@@ -1,0 +1,13 @@
+{
+  "email": {
+    "verification": {
+      "subject": "OpenGuardrails平台 - 邮箱验证码",
+      "title": "邮箱验证",
+      "platformName": "OpenGuardrails平台",
+      "greeting": "您好！感谢您注册OpenGuardrails平台。",
+      "codePrompt": "您的验证码是：",
+      "validityNote": "验证码有效期为10分钟，请及时使用。",
+      "footer": "OpenGuardrails平台 - 保护AI应用安全"
+    }
+  }
+}

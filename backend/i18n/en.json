@@ -1,0 +1,13 @@
+{
+  "email": {
+    "verification": {
+      "subject": "OpenGuardrails - Email Verification Code",
+      "title": "Email Verification",
+      "platformName": "OpenGuardrails",
+      "greeting": "Hello! Thank you for registering with OpenGuardrails Platform.",
+      "codePrompt": "Your verification code is:",
+      "validityNote": "This verification code is valid for 10 minutes. Please use it promptly.",
+      "footer": "OpenGuardrails - Securing AI Applications"
+    }
+  }
+}
