@@ -101,7 +101,41 @@ class GuardrailService:
                     ip_address, user_agent, tenant_id
                 )
 
-            # 2. Model detection
+            # 2. Data leak detection for INPUT (before sending to model)
+            # Note: Data leak detection logic differs from compliance/security detection
+            # - Input detection: Detects user input for sensitive data, returns desensitized text
+            #   The desensitized text should be the suggested answer for "replace" action
+            # - Output detection: Detects LLM output for sensitive data, returns desensitized text
+            #   The desensitized text should be the suggested answer for "replace" action
+            data_security_service = DataSecurityService(self.db)
+            data_result = DataSecurityResult(risk_level="no_risk", categories=[])
+            anonymized_text = None
+
+            # Check if this is input or output detection
+            has_assistant_message = any(msg.role == 'assistant' for msg in request.messages)
+
+            if not has_assistant_message:
+                # This is INPUT detection - check user input for sensitive data before sending to model
+                logger.info(f"Starting input data leak detection for tenant {tenant_id}")
+                data_detection_result = await data_security_service.detect_sensitive_data(
+                    text=user_content,
+                    tenant_id=tenant_id,
+                    direction='input'
+                )
+                logger.info(f"Input data leak detection result: {data_detection_result}")
+
+                # Construct data security result
+                data_result = DataSecurityResult(
+                    risk_level=data_detection_result.get('risk_level', 'no_risk'),
+                    categories=data_detection_result.get('categories', [])
+                )
+
+                # If sensitive data found in input, store the desensitized text
+                # This will be used as the suggested answer to send to upstream LLM
+                if data_result.risk_level != 'no_risk':
+                    anonymized_text = data_detection_result.get('anonymized_text')
+
+            # 3. Model detection (only if not output detection)
             # Convert Message objects to dict format and process images
             from utils.image_utils import image_utils
 
@@ -134,33 +168,41 @@ class GuardrailService:
 
             # Select model based on whether there are images
             use_vl_model = has_image
-            model_response = await model_service.check_messages(messages_dict, use_vl_model=use_vl_model)
+            model_response, _ = await model_service.check_messages_with_sensitivity(messages_dict, use_vl_model=use_vl_model)
 
-            # 3. Parse model response and apply risk type filtering
+            # 4. Parse model response and apply risk type filtering
             compliance_result, security_result = self._parse_model_response(model_response, tenant_id)
 
-            # 3.5. Data leak detection (detect input content)
-            data_security_service = DataSecurityService(self.db)
-            logger.info(f"Starting data leak detection for tenant {tenant_id}")
-            data_detection_result = await data_security_service.detect_sensitive_data(
-                text=user_content,
-                tenant_id=tenant_id,
-                direction='input'  # Detect input
-            )
-            logger.info(f"Data leak detection result: {data_detection_result}")
+            # 5. Data leak detection for OUTPUT (after getting LLM response)
+            if has_assistant_message:
+                # This is OUTPUT detection - check assistant's response for sensitive data
+                detection_content = self._extract_assistant_content(request.messages)
 
-            # Construct data security result
-            data_result = DataSecurityResult(
-                risk_level=data_detection_result.get('risk_level', 'no_risk'),
-                categories=data_detection_result.get('categories', [])
-            )
+                logger.info(f"Starting output data leak detection for tenant {tenant_id}")
+                data_detection_result = await data_security_service.detect_sensitive_data(
+                    text=detection_content,
+                    tenant_id=tenant_id,
+                    direction='output'
+                )
+                logger.info(f"Output data leak detection result: {data_detection_result}")
 
-            # 4. Determine suggested action and answer (pass tenant_id to select answer template by tenant, pass user query to support knowledge base search)
+                # Construct data security result
+                data_result = DataSecurityResult(
+                    risk_level=data_detection_result.get('risk_level', 'no_risk'),
+                    categories=data_detection_result.get('categories', [])
+                )
+
+                # If sensitive data found in output, store the desensitized text
+                # This will be used as the suggested answer to return to user
+                if data_result.risk_level != 'no_risk':
+                    anonymized_text = data_detection_result.get('anonymized_text')
+
+            # 6. Determine suggested action and answer
             overall_risk_level, suggest_action, suggest_answer = await self._determine_action(
-                compliance_result, security_result, tenant_id, user_content, data_result
+                compliance_result, security_result, tenant_id, user_content, data_result, anonymized_text
             )
 
-            # 5. Asynchronously log detection results
+            # 7. Asynchronously log detection results
             await self._log_detection_result(
                 request_id, user_content, compliance_result, security_result,
                 suggest_action, suggest_answer, model_response,
@@ -168,7 +210,7 @@ class GuardrailService:
                 has_image=has_image, image_count=len(saved_image_paths), image_paths=saved_image_paths
             )
 
-            # 6. Construct response
+            # 8. Construct response
             result = GuardrailResult(
                 compliance=compliance_result,
                 security=security_result,
@@ -188,6 +230,24 @@ class GuardrailService:
             # Return safe default response on error
             return await self._handle_error(request_id, user_content, str(e), tenant_id)
     
+    def _extract_assistant_content(self, messages: List[Message]) -> str:
+        """Extract assistant message content for output detection"""
+        for msg in reversed(messages):  # Get the last assistant message
+            if msg.role == 'assistant':
+                content = msg.content
+                if isinstance(content, str):
+                    return content
+                elif isinstance(content, list):
+                    # For multimodal content, only extract text part
+                    text_parts = []
+                    for part in content:
+                        if hasattr(part, 'type') and part.type == 'text' and hasattr(part, 'text'):
+                            text_parts.append(part.text)
+                    return ' '.join(text_parts) if text_parts else ""
+                else:
+                    return str(content)
+        return ""
+
     def _extract_user_content(self, messages: List[Message]) -> str:
         """Extract complete conversation content"""
         if len(messages) == 1 and messages[0].role == 'user':
@@ -324,7 +384,8 @@ class GuardrailService:
         security_result: SecurityResult,
         tenant_id: Optional[str] = None,  # tenant_id for backward compatibility
         user_query: Optional[str] = None,
-        data_result: Optional[DataSecurityResult] = None
+        data_result: Optional[DataSecurityResult] = None,
+        anonymized_text: Optional[str] = None  # De-sensitized text for data leak scenarios
     ) -> Tuple[str, str, Optional[str]]:
         """Determine suggested action and answer"""
 
@@ -361,9 +422,15 @@ class GuardrailService:
             suggest_answer = await self._get_suggest_answer(risk_categories, tenant_id, user_query)
             return overall_risk_level, "reject", suggest_answer
         elif overall_risk_level == "medium_risk":
+            # For data leak scenarios with replace action, use anonymized text if available
+            if anonymized_text and data_result and data_result.risk_level != "no_risk":
+                return overall_risk_level, "replace", anonymized_text
             suggest_answer = await self._get_suggest_answer(risk_categories, tenant_id, user_query)
             return overall_risk_level, "replace", suggest_answer
         else:  # low_risk
+            # For data leak scenarios with replace action, use anonymized text if available
+            if anonymized_text and data_result and data_result.risk_level != "no_risk":
+                return overall_risk_level, "replace", anonymized_text
             suggest_answer = await self._get_suggest_answer(risk_categories, tenant_id, user_query)
             return overall_risk_level, "replace", suggest_answer
     
@@ -404,7 +471,8 @@ class GuardrailService:
             id=request_id,
             result=GuardrailResult(
                 compliance=ComplianceResult(risk_level="high_risk", categories=[list_name]),
-                security=SecurityResult(risk_level="no_risk", categories=[])
+                security=SecurityResult(risk_level="no_risk", categories=[]),
+                data=DataSecurityResult(risk_level="no_risk", categories=[])
             ),
             overall_risk_level="high_risk",
             suggest_action="reject",
@@ -441,7 +509,8 @@ class GuardrailService:
             id=request_id,
             result=GuardrailResult(
                 compliance=ComplianceResult(risk_level="no_risk", categories=[]),
-                security=SecurityResult(risk_level="no_risk", categories=[])
+                security=SecurityResult(risk_level="no_risk", categories=[]),
+                data=DataSecurityResult(risk_level="no_risk", categories=[])
             ),
             overall_risk_level="no_risk",
             suggest_action="pass",
@@ -509,7 +578,8 @@ class GuardrailService:
             id=request_id,
             result=GuardrailResult(
                 compliance=ComplianceResult(risk_level="no_risk", categories=[]),
-                security=SecurityResult(risk_level="no_risk", categories=[])
+                security=SecurityResult(risk_level="no_risk", categories=[]),
+                data=DataSecurityResult(risk_level="no_risk", categories=[])
             ),
             overall_risk_level="no_risk",  # When system error, treat as no risk
             suggest_action="pass",

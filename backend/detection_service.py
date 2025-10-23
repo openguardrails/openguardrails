@@ -16,7 +16,7 @@ from pathlib import Path
 
 from config import settings
 from database.connection import init_db, create_detection_engine
-from routers import detection_guardrails
+from routers import detection_guardrails, dify_moderation
 from services.async_logger import async_detection_logger
 from utils.logger import setup_logger
 
@@ -30,8 +30,8 @@ class AuthContextMiddleware(BaseHTTPMiddleware):
     """Authentication context middleware - detection service version (simplified version)"""
     
     async def dispatch(self, request: Request, call_next):
-        # Only handle detection API routes
-        if request.url.path.startswith('/v1/guardrails'):
+        # Only handle detection API routes (including guardrails and dify moderation)
+        if request.url.path.startswith('/v1/guardrails') or request.url.path.startswith('/v1/dify'):
             auth_header = request.headers.get('authorization')
 
             if auth_header:
@@ -215,6 +215,7 @@ async def verify_user_auth(
 
 # Register detection routes (special version)
 app.include_router(detection_guardrails.router, prefix="/v1", dependencies=[Depends(verify_user_auth)])
+app.include_router(dify_moderation.router, prefix="/v1", dependencies=[Depends(verify_user_auth)])  # Dify API-based Extension
 
 # Global exception handling
 @app.exception_handler(Exception)

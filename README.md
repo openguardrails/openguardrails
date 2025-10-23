@@ -4,7 +4,7 @@
 <br>
 
 <p align="center">
-        🤗 <a href="https://huggingface.co/openguardrails/OpenGuardrails-Text">Hugging Face</a>&nbsp&nbsp ｜  &nbsp&nbsp<a href="https://www.openguardrails.com">Website</a>
+        🤗 <a href="https://huggingface.co/openguardrails/OpenGuardrails-Text">Hugging Face</a>&nbsp&nbsp ｜  &nbsp&nbsp<a href="https://www.openguardrails.com">Website</a>&nbsp&nbsp ｜  &nbsp&nbsp<a href="https://arxiv.org/abs/2510.19169">Tech Report</a>
 </p>
 
 # OpenGuardrails
@@ -15,9 +15,9 @@
 [![React](https://img.shields.io/badge/React-18.0%2B-blue)](https://reactjs.org)
 [![HuggingFace](https://img.shields.io/badge/🤗-Models-yellow)](https://huggingface.co/openguardrails/OpenGuardrails-Text)
 
-> 🚀 **Enterprise-grade AI Safety Guardrails Platform** - Comprehensive security protection for AI applications
+> 🚀 **Developer-first open-source AI security platform** - Comprehensive security protection for AI applications
 
-OpenGuardrails is an open-source and free-for-commercial-use AI guardrails solution. Built on advanced large language models, it provides prompt attack detection, content safety, data leak detection, and supports complete on-premise deployment to build robust security defenses for AI applications.
+OpenGuardrails is developer-first open-source AI security platform. Built on advanced large language models, it provides prompt attack detection, content safety, data leak detection, and supports complete on-premise deployment to build robust security defenses for AI applications.
 
 ## ✨ Core Features
 
@@ -25,7 +25,7 @@ OpenGuardrails is an open-source and free-for-commercial-use AI guardrails solut
 - 🛡️ **Triple Protection** - Prompt attack detection + Content compliance detection + Data leak detection
 - 🧠 **Context Awareness** - Intelligent safety detection based on conversation context
 - 📋 **Content Safety** - Support custom training for content safety of different cultures and regions.
-- 🔧 **Configurable Policy Adaptation** - Introduces a practical and enterpriseoriented solution to the long-standing policy inconsistency problem observed in existing safety benchmarks and guard models.
+- 🔧 **Configurable Policy Adaptation** - Introduces a practical solution to the long-standing policy inconsistency problem observed in existing safety benchmarks and guard models.
 - 🧠 **Knowledge Base Responses** - Vector similarity-based intelligent Q&A matching with custom knowledge bases
 - 🏢 **Private Deployment** - Support for complete local deployment, controllable data security
 - 🚫 **Ban Policy** - Intelligently identify attack patterns and automatically ban malicious users
@@ -192,32 +192,29 @@ Dify provides three moderation options under **Content Review**:
   <img src="frontend/public/dify-moderation-extension.png" alt="Dify Moderation API" width="60%">
 </p>
 
+#### Add OpenGuardrails as moderation API Extension
+
+1. **Enter Name**  
+   Choose a descriptive name for your API extension.
+
+2. **Set the API Endpoint**  
+   Fill in the following endpoint URL:  
+```
+https://api.openguardrails.com/v1/dify/moderation
+```
+
+3. **Get Your API Key**  
+Obtain a free API key from [openguardrails.com](https://openguardrails.com/platform/).  
+After getting the key, paste it into the **API-key** field.
+
+
 By selecting **OpenGuardrails** as the moderation API extension, users gain access to a **comprehensive and highly configurable moderation system**:
 
 * 🧩 **19 major categories** of content risk, including political sensitivity, privacy, sexual content, violence, hate speech, self-harm, and more.
-* ⚙️ **Customizable risk definitions** — enterprises can redefine category meanings and thresholds.
+* ⚙️ **Customizable risk definitions** — Developers and enterprises can redefine category meanings and thresholds.
 * 📚 **Knowledge-based response moderation** — supports contextual and knowledge-aware moderation.
 * 💰 **Free and open** — no per-request cost or usage limit.
 * 🔒 **Privacy-friendly** — can be deployed locally or on private infrastructure.
-
-#### 📝 How to Configure OpenGuardrails in Dify
-
-1. **Deploy OpenGuardrails** — Follow the [Quick Deployment Guide](#-openguardrails-quick-deployment-guide) below to set up OpenGuardrails platform.
-
-2. **Get your API Key** — After logging into the OpenGuardrails platform at [http://localhost:3000/platform/](http://localhost:3000/platform/), navigate to **Account Management** to obtain your API key (format: `sk-xxai-xxxxxxxxxx`).
-
-3. **Configure in Dify** — In your Dify workspace:
-   - Navigate to **Workspace Settings** → **Content Review** → **API Extension**
-   - Enter the following information:
-     - **API Endpoint URL**:
-       - For **input moderation**: `http://your-server:5001/v1/guardrails/input`
-       - For **output moderation**: `http://your-server:5001/v1/guardrails/output`
-     - **API Key**: Your OpenGuardrails API key (can be with or without `Bearer` prefix)
-       - Example: `sk-xxai-xxxxxxxxxx` or `Bearer sk-xxai-xxxxxxxxxx`
-
-4. **Test the Integration** — Send a test request in Dify to verify that OpenGuardrails is correctly moderating content.
-
-> 💡 **Tip**: OpenGuardrails automatically handles API keys with or without the `Bearer` prefix, making integration more flexible.
 
 ## 🚀 OpenGuardrails Quick Deployment Guide
 
@@ -402,6 +399,39 @@ Example:
 - **🟢 Low Risk**: **Allow** normal processing
 - **⚪ Safe**: **Allow** no risk content
 
+### Data Leak Detection
+
+OpenGuardrails provides **Input** and **Output** data leak detection with different behaviors:
+
+#### 📥 Input Detection
+When sensitive data (ID card, phone number, bank card, etc.) is detected in **user input**:
+- ✅ **Desensitize FIRST**, then send to LLM for processing
+- ❌ **NOT blocked** - the desensitized text is forwarded to the LLM
+- 🎯 **Use case**: Protect user privacy data from leaking to external LLM providers
+
+**Example:**
+```
+User Input: "My ID is 110101199001011234, phone is 13912345678"
+↓ Detected & Desensitized
+Sent to LLM: "My ID is 110***********1234, phone is 139****5678"
+```
+
+#### 📤 Output Detection
+When sensitive data is detected in **LLM output**:
+- ✅ **Desensitize FIRST**, then return to user
+- ❌ **NOT blocked** - the desensitized text is returned to user
+- 🎯 **Use case**: Prevent LLM from leaking sensitive data to users
+
+**Example:**
+```
+Q: What is John's contact info?
+A (from LLM): "John's ID is 110101199001011234, phone is 13912345678"
+↓ Detected & Desensitized
+Returned to User: "John's ID is 110***********1234, phone is 139****5678"
+```
+
+**Configuration**: Each entity type can be configured independently for input/output detection in the Data Security page.
+
 ## 🏗️ Architecture
 
 ```
@@ -549,9 +579,22 @@ If this project helps you, please give us a ⭐️
 
 ---
 
+## Citation
+
+If you find our work helpful, feel free to give us a cite.
+
+```bibtex
+@misc{openguardrails,
+      title={OpenGuardrails: An Open-Source Context-Aware AI Guardrails Platform}, 
+      author={Thomas Wang and Haowen Li},
+      year={2025},
+      url={https://arxiv.org/abs/2510.19169}, 
+}
+```
+
 <div align="center">
 
-**Enterprise-Grade Open Source AI Guardrails** 🛡️
+**Developer-first open-source AI security platform** 🛡️
 
 Made with ❤️ by [OpenGuardrails](https://openguardrails.com)
 

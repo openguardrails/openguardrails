@@ -176,7 +176,7 @@ const OnlineTest: React.FC = () => {
     {
       id: '6',
       name: t('onlineTest.dataLeakIdentity'),
-      type: 'question',
+      type: 'qa_pair',
       content: t('onlineTest.testCases.dataLeakIdentityContent'),
       expectedRisk: t('risk.level.high_risk'),
       description: t('onlineTest.dataLeakIdentityDesc')
@@ -184,7 +184,7 @@ const OnlineTest: React.FC = () => {
     {
       id: '7',
       name: t('onlineTest.dataLeakBanking'),
-      type: 'question',
+      type: 'qa_pair',
       content: t('onlineTest.testCases.dataLeakBankingContent'),
       expectedRisk: t('risk.level.high_risk'),
       description: t('onlineTest.dataLeakBankingDesc')
@@ -192,7 +192,7 @@ const OnlineTest: React.FC = () => {
     {
       id: '8',
       name: t('onlineTest.dataLeakEmail'),
-      type: 'question',
+      type: 'qa_pair',
       content: t('onlineTest.testCases.dataLeakEmailContent'),
       expectedRisk: t('risk.level.low_risk'),
       description: t('onlineTest.dataLeakEmailDesc')

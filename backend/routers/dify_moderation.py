@@ -88,10 +88,16 @@ async def handle_input_moderation(
     Handle app.moderation.input
 
     Checks each variable in inputs and query independently.
+    For input moderation:
+    - Checks for compliance/security risks (prompt attacks, policy violations)
+    - Checks for sensitive data in input (data leak detection with direction="input")
+
     Returns:
     - flagged=True if any check is not "pass"
-    - action="direct_output" if any result is "reject"
-    - action="overridden" if no reject but has "replace"
+    - action="direct_output" if any result is "reject" (high risk)
+    - action="overridden" if no reject but has "replace" (medium/low risk or sensitive data found)
+      - For sensitive data: replace with desensitized text that should be sent to LLM
+      - For compliance/security: replace with preset safe response
     """
     params = request_data.params
     if not params:
@@ -247,13 +253,13 @@ def aggregate_input_results(detection_results: list, params) -> DifyModerationRe
         suggest_action = result.suggest_action
 
         # Check if this is a reject
-        if suggest_action == "Decline":
+        if suggest_action == "reject":
             has_reject = True
             if not first_reject_answer and result.suggest_answer:
                 first_reject_answer = result.suggest_answer
 
         # Check if this is a replace
-        elif suggest_action == "Delegate":
+        elif suggest_action == "replace":
             has_replace = True
 
             # Store overridden value
@@ -301,13 +307,14 @@ def aggregate_output_result(result, original_text: str) -> DifyModerationRespons
     """
     Aggregate detection result for output moderation
 
-    Logic similar to input:
-    - action="direct_output" if "Decline" (reject)
-    - action="overridden" if "Delegate" (replace)
+    Logic:
+    - action="direct_output" if "reject" (high risk)
+    - action="overridden" if "replace" (medium/low risk)
+    - flagged=false if "pass" (no risk)
     """
     suggest_action = result.suggest_action
 
-    if suggest_action == "Decline":
+    if suggest_action == "reject":
         # Reject - return preset response
         return DifyModerationResponse(
             flagged=True,
@@ -315,7 +322,7 @@ def aggregate_output_result(result, original_text: str) -> DifyModerationRespons
             preset_response=result.suggest_answer if result.suggest_answer else "Your content violates our usage policy."
         )
 
-    elif suggest_action == "Delegate":
+    elif suggest_action == "replace":
         # Replace - return overridden text
         return DifyModerationResponse(
             flagged=True,

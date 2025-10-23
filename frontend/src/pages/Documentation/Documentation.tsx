@@ -233,48 +233,95 @@ print("Result:", result)
                 {t('docs.difyIntegrationDesc')}
               </Paragraph>
 
-              <Alert
-                message={t('docs.difyIntegrationBenefit')}
-                type="success"
-                showIcon
-                style={{ marginBottom: 16 }}
-              />
+              <div style={{ textAlign: 'center', marginTop: 16, marginBottom: 16 }}>
+                <img
+                  src="/dify-moderation.png"
+                  alt="Dify Moderation"
+                  style={{
+                    maxWidth: '60%',
+                    height: 'auto',
+                    borderRadius: 8,
+                    border: '1px solid #f0f0f0',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                  }}
+                />
+              </div>
 
-              <div style={{ marginTop: 16 }}>
-                <Text strong>{t('docs.difySteps')}:</Text>
-                <ol style={{ marginTop: 8 }}>
+              <Paragraph>
+                {t('docs.difyModerationOptions')}
+              </Paragraph>
+
+              <ol style={{ marginTop: 8 }}>
+                <li>
+                  <Text strong>{t('docs.difyOpenAIModeration')}</Text> — {t('docs.difyOpenAIModerationDesc')}
+                </li>
+                <li>
+                  <Text strong>{t('docs.difyCustomKeywords')}</Text> — {t('docs.difyCustomKeywordsDesc')}
+                </li>
+                <li>
+                  <Text strong>{t('docs.difyApiExtension')}</Text> — {t('docs.difyApiExtensionDesc')}
+                </li>
+              </ol>
+
+              <div style={{ textAlign: 'center', marginTop: 16, marginBottom: 16 }}>
+                <img
+                  src="/dify-moderation-extension.png"
+                  alt="Dify Moderation API Extension"
+                  style={{
+                    maxWidth: '60%',
+                    height: 'auto',
+                    borderRadius: 8,
+                    border: '1px solid #f0f0f0',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                  }}
+                />
+              </div>
+
+              <div style={{ marginTop: 24 }}>
+                <Text strong style={{ fontSize: 16 }}>{t('docs.difyAddExtension')}</Text>
+                <ol style={{ marginTop: 12 }}>
                   <li>
-                    <Text strong>{t('docs.difyStep1Title')}:</Text> {t('docs.difyStep1Desc')}
+                    <Text strong>{t('docs.difyStep1Title')}</Text>
+                    <br />
+                    <Text>{t('docs.difyStep1NewDesc')}</Text>
                   </li>
-                  <li>
-                    <Text strong>{t('docs.difyStep2Title')}:</Text> {t('docs.difyStep2Desc')}
-                    <Text code style={{ marginLeft: 8 }}>{user?.api_key || 'sk-xxai-xxxxxxxxxx'}</Text>
+                  <li style={{ marginTop: 12 }}>
+                    <Text strong>{t('docs.difyStep2Title')}</Text>
+                    <br />
+                    <Text>{t('docs.difyStep2NewDesc')}</Text>
+                    <pre style={{
+                      backgroundColor: '#f6f8fa',
+                      padding: 12,
+                      borderRadius: 6,
+                      marginTop: 8,
+                      fontSize: 13
+                    }}>
+{`https://api.openguardrails.com/v1/dify/moderation`}
+                    </pre>
                   </li>
-                  <li>
-                    <Text strong>{t('docs.difyStep3Title')}:</Text> {t('docs.difyStep3Desc')}
-                    <ul style={{ marginTop: 8 }}>
-                      <li>{t('docs.difyStep3NavPath')}: <Text strong>{t('docs.difyStep3NavDetail')}</Text></li>
-                      <li>{t('docs.difyStep3ApiEndpoint')}:
-                        <ul>
-                          <li>{t('docs.difyStep3InputUrl')}: <Text code>{window.location.origin.replace(':3000', ':5001')}/v1/guardrails/input</Text></li>
-                          <li>{t('docs.difyStep3OutputUrl')}: <Text code>{window.location.origin.replace(':3000', ':5001')}/v1/guardrails/output</Text></li>
-                        </ul>
-                      </li>
-                      <li>{t('docs.difyStep3ApiKey')}: <Text code>{user?.api_key || 'sk-xxai-xxxxxxxxxx'}</Text> {t('docs.difyStep3ApiKeyNote')}</li>
-                    </ul>
-                  </li>
-                  <li>
-                    <Text strong>{t('docs.difyStep4Title')}:</Text> {t('docs.difyStep4Desc')}
+                  <li style={{ marginTop: 12 }}>
+                    <Text strong>{t('docs.difyStep3NewTitle')}</Text>
+                    <br />
+                    <Text>{t('docs.difyStep3NewDesc1')} </Text>
+                    <a href="https://openguardrails.com/platform/" target="_blank" rel="noopener noreferrer">
+                      openguardrails.com
+                    </a>
+                    <Text>{t('docs.difyStep3NewDesc2')}</Text>
+                    {user?.api_key && (
+                      <div style={{ marginTop: 8 }}>
+                        <Text>{t('docs.yourApiKey')}: </Text>
+                        <Text code>{user.api_key}</Text>
+                      </div>
+                    )}
                   </li>
                 </ol>
               </div>
 
               <Alert
-                message={t('docs.difyFlexibleAuth')}
-                description={t('docs.difyFlexibleAuthDesc')}
-                type="info"
+                message={t('docs.difyIntegrationBenefit')}
+                type="success"
                 showIcon
-                style={{ marginTop: 16 }}
+                style={{ marginTop: 24, marginBottom: 16 }}
               />
 
               <div style={{ marginTop: 16, padding: 16, backgroundColor: '#f6f8fa', borderRadius: 6 }}>
