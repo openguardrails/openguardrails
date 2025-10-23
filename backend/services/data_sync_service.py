@@ -113,8 +113,9 @@ class DataSyncService:
             stat = file_path.stat()
             last_modified = datetime.fromtimestamp(stat.st_mtime)
             
-            # If the file was modified in the last 5 minutes, it might still be being written
-            if datetime.now() - last_modified < timedelta(minutes=5):
+            # If the file was modified in the last 30 seconds, it might still be being written
+            # Changed from 5 minutes to 30 seconds to ensure faster synchronization
+            if datetime.now() - last_modified < timedelta(seconds=30):
                 return False
                 
             # Check if the file is in the processed list
@@ -160,8 +161,12 @@ class DataSyncService:
                         logger.error(f"Error processing record in {file_path}: {e}")
                         error_count += 1
             
-            # Mark file as processed
-            self._processed_files.add(str(file_path))
+            # Only mark file as processed if it's older than 5 minutes
+            # This allows recent files to be re-processed to catch new records
+            stat = file_path.stat()
+            last_modified = datetime.fromtimestamp(stat.st_mtime)
+            if datetime.now() - last_modified > timedelta(minutes=5):
+                self._processed_files.add(str(file_path))
             
             logger.info(f"Completed processing {file_path.name}: {processed_count} processed, {error_count} errors")
             
