@@ -10,7 +10,7 @@ logger = setup_logger()
 router = APIRouter(tags=["Dify Moderation"])
 
 
-@router.post("/dify/moderation", response_model=DifyModerationResponse)
+@router.post("/dify/moderation", response_model=DifyModerationResponse, response_model_exclude_none=True)
 async def dify_moderation(
     request_data: DifyModerationRequest,
     request: Request,
@@ -288,18 +288,49 @@ def aggregate_input_results(detection_results: list, params) -> DifyModerationRe
         )
 
     elif has_replace:
-        # Override with modified inputs
-        return DifyModerationResponse(
-            flagged=True,
-            action="overridden",
-            inputs=overridden_inputs if params.inputs else None,
-            query=overridden_query
-        )
+        # Check if the replacement is actual desensitization (partial modification)
+        # or full safety response (complete replacement)
+        # If suggest_answer contains desensitized content (like [PHONE], [EMAIL]), use overridden
+        # Otherwise, use direct_output to terminate processing
+
+        is_desensitization = False
+        for item in detection_results:
+            result = item['result']
+            if result.suggest_action == "replace" and result.suggest_answer:
+                # Check if it's desensitized content (contains masked patterns)
+                if any(marker in result.suggest_answer for marker in ['[PHONE]', '[EMAIL]', '[ID]', '[ADDRESS]', '[NAME]', '***', '[MASKED]']):
+                    is_desensitization = True
+                    break
+
+        if is_desensitization:
+            # True desensitization - use overridden to continue processing with modified content
+            return DifyModerationResponse(
+                flagged=True,
+                action="overridden",
+                inputs=overridden_inputs if params.inputs else None,
+                query=overridden_query
+            )
+        else:
+            # Full safety response - use direct_output to terminate
+            # Get the first replace answer as preset response
+            first_replace_answer = None
+            for item in detection_results:
+                if item['result'].suggest_action == "replace" and item['result'].suggest_answer:
+                    first_replace_answer = item['result'].suggest_answer
+                    break
+
+            return DifyModerationResponse(
+                flagged=True,
+                action="direct_output",
+                preset_response=first_replace_answer if first_replace_answer else "Your content has been moderated."
+            )
 
     else:
-        # No issues detected
+        # No issues detected - but still need to return action for Dify compatibility
         return DifyModerationResponse(
-            flagged=False
+            flagged=False,
+            action="direct_output",
+            preset_response=""
         )
 
 
@@ -323,15 +354,33 @@ def aggregate_output_result(result, original_text: str) -> DifyModerationRespons
         )
 
     elif suggest_action == "replace":
-        # Replace - return overridden text
-        return DifyModerationResponse(
-            flagged=True,
-            action="overridden",
-            text=result.suggest_answer if result.suggest_answer else original_text
-        )
+        # Check if this is desensitization (partial modification) or full safety response
+        suggest_answer = result.suggest_answer if result.suggest_answer else original_text
+
+        # Check if it's desensitized content
+        is_desensitization = any(marker in suggest_answer for marker in [
+            '[PHONE]', '[EMAIL]', '[ID]', '[ADDRESS]', '[NAME]', '***', '[MASKED]'
+        ])
+
+        if is_desensitization:
+            # True desensitization - use overridden to continue with modified content
+            return DifyModerationResponse(
+                flagged=True,
+                action="overridden",
+                text=suggest_answer
+            )
+        else:
+            # Full safety response - use direct_output to terminate
+            return DifyModerationResponse(
+                flagged=True,
+                action="direct_output",
+                preset_response=suggest_answer
+            )
 
     else:
-        # Pass - no issues
+        # Pass - no issues, but still need to return action for Dify compatibility
         return DifyModerationResponse(
-            flagged=False
+            flagged=False,
+            action="direct_output",
+            preset_response=""
         )

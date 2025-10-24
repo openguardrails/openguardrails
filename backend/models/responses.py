@@ -1,5 +1,5 @@
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from datetime import datetime
 
 class ComplianceResult(BaseModel):
@@ -186,6 +186,8 @@ class DataSecurityEntityTypeResponse(BaseModel):
 
 class DifyModerationResponse(BaseModel):
     """Dify API-based extension moderation response model"""
+    model_config = ConfigDict(exclude_none=True)  # Exclude None values from JSON serialization
+
     result: Optional[str] = None  # For ping response: "pong"
     flagged: Optional[bool] = None
     action: Optional[str] = None  # "direct_output" or "overridden"
