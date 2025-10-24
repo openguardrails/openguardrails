@@ -26,12 +26,23 @@ npm run dev &
 FRONTEND_PID=$!
 cd ..
 
-# Start backend (development mode)
-echo "🚀 Start backend service..."
+# Start backend services (development mode)
+echo "🚀 Start backend services..."
 cd backend
 pip install -r requirements.txt
-python main.py &
-BACKEND_PID=$!
+
+# Start admin service
+python start_admin_service.py &
+ADMIN_PID=$!
+
+# Start detection service
+python start_detection_service.py &
+DETECTION_PID=$!
+
+# Start proxy service
+python start_proxy_service.py &
+PROXY_PID=$!
+
 cd ..
 
 echo ""
@@ -39,11 +50,12 @@ echo "✅ Service starting..."
 echo ""
 echo "📊 Access Address:"
 echo "   Frontend Management Interface: http://localhost:3000"
-echo "   Backend API Documentation: http://localhost:5000/docs"
-echo "   Guardrails API: http://localhost:5001/v1/guardrails"
+echo "   Admin Service (Port 5000): http://localhost:5000/docs"
+echo "   Detection Service (Port 5001): http://localhost:5001/v1/guardrails"
+echo "   Proxy Service (Port 5002): http://localhost:5002/v1/chat/completions"
 echo ""
 echo "🔧 Stop Service:"
-echo "   Ctrl+C or run: kill $FRONTEND_PID $BACKEND_PID"
+echo "   Ctrl+C or run: kill $FRONTEND_PID $ADMIN_PID $DETECTION_PID $PROXY_PID"
 echo ""
 echo "📧 Technical Support: thomas@openguardrails.com"
 

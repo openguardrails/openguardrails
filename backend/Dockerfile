@@ -24,4 +24,5 @@ RUN mkdir -p /app/data /app/logs
 EXPOSE 5000 5001 5002
 
 # Default startup command (will be overridden by docker-compose)
-CMD ["python", "main.py"]
+# Use admin service as default for backwards compatibility
+CMD ["python", "start_admin_service.py"]

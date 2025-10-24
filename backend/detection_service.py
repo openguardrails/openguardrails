@@ -20,8 +20,8 @@ from routers import detection_guardrails, dify_moderation
 from services.async_logger import async_detection_logger
 from utils.logger import setup_logger
 
-# Set security verification
-security = HTTPBearer()
+# Set security verification (auto_error=False to allow manual handling)
+security = HTTPBearer(auto_error=False)
 
 # Import concurrent control middleware
 from middleware.concurrent_limit_middleware import ConcurrentLimitMiddleware
@@ -210,8 +210,9 @@ async def verify_user_auth(
         auth_ctx = getattr(request.state, 'auth_context', None)
         if auth_ctx:
             return auth_ctx
-    
-    raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    # If middleware didn't set auth_context, check if it's because of missing/invalid auth
+    raise HTTPException(status_code=401, detail="Not authenticated")
 
 # Register detection routes (special version)
 app.include_router(detection_guardrails.router, prefix="/v1", dependencies=[Depends(verify_user_auth)])

@@ -62,11 +62,20 @@ npm install
 
 ### 5. Start Development Services
 ```bash
-# Start backend (Terminal 1)
+# Start backend services (3 separate terminals)
+# Terminal 1 - Admin Service
 cd backend
-python main.py
+python start_admin_service.py
 
-# Start frontend (Terminal 2)
+# Terminal 2 - Detection Service
+cd backend
+python start_detection_service.py
+
+# Terminal 3 - Proxy Service
+cd backend
+python start_proxy_service.py
+
+# Terminal 4 - Frontend
 cd frontend
 npm run dev
 ```

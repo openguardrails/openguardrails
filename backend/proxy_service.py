@@ -22,8 +22,8 @@ from routers import proxy_api
 from services.async_logger import async_detection_logger
 from utils.logger import setup_logger
 
-# Set security verification
-security = HTTPBearer()
+# Set security verification (auto_error=False to allow manual handling)
+security = HTTPBearer(auto_error=False)
 
 # Import concurrent control middleware
 from middleware.concurrent_limit_middleware import ConcurrentLimitMiddleware
