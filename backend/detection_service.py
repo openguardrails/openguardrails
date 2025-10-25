@@ -35,14 +35,11 @@ class AuthContextMiddleware(BaseHTTPMiddleware):
             auth_header = request.headers.get('authorization')
 
             if auth_header:
-                # Automatically handle both "Bearer token" and direct "token" formats
+                # Only accept "Bearer token" format
                 if auth_header.startswith('Bearer '):
                     token = auth_header.split(' ')[1]
-                elif auth_header.startswith('sk-xxai-'):
-                    # Direct API key without "Bearer " prefix
-                    token = auth_header
                 else:
-                    # Invalid format
+                    # Invalid format - must include Bearer prefix
                     token = None
 
                 if token:

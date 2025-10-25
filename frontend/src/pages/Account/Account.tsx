@@ -52,6 +52,26 @@ const Account: React.FC = () => {
     }
   };
 
+  const handleCopyCozeAuth = async () => {
+    if (!user?.api_key) return;
+    try {
+      await navigator.clipboard.writeText(`Bearer ${user.api_key}`);
+      message.success(t('account.copied'));
+    } catch {
+      message.error(t('account.copyFailed'));
+    }
+  };
+
+  const handleCopyDifyEndpoint = async () => {
+    const endpoint = 'https://api.openguardrails.com/v1/dify/moderation';
+    try {
+      await navigator.clipboard.writeText(endpoint);
+      message.success(t('account.copied'));
+    } catch {
+      message.error(t('account.copyFailed'));
+    }
+  };
+
   const handleRegenerate = async () => {
     try {
       setLoading(true);
@@ -136,6 +156,54 @@ const Account: React.FC = () => {
           </Space>
           <div style={{ marginTop: 8 }}>
             <Text type="secondary">{t('account.regenerateWarning')}</Text>
+          </div>
+        </div>
+
+        <div>
+          <Text type="secondary">{t('account.cozeAuthorization')}</Text>
+          <Space style={{ width: '100%', marginTop: 8, alignItems: 'center' }}>
+            <div style={{
+              flex: 1,
+              padding: '8px 12px',
+              border: '1px solid #d9d9d9',
+              borderRadius: '6px',
+              backgroundColor: '#fafafa',
+              fontFamily: 'monospace',
+              fontSize: '14px',
+              wordBreak: 'break-all'
+            }}>
+              <Text code style={{ backgroundColor: 'transparent', border: 'none', padding: 0 }}>
+                {user?.api_key ? `Bearer ${user.api_key}` : '-'}
+              </Text>
+            </div>
+            <Button icon={<CopyOutlined />} onClick={handleCopyCozeAuth}>{t('account.copy')}</Button>
+          </Space>
+          <div style={{ marginTop: 8 }}>
+            <Text type="secondary">{t('account.cozeAuthorizationNote')}</Text>
+          </div>
+        </div>
+
+        <div>
+          <Text type="secondary">{t('account.difyModerationEndpoint')}</Text>
+          <Space style={{ width: '100%', marginTop: 8, alignItems: 'center' }}>
+            <div style={{
+              flex: 1,
+              padding: '8px 12px',
+              border: '1px solid #d9d9d9',
+              borderRadius: '6px',
+              backgroundColor: '#fafafa',
+              fontFamily: 'monospace',
+              fontSize: '14px',
+              wordBreak: 'break-all'
+            }}>
+              <Text code style={{ backgroundColor: 'transparent', border: 'none', padding: 0 }}>
+                https://api.openguardrails.com/v1/dify/moderation
+              </Text>
+            </div>
+            <Button icon={<CopyOutlined />} onClick={handleCopyDifyEndpoint}>{t('account.copy')}</Button>
+          </Space>
+          <div style={{ marginTop: 8 }}>
+            <Text type="secondary">{t('account.difyModerationEndpointNote')}</Text>
           </div>
         </div>
 
