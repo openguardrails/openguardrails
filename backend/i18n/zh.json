@@ -8,6 +8,17 @@
       "codePrompt": "您的验证码是：",
       "validityNote": "验证码有效期为10分钟，请及时使用。",
       "footer": "OpenGuardrails平台 - 保护AI应用安全"
+    },
+    "passwordReset": {
+      "subject": "OpenGuardrails平台 - 密码重置请求",
+      "title": "密码重置请求",
+      "platformName": "OpenGuardrails平台",
+      "greeting": "您好！我们收到了您的密码重置请求。",
+      "instruction": "请点击下方按钮重置您的密码：",
+      "buttonText": "重置密码",
+      "validityNote": "此密码重置链接有效期为1小时。",
+      "ignoreNote": "如果您没有请求重置密码，请忽略此邮件，您的密码将保持不变。",
+      "footer": "OpenGuardrails平台 - 保护AI应用安全"
     }
   }
 }

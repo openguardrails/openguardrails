@@ -31,12 +31,23 @@ class Tenant(Base):
 class EmailVerification(Base):
     """Email verification table"""
     __tablename__ = "email_verifications"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String(255), nullable=False, index=True)
     verification_code = Column(String(6), nullable=False)
     expires_at = Column(DateTime(timezone=True), nullable=False)
     is_used = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class PasswordResetToken(Base):
+    """Password reset token table"""
+    __tablename__ = "password_reset_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String(255), nullable=False, index=True)
+    reset_token = Column(String(64), unique=True, nullable=False, index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    is_used = Column(Boolean, default=False, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 class DetectionResult(Base):

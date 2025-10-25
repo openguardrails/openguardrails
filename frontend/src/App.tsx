@@ -6,6 +6,8 @@ import ProtectedRoute from './components/ProtectedRoute/ProtectedRoute';
 import Login from './pages/Login/Login';
 import Register from './pages/Register/Register';
 import Verify from './pages/Verify/Verify';
+import ForgotPassword from './pages/ForgotPassword/ForgotPassword';
+import ResetPassword from './pages/ResetPassword/ResetPassword';
 import Dashboard from './pages/Dashboard/Dashboard';
 import Results from './pages/Results/Results';
 import Reports from './pages/Reports/Reports';
@@ -28,6 +30,8 @@ function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
       <Route path="/verify" element={<Verify />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/*" element={
         <ProtectedRoute>
           <Layout>

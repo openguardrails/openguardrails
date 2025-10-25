@@ -153,14 +153,18 @@ const Login: React.FC = () => {
           </Form>
 
           <div className="login-footer">
-            <Space direction="vertical" align="center">
-              <Space>
+            <Space direction="vertical" align="center" style={{ width: '100%' }}>
+              <Space wrap>
                 <Text type="secondary">
                   {t('login.noAccount')} <Link to="/register">{t('login.registerNow')}</Link>
                 </Text>
                 <Text type="secondary">|</Text>
                 <Text type="secondary">
                   {t('login.needVerifyEmail')} <Link to="/verify">{t('login.verifyPage')}</Link>
+                </Text>
+                <Text type="secondary">|</Text>
+                <Text type="secondary">
+                  <Link to="/forgot-password">{t('login.forgotPassword')}</Link>
                 </Text>
               </Space>
               <Text type="secondary" style={{ fontSize: '12px' }}>

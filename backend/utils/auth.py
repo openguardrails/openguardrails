@@ -27,6 +27,11 @@ def generate_api_key() -> str:
     random_part = ''.join(secrets.choice(characters) for _ in range(key_length))
     return prefix + random_part
 
+def generate_reset_token() -> str:
+    """Generate password reset token"""
+    # Generate 64-character secure random token
+    return secrets.token_urlsafe(48)[:64]
+
 def authenticate_admin(username: str, password: str) -> bool:
     """Verify admin account"""
     if username != settings.super_admin_username:
