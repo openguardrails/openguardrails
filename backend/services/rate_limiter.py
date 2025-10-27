@@ -34,7 +34,7 @@ class PostgreSQLRateLimiter:
             await self._update_config_cache_if_needed(db)
 
             # Get tenant rate limit configuration
-            rate_limit = self._rate_limits.get(tenant_id, 1)  # 默认每秒1个请求
+            rate_limit = self._rate_limits.get(tenant_id, 10)  # 默认每秒10个请求
 
             # 0 means no limit
             if rate_limit == 0:

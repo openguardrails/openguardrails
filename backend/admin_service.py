@@ -16,7 +16,7 @@ from pathlib import Path
 
 from config import settings
 from database.connection import init_db, create_admin_engine
-from routers import dashboard, config_api, results, auth, user, sync, admin, online_test, test_models, risk_config_api, proxy_management, concurrent_stats, media, data_security
+from routers import dashboard, config_api, results, auth, user, sync, admin, online_test, test_models, risk_config_api, proxy_management, concurrent_stats, media, data_security, billing
 from services.data_sync_service import data_sync_service
 from utils.logger import setup_logger
 from services.admin_service import admin_service
@@ -337,6 +337,7 @@ app.include_router(risk_config_api.router, dependencies=[Depends(verify_user_aut
 app.include_router(proxy_management.router, prefix="/api/v1", dependencies=[Depends(verify_user_auth)])
 app.include_router(concurrent_stats.router, dependencies=[Depends(verify_user_auth)])
 app.include_router(data_security.router, dependencies=[Depends(verify_user_auth)])
+app.include_router(billing.router, dependencies=[Depends(verify_user_auth)])  # Billing APIs
 
 # Import and register ban policy routes
 from routers import ban_policy_api

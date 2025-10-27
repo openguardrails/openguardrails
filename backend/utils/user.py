@@ -86,6 +86,25 @@ def verify_user_email(db: Session, email: str, verification_code: str) -> bool:
             print(f"Failed to create default entity type configurations for tenant {tenant.email}: {e}")
             # Not affect tenant activation process, just record error
 
+        # Create default subscription for new tenant (free plan)
+        try:
+            from services.billing_service import billing_service
+            billing_service.create_subscription(str(tenant.id), 'free', db)
+            print(f"Created free subscription for tenant {tenant.email}")
+        except Exception as e:
+            print(f"Failed to create subscription for tenant {tenant.email}: {e}")
+            # Not affect tenant activation process, just record error
+
+        # Create default rate limit for new tenant (10 RPS)
+        try:
+            from services.rate_limiter import RateLimitService
+            rate_limit_service = RateLimitService(db)
+            rate_limit_service.set_user_rate_limit(str(tenant.id), 10)
+            print(f"Created rate limit (10 RPS) for tenant {tenant.email}")
+        except Exception as e:
+            print(f"Failed to create rate limit for tenant {tenant.email}: {e}")
+            # Not affect tenant activation process, just record error
+
     return True
 
 def regenerate_api_key(db: Session, tenant_id: Union[str, uuid.UUID]) -> Optional[str]:

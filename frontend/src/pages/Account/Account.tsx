@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { Card, Typography, Space, Button, message, Divider } from 'antd';
+import { Card, Typography, Space, Button, message, Divider, Progress, Tag } from 'antd';
 import { CopyOutlined, ReloadOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { authService, UserInfo } from '../../services/auth';
 import { configApi } from '../../services/api';
+import { billingService } from '../../services/billing';
+import type { Subscription } from '../../types/billing';
 
 const { Title, Text } = Typography;
 
@@ -17,6 +19,7 @@ const Account: React.FC = () => {
   const { t } = useTranslation();
   const [user, setUser] = useState<UserInfo | null>(null);
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
+  const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [loading, setLoading] = useState(false);
 
   const fetchMe = async () => {
@@ -37,25 +40,27 @@ const Account: React.FC = () => {
     }
   };
 
+  const fetchSubscription = async () => {
+    try {
+      const sub = await billingService.getCurrentSubscription();
+      setSubscription(sub);
+    } catch (e: any) {
+      console.error('Fetch subscription failed', e);
+      // Set null to indicate subscription not found (for legacy users)
+      setSubscription(null);
+    }
+  };
+
   useEffect(() => {
     fetchMe();
     fetchSystemInfo();
+    fetchSubscription();
   }, []);
 
   const handleCopy = async () => {
     if (!user?.api_key) return;
     try {
       await navigator.clipboard.writeText(user.api_key);
-      message.success(t('account.copied'));
-    } catch {
-      message.error(t('account.copyFailed'));
-    }
-  };
-
-  const handleCopyCozeAuth = async () => {
-    if (!user?.api_key) return;
-    try {
-      await navigator.clipboard.writeText(`Bearer ${user.api_key}`);
       message.success(t('account.copied'));
     } catch {
       message.error(t('account.copyFailed'));
@@ -160,30 +165,6 @@ const Account: React.FC = () => {
         </div>
 
         <div>
-          <Text type="secondary">{t('account.cozeAuthorization')}</Text>
-          <Space style={{ width: '100%', marginTop: 8, alignItems: 'center' }}>
-            <div style={{
-              flex: 1,
-              padding: '8px 12px',
-              border: '1px solid #d9d9d9',
-              borderRadius: '6px',
-              backgroundColor: '#fafafa',
-              fontFamily: 'monospace',
-              fontSize: '14px',
-              wordBreak: 'break-all'
-            }}>
-              <Text code style={{ backgroundColor: 'transparent', border: 'none', padding: 0 }}>
-                {user?.api_key ? `Bearer ${user.api_key}` : '-'}
-              </Text>
-            </div>
-            <Button icon={<CopyOutlined />} onClick={handleCopyCozeAuth}>{t('account.copy')}</Button>
-          </Space>
-          <div style={{ marginTop: 8 }}>
-            <Text type="secondary">{t('account.cozeAuthorizationNote')}</Text>
-          </div>
-        </div>
-
-        <div>
           <Text type="secondary">{t('account.difyModerationEndpoint')}</Text>
           <Space style={{ width: '100%', marginTop: 8, alignItems: 'center' }}>
             <div style={{
@@ -204,6 +185,64 @@ const Account: React.FC = () => {
           </Space>
           <div style={{ marginTop: 8 }}>
             <Text type="secondary">{t('account.difyModerationEndpointNote')}</Text>
+          </div>
+        </div>
+
+        <div>
+          <Text type="secondary">{t('account.subscription')}</Text>
+          <div style={{ marginTop: 8 }}>
+            {subscription ? (
+              <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                <div>
+                  <Tag color={subscription.subscription_type === 'subscribed' ? 'blue' : 'default'}>
+                    {subscription.plan_name}
+                  </Tag>
+                </div>
+                <div>
+                  <Text>{t('account.monthlyQuota')}: </Text>
+                  <Text strong>
+                    {subscription.current_month_usage.toLocaleString()} / {subscription.monthly_quota.toLocaleString()}
+                  </Text>
+                  <Text type="secondary"> {t('account.calls')}</Text>
+                </div>
+                <Progress
+                  percent={Math.min(subscription.usage_percentage, 100)}
+                  status={subscription.usage_percentage >= 90 ? 'exception' : 'active'}
+                  strokeColor={subscription.usage_percentage >= 90 ? '#ff4d4f' : '#1890ff'}
+                />
+                <div>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {t('account.quotaResetsOn', { date: new Date(subscription.usage_reset_at).toLocaleDateString() })}
+                  </Text>
+                </div>
+                {subscription.subscription_type === 'free' && subscription.usage_percentage >= 80 && (
+                  <div style={{
+                    padding: '8px 12px',
+                    background: '#fff7e6',
+                    border: '1px solid #ffd591',
+                    borderRadius: '4px',
+                    marginTop: 8
+                  }}>
+                    <Text type="warning" style={{ fontSize: 12 }}>
+                      {t('account.upgradePrompt', { email: systemInfo?.support_email || '' })}
+                    </Text>
+                  </div>
+                )}
+              </Space>
+            ) : subscription === null ? (
+              <div style={{
+                padding: '12px',
+                background: '#fff7e6',
+                border: '1px solid #ffd591',
+                borderRadius: '4px'
+              }}>
+                <Text type="warning">
+                  {t('account.subscriptionNotFound', { email: systemInfo?.support_email || 'support@openguardrails.com' })}
+                </Text>
+              </div>
+            ) : (
+              <Text type="secondary">{t('common.loading')}</Text>
+            )}
           </div>
         </div>
 

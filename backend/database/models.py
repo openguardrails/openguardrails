@@ -66,12 +66,12 @@ class DetectionResult(Base):
     ip_address = Column(String(45))
     user_agent = Column(Text)
     # Separated security and compliance detection results
-    security_risk_level = Column(String(10), default='no_risk')  # Security risk level
+    security_risk_level = Column(String(20), default='no_risk')  # Security risk level
     security_categories = Column(JSON, default=list)  # Security categories
-    compliance_risk_level = Column(String(10), default='no_risk')  # Compliance risk level
+    compliance_risk_level = Column(String(20), default='no_risk')  # Compliance risk level
     compliance_categories = Column(JSON, default=list)  # Compliance categories
     # Data security detection results
-    data_risk_level = Column(String(10), default='no_risk')  # Data leakage risk level
+    data_risk_level = Column(String(20), default='no_risk')  # Data leakage risk level
     data_categories = Column(JSON, default=list)  # Data leakage categories
     # Multimodal related fields
     has_image = Column(Boolean, default=False, index=True)  # Whether contains image
@@ -121,7 +121,7 @@ class ResponseTemplate(Base):
     # Allow null: When it is a system-level default template, tenant_id is null
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=True, index=True)  # Associated tenant (can be null for global templates)
     category = Column(String(50), nullable=False, index=True)  # Risk category (S1-S12, default)
-    risk_level = Column(String(10), nullable=False)  # Risk level
+    risk_level = Column(String(20), nullable=False)  # Risk level
     template_content = Column(Text, nullable=False)  # Response template content
     is_default = Column(Boolean, default=False)  # Whether it is a default template
     is_active = Column(Boolean, default=True)  # Whether enabled
@@ -199,7 +199,7 @@ class RiskTypeConfig(Base):
     low_sensitivity_threshold = Column(Float, default=0.95)     # Low sensitivity threshold
 
     # Sensitivity trigger level config (low, medium, high)
-    sensitivity_trigger_level = Column(String(10), default="medium")  # Trigger detection hit lowest sensitivity level
+    sensitivity_trigger_level = Column(String(20), default="medium")  # Trigger detection hit lowest sensitivity level
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -213,7 +213,7 @@ class TenantRateLimit(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, unique=True, index=True)
-    requests_per_second = Column(Integer, default=1, nullable=False)  # Requests per second, 0 means no limit
+    requests_per_second = Column(Integer, default=10, nullable=False)  # Requests per second, 0 means no limit
     is_active = Column(Boolean, default=True, index=True)  # Whether to enable rate limiting
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -461,3 +461,19 @@ class TenantKnowledgeBaseDisable(Base):
     __table_args__ = (
         UniqueConstraint('tenant_id', 'kb_id', name='_tenant_kb_disable_uc'),
     )
+
+class TenantSubscription(Base):
+    """Tenant subscription and billing table"""
+    __tablename__ = "tenant_subscriptions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, unique=True, index=True)
+    subscription_type = Column(String(20), nullable=False, default='free', index=True)  # 'free' or 'subscribed'
+    monthly_quota = Column(Integer, nullable=False, default=10000)  # Monthly API call quota
+    current_month_usage = Column(Integer, nullable=False, default=0)  # Current month usage
+    usage_reset_at = Column(DateTime(timezone=True), nullable=False)  # Next reset date (1st of next month)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Association relationships
+    tenant = relationship("Tenant")

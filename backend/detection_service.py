@@ -16,7 +16,7 @@ from pathlib import Path
 
 from config import settings
 from database.connection import init_db, create_detection_engine
-from routers import detection_guardrails, dify_moderation
+from routers import detection_guardrails, dify_moderation, billing
 from services.async_logger import async_detection_logger
 from utils.logger import setup_logger
 
@@ -155,9 +155,13 @@ app = FastAPI(
 # Add concurrent control middleware (highest priority, added last)
 app.add_middleware(ConcurrentLimitMiddleware, service_type="detection", max_concurrent=settings.detection_max_concurrent_requests)
 
-# Add rate limit middleware
+# Add rate limit middleware (RPS limiting)
 from middleware.rate_limit_middleware import RateLimitMiddleware
 app.add_middleware(RateLimitMiddleware)
+
+# Add billing middleware (monthly quota limiting)
+from middleware.billing_middleware import BillingMiddleware
+app.add_middleware(BillingMiddleware)
 
 # Add authentication context middleware
 app.add_middleware(AuthContextMiddleware)
@@ -214,6 +218,7 @@ async def verify_user_auth(
 # Register detection routes (special version)
 app.include_router(detection_guardrails.router, prefix="/v1", dependencies=[Depends(verify_user_auth)])
 app.include_router(dify_moderation.router, prefix="/v1", dependencies=[Depends(verify_user_auth)])  # Dify API-based Extension
+app.include_router(billing.router, dependencies=[Depends(verify_user_auth)])  # Billing APIs
 
 # Global exception handling
 @app.exception_handler(Exception)

@@ -13,6 +13,7 @@ import {
   ReloadOutlined,
   ExperimentOutlined,
   BookOutlined,
+  CreditCardOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../../contexts/AuthContext';
 import { adminApi, configApi } from '../../services/api';
@@ -144,12 +145,21 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           key: '/admin/rate-limits',
           label: t('nav.rateLimiting'),
         },
+        {
+          key: '/admin/subscriptions',
+          label: t('nav.subscriptionManagement'),
+        },
       ],
     }] : []),
     {
       key: '/account',
       icon: <UserOutlined />,
       label: t('nav.account'),
+    },
+    {
+      key: '/subscription',
+      icon: <CreditCardOutlined />,
+      label: t('nav.subscription'),
     },
   ];
 

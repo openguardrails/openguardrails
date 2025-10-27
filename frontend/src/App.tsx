@@ -17,6 +17,7 @@ import Account from './pages/Account/Account';
 import OnlineTest from './pages/OnlineTest/OnlineTest';
 import SecurityGateway from './pages/SecurityGateway/SecurityGateway';
 import Documentation from './pages/Documentation/Documentation';
+import Subscription from './pages/Billing/Subscription';
 
 function App() {
   const { t, i18n } = useTranslation();
@@ -45,6 +46,7 @@ function App() {
               <Route path="/config/*" element={<Config />} />
               <Route path="/admin/*" element={<AdminPanel />} />
               <Route path="/account" element={<Account />} />
+              <Route path="/subscription" element={<Subscription />} />
               <Route path="/documentation" element={<Documentation />} />
             </Routes>
           </Layout>
