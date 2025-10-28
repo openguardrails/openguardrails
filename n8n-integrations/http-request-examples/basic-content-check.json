@@ -1,0 +1,262 @@
+{
+  "name": "OpenGuardrails - Basic Content Check (v2 - Cloud Compatible)",
+  "nodes": [
+    {
+      "parameters": {},
+      "name": "When clicking 'Test workflow'",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "content",
+              "value": "How can I hack into someone's email account?"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Test Input Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openguardrails.com/v1/guardrails",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"OpenGuardrails-Text\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"{{ $json.content }}\"\n    }\n  ],\n  \"extra_body\": {\n    \"enable_security\": true,\n    \"enable_compliance\": true,\n    \"enable_data_security\": true\n  }\n}",
+        "options": {}
+      },
+      "name": "OpenGuardrails Check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [650, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "1",
+          "name": "OpenGuardrails API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse the OpenGuardrails response\n// Compatible with n8n Cloud\n\n// Get the API response\nconst response = $input.first().json;\n\n// Get original content from the previous node\nconst originalContent = $('Test Input Data').first().json.content;\n\n// Extract all risk categories\nconst allCategories = [\n  ...(response.result.security.categories || []),\n  ...(response.result.compliance.categories || []),\n  ...(response.result.data.categories || [])\n];\n\n// Return structured data\nreturn {\n  request_id: response.id,\n  original_content: originalContent,\n  action: response.suggest_action,\n  risk_level: response.overall_risk_level,\n  suggest_answer: response.suggest_answer || null,\n  score: response.score || 0,\n  security_risk: response.result.security.risk_level,\n  security_categories: response.result.security.categories || [],\n  compliance_risk: response.result.compliance.risk_level,\n  compliance_categories: response.result.compliance.categories || [],\n  data_risk: response.result.data.risk_level,\n  data_categories: response.result.data.categories || [],\n  categories: allCategories\n};"
+      },
+      "name": "Parse Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.action }}",
+              "value2": "pass"
+            }
+          ]
+        }
+      },
+      "name": "Check Action",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "status",
+              "value": "approved"
+            },
+            {
+              "name": "message",
+              "value": "Content is safe and approved for processing"
+            },
+            {
+              "name": "original_content",
+              "value": "={{ $json.original_content }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Content Approved",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [1250, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.action }}",
+              "value2": "reject"
+            }
+          ]
+        }
+      },
+      "name": "Is Reject?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1250, 400]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "status",
+              "value": "rejected"
+            },
+            {
+              "name": "message",
+              "value": "Content blocked due to safety concerns"
+            },
+            {
+              "name": "risk_level",
+              "value": "={{ $json.risk_level }}"
+            },
+            {
+              "name": "categories",
+              "value": "={{ $json.categories.join(', ') }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Content Rejected",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [1450, 350]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "status",
+              "value": "replaced"
+            },
+            {
+              "name": "message",
+              "value": "Content was moderated and replaced with safe response"
+            },
+            {
+              "name": "safe_response",
+              "value": "={{ $json.suggest_answer }}"
+            },
+            {
+              "name": "risk_level",
+              "value": "={{ $json.risk_level }}"
+            },
+            {
+              "name": "categories",
+              "value": "={{ $json.categories.join(', ') }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Content Replaced",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [1450, 450]
+    }
+  ],
+  "connections": {
+    "When clicking 'Test workflow'": {
+      "main": [
+        [
+          {
+            "node": "Test Input Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Test Input Data": {
+      "main": [
+        [
+          {
+            "node": "OpenGuardrails Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenGuardrails Check": {
+      "main": [
+        [
+          {
+            "node": "Parse Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Response": {
+      "main": [
+        [
+          {
+            "node": "Check Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Action": {
+      "main": [
+        [
+          {
+            "node": "Content Approved",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is Reject?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Reject?": {
+      "main": [
+        [
+          {
+            "node": "Content Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Content Replaced",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {}
+}
