@@ -112,9 +112,15 @@ class AdminService:
         return generate_api_key()
     
     def is_super_admin(self, tenant: Tenant) -> bool:
-        """Check if tenant is super admin (based on .env configured email)"""
+        """Check if tenant is super admin (based on database field or .env configured email)"""
         if not tenant:
             return False
+        
+        # Check database field first (more flexible)
+        if hasattr(tenant, 'is_super_admin') and tenant.is_super_admin:
+            return True
+        
+        # Fallback to .env configuration for backward compatibility
         return tenant.email == settings.super_admin_username
     
     def get_all_users(self, db: Session, admin_tenant: Tenant) -> List[Dict[str, Any]]:

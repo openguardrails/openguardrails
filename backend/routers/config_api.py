@@ -657,13 +657,24 @@ async def delete_knowledge_base(
     try:
         current_user = get_current_user_from_request(request, db)
 
+        # Find knowledge base (user's own or global)
         knowledge_base = db.query(KnowledgeBase).filter(
-            KnowledgeBase.id == kb_id,
-            KnowledgeBase.tenant_id == current_user.id
+            KnowledgeBase.id == kb_id
         ).first()
 
         if not knowledge_base:
             raise HTTPException(status_code=404, detail="Knowledge base not found")
+
+        # Permission check: 
+        # 1. Users can delete their own knowledge bases
+        # 2. Administrators can delete system-level (global) knowledge bases
+        # 3. Regular users cannot delete system-level knowledge bases
+        if knowledge_base.tenant_id != current_user.id:
+            if not (current_user.is_super_admin and knowledge_base.is_global):
+                raise HTTPException(
+                    status_code=403, 
+                    detail="Permission denied. You can only delete your own knowledge bases, or administrators can delete system-level knowledge bases."
+                )
 
         # Delete related files
         knowledge_base_service.delete_knowledge_base_files(kb_id)

@@ -423,7 +423,8 @@ const KnowledgeBaseManagement: React.FC = () => {
       fixed: 'right' as const,
       render: (_: any, record: KnowledgeBase) => (
         <Space size="small">
-          {!record.is_global && (
+          {/* Show edit buttons for user's own knowledge bases or for admins on global knowledge bases */}
+          {(!record.is_global || user?.is_super_admin) && (
             <>
               <Tooltip title={t('knowledge.editBasicInfo')}>
                 <Button
@@ -458,14 +459,36 @@ const KnowledgeBaseManagement: React.FC = () => {
             </Button>
           </Tooltip>
           {record.is_global ? (
-            <Button
-              type="link"
-              size="small"
-              onClick={() => handleToggleDisable(record)}
-            >
-              {record.is_disabled_by_me ? t('common.enable') : t('common.disable')}
-            </Button>
+            <>
+              {/* For global knowledge bases, show enable/disable for all users */}
+              <Button
+                type="link"
+                size="small"
+                onClick={() => handleToggleDisable(record)}
+              >
+                {record.is_disabled_by_me ? t('common.enable') : t('common.disable')}
+              </Button>
+              {/* Show delete button only for administrators */}
+              {user?.is_super_admin && (
+                <Popconfirm
+                  title={t('knowledge.deleteConfirmKB', { name: record.name })}
+                  onConfirm={() => handleDelete(record)}
+                  okText={t('common.confirm')}
+                  cancelText={t('common.cancel')}
+                >
+                  <Button
+                    type="link"
+                    danger
+                    size="small"
+                    icon={<DeleteOutlined />}
+                  >
+                    {t('common.delete')}
+                  </Button>
+                </Popconfirm>
+              )}
+            </>
           ) : (
+            /* For user's own knowledge bases, show delete button */
             <Popconfirm
               title={t('knowledge.deleteConfirmKB', { name: record.name })}
               onConfirm={() => handleDelete(record)}
