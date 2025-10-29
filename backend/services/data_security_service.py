@@ -454,16 +454,9 @@ class DataSecurityService:
             return []
 
 
-def create_user_default_entity_types(db: Session, tenant_id: str) -> int:
-    """Create default entity type configuration for new tenant
-
-    Note: For backward compatibility, keep function name create_user_default_entity_types, parameter name tenant_id, but actually process tenant_id
-    """
-    tenant_id = tenant_id  # For backward compatibility, internally use tenant_id
-    service = DataSecurityService(db)
-
-    # Define default entity types
-    default_entity_types = [
+def get_default_entity_types_config() -> List[Dict[str, Any]]:
+    """Get default entity types configuration (used for global initialization)"""
+    return [
         {
             'entity_type': 'ID_CARD_NUMBER_SYS',
             'display_name': 'ID Card Number',
@@ -526,20 +519,34 @@ def create_user_default_entity_types(db: Session, tenant_id: str) -> int:
         }
     ]
 
+
+def create_global_entity_types(db: Session, admin_tenant_id: str) -> int:
+    """Create global entity type configurations (called during system initialization)
+
+    Args:
+        db: Database session
+        admin_tenant_id: Super admin tenant ID (used as creator of global configs)
+
+    Returns:
+        Number of entity types created
+    """
+    service = DataSecurityService(db)
+    default_entity_types = get_default_entity_types_config()
+
     created_count = 0
     for entity_data in default_entity_types:
         try:
-            # Check if it already exists
+            # Check if global entity type already exists
             existing = db.query(DataSecurityEntityType).filter(
                 and_(
                     DataSecurityEntityType.entity_type == entity_data['entity_type'],
-                    DataSecurityEntityType.tenant_id == tenant_id
+                    DataSecurityEntityType.is_global == True
                 )
             ).first()
 
             if not existing:
                 service.create_entity_type(
-                    tenant_id=tenant_id, 
+                    tenant_id=admin_tenant_id,
                     entity_type=entity_data['entity_type'],
                     display_name=entity_data['display_name'],
                     risk_level=entity_data['risk_level'],
@@ -548,11 +555,27 @@ def create_user_default_entity_types(db: Session, tenant_id: str) -> int:
                     anonymization_config=entity_data['anonymization_config'],
                     check_input=entity_data['check_input'],
                     check_output=entity_data['check_output'],
-                    is_global=True  # System default initialization data marked as system source
+                    is_global=True
                 )
                 created_count += 1
+                logger.info(f"Created global entity type: {entity_data['entity_type']}")
         except Exception as e:
-            logger.error(f"Failed to create default entity type {entity_data['entity_type']}: {e}")
+            logger.error(f"Failed to create global entity type {entity_data['entity_type']}: {e}")
 
     return created_count
+
+
+def create_user_default_entity_types(db: Session, tenant_id: str) -> int:
+    """Create default entity type configuration for new tenant (DEPRECATED)
+
+    This function is now deprecated and does nothing. Global entity types are created
+    during system initialization via migration. This function is kept for backward
+    compatibility but no longer creates any entity types.
+
+    Note: For backward compatibility, keep function name create_user_default_entity_types, parameter name tenant_id, but actually process tenant_id
+    """
+    # No longer create entity types for individual users
+    # Global entity types should already exist from system initialization
+    logger.info(f"Skipping entity type creation for tenant {tenant_id} - using global defaults")
+    return 0
 

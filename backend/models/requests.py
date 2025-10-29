@@ -87,7 +87,7 @@ class ResponseTemplateRequest(BaseModel):
     """Response template request model"""
     category: str = Field(..., description="Risk category")
     risk_level: str = Field(..., description="Risk level")
-    template_content: str = Field(..., description="Response template content")
+    template_content: Dict[str, str] = Field(..., description="Multilingual response template content: {'en': '...', 'zh': '...', ...}")
     is_default: bool = Field(False, description="Whether it is a default template")
     is_active: bool = Field(True, description="Whether enabled")
     

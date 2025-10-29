@@ -10,7 +10,7 @@ const { TextArea } = Input;
 const { Option } = Select;
 
 const ResponseTemplateManagement: React.FC = () => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [data, setData] = useState<ResponseTemplate[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
@@ -95,29 +95,21 @@ const ResponseTemplateManagement: React.FC = () => {
   const handleEdit = (record: ResponseTemplate) => {
     setEditingItem(record);
 
-    // Handle both old string format and new JSON format
-    let contentEn = '';
-    let contentZh = '';
+    // Get current language
+    const currentLang = i18n.language || 'en';
+    let currentContent = '';
 
     if (typeof record.template_content === 'string') {
       // Old format: single string
-      // Determine if it's Chinese or English based on content
-      const isChinese = /[\u4e00-\u9fff]/.test(record.template_content);
-      if (isChinese) {
-        contentZh = record.template_content;
-      } else {
-        contentEn = record.template_content;
-      }
+      currentContent = record.template_content;
     } else if (typeof record.template_content === 'object') {
       // New format: JSON object with language keys
-      contentEn = record.template_content.en || '';
-      contentZh = record.template_content.zh || '';
+      currentContent = record.template_content[currentLang] || '';
     }
 
     form.setFieldsValue({
       category: record.category,
-      template_content_en: contentEn,
-      template_content_zh: contentZh
+      template_content: currentContent
     });
     setModalVisible(true);
   };
@@ -130,19 +122,23 @@ const ResponseTemplateManagement: React.FC = () => {
         return;
       }
 
-      // Create multilingual content object
-      const multilingualContent: Record<string, string> = {};
+      // Get current language
+      const currentLang = i18n.language || 'en';
 
-      if (values.template_content_en) {
-        multilingualContent.en = values.template_content_en;
-      }
-      if (values.template_content_zh) {
-        multilingualContent.zh = values.template_content_zh;
-      }
+      // Preserve existing content from other languages
+      const existingContent = typeof editingItem.template_content === 'object'
+        ? { ...editingItem.template_content }
+        : {};
 
-      // Validate that at least one language is provided
-      if (Object.keys(multilingualContent).length === 0) {
-        message.error(t('template.atLeastOneLanguage'));
+      // Update only the current language content
+      const multilingualContent: Record<string, string> = {
+        ...existingContent,
+        [currentLang]: values.template_content
+      };
+
+      // Validate that content is provided
+      if (!values.template_content || !values.template_content.trim()) {
+        message.error(t('template.contentRequired'));
         return;
       }
 
@@ -205,11 +201,10 @@ const ResponseTemplateManagement: React.FC = () => {
         if (typeof content === 'string') {
           return content;
         } else if (typeof content === 'object') {
-          // Display both languages if available
-          const parts = [];
-          if (content.en) parts.push(`EN: ${content.en}`);
-          if (content.zh) parts.push(`ZH: ${content.zh}`);
-          return parts.join(' | ');
+          // Display only the current language content
+          const currentLang = i18n.language || 'en';
+          const displayContent = content[currentLang] || content['en'] || content['zh'] || '';
+          return displayContent;
         }
         return '';
       }
@@ -278,24 +273,24 @@ const ResponseTemplateManagement: React.FC = () => {
           </Form.Item>
 
           <Form.Item
-            name="template_content_en"
-            label={t('template.rejectContentEnglish')}
+            name="template_content"
+            label={t('template.rejectContent')}
+            rules={[{ required: true, message: t('template.contentRequired') }]}
+            extra={
+              <div style={{ color: '#666', fontSize: '12px', marginTop: '8px' }}>
+                {t('template.editLanguageHint', {
+                  language: i18n.language === 'zh' ? '中文' : 'English'
+                })}
+              </div>
+            }
           >
             <TextArea
-              rows={4}
-              placeholder={t('template.rejectContentPlaceholderEn')}
-              showCount
-              maxLength={500}
-            />
-          </Form.Item>
-
-          <Form.Item
-            name="template_content_zh"
-            label={t('template.rejectContentChinese')}
-          >
-            <TextArea
-              rows={4}
-              placeholder={t('template.rejectContentPlaceholderZh')}
+              rows={6}
+              placeholder={
+                i18n.language === 'zh'
+                  ? t('template.rejectContentPlaceholderZh')
+                  : t('template.rejectContentPlaceholderEn')
+              }
               showCount
               maxLength={500}
             />

@@ -16,6 +16,7 @@ migrations/
 ├── 008_*.py           # Python migration files (manual execution)
 ├── 009_*.py
 ├── 010_*.py
+├── 011_*.py
 └── .migration_history  # Migration execution history (auto-generated)
 ```
 

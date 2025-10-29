@@ -121,6 +121,7 @@ export const resultsApi = {
     risk_level?: string;
     result_type?: string;
     category?: string;
+    data_entity_type?: string;
     start_date?: string;
     end_date?: string;
   }): Promise<PaginatedResponse<DetectionResult>> =>
@@ -136,6 +137,7 @@ export const resultsApi = {
     security_risk_level?: string;
     compliance_risk_level?: string;
     category?: string;
+    data_entity_type?: string;
     start_date?: string;
     end_date?: string;
     content_search?: string;
@@ -468,6 +470,10 @@ export const knowledgeBaseApi = {
 export const dataSecurityApi = {
   // Get all sensitive data types
   getEntityTypes: (): Promise<{ items: any[] }> =>
+    api.get('/api/v1/config/data-security/entity-types').then(res => res.data),
+
+  // Alias for getEntityTypes (for consistency with Results page)
+  list: (): Promise<{ items: any[] }> =>
     api.get('/api/v1/config/data-security/entity-types').then(res => res.data),
 
   // Get single sensitive data type

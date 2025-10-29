@@ -30,6 +30,7 @@ async def get_detection_results(
     security_risk_level: Optional[str] = Query(None, description="提示词攻击风险等级过滤"),
     compliance_risk_level: Optional[str] = Query(None, description="内容合规风险等级过滤"),
     category: Optional[str] = Query(None, description="风险类别过滤"),
+    data_entity_type: Optional[str] = Query(None, description="数据泄漏实体类型过滤"),
     start_date: Optional[str] = Query(None, description="开始日期"),
     end_date: Optional[str] = Query(None, description="结束日期"),
     content_search: Optional[str] = Query(None, description="检测内容搜索"),
@@ -79,6 +80,10 @@ async def get_detection_results(
                 cast(DetectionResult.compliance_categories, JSONB).contains([category]),
                 cast(DetectionResult.data_categories, JSONB).contains([category])
             ))
+
+        # Data entity type filter - find in data_categories
+        if data_entity_type:
+            filters.append(cast(DetectionResult.data_categories, JSONB).contains([data_entity_type]))
         
         if start_date:
             filters.append(DetectionResult.created_at >= start_date + ' 00:00:00')
@@ -153,6 +158,8 @@ async def get_detection_results(
                 security_categories=result.security_categories,
                 compliance_risk_level=result.compliance_risk_level,
                 compliance_categories=result.compliance_categories,
+                data_risk_level=result.data_risk_level if hasattr(result, 'data_risk_level') else "no_risk",
+                data_categories=result.data_categories if hasattr(result, 'data_categories') else [],
                 has_image=result.has_image if hasattr(result, 'has_image') else False,
                 image_count=result.image_count if hasattr(result, 'image_count') else 0,
                 image_paths=result.image_paths if hasattr(result, 'image_paths') else [],
@@ -173,77 +180,6 @@ async def get_detection_results(
         logger.error(f"Get detection results error: {e}")
         raise HTTPException(status_code=500, detail="Failed to get detection results")
 
-@router.get("/results/{result_id}", response_model=DetectionResultResponse)
-async def get_detection_result(result_id: int, request: Request, db: Session = Depends(get_db)):
-    """Get single detection result detail (ensure current user can only view their own results)"""
-    try:
-        # Get user context
-        auth_context = getattr(request.state, 'auth_context', None)
-        tenant_id = None
-        if auth_context and auth_context.get('data'):
-            tenant_id = auth_context['data'].get('tenant_id')
-        
-        result = db.query(DetectionResult).filter_by(id=result_id).first()
-        if not result:
-            raise HTTPException(status_code=404, detail="Detection result not found")
-        
-        # Permission check: can only view own records
-        if tenant_id is not None:
-            # Convert string type tenant_id to UUID for comparison
-            try:
-                import uuid
-                tenant_uuid = uuid.UUID(str(tenant_id))
-                if result.tenant_id != tenant_uuid:
-                    raise HTTPException(status_code=403, detail="Forbidden")
-            except ValueError:
-                raise HTTPException(status_code=403, detail="Invalid user ID format")
-        
-        # Generate signed image URLs
-        image_urls = []
-        if hasattr(result, 'image_paths') and result.image_paths:
-            for image_path in result.image_paths:
-                try:
-                    # Extract tenant_id and filename from path
-                    # Path format: /mnt/data/openguardrails-data/media/{tenant_id}/{filename}
-                    path_parts = Path(image_path).parts
-                    filename = path_parts[-1]
-                    extracted_tenant_id = path_parts[-2]
-
-                    # Generate signed URL
-                    signed_url = generate_signed_media_url(
-                        tenant_id=extracted_tenant_id,
-                        filename=filename,
-                        expires_in_seconds=86400  # 24 hours valid
-                    )
-                    image_urls.append(signed_url)
-                except Exception as e:
-                    logger.error(f"Failed to generate signed URL for {image_path}: {e}")
-
-        return DetectionResultResponse(
-            id=result.id,
-            request_id=result.request_id,
-            content=result.content,
-            suggest_action=result.suggest_action,
-            suggest_answer=result.suggest_answer,
-            hit_keywords=result.hit_keywords,
-            created_at=result.created_at,
-            ip_address=result.ip_address,
-            security_risk_level=result.security_risk_level,
-            security_categories=result.security_categories,
-            compliance_risk_level=result.compliance_risk_level,
-            compliance_categories=result.compliance_categories,
-            has_image=result.has_image if hasattr(result, 'has_image') else False,
-            image_count=result.image_count if hasattr(result, 'image_count') else 0,
-            image_paths=result.image_paths if hasattr(result, 'image_paths') else [],
-            image_urls=image_urls  # New signed URLs
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Get detection result error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get detection result")
-
 @router.get("/results/export")
 async def export_detection_results(
     request: Request,
@@ -252,6 +188,7 @@ async def export_detection_results(
     security_risk_level: Optional[str] = Query(None, description="提示词攻击风险等级过滤"),
     compliance_risk_level: Optional[str] = Query(None, description="内容合规风险等级过滤"),
     category: Optional[str] = Query(None, description="风险类别过滤"),
+    data_entity_type: Optional[str] = Query(None, description="数据泄漏实体类型过滤"),
     start_date: Optional[str] = Query(None, description="开始日期"),
     end_date: Optional[str] = Query(None, description="结束日期"),
     content_search: Optional[str] = Query(None, description="检测内容搜索"),
@@ -294,6 +231,10 @@ async def export_detection_results(
                 cast(DetectionResult.compliance_categories, JSONB).contains([category]),
                 cast(DetectionResult.data_categories, JSONB).contains([category])
             ))
+
+        # Data entity type filter - find in data_categories
+        if data_entity_type:
+            filters.append(cast(DetectionResult.data_categories, JSONB).contains([data_entity_type]))
 
         if start_date:
             filters.append(DetectionResult.created_at >= start_date + ' 00:00:00')
@@ -402,3 +343,76 @@ async def export_detection_results(
     except Exception as e:
         logger.error(f"Export detection results error: {e}")
         raise HTTPException(status_code=500, detail="Failed to export detection results")
+
+@router.get("/results/{result_id}", response_model=DetectionResultResponse)
+async def get_detection_result(result_id: int, request: Request, db: Session = Depends(get_db)):
+    """Get single detection result detail (ensure current user can only view their own results)"""
+    try:
+        # Get user context
+        auth_context = getattr(request.state, 'auth_context', None)
+        tenant_id = None
+        if auth_context and auth_context.get('data'):
+            tenant_id = auth_context['data'].get('tenant_id')
+
+        result = db.query(DetectionResult).filter_by(id=result_id).first()
+        if not result:
+            raise HTTPException(status_code=404, detail="Detection result not found")
+
+        # Permission check: can only view own records
+        if tenant_id is not None:
+            # Convert string type tenant_id to UUID for comparison
+            try:
+                import uuid
+                tenant_uuid = uuid.UUID(str(tenant_id))
+                if result.tenant_id != tenant_uuid:
+                    raise HTTPException(status_code=403, detail="Forbidden")
+            except ValueError:
+                raise HTTPException(status_code=403, detail="Invalid user ID format")
+
+        # Generate signed image URLs
+        image_urls = []
+        if hasattr(result, 'image_paths') and result.image_paths:
+            for image_path in result.image_paths:
+                try:
+                    # Extract tenant_id and filename from path
+                    # Path format: /mnt/data/openguardrails-data/media/{tenant_id}/{filename}
+                    path_parts = Path(image_path).parts
+                    filename = path_parts[-1]
+                    extracted_tenant_id = path_parts[-2]
+
+                    # Generate signed URL
+                    signed_url = generate_signed_media_url(
+                        tenant_id=extracted_tenant_id,
+                        filename=filename,
+                        expires_in_seconds=86400  # 24 hours valid
+                    )
+                    image_urls.append(signed_url)
+                except Exception as e:
+                    logger.error(f"Failed to generate signed URL for {image_path}: {e}")
+
+        return DetectionResultResponse(
+            id=result.id,
+            request_id=result.request_id,
+            content=result.content,
+            suggest_action=result.suggest_action,
+            suggest_answer=result.suggest_answer,
+            hit_keywords=result.hit_keywords,
+            created_at=result.created_at,
+            ip_address=result.ip_address,
+            security_risk_level=result.security_risk_level,
+            security_categories=result.security_categories,
+            compliance_risk_level=result.compliance_risk_level,
+            compliance_categories=result.compliance_categories,
+            data_risk_level=result.data_risk_level if hasattr(result, 'data_risk_level') else "no_risk",
+            data_categories=result.data_categories if hasattr(result, 'data_categories') else [],
+            has_image=result.has_image if hasattr(result, 'has_image') else False,
+            image_count=result.image_count if hasattr(result, 'image_count') else 0,
+            image_paths=result.image_paths if hasattr(result, 'image_paths') else [],
+            image_urls=image_urls  # New signed URLs
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get detection result error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get detection result")

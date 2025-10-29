@@ -181,8 +181,14 @@ class DetectionGuardrailService:
                     ip_address, user_agent, tenant_id
                 )
             
-            # 2. Data security detection (detect input)
-            data_result = await self._check_data_security(user_content, tenant_id, direction="input")
+            # 2. Data security detection
+            # Determine detection direction based on message structure
+            # If the last message is assistant (output), detect output
+            # Otherwise detect input
+            detection_direction = "output" if truncated_messages and truncated_messages[-1].role == "assistant" else "input"
+            # Extract appropriate content for data leak detection
+            content_for_data_detection = self._extract_content_for_data_detection(truncated_messages, detection_direction)
+            data_result, data_anonymized_text = await self._check_data_security(content_for_data_detection, tenant_id, direction=detection_direction)
 
             # 3. Model detection (using truncated messages, get sensitivity)
             # Convert messages to dictionary format, support multi-modal
@@ -227,7 +233,7 @@ class DetectionGuardrailService:
 
             # 5. Determine suggested action and answer (include data security result)
             overall_risk_level, suggest_action, suggest_answer = await self._determine_action_with_data(
-                compliance_result, security_result, data_result, tenant_id, user_content
+                compliance_result, security_result, data_result, tenant_id, user_content, data_anonymized_text
             )
             
             # 6. Asynchronously record detection results to log file (not write to database)
@@ -260,7 +266,14 @@ class DetectionGuardrailService:
             return await self._handle_error(request_id, user_content, str(e), tenant_id)
     
     def _extract_user_content(self, messages: List[Message]) -> str:
-        """Extract complete conversation content"""
+        """Extract complete conversation content
+
+        For data leak detection:
+        - If last message is assistant (QA pair), extract assistant's response only
+        - Otherwise extract user's content
+
+        For logging: always include full conversation context
+        """
         if len(messages) == 1 and messages[0].role == 'user':
             content = messages[0].content
             if isinstance(content, str):
@@ -275,6 +288,7 @@ class DetectionGuardrailService:
                         text_parts.append("[Image]")
                 return ' '.join(text_parts) if text_parts else "[Multi-modal content]"
         else:
+            # Multi-message conversation
             conversation_parts = []
             for msg in messages:
                 role_label = "User" if msg.role == "user" else "Assistant" if msg.role == "assistant" else msg.role
@@ -292,6 +306,49 @@ class DetectionGuardrailService:
                     content_str = ' '.join(text_parts) if text_parts else "[多模态内容]"
                     conversation_parts.append(f"[{role_label}]: {content_str}")
             return '\n'.join(conversation_parts)
+
+    def _extract_content_for_data_detection(self, messages: List[Message], direction: str) -> str:
+        """Extract content for data leak detection based on direction
+
+        Args:
+            messages: List of messages
+            direction: "input" for user input, "output" for assistant output
+
+        Returns:
+            Text content to be checked for data leaks
+        """
+        if direction == "output":
+            # For output detection, only check assistant messages
+            assistant_parts = []
+            for msg in messages:
+                if msg.role == "assistant":
+                    content = msg.content
+                    if isinstance(content, str):
+                        assistant_parts.append(content)
+                    elif isinstance(content, list):
+                        text_parts = []
+                        for part in content:
+                            if hasattr(part, 'type') and part.type == 'text' and hasattr(part, 'text'):
+                                text_parts.append(part.text)
+                        if text_parts:
+                            assistant_parts.append(' '.join(text_parts))
+            return '\n'.join(assistant_parts) if assistant_parts else ""
+        else:
+            # For input detection, check user messages
+            user_parts = []
+            for msg in messages:
+                if msg.role == "user":
+                    content = msg.content
+                    if isinstance(content, str):
+                        user_parts.append(content)
+                    elif isinstance(content, list):
+                        text_parts = []
+                        for part in content:
+                            if hasattr(part, 'type') and part.type == 'text' and hasattr(part, 'text'):
+                                text_parts.append(part.text)
+                        if text_parts:
+                            user_parts.append(' '.join(text_parts))
+            return '\n'.join(user_parts) if user_parts else ""
     
     async def _parse_model_response(self, response: str, tenant_id: Optional[str] = None) -> Tuple[ComplianceResult, SecurityResult]:
         """Parse model response and apply risk type filtering"""
@@ -429,12 +486,16 @@ class DetectionGuardrailService:
             SecurityResult(risk_level="no_risk", categories=[])
         )
     
-    async def _check_data_security(self, text: str, tenant_id: Optional[str], direction: str = "input") -> DataSecurityResult:
-        """Check data security"""
+    async def _check_data_security(self, text: str, tenant_id: Optional[str], direction: str = "input") -> Tuple[DataSecurityResult, Optional[str]]:
+        """Check data security and return anonymized text
+
+        Returns:
+            Tuple of (DataSecurityResult, anonymized_text)
+        """
         logger.info(f"_check_data_security called for user {tenant_id}, direction {direction}")
         if not tenant_id:
             logger.info("No tenant_id, returning safe")
-            return DataSecurityResult(risk_level="no_risk", categories=[])
+            return DataSecurityResult(risk_level="no_risk", categories=[]), None
 
         try:
             # Get database session
@@ -448,15 +509,19 @@ class DetectionGuardrailService:
                 result = await service.detect_sensitive_data(text, tenant_id, direction)
                 logger.info(f"Data security detection result: {result}")
 
-                return DataSecurityResult(
+                # Return both result and anonymized text
+                data_result = DataSecurityResult(
                     risk_level=result['risk_level'],
                     categories=result['categories']
                 )
+                anonymized_text = result.get('anonymized_text') if result['risk_level'] != 'no_risk' else None
+
+                return data_result, anonymized_text
             finally:
                 db.close()
         except Exception as e:
             logger.error(f"Data security check error: {e}", exc_info=True)
-            return DataSecurityResult(risk_level="no_risk", categories=[])
+            return DataSecurityResult(risk_level="no_risk", categories=[]), None
 
     def _get_highest_risk_level(self, categories: List[str]) -> str:
         """Get highest risk level"""
@@ -485,7 +550,8 @@ class DetectionGuardrailService:
         security_result: SecurityResult,
         data_result: DataSecurityResult,
         tenant_id: Optional[str] = None,
-        user_query: Optional[str] = None
+        user_query: Optional[str] = None,
+        data_anonymized_text: Optional[str] = None
     ) -> Tuple[str, str, Optional[str]]:
         """Determine suggested action (include data security detection result)"""
         # Collect all risk levels and categories
@@ -510,20 +576,12 @@ class DetectionGuardrailService:
         if overall_risk_level == "no_risk":
             return overall_risk_level, "pass", None
 
-        # If there is data leakage, get de-sensitized text as suggested answer
+        # If there is data leakage, use the anonymized text from detection result
         suggest_answer = None
-        if data_result.risk_level != "no_risk" and user_query:
-            try:
-                db = get_db_session()
-                try:
-                    from services.data_security_service import DataSecurityService
-                    service = DataSecurityService(db)
-                    detection_result = await service.detect_sensitive_data(user_query, tenant_id, "input")
-                    suggest_answer = detection_result.get('anonymized_text', user_query)
-                finally:
-                    db.close()
-            except Exception as e:
-                logger.error(f"Error getting anonymized text: {e}")
+        if data_result.risk_level != "no_risk" and data_anonymized_text:
+            # Use the anonymized text from the original data security check
+            suggest_answer = data_anonymized_text
+            logger.info(f"Using anonymized text for data leak: {suggest_answer[:100]}...")
 
         # If there is no data leakage de-sensitized text, use traditional template answer
         if not suggest_answer:

@@ -4,7 +4,7 @@ import uuid
 import pickle
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Set
+from typing import Optional, Set, Dict
 from sqlalchemy.orm import Session
 from database.models import DetectionResult
 from database.connection import get_admin_db_session
@@ -14,11 +14,11 @@ logger = setup_logger()
 
 class LogToDbService:
     """Log to DB service - import detection log files to PostgreSQL database"""
-    
+
     def __init__(self):
         self.running = False
         self.task = None
-        self.processed_files: Set[str] = set()
+        self.processed_files: Dict[str, int] = {}  # filename -> processed line count
         self._state_file = None  # Will be initialized when starting
     
     async def start(self):
@@ -67,64 +67,109 @@ class LogToDbService:
                 await asyncio.sleep(60)  # Wait longer when error occurs
     
     async def _process_log_files(self):
-        """Process all unprocessed log files"""
+        """Process all unprocessed log files (with incremental processing)"""
         from config import settings
-        
+
         detection_log_dir = Path(settings.detection_log_dir)
         if not detection_log_dir.exists():
             return
-        
+
         # Find all detection log files
         log_files = list(detection_log_dir.glob("detection_*.jsonl"))
-        
+
         for log_file in log_files:
-            if log_file.name not in self.processed_files:
-                # Additional check: if all records in the file already exist in the database, skip
-                if await self._is_file_already_in_db(log_file):
-                    logger.info(f"File {log_file.name} already fully processed in database, skipping")
-                    self.processed_files.add(log_file.name)
-                    # Save state update
-                    await self._save_processed_files_state()
-                    continue
-                
-                await self._process_single_log_file(log_file)
-                self.processed_files.add(log_file.name)
+            # Get total lines in file
+            try:
+                total_lines = self._count_lines(log_file)
+            except Exception as e:
+                logger.error(f"Failed to count lines in {log_file.name}: {e}")
+                continue
+
+            # Get processed line count
+            processed_lines = self.processed_files.get(log_file.name, 0)
+
+            # Check if there are new lines to process
+            if total_lines > processed_lines:
+                new_lines = total_lines - processed_lines
+                logger.info(f"Processing {new_lines} new lines in {log_file.name} (processed: {processed_lines}, total: {total_lines})")
+
+                # Process new lines only
+                new_processed = await self._process_single_log_file(log_file, start_line=processed_lines)
+
+                # Update processed line count
+                self.processed_files[log_file.name] = processed_lines + new_processed
+
                 # Save state after each file is processed
                 await self._save_processed_files_state()
+            else:
+                # No new lines
+                if log_file.name not in self.processed_files:
+                    # First time seeing this file, mark as processed
+                    self.processed_files[log_file.name] = total_lines
+                    await self._save_processed_files_state()
     
-    async def _process_single_log_file(self, log_file: Path):
-        """Process single log file"""
+    def _count_lines(self, log_file: Path) -> int:
+        """Count total lines in file (non-empty lines only)"""
+        count = 0
+        with open(log_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                if line.strip():
+                    count += 1
+        return count
+
+    async def _process_single_log_file(self, log_file: Path, start_line: int = 0) -> int:
+        """Process single log file from start_line (incremental)
+
+        Args:
+            log_file: Path to log file
+            start_line: Line number to start from (0-indexed, counting non-empty lines only)
+
+        Returns:
+            Number of lines successfully processed
+        """
+        processed_count = 0
         try:
             db = get_admin_db_session()
             try:
                 with open(log_file, 'r', encoding='utf-8') as f:
+                    current_line = 0
                     for line_num, line in enumerate(f, 1):
                         line = line.strip()
                         if not line:
                             continue
-                        
+
+                        # Skip already processed lines
+                        if current_line < start_line:
+                            current_line += 1
+                            continue
+
                         try:
                             log_data = json.loads(line)
-                            
+
                             # Clean NUL characters in data
                             from utils.validators import clean_detection_data
                             cleaned_data = clean_detection_data(log_data)
-                            
+
                             await self._save_log_to_db(db, cleaned_data)
+                            processed_count += 1
                         except json.JSONDecodeError as e:
                             logger.warning(f"Invalid JSON in {log_file}:{line_num}: {e}")
                         except Exception as e:
                             logger.error(f"Error processing log entry {log_file}:{line_num}: {e}")
-                
+
+                        current_line += 1
+
                 # Commit all changes
                 db.commit()
-                logger.info(f"Processed log file: {log_file.name}")
-                
+                logger.info(f"Processed {processed_count} new lines from {log_file.name}")
+
             finally:
                 db.close()
-                
+
         except Exception as e:
             logger.error(f"Error processing log file {log_file}: {e}")
+
+        return processed_count
     
     async def _save_log_to_db(self, db: Session, log_data: dict):
         """Save log data to database"""
@@ -176,6 +221,11 @@ class LogToDbService:
                 security_categories=log_data.get('security_categories', []),
                 compliance_risk_level=log_data.get('compliance_risk_level', 'no_risk'),
                 compliance_categories=log_data.get('compliance_categories', []),
+                data_risk_level=log_data.get('data_risk_level', 'no_risk'),
+                data_categories=log_data.get('data_categories', []),
+                has_image=log_data.get('has_image', False),
+                image_count=log_data.get('image_count', 0),
+                image_paths=log_data.get('image_paths', []),
                 created_at=created_at
             )
             
@@ -190,13 +240,24 @@ class LogToDbService:
         try:
             if self._state_file and self._state_file.exists():
                 with open(self._state_file, 'rb') as f:
-                    self.processed_files = pickle.load(f)
-                logger.info(f"Loaded {len(self.processed_files)} processed files from state file")
+                    loaded_state = pickle.load(f)
+                    # Handle both old format (set) and new format (dict)
+                    if isinstance(loaded_state, set):
+                        # Old format: convert to dict with 0 processed lines
+                        # This will force reprocessing with the new incremental logic
+                        self.processed_files = {}
+                        logger.info(f"Migrated old state format (set) to new format (dict)")
+                    elif isinstance(loaded_state, dict):
+                        self.processed_files = loaded_state
+                        logger.info(f"Loaded state for {len(self.processed_files)} files from state file")
+                    else:
+                        logger.warning(f"Unknown state format: {type(loaded_state)}, starting fresh")
+                        self.processed_files = {}
             else:
-                logger.info("No state file found, starting with empty processed files set")
+                logger.info("No state file found, starting with empty processed files dict")
         except Exception as e:
             logger.error(f"Error loading processed files state: {e}")
-            self.processed_files = set()
+            self.processed_files = {}
     
     async def _save_processed_files_state(self):
         """Save processed files state to file"""
@@ -206,50 +267,10 @@ class LogToDbService:
                 self._state_file.parent.mkdir(parents=True, exist_ok=True)
                 with open(self._state_file, 'wb') as f:
                     pickle.dump(self.processed_files, f)
-                logger.debug(f"Saved {len(self.processed_files)} processed files to state file")
+                total_lines = sum(self.processed_files.values())
+                logger.debug(f"Saved state for {len(self.processed_files)} files ({total_lines} total lines processed)")
         except Exception as e:
             logger.error(f"Error saving processed files state: {e}")
-    
-    async def _is_file_already_in_db(self, log_file: Path) -> bool:
-        """Check if the content of the log file is already fully in the database"""
-        try:
-            db = get_admin_db_session()
-            try:
-                with open(log_file, 'r', encoding='utf-8') as f:
-                    # Check if the first 10 lines are already in the database
-                    lines_checked = 0
-                    lines_found = 0
-                    
-                    for line in f:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        
-                        lines_checked += 1
-                        if lines_checked > 10:  # Only check the first 10 lines to improve performance
-                            break
-                            
-                        try:
-                            log_data = json.loads(line)
-                            request_id = log_data.get('request_id')
-                            if request_id:
-                                existing = db.query(DetectionResult).filter_by(
-                                    request_id=request_id
-                                ).first()
-                                if existing:
-                                    lines_found += 1
-                        except json.JSONDecodeError:
-                            continue
-                    
-                    # If the number of checked lines is greater than 0 and all lines are in the database, consider the file processed
-                    return lines_checked > 0 and lines_found == lines_checked
-                    
-            finally:
-                db.close()
-                
-        except Exception as e:
-            logger.error(f"Error checking if file {log_file} is in DB: {e}")
-            return False
 
 # Global instance
 log_to_db_service = LogToDbService()

@@ -83,7 +83,7 @@ class ResponseTemplateResponse(BaseModel):
     id: int
     category: str
     risk_level: str
-    template_content: str
+    template_content: Dict[str, str]  # Multilingual content: {"en": "...", "zh": "...", ...}
     is_default: bool
     is_active: bool
     created_at: datetime

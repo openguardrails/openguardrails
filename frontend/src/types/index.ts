@@ -101,7 +101,7 @@ export interface ResponseTemplate {
   id: number;
   category: string;
   risk_level: string;
-  template_content: string;
+  template_content: { [key: string]: string };  // Multilingual content: { en: "...", zh: "...", ... }
   is_default: boolean;
   is_active: boolean;
   created_at: string;

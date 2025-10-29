@@ -3,8 +3,8 @@ import { Table, Card, Select, DatePicker, Space, Tag, Button, Drawer, Typography
 import { EyeOutlined, ReloadOutlined, SearchOutlined, FileImageOutlined, PictureOutlined, DownloadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import dayjs from 'dayjs';
-import { resultsApi } from '../../services/api';
-import type { DetectionResult, PaginatedResponse } from '../../types';
+import { resultsApi, dataSecurityApi } from '../../services/api';
+import type { DetectionResult, PaginatedResponse, DataSecurityEntityType } from '../../types';
 
 const { RangePicker } = DatePicker;
 const { Option } = Select;
@@ -17,10 +17,12 @@ const Results: React.FC = () => {
   const [selectedResult, setSelectedResult] = useState<DetectionResult | null>(null);
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [dataEntityTypes, setDataEntityTypes] = useState<DataSecurityEntityType[]>([]);
   const [filters, setFilters] = useState({
     risk_level: undefined as string | undefined,
     result_type: undefined as string | undefined,
     category: undefined as string | undefined,
+    data_entity_type: undefined as string | undefined,
     date_range: null as [dayjs.Dayjs, dayjs.Dayjs] | null,
     content_search: undefined as string | undefined,
     request_id_search: undefined as string | undefined,
@@ -33,6 +35,21 @@ const Results: React.FC = () => {
   useEffect(() => {
     fetchResults();
   }, [pagination.current, pagination.pageSize, filters]);
+
+  useEffect(() => {
+    fetchDataEntityTypes();
+  }, []);
+
+  const fetchDataEntityTypes = async () => {
+    try {
+      const response = await dataSecurityApi.list();
+      if (response && response.items) {
+        setDataEntityTypes(response.items);
+      }
+    } catch (error) {
+      console.error('Error fetching data entity types:', error);
+    }
+  };
 
   const fetchResults = async () => {
     try {
@@ -50,6 +67,9 @@ const Results: React.FC = () => {
       }
       if (filters.category) {
         params.category = filters.category;
+      }
+      if (filters.data_entity_type) {
+        params.data_entity_type = filters.data_entity_type;
       }
       if (filters.date_range) {
         params.start_date = filters.date_range[0].format('YYYY-MM-DD');
@@ -97,6 +117,9 @@ const Results: React.FC = () => {
       }
       if (filters.category) {
         params.category = filters.category;
+      }
+      if (filters.data_entity_type) {
+        params.data_entity_type = filters.data_entity_type;
       }
       if (filters.date_range) {
         params.start_date = filters.date_range[0].format('YYYY-MM-DD');
@@ -186,21 +209,28 @@ const Results: React.FC = () => {
     return '...' + requestId.slice(-18);
   };
 
-  // 定义所有风险类别
+  // 定义所有风险类别 - 使用数据库中实际存储的英文显示名称
   const getAllCategories = () => {
     return [
-      'sensitive_political_topic',
-      'damage_to_national_image',
-      'violent_crime',
-      'prompt_attack',
-      'general_political_topic',
-      'harm_to_minors',
-      'illegal_activities',
-      'pornography',
-      'discriminatory_content',
-      'insults',
-      'privacy_violation',
-      'business_violations',
+      { value: 'General Political Topics', label: t('config.riskTypes.s1') },
+      { value: 'Sensitive Political Topics', label: t('config.riskTypes.s2') },
+      { value: 'Insult to National Symbols or Leaders', label: t('config.riskTypes.s3') },
+      { value: 'Harm to Minors', label: t('config.riskTypes.s4') },
+      { value: 'Violent Crime', label: t('config.riskTypes.s5') },
+      { value: 'Non-Violent Crime', label: t('config.riskTypes.s6') },
+      { value: 'Pornography', label: t('config.riskTypes.s7') },
+      { value: 'Hate & Discrimination', label: t('config.riskTypes.s8') },
+      { value: 'Prompt Attacks', label: t('config.riskTypes.s9') },
+      { value: 'Profanity', label: t('config.riskTypes.s10') },
+      { value: 'Privacy Invasion', label: t('config.riskTypes.s11') },
+      { value: 'Commercial Violations', label: t('config.riskTypes.s12') },
+      { value: 'Intellectual Property Infringement', label: t('config.riskTypes.s13') },
+      { value: 'Harassment', label: t('config.riskTypes.s14') },
+      { value: 'Weapons of Mass Destruction', label: t('config.riskTypes.s15') },
+      { value: 'Self-Harm', label: t('config.riskTypes.s16') },
+      { value: 'Sexual Crimes', label: t('config.riskTypes.s17') },
+      { value: 'Threats', label: t('config.riskTypes.s18') },
+      { value: 'Professional Advice', label: t('config.riskTypes.s19') },
     ];
   };
 
@@ -384,13 +414,38 @@ const Results: React.FC = () => {
             placeholder={t('results.selectCategory')}
             allowClear
             size="middle"
-            style={{ width: 150 }}
+            style={{ width: 200 }}
             value={filters.category}
             onChange={(value) => handleFilterChange('category', value)}
+            showSearch
+            filterOption={(input, option) =>
+              (option?.children as string)?.toLowerCase().includes(input.toLowerCase())
+            }
           >
-            {getAllCategories().map(category => (
-              <Option key={category} value={category}>{category}</Option>
+            {getAllCategories().map(cat => (
+              <Option key={cat.value} value={cat.value}>{cat.label}</Option>
             ))}
+          </Select>
+
+          <Select
+            placeholder={t('results.selectDataEntityType')}
+            allowClear
+            size="middle"
+            style={{ width: 200 }}
+            value={filters.data_entity_type}
+            onChange={(value) => handleFilterChange('data_entity_type', value)}
+            showSearch
+            filterOption={(input, option) =>
+              (option?.children as string)?.toLowerCase().includes(input.toLowerCase())
+            }
+          >
+            {dataEntityTypes
+              .filter(et => et.is_active)
+              .map(et => (
+                <Option key={et.entity_type} value={et.entity_type}>
+                  {et.display_name}
+                </Option>
+              ))}
           </Select>
 
           <Input

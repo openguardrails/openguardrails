@@ -1,51 +1,52 @@
-# 数据库Migration指南
+# Database Migration Guide
 
-## 概述
+## Overview
 
-OpenGuardrails现在使用自动化的数据库migration系统来管理数据库架构变更。
+OpenGuardrails now uses an automated database migration system to manage schema changes.
 
-## Migration系统特性
+## Migration System Features
 
-✅ **自动执行**: 应用启动时自动运行未执行的migrations
-✅ **版本跟踪**: 通过`schema_migrations`表跟踪已执行的migrations
-✅ **幂等性**: 所有migrations使用`IF NOT EXISTS`/`IF EXISTS`保证幂等性
-✅ **顺序执行**: 按版本号顺序执行migrations
-✅ **错误处理**: Migration失败时停止执行并记录错误
-✅ **独立运行**: 可以独立运行migrations，无需启动应用
+✅ **Automatic Execution**: Automatically runs pending migrations when the application starts
+✅ **Version Tracking**: Tracks executed migrations via the `schema_migrations` table
+✅ **Idempotency**: All migrations use `IF NOT EXISTS` / `IF EXISTS` to ensure idempotency
+✅ **Sequential Execution**: Migrations are executed in version number order
+✅ **Error Handling**: Stops execution and logs errors when a migration fails
+✅ **Independent Operation**: Can run migrations independently without starting the application
 
-## 目录结构
+## Directory Structure
 
 ```
 backend/
 ├── migrations/
-│   ├── README.md                 # Migration系统文档
-│   ├── create_migration.sh       # 创建新migration的脚本
-│   ├── run_migrations.py         # Migration运行器
-│   └── versions/                 # Migration SQL文件
+│   ├── README.md                 # Migration system documentation
+│   ├── create_migration.sh       # Script to create a new migration
+│   ├── run_migrations.py         # Migration runner
+│   └── versions/                 # Migration SQL files
 │       ├── 001_add_ban_policy_tables.sql
 │       ├── 002_add_tenant_kb_disable_table.sql
 │       └── ...
 ```
 
-## 创建新的Migration
+## Creating a New Migration
 
-### 方法1: 使用脚本（推荐）
+### Method 1: Using the Script (Recommended)
 
 ```bash
 cd backend/migrations
 ./create_migration.sh "add_user_preferences_table"
 ```
 
-这会自动创建一个新的migration文件，包含版本号和模板。
+This automatically creates a new migration file with a version number and template.
 
-### 方法2: 手动创建
+### Method 2: Manual Creation
 
-1. 在`backend/migrations/versions/`目录下创建新文件
-2. 文件命名格式: `{version}_{description}.sql`
-   - 例如: `003_add_user_preferences.sql`
-3. 编写SQL语句
+1. Create a new file in the `backend/migrations/versions/` directory
+2. File naming format: `{version}_{description}.sql`
 
-### Migration文件示例
+   * Example: `003_add_user_preferences.sql`
+3. Write your SQL statements
+
+### Example Migration File
 
 ```sql
 -- Migration: Add user preferences table
@@ -74,89 +75,89 @@ COMMENT ON COLUMN user_preferences.preference_key IS 'Preference key identifier'
 COMMENT ON COLUMN user_preferences.preference_value IS 'Preference value (JSON or text)';
 ```
 
-## Migration最佳实践
+## Migration Best Practices
 
-### 1. 幂等性 (Idempotent)
+### 1. Idempotency
 
-**总是**使用`IF NOT EXISTS`/`IF EXISTS`:
+**Always** use `IF NOT EXISTS` / `IF EXISTS`:
 
 ```sql
--- ✓ 正确
+-- ✓ Correct
 CREATE TABLE IF NOT EXISTS my_table (...);
 CREATE INDEX IF NOT EXISTS idx_name ON my_table(column);
 ALTER TABLE my_table ADD COLUMN IF NOT EXISTS new_column VARCHAR(100);
 
--- ✗ 错误
-CREATE TABLE my_table (...);  -- 重复运行会失败
+-- ✗ Incorrect
+CREATE TABLE my_table (...);  -- Will fail on repeated runs
 ```
 
-### 2. 增量变更
+### 2. Incremental Changes
 
-每个migration只做一件事：
+Each migration should do only one thing:
 
 ```sql
--- ✓ 正确 - 专注于单个功能
+-- ✓ Correct - Focused on a single feature
 -- Migration: Add email notification preferences
 CREATE TABLE IF NOT EXISTS email_preferences (...);
 
--- ✗ 错误 - 混合多个不相关的变更
+-- ✗ Incorrect - Mixing unrelated changes
 CREATE TABLE IF NOT EXISTS email_preferences (...);
 CREATE TABLE IF NOT EXISTS user_avatars (...);
 ALTER TABLE tenants ADD COLUMN phone_number VARCHAR(20);
 ```
 
-### 3. 向后兼容
+### 3. Backward Compatibility
 
-确保migration不会破坏现有功能：
+Ensure migrations don’t break existing functionality:
 
 ```sql
--- ✓ 正确 - 添加可选列
+-- ✓ Correct - Adding optional column
 ALTER TABLE tenants ADD COLUMN IF NOT EXISTS timezone VARCHAR(50) DEFAULT 'UTC';
 
--- ⚠️ 注意 - 添加NOT NULL列需要默认值
+-- ⚠️ Note - Adding NOT NULL columns requires a default value
 ALTER TABLE tenants ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'active';
 
--- ✗ 危险 - 删除列可能破坏现有代码
--- ALTER TABLE tenants DROP COLUMN IF EXISTS old_field;  -- 需要谨慎评估
+-- ✗ Dangerous - Dropping columns may break existing code
+-- ALTER TABLE tenants DROP COLUMN IF EXISTS old_field;  -- Evaluate carefully
 ```
 
-### 4. 添加注释
+### 4. Add Comments
 
-为表和列添加描述性注释：
+Add descriptive comments for tables and columns:
 
 ```sql
 COMMENT ON TABLE my_table IS 'Stores user preferences for the application';
 COMMENT ON COLUMN my_table.status IS 'Current status: active, inactive, or pending';
 ```
 
-### 5. 索引优化
+### 5. Index Optimization
 
-为查询频繁的列添加索引：
+Add indexes for frequently queried columns:
 
 ```sql
--- 单列索引
+-- Single-column index
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 
--- 复合索引（注意列的顺序）
+-- Composite index (order matters)
 CREATE INDEX IF NOT EXISTS idx_logs_tenant_date ON logs(tenant_id, created_at DESC);
 
--- 部分索引（仅索引特定条件的行）
+-- Partial index (only index rows matching condition)
 CREATE INDEX IF NOT EXISTS idx_active_users ON users(email) WHERE is_active = true;
 ```
 
-## 运行Migrations
+## Running Migrations
 
-### 自动运行（启动时）
+### Automatic Execution (On Startup)
 
-Migrations会在应用启动时自动运行（仅在admin-service中）：
+Migrations run automatically when the application starts (in `admin-service` only):
 
 ```bash
 docker-compose up
-# 或
+# or
 python3 start_admin_service.py
 ```
 
-你会看到日志输出：
+You’ll see log output like this:
 
 ```
 Running database migrations...
@@ -170,98 +171,101 @@ Executing migration 002: add_tenant_kb_disable_table
 Database migrations completed: 2 migration(s) executed
 ```
 
-### 手动运行
+### Manual Execution
 
 ```bash
 cd backend
 python3 migrations/run_migrations.py
 ```
 
-### 预览待执行的Migrations（Dry Run）
+### Preview Pending Migrations (Dry Run)
 
 ```bash
 cd backend
 python3 migrations/run_migrations.py --dry-run
 ```
 
-## Migration跟踪表
+## Migration Tracking Table
 
-系统使用`schema_migrations`表跟踪已执行的migrations：
+The system uses the `schema_migrations` table to track executed migrations:
 
 ```sql
 SELECT * FROM schema_migrations ORDER BY version;
 ```
 
-| version | description              | filename                          | executed_at         | success | error_message |
-|---------|--------------------------|-----------------------------------|---------------------|---------|---------------|
-| 1       | add_ban_policy_tables    | 001_add_ban_policy_tables.sql    | 2025-01-21 10:00:00 | true    | null          |
+| version | description                 | filename                            | executed_at         | success | error_message |
+| ------- | --------------------------- | ----------------------------------- | ------------------- | ------- | ------------- |
+| 1       | add_ban_policy_tables       | 001_add_ban_policy_tables.sql       | 2025-01-21 10:00:00 | true    | null          |
 | 2       | add_tenant_kb_disable_table | 002_add_tenant_kb_disable_table.sql | 2025-01-21 10:00:01 | true    | null          |
 
-## 常见问题
+## Common Issues
 
-### Q: Migration失败了怎么办？
+### Q: What if a migration fails?
 
-1. 查看错误日志
-2. 修复migration SQL文件中的问题
-3. 从`schema_migrations`表中删除失败的记录：
+1. Check the error logs
+2. Fix the issue in the migration SQL file
+3. Delete the failed record from `schema_migrations`:
+
    ```sql
    DELETE FROM schema_migrations WHERE version = X;
    ```
-4. 重新运行migration
+4. Re-run the migration
 
-### Q: 如何回滚migration？
+### Q: How to roll back a migration?
 
-目前系统不支持自动回滚。如需回滚：
+Automatic rollback is not supported yet. To roll back manually:
 
-1. 手动编写回滚SQL（建议在migration文件注释中包含回滚SQL）
-2. 手动执行回滚SQL
-3. 从`schema_migrations`表中删除记录
+1. Write rollback SQL manually (include it in migration comments if possible)
+2. Execute the rollback SQL manually
+3. Delete the record from `schema_migrations`
 
-### Q: 可以修改已执行的migration吗？
+### Q: Can I modify an executed migration?
 
-**不要修改已执行的migration**。如需变更：
+**Do not modify executed migrations.** If you need to make changes:
 
-1. 创建新的migration来应用变更
-2. 这保证了migration历史的一致性
+1. Create a new migration for the modification
+2. This ensures historical consistency
 
-### Q: 开发环境vs生产环境
+### Q: Development vs. Production Environments
 
-- **开发环境**: 可以使用`RESET_DATABASE_ON_STARTUP=true`重置数据库
-- **生产环境**: **必须**设置`RESET_DATABASE_ON_STARTUP=false`，仅依赖migrations
+* **Development**: You may use `RESET_DATABASE_ON_STARTUP=true` to reset the DB
+* **Production**: **Must** set `RESET_DATABASE_ON_STARTUP=false` and rely only on migrations
 
-## 环境变量配置
+## Environment Variables Configuration
 
-在`docker-compose.yml`或`.env`中：
+In `docker-compose.yml` or `.env`:
 
 ```yaml
 environment:
-  # 开发环境：每次启动时重置数据库（会丢失所有数据）
+  # Development: resets database on each startup (all data lost)
   - RESET_DATABASE_ON_STARTUP=true
 
-  # 生产环境：保留数据，仅运行新的migrations
+  # Production: preserves data, only runs new migrations
   - RESET_DATABASE_ON_STARTUP=false
 ```
 
-## 迁移到新系统
+## Migrating to the New System
 
-现有项目迁移步骤：
+Steps for migrating existing projects:
 
-1. 确保当前数据库已经运行了所有手动SQL脚本
-2. 新的migration系统会自动创建`schema_migrations`表
-3. 首次运行时，系统会执行所有在`versions/`目录中的migrations
-4. 已经手动执行过的migrations会再次执行，但由于使用了`IF NOT EXISTS`，不会有影响
+1. Ensure all manual SQL scripts have already been run
+2. The new migration system will automatically create the `schema_migrations` table
+3. On first run, it will execute all migrations in the `versions/` directory
+4. Previously executed migrations will run again, but `IF NOT EXISTS` ensures no effect
 
-## 示例工作流
+## Example Workflow
 
-### 添加新功能需要数据库变更
+### Adding a New Feature Requiring DB Changes
 
-1. **创建migration**:
+1. **Create the migration**:
+
    ```bash
    cd backend/migrations
    ./create_migration.sh "add_notification_settings"
    ```
 
-2. **编辑migration文件**:
+2. **Edit the migration file**:
+
    ```sql
    -- Migration: Add notification settings
    -- Version: 003
@@ -275,29 +279,31 @@ environment:
    );
    ```
 
-3. **本地测试**:
+3. **Test locally**:
+
    ```bash
-   python3 migrations/run_migrations.py --dry-run  # 预览
-   python3 migrations/run_migrations.py             # 执行
+   python3 migrations/run_migrations.py --dry-run  # Preview
+   python3 migrations/run_migrations.py             # Execute
    ```
 
-4. **更新代码**: 添加使用新表的Python代码
+4. **Update code**: Add Python logic to use the new table
 
-5. **提交到Git**:
+5. **Commit to Git**:
+
    ```bash
    git add backend/migrations/versions/003_add_notification_settings.sql
-   git add backend/database/models.py  # 如果有模型变更
+   git add backend/database/models.py  # if models were updated
    git commit -m "Add notification settings table"
    ```
 
-6. **部署**: 应用启动时会自动运行新的migration
+6. **Deploy**: The application will automatically run the new migration on startup
 
-## 总结
+## Summary
 
-✅ Migration系统现在完全自动化
-✅ 首次启动会自动执行所有pending migrations
-✅ 使用版本号管理，按顺序执行
-✅ 支持幂等性，可以安全地重复运行
-✅ 记录执行历史，便于追踪
+✅ Migration system is now fully automated
+✅ Automatically executes all pending migrations on first startup
+✅ Version-controlled and sequential execution
+✅ Idempotent and safe to re-run
+✅ Tracks execution history for traceability
 
-**记住**: 始终在migration中使用`IF NOT EXISTS`/`IF EXISTS`来保证幂等性！
+**Remember**: Always use `IF NOT EXISTS` / `IF EXISTS` in your migrations to ensure idempotency!
