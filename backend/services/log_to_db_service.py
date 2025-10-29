@@ -272,5 +272,68 @@ class LogToDbService:
         except Exception as e:
             logger.error(f"Error saving processed files state: {e}")
 
+    async def force_sync(self, date_range: Optional[tuple] = None):
+        """Force sync all log files (for manual triggering)
+
+        Args:
+            date_range: Optional tuple of (start_date, end_date) in YYYYMMDD format
+                       If not provided, syncs all files
+        """
+        from config import settings
+        from pathlib import Path
+
+        logger.info(f"Starting force sync (date_range: {date_range})...")
+
+        try:
+            detection_log_dir = Path(settings.detection_log_dir)
+            if not detection_log_dir.exists():
+                logger.warning(f"Detection log directory does not exist: {detection_log_dir}")
+                return
+
+            # Find all detection log files
+            log_files = list(detection_log_dir.glob("detection_*.jsonl"))
+
+            # Filter by date range if provided
+            if date_range:
+                start_date, end_date = date_range
+                filtered_files = []
+                for log_file in log_files:
+                    # Extract date from filename (detection_YYYYMMDD.jsonl)
+                    try:
+                        file_date = log_file.stem.split('_')[1]
+                        if start_date <= file_date <= end_date:
+                            filtered_files.append(log_file)
+                    except (IndexError, ValueError):
+                        continue
+                log_files = filtered_files
+
+            if not log_files:
+                logger.info("No log files found to sync")
+                return
+
+            logger.info(f"Force syncing {len(log_files)} log files...")
+
+            # Clear processed state for these files to force reprocessing
+            for log_file in log_files:
+                if log_file.name in self.processed_files:
+                    logger.info(f"Clearing processed state for {log_file.name} (was at line {self.processed_files[log_file.name]})")
+                    del self.processed_files[log_file.name]
+
+            # Save cleared state
+            await self._save_processed_files_state()
+
+            # Process all files
+            for log_file in sorted(log_files):
+                logger.info(f"Force processing {log_file.name}...")
+                new_processed = await self._process_single_log_file(log_file, start_line=0)
+                self.processed_files[log_file.name] = new_processed
+                await self._save_processed_files_state()
+
+            logger.info("Force sync completed")
+
+        except Exception as e:
+            logger.error(f"Error in force sync: {e}")
+            raise
+
 # Global instance
 log_to_db_service = LogToDbService()

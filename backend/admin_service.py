@@ -17,7 +17,6 @@ from pathlib import Path
 from config import settings
 from database.connection import init_db, create_admin_engine
 from routers import dashboard, config_api, results, auth, user, sync, admin, online_test, test_models, risk_config_api, proxy_management, concurrent_stats, media, data_security, billing
-from services.data_sync_service import data_sync_service
 from utils.logger import setup_logger
 from services.admin_service import admin_service
 
@@ -184,12 +183,12 @@ async def lifespan(app: FastAPI):
     # Initialize database (management service needs full initialization)
     await init_db(minimal=False)
 
-    # Start data synchronization service
-    await data_sync_service.start()
+    # Start cache cleaner
     from services.cache_cleaner import cache_cleaner
     await cache_cleaner.start()
-    
-    # According to the configuration, decide whether to start the log import database service
+
+    # Start log to database service (replaces old data_sync_service)
+    # This service provides better incremental processing and state persistence
     if settings.store_detection_results:
         from services.log_to_db_service import log_to_db_service
         await log_to_db_service.start()
@@ -205,7 +204,6 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         # Shutdown phase
-        await data_sync_service.stop()
         from services.cache_cleaner import cache_cleaner
         await cache_cleaner.stop()
         if settings.store_detection_results:
