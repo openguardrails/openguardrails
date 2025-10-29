@@ -81,6 +81,17 @@ interface TestResult {
 const OnlineTest: React.FC = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
+
+  // Helper function to translate risk level
+  const translateRiskLevel = (riskLevel: string) => {
+    const riskLevelMap: { [key: string]: string } = {
+      'high_risk': t('risk.level.high_risk'),
+      'medium_risk': t('risk.level.medium_risk'),
+      'low_risk': t('risk.level.low_risk'),
+      'no_risk': t('risk.level.no_risk'),
+    };
+    return riskLevelMap[riskLevel] || riskLevel;
+  };
   const [loading, setLoading] = useState(false);
   const [testInput, setTestInput] = useState('');
   const [inputType, setInputType] = useState<'question' | 'qa_pair'>('question');
@@ -590,7 +601,7 @@ const OnlineTest: React.FC = () => {
                                 <div>
                                   <Text>{t('onlineTest.riskLevel')} </Text>
                                   <Tag color={getRiskColor(testResult.guardrail.security?.risk_level)}>
-                                    {testResult.guardrail.security?.risk_level || t('risk.level.no_risk')}
+                                    {translateRiskLevel(testResult.guardrail.security?.risk_level || 'no_risk')}
                                   </Tag>
                                 </div>
                                 {testResult.guardrail.security?.categories?.length > 0 && (
@@ -610,7 +621,7 @@ const OnlineTest: React.FC = () => {
                                 <div>
                                   <Text>{t('onlineTest.riskLevel')} </Text>
                                   <Tag color={getRiskColor(testResult.guardrail.compliance?.risk_level)}>
-                                    {testResult.guardrail.compliance?.risk_level || t('risk.level.no_risk')}
+                                    {translateRiskLevel(testResult.guardrail.compliance?.risk_level || 'no_risk')}
                                   </Tag>
                                 </div>
                                 {testResult.guardrail.compliance?.categories?.length > 0 && (
@@ -629,8 +640,8 @@ const OnlineTest: React.FC = () => {
                               <Space direction="vertical">
                                 <div>
                                   <Text>{t('onlineTest.riskLevel')} </Text>
-                                  <Tag color={getRiskColor(testResult.guardrail.data?.risk_level || t('risk.level.no_risk'))}>
-                                    {testResult.guardrail.data?.risk_level || t('risk.level.no_risk')}
+                                  <Tag color={getRiskColor(testResult.guardrail.data?.risk_level || 'no_risk')}>
+                                    {translateRiskLevel(testResult.guardrail.data?.risk_level || 'no_risk')}
                                   </Tag>
                                 </div>
                                 {testResult.guardrail.data?.categories && testResult.guardrail.data.categories.length > 0 && (
@@ -652,7 +663,7 @@ const OnlineTest: React.FC = () => {
                           <Col span={8}>
                             <Text>{t('onlineTest.overallRiskLevel')} </Text>
                             <Tag color={getRiskColor(testResult.guardrail.overall_risk_level)}>
-                              <strong>{testResult.guardrail.overall_risk_level}</strong>
+                              <strong>{translateRiskLevel(testResult.guardrail.overall_risk_level)}</strong>
                             </Tag>
                           </Col>
                           <Col span={8}>

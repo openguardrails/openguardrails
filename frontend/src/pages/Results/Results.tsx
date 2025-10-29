@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { Table, Card, Select, DatePicker, Space, Tag, Button, Drawer, Typography, Row, Col, Input, Spin, Image, message } from 'antd';
-import { EyeOutlined, ReloadOutlined, SearchOutlined, FileImageOutlined, PictureOutlined, DownloadOutlined } from '@ant-design/icons';
+import { EyeOutlined, ReloadOutlined, SearchOutlined, FileImageOutlined, DownloadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import dayjs from 'dayjs';
 import { resultsApi, dataSecurityApi } from '../../services/api';
 import type { DetectionResult, PaginatedResponse, DataSecurityEntityType } from '../../types';
+import { translateRiskLevel, getRiskLevelColor } from '../../utils/i18nMapper';
 
 const { RangePicker } = DatePicker;
 const { Option } = Select;
@@ -171,33 +172,20 @@ const Results: React.FC = () => {
     }
   };
 
-  const getRiskLevelColor = (level: string) => {
-    // 后端返回的是标准化的英文值，直接匹配
-    switch (level) {
-      case 'high_risk':
-        return 'red';
-      case 'medium_risk':
-        return 'orange';
-      case 'low_risk':
-        return 'yellow';
-      case 'no_risk':
-      case 'safe':
-        return 'green';
-      default: 
-        return 'default';
-    }
+  const getRiskLevelColorLocal = (level: string) => {
+    // Use the utility function from i18nMapper
+    return getRiskLevelColor(level);
   };
 
   // Helper function to format risk display
   const formatRiskDisplay = (riskLevel: string, categories: string[]) => {
-    const noRisk = t('risk.level.no_risk');
-    if (riskLevel === '无风险' || riskLevel === noRisk) {
-      return noRisk;
-    }
+    // Use the i18n mapper to translate risk level
+    const translatedRiskLevel = translateRiskLevel(riskLevel, t);
+    
     if (categories && categories.length > 0) {
-      return `${riskLevel} ${categories[0]}`;
+      return `${translatedRiskLevel} ${categories[0]}`;
     }
-    return riskLevel;
+    return translatedRiskLevel;
   };
 
   // Helper function to format request ID display - show latter half with ellipsis
@@ -290,7 +278,7 @@ const Results: React.FC = () => {
 
         return (
           <Tag
-            color={getRiskLevelColor(riskLevel)}
+            color={getRiskLevelColorLocal(riskLevel)}
             style={{ fontSize: '12px' }}
             title={categories.join(', ')}
           >
@@ -310,7 +298,7 @@ const Results: React.FC = () => {
 
         return (
           <Tag
-            color={getRiskLevelColor(riskLevel)}
+            color={getRiskLevelColorLocal(riskLevel)}
             style={{ fontSize: '12px' }}
             title={categories.join(', ')}
           >
@@ -330,7 +318,7 @@ const Results: React.FC = () => {
 
         return (
           <Tag
-            color={getRiskLevelColor(riskLevel)}
+            color={getRiskLevelColorLocal(riskLevel)}
             style={{ fontSize: '12px' }}
             title={categories.join(', ')}
           >
@@ -419,7 +407,7 @@ const Results: React.FC = () => {
             onChange={(value) => handleFilterChange('category', value)}
             showSearch
             filterOption={(input, option) =>
-              (option?.children as string)?.toLowerCase().includes(input.toLowerCase())
+              (option?.label as string)?.toLowerCase().includes(input.toLowerCase())
             }
           >
             {getAllCategories().map(cat => (
@@ -436,7 +424,7 @@ const Results: React.FC = () => {
             onChange={(value) => handleFilterChange('data_entity_type', value)}
             showSearch
             filterOption={(input, option) =>
-              (option?.children as string)?.toLowerCase().includes(input.toLowerCase())
+              (option?.label as string)?.toLowerCase().includes(input.toLowerCase())
             }
           >
             {dataEntityTypes
@@ -542,7 +530,7 @@ const Results: React.FC = () => {
                 <Text strong>{t('results.promptAttack')}:</Text>
               </Col>
               <Col span={16}>
-                <Tag color={getRiskLevelColor(selectedResult.security_risk_level || t('risk.level.no_risk'))}>
+                <Tag color={getRiskLevelColorLocal(selectedResult.security_risk_level || 'no_risk')}>
                   {formatRiskDisplay(selectedResult.security_risk_level || t('risk.level.no_risk'), selectedResult.security_categories || [])}
                 </Tag>
               </Col>
@@ -553,7 +541,7 @@ const Results: React.FC = () => {
                 <Text strong>{t('results.contentCompliance')}:</Text>
               </Col>
               <Col span={16}>
-                <Tag color={getRiskLevelColor(selectedResult.compliance_risk_level || t('risk.level.no_risk'))}>
+                <Tag color={getRiskLevelColorLocal(selectedResult.compliance_risk_level || 'no_risk')}>
                   {formatRiskDisplay(selectedResult.compliance_risk_level || t('risk.level.no_risk'), selectedResult.compliance_categories || [])}
                 </Tag>
               </Col>
@@ -564,7 +552,7 @@ const Results: React.FC = () => {
                 <Text strong>{t('results.dataLeak')}:</Text>
               </Col>
               <Col span={16}>
-                <Tag color={getRiskLevelColor(selectedResult.data_risk_level || t('risk.level.no_risk'))}>
+                <Tag color={getRiskLevelColorLocal(selectedResult.data_risk_level || 'no_risk')}>
                   {formatRiskDisplay(selectedResult.data_risk_level || t('risk.level.no_risk'), selectedResult.data_categories || [])}
                 </Tag>
               </Col>

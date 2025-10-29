@@ -10,10 +10,16 @@ import { TFunction } from 'i18next';
  */
 export function translateRiskLevel(value: string, t: TFunction): string {
   const keyMap: Record<string, string> = {
+    // English values (current format)
     'no_risk': 'risk.level.no_risk',
     'low_risk': 'risk.level.low_risk',
     'medium_risk': 'risk.level.medium_risk',
-    'high_risk': 'risk.level.high_risk'
+    'high_risk': 'risk.level.high_risk',
+    // Chinese values (legacy format)
+    '无风险': 'risk.level.no_risk',
+    '低风险': 'risk.level.low_risk',
+    '中风险': 'risk.level.medium_risk',
+    '高风险': 'risk.level.high_risk'
   };
 
   const key = keyMap[value];
@@ -66,10 +72,16 @@ export function translateCategory(value: string, t: TFunction): string {
  */
 export function getRiskLevelColor(riskLevel: string): string {
   const colorMap: Record<string, string> = {
+    // English values (current format)
     'no_risk': 'success',
     'low_risk': 'warning',
     'medium_risk': 'orange',
-    'high_risk': 'error'
+    'high_risk': 'error',
+    // Chinese values (legacy format)
+    '无风险': 'success',
+    '低风险': 'warning',
+    '中风险': 'orange',
+    '高风险': 'error'
   };
 
   return colorMap[riskLevel] || 'default';

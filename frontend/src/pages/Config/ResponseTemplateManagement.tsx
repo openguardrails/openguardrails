@@ -20,10 +20,16 @@ const ResponseTemplateManagement: React.FC = () => {
 
   const getRiskLevelLabel = (riskLevel: string) => {
     const riskLevelMap: { [key: string]: string } = {
+      // English values (current format)
       'high_risk': t('risk.level.high_risk'),
       'medium_risk': t('risk.level.medium_risk'),
       'low_risk': t('risk.level.low_risk'),
       'no_risk': t('risk.level.no_risk'),
+      // Chinese values (legacy format)
+      '高风险': t('risk.level.high_risk'),
+      '中风险': t('risk.level.medium_risk'),
+      '低风险': t('risk.level.low_risk'),
+      '无风险': t('risk.level.no_risk'),
     };
     return riskLevelMap[riskLevel] || riskLevel;
   };
@@ -41,6 +47,13 @@ const ResponseTemplateManagement: React.FC = () => {
     { value: 'S10', label: `S10 - ${t('category.S10')}`, riskLevel: 'low_risk' },
     { value: 'S11', label: `S11 - ${t('category.S11')}`, riskLevel: 'low_risk' },
     { value: 'S12', label: `S12 - ${t('category.S12')}`, riskLevel: 'low_risk' },
+    { value: 'S13', label: `S13 - ${t('category.S13')}`, riskLevel: 'low_risk' },
+    { value: 'S14', label: `S14 - ${t('category.S14')}`, riskLevel: 'low_risk' },
+    { value: 'S15', label: `S15 - ${t('category.S15')}`, riskLevel: 'high_risk' },
+    { value: 'S16', label: `S16 - ${t('category.S16')}`, riskLevel: 'medium_risk' },
+    { value: 'S17', label: `S17 - ${t('category.S17')}`, riskLevel: 'high_risk' },
+    { value: 'S18', label: `S18 - ${t('category.S18')}`, riskLevel: 'low_risk' },
+    { value: 'S19', label: `S19 - ${t('category.S19')}`, riskLevel: 'low_risk' },
     { value: 'default', label: t('template.defaultReject'), riskLevel: 'no_risk' },
   ];
 
@@ -183,9 +196,15 @@ const ResponseTemplateManagement: React.FC = () => {
       dataIndex: 'risk_level',
       key: 'risk_level',
       render: (level: string) => {
-        const color = level === 'high_risk' ? 'red' : level === 'medium_risk' ? 'orange' : level === 'low_risk' ? 'yellow' : 'green';
+        const getColor = (riskLevel: string) => {
+          if (riskLevel === 'high_risk' || riskLevel === '高风险') return 'red';
+          if (riskLevel === 'medium_risk' || riskLevel === '中风险') return 'orange';
+          if (riskLevel === 'low_risk' || riskLevel === '低风险') return 'yellow';
+          return 'green';
+        };
+        
         return (
-          <Tag color={color}>
+          <Tag color={getColor(level)}>
             {getRiskLevelLabel(level)}
           </Tag>
         );

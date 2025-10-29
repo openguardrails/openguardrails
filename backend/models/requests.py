@@ -100,9 +100,12 @@ class ResponseTemplateRequest(BaseModel):
     
     @validator('risk_level')
     def validate_risk_level(cls, v):
-        if v not in ['no risk', 'low risk', 'medium risk', 'high risk']:
-            raise ValueError('risk_level must be one of: no risk, low risk, medium risk, high risk')
-        return v
+        # Accept both underscore format (from database/frontend) and space format (legacy)
+        valid_values = ['no_risk', 'low_risk', 'medium_risk', 'high_risk', 'no risk', 'low risk', 'medium risk', 'high risk']
+        if v not in valid_values:
+            raise ValueError('risk_level must be one of: no_risk, low_risk, medium_risk, high_risk (or legacy: no risk, low risk, medium risk, high risk)')
+        # Normalize to underscore format for consistency
+        return v.replace(' ', '_')
 
 class ProxyCompletionRequest(BaseModel):
     """Proxy completion request model"""
