@@ -81,12 +81,19 @@ const ResponseTemplateManagement: React.FC = () => {
       // Create default reject content for missing categories
       for (const category of missingCategories) {
         // Use internationalized default reject content
+        const currentLang = i18n.language || 'en';
         const defaultContent = t(`template.defaultContents.${category.value}`);
+
+        // Create multilingual content object
+        const multilingualContent: Record<string, string> = {
+          [currentLang]: defaultContent
+        };
+
         try {
           await configApi.responses.create({
             category: category.value,
             risk_level: category.riskLevel,
-            template_content: defaultContent,
+            template_content: multilingualContent,
             is_default: true,
             is_active: true
           });
@@ -193,19 +200,23 @@ const ResponseTemplateManagement: React.FC = () => {
     },
     {
       title: t('results.riskLevel'),
-      dataIndex: 'risk_level',
+      dataIndex: 'category',
       key: 'risk_level',
-      render: (level: string) => {
+      render: (category: string) => {
+        // Get the risk level from the category mapping (not from database)
+        const categoryConfig = categories.find(c => c.value === category);
+        const riskLevel = categoryConfig?.riskLevel || 'no_risk';
+
         const getColor = (riskLevel: string) => {
           if (riskLevel === 'high_risk' || riskLevel === '高风险') return 'red';
           if (riskLevel === 'medium_risk' || riskLevel === '中风险') return 'orange';
           if (riskLevel === 'low_risk' || riskLevel === '低风险') return 'yellow';
           return 'green';
         };
-        
+
         return (
-          <Tag color={getColor(level)}>
-            {getRiskLevelLabel(level)}
+          <Tag color={getColor(riskLevel)}>
+            {getRiskLevelLabel(riskLevel)}
           </Tag>
         );
       },
