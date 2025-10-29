@@ -29,20 +29,21 @@ class EnhancedTemplateService:
         self._cache_ttl = cache_ttl
         self._lock = asyncio.Lock()
 
-    async def get_suggest_answer(self, categories: List[str], tenant_id: Optional[str] = None, user_query: Optional[str] = None) -> str:
+    async def get_suggest_answer(self, categories: List[str], tenant_id: Optional[str] = None, user_query: Optional[str] = None, user_language: Optional[str] = None) -> str:
         """
         Get suggested answer, first search from knowledge base, if not found, use default template
         Args:
             categories: Risk categories list
             tenant_id: User ID
             user_query: User original question (for knowledge base search)
+            user_language: User's preferred language (e.g., 'en', 'zh')
         Returns:
             Suggested answer content
         """
         await self._ensure_cache_fresh()
 
         if not categories:
-            return self._get_default_answer(tenant_id)
+            return self._get_default_answer(tenant_id, user_language)
 
         try:
             # 1. Try to get answer from knowledge base
@@ -53,11 +54,11 @@ class EnhancedTemplateService:
                     return kb_answer
 
             # 2. Knowledge base didn't find answer, use traditional template logic
-            return await self._get_template_answer(categories, tenant_id)
+            return await self._get_template_answer(categories, tenant_id, user_language)
 
         except Exception as e:
             logger.error(f"Get suggest answer error: {e}")
-            return self._get_default_answer(tenant_id)
+            return self._get_default_answer(tenant_id, user_language)
 
     async def _search_knowledge_base_answer(self, categories: List[str], tenant_id: Optional[str], user_query: str) -> Optional[str]:
         """Search answer from knowledge base"""
@@ -143,7 +144,7 @@ class EnhancedTemplateService:
             logger.error(f"Search knowledge base answer error: {e}")
             return None
 
-    async def _get_template_answer(self, categories: List[str], tenant_id: Optional[str]) -> str:
+    async def _get_template_answer(self, categories: List[str], tenant_id: Optional[str], user_language: Optional[str] = None) -> str:
         """Use traditional template to get answer"""
         try:
             # Define risk level priority
@@ -193,34 +194,74 @@ class EnhancedTemplateService:
                 if category_key in user_cache:
                     templates = user_cache[category_key]
                     if False in templates:  # Non-default template
-                        return templates[False]
+                        return self._get_localized_content(templates[False], user_language)
                     if True in templates:  # Default template
-                        return templates[True]
+                        return self._get_localized_content(templates[True], user_language)
 
                 # Fallback to "global default user" None template (for system-level default template)
                 global_cache = self._template_cache.get("__global__", {})
                 if category_key in global_cache:
                     templates = global_cache[category_key]
                     if True in templates:
-                        return templates[True]
+                        return self._get_localized_content(templates[True], user_language)
 
-            return self._get_default_answer(tenant_id)
+            return self._get_default_answer(tenant_id, user_language)
 
         except Exception as e:
             logger.error(f"Get template answer error: {e}")
-            return self._get_default_answer(tenant_id)
+            return self._get_default_answer(tenant_id, user_language)
 
-    def _get_default_answer(self, tenant_id: Optional[str] = None) -> str:
+    def _get_localized_content(self, content: any, user_language: Optional[str] = None) -> str:
+        """
+        Get localized content from template content
+        Args:
+            content: Template content (can be str or dict)
+            user_language: User's preferred language
+        Returns:
+            Localized string
+        """
+        # If content is already a string (backward compatibility), return as-is
+        if isinstance(content, str):
+            return content
+
+        # If content is a dict (new JSON format)
+        if isinstance(content, dict):
+            # Determine language to use
+            lang = user_language or 'en'  # Default to English
+
+            # Try exact match first
+            if lang in content:
+                return content[lang]
+
+            # Fallback to English
+            if 'en' in content:
+                return content['en']
+
+            # Fallback to first available language
+            if content:
+                return next(iter(content.values()))
+
+        # Fallback to generic message
+        return "Sorry, I can't answer this question. If you have any questions, please contact customer service."
+
+    def _get_default_answer(self, tenant_id: Optional[str] = None, user_language: Optional[str] = None) -> str:
         """Get default answer"""
         # First find user-defined default
         user_cache = self._template_cache.get(str(tenant_id or "__none__"), {})
         if "default" in user_cache and True in user_cache["default"]:
-            return user_cache["default"][True]
+            return self._get_localized_content(user_cache["default"][True], user_language)
         # Then fallback to global default
         global_cache = self._template_cache.get("__global__", {})
         if "default" in global_cache and True in global_cache["default"]:
-            return global_cache["default"][True]
-        return "Sorry, I can't answer this question. If you have any questions, please contact customer service."
+            return self._get_localized_content(global_cache["default"][True], user_language)
+
+        # Final fallback with multilingual support
+        default_messages = {
+            'en': "Sorry, I can't answer this question. If you have any questions, please contact customer service.",
+            'zh': "抱歉，我无法回答这个问题。如有任何疑问，请联系客服。"
+        }
+        lang = user_language or 'en'
+        return default_messages.get(lang, default_messages['en'])
 
     async def _ensure_cache_fresh(self):
         """Ensure cache is fresh"""

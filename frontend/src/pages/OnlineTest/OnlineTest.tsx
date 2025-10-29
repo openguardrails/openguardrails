@@ -478,16 +478,16 @@ const OnlineTest: React.FC = () => {
                       message={t('onlineTest.noProxyModels')}
                       description={
                         <span>
-                          {t('onlineTest.noProxyModelsDesc').split(t('onlineTest.protectionConfig'))[0]}
+                          {t('onlineTest.noProxyModelsDesc').split(t('onlineTest.securityGateway'))[0]}
                           <Button
                             type="link"
                             size="small"
                             onClick={() => navigate('/security-gateway')}
                             style={{ padding: 0, margin: '0 4px' }}
                           >
-                            {t('onlineTest.protectionConfig')}
+                            {t('onlineTest.securityGateway')}
                           </Button>
-                          {t('onlineTest.noProxyModelsDesc').split(t('onlineTest.protectionConfig'))[1]}
+                          {t('onlineTest.noProxyModelsDesc').split(t('onlineTest.securityGateway'))[1]}
                         </span>
                       }
                       type="info"

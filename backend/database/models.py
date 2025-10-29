@@ -122,7 +122,7 @@ class ResponseTemplate(Base):
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=True, index=True)  # Associated tenant (can be null for global templates)
     category = Column(String(50), nullable=False, index=True)  # Risk category (S1-S12, default)
     risk_level = Column(String(20), nullable=False)  # Risk level
-    template_content = Column(Text, nullable=False)  # Response template content
+    template_content = Column(JSON, nullable=False)  # Multilingual response template content: {"en": "...", "zh": "...", ...}
     is_default = Column(Boolean, default=False)  # Whether it is a default template
     is_active = Column(Boolean, default=True)  # Whether enabled
     created_at = Column(DateTime(timezone=True), server_default=func.now())

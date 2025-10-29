@@ -125,10 +125,26 @@ export const resultsApi = {
     end_date?: string;
   }): Promise<PaginatedResponse<DetectionResult>> =>
     api.get('/api/v1/results', { params }).then(res => res.data),
-  
+
   // Get single detection result
   getResult: (id: number): Promise<DetectionResult> =>
     api.get(`/api/v1/results/${id}`).then(res => res.data),
+
+  // Export detection results to Excel
+  exportResults: (params?: {
+    risk_level?: string;
+    security_risk_level?: string;
+    compliance_risk_level?: string;
+    category?: string;
+    start_date?: string;
+    end_date?: string;
+    content_search?: string;
+    request_id_search?: string;
+  }): Promise<Blob> =>
+    api.get('/api/v1/results/export', {
+      params,
+      responseType: 'blob'
+    }).then(res => res.data),
 };
 
 // Config API

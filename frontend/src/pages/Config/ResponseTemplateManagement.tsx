@@ -94,9 +94,30 @@ const ResponseTemplateManagement: React.FC = () => {
 
   const handleEdit = (record: ResponseTemplate) => {
     setEditingItem(record);
+
+    // Handle both old string format and new JSON format
+    let contentEn = '';
+    let contentZh = '';
+
+    if (typeof record.template_content === 'string') {
+      // Old format: single string
+      // Determine if it's Chinese or English based on content
+      const isChinese = /[\u4e00-\u9fff]/.test(record.template_content);
+      if (isChinese) {
+        contentZh = record.template_content;
+      } else {
+        contentEn = record.template_content;
+      }
+    } else if (typeof record.template_content === 'object') {
+      // New format: JSON object with language keys
+      contentEn = record.template_content.en || '';
+      contentZh = record.template_content.zh || '';
+    }
+
     form.setFieldsValue({
       category: record.category,
-      template_content: record.template_content
+      template_content_en: contentEn,
+      template_content_zh: contentZh
     });
     setModalVisible(true);
   };
@@ -109,11 +130,27 @@ const ResponseTemplateManagement: React.FC = () => {
         return;
       }
 
+      // Create multilingual content object
+      const multilingualContent: Record<string, string> = {};
+
+      if (values.template_content_en) {
+        multilingualContent.en = values.template_content_en;
+      }
+      if (values.template_content_zh) {
+        multilingualContent.zh = values.template_content_zh;
+      }
+
+      // Validate that at least one language is provided
+      if (Object.keys(multilingualContent).length === 0) {
+        message.error(t('template.atLeastOneLanguage'));
+        return;
+      }
+
       // Update reject content, keep the original category and risk level
       const submissionData = {
         category: editingItem.category,
         risk_level: editingItem.risk_level,
-        template_content: values.template_content,
+        template_content: multilingualContent,
         is_default: true,
         is_active: true
       };
@@ -164,6 +201,18 @@ const ResponseTemplateManagement: React.FC = () => {
       key: 'template_content',
       ellipsis: true,
       width: 400,
+      render: (content: any) => {
+        if (typeof content === 'string') {
+          return content;
+        } else if (typeof content === 'object') {
+          // Display both languages if available
+          const parts = [];
+          if (content.en) parts.push(`EN: ${content.en}`);
+          if (content.zh) parts.push(`ZH: ${content.zh}`);
+          return parts.join(' | ');
+        }
+        return '';
+      }
     },
     {
       title: t('common.updatedAt'),
@@ -229,13 +278,24 @@ const ResponseTemplateManagement: React.FC = () => {
           </Form.Item>
 
           <Form.Item
-            name="template_content"
-            label={t('template.rejectContent')}
-            rules={[{ required: true, message: t('template.inputTemplate') }]}
+            name="template_content_en"
+            label={t('template.rejectContentEnglish')}
           >
             <TextArea
-              rows={6}
-              placeholder={t('template.rejectContentPlaceholder')}
+              rows={4}
+              placeholder={t('template.rejectContentPlaceholderEn')}
+              showCount
+              maxLength={500}
+            />
+          </Form.Item>
+
+          <Form.Item
+            name="template_content_zh"
+            label={t('template.rejectContentChinese')}
+          >
+            <TextArea
+              rows={4}
+              placeholder={t('template.rejectContentPlaceholderZh')}
               showCount
               maxLength={500}
             />

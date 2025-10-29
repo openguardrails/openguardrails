@@ -439,7 +439,19 @@ class GuardrailService:
 
         Note: Parameter name kept as tenant_id for backward compatibility
         """
-        return await enhanced_template_service.get_suggest_answer(categories, tenant_id, user_query)
+        from database.models import Tenant
+
+        # Get user's language preference
+        user_language = None
+        if tenant_id:
+            try:
+                tenant = self.db.query(Tenant).filter(Tenant.id == tenant_id).first()
+                if tenant:
+                    user_language = tenant.language
+            except Exception as e:
+                logger.warning(f"Failed to get user language for tenant {tenant_id}: {e}")
+
+        return await enhanced_template_service.get_suggest_answer(categories, tenant_id, user_query, user_language)
     
     async def _handle_blacklist_hit(
         self, request_id: str, content: str, list_name: str,

@@ -564,7 +564,21 @@ class DetectionGuardrailService:
     async def _get_suggest_answer(self, categories: List[str], tenant_id: Optional[str] = None, user_query: Optional[str] = None) -> str:
         """Get suggested answer (using enhanced template service, support knowledge base search)"""
         from services.enhanced_template_service import enhanced_template_service
-        return await enhanced_template_service.get_suggest_answer(categories, tenant_id, user_query)
+        from database.models import Tenant
+
+        # Get user's language preference
+        user_language = None
+        if tenant_id:
+            try:
+                db = get_db_session()
+                tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+                if tenant:
+                    user_language = tenant.language
+                db.close()
+            except Exception as e:
+                logger.warning(f"Failed to get user language for tenant {tenant_id}: {e}")
+
+        return await enhanced_template_service.get_suggest_answer(categories, tenant_id, user_query, user_language)
 
 
 

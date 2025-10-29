@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Table, Card, Select, DatePicker, Space, Tag, Button, Drawer, Typography, Row, Col, Input, Spin, Image } from 'antd';
-import { EyeOutlined, ReloadOutlined, SearchOutlined, FileImageOutlined, PictureOutlined } from '@ant-design/icons';
+import { Table, Card, Select, DatePicker, Space, Tag, Button, Drawer, Typography, Row, Col, Input, Spin, Image, message } from 'antd';
+import { EyeOutlined, ReloadOutlined, SearchOutlined, FileImageOutlined, PictureOutlined, DownloadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import dayjs from 'dayjs';
 import { resultsApi } from '../../services/api';
@@ -84,6 +84,48 @@ const Results: React.FC = () => {
       [key]: value,
     }));
     setPagination(prev => ({ ...prev, current: 1 })); // Reset page number
+  };
+
+  const handleExport = async () => {
+    try {
+      message.loading({ content: t('results.exporting'), key: 'export' });
+
+      const params: any = {};
+
+      if (filters.risk_level) {
+        params.risk_level = filters.risk_level;
+      }
+      if (filters.category) {
+        params.category = filters.category;
+      }
+      if (filters.date_range) {
+        params.start_date = filters.date_range[0].format('YYYY-MM-DD');
+        params.end_date = filters.date_range[1].format('YYYY-MM-DD');
+      }
+      if (filters.content_search) {
+        params.content_search = filters.content_search;
+      }
+      if (filters.request_id_search) {
+        params.request_id_search = filters.request_id_search;
+      }
+
+      const blob = await resultsApi.exportResults(params);
+
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `detection_results_${dayjs().format('YYYYMMDD_HHmmss')}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+      message.success({ content: t('results.exportSuccess'), key: 'export' });
+    } catch (error) {
+      console.error('Export error:', error);
+      message.error({ content: t('results.exportFailed'), key: 'export' });
+    }
   };
 
   const showDetail = async (record: DetectionResult) => {
@@ -382,6 +424,14 @@ const Results: React.FC = () => {
             onClick={fetchResults}
           >
             {t('results.refresh')}
+          </Button>
+
+          <Button
+            type="primary"
+            icon={<DownloadOutlined />}
+            onClick={handleExport}
+          >
+            {t('results.export')}
           </Button>
         </Space>
       </Card>
