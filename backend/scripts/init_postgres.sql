@@ -222,6 +222,7 @@ CREATE TABLE IF NOT EXISTS ban_policies (
     ban_duration_minutes INTEGER NOT NULL DEFAULT 60,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    CONSTRAINT check_risk_level CHECK (risk_level IN ('high_risk', 'medium_risk', 'low_risk')),
     CONSTRAINT check_trigger_count CHECK (trigger_count >= 1 AND trigger_count <= 100),
     CONSTRAINT check_time_window CHECK (time_window_minutes >= 1 AND time_window_minutes <= 1440),
     CONSTRAINT check_ban_duration CHECK (ban_duration_minutes >= 1 AND ban_duration_minutes <= 10080)

@@ -3,6 +3,7 @@ import { Card, Form, Switch, Select, InputNumber, Button, Table, message, Modal,
 import type { ColumnsType } from 'antd/es/table';
 import { useTranslation } from 'react-i18next';
 import { configApi } from '../../services/api';
+import { translateRiskLevel, getRiskLevelColor } from '../../utils/i18nMapper';
 
 const { Option } = Select;
 
@@ -48,20 +49,9 @@ const BanPolicy: React.FC = () => {
   const [selectedUserId, setSelectedUserId] = useState<string>('');
   const [userHistory, setUserHistory] = useState<RiskTrigger[]>([]);
 
-  // Get translated risk level text
+  // Get translated risk level text - use i18nMapper to handle both English and Chinese formats
   const getRiskLevelText = (level: string): string => {
-    if (level === 'high_risk') return t('banPolicy.highRisk');
-    if (level === 'medium_risk') return t('banPolicy.mediumRisk');
-    if (level === 'low_risk') return t('banPolicy.lowRisk');
-    return level;
-  };
-
-  // Get risk level color
-  const getRiskLevelColor = (level: string): string => {
-    if (level === 'high_risk') return 'red';
-    if (level === 'medium_risk') return 'orange';
-    if (level === 'low_risk') return 'blue';
-    return 'default';
+    return translateRiskLevel(level, t);
   };
 
   // Get translated status text
