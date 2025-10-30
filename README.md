@@ -316,6 +316,25 @@ Start all services:
 docker compose up -d
 ```
 
+**✨ Database migrations run automatically on first deployment!**
+
+The admin service will automatically:
+1. Wait for PostgreSQL to be ready
+2. Run all pending database migrations
+3. Start the service
+
+You can monitor the migration progress:
+
+```bash
+# Watch admin service logs for migration output
+docker logs -f openguardrails-admin
+
+# Expected output includes:
+# - "Running database migrations (admin service)..."
+# - "Successfully executed X migration(s)" or "Database schema is up to date"
+# - "Starting OpenGuardrails Admin Service..."
+```
+
 You can check running containers with:
 
 ```bash

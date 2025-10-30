@@ -44,9 +44,12 @@ services:
     ports:
       - "5000:5000"
     environment:
+      # Service identification (for entrypoint script)
+      - SERVICE_NAME=admin
+
       # Database configuration
       - DATABASE_URL=postgresql://openguardrails:your_password@postgres:5432/openguardrails
-      - RESET_DATABASE_ON_STARTUP=true
+      - RESET_DATABASE_ON_STARTUP=false
       
       # Application configuration
       - DEBUG=false
@@ -115,6 +118,9 @@ services:
     ports:
       - "5001:5001"
     environment:
+      # Service identification (for entrypoint script)
+      - SERVICE_NAME=detection
+
       # Database configuration
       - DATABASE_URL=postgresql://openguardrails:your_password@postgres:5432/openguardrails
 
@@ -173,6 +179,9 @@ services:
     ports:
       - "5002:5002"
     environment:
+      # Service identification (for entrypoint script)
+      - SERVICE_NAME=proxy
+
       # Database configuration
       - DATABASE_URL=postgresql://openguardrails:your_password@postgres:5432/openguardrails
 

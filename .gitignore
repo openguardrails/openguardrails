@@ -32,7 +32,6 @@ ENV/
 .idea/
 *.swp
 *.swo
-CLAUDE.md
 .claude/
 
 # Database
@@ -73,3 +72,4 @@ data/
 *.xlsx
 tests
 sdks/
+CLAUDE.md

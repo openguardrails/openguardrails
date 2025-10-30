@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 🚀 Deployment & Developer Experience
+
+#### Added
+- ✨ **Automatic Database Migrations** - Database migrations now run automatically on first deployment
+  - No manual migration commands needed - just run `docker compose up -d`
+  - Entrypoint script ([backend/entrypoint.sh](backend/entrypoint.sh)) handles automatic migration execution
+  - PostgreSQL advisory locks prevent concurrent migration conflicts
+  - Admin service runs migrations before starting (detection and proxy services skip)
+  - Migration tracking table (`schema_migrations`) records all executed migrations
+  - Clear migration logs visible in admin service output
+  - Safe failure mode - service won't start if migration fails
+  - Improved first-time deployment experience for new developers
+
+#### Changed
+- 🐳 **Docker Configuration Updates**
+  - Updated [backend/Dockerfile](backend/Dockerfile) to include `postgresql-client` for health checks
+  - Added `ENTRYPOINT` script to handle pre-startup initialization
+  - Added `SERVICE_NAME` environment variable to all services in [docker-compose.yml](docker-compose.yml)
+  - Changed `RESET_DATABASE_ON_STARTUP` default to `false` (migrations handle schema)
+
+#### Documentation
+- 📚 **Migration Documentation**
+  - Updated [backend/migrations/README.md](backend/migrations/README.md) with automatic migration details
+  - Added [docs/AUTO_MIGRATION_TEST.md](docs/AUTO_MIGRATION_TEST.md) with comprehensive testing guide
+  - Updated main [README.md](README.md) to explain automatic migration on deployment
+
 ## [2.6.1] - 2025-10-08
 
 ### 🌍 Internationalization (i18n)

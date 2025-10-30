@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Start management service script - low concurrency management platform API
-""" 
+"""
 import uvicorn
 from config import settings
 
@@ -10,7 +10,7 @@ if __name__ == "__main__":
     print(f"Port: {settings.admin_port}")
     print(f"Workers: {settings.admin_uvicorn_workers}")
     print("Optimized for management operations")
-    
+
     uvicorn.run(
         "admin_service:app",
         host=settings.host,
