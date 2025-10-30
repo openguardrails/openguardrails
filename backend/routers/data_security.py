@@ -109,6 +109,8 @@ async def create_entity_type(
         "check_output": recognition_config.get('check_output', True),
         "is_active": entity_type.is_active,
         "is_global": entity_type.is_global,
+        "source_type": entity_type.source_type if hasattr(entity_type, 'source_type') else 'custom',
+        "template_id": str(entity_type.template_id) if hasattr(entity_type, 'template_id') and entity_type.template_id else None,
         "created_at": entity_type.created_at.isoformat(),
         "updated_at": entity_type.updated_at.isoformat()
     }
@@ -146,6 +148,8 @@ async def list_entity_types(
             "check_output": recognition_config.get('check_output', True),
             "is_active": et.is_active,
             "is_global": et.is_global,
+            "source_type": et.source_type if hasattr(et, 'source_type') else 'custom',
+            "template_id": str(et.template_id) if hasattr(et, 'template_id') and et.template_id else None,
             "created_at": et.created_at.isoformat(),
             "updated_at": et.updated_at.isoformat()
         })
@@ -189,6 +193,8 @@ async def get_entity_type(
         "check_output": recognition_config.get('check_output', True),
         "is_active": entity_type.is_active,
         "is_global": entity_type.is_global,
+        "source_type": entity_type.source_type if hasattr(entity_type, 'source_type') else 'custom',
+        "template_id": str(entity_type.template_id) if hasattr(entity_type, 'template_id') and entity_type.template_id else None,
         "created_at": entity_type.created_at.isoformat(),
         "updated_at": entity_type.updated_at.isoformat()
     }
@@ -210,13 +216,27 @@ async def update_entity_type(
     if not entity_type:
         raise HTTPException(status_code=404, detail="Entity type configuration not found")
 
-    # Check permission
-    if entity_type.is_global:
-        # Only admin can modify global configuration
+    # Check permission based on source_type
+    if entity_type.source_type == 'system_template':
+        # Only admin can modify system templates
         if not current_user.is_super_admin:
-            raise HTTPException(status_code=403, detail="Only admin can modify global configuration")
-    elif entity_type.tenant_id != current_user.id:
-        raise HTTPException(status_code=403, detail="No permission to modify this configuration")
+            raise HTTPException(status_code=403, detail="Only admin can modify system templates")
+    elif entity_type.source_type == 'system_copy':
+        # Tenant can modify their own system copy
+        if entity_type.tenant_id != current_user.id:
+            raise HTTPException(status_code=403, detail="No permission to modify this configuration")
+    elif entity_type.source_type == 'custom':
+        # Tenant can only modify their own custom configuration
+        if entity_type.tenant_id != current_user.id:
+            raise HTTPException(status_code=403, detail="No permission to modify this configuration")
+    else:
+        # Fallback to old logic for backward compatibility
+        if entity_type.is_global:
+            # Only admin can modify global configuration
+            if not current_user.is_super_admin:
+                raise HTTPException(status_code=403, detail="Only admin can modify global configuration")
+        elif entity_type.tenant_id != current_user.id:
+            raise HTTPException(status_code=403, detail="No permission to modify this configuration")
 
     # Create service instance
     service = DataSecurityService(db)
@@ -264,6 +284,8 @@ async def update_entity_type(
         "check_output": recognition_config.get('check_output', True),
         "is_active": updated_entity.is_active,
         "is_global": updated_entity.is_global,
+        "source_type": updated_entity.source_type if hasattr(updated_entity, 'source_type') else 'custom',
+        "template_id": str(updated_entity.template_id) if hasattr(updated_entity, 'template_id') and updated_entity.template_id else None,
         "created_at": updated_entity.created_at.isoformat(),
         "updated_at": updated_entity.updated_at.isoformat()
     }
@@ -284,13 +306,26 @@ async def delete_entity_type(
     if not entity_type:
         raise HTTPException(status_code=404, detail="Entity type configuration not found")
 
-    # Check permission
-    if entity_type.is_global:
-        # Only admin can delete global configuration
+    # Check permission based on source_type
+    if entity_type.source_type == 'system_template':
+        # Only admin can delete system templates
         if not current_user.is_super_admin:
-            raise HTTPException(status_code=403, detail="Only admin can delete global configuration")
-    elif entity_type.tenant_id != current_user.id:
-        raise HTTPException(status_code=403, detail="No permission to delete this configuration")
+            raise HTTPException(status_code=403, detail="Only admin can delete system templates")
+    elif entity_type.source_type == 'system_copy':
+        # Tenant cannot delete system copies, but can disable them
+        raise HTTPException(status_code=403, detail="Cannot delete system entity types. Please disable them instead.")
+    elif entity_type.source_type == 'custom':
+        # Tenant can only delete their own custom configuration
+        if entity_type.tenant_id != current_user.id:
+            raise HTTPException(status_code=403, detail="No permission to delete this configuration")
+    else:
+        # Fallback to old logic for backward compatibility
+        if entity_type.is_global:
+            # Only admin can delete global configuration
+            if not current_user.is_super_admin:
+                raise HTTPException(status_code=403, detail="Only admin can delete global configuration")
+        elif entity_type.tenant_id != current_user.id:
+            raise HTTPException(status_code=403, detail="No permission to delete this configuration")
 
     # Create service instance
     service = DataSecurityService(db)
@@ -309,28 +344,32 @@ async def create_global_entity_type(
     request: Request,
     db: Session = Depends(get_db)
 ):
-    """Create global sensitive data type configuration (only admin)"""
+    """Create system template entity type (only admin)
+    
+    This creates a template that will be automatically copied to all tenants.
+    Each tenant gets their own editable copy.
+    """
     current_user = get_current_user(request, db)
 
     # Check if the user is an admin
     if not current_user.is_super_admin:
-        raise HTTPException(status_code=403, detail="Only admin can create global configuration")
+        raise HTTPException(status_code=403, detail="Only admin can create system templates")
 
-    # Check if the global entity type already exists
+    # Check if the system template already exists
     existing = db.query(DataSecurityEntityType).filter(
         and_(
             DataSecurityEntityType.entity_type == entity_data.entity_type,
-            DataSecurityEntityType.is_global == True
+            DataSecurityEntityType.source_type == 'system_template'
         )
     ).first()
 
     if existing:
-        raise HTTPException(status_code=400, detail="The global entity type already exists")
+        raise HTTPException(status_code=400, detail="The system template already exists")
 
     # Create service instance
     service = DataSecurityService(db)
 
-    # Create new global configuration
+    # Create new system template
     entity_type = service.create_entity_type(
         tenant_id=str(current_user.id),
         entity_type=entity_data.entity_type,
@@ -341,7 +380,8 @@ async def create_global_entity_type(
         anonymization_config=entity_data.anonymization_config,
         check_input=entity_data.check_input,
         check_output=entity_data.check_output,
-        is_global=True
+        is_global=True,  # Keep for backward compatibility
+        source_type='system_template'
     )
 
     recognition_config = entity_type.recognition_config or {}
@@ -358,6 +398,8 @@ async def create_global_entity_type(
         "check_output": recognition_config.get('check_output', True),
         "is_active": entity_type.is_active,
         "is_global": entity_type.is_global,
+        "source_type": entity_type.source_type if hasattr(entity_type, 'source_type') else 'custom',
+        "template_id": str(entity_type.template_id) if hasattr(entity_type, 'template_id') and entity_type.template_id else None,
         "created_at": entity_type.created_at.isoformat(),
         "updated_at": entity_type.updated_at.isoformat()
     }

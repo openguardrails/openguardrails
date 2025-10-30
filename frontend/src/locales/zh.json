@@ -51,7 +51,8 @@
     "deleteFailed": "删除失败",
     "saveFailed": "保存失败",
     "operationFailed": "操作失败",
-    "action": "操作"
+    "action": "操作",
+    "confirmDelete": "确认删除"
   },
   "risk": {
     "level": {
@@ -882,7 +883,6 @@
     "system": "系统",
     "custom": "自定义",
     "invalidJsonConfig": "脱敏配置JSON格式错误",
-    "createGlobalSuccess": "创建系统配置成功",
     "entityTypeCode": "实体类型代码",
     "entityTypeCodePlaceholder": "如：ID_CARD_NUMBER_SYS、PHONE_NUMBER_SYS、EMAIL_SYS",
     "entityTypeCodeRequired": "请输入实体类型代码",
@@ -920,7 +920,14 @@
     "outputSwitch": "输出",
     "enableStatusLabel": "启用状态",
     "systemConfigLabel": "系统配置",
-    "systemConfigTooltip": "系统配置将对所有用户生效，只有管理员可以设置和修改"
+    "systemConfigTooltip": "系统配置将对所有用户生效，只有管理员可以设置和修改",
+    "systemTemplate": "系统模板",
+    "systemCopy": "系统副本",
+    "systemCopyEditHint": "这是您的系统模板个人副本。您可以编辑它而不会影响其他用户。",
+    "noEditPermission": "无编辑权限",
+    "noDeletePermission": "无删除权限",
+    "cannotDeleteSystemCopy": "系统副本不能删除。您可以选择禁用它。",
+    "createGlobalSuccess": "系统模板创建成功。将自动分发给所有用户。"
   },
   "account": {
     "title": "账号管理",

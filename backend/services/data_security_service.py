@@ -89,6 +89,9 @@ class DataSecurityService:
         """
         tenant_id = tenant_id  # For backward compatibility, internally use tenant_id
         try:
+            # Ensure tenant has copies of all system templates
+            self.ensure_tenant_has_system_copies(tenant_id)
+            
             # Get disabled entity types for this tenant
             disabled_entity_types = set()
             disabled_query = self.db.query(TenantEntityTypeDisable).filter(
@@ -97,11 +100,12 @@ class DataSecurityService:
             for disabled in disabled_query.all():
                 disabled_entity_types.add(disabled.entity_type)
 
-            # Get global config and tenant custom config
+            # Get only tenant's own entity types (both system_copy and custom)
+            # No longer include global templates directly
             query = self.db.query(DataSecurityEntityType).filter(
                 and_(
                     DataSecurityEntityType.is_active == True,
-                    (DataSecurityEntityType.tenant_id == tenant_id) | (DataSecurityEntityType.is_global == True)
+                    DataSecurityEntityType.tenant_id == tenant_id
                 )
             )
 
@@ -272,11 +276,17 @@ class DataSecurityService:
         anonymization_config: Optional[Dict[str, Any]] = None,
         check_input: bool = True,
         check_output: bool = True,
-        is_global: bool = False
+        is_global: bool = False,
+        source_type: str = 'custom',
+        template_id: Optional[str] = None
     ) -> DataSecurityEntityType:
         """Create sensitive data type configuration
 
         Note: For backward compatibility, keep parameter name tenant_id, but actually process tenant_id
+        
+        Args:
+            source_type: 'system_template' (admin creates template), 'system_copy' (tenant's copy), 'custom' (user creates)
+            template_id: UUID of the template if this is a copy
         """
         tenant_id = tenant_id  # For backward compatibility, internally use tenant_id
         recognition_config = {
@@ -284,6 +294,10 @@ class DataSecurityService:
             'check_input': check_input,
             'check_output': check_output
         }
+
+        # For backward compatibility: is_global=True implies source_type='system_template'
+        if is_global and source_type == 'custom':
+            source_type = 'system_template'
 
         entity_type_obj = DataSecurityEntityType(
             tenant_id=tenant_id,  # Database field name keep as tenant_id, actually store tenant_id
@@ -294,7 +308,9 @@ class DataSecurityService:
             recognition_config=recognition_config,
             anonymization_method=anonymization_method,
             anonymization_config=anonymization_config or {},
-            is_global=is_global
+            is_global=is_global,
+            source_type=source_type,
+            template_id=template_id
         )
 
         self.db.add(entity_type_obj)
@@ -381,12 +397,19 @@ class DataSecurityService:
         is_active: Optional[bool] = None
     ) -> List[DataSecurityEntityType]:
         """Get sensitive data type configuration list
+        
+        This method now automatically ensures tenant has copies of all system templates.
 
         Note: For backward compatibility, keep parameter name tenant_id, but actually process tenant_id
         """
         tenant_id = tenant_id  # For backward compatibility, internally use tenant_id
+        
+        # Ensure tenant has copies of all system templates
+        self.ensure_tenant_has_system_copies(tenant_id)
+        
+        # Get tenant's own entity types (both system_copy and custom)
         query = self.db.query(DataSecurityEntityType).filter(
-            (DataSecurityEntityType.tenant_id == tenant_id) | (DataSecurityEntityType.is_global == True)
+            DataSecurityEntityType.tenant_id == tenant_id
         )
 
         if risk_level:
@@ -452,6 +475,78 @@ class DataSecurityService:
         except Exception as e:
             logger.error(f"Error getting disabled entity types for tenant {tenant_id}: {e}")
             return []
+    
+    def ensure_tenant_has_system_copies(self, tenant_id: str) -> int:
+        """Ensure tenant has copies of all system templates
+        
+        This method:
+        1. Finds all system templates (source_type='system_template')
+        2. For each template, checks if tenant has a copy
+        3. Creates missing copies with source_type='system_copy' and template_id set
+        
+        Returns:
+            Number of copies created
+        """
+        try:
+            # Get all system templates
+            system_templates = self.db.query(DataSecurityEntityType).filter(
+                DataSecurityEntityType.source_type == 'system_template'
+            ).all()
+            
+            if not system_templates:
+                return 0
+            
+            # Get tenant's existing entity types
+            tenant_entity_types = self.db.query(DataSecurityEntityType).filter(
+                DataSecurityEntityType.tenant_id == tenant_id
+            ).all()
+            
+            # Create a set of template IDs that tenant already has copies of
+            tenant_template_ids = set()
+            for et in tenant_entity_types:
+                if et.template_id:
+                    tenant_template_ids.add(str(et.template_id))
+            
+            # Create copies for missing templates
+            copies_created = 0
+            for template in system_templates:
+                template_id_str = str(template.id)
+                
+                # Skip if tenant already has a copy of this template
+                if template_id_str in tenant_template_ids:
+                    continue
+                
+                # Create a copy for this tenant
+                recognition_config = template.recognition_config or {}
+                copy = DataSecurityEntityType(
+                    tenant_id=tenant_id,
+                    entity_type=template.entity_type,
+                    display_name=template.display_name,
+                    category=template.category,
+                    recognition_method=template.recognition_method,
+                    recognition_config=recognition_config.copy(),
+                    anonymization_method=template.anonymization_method,
+                    anonymization_config=(template.anonymization_config or {}).copy(),
+                    is_active=template.is_active,
+                    is_global=False,  # Copies are not global
+                    source_type='system_copy',
+                    template_id=template.id
+                )
+                
+                self.db.add(copy)
+                copies_created += 1
+                logger.info(f"Created system copy of '{template.entity_type}' for tenant {tenant_id}")
+            
+            if copies_created > 0:
+                self.db.commit()
+                logger.info(f"Created {copies_created} system entity type copies for tenant {tenant_id}")
+            
+            return copies_created
+            
+        except Exception as e:
+            logger.error(f"Error ensuring tenant {tenant_id} has system copies: {e}")
+            self.db.rollback()
+            return 0
 
 
 def get_default_entity_types_config() -> List[Dict[str, Any]]:
@@ -521,11 +616,11 @@ def get_default_entity_types_config() -> List[Dict[str, Any]]:
 
 
 def create_global_entity_types(db: Session, admin_tenant_id: str) -> int:
-    """Create global entity type configurations (called during system initialization)
+    """Create system template entity type configurations (called during system initialization)
 
     Args:
         db: Database session
-        admin_tenant_id: Super admin tenant ID (used as creator of global configs)
+        admin_tenant_id: Super admin tenant ID (used as creator of templates)
 
     Returns:
         Number of entity types created
@@ -536,11 +631,11 @@ def create_global_entity_types(db: Session, admin_tenant_id: str) -> int:
     created_count = 0
     for entity_data in default_entity_types:
         try:
-            # Check if global entity type already exists
+            # Check if system template already exists
             existing = db.query(DataSecurityEntityType).filter(
                 and_(
                     DataSecurityEntityType.entity_type == entity_data['entity_type'],
-                    DataSecurityEntityType.is_global == True
+                    DataSecurityEntityType.source_type == 'system_template'
                 )
             ).first()
 
@@ -555,12 +650,13 @@ def create_global_entity_types(db: Session, admin_tenant_id: str) -> int:
                     anonymization_config=entity_data['anonymization_config'],
                     check_input=entity_data['check_input'],
                     check_output=entity_data['check_output'],
-                    is_global=True
+                    is_global=True,  # Keep for backward compatibility
+                    source_type='system_template'
                 )
                 created_count += 1
-                logger.info(f"Created global entity type: {entity_data['entity_type']}")
+                logger.info(f"Created system template entity type: {entity_data['entity_type']}")
         except Exception as e:
-            logger.error(f"Failed to create global entity type {entity_data['entity_type']}: {e}")
+            logger.error(f"Failed to create system template entity type {entity_data['entity_type']}: {e}")
 
     return created_count
 

@@ -51,7 +51,8 @@
     "deleteFailed": "Delete failed",
     "saveFailed": "Save failed",
     "operationFailed": "Operation failed",
-    "action": "Action"
+    "action": "Action",
+    "confirmDelete": "Confirm Delete"
   },
   "risk": {
     "level": {
@@ -922,7 +923,14 @@
     "outputSwitch": "Output",
     "enableStatusLabel": "Enable status",
     "systemConfigLabel": "System configuration",
-    "systemConfigTooltip": "System configuration will take effect for all users, only administrators can set and modify"
+    "systemConfigTooltip": "System configuration will take effect for all users, only administrators can set and modify",
+    "systemTemplate": "System Template",
+    "systemCopy": "System Copy",
+    "systemCopyEditHint": "This is your personal copy of a system template. You can edit it without affecting other users.",
+    "noEditPermission": "No permission to edit",
+    "noDeletePermission": "No permission to delete",
+    "cannotDeleteSystemCopy": "System copies cannot be deleted. You can disable them instead.",
+    "createGlobalSuccess": "System template created successfully. It will be automatically distributed to all users."
   },
   "account": {
     "title": "Account Management",

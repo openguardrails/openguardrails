@@ -36,6 +36,8 @@ interface EntityType {
   check_output: boolean;
   is_active: boolean;
   is_global: boolean;
+  source_type?: string; // 'system_template', 'system_copy', 'custom'
+  template_id?: string;
   created_at: string;
   updated_at: string;
 }
@@ -228,43 +230,75 @@ const EntityTypeManagement: React.FC = () => {
     },
     {
       title: t('entityType.sourceColumn'),
-      dataIndex: 'is_global',
-      key: 'is_global',
-      width: 80,
-      render: (is_global: boolean) => (
-        <Tag icon={is_global ? <GlobalOutlined /> : <UserOutlined />} color={is_global ? 'blue' : 'default'}>
-          {is_global ? t('entityType.system') : t('entityType.custom')}
-        </Tag>
-      ),
+      dataIndex: 'source_type',
+      key: 'source_type',
+      width: 100,
+      render: (_: any, record: EntityType) => {
+        const sourceType = record.source_type || (record.is_global ? 'system_template' : 'custom');
+        
+        if (sourceType === 'system_template') {
+          return (
+            <Tag icon={<GlobalOutlined />} color="blue">
+              {t('entityType.systemTemplate')}
+            </Tag>
+          );
+        } else if (sourceType === 'system_copy') {
+          return (
+            <Tag icon={<GlobalOutlined />} color="cyan">
+              {t('entityType.systemCopy')}
+            </Tag>
+          );
+        } else {
+          return (
+            <Tag icon={<UserOutlined />} color="default">
+              {t('entityType.custom')}
+            </Tag>
+          );
+        }
+      },
     },
     {
       title: t('entityType.operationColumn'),
       key: 'action',
       width: 120,
-      render: (_: any, record: EntityType) => (
-        <Space size="small">
-          <Tooltip title={t('common.edit')}>
-            <Button
-              type="link"
-              size="small"
-              icon={<EditOutlined />}
-              onClick={() => handleEdit(record)}
-              disabled={record.is_global && !user?.is_super_admin}
-            />
-          </Tooltip>
-          <Popconfirm title={t('common.confirmDelete')} onConfirm={() => handleDelete(record.id)}>
-            <Tooltip title={t('common.delete')}>
+      render: (_: any, record: EntityType) => {
+        const sourceType = record.source_type || (record.is_global ? 'system_template' : 'custom');
+        const canEdit = sourceType === 'system_template' 
+          ? user?.is_super_admin 
+          : true; // system_copy and custom can be edited by owner
+        const canDelete = sourceType === 'system_template'
+          ? user?.is_super_admin
+          : sourceType === 'custom'; // system_copy cannot be deleted
+        
+        return (
+          <Space size="small">
+            <Tooltip title={canEdit ? t('common.edit') : t('entityType.noEditPermission')}>
               <Button
                 type="link"
                 size="small"
-                danger
-                icon={<DeleteOutlined />}
-                disabled={record.is_global && !user?.is_super_admin}
+                icon={<EditOutlined />}
+                onClick={() => handleEdit(record)}
+                disabled={!canEdit}
               />
             </Tooltip>
-          </Popconfirm>
-        </Space>
-      ),
+            <Tooltip title={canDelete ? t('common.delete') : (sourceType === 'system_copy' ? t('entityType.cannotDeleteSystemCopy') : t('entityType.noDeletePermission'))}>
+              <Popconfirm 
+                title={t('common.confirmDelete')} 
+                onConfirm={() => handleDelete(record.id)}
+                disabled={!canDelete}
+              >
+                <Button
+                  type="link"
+                  size="small"
+                  danger
+                  icon={<DeleteOutlined />}
+                  disabled={!canDelete}
+                />
+              </Popconfirm>
+            </Tooltip>
+          </Space>
+        );
+      },
     },
   ];
 
@@ -341,8 +375,18 @@ const EntityTypeManagement: React.FC = () => {
             label={t('entityType.entityTypeCode')}
             rules={[{ required: true, message: t('entityType.entityTypeCodeRequired') }]}
           >
-            <Input placeholder={t('entityType.entityTypeCodePlaceholder')} disabled={!!editingEntity} />
+            <Input 
+              placeholder={t('entityType.entityTypeCodePlaceholder')} 
+              disabled={!!editingEntity} 
+            />
           </Form.Item>
+          
+          {editingEntity && editingEntity.source_type === 'system_copy' && (
+            <div style={{ marginBottom: 16, padding: 12, backgroundColor: '#e6f7ff', borderRadius: 4 }}>
+              <InfoCircleOutlined style={{ marginRight: 8, color: '#1890ff' }} />
+              <Text type="secondary">{t('entityType.systemCopyEditHint')}</Text>
+            </div>
+          )}
 
           <Form.Item
             name="display_name"
