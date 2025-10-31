@@ -157,15 +157,16 @@ else:
               }}>
 {`from openai import OpenAI
 
-# Just change two lines - base_url and api_key
+# Just change base_url and api_key
 client = OpenAI(
-    base_url="https://api.openguardrails.com/v1/gateway",
+    base_url="http://localhost:5002/v1/gateway/<upstream_api_id>/",
     api_key="${user?.api_key || 'your-api-key'}"
 )
 
 # Use as normal - automatic safety protection!
+# No need to change the model name - use your original upstream model name
 response = client.chat.completions.create(
-    model="your-proxy-model-name",
+    model="gpt-4",  # Your original upstream model name
     messages=[{"role": "user", "content": "Hello"}]
 )
 `}
@@ -192,13 +193,13 @@ response = client.chat.completions.create(
 {`from openai import OpenAI
 
 client = OpenAI(
-    base_url="http://localhost:5002/v1",
+    base_url="http://localhost:5002/v1/gateway/<upstream_api_id>/",
     api_key="${user?.api_key || 'your-api-key'}"
 )
 
-def chat_with_openai(prompt, model="your-model", system="You are a helpful assistant."):
+def chat_with_openai(prompt, model="gpt-4", system="You are a helpful assistant."):
     completion = client.chat.completions.create(
-        model=model,
+        model=model,  # Use your original upstream model name
         messages=[
             {"role": "system", "content": system},
             {"role": "user", "content": prompt}

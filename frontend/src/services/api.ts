@@ -355,51 +355,49 @@ export const sensitivityThresholdApi = {
   reset: () => api.post('/api/v1/config/sensitivity-thresholds/reset').then(res => res.data),
 };
 
-// Proxy model configuration API
+// Proxy upstream API configuration API
 export const proxyModelsApi = {
-  // Get proxy model list
+  // Get upstream API configurations list
   list: (): Promise<{ success: boolean; data: any[] }> =>
-    api.get('/api/v1/proxy/models').then(res => res.data),
-  
-  // Get proxy model detail
+    api.get('/api/v1/proxy/upstream-apis').then(res => res.data),
+
+  // Get upstream API configuration detail
   get: (id: string): Promise<{ success: boolean; data: any }> =>
-    api.get(`/api/v1/proxy/models/${id}`).then(res => res.data),
-  
-  // Create proxy model configuration
+    api.get(`/api/v1/proxy/upstream-apis/${id}`).then(res => res.data),
+
+  // Create upstream API configuration
   create: (data: {
     config_name: string;
     api_base_url: string;
     api_key: string;
-    model_name: string;
-    enabled?: boolean;
+    is_active?: boolean;
     block_on_input_risk?: boolean;
     block_on_output_risk?: boolean;
     enable_reasoning_detection?: boolean;
     stream_chunk_size?: number;
   }): Promise<{ success: boolean; message: string; data?: any }> =>
-    api.post('/api/v1/proxy/models', data).then(res => res.data),
-  
-  // Update proxy model configuration
+    api.post('/api/v1/proxy/upstream-apis', data).then(res => res.data),
+
+  // Update upstream API configuration
   update: (id: string, data: {
     config_name?: string;
     api_base_url?: string;
     api_key?: string;
-    model_name?: string;
-    enabled?: boolean;
+    is_active?: boolean;
     block_on_input_risk?: boolean;
     block_on_output_risk?: boolean;
     enable_reasoning_detection?: boolean;
     stream_chunk_size?: number;
   }): Promise<{ success: boolean; message: string }> =>
-    api.put(`/api/v1/proxy/models/${id}`, data).then(res => res.data),
-  
-  // Delete proxy model configuration
+    api.put(`/api/v1/proxy/upstream-apis/${id}`, data).then(res => res.data),
+
+  // Delete upstream API configuration
   delete: (id: string): Promise<{ success: boolean; message: string }> =>
-    api.delete(`/api/v1/proxy/models/${id}`).then(res => res.data),
-  
-  // Test proxy model configuration
+    api.delete(`/api/v1/proxy/upstream-apis/${id}`).then(res => res.data),
+
+  // Test upstream API configuration
   test: (id: string): Promise<{ success: boolean; message: string; data?: any }> =>
-    api.post(`/api/v1/proxy/models/${id}/test`).then(res => res.data),
+    api.post(`/api/v1/proxy/upstream-apis/${id}/test`).then(res => res.data),
 };
 
 // Knowledge base management API

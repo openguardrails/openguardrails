@@ -123,7 +123,7 @@ class DetectionGuardrailService:
             message_objects.append(Message(role=msg["role"], content=msg["content"]))
         
         request = GuardrailRequest(model="detection", messages=message_objects)
-
+        
         # Call full detection method
         result = await self.check_guardrails(
             request=request,
@@ -138,7 +138,8 @@ class DetectionGuardrailService:
             "suggest_answer": result.suggest_answer,
             "overall_risk_level": result.overall_risk_level,
             "compliance_result": result.result.compliance.__dict__ if result.result.compliance else None,
-            "security_result": result.result.security.__dict__ if result.result.security else None
+            "security_result": result.result.security.__dict__ if result.result.security else None,
+            "data_result": result.result.data.__dict__ if result.result.data else None
         }
     
     async def check_guardrails(

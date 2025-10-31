@@ -250,9 +250,39 @@ class TestModelConfig(Base):
     # Association relationships
     tenant = relationship("Tenant", back_populates="test_models")
 
+class UpstreamApiConfig(Base):
+    """Upstream API configuration for Security Gateway"""
+    __tablename__ = "upstream_api_configs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)  # Used in gateway URL
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
+    config_name = Column(String(100), nullable=False, index=True)  # Display name (e.g., "OpenAI Production")
+    api_base_url = Column(String(512), nullable=False)  # Upstream API base URL
+    api_key_encrypted = Column(Text, nullable=False)  # Encrypted upstream API key
+    provider = Column(String(50))  # Provider type: openai, anthropic, local, etc.
+    is_active = Column(Boolean, default=True, index=True)  # Whether this config is active
+
+    # Security config
+    block_on_input_risk = Column(Boolean, default=False)  # Whether to block on input risk
+    block_on_output_risk = Column(Boolean, default=False)  # Whether to block on output risk
+    enable_reasoning_detection = Column(Boolean, default=True)  # Whether to detect reasoning content
+    stream_chunk_size = Column(Integer, default=50)  # Stream detection interval, detect every N chunks
+
+    # Metadata
+    description = Column(Text)  # Optional description
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Association relationships
+    tenant = relationship("Tenant")
+
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'config_name', name='upstream_api_configs_tenant_name_unique'),
+    )
+
 class ProxyModelConfig(Base):
-    """Reverse proxy model config table"""
-    __tablename__ = "proxy_model_configs"
+    """DEPRECATED: Reverse proxy model config table (replaced by UpstreamApiConfig)"""
+    __tablename__ = "proxy_model_configs_deprecated"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
@@ -281,7 +311,12 @@ class ProxyRequestLog(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     request_id = Column(String(64), unique=True, nullable=False, index=True)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
-    proxy_config_id = Column(UUID(as_uuid=True), ForeignKey("proxy_model_configs.id"), nullable=False)
+
+    # New foreign key to upstream_api_configs
+    upstream_api_config_id = Column(UUID(as_uuid=True), ForeignKey("upstream_api_configs.id", ondelete="SET NULL"), index=True)
+
+    # Old foreign key (deprecated, kept for backward compatibility)
+    proxy_config_id = Column(UUID(as_uuid=True), ForeignKey("proxy_model_configs_deprecated.id"), nullable=True)
 
     # Request information
     model_requested = Column(String(255), nullable=False)  # User requested model name
@@ -336,7 +371,7 @@ class OnlineTestModelSelection(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
-    proxy_model_id = Column(UUID(as_uuid=True), ForeignKey("proxy_model_configs.id"), nullable=False, index=True)
+    proxy_model_id = Column(UUID(as_uuid=True), ForeignKey("proxy_model_configs_deprecated.id"), nullable=False, index=True)
     selected = Column(Boolean, default=False, nullable=False)  # Whether it is selected for online test
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -493,7 +493,246 @@ class StreamChunkDetector:
         except Exception as e:
             logger.error(f"Synchronous final detection failed: {e}")
             return False
-    
+
+
+# ============================================================================
+# Gateway Pattern Response Handlers (simplified for MVP)
+# ============================================================================
+
+async def _handle_gateway_streaming_response(
+    upstream_response, api_config, tenant_id: str, request_id: str,
+    input_detection_id: str, user_id: str, model_name: str, start_time: float,
+    input_messages: list
+):
+    """Handle gateway streaming response with output detection"""
+    try:
+        # Select detection mode based on configuration
+        output_detection_mode = get_detection_mode(api_config, 'output')
+        detector = StreamChunkDetector(output_detection_mode)
+
+        async def stream_generator():
+            full_content = ""
+            output_detection_id = None
+            output_blocked = False
+            chunks_queue = []  # Queue to save ALL chunks in serial mode
+
+            try:
+                async with upstream_response as response:
+                    response.raise_for_status()
+
+                    async for line in response.aiter_lines():
+                        if line.strip():
+                            if line.startswith("data: "):
+                                line = line[6:]
+
+                                if line.strip() == "[DONE]":
+                                    # Final detection before completing
+                                    if not detector.should_stop:
+                                        should_stop = await detector.final_detection(
+                                            api_config, input_messages, tenant_id, request_id
+                                        )
+                                        if should_stop:
+                                            output_blocked = True
+                                            # In serial mode, discard all queued chunks and return error
+                                            if detector.detection_mode == DetectionMode.SYNC_SERIAL:
+                                                chunks_queue = []  # Discard all queued content
+                                            
+                                            # Get suggest_answer from detection result
+                                            suggest_answer = None
+                                            if detector.detection_result:
+                                                suggest_answer = detector.detection_result.get('suggest_answer')
+                                                logger.info(f"Gateway final detection - Detected risk, suggest_answer: {suggest_answer}")
+                                            
+                                            # If there's a suggest_answer, send it as content chunks first
+                                            if suggest_answer:
+                                                logger.info(f"Gateway final detection - Sending suggest_answer as content chunks: {suggest_answer[:50]}...")
+                                                for chunk_str in _yield_suggest_answer_chunks(request_id, suggest_answer):
+                                                    yield chunk_str
+                                            else:
+                                                logger.warning(f"Gateway final detection - No suggest_answer found in detection_result: {detector.detection_result}")
+                                            
+                                            # Send risk blocking message
+                                            stop_chunk = _create_stop_chunk(request_id, detector.detection_result)
+                                            yield f"data: {json.dumps(stop_chunk)}\n\n"
+                                            yield "data: [DONE]\n\n"
+                                            break
+                                        else:
+                                            # Detection safe, output ALL queued chunks in serial mode
+                                            if detector.detection_mode == DetectionMode.SYNC_SERIAL:
+                                                for queued_chunk in chunks_queue:
+                                                    yield f"data: {json.dumps(queued_chunk)}\n\n"
+
+                                    yield "data: [DONE]\n\n"
+                                    break
+
+                                try:
+                                    chunk_data = json.loads(line)
+                                    # Extract content for detection
+                                    if 'choices' in chunk_data and len(chunk_data['choices']) > 0:
+                                        delta = chunk_data['choices'][0].get('delta', {})
+                                        content = delta.get('content', '')
+                                        reasoning_content = ""
+
+                                        # Extract reasoning content if enabled
+                                        if getattr(api_config, 'enable_reasoning_detection', True):
+                                            reasoning_content = delta.get('reasoning_content', '')
+
+                                        if content or reasoning_content:
+                                            full_content += content
+
+                                            # Detect chunk
+                                            should_stop = await detector.add_chunk(
+                                                content, reasoning_content, api_config,
+                                                input_messages, tenant_id, request_id
+                                            )
+
+                                            if should_stop:
+                                                output_blocked = True
+                                                # In serial mode, discard all queued chunks
+                                                if detector.detection_mode == DetectionMode.SYNC_SERIAL:
+                                                    chunks_queue = []
+                                                
+                                                # Get suggest_answer from detection result
+                                                suggest_answer = None
+                                                if detector.detection_result:
+                                                    suggest_answer = detector.detection_result.get('suggest_answer')
+                                                    logger.info(f"Gateway streaming - Detected risk, suggest_answer: {suggest_answer}")
+                                                
+                                                # If there's a suggest_answer, send it as content chunks first
+                                                if suggest_answer:
+                                                    logger.info(f"Gateway streaming - Sending suggest_answer as content chunks: {suggest_answer[:50]}...")
+                                                    for chunk_str in _yield_suggest_answer_chunks(request_id, suggest_answer):
+                                                        yield chunk_str
+                                                else:
+                                                    logger.warning(f"Gateway streaming - No suggest_answer found in detection_result: {detector.detection_result}")
+                                                
+                                                # Send risk blocking message and stop
+                                                stop_chunk = _create_stop_chunk(request_id, detector.detection_result)
+                                                yield f"data: {json.dumps(stop_chunk)}\n\n"
+                                                yield "data: [DONE]\n\n"
+                                                break
+
+                                    # In serial mode, QUEUE ALL chunks; in async mode, output immediately
+                                    if detector.detection_mode == DetectionMode.ASYNC_BYPASS:
+                                        yield f"data: {json.dumps(chunk_data)}\n\n"
+                                    else:
+                                        # Serial mode: SAVE ALL CHUNKS, do NOT output yet
+                                        chunks_queue.append(chunk_data)
+
+                                except json.JSONDecodeError:
+                                    continue
+
+                # Log request
+                await proxy_service.log_proxy_request_gateway(
+                    request_id=request_id,
+                    tenant_id=tenant_id,
+                    upstream_api_config_id=str(api_config.id),
+                    model_requested=model_name,
+                    model_used=model_name,
+                    provider=api_config.provider or "unknown",
+                    input_detection_id=input_detection_id,
+                    output_detection_id=output_detection_id,
+                    input_blocked=False,
+                    output_blocked=output_blocked,
+                    status="stream_blocked" if output_blocked else "stream_success",
+                    response_time_ms=int((time.time() - start_time) * 1000)
+                )
+
+            except Exception as e:
+                logger.error(f"Gateway streaming error: {e}")
+                error_chunk = {
+                    "id": f"chatcmpl-{request_id}",
+                    "object": "chat.completion.chunk",
+                    "created": int(time.time()),
+                    "model": model_name,
+                    "choices": [{
+                        "index": 0,
+                        "delta": {"role": "assistant", "content": f"Error: {str(e)}"},
+                        "finish_reason": "error"
+                    }]
+                }
+                yield f"data: {json.dumps(error_chunk)}\n\n"
+                yield "data: [DONE]\n\n"
+
+        return StreamingResponse(
+            stream_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Gateway streaming handler error: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": {"message": str(e), "type": "internal_error"}}
+        )
+
+
+async def _handle_gateway_non_streaming_response(
+    upstream_response, api_config, tenant_id: str, request_id: str,
+    input_detection_id: str, user_id: str, model_name: str, start_time: float,
+    input_messages: list
+):
+    """Handle gateway non-streaming response with output detection"""
+    try:
+        output_detection_id = None
+        output_blocked = False
+
+        # Extract response content for detection
+        if upstream_response.get('choices'):
+            output_content = upstream_response['choices'][0]['message']['content']
+
+            # Perform output detection
+            output_detection_result = await perform_output_detection(
+                api_config, input_messages, output_content, tenant_id, request_id, user_id
+            )
+
+            output_detection_id = output_detection_result.get('detection_id')
+            output_blocked = output_detection_result.get('blocked', False)
+            final_content = output_detection_result.get('response_content', output_content)
+
+            # Update response content
+            upstream_response['choices'][0]['message']['content'] = final_content
+            if output_blocked:
+                upstream_response['choices'][0]['finish_reason'] = 'content_filter'
+
+        # Extract usage tokens if available
+        usage = upstream_response.get('usage', {})
+        request_tokens = usage.get('prompt_tokens', 0)
+        response_tokens = usage.get('completion_tokens', 0)
+        total_tokens = usage.get('total_tokens', 0)
+
+        # Log request
+        await proxy_service.log_proxy_request_gateway(
+            request_id=request_id,
+            tenant_id=tenant_id,
+            upstream_api_config_id=str(api_config.id),
+            model_requested=model_name,
+            model_used=model_name,
+            provider=api_config.provider or "unknown",
+            input_detection_id=input_detection_id,
+            output_detection_id=output_detection_id,
+            input_blocked=False,
+            output_blocked=output_blocked,
+            request_tokens=request_tokens,
+            response_tokens=response_tokens,
+            total_tokens=total_tokens,
+            status="success",
+            response_time_ms=int((time.time() - start_time) * 1000)
+        )
+
+        return JSONResponse(content=upstream_response)
+
+    except Exception as e:
+        logger.error(f"Gateway non-streaming handler error: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": {"message": str(e), "type": "internal_error"}}
+        )
 
 
 async def _handle_streaming_chat_completion(
@@ -540,6 +779,20 @@ async def _handle_streaming_chat_completion(
                         )
                         
                         if should_stop:
+                            # Get suggest_answer from detection result
+                            suggest_answer = None
+                            if detector.detection_result:
+                                suggest_answer = detector.detection_result.get('suggest_answer')
+                                logger.info(f"Detected risk, suggest_answer: {suggest_answer}")
+                            
+                            # If there's a suggest_answer, send it as content chunks first
+                            if suggest_answer:
+                                logger.info(f"Sending suggest_answer as content chunks: {suggest_answer[:50]}...")
+                                for chunk_str in _yield_suggest_answer_chunks(request_id, suggest_answer):
+                                    yield chunk_str
+                            else:
+                                logger.warning(f"No suggest_answer found in detection_result: {detector.detection_result}")
+                            
                             # Send risk blocking message and stop
                             stop_chunk = _create_stop_chunk(request_id, detector.detection_result)
                             yield f"data: {json.dumps(stop_chunk)}\n\n"
@@ -568,17 +821,44 @@ async def _handle_streaming_chat_completion(
                         model_config, input_messages, tenant_id, request_id
                     )
                     if should_stop:
+                        # Get suggest_answer from detection result
+                        logger.info(f"Final detection - should_stop=True, detector.detection_result exists: {detector.detection_result is not None}")
+                        if detector.detection_result:
+                            logger.info(f"Final detection - detection_result keys: {list(detector.detection_result.keys())}")
+                        suggest_answer = None
+                        if detector.detection_result:
+                            suggest_answer = detector.detection_result.get('suggest_answer')
+                            logger.info(f"Final detection - Detected risk, suggest_answer: '{suggest_answer}', type: {type(suggest_answer)}, bool check: {bool(suggest_answer)}")
+                        
+                        # If there's a suggest_answer, send it as content chunks first
+                        if suggest_answer:
+                            logger.info(f"Final detection - Sending suggest_answer as content chunks: {suggest_answer[:50]}...")
+                            chunk_count = 0
+                            for chunk_str in _yield_suggest_answer_chunks(request_id, suggest_answer):
+                                chunk_count += 1
+                                logger.info(f"Final detection - Yielding suggest_answer chunk {chunk_count}")
+                                yield chunk_str
+                            logger.info(f"Final detection - Sent {chunk_count} suggest_answer chunks")
+                        else:
+                            logger.warning(f"Final detection - No suggest_answer found in detection_result: {detector.detection_result}")
+                        
+                        # Send risk blocking message
                         stop_chunk = _create_stop_chunk(request_id, detector.detection_result)
                         yield f"data: {json.dumps(stop_chunk)}\n\n"
+                        yield "data: [DONE]\n\n"
                     else:
                         # Detection safe, release last retained chunk (if any)
                         if detector.can_release_last_chunk():
                             last_chunk_data = detector.get_and_clear_last_chunk()
                             if last_chunk_data:
                                 yield f"data: {last_chunk_data}\n\n"
-                
-                # Normal end
-                if not detector.should_stop:
+                        # Normal end when detection passed
+                        yield "data: [DONE]\n\n"
+                elif detector.should_stop:
+                    # Already stopped during chunk detection, just ensure [DONE] is sent
+                    yield "data: [DONE]\n\n"
+                else:
+                    # Normal end when no final detection was needed
                     yield "data: [DONE]\n\n"
                     
             except Exception as e:
@@ -641,6 +921,19 @@ def _extract_chunk_content(chunk: dict, content_field: str = "content") -> str:
     return ""
 
 
+def _create_content_chunk(request_id: str, content: str) -> dict:
+    """Create a content chunk with specified content"""
+    return {
+        "id": f"chatcmpl-{request_id}",
+        "object": "chat.completion.chunk",
+        "created": int(time.time()),
+        "choices": [{
+            "index": 0,
+            "delta": {"content": content}
+        }]
+    }
+
+
 def _create_stop_chunk(request_id: str, detection_result: dict = None) -> dict:
     """Create risk blocking chunk, include detailed detection information"""
     chunk = {
@@ -649,7 +942,7 @@ def _create_stop_chunk(request_id: str, detection_result: dict = None) -> dict:
         "created": int(time.time()),
         "choices": [{
             "index": 0,
-            "delta": {"content": ""},
+            "delta": {},
             "finish_reason": "content_filter"
         }]
     }
@@ -662,6 +955,7 @@ def _create_stop_chunk(request_id: str, detection_result: dict = None) -> dict:
             "overall_risk_level": detection_result.get('overall_risk_level'),
             "compliance_result": detection_result.get('compliance_result'),
             "security_result": detection_result.get('security_result'),
+            "data_result": detection_result.get('data_result'),
             "request_id": detection_result.get('request_id')
         }
     else:
@@ -675,6 +969,23 @@ def _create_stop_chunk(request_id: str, detection_result: dict = None) -> dict:
         }
     
     return chunk
+
+
+def _yield_suggest_answer_chunks(request_id: str, suggest_answer: str, chunk_size: int = 50):
+    """Yield suggest answer content in chunks to match streaming format"""
+    if not suggest_answer:
+        logger.warning(f"_yield_suggest_answer_chunks called with empty suggest_answer")
+        return
+    
+    logger.info(f"_yield_suggest_answer_chunks: suggest_answer length={len(suggest_answer)}, content={suggest_answer[:100]}")
+    
+    # Split suggest_answer into chunks for streaming
+    for i in range(0, len(suggest_answer), chunk_size):
+        chunk_content = suggest_answer[i:i + chunk_size]
+        content_chunk = _create_content_chunk(request_id, chunk_content)
+        chunk_str = f"data: {json.dumps(content_chunk)}\n\n"
+        logger.debug(f"Yielding suggest_answer chunk {i//chunk_size + 1}: {chunk_content[:50]}...")
+        yield chunk_str
 
 
 def _create_error_chunk(request_id: str, error_msg: str) -> dict:
@@ -780,12 +1091,169 @@ async def list_models(request: Request):
             content={"error": {"message": str(e), "type": "internal_error"}}
         )
 
+@router.post("/v1/gateway/{upstream_api_id}/chat/completions")
+async def create_gateway_chat_completion(
+    upstream_api_id: str,
+    request_data: ChatCompletionRequest,
+    request: Request
+):
+    """Create chat completion via gateway pattern (new design)
+
+    URL pattern: /v1/gateway/{upstream_api_id}/chat/completions
+    The model name in request body is passed through directly to upstream API
+    """
+    try:
+        auth_ctx = getattr(request.state, 'auth_context', None)
+        if not auth_ctx:
+            raise HTTPException(status_code=401, detail="Authentication required")
+
+        tenant_id = auth_ctx['data'].get('tenant_id') or auth_ctx['data'].get('tenant_id')
+        request_id = str(uuid.uuid4())
+
+        # Get user ID
+        user_id = None
+        if request_data.extra_body:
+            user_id = request_data.extra_body.get('xxai_app_user_id')
+
+        # If no user_id, use tenant_id as fallback
+        if not user_id:
+            user_id = tenant_id
+
+        logger.info(f"Gateway chat completion request {request_id} from tenant {tenant_id}, upstream_api_id: {upstream_api_id}, model: {request_data.model}, user_id: {user_id}")
+
+        # Check if user is banned
+        await check_user_ban_status_proxy(tenant_id, user_id)
+
+        # Get upstream API configuration by ID
+        api_config = await proxy_service.get_upstream_api_config(upstream_api_id, tenant_id)
+        if not api_config:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "error": {
+                        "message": f"Upstream API configuration '{upstream_api_id}' not found or inactive.",
+                        "type": "upstream_api_not_found"
+                    }
+                }
+            )
+
+        # Construct messages structure for context-aware detection
+        input_messages = [{"role": msg.role, "content": msg.content} for msg in request_data.messages]
+
+        start_time = time.time()
+        input_blocked = False
+        output_blocked = False
+        input_detection_id = None
+        output_detection_id = None
+
+        try:
+            # Input detection - select asynchronous/synchronous mode based on configuration
+            input_detection_result = await perform_input_detection(
+                api_config, input_messages, tenant_id, request_id, user_id
+            )
+
+            input_detection_id = input_detection_result.get('detection_id')
+            input_blocked = input_detection_result.get('blocked', False)
+            suggest_answer = input_detection_result.get('suggest_answer')
+
+            # If input is blocked, record log and return
+            if input_blocked:
+                # Record log
+                await proxy_service.log_proxy_request_gateway(
+                        request_id=request_id,
+                        tenant_id=tenant_id,
+                        upstream_api_config_id=str(api_config.id),
+                        model_requested=request_data.model,
+                        model_used=request_data.model,  # Gateway pattern: pass through model name
+                        provider=api_config.provider or "unknown",
+                        input_detection_id=input_detection_id,
+                        input_blocked=True,
+                        status="blocked",
+                        response_time_ms=int((time.time() - start_time) * 1000)
+                )
+
+                response = {
+                    "id": f"chatcmpl-{request_id}",
+                    "object": "chat.completion",
+                    "created": int(time.time()),
+                    "model": request_data.model,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": suggest_answer
+                            },
+                            "finish_reason": "content_filter"
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "total_tokens": 0
+                    }
+                }
+
+                # Add detection information for debugging and user handling
+                response["detection_info"] = {
+                    "input_blocked": True,
+                    "input_detection_id": input_detection_id
+                }
+
+                return JSONResponse(content=response)
+
+            # Input passes, call upstream API
+            # The model name is passed through directly - this is the key difference from old pattern
+            upstream_response = await proxy_service.call_upstream_api_gateway(
+                api_config=api_config,
+                model_name=request_data.model,  # Pass through original model name
+                messages=[msg.dict() for msg in request_data.messages],
+                stream=request_data.stream,
+                temperature=request_data.temperature,
+                max_tokens=request_data.max_tokens,
+                top_p=request_data.top_p,
+                frequency_penalty=request_data.frequency_penalty,
+                presence_penalty=request_data.presence_penalty,
+                stop=request_data.stop
+            )
+
+            # Handle streaming response
+            if request_data.stream:
+                return await _handle_gateway_streaming_response(
+                    upstream_response, api_config, tenant_id, request_id,
+                    input_detection_id, user_id, request_data.model, start_time,
+                    input_messages
+                )
+            else:
+                # Handle non-streaming response
+                return await _handle_gateway_non_streaming_response(
+                    upstream_response, api_config, tenant_id, request_id,
+                    input_detection_id, user_id, request_data.model, start_time,
+                    input_messages
+                )
+
+        except Exception as e:
+            logger.error(f"Gateway chat completion error: {e}")
+            return JSONResponse(
+                status_code=500,
+                content={"error": {"message": str(e), "type": "internal_error"}}
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Gateway completion error: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": {"message": str(e), "type": "internal_error"}}
+        )
+
 @router.post("/v1/chat/completions")
 async def create_chat_completion(
     request_data: ChatCompletionRequest,
     request: Request
 ):
-    """Create chat completion"""
+    """Create chat completion (legacy pattern - model name matches config_name)"""
     try:
         auth_ctx = getattr(request.state, 'auth_context', None)
         if not auth_ctx:

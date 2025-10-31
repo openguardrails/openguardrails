@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 
 # Import database related modules
 from database.connection import get_admin_db_session
-from database.models import ProxyModelConfig, ProxyRequestLog, OnlineTestModelSelection
+from database.models import ProxyModelConfig, ProxyRequestLog, OnlineTestModelSelection, UpstreamApiConfig
 from utils.logger import setup_logger
 
 logger = setup_logger()
@@ -109,8 +109,40 @@ class ProxyService:
         finally:
             db.close()
     
+    async def get_upstream_api_config(self, upstream_api_id: str, tenant_id: str) -> Optional[UpstreamApiConfig]:
+        """Get upstream API configuration by ID (new gateway pattern)"""
+        # Ensure IDs are UUID objects
+        if isinstance(upstream_api_id, str):
+            upstream_api_id = uuid.UUID(upstream_api_id)
+        if isinstance(tenant_id, str):
+            tenant_id = uuid.UUID(tenant_id)
+
+        db = get_admin_db_session()
+        try:
+            config = db.query(UpstreamApiConfig).filter(
+                UpstreamApiConfig.id == upstream_api_id,
+                UpstreamApiConfig.tenant_id == tenant_id,
+                UpstreamApiConfig.is_active == True
+            ).first()
+
+            # If found, preload all attributes to avoid session detached error
+            if config:
+                _ = config.tenant  # Trigger tenant relationship loading
+                _ = (config.id, config.config_name, config.api_base_url,
+                     config.api_key_encrypted, config.provider, config.is_active,
+                     config.block_on_input_risk, config.block_on_output_risk,
+                     config.enable_reasoning_detection, config.stream_chunk_size,
+                     config.description, config.created_at, config.updated_at)
+
+                # Detach object from session
+                db.expunge(config)
+
+            return config
+        finally:
+            db.close()
+
     async def get_user_model_config(self, tenant_id: str, model_name: str) -> Optional[ProxyModelConfig]:
-        """Get user specific model configuration"""
+        """Get user specific model configuration (legacy pattern)"""
         # Ensure tenant_id is UUID object
         if isinstance(tenant_id, str):
             tenant_id = uuid.UUID(tenant_id)
@@ -470,7 +502,136 @@ class ProxyService:
         except httpx.RequestError as e:
             logger.error(f"Request error forwarding to {model_config.api_base_url}: {e}")
             raise Exception("Failed to connect to model API")
-    
+
+    # ============================================================================
+    # Gateway Pattern Methods (new design - one API key serves multiple models)
+    # ============================================================================
+
+    async def call_upstream_api_gateway(
+        self,
+        api_config: UpstreamApiConfig,
+        model_name: str,  # Original model name from user request
+        messages: List[Dict],
+        stream: bool = False,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        top_p: Optional[float] = None,
+        frequency_penalty: Optional[float] = None,
+        presence_penalty: Optional[float] = None,
+        stop: Optional[List[str]] = None
+    ):
+        """Call upstream API with gateway pattern (pass through model name)"""
+        api_key = self._decrypt_api_key(api_config.api_key_encrypted)
+
+        # Construct request URL
+        url = f"{api_config.api_base_url}/chat/completions"
+
+        # Construct request headers
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+
+        # Construct request body - pass through original model name
+        payload = {
+            "model": model_name,  # Key difference: use user's original model name
+            "messages": messages,
+            "stream": stream
+        }
+
+        # Add optional parameters
+        if temperature is not None:
+            payload["temperature"] = temperature
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
+        if top_p is not None:
+            payload["top_p"] = top_p
+        if frequency_penalty is not None:
+            payload["frequency_penalty"] = frequency_penalty
+        if presence_penalty is not None:
+            payload["presence_penalty"] = presence_penalty
+        if stop is not None:
+            payload["stop"] = stop
+
+        # Use shared HTTP client to send request
+        try:
+            if stream:
+                # Return async generator for streaming
+                return self.http_client.stream("POST", url, headers=headers, json=payload)
+            else:
+                # Non-streaming request
+                response = await self.http_client.post(url, headers=headers, json=payload)
+                response.raise_for_status()
+                return response.json()
+
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error calling gateway upstream {api_config.api_base_url}: {e}")
+            if hasattr(e, 'response'):
+                logger.error(f"Upstream API response: {e.response.text}")
+            if e.response.status_code == 401:
+                raise Exception("Invalid API credentials")
+            elif e.response.status_code == 403:
+                raise Exception("Access forbidden by upstream API")
+            elif e.response.status_code == 429:
+                raise Exception("Rate limit exceeded")
+            elif e.response.status_code >= 500:
+                raise Exception("Upstream API service unavailable")
+            else:
+                raise Exception("Request failed")
+        except httpx.RequestError as e:
+            logger.error(f"Request error calling gateway upstream {api_config.api_base_url}: {e}")
+            raise Exception("Failed to connect to upstream API")
+
+    async def log_proxy_request_gateway(
+        self,
+        request_id: str,
+        tenant_id: str,
+        upstream_api_config_id: str,
+        model_requested: str,
+        model_used: str,
+        provider: str,
+        input_detection_id: Optional[str] = None,
+        output_detection_id: Optional[str] = None,
+        input_blocked: bool = False,
+        output_blocked: bool = False,
+        request_tokens: int = 0,
+        response_tokens: int = 0,
+        total_tokens: int = 0,
+        status: str = "success",
+        error_message: Optional[str] = None,
+        response_time_ms: int = 0
+    ):
+        """Log proxy request for gateway pattern (uses upstream_api_config_id)"""
+        db = get_admin_db_session()
+        try:
+            log_entry = ProxyRequestLog(
+                request_id=request_id,
+                tenant_id=tenant_id,
+                upstream_api_config_id=upstream_api_config_id,  # New field
+                proxy_config_id=None,  # Legacy field, set to None for gateway pattern
+                model_requested=model_requested,
+                model_used=model_used,
+                provider=provider,
+                input_detection_id=input_detection_id,
+                output_detection_id=output_detection_id,
+                input_blocked=input_blocked,
+                output_blocked=output_blocked,
+                request_tokens=request_tokens,
+                response_tokens=response_tokens,
+                total_tokens=total_tokens,
+                status=status,
+                error_message=error_message,
+                response_time_ms=response_time_ms
+            )
+
+            db.add(log_entry)
+            db.commit()
+        except Exception as e:
+            logger.error(f"Failed to log gateway proxy request {request_id}: {e}")
+            db.rollback()
+        finally:
+            db.close()
+
     async def log_proxy_request(
         self,
         request_id: str,

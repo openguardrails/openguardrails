@@ -1,5 +1,6 @@
 """
-Proxy model configuration management API - management service endpoint
+Upstream API configuration management API - management service endpoint
+Redesigned to support one upstream API key serving multiple models
 """
 from fastapi import APIRouter, HTTPException, Request, Depends
 from fastapi.responses import JSONResponse
@@ -8,7 +9,7 @@ import uuid
 from datetime import datetime
 
 from database.connection import get_admin_db_session
-from database.models import ProxyModelConfig, ProxyRequestLog, OnlineTestModelSelection
+from database.models import UpstreamApiConfig, ProxyRequestLog, OnlineTestModelSelection
 from sqlalchemy.orm import Session
 from utils.logger import setup_logger
 from cryptography.fernet import Fernet
@@ -43,9 +44,20 @@ def _decrypt_api_key(encrypted_api_key: str) -> str:
     cipher_suite = Fernet(_get_or_create_encryption_key())
     return cipher_suite.decrypt(encrypted_api_key.encode()).decode()
 
-@router.get("/proxy/models")
-async def get_user_proxy_models(request: Request):
-    """Get user proxy model configuration"""
+def _mask_api_key(api_key: str) -> str:
+    """Mask API key, showing first 6 and last 4 characters"""
+    if not api_key:
+        return ""
+    if len(api_key) <= 10:
+        # If too short, just mask the middle part
+        return api_key[0] + "*" * (len(api_key) - 2) + api_key[-1] if len(api_key) > 2 else api_key
+    # Show first 6 and last 4 characters, mask the rest
+    masked_length = len(api_key) - 10
+    return api_key[:6] + "*" * masked_length + api_key[-4:]
+
+@router.get("/proxy/upstream-apis")
+async def get_user_upstream_apis(request: Request):
+    """Get user upstream API configurations"""
     try:
         auth_ctx = getattr(request.state, 'auth_context', None)
         if not auth_ctx:
@@ -68,39 +80,42 @@ async def get_user_proxy_models(request: Request):
         # Directly use database query
         db = get_admin_db_session()
         try:
-            models = db.query(ProxyModelConfig).filter(
-                ProxyModelConfig.tenant_id == tenant_id_uuid
+            configs = db.query(UpstreamApiConfig).filter(
+                UpstreamApiConfig.tenant_id == tenant_id_uuid
             ).all()
-            
+
             return {
                 "success": True,
                 "data": [
                     {
-                        "id": str(model.id),
-                        "config_name": model.config_name,
-                        "model_name": model.model_name,
-                        "enabled": model.enabled,
-                        "block_on_input_risk": model.block_on_input_risk,
-                        "block_on_output_risk": model.block_on_output_risk,
-                        "enable_reasoning_detection": model.enable_reasoning_detection,
-                        "stream_chunk_size": model.stream_chunk_size,
-                        "created_at": model.created_at.isoformat()
+                        "id": str(config.id),
+                        "config_name": config.config_name,
+                        "api_base_url": config.api_base_url,
+                        "provider": config.provider,
+                        "is_active": config.is_active,
+                        "block_on_input_risk": config.block_on_input_risk,
+                        "block_on_output_risk": config.block_on_output_risk,
+                        "enable_reasoning_detection": config.enable_reasoning_detection,
+                        "stream_chunk_size": config.stream_chunk_size,
+                        "description": config.description,
+                        "created_at": config.created_at.isoformat(),
+                        "gateway_url": f"http://localhost:5002/v1/gateway/{config.id}/"
                     }
-                    for model in models
+                    for config in configs
                 ]
             }
         finally:
             db.close()
     except Exception as e:
-        logger.error(f"Get user proxy models error: {e}")
+        logger.error(f"Get user upstream APIs error: {e}")
         return JSONResponse(
             status_code=500,
             content={"success": False, "error": str(e)}
         )
 
-@router.post("/proxy/models")
-async def create_proxy_model(request: Request):
-    """Create proxy model configuration"""
+@router.post("/proxy/upstream-apis")
+async def create_upstream_api(request: Request):
+    """Create upstream API configuration"""
     try:
         auth_ctx = getattr(request.state, 'auth_context', None)
         if not auth_ctx:
@@ -121,73 +136,73 @@ async def create_proxy_model(request: Request):
             raise HTTPException(status_code=400, detail="Invalid user ID format")
 
         request_data = await request.json()
-        
+
         # Debug log
-        logger.info(f"Create proxy model - received original data: {request_data}")
-        for key in ['enabled', 'block_on_input_risk', 'block_on_output_risk', 'enable_reasoning_detection', 'stream_chunk_size']:
-            if key in request_data:
-                logger.info(f"{key}: {request_data[key]} (Type: {type(request_data[key])})")
-        
-        # Verify necessary fields
-        required_fields = ['config_name', 'api_base_url', 'api_key', 'model_name']
+        logger.info(f"Create upstream API - received data: {request_data}")
+
+        # Verify necessary fields (removed model_name requirement)
+        required_fields = ['config_name', 'api_base_url', 'api_key']
         for field in required_fields:
             if field not in request_data or not request_data[field]:
                 raise ValueError(f"Missing required field: {field}")
-        
+
         # Directly use database operation
         db = get_admin_db_session()
         try:
             # Check if configuration name already exists
-            existing = db.query(ProxyModelConfig).filter(
-                ProxyModelConfig.tenant_id == tenant_id_uuid,
-                ProxyModelConfig.config_name == request_data['config_name']
+            existing = db.query(UpstreamApiConfig).filter(
+                UpstreamApiConfig.tenant_id == tenant_id_uuid,
+                UpstreamApiConfig.config_name == request_data['config_name']
             ).first()
             if existing:
-                raise ValueError(f"Model configuration '{request_data['config_name']}' already exists")
-            
+                raise ValueError(f"Upstream API configuration '{request_data['config_name']}' already exists")
+
             # Encrypt API key
             encrypted_api_key = _encrypt_api_key(request_data['api_key'])
-            
-            # Create model configuration, using "3+3" design
-            model_config = ProxyModelConfig(
+
+            # Create upstream API configuration
+            api_config = UpstreamApiConfig(
                 id=uuid.uuid4(),
                 tenant_id=tenant_id_uuid,
                 config_name=request_data['config_name'],
                 api_base_url=request_data['api_base_url'],
                 api_key_encrypted=encrypted_api_key,
-                model_name=request_data['model_name'],
-                enabled=bool(request_data.get('enabled', True)),
+                provider=request_data.get('provider'),  # Optional
+                is_active=bool(request_data.get('is_active', True)),
                 block_on_input_risk=bool(request_data.get('block_on_input_risk', False)),
                 block_on_output_risk=bool(request_data.get('block_on_output_risk', False)),
                 enable_reasoning_detection=bool(request_data.get('enable_reasoning_detection', True)),
-                stream_chunk_size=int(request_data.get('stream_chunk_size', 50))
+                stream_chunk_size=int(request_data.get('stream_chunk_size', 50)),
+                description=request_data.get('description')
             )
-            
-            db.add(model_config)
+
+            db.add(api_config)
             db.commit()
-            db.refresh(model_config)
+            db.refresh(api_config)
         finally:
             db.close()
-        
+
         return {
             "success": True,
             "data": {
-                "id": str(model_config.id),
-                "config_name": model_config.config_name,
-                "model_name": model_config.model_name,
-                "enabled": model_config.enabled
+                "id": str(api_config.id),
+                "config_name": api_config.config_name,
+                "api_base_url": api_config.api_base_url,
+                "provider": api_config.provider,
+                "is_active": api_config.is_active,
+                "gateway_url": f"http://localhost:5002/v1/gateway/{api_config.id}/"
             }
         }
     except Exception as e:
-        logger.error(f"Create proxy model error: {e}")
+        logger.error(f"Create upstream API error: {e}")
         return JSONResponse(
             status_code=500,
             content={"success": False, "error": str(e)}
         )
 
-@router.get("/proxy/models/{model_id}")
-async def get_proxy_model_detail(model_id: str, request: Request):
-    """Get single proxy model configuration detail (for edit form)"""
+@router.get("/proxy/upstream-apis/{api_id}")
+async def get_upstream_api_detail(api_id: str, request: Request):
+    """Get single upstream API configuration detail (for edit form)"""
     try:
         auth_ctx = getattr(request.state, 'auth_context', None)
         if not auth_ctx:
@@ -209,42 +224,54 @@ async def get_proxy_model_detail(model_id: str, request: Request):
 
         db = get_admin_db_session()
         try:
-            model_config = db.query(ProxyModelConfig).filter(
-                ProxyModelConfig.id == model_id,
-                ProxyModelConfig.tenant_id == tenant_id_uuid
+            api_config = db.query(UpstreamApiConfig).filter(
+                UpstreamApiConfig.id == api_id,
+                UpstreamApiConfig.tenant_id == tenant_id_uuid
             ).first()
-            
-            if not model_config:
-                raise ValueError(f"Model configuration not found")
-            
+
+            if not api_config:
+                raise ValueError(f"Upstream API configuration not found")
+
+            # Decrypt and mask API key for display
+            api_key_masked = ""
+            if api_config.api_key_encrypted:
+                try:
+                    decrypted_key = _decrypt_api_key(api_config.api_key_encrypted)
+                    api_key_masked = _mask_api_key(decrypted_key)
+                except Exception as e:
+                    logger.error(f"Failed to decrypt API key: {e}")
+                    api_key_masked = "******"
+
             return {
                 "success": True,
                 "data": {
-                    "id": str(model_config.id),
-                    "config_name": model_config.config_name,
-                    "api_base_url": model_config.api_base_url,
-                    "api_key_masked": "sk-xxai-" + "*" * 48 if model_config.api_key_encrypted else "",
-                    "model_name": model_config.model_name,
-                    "enabled": model_config.enabled if model_config.enabled is not None else True,
-                    "enable_reasoning_detection": model_config.enable_reasoning_detection if model_config.enable_reasoning_detection is not None else True,
-                    "block_on_input_risk": model_config.block_on_input_risk if model_config.block_on_input_risk is not None else False,
-                    "block_on_output_risk": model_config.block_on_output_risk if model_config.block_on_output_risk is not None else False,
-                    "stream_chunk_size": model_config.stream_chunk_size if model_config.stream_chunk_size is not None else 50,
-                    "created_at": model_config.created_at.isoformat()
+                    "id": str(api_config.id),
+                    "config_name": api_config.config_name,
+                    "api_base_url": api_config.api_base_url,
+                    "api_key_masked": api_key_masked,
+                    "provider": api_config.provider,
+                    "is_active": api_config.is_active if api_config.is_active is not None else True,
+                    "enable_reasoning_detection": api_config.enable_reasoning_detection if api_config.enable_reasoning_detection is not None else True,
+                    "block_on_input_risk": api_config.block_on_input_risk if api_config.block_on_input_risk is not None else False,
+                    "block_on_output_risk": api_config.block_on_output_risk if api_config.block_on_output_risk is not None else False,
+                    "stream_chunk_size": api_config.stream_chunk_size if api_config.stream_chunk_size is not None else 50,
+                    "description": api_config.description,
+                    "created_at": api_config.created_at.isoformat(),
+                    "gateway_url": f"http://localhost:5002/v1/gateway/{api_config.id}/"
                 }
             }
         finally:
             db.close()
     except Exception as e:
-        logger.error(f"Get proxy model detail error: {e}")
+        logger.error(f"Get upstream API detail error: {e}")
         return JSONResponse(
             status_code=500,
             content={"success": False, "error": str(e)}
         )
 
-@router.put("/proxy/models/{model_id}")
-async def update_proxy_model(model_id: str, request: Request):
-    """Update proxy model configuration"""
+@router.put("/proxy/upstream-apis/{api_id}")
+async def update_upstream_api(api_id: str, request: Request):
+    """Update upstream API configuration"""
     try:
         auth_ctx = getattr(request.state, 'auth_context', None)
         if not auth_ctx:
@@ -265,74 +292,71 @@ async def update_proxy_model(model_id: str, request: Request):
             raise HTTPException(status_code=400, detail="Invalid user ID format")
 
         request_data = await request.json()
-        
+
         # Debug log
-        logger.info(f"Update proxy model {model_id} - received original data: {request_data}")
-        for key in ['enabled', 'block_on_input_risk', 'block_on_output_risk', 'enable_reasoning_detection', 'stream_chunk_size']:
-            if key in request_data:
-                logger.info(f"{key}: {request_data[key]} (类型: {type(request_data[key])})")
-        
+        logger.info(f"Update upstream API {api_id} - received data: {request_data}")
+
         # Directly use database operation
         db = get_admin_db_session()
         try:
-            model_config = db.query(ProxyModelConfig).filter(
-                ProxyModelConfig.id == model_id,
-                ProxyModelConfig.tenant_id == tenant_id_uuid
+            api_config = db.query(UpstreamApiConfig).filter(
+                UpstreamApiConfig.id == api_id,
+                UpstreamApiConfig.tenant_id == tenant_id_uuid
             ).first()
 
-            if not model_config:
-                raise ValueError(f"Model configuration not found")
+            if not api_config:
+                raise ValueError(f"Upstream API configuration not found")
 
             # Check if configuration name already exists
             if 'config_name' in request_data:
-                existing = db.query(ProxyModelConfig).filter(
-                    ProxyModelConfig.tenant_id == tenant_id_uuid,
-                    ProxyModelConfig.config_name == request_data['config_name'],
-                    ProxyModelConfig.id != model_id  # Exclude current configuration
+                existing = db.query(UpstreamApiConfig).filter(
+                    UpstreamApiConfig.tenant_id == tenant_id_uuid,
+                    UpstreamApiConfig.config_name == request_data['config_name'],
+                    UpstreamApiConfig.id != api_id  # Exclude current configuration
                 ).first()
                 if existing:
-                    raise ValueError(f"Model configuration '{request_data['config_name']}' already exists")
-            
+                    raise ValueError(f"Upstream API configuration '{request_data['config_name']}' already exists")
+
             # Update fields
             for field, value in request_data.items():
                 if field == 'api_key':
                     if value:  # If API key is provided, update
-                        model_config.api_key_encrypted = _encrypt_api_key(value)
-
-                elif field in ['enabled', 'block_on_input_risk', 'block_on_output_risk', 'enable_reasoning_detection']:
-                    # Explicitly handle boolean fields, ensure correct false value setting
-                    setattr(model_config, field, bool(value))
+                        api_config.api_key_encrypted = _encrypt_api_key(value)
+                elif field in ['is_active', 'block_on_input_risk', 'block_on_output_risk', 'enable_reasoning_detection']:
+                    # Explicitly handle boolean fields
+                    setattr(api_config, field, bool(value))
                 elif field == 'stream_chunk_size':
                     # Handle integer fields
-                    setattr(model_config, field, int(value))
-                elif hasattr(model_config, field):
-                    setattr(model_config, field, value)
-            
-            
+                    setattr(api_config, field, int(value))
+                elif hasattr(api_config, field):
+                    setattr(api_config, field, value)
+
             db.commit()
-            db.refresh(model_config)
-            
+            db.refresh(api_config)
+
             return {
                 "success": True,
                 "data": {
-                    "id": str(model_config.id),
-                    "config_name": model_config.config_name,
-                    "model_name": model_config.model_name,
-                    "enabled": model_config.enabled
+                    "id": str(api_config.id),
+                    "config_name": api_config.config_name,
+                    "api_base_url": api_config.api_base_url,
+                    "provider": api_config.provider,
+                    "is_active": api_config.is_active,
+                    "gateway_url": f"http://localhost:5002/v1/gateway/{api_config.id}/"
                 }
             }
         finally:
             db.close()
     except Exception as e:
-        logger.error(f"Update proxy model error: {e}")
+        logger.error(f"Update upstream API error: {e}")
         return JSONResponse(
             status_code=500,
             content={"success": False, "error": str(e)}
         )
 
-@router.delete("/proxy/models/{model_id}")
-async def delete_proxy_model(model_id: str, request: Request):
-    """Delete proxy model configuration"""
+@router.delete("/proxy/upstream-apis/{api_id}")
+async def delete_upstream_api(api_id: str, request: Request):
+    """Delete upstream API configuration"""
     try:
         auth_ctx = getattr(request.state, 'auth_context', None)
         if not auth_ctx:
@@ -355,36 +379,35 @@ async def delete_proxy_model(model_id: str, request: Request):
         # Directly use database operation
         db = get_admin_db_session()
         try:
-            model_config = db.query(ProxyModelConfig).filter(
-                ProxyModelConfig.id == model_id,
-                ProxyModelConfig.tenant_id == tenant_id_uuid
+            api_config = db.query(UpstreamApiConfig).filter(
+                UpstreamApiConfig.id == api_id,
+                UpstreamApiConfig.tenant_id == tenant_id_uuid
             ).first()
-            
-            if not model_config:
-                raise ValueError(f"Model configuration not found")
-            
-            # First delete associated request log records
-            deleted_logs_count = db.query(ProxyRequestLog).filter(
-                ProxyRequestLog.proxy_config_id == model_id
-            ).delete()
-            
+
+            if not api_config:
+                raise ValueError(f"Upstream API configuration not found")
+
+            # Note: We don't cascade delete request logs - they reference upstream_api_config_id with ON DELETE SET NULL
+            # This preserves historical data while allowing config deletion
+
             # Delete associated online test model selection records
             deleted_selections_count = db.query(OnlineTestModelSelection).filter(
-                OnlineTestModelSelection.proxy_model_id == model_id
+                OnlineTestModelSelection.proxy_model_id == api_id
             ).delete()
-            
-            # Finally delete proxy model configuration
-            db.delete(model_config)
+
+            # Delete upstream API configuration
+            config_name = api_config.config_name
+            db.delete(api_config)
             db.commit()
-            
-            logger.info(f"Deleted proxy model config '{model_config.config_name}' for user {tenant_id}. "
-                       f"Also deleted {deleted_logs_count} request logs and {deleted_selections_count} model selections.")
+
+            logger.info(f"Deleted upstream API config '{config_name}' for user {tenant_id}. "
+                       f"Also deleted {deleted_selections_count} model selections.")
         finally:
             db.close()
-        
+
         return {"success": True}
     except Exception as e:
-        logger.error(f"Delete proxy model error: {e}")
+        logger.error(f"Delete upstream API error: {e}")
         return JSONResponse(
             status_code=500,
             content={"success": False, "error": str(e)}

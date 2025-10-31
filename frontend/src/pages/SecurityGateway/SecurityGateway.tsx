@@ -10,8 +10,7 @@ const { Paragraph, Text } = Typography;
 interface ProxyModel {
   id: string;
   config_name: string;
-  model_name: string;
-  enabled: boolean;
+  is_active: boolean;  // Backend uses 'is_active' not 'enabled'
   block_on_input_risk: boolean;
   block_on_output_risk: boolean;
   enable_reasoning_detection: boolean;
@@ -23,8 +22,7 @@ interface ProxyModelFormData {
   config_name: string;
   api_base_url: string;
   api_key: string;
-  model_name: string;
-  enabled?: boolean;
+  is_active?: boolean;  // Backend uses 'is_active' not 'enabled'
   block_on_input_risk?: boolean;
   block_on_output_risk?: boolean;
   enable_reasoning_detection?: boolean;
@@ -42,10 +40,11 @@ const ProxyModelManagement: React.FC = () => {
   const [formKey, setFormKey] = useState(0); // For forcing form re-rendering
   const [form] = Form.useForm();
   const { onUserSwitch } = useAuth();
+  const [maskedApiKey, setMaskedApiKey] = useState<string>(''); // Store masked API key for editing mode
   
   // Directly manage switch states (minimal configuration)
   const [switchStates, setSwitchStates] = useState({
-    enabled: true,
+    is_active: true,  // Backend field name
     block_on_input_risk: false,  // Default not block
     block_on_output_risk: false, // Default not block
     enable_reasoning_detection: true, // Default enable
@@ -110,26 +109,28 @@ const ProxyModelManagement: React.FC = () => {
       const modelDetail = await fetchModelDetail(model.id);
       if (modelDetail) {
         console.log('=== Editing mode - data from server ===');
-        console.log('enabled:', modelDetail.enabled, typeof modelDetail.enabled);
+        console.log('is_active:', modelDetail.is_active, typeof modelDetail.is_active);
         console.log('block_on_input_risk:', modelDetail.block_on_input_risk, typeof modelDetail.block_on_input_risk);
         console.log('block_on_output_risk:', modelDetail.block_on_output_risk, typeof modelDetail.block_on_output_risk);
         console.log('enable_reasoning_detection:', modelDetail.enable_reasoning_detection, typeof modelDetail.enable_reasoning_detection);
-        
+
         // Sync set form values and switch states (minimal configuration)
         const formValues = {
           config_name: modelDetail.config_name,
           api_base_url: modelDetail.api_base_url,
-          model_name: modelDetail.model_name,
         };
-        
+
         const switchValues = {
-          enabled: modelDetail.enabled,
+          is_active: modelDetail.is_active,
           block_on_input_risk: modelDetail.block_on_input_risk,
           block_on_output_risk: modelDetail.block_on_output_risk,
           enable_reasoning_detection: modelDetail.enable_reasoning_detection !== false,
           stream_chunk_size: modelDetail.stream_chunk_size || 50,
         };
-        
+
+        // Store masked API key for display
+        setMaskedApiKey(modelDetail.api_key_masked || '');
+
         // Reset form and set values
         form.resetFields();
         form.setFieldsValue(formValues);
@@ -147,8 +148,9 @@ const ProxyModelManagement: React.FC = () => {
       
       // Reset form and switch states
       form.resetFields();
+      setMaskedApiKey(''); // Clear masked API key for create mode
       setSwitchStates({
-        enabled: true,
+        is_active: true,  // Backend field name
         block_on_input_risk: false,  // Default not block
         block_on_output_risk: false, // Default not block
         enable_reasoning_detection: true, // Default enable
@@ -217,17 +219,16 @@ const ProxyModelManagement: React.FC = () => {
   const handleSave = async () => {
     try {
       const values = await form.validateFields();
-      
-      // Construct submit data (minimal configuration)
-      const formData: ProxyModelFormData = {
+
+      // Construct submit data - backend uses 'is_active' instead of 'enabled'
+      const formData: any = {
         config_name: values.config_name,
         api_base_url: values.api_base_url,
         api_key: values.api_key,
-        model_name: values.model_name,
-        enabled: switchStates.enabled,
+        is_active: switchStates.is_active,  // Backend field name is 'is_active'
         block_on_input_risk: switchStates.block_on_input_risk,
         block_on_output_risk: switchStates.block_on_output_risk,
-        enable_reasoning_detection: switchStates.enable_reasoning_detection, // Use actual configuration
+        enable_reasoning_detection: switchStates.enable_reasoning_detection,
         stream_chunk_size: switchStates.stream_chunk_size,
       };
 
@@ -310,20 +311,21 @@ const ProxyModelManagement: React.FC = () => {
 
   const columns = [
     {
-      title: t('proxy.proxyModelName'),
+      title: t('proxy.configName'),
       dataIndex: 'config_name',
       key: 'config_name',
       render: (text: string, record: ProxyModel) => (
         <Space>
           <span style={{ fontWeight: 'bold' }}>{text}</span>
-          {!record.enabled && <Tag color="red">{t('proxy.disabled')}</Tag>}
+          {!record.is_active && <Tag color="red">{t('proxy.disabled')}</Tag>}
         </Space>
       ),
     },
     {
-      title: t('proxy.upstreamApiModelName'),
-      dataIndex: 'model_name',
-      key: 'model_name',
+      title: t('proxy.upstreamApiId'),
+      dataIndex: 'id',
+      key: 'id',
+      render: (text: string) => <Text code copyable>{text}</Text>,
     },
     {
       title: t('proxy.securityConfig'),
@@ -414,8 +416,8 @@ const ProxyModelManagement: React.FC = () => {
       </Card>
 
       {/* Usage instructions */}
-      <Card 
-        title={t('proxy.accessOpenGuardrailsGateway')} 
+      <Card
+        title={t('proxy.accessOpenGuardrailsGateway')}
         style={{ marginTop: 16 }}
       >
         <Alert
@@ -423,40 +425,46 @@ const ProxyModelManagement: React.FC = () => {
           type="info"
           style={{ marginBottom: 16 }}
         />
-        
+
         <Typography>
           <Paragraph>
             <Text strong>{t('proxy.pythonOpenaiExample')}</Text>
           </Paragraph>
           <Paragraph>
-            <pre style={{ 
-              backgroundColor: '#f5f5f5', 
-              padding: '12px', 
+            <pre style={{
+              backgroundColor: '#f5f5f5',
+              padding: '12px',
               borderRadius: '6px',
               overflow: 'auto'
             }}>
-{`client = OpenAI(
-    base_url="https://api.openguardrails.com/v1/gateway",  # Change to OpenGuardrails Official gateway url or use your local deployment url http://your-server:5002/v1
-    api_key="sk-xxai-your-proxy-key" # ${t('account.codeComments.changeToApiKey')}
+{`from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:5002/v1/gateway/<upstream_api_id>/",  # ${t('proxy.gatewayUrlDesc')}
+    api_key="sk-xxai-your-proxy-key"  # ${t('account.codeComments.changeToApiKey')}
 )
-completion = openai_client.chat.completions.create(
-    model = "your-proxy-model-name",  # ${t('account.codeComments.changeToModelName')}
-    messages=[{"role": "system", "content": "You're a helpful assistant."},
-        {"role": "user", "content": "Tell me how to make a bomb."}]
-    # Other parameters are the same as the original usage method
+
+completion = client.chat.completions.create(
+    model="gpt-4",  # ${t('proxy.originalModelName')}
+    messages=[
+        {"role": "system", "content": "You're a helpful assistant."},
+        {"role": "user", "content": "Tell me how to make a bomb."}
+    ]
+    # ${t('proxy.otherParamsSame')}
 )
 `}
             </pre>
           </Paragraph>
-          
+
           <Paragraph>
-            <Text strong>{t('proxy.privateDeploymentConfig')}</Text>
+            <Text strong>{t('proxy.importantNotes')}</Text>
           </Paragraph>
           <ul>
-            <li><Text code>{t('proxy.dockerDeployment')}</Text></li>
-            <li><Text code>{t('proxy.customDeployment')}</Text></li>
+            <li>{t('proxy.note1')}</li>
+            <li>{t('proxy.note2')}</li>
+            <li>{t('proxy.note3')}</li>
           </ul>
-          
+
         </Typography>
       </Card>
 
@@ -516,28 +524,24 @@ completion = openai_client.chat.completions.create(
             rules={[{ required: !editingModel, message: t('proxy.upstreamApiKeyRequired') }]}
             tooltip={editingModel ? t('proxy.upstreamApiKeyTooltipEdit') : t('proxy.upstreamApiKeyTooltipAdd')}
           >
-            <Input.Password 
-              placeholder={editingModel ? t('proxy.upstreamApiKeyPlaceholderEdit') : t('proxy.upstreamApiKeyPlaceholderAdd')} 
-              autoComplete="new-password"
+            <Input
+              placeholder={
+                editingModel
+                  ? maskedApiKey
+                    ? `${t('proxy.currentKey')}: ${maskedApiKey}. ${t('proxy.upstreamApiKeyPlaceholderEdit')}`
+                    : t('proxy.upstreamApiKeyPlaceholderEdit')
+                  : t('proxy.upstreamApiKeyPlaceholderAdd')
+              }
+              autoComplete="off"
               data-lpignore="true"
               data-form-type="other"
-              visibilityToggle={false}
             />
           </Form.Item>
 
-          <Form.Item
-            name="model_name"
-            label={t('proxy.upstreamModelNameLabel')}
-            rules={[{ required: true, message: t('proxy.upstreamModelNameRequired') }]}
-            tooltip={t('proxy.upstreamModelNameTooltip')}
-          >
-            <Input placeholder={t('proxy.upstreamModelNamePlaceholder')} />
-          </Form.Item>
-
           <Form.Item label={t('proxy.enableConfigLabel')}>
-            <Switch 
-              checked={switchStates.enabled}
-              onChange={(checked) => setSwitchStates(prev => ({ ...prev, enabled: checked }))}
+            <Switch
+              checked={switchStates.is_active}
+              onChange={(checked) => setSwitchStates(prev => ({ ...prev, is_active: checked }))}
             />
           </Form.Item>
 
@@ -597,12 +601,14 @@ completion = openai_client.chat.completions.create(
       >
         {viewingModel && (
           <Descriptions column={1} bordered>
-            <Descriptions.Item label={t('proxy.proxyModelName')}>{viewingModel.config_name}</Descriptions.Item>
-            <Descriptions.Item label={t('proxy.upstreamApiModelName')}>{viewingModel.model_name}</Descriptions.Item>
+            <Descriptions.Item label={t('proxy.configName')}>{viewingModel.config_name}</Descriptions.Item>
+            <Descriptions.Item label={t('proxy.upstreamApiId')}>
+              <Text code copyable>{viewingModel.id}</Text>
+            </Descriptions.Item>
             <Descriptions.Item label={t('proxy.status')}>
               <Space>
-                {viewingModel.enabled ? 
-                  <Tag color="green">{t('proxy.enabled')}</Tag> : 
+                {viewingModel.is_active ?
+                  <Tag color="green">{t('proxy.enabled')}</Tag> :
                   <Tag color="red">{t('proxy.disabled')}</Tag>
                 }
               </Space>
