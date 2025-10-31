@@ -590,7 +590,9 @@
     "global": "全局",
     "personal": "个人",
     "editBasicInfo": "编辑基本信息",
-    "validationSuccess": "问答对验证成功"
+    "validationSuccess": "问答对验证成功",
+    "deleteConfirmKB": "确定要删除这个知识库吗？",
+    "replaceKBFile": "替换知识库文件"
   },
   "proxy": {
     "title": "安全网关配置",
@@ -665,12 +667,12 @@
     "upstreamApiBaseUrlLabel": "上游API Base URL",
     "upstreamApiBaseUrlRequired": "请输入上游API Base URL",
     "upstreamApiBaseUrlPlaceholder": "如：https://api.openai.com/v1",
-    "upstreamApiKeyLabel": "上游API Key",
+    "upstreamApiKeyLabel": "上游API Key（非 sk-xxai- 格式）",
     "upstreamApiKeyRequired": "请输入上游API Key",
-    "upstreamApiKeyTooltipEdit": "出于安全考虑，编辑时不显示API Key。如需更换，请输入新的API Key；留空则保持原有配置不变。",
-    "upstreamApiKeyTooltipAdd": "请输入上游API的访问密钥",
-    "upstreamApiKeyPlaceholderEdit": "留空保持原有API Key不变，或输入新的API Key",
-    "upstreamApiKeyPlaceholderAdd": "输入上游API Key",
+    "upstreamApiKeyTooltipEdit": "⚠️ 注意：这里填写的是上游服务（如OpenAI、Claude等）的API Key，不是您的OpenGuardrails API Key (sk-xxai-)。出于安全考虑，编辑时不显示API Key。如需更换，请输入新的API Key；留空则保持原有配置不变。",
+    "upstreamApiKeyTooltipAdd": "⚠️ 重要：请输入上游服务（如OpenAI、Claude等）的API Key，而不是您的OpenGuardrails API Key (sk-xxai-)。OpenGuardrails会使用这个key来调用上游服务。",
+    "upstreamApiKeyPlaceholderEdit": "留空保持原有API Key不变，或输入新的上游API Key",
+    "upstreamApiKeyPlaceholderAdd": "输入上游服务的API Key（如 OpenAI 的 sk-xxx）",
     "enableConfigLabel": "启用此配置",
     "securityConfigLabel": "安全配置",
     "securityConfigDesc": "输入检测和输出检测始终开启，为您提供全面安全防护",

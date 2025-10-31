@@ -133,6 +133,9 @@ class ProxyService:
                      config.block_on_input_risk, config.block_on_output_risk,
                      config.enable_reasoning_detection, config.stream_chunk_size,
                      config.description, config.created_at, config.updated_at)
+                
+                # Log for debugging
+                logger.info(f"Retrieved upstream API config: id={config.id}, config_name={config.config_name}, api_base_url={config.api_base_url}")
 
                 # Detach object from session
                 db.expunge(config)
@@ -522,6 +525,10 @@ class ProxyService:
     ):
         """Call upstream API with gateway pattern (pass through model name)"""
         api_key = self._decrypt_api_key(api_config.api_key_encrypted)
+        
+        # Log API key info for debugging (only show first/last few chars)
+        masked_key = f"{api_key[:8]}...{api_key[-4:]}" if len(api_key) > 12 else "***"
+        logger.info(f"Calling upstream API {api_config.api_base_url} with upstream_api_config_id={api_config.id}, api_key={masked_key}")
 
         # Construct request URL
         url = f"{api_config.api_base_url}/chat/completions"

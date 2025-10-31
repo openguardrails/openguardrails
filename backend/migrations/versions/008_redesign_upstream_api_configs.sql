@@ -120,6 +120,9 @@ ON proxy_request_logs(upstream_api_config_id);
 -- Step 4: Mark old table as deprecated (keep for rollback, will drop in future)
 -- ============================================================================
 
+-- Drop the empty deprecated table if it already exists (from previous failed migration)
+DROP TABLE IF EXISTS proxy_model_configs_deprecated CASCADE;
+
 -- Rename old table to indicate deprecation
 ALTER TABLE IF EXISTS proxy_model_configs
 RENAME TO proxy_model_configs_deprecated;

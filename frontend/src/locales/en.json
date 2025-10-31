@@ -594,7 +594,9 @@
     "global": "Global",
     "personal": "Personal",
     "editBasicInfo": "Edit Basic Info",
-    "validationSuccess": "Q&A pairs validated successfully"
+    "validationSuccess": "Q&A pairs validated successfully",
+    "deleteConfirmKB": "Delete this knowledge base?",
+    "replaceKBFile": "Replace Knowledge Base File"
   },
   "proxy": {
     "title": "Security Gateway Configuration",
@@ -669,12 +671,12 @@
     "upstreamApiBaseUrlLabel": "Upstream API Base URL",
     "upstreamApiBaseUrlRequired": "Please enter upstream API Base URL",
     "upstreamApiBaseUrlPlaceholder": "e.g.: https://api.openai.com/v1",
-    "upstreamApiKeyLabel": "Upstream API Key",
+    "upstreamApiKeyLabel": "Upstream API Key (NOT sk-xxai- format)",
     "upstreamApiKeyRequired": "Please enter upstream API Key",
-    "upstreamApiKeyTooltipEdit": "For security reasons, API Key is not displayed when editing. If you need to change it, please enter a new API Key; leave blank to keep the original configuration unchanged.",
-    "upstreamApiKeyTooltipAdd": "Please enter the access key for the upstream API",
-    "upstreamApiKeyPlaceholderEdit": "Leave blank to keep original API Key unchanged, or enter new API Key",
-    "upstreamApiKeyPlaceholderAdd": "Enter upstream API Key",
+    "upstreamApiKeyTooltipEdit": "⚠️ Note: This should be the API Key from upstream services (like OpenAI, Claude, etc.), NOT your OpenGuardrails API Key (sk-xxai-). For security reasons, API Key is not displayed when editing. If you need to change it, please enter a new API Key; leave blank to keep the original configuration unchanged.",
+    "upstreamApiKeyTooltipAdd": "⚠️ Important: Enter the API Key from upstream services (like OpenAI, Claude, etc.), NOT your OpenGuardrails API Key (sk-xxai-). OpenGuardrails will use this key to call upstream services.",
+    "upstreamApiKeyPlaceholderEdit": "Leave blank to keep original API Key, or enter new upstream API Key",
+    "upstreamApiKeyPlaceholderAdd": "Enter upstream service API Key (e.g., OpenAI's sk-xxx)",
     "enableConfigLabel": "Enable this configuration",
     "securityConfigLabel": "Security Configuration",
     "securityConfigDesc": "Input detection and output detection are always enabled to provide comprehensive security protection",

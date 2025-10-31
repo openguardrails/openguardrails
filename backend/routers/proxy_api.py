@@ -1204,10 +1204,15 @@ async def create_gateway_chat_completion(
 
             # Input passes, call upstream API
             # The model name is passed through directly - this is the key difference from old pattern
+            # Clean messages: only keep role and content, remove name and other fields that vllm doesn't support
+            clean_messages = [
+                {"role": msg.role, "content": msg.content}
+                for msg in request_data.messages
+            ]
             upstream_response = await proxy_service.call_upstream_api_gateway(
                 api_config=api_config,
                 model_name=request_data.model,  # Pass through original model name
-                messages=[msg.dict() for msg in request_data.messages],
+                messages=clean_messages,
                 stream=request_data.stream,
                 temperature=request_data.temperature,
                 max_tokens=request_data.max_tokens,

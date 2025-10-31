@@ -158,7 +158,12 @@ async def create_upstream_api(request: Request):
                 raise ValueError(f"Upstream API configuration '{request_data['config_name']}' already exists")
 
             # Encrypt API key
-            encrypted_api_key = _encrypt_api_key(request_data['api_key'])
+            api_key_to_encrypt = request_data['api_key']
+            # Log for debugging (mask the key)
+            masked_key = f"{api_key_to_encrypt[:8]}...{api_key_to_encrypt[-4:]}" if len(api_key_to_encrypt) > 12 else "***"
+            logger.info(f"Creating upstream API config with api_key={masked_key}")
+            
+            encrypted_api_key = _encrypt_api_key(api_key_to_encrypt)
 
             # Create upstream API configuration
             api_config = UpstreamApiConfig(
