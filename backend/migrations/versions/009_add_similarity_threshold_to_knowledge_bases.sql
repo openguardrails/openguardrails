@@ -12,9 +12,18 @@ ALTER TABLE knowledge_bases
 ADD COLUMN IF NOT EXISTS similarity_threshold FLOAT DEFAULT 0.7 NOT NULL;
 
 -- Add check constraint to ensure threshold is between 0 and 1
-ALTER TABLE knowledge_bases
-ADD CONSTRAINT IF NOT EXISTS check_similarity_threshold_range
-CHECK (similarity_threshold >= 0 AND similarity_threshold <= 1);
+-- PostgreSQL doesn't support IF NOT EXISTS for ADD CONSTRAINT, so we use DO block
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint 
+        WHERE conname = 'check_similarity_threshold_range'
+    ) THEN
+        ALTER TABLE knowledge_bases
+        ADD CONSTRAINT check_similarity_threshold_range
+        CHECK (similarity_threshold >= 0 AND similarity_threshold <= 1);
+    END IF;
+END $$;
 
 -- Update existing records to use the default value (0.7)
 UPDATE knowledge_bases
