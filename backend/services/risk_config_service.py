@@ -67,7 +67,7 @@ class RiskConfigService:
                 'S5': True, 'S6': True, 'S7': True, 'S8': True,
                 'S9': True, 'S10': True, 'S11': True, 'S12': True,
                 'S13': True, 'S14': True, 'S15': True, 'S16': True,
-                'S17': True, 'S18': True, 'S19': True
+                'S17': True, 'S18': True, 'S19': True, 'S20': True, 'S21': True
             }
 
         return {
@@ -90,6 +90,8 @@ class RiskConfigService:
             'S17': config.s17_enabled if hasattr(config, 's17_enabled') else True,
             'S18': config.s18_enabled if hasattr(config, 's18_enabled') else True,
             'S19': config.s19_enabled if hasattr(config, 's19_enabled') else True,
+            'S20': config.s20_enabled if hasattr(config, 's20_enabled') else True,
+            'S21': config.s21_enabled if hasattr(config, 's21_enabled') else True,
         }
     
     def is_risk_type_enabled(self, tenant_id: str, risk_type: str) -> bool:
@@ -106,7 +108,7 @@ class RiskConfigService:
                 's5_enabled': True, 's6_enabled': True, 's7_enabled': True, 's8_enabled': True,
                 's9_enabled': True, 's10_enabled': True, 's11_enabled': True, 's12_enabled': True,
                 's13_enabled': True, 's14_enabled': True, 's15_enabled': True, 's16_enabled': True,
-                's17_enabled': True, 's18_enabled': True, 's19_enabled': True
+                's17_enabled': True, 's18_enabled': True, 's19_enabled': True, 's20_enabled': True, 's21_enabled': True
             }
 
         return {
@@ -129,6 +131,8 @@ class RiskConfigService:
             's17_enabled': config.s17_enabled if hasattr(config, 's17_enabled') else True,
             's18_enabled': config.s18_enabled if hasattr(config, 's18_enabled') else True,
             's19_enabled': config.s19_enabled if hasattr(config, 's19_enabled') else True,
+            's20_enabled': config.s20_enabled if hasattr(config, 's20_enabled') else True,
+            's21_enabled': config.s21_enabled if hasattr(config, 's21_enabled') else True,
         }
 
     def update_sensitivity_thresholds(self, tenant_id: str, threshold_data: Dict) -> Optional[RiskTypeConfig]:

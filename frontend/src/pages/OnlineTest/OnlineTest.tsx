@@ -13,7 +13,8 @@ import {
   Tag,
   Select,
   Switch,
-  message
+  message,
+  Tabs
 } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -46,6 +47,7 @@ interface TestCase {
   content: string;
   expectedRisk?: string;
   description?: string;
+  category?: string;
 }
 
 interface GuardrailResult {
@@ -143,79 +145,123 @@ const OnlineTest: React.FC = () => {
   }, []);
 
   // Preset test cases
+  // Organized test cases by category
+  const testCasesByCategory = {
+    security: [
+      {
+        id: 's9-1',
+        name: t('onlineTest.promptAttackExample'),
+        type: 'question' as const,
+        content: t('onlineTest.testCases.promptAttackContent'),
+        expectedRisk: t('risk.level.high_risk'),
+        description: t('onlineTest.promptAttackExampleDesc'),
+        category: 'S9'
+      },
+      {
+        id: 's5-1',
+        name: t('onlineTest.violentCrimeContent'),
+        type: 'question' as const,
+        content: t('onlineTest.testCases.violentCrimeContent'),
+        expectedRisk: t('risk.level.high_risk'),
+        description: t('onlineTest.violentCrimeContentDesc'),
+        category: 'S5'
+      },
+      {
+        id: 's7-1',
+        name: t('onlineTest.pornographicContent'),
+        type: 'question' as const,
+        content: t('onlineTest.testCases.pornographicContent'),
+        expectedRisk: t('risk.level.medium_risk'),
+        description: t('onlineTest.pornographicContentDesc'),
+        category: 'S7'
+      },
+      {
+        id: 's8-1',
+        name: t('onlineTest.discriminatoryContent'),
+        type: 'question' as const,
+        content: t('onlineTest.testCases.discriminatoryContent'),
+        expectedRisk: t('risk.level.low_risk'),
+        description: t('onlineTest.discriminatoryContentDesc'),
+        category: 'S8'
+      }
+    ],
+    dataLeak: [
+      {
+        id: 'd-1',
+        name: t('onlineTest.dataLeakIdentity'),
+        type: 'qa_pair' as const,
+        content: t('onlineTest.testCases.dataLeakIdentityContent'),
+        expectedRisk: t('risk.level.high_risk'),
+        description: t('onlineTest.dataLeakIdentityDesc'),
+        category: 'Data'
+      },
+      {
+        id: 'd-2',
+        name: t('onlineTest.dataLeakBanking'),
+        type: 'qa_pair' as const,
+        content: t('onlineTest.testCases.dataLeakBankingContent'),
+        expectedRisk: t('risk.level.high_risk'),
+        description: t('onlineTest.dataLeakBankingDesc'),
+        category: 'Data'
+      },
+      {
+        id: 'd-3',
+        name: t('onlineTest.dataLeakEmail'),
+        type: 'qa_pair' as const,
+        content: t('onlineTest.testCases.dataLeakEmailContent'),
+        expectedRisk: t('risk.level.low_risk'),
+        description: t('onlineTest.dataLeakEmailDesc'),
+        category: 'Data'
+      }
+    ],
+    professional: [
+      {
+        id: 's19-1',
+        name: t('onlineTest.financialAdvice'),
+        type: 'qa_pair' as const,
+        content: t('onlineTest.testCases.financialAdviceContent'),
+        expectedRisk: t('risk.level.low_risk'),
+        description: t('onlineTest.financialAdviceDesc'),
+        category: 'S19'
+      },
+      {
+        id: 's20-1',
+        name: t('onlineTest.medicalAdvice'),
+        type: 'qa_pair' as const,
+        content: t('onlineTest.testCases.medicalAdviceContent'),
+        expectedRisk: t('risk.level.low_risk'),
+        description: t('onlineTest.medicalAdviceDesc'),
+        category: 'S20'
+      },
+      {
+        id: 's21-1',
+        name: t('onlineTest.legalAdvice'),
+        type: 'qa_pair' as const,
+        content: t('onlineTest.testCases.legalAdviceContent'),
+        expectedRisk: t('risk.level.low_risk'),
+        description: t('onlineTest.legalAdviceDesc'),
+        category: 'S21'
+      }
+    ],
+    safe: [
+      {
+        id: 'safe-1',
+        name: t('onlineTest.safeQaPair'),
+        type: 'qa_pair' as const,
+        content: t('onlineTest.testCases.safeQaPairContent'),
+        expectedRisk: t('risk.level.no_risk'),
+        description: t('onlineTest.safeQaPairDesc'),
+        category: 'Safe'
+      }
+    ]
+  };
+
+  // Flatten all test cases for backward compatibility
   const testCases: TestCase[] = [
-    {
-      id: '1',
-      name: t('onlineTest.promptAttackExample'),
-      type: 'question',
-      content: t('onlineTest.testCases.promptAttackContent'),
-      expectedRisk: t('risk.level.high_risk'),
-      description: t('onlineTest.promptAttackExampleDesc')
-    },
-    {
-      id: '2',
-      name: t('onlineTest.violentCrimeContent'),
-      type: 'question',
-      content: t('onlineTest.testCases.violentCrimeContent'),
-      expectedRisk: t('risk.level.high_risk'),
-      description: t('onlineTest.violentCrimeContentDesc')
-    },
-    {
-      id: '3',
-      name: t('onlineTest.sensitivePoliticalTopic'),
-      type: 'question',
-      content: t('onlineTest.testCases.sensitivePoliticalContent'),
-      expectedRisk: t('risk.level.high_risk'),
-      description: t('onlineTest.sensitivePoliticalTopicDesc')
-    },
-    {
-      id: '4',
-      name: t('onlineTest.pornographicContent'),
-      type: 'question',
-      content: t('onlineTest.testCases.pornographicContent'),
-      expectedRisk: t('risk.level.medium_risk'),
-      description: t('onlineTest.pornographicContentDesc')
-    },
-    {
-      id: '5',
-      name: t('onlineTest.discriminatoryContent'),
-      type: 'question',
-      content: t('onlineTest.testCases.discriminatoryContent'),
-      expectedRisk: t('risk.level.low_risk'),
-      description: t('onlineTest.discriminatoryContentDesc')
-    },
-    {
-      id: '6',
-      name: t('onlineTest.dataLeakIdentity'),
-      type: 'qa_pair',
-      content: t('onlineTest.testCases.dataLeakIdentityContent'),
-      expectedRisk: t('risk.level.high_risk'),
-      description: t('onlineTest.dataLeakIdentityDesc')
-    },
-    {
-      id: '7',
-      name: t('onlineTest.dataLeakBanking'),
-      type: 'qa_pair',
-      content: t('onlineTest.testCases.dataLeakBankingContent'),
-      expectedRisk: t('risk.level.high_risk'),
-      description: t('onlineTest.dataLeakBankingDesc')
-    },
-    {
-      id: '8',
-      name: t('onlineTest.dataLeakEmail'),
-      type: 'qa_pair',
-      content: t('onlineTest.testCases.dataLeakEmailContent'),
-      expectedRisk: t('risk.level.low_risk'),
-      description: t('onlineTest.dataLeakEmailDesc')
-    },
-    {
-      id: '9',
-      name: t('onlineTest.safeQaPair'),
-      type: 'qa_pair',
-      content: t('onlineTest.testCases.safeQaPairContent'),
-      expectedRisk: t('risk.level.no_risk'),
-      description: t('onlineTest.safeQaPairDesc')
-    }
+    ...testCasesByCategory.security,
+    ...testCasesByCategory.dataLeak,
+    ...testCasesByCategory.professional,
+    ...testCasesByCategory.safe
   ];
 
   // Execute test
@@ -767,47 +813,201 @@ const OnlineTest: React.FC = () => {
         {/* Right side: Preset test cases */}
         <Col span={8}>
           <Card title={t('onlineTest.presetTestCases')} size="small">
-            <Space direction="vertical" style={{ width: '100%' }}>
-              {testCases.map((testCase) => (
-                <Card
-                  key={testCase.id}
-                  size="small"
-                  hoverable
-                  onClick={() => useTestCase(testCase)}
-                  style={{ cursor: 'pointer' }}
-                  styles={{ body: { padding: 12 } }}
-                >
-                  <Space direction="vertical" size="small" style={{ width: '100%' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <Text strong>{testCase.name}</Text>
-                      <Tag color={testCase.type === 'question' ? 'blue' : 'purple'}>
-                        {testCase.type === 'question' ? t('onlineTest.question') : t('onlineTest.qaPair')}
-                      </Tag>
+            <Tabs
+              defaultActiveKey="security"
+              tabPosition="top"
+              size="small"
+              items={[
+                {
+                  key: 'security',
+                  label: t('onlineTest.categories.security'),
+                  children: (
+                    <div style={{ maxHeight: '600px', overflowY: 'auto', paddingRight: '4px' }}>
+                      <Space direction="vertical" style={{ width: '100%' }} size="small">
+                        {testCasesByCategory.security.map((testCase) => (
+                          <Card
+                            key={testCase.id}
+                            size="small"
+                            hoverable
+                            onClick={() => useTestCase(testCase)}
+                            style={{ cursor: 'pointer' }}
+                            styles={{ body: { padding: 12 } }}
+                          >
+                            <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                <Text strong>{testCase.name}</Text>
+                                <Tag color="blue">{testCase.category}</Tag>
+                              </div>
+                              <Text type="secondary" style={{ fontSize: '12px' }}>
+                                {testCase.description}
+                              </Text>
+                              <Text
+                                style={{
+                                  fontSize: '12px',
+                                  backgroundColor: '#f5f5f5',
+                                  padding: '4px 8px',
+                                  borderRadius: '4px',
+                                  display: 'block'
+                                }}
+                              >
+                                {testCase.content.length > 50
+                                  ? testCase.content.substring(0, 50) + '...'
+                                  : testCase.content
+                                }
+                              </Text>
+                              <Tag color={getRiskColor(testCase.expectedRisk || '')}>
+                                {t('onlineTest.expected')} {testCase.expectedRisk}
+                              </Tag>
+                            </Space>
+                          </Card>
+                        ))}
+                      </Space>
                     </div>
-                    <Text type="secondary" style={{ fontSize: '12px' }}>
-                      {testCase.description}
-                    </Text>
-                    <Text
-                      style={{
-                        fontSize: '12px',
-                        backgroundColor: '#f5f5f5',
-                        padding: '4px 8px',
-                        borderRadius: '4px',
-                        display: 'block'
-                      }}
-                    >
-                      {testCase.content.length > 50
-                        ? testCase.content.substring(0, 50) + '...'
-                        : testCase.content
-                      }
-                    </Text>
-                    <Tag color={getRiskColor(testCase.expectedRisk || '')}>
-                      {t('onlineTest.expected')} {testCase.expectedRisk}
-                    </Tag>
-                  </Space>
-                </Card>
-              ))}
-            </Space>
+                  )
+                },
+                {
+                  key: 'dataLeak',
+                  label: t('onlineTest.categories.dataLeak'),
+                  children: (
+                    <div style={{ maxHeight: '600px', overflowY: 'auto', paddingRight: '4px' }}>
+                      <Space direction="vertical" style={{ width: '100%' }} size="small">
+                        {testCasesByCategory.dataLeak.map((testCase) => (
+                          <Card
+                            key={testCase.id}
+                            size="small"
+                            hoverable
+                            onClick={() => useTestCase(testCase)}
+                            style={{ cursor: 'pointer' }}
+                            styles={{ body: { padding: 12 } }}
+                          >
+                            <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                <Text strong>{testCase.name}</Text>
+                                <Tag color="purple">{t('onlineTest.qaPair')}</Tag>
+                              </div>
+                              <Text type="secondary" style={{ fontSize: '12px' }}>
+                                {testCase.description}
+                              </Text>
+                              <Text
+                                style={{
+                                  fontSize: '12px',
+                                  backgroundColor: '#f5f5f5',
+                                  padding: '4px 8px',
+                                  borderRadius: '4px',
+                                  display: 'block'
+                                }}
+                              >
+                                {testCase.content.length > 50
+                                  ? testCase.content.substring(0, 50) + '...'
+                                  : testCase.content
+                                }
+                              </Text>
+                              <Tag color={getRiskColor(testCase.expectedRisk || '')}>
+                                {t('onlineTest.expected')} {testCase.expectedRisk}
+                              </Tag>
+                            </Space>
+                          </Card>
+                        ))}
+                      </Space>
+                    </div>
+                  )
+                },
+                {
+                  key: 'professional',
+                  label: t('onlineTest.categories.professional'),
+                  children: (
+                    <div style={{ maxHeight: '600px', overflowY: 'auto', paddingRight: '4px' }}>
+                      <Space direction="vertical" style={{ width: '100%' }} size="small">
+                        {testCasesByCategory.professional.map((testCase) => (
+                          <Card
+                            key={testCase.id}
+                            size="small"
+                            hoverable
+                            onClick={() => useTestCase(testCase)}
+                            style={{ cursor: 'pointer' }}
+                            styles={{ body: { padding: 12 } }}
+                          >
+                            <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                <Text strong>{testCase.name}</Text>
+                                <Tag color="purple">{t('onlineTest.qaPair')}</Tag>
+                              </div>
+                              <Text type="secondary" style={{ fontSize: '12px' }}>
+                                {testCase.description}
+                              </Text>
+                              <Text
+                                style={{
+                                  fontSize: '12px',
+                                  backgroundColor: '#f5f5f5',
+                                  padding: '4px 8px',
+                                  borderRadius: '4px',
+                                  display: 'block'
+                                }}
+                              >
+                                {testCase.content.length > 50
+                                  ? testCase.content.substring(0, 50) + '...'
+                                  : testCase.content
+                                }
+                              </Text>
+                              <Tag color={getRiskColor(testCase.expectedRisk || '')}>
+                                {t('onlineTest.expected')} {testCase.expectedRisk}
+                              </Tag>
+                            </Space>
+                          </Card>
+                        ))}
+                      </Space>
+                    </div>
+                  )
+                },
+                {
+                  key: 'safe',
+                  label: t('onlineTest.categories.safe'),
+                  children: (
+                    <div style={{ maxHeight: '600px', overflowY: 'auto', paddingRight: '4px' }}>
+                      <Space direction="vertical" style={{ width: '100%' }} size="small">
+                        {testCasesByCategory.safe.map((testCase) => (
+                          <Card
+                            key={testCase.id}
+                            size="small"
+                            hoverable
+                            onClick={() => useTestCase(testCase)}
+                            style={{ cursor: 'pointer' }}
+                            styles={{ body: { padding: 12 } }}
+                          >
+                            <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                <Text strong>{testCase.name}</Text>
+                                <Tag color="purple">{t('onlineTest.qaPair')}</Tag>
+                              </div>
+                              <Text type="secondary" style={{ fontSize: '12px' }}>
+                                {testCase.description}
+                              </Text>
+                              <Text
+                                style={{
+                                  fontSize: '12px',
+                                  backgroundColor: '#f5f5f5',
+                                  padding: '4px 8px',
+                                  borderRadius: '4px',
+                                  display: 'block'
+                                }}
+                              >
+                                {testCase.content.length > 50
+                                  ? testCase.content.substring(0, 50) + '...'
+                                  : testCase.content
+                                }
+                              </Text>
+                              <Tag color={getRiskColor(testCase.expectedRisk || '')}>
+                                {t('onlineTest.expected')} {testCase.expectedRisk}
+                              </Tag>
+                            </Space>
+                          </Card>
+                        ))}
+                      </Space>
+                    </div>
+                  )
+                }
+              ]}
+            />
           </Card>
         </Col>
       </Row>

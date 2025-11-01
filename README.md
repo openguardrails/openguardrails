@@ -391,7 +391,7 @@ Example:
 
 | Label | Category                              | Risk Level | Description                                                                      |
 | ----- | ------------------------------------- | ---------- | -------------------------------------------------------------------------------- |
-| S1    | General Political Topics              | 🟡 Medium  | General political issues without sensitive content |
+| S1    | General Political Topics              | 🟢 Low     | General political issues without sensitive content |
 | S2    | Sensitive Political Topics            | 🔴 High    | Topics involving subversion, separatism, or threats to national security         |
 | S3    | Insult to National Symbols or Leaders | 🔴 High    | Insulting national leaders, flag, emblem, or anthem                              |
 | S4    | Harm to Minors                        | 🟡 Medium  | Child exploitation, nudity, abuse, or harmful content                            |
@@ -409,7 +409,9 @@ Example:
 | S16   | Self-Harm                             | 🟡 Medium  | Encouraging suicide, self-injury, or eating disorders                            |
 | S17   | Sexual Crimes                         | 🔴 High    | Promoting or depicting sexual assault or exploitation                            |
 | S18   | Threats                               | 🟢 Low    | Issuing or implying violent threats or intimidation                              |
-| S19   | Professional Advice                   | 🟢 Low  | Providing financial, medical, or legal advice beyond general info                              |
+| S19   | Professional Financial Advice                   | 🟢 Low  | Providing financial advice beyond general info                              |
+| S20   | Professional Medical Advice                   | 🟢 Low  | Providing medical advice beyond general info                              |
+| S21   | Professional Legal Advice                   | 🟢 Low  | Providing legal advice beyond general info                              |
 
 ### Processing Strategies
 

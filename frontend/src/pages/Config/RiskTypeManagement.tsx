@@ -27,6 +27,8 @@ interface RiskTypeConfig {
   s17_enabled: boolean;
   s18_enabled: boolean;
   s19_enabled: boolean;
+  s20_enabled: boolean;
+  s21_enabled: boolean;
 }
 
 const RiskTypeManagement: React.FC = () => {
@@ -46,12 +48,12 @@ const RiskTypeManagement: React.FC = () => {
     { key: 's15_enabled', code: 'S15', name: t('config.riskTypes.s15'), level: t('risk.level.high_risk'), color: '#f5222d', priority: 1 },
     { key: 's17_enabled', code: 'S17', name: t('config.riskTypes.s17'), level: t('risk.level.high_risk'), color: '#f5222d', priority: 1 },
     // Medium risk
-    { key: 's1_enabled', code: 'S1', name: t('config.riskTypes.s1'), level: t('risk.level.medium_risk'), color: '#fa8c16', priority: 2 },
     { key: 's4_enabled', code: 'S4', name: t('config.riskTypes.s4'), level: t('risk.level.medium_risk'), color: '#fa8c16', priority: 2 },
     { key: 's6_enabled', code: 'S6', name: t('config.riskTypes.s6'), level: t('risk.level.medium_risk'), color: '#fa8c16', priority: 2 },
     { key: 's7_enabled', code: 'S7', name: t('config.riskTypes.s7'), level: t('risk.level.medium_risk'), color: '#fa8c16', priority: 2 },
     { key: 's16_enabled', code: 'S16', name: t('config.riskTypes.s16'), level: t('risk.level.medium_risk'), color: '#fa8c16', priority: 2 },
     // Low risk
+    { key: 's1_enabled', code: 'S1', name: t('config.riskTypes.s1'), level: t('risk.level.low_risk'), color: '#52c41a', priority: 3 },
     { key: 's8_enabled', code: 'S8', name: t('config.riskTypes.s8'), level: t('risk.level.low_risk'), color: '#52c41a', priority: 3 },
     { key: 's10_enabled', code: 'S10', name: t('config.riskTypes.s10'), level: t('risk.level.low_risk'), color: '#52c41a', priority: 3 },
     { key: 's11_enabled', code: 'S11', name: t('config.riskTypes.s11'), level: t('risk.level.low_risk'), color: '#52c41a', priority: 3 },
@@ -60,6 +62,8 @@ const RiskTypeManagement: React.FC = () => {
     { key: 's14_enabled', code: 'S14', name: t('config.riskTypes.s14'), level: t('risk.level.low_risk'), color: '#52c41a', priority: 3 },
     { key: 's18_enabled', code: 'S18', name: t('config.riskTypes.s18'), level: t('risk.level.low_risk'), color: '#52c41a', priority: 3 },
     { key: 's19_enabled', code: 'S19', name: t('config.riskTypes.s19'), level: t('risk.level.low_risk'), color: '#52c41a', priority: 3 },
+    { key: 's20_enabled', code: 'S20', name: t('config.riskTypes.s20'), level: t('risk.level.low_risk'), color: '#52c41a', priority: 3 },
+    { key: 's21_enabled', code: 'S21', name: t('config.riskTypes.s21'), level: t('risk.level.low_risk'), color: '#52c41a', priority: 3 },
   ];
 
   useEffect(() => {

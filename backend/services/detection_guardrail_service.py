@@ -17,7 +17,7 @@ from database.connection import get_db_session
 
 logger = setup_logger()
 
-# Risk level mapping (19 risk types)
+# Risk level mapping (21 risk types)
 RISK_LEVEL_MAPPING = {
     'S2': 'high_risk',   # Sensitive Political Topics
     'S3': 'high_risk',   # Insult to National Symbols or Leaders
@@ -25,11 +25,11 @@ RISK_LEVEL_MAPPING = {
     'S9': 'high_risk',   # Prompt Attacks
     'S15': 'high_risk',  # Weapons of Mass Destruction
     'S17': 'high_risk',  # Sexual Crimes
-    'S1': 'medium_risk', # General Political Topics
     'S4': 'medium_risk', # Harm to Minors
     'S6': 'medium_risk', # Non-Violent Crime
     'S7': 'medium_risk', # Pornography
     'S16': 'medium_risk',# Self-Harm
+    'S1': 'low_risk',    # General Political Topics
     'S8': 'low_risk',    # Hate & Discrimination
     'S10': 'low_risk',   # Profanity
     'S11': 'low_risk',   # Privacy Invasion
@@ -37,10 +37,12 @@ RISK_LEVEL_MAPPING = {
     'S13': 'low_risk',   # Intellectual Property Infringement
     'S14': 'low_risk',   # Harassment
     'S18': 'low_risk',   # Threats
-    'S19': 'low_risk',   # Professional Advice
+    'S19': 'low_risk',   # Professional Financial Advice
+    'S20': 'low_risk',   # Professional Medical Advice
+    'S21': 'low_risk',   # Professional Legal Advice
 }
 
-# Category name mapping (19 risk types)
+# Category name mapping (21 risk types)
 CATEGORY_NAMES = {
     'S1': 'General Political Topics',
     'S2': 'Sensitive Political Topics',
@@ -60,7 +62,9 @@ CATEGORY_NAMES = {
     'S16': 'Self-Harm',
     'S17': 'Sexual Crimes',
     'S18': 'Threats',
-    'S19': 'Professional Advice',
+    'S19': 'Professional Financial Advice',
+    'S20': 'Professional Medical Advice',
+    'S21': 'Professional Legal Advice',
 }
 
 class DetectionGuardrailService:

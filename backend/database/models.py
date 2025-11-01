@@ -172,7 +172,7 @@ class RiskTypeConfig(Base):
     id = Column(Integer, primary_key=True, index=True)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True, unique=True)
 
-    # S1-S19 risk type switch configuration
+    # S1-S21 risk type switch configuration
     s1_enabled = Column(Boolean, default=True)  # General political topics
     s2_enabled = Column(Boolean, default=True)  # Sensitive political topics
     s3_enabled = Column(Boolean, default=True)  # Insult to National Symbols or Leaders
@@ -191,7 +191,9 @@ class RiskTypeConfig(Base):
     s16_enabled = Column(Boolean, default=True) # Self-Harm
     s17_enabled = Column(Boolean, default=True) # Sexual Crimes
     s18_enabled = Column(Boolean, default=True) # Threats
-    s19_enabled = Column(Boolean, default=True) # Professional Advice
+    s19_enabled = Column(Boolean, default=True) # Professional Financial Advice
+    s20_enabled = Column(Boolean, default=True) # Professional Medical Advice
+    s21_enabled = Column(Boolean, default=True) # Professional Legal Advice
 
     # Global sensitivity threshold config
     high_sensitivity_threshold = Column(Float, default=0.40)    # High sensitivity threshold

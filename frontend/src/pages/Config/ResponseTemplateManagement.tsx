@@ -35,25 +35,27 @@ const ResponseTemplateManagement: React.FC = () => {
   };
 
   const categories = [
-    { value: 'S1', label: `S1 - ${t('category.S1')}`, riskLevel: 'medium_risk' },
     { value: 'S2', label: `S2 - ${t('category.S2')}`, riskLevel: 'high_risk' },
     { value: 'S3', label: `S3 - ${t('category.S3')}`, riskLevel: 'high_risk' },
-    { value: 'S4', label: `S4 - ${t('category.S4')}`, riskLevel: 'medium_risk' },
     { value: 'S5', label: `S5 - ${t('category.S5')}`, riskLevel: 'high_risk' },
+    { value: 'S9', label: `S9 - ${t('category.S9')}`, riskLevel: 'high_risk' },
+    { value: 'S15', label: `S15 - ${t('category.S15')}`, riskLevel: 'high_risk' },
+    { value: 'S17', label: `S17 - ${t('category.S17')}`, riskLevel: 'high_risk' },
+    { value: 'S4', label: `S4 - ${t('category.S4')}`, riskLevel: 'medium_risk' },
     { value: 'S6', label: `S6 - ${t('category.S6')}`, riskLevel: 'medium_risk' },
     { value: 'S7', label: `S7 - ${t('category.S7')}`, riskLevel: 'medium_risk' },
+    { value: 'S16', label: `S16 - ${t('category.S16')}`, riskLevel: 'medium_risk' },
+    { value: 'S1', label: `S1 - ${t('category.S1')}`, riskLevel: 'low_risk' },
     { value: 'S8', label: `S8 - ${t('category.S8')}`, riskLevel: 'low_risk' },
-    { value: 'S9', label: `S9 - ${t('category.S9')}`, riskLevel: 'high_risk' },
     { value: 'S10', label: `S10 - ${t('category.S10')}`, riskLevel: 'low_risk' },
     { value: 'S11', label: `S11 - ${t('category.S11')}`, riskLevel: 'low_risk' },
     { value: 'S12', label: `S12 - ${t('category.S12')}`, riskLevel: 'low_risk' },
     { value: 'S13', label: `S13 - ${t('category.S13')}`, riskLevel: 'low_risk' },
     { value: 'S14', label: `S14 - ${t('category.S14')}`, riskLevel: 'low_risk' },
-    { value: 'S15', label: `S15 - ${t('category.S15')}`, riskLevel: 'high_risk' },
-    { value: 'S16', label: `S16 - ${t('category.S16')}`, riskLevel: 'medium_risk' },
-    { value: 'S17', label: `S17 - ${t('category.S17')}`, riskLevel: 'high_risk' },
     { value: 'S18', label: `S18 - ${t('category.S18')}`, riskLevel: 'low_risk' },
     { value: 'S19', label: `S19 - ${t('category.S19')}`, riskLevel: 'low_risk' },
+    { value: 'S20', label: `S20 - ${t('category.S20')}`, riskLevel: 'low_risk' },
+    { value: 'S21', label: `S21 - ${t('category.S21')}`, riskLevel: 'low_risk' },
     { value: 'default', label: t('template.defaultReject'), riskLevel: 'no_risk' },
   ];
 

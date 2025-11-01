@@ -93,7 +93,7 @@ class ResponseTemplateRequest(BaseModel):
     
     @validator('category')
     def validate_category(cls, v):
-        valid_categories = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 'S10', 'S11', 'S12', 'default']
+        valid_categories = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 'S10', 'S11', 'S12', 'S13', 'S14', 'S15', 'S16', 'S17', 'S18', 'S19', 'S20', 'S21', 'default']
         if v not in valid_categories:
             raise ValueError(f'category must be one of: {valid_categories}')
         return v
@@ -192,7 +192,7 @@ class KnowledgeBaseRequest(BaseModel):
 
     @validator('category')
     def validate_category(cls, v):
-        valid_categories = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 'S10', 'S11', 'S12']
+        valid_categories = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 'S10', 'S11', 'S12', 'S13', 'S14', 'S15', 'S16', 'S17', 'S18', 'S19', 'S20', 'S21']
         if v not in valid_categories:
             raise ValueError(f'category must be one of: {valid_categories}')
         return v

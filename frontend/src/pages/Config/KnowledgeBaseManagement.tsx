@@ -66,6 +66,15 @@ const KnowledgeBaseManagement: React.FC = () => {
     { value: 'S10', label: `S10 - ${t('category.S10')}` },
     { value: 'S11', label: `S11 - ${t('category.S11')}` },
     { value: 'S12', label: `S12 - ${t('category.S12')}` },
+    { value: 'S13', label: `S13 - ${t('category.S13')}` },
+    { value: 'S14', label: `S14 - ${t('category.S14')}` },
+    { value: 'S15', label: `S15 - ${t('category.S15')}` },
+    { value: 'S16', label: `S16 - ${t('category.S16')}` },
+    { value: 'S17', label: `S17 - ${t('category.S17')}` },
+    { value: 'S18', label: `S18 - ${t('category.S18')}` },
+    { value: 'S19', label: `S19 - ${t('category.S19')}` },
+    { value: 'S20', label: `S20 - ${t('category.S20')}` },
+    { value: 'S21', label: `S21 - ${t('category.S21')}` },
   ];
 
   useEffect(() => {
