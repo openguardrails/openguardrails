@@ -13,11 +13,13 @@
 [![Python](https://img.shields.io/badge/Python-3.8%2B-blue)](https://www.python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.104%2B-green)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/React-18.0%2B-blue)](https://reactjs.org)
-[![HuggingFace](https://img.shields.io/badge/🤗-Models-yellow)](https://huggingface.co/openguardrails/OpenGuardrails-Text)
+[![HuggingFace](https://img.shields.io/badge/🤗-Models-yellow)](https://huggingface.co/openguardrails/)
 
 > 🚀 **Developer-first open-source AI security platform** - Comprehensive security protection for AI applications
 
-OpenGuardrails is developer-first open-source AI security platform. Built on advanced large language models, it provides prompt attack detection, content safety, data leak detection, and supports complete on-premise deployment to build robust security defenses for AI applications.
+**OpenGuardrails** is a developer-first open-source AI security platform. Built on advanced large language models, it provides prompt attack detection, content safety, data leak detection, and supports complete on-premise deployment to build robust security defenses for AI applications.
+
+📄 **Technical Report:** [arXiv:2510.19169](https://arxiv.org/abs/2510.19169)
 
 ## ✨ Core Features
 
