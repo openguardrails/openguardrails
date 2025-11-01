@@ -123,20 +123,30 @@ class EnhancedTemplateService:
                 # Remove duplicates
                 knowledge_base_ids = list(set(knowledge_base_ids))
 
-                for kb_id in knowledge_base_ids:
-                    try:
-                        # Search similar questions
-                        results = knowledge_base_service.search_similar_questions(user_query, kb_id, top_k=1)
+                # Get database session for fetching KB's similarity threshold
+                db = next(get_db_session())
+                try:
+                    for kb_id in knowledge_base_ids:
+                        try:
+                            # Search similar questions (will use KB's configured threshold)
+                            results = knowledge_base_service.search_similar_questions(
+                                user_query,
+                                kb_id,
+                                top_k=1,
+                                db=db
+                            )
 
-                        if results:
-                            best_result = results[0]
-                            kb_type = "global" if kb_id in global_kb_ids else "user"
-                            logger.info(f"Found similar question in {kb_type} KB {kb_id}: similarity={best_result['similarity_score']:.3f}")
-                            return best_result['answer']
+                            if results:
+                                best_result = results[0]
+                                kb_type = "global" if kb_id in global_kb_ids else "user"
+                                logger.info(f"Found similar question in {kb_type} KB {kb_id}: similarity={best_result['similarity_score']:.3f}")
+                                return best_result['answer']
 
-                    except Exception as e:
-                        logger.warning(f"Error searching knowledge base {kb_id}: {e}")
-                        continue
+                        except Exception as e:
+                            logger.warning(f"Error searching knowledge base {kb_id}: {e}")
+                            continue
+                finally:
+                    db.close()
 
             return None
 

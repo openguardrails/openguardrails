@@ -592,7 +592,12 @@
     "editBasicInfo": "编辑基本信息",
     "validationSuccess": "问答对验证成功",
     "deleteConfirmKB": "确定要删除这个知识库吗？",
-    "replaceKBFile": "替换知识库文件"
+    "replaceKBFile": "替换知识库文件",
+    "similarityThreshold": "相似度阈值",
+    "similarityThresholdTooltip": "问答对匹配的相似度阈值（0-1之间），数值越大要求越相似。推荐值：0.7",
+    "similarityThresholdRequired": "请设置相似度阈值",
+    "similarityThresholdRange": "相似度阈值必须在0-1之间",
+    "similarityThresholdPlaceholder": "请输入相似度阈值（0-1），例如：0.7"
   },
   "proxy": {
     "title": "安全网关配置",

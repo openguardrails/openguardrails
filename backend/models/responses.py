@@ -146,6 +146,7 @@ class KnowledgeBaseResponse(BaseModel):
     file_path: str
     vector_file_path: Optional[str]
     total_qa_pairs: int
+    similarity_threshold: float
     is_active: bool
     is_global: bool
     is_disabled_by_me: bool = False  # Whether current user has disabled this global KB

@@ -596,7 +596,12 @@
     "editBasicInfo": "Edit Basic Info",
     "validationSuccess": "Q&A pairs validated successfully",
     "deleteConfirmKB": "Delete this knowledge base?",
-    "replaceKBFile": "Replace Knowledge Base File"
+    "replaceKBFile": "Replace Knowledge Base File",
+    "similarityThreshold": "Similarity Threshold",
+    "similarityThresholdTooltip": "Similarity threshold for Q&A pair matching (between 0-1), higher value requires more similarity. Recommended: 0.7",
+    "similarityThresholdRequired": "Please set similarity threshold",
+    "similarityThresholdRange": "Similarity threshold must be between 0-1",
+    "similarityThresholdPlaceholder": "Enter similarity threshold (0-1), e.g., 0.7"
   },
   "proxy": {
     "title": "Security Gateway Configuration",

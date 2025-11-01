@@ -486,6 +486,7 @@ async def get_knowledge_bases(
             file_path=kb.file_path,
             vector_file_path=kb.vector_file_path,
             total_qa_pairs=kb.total_qa_pairs,
+            similarity_threshold=kb.similarity_threshold,
             is_active=kb.is_active,
             is_global=kb.is_global,
             is_disabled_by_me=kb.id in disabled_kb_ids if kb.is_global else False,
@@ -505,6 +506,7 @@ async def create_knowledge_base(
     category: str = Form(...),
     name: str = Form(...),
     description: str = Form(""),
+    similarity_threshold: float = Form(0.7),
     is_active: bool = Form(True),
     is_global: bool = Form(False),
     request: Request = None,
@@ -515,13 +517,17 @@ async def create_knowledge_base(
         current_user = get_current_user_from_request(request, db)
 
         # Debug info
-        logger.info(f"Create knowledge base - category: {category}, name: {name}, description: {description}, is_active: {is_active}, is_global: {is_global}")
+        logger.info(f"Create knowledge base - category: {category}, name: {name}, description: {description}, similarity_threshold: {similarity_threshold}, is_active: {is_active}, is_global: {is_global}")
         logger.info(f"File info - filename: {file.filename}, content_type: {file.content_type}")
 
         # Validate parameters
         if not category or not name:
             logger.error(f"Missing required parameters - category: {category}, name: {name}")
             raise HTTPException(status_code=400, detail="Category and name are required")
+
+        # Validate similarity_threshold
+        if similarity_threshold < 0 or similarity_threshold > 1:
+            raise HTTPException(status_code=400, detail="similarity_threshold must be between 0 and 1")
 
         # Check global permission (only admin can set global knowledge base)
         if is_global and not current_user.is_super_admin:
@@ -558,6 +564,7 @@ async def create_knowledge_base(
             description=description,
             file_path="",  # Will be set below
             total_qa_pairs=len(qa_pairs),
+            similarity_threshold=similarity_threshold,
             is_active=is_active,
             is_global=is_global
         )
@@ -629,6 +636,7 @@ async def update_knowledge_base(
         knowledge_base.category = kb_request.category
         knowledge_base.name = kb_request.name
         knowledge_base.description = kb_request.description
+        knowledge_base.similarity_threshold = kb_request.similarity_threshold
         knowledge_base.is_active = kb_request.is_active
         knowledge_base.is_global = kb_request.is_global
 
@@ -807,7 +815,14 @@ async def search_similar_questions(
         if not query.strip():
             raise HTTPException(status_code=400, detail="Query cannot be empty")
 
-        results = knowledge_base_service.search_similar_questions(query.strip(), kb_id, top_k)
+        # Use KB's configured similarity threshold
+        results = knowledge_base_service.search_similar_questions(
+            query.strip(),
+            kb_id,
+            top_k,
+            similarity_threshold=knowledge_base.similarity_threshold,
+            db=db
+        )
 
         return [SimilarQuestionResult(**result) for result in results]
 
@@ -845,6 +860,7 @@ async def get_knowledge_bases_by_category(
             file_path=kb.file_path,
             vector_file_path=kb.vector_file_path,
             total_qa_pairs=kb.total_qa_pairs,
+            similarity_threshold=kb.similarity_threshold,
             is_active=kb.is_active,
             is_global=kb.is_global,
             created_at=kb.created_at,

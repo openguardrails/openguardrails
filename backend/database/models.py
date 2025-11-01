@@ -357,6 +357,7 @@ class KnowledgeBase(Base):
     file_path = Column(String(512), nullable=False)  # Original JSONL file path
     vector_file_path = Column(String(512))  # Vectorized file path
     total_qa_pairs = Column(Integer, default=0)  # Total QA pairs
+    similarity_threshold = Column(Float, default=0.7, nullable=False)  # Similarity threshold for this KB (0-1)
     is_active = Column(Boolean, default=True, index=True)  # Whether enabled
     is_global = Column(Boolean, default=False, index=True)  # Whether it is a global knowledge base (all tenants take effect), only admin can set
     created_at = Column(DateTime(timezone=True), server_default=func.now())

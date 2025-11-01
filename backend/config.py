@@ -67,7 +67,7 @@ class Settings(BaseSettings):
     embedding_api_key: str = "your-embedding-api-key"
     embedding_model_name: str = "OpenGuardrails-Embedding-1024"
     embedding_model_dimension: int = 1024  # Embedding vector dimension
-    embedding_similarity_threshold: float = 0.7  # Similarity threshold
+    embedding_similarity_threshold: float = 0.7  # Default similarity threshold (fallback when KB-specific threshold is not available)
     embedding_max_results: int = 5  # Maximum return results
 
     # API configuration

@@ -179,13 +179,22 @@ class KnowledgeBaseService:
             logger.error(f"Failed to create vector index: {e}")
             raise
 
-    def search_similar_questions(self, query: str, knowledge_base_id: int, top_k: Optional[int] = None) -> List[Dict[str, Any]]:
+    def search_similar_questions(
+        self,
+        query: str,
+        knowledge_base_id: int,
+        top_k: Optional[int] = None,
+        similarity_threshold: Optional[float] = None,
+        db: Optional[Session] = None
+    ) -> List[Dict[str, Any]]:
         """
         Search similar questions
         Args:
             query: Query question
             knowledge_base_id: Knowledge base ID
             top_k: Return results number
+            similarity_threshold: Optional override threshold (if None, use KB's configured threshold)
+            db: Database session (needed to fetch KB's threshold if not provided)
         Returns:
             Similar questions list, containing question, answer and similarity score
         """
@@ -207,6 +216,21 @@ class KnowledgeBaseService:
             index = faiss.deserialize_index(vector_data['index'])
             qa_pairs = vector_data['qa_pairs']
 
+            # Determine which similarity threshold to use
+            threshold = similarity_threshold
+            if threshold is None and db is not None:
+                # Fetch threshold from database
+                kb = db.query(KnowledgeBase).filter(KnowledgeBase.id == knowledge_base_id).first()
+                if kb and kb.similarity_threshold is not None:
+                    threshold = kb.similarity_threshold
+                    logger.info(f"Using KB's configured threshold: {threshold}")
+                else:
+                    threshold = self.similarity_threshold
+                    logger.info(f"Using default threshold: {threshold}")
+            elif threshold is None:
+                threshold = self.similarity_threshold
+                logger.info(f"Using default threshold: {threshold}")
+
             # Vectorize query
             query_embeddings = self._get_embeddings([query])
             query_vector = np.array(query_embeddings, dtype=np.float32)
@@ -217,7 +241,7 @@ class KnowledgeBaseService:
 
             results = []
             for i, (score, idx) in enumerate(zip(scores[0], indices[0])):
-                if idx >= 0 and score >= self.similarity_threshold:
+                if idx >= 0 and score >= threshold:
                     qa_pair = qa_pairs[idx]
                     results.append({
                         'questionid': qa_pair['questionid'],
@@ -227,7 +251,7 @@ class KnowledgeBaseService:
                         'rank': i + 1
                     })
 
-            logger.info(f"Found {len(results)} similar questions for query: {query[:50]}...")
+            logger.info(f"Found {len(results)} similar questions for query: {query[:50]}... (threshold: {threshold})")
             return results
 
         except Exception as e:

@@ -145,6 +145,7 @@ export interface KnowledgeBase {
   file_path: string;
   vector_file_path?: string;
   total_qa_pairs: number;
+  similarity_threshold: number;
   is_active: boolean;
   is_global: boolean;
   is_disabled_by_me?: boolean;  // Whether current user has disabled this global KB

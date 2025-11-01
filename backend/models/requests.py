@@ -186,6 +186,7 @@ class KnowledgeBaseRequest(BaseModel):
     category: str = Field(..., description="Risk category")
     name: str = Field(..., description="Knowledge base name")
     description: Optional[str] = Field(None, description="Description")
+    similarity_threshold: float = Field(0.7, description="Similarity threshold for this knowledge base (0-1)", ge=0, le=1)
     is_active: bool = Field(True, description="Whether enabled")
     is_global: Optional[bool] = Field(False, description="Whether it is a global knowledge base (only admin can set)")
 

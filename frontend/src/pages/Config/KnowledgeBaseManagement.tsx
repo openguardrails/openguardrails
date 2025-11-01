@@ -16,7 +16,8 @@ import {
   Tooltip,
   Row,
   Col,
-  Alert
+  Alert,
+  InputNumber
 } from 'antd';
 import {
   PlusOutlined,
@@ -103,6 +104,7 @@ const KnowledgeBaseManagement: React.FC = () => {
       category: record.category,
       name: record.name,
       description: record.description,
+      similarity_threshold: record.similarity_threshold,
       is_active: record.is_active,
       is_global: record.is_global,
     });
@@ -207,6 +209,7 @@ const KnowledgeBaseManagement: React.FC = () => {
         formData.append('category', values.category);
         formData.append('name', values.name);
         formData.append('description', values.description || '');
+        formData.append('similarity_threshold', values.similarity_threshold?.toString() || '0.7');
         formData.append('is_active', values.is_active ? 'true' : 'false');
         formData.append('is_global', values.is_global ? 'true' : 'false');
 
@@ -376,6 +379,16 @@ const KnowledgeBaseManagement: React.FC = () => {
       ),
     },
     {
+      title: t('knowledge.similarityThreshold'),
+      dataIndex: 'similarity_threshold',
+      key: 'similarity_threshold',
+      width: 120,
+      align: 'center' as const,
+      render: (threshold: number) => (
+        <Tag color="blue">{(threshold * 100).toFixed(0)}%</Tag>
+      ),
+    },
+    {
       title: t('common.status'),
       dataIndex: 'is_active',
       key: 'is_active',
@@ -419,10 +432,10 @@ const KnowledgeBaseManagement: React.FC = () => {
     {
       title: t('common.operation'),
       key: 'action',
-      width: 350,
+      width: 400,
       fixed: 'right' as const,
       render: (_: any, record: KnowledgeBase) => (
-        <Space size="small">
+        <Space size="small" wrap>
           {/* Show edit buttons for user's own knowledge bases or for admins on global knowledge bases */}
           {(!record.is_global || user?.is_super_admin) && (
             <>
@@ -604,6 +617,31 @@ const KnowledgeBaseManagement: React.FC = () => {
             <TextArea
               rows={3}
               placeholder={t('knowledge.descriptionPlaceholder')}
+            />
+          </Form.Item>
+
+          <Form.Item
+            name="similarity_threshold"
+            label={
+              <span>
+                {t('knowledge.similarityThreshold')}
+                <Tooltip title={t('knowledge.similarityThresholdTooltip')}>
+                  <InfoCircleOutlined style={{ marginLeft: 4 }} />
+                </Tooltip>
+              </span>
+            }
+            initialValue={0.7}
+            rules={[
+              { required: true, message: t('knowledge.similarityThresholdRequired') },
+              { type: 'number', min: 0, max: 1, message: t('knowledge.similarityThresholdRange') }
+            ]}
+          >
+            <InputNumber
+              min={0}
+              max={1}
+              step={0.05}
+              style={{ width: '100%' }}
+              placeholder={t('knowledge.similarityThresholdPlaceholder')}
             />
           </Form.Item>
 
