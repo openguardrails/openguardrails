@@ -9,7 +9,7 @@ from database.models import (
     Tenant, DetectionResult, TenantRateLimitCounter, TenantRateLimit,
     TestModelConfig, Blacklist, Whitelist, ResponseTemplate, RiskTypeConfig,
     ProxyModelConfig, ProxyRequestLog, KnowledgeBase, OnlineTestModelSelection,
-    DataSecurityEntityType, TenantSwitch
+    DataSecurityEntityType, TenantSwitch, TenantSubscription
 )
 from services.admin_service import admin_service
 from utils.logger import setup_logger
@@ -562,6 +562,9 @@ async def delete_user(
             (TenantSwitch.admin_tenant_id == tenant_uuid) | 
             (TenantSwitch.target_tenant_id == tenant_uuid)
         ).delete()
+        
+        # Delete tenant subscriptions
+        db.query(TenantSubscription).filter(TenantSubscription.tenant_id == tenant_uuid).delete()
         
         # Finally delete the tenant
         db.delete(tenant)
