@@ -150,8 +150,9 @@ class LogToDbService:
                             from utils.validators import clean_detection_data
                             cleaned_data = clean_detection_data(log_data)
 
-                            await self._save_log_to_db(db, cleaned_data)
-                            processed_count += 1
+                            # Try to save and commit individually to handle duplicates gracefully
+                            if await self._save_log_to_db(db, cleaned_data):
+                                processed_count += 1
                         except json.JSONDecodeError as e:
                             logger.warning(f"Invalid JSON in {log_file}:{line_num}: {e}")
                         except Exception as e:
@@ -159,8 +160,6 @@ class LogToDbService:
 
                         current_line += 1
 
-                # Commit all changes
-                db.commit()
                 logger.info(f"Processed {processed_count} new lines from {log_file.name}")
 
             finally:
@@ -171,8 +170,14 @@ class LogToDbService:
 
         return processed_count
     
-    async def _save_log_to_db(self, db: Session, log_data: dict):
-        """Save log data to database"""
+    async def _save_log_to_db(self, db: Session, log_data: dict) -> bool:
+        """Save log data to database
+        
+        Returns:
+            True if successfully saved, False if skipped (duplicate or error)
+        """
+        from sqlalchemy.exc import IntegrityError
+        
         try:
             # Check if already exists (avoid duplicate import)
             existing = db.query(DetectionResult).filter_by(
@@ -180,7 +185,8 @@ class LogToDbService:
             ).first()
             
             if existing:
-                return  # Already exists, skip
+                logger.debug(f"Skipping duplicate record: {log_data.get('request_id')}")
+                return False  # Already exists, skip
             
             # Parse tenant ID
             tenant_id = log_data.get('tenant_id')  # Field name kept as tenant_id for backward compatibility
@@ -239,10 +245,18 @@ class LogToDbService:
             )
             
             db.add(detection_result)
+            db.commit()  # Commit each record individually to handle duplicates
+            return True
             
+        except IntegrityError as e:
+            # Handle duplicate key violations gracefully
+            db.rollback()
+            logger.debug(f"Duplicate record skipped (IntegrityError): {log_data.get('request_id')}")
+            return False
         except Exception as e:
+            db.rollback()
             logger.error(f"Error saving log data to DB: {e}")
-            # Don't throw exception, continue processing next log
+            return False
     
     async def _load_processed_files_state(self):
         """Load processed files state from file"""
