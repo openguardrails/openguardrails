@@ -189,6 +189,14 @@ class LogToDbService:
                     tenant_id = uuid.UUID(tenant_id)
                 except ValueError:
                     tenant_id = None
+
+            # Parse application ID
+            application_id = log_data.get('application_id')
+            if application_id and isinstance(application_id, str):
+                try:
+                    application_id = uuid.UUID(application_id)
+                except ValueError:
+                    application_id = None
             
             # Parse created time
             created_at = None
@@ -211,6 +219,7 @@ class LogToDbService:
             detection_result = DetectionResult(
                 request_id=log_data.get('request_id'),
                 tenant_id=tenant_id,
+                application_id=application_id,
                 content=log_data.get('content'),
                 suggest_action=log_data.get('suggest_action'),
                 suggest_answer=log_data.get('suggest_answer'),
