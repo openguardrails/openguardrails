@@ -19,7 +19,7 @@
 
 **OpenGuardrails** is a developer-first open-source AI security platform. Built on advanced large language models, it provides prompt attack detection, content safety, data leak detection, and supports complete on-premise deployment to build robust security defenses for AI applications.
 
-📄 **Technical Report:** [arXiv:2510.19169](https://arxiv.org/abs/2510.19169)
+📄 **Technical Report:** [OpenGuardrails: A Configurable, Unified, and Scalable Guardrails Platform for Large Language Models (arXiv:2510.19169)](https://arxiv.org/abs/2510.19169) 
 
 ## ✨ Core Features
 
