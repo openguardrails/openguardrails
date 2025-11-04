@@ -9,21 +9,31 @@ from utils.logger import setup_logger
 logger = setup_logger()
 
 class TemplateCache:
-    """Response template cache service"""
-    
+    """Response template cache service (application-scoped)"""
+
     def __init__(self, cache_ttl: int = 600):  # 10 minutes cache, template changes rarely
-        # Multi-tenant template cache structure: {tenant_id: {category: {is_default: template_content}}}
+        # Multi-application template cache structure: {application_id: {category: {is_default: template_content}}}
         self._template_cache: Dict[str, Dict[str, Dict[bool, str]]] = {}
         self._cache_timestamp = 0
         self._cache_ttl = cache_ttl
         self._lock = asyncio.Lock()
-        
-    async def get_suggest_answer(self, categories: List[str], tenant_id: Optional[str] = None) -> str:
-        """Get suggested answer (memory cache version)"""
+
+    async def get_suggest_answer(self, categories: List[str], tenant_id: Optional[str] = None, application_id: Optional[str] = None) -> str:
+        """
+        Get suggested answer (memory cache version)
+
+        Args:
+            categories: Risk categories
+            tenant_id: DEPRECATED - kept for backward compatibility
+            application_id: Application ID to get templates for
+        """
         await self._ensure_cache_fresh()
-        
+
+        # Prefer application_id, fallback to tenant_id
+        cache_key = application_id if application_id else tenant_id
+
         if not categories:
-            return self._get_default_answer(tenant_id)
+            return self._get_default_answer(cache_key)
         
         try:
             # Define risk level priority
@@ -68,34 +78,34 @@ class TemplateCache:
             
             # Find template by highest risk level
             for category_key, risk_level, priority in category_risk_mapping:
-                # First find template for "current user" (non-default priority), if not found, fallback to global default
-                user_cache = self._template_cache.get(str(tenant_id or "__none__"), {})
-                if category_key in user_cache:
-                    templates = user_cache[category_key]
+                # First find template for "current application" (non-default priority), if not found, fallback to global default
+                app_cache = self._template_cache.get(str(cache_key or "__none__"), {})
+                if category_key in app_cache:
+                    templates = app_cache[category_key]
                     if False in templates:  # Non-default template
                         return templates[False]
                     if True in templates:  # Default template
                         return templates[True]
 
-                # Fallback to "global default user" None template (for system-level default template)
+                # Fallback to "global default" None template (for system-level default template)
                 global_cache = self._template_cache.get("__global__", {})
                 if category_key in global_cache:
                     templates = global_cache[category_key]
                     if True in templates:
                         return templates[True]
 
-            return self._get_default_answer(tenant_id)
-            
+            return self._get_default_answer(cache_key)
+
         except Exception as e:
             logger.error(f"Get suggest answer error: {e}")
-            return self._get_default_answer()
-    
-    def _get_default_answer(self, tenant_id: Optional[str]) -> str:
+            return self._get_default_answer(None)
+
+    def _get_default_answer(self, cache_key: Optional[str]) -> str:
         """Get default answer"""
-        # First find user-defined default
-        user_cache = self._template_cache.get(str(tenant_id or "__none__"), {})
-        if "default" in user_cache and True in user_cache["default"]:
-            return user_cache["default"][True]
+        # First find application-defined default
+        app_cache = self._template_cache.get(str(cache_key or "__none__"), {})
+        if "default" in app_cache and True in app_cache["default"]:
+            return app_cache["default"][True]
         # Fallback to global default
         global_cache = self._template_cache.get("__global__", {})
         if "default" in global_cache and True in global_cache["default"]:
@@ -113,40 +123,41 @@ class TemplateCache:
                     await self._refresh_cache()
     
     async def _refresh_cache(self):
-        """Refresh cache"""
+        """Refresh cache (application-scoped)"""
         try:
             db = get_db_session()
             try:
-                # Load all enabled response templates (grouped by user, None represents global default template)
+                # Load all enabled response templates (grouped by application, None represents global default template)
                 templates = db.query(ResponseTemplate).filter_by(is_active=True).all()
                 new_cache: Dict[str, Dict[str, Dict[bool, str]]] = {}
                 for template in templates:
-                    user_key = str(template.tenant_id) if template.tenant_id is not None else "__global__"
+                    # Use application_id as cache key, None represents global templates
+                    app_key = str(template.application_id) if template.application_id is not None else "__global__"
                     category = template.category
                     is_default = template.is_default
                     content = template.template_content
 
-                    if user_key not in new_cache:
-                        new_cache[user_key] = {}
-                    if category not in new_cache[user_key]:
-                        new_cache[user_key][category] = {}
-                    new_cache[user_key][category][is_default] = content
-                
+                    if app_key not in new_cache:
+                        new_cache[app_key] = {}
+                    if category not in new_cache[app_key]:
+                        new_cache[app_key][category] = {}
+                    new_cache[app_key][category][is_default] = content
+
                 # Atomic update cache
                 self._template_cache = new_cache
                 self._cache_timestamp = time.time()
-                
+
                 template_count = sum(
-                    sum(len(templates) for templates in user_categories.values())
-                    for user_categories in new_cache.values()
+                    sum(len(templates) for templates in app_categories.values())
+                    for app_categories in new_cache.values()
                 )
                 logger.debug(
-                    f"Template cache refreshed - Users: {len(new_cache)}, Templates: {template_count}"
+                    f"Template cache refreshed - Applications: {len(new_cache)}, Templates: {template_count}"
                 )
-                
+
             finally:
                 db.close()
-                
+
         except Exception as e:
             logger.error(f"Failed to refresh template cache: {e}")
     
@@ -159,12 +170,12 @@ class TemplateCache:
     def get_cache_info(self) -> dict:
         """Get cache statistics"""
         template_count = sum(
-            sum(len(templates) for templates in user_categories.values())
-            for user_categories in self._template_cache.values()
+            sum(len(templates) for templates in app_categories.values())
+            for app_categories in self._template_cache.values()
         )
-        
+
         return {
-            "users": len(self._template_cache),
+            "applications": len(self._template_cache),
             "templates": template_count,
             "last_refresh": self._cache_timestamp,
             "cache_age_seconds": time.time() - self._cache_timestamp if self._cache_timestamp > 0 else 0

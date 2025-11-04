@@ -72,21 +72,21 @@ def get_detection_mode(model_config, detection_type: str) -> DetectionMode:
         # Default use bypass mode
         return DetectionMode.ASYNC_BYPASS
 
-async def perform_input_detection(model_config, input_messages: list, tenant_id: str, request_id: str, user_id: str = None):
+async def perform_input_detection(model_config, input_messages: list, tenant_id: str, request_id: str, user_id: str = None, application_id: str = None):
     """Perform input detection - select asynchronous or synchronous mode based on configuration"""
     detection_mode = get_detection_mode(model_config, 'input')
 
     if detection_mode == DetectionMode.ASYNC_BYPASS:
         # Asynchronous bypass mode: not blocking, start detection and upstream call simultaneously
-        return await _async_input_detection(input_messages, tenant_id, request_id, model_config, user_id)
+        return await _async_input_detection(input_messages, tenant_id, request_id, model_config, user_id, application_id)
     else:
         # Synchronous serial mode: first detect, then decide whether to call upstream
-        return await _sync_input_detection(model_config, input_messages, tenant_id, request_id, user_id)
+        return await _sync_input_detection(model_config, input_messages, tenant_id, request_id, user_id, application_id)
 
-async def _async_input_detection(input_messages: list, tenant_id: str, request_id: str, model_config=None, user_id: str = None):
+async def _async_input_detection(input_messages: list, tenant_id: str, request_id: str, model_config=None, user_id: str = None, application_id: str = None):
     """Asynchronous input detection - start background detection task, immediately return pass result"""
     # Start background detection task
-    asyncio.create_task(_background_input_detection(input_messages, tenant_id, request_id, model_config, user_id))
+    asyncio.create_task(_background_input_detection(input_messages, tenant_id, request_id, model_config, user_id, application_id))
 
     # Immediately return pass status, allow request to continue processing
     return {
@@ -95,13 +95,14 @@ async def _async_input_detection(input_messages: list, tenant_id: str, request_i
         'suggest_answer': None
     }
 
-async def _background_input_detection(input_messages: list, tenant_id: str, request_id: str, model_config=None, user_id: str = None):
+async def _background_input_detection(input_messages: list, tenant_id: str, request_id: str, model_config=None, user_id: str = None, application_id: str = None):
     """Background input detection task - only record result,不影响请求处理"""
     try:
         detection_result = await detection_guardrail_service.detect_messages(
             messages=input_messages,
             tenant_id=tenant_id,
-            request_id=f"{request_id}_input_async"
+            request_id=f"{request_id}_input_async",
+            application_id=application_id
         )
 
         # Record detection result but not block
@@ -124,13 +125,14 @@ async def _background_input_detection(input_messages: list, tenant_id: str, requ
     except Exception as e:
         logger.error(f"Background input detection failed: {e}")
 
-async def _sync_input_detection(model_config, input_messages: list, tenant_id: str, request_id: str, user_id: str = None):
+async def _sync_input_detection(model_config, input_messages: list, tenant_id: str, request_id: str, user_id: str = None, application_id: str = None):
     """Synchronous input detection - detect completed后再决定是否继续"""
     try:
         detection_result = await detection_guardrail_service.detect_messages(
             messages=input_messages,
             tenant_id=tenant_id,
-            request_id=f"{request_id}_input_sync"
+            request_id=f"{request_id}_input_sync",
+            application_id=application_id
         )
 
         detection_id = detection_result.get('request_id')
@@ -142,7 +144,8 @@ async def _sync_input_detection(model_config, input_messages: list, tenant_id: s
                 user_id=user_id,
                 risk_level=detection_result.get('overall_risk_level'),
                 detection_result_id=detection_id,
-                language='zh'  # Proxy service uses default Chinese
+                language='zh',  # Proxy service uses default Chinese
+                application_id=application_id
             )
 
         # Check if blocking is needed
@@ -166,7 +169,8 @@ async def _sync_input_detection(model_config, input_messages: list, tenant_id: s
         }
 
     except Exception as e:
-        logger.error(f"Synchronous input detection failed: {e}")
+        logger.error(f"Synchronous input detection failed: {e}", exc_info=True)
+        logger.error(f"Detection failed for tenant_id={tenant_id}, application_id={application_id}, messages={input_messages}")
         # Default pass when detection fails (to avoid service unavailable)
         return {
             'blocked': False,
@@ -174,21 +178,21 @@ async def _sync_input_detection(model_config, input_messages: list, tenant_id: s
             'suggest_answer': None
         }
 
-async def perform_output_detection(model_config, input_messages: list, response_content: str, tenant_id: str, request_id: str, user_id: str = None):
+async def perform_output_detection(model_config, input_messages: list, response_content: str, tenant_id: str, request_id: str, user_id: str = None, application_id: str = None):
     """Perform output detection - select asynchronous or synchronous mode based on configuration"""
     detection_mode = get_detection_mode(model_config, 'output')
 
     if detection_mode == DetectionMode.ASYNC_BYPASS:
         # Asynchronous bypass mode: start background detection, immediately return pass result
-        return await _async_output_detection(input_messages, response_content, tenant_id, request_id, model_config, user_id)
+        return await _async_output_detection(input_messages, response_content, tenant_id, request_id, model_config, user_id, application_id)
     else:
         # Synchronous serial mode: detect completed后再返回结果
-        return await _sync_output_detection(model_config, input_messages, response_content, tenant_id, request_id, user_id)
+        return await _sync_output_detection(model_config, input_messages, response_content, tenant_id, request_id, user_id, application_id)
 
-async def _async_output_detection(input_messages: list, response_content: str, tenant_id: str, request_id: str, model_config=None, user_id: str = None):
+async def _async_output_detection(input_messages: list, response_content: str, tenant_id: str, request_id: str, model_config=None, user_id: str = None, application_id: str = None):
     """Asynchronous output detection - start background detection task, immediately return pass result"""
     # Start background detection task
-    asyncio.create_task(_background_output_detection(input_messages, response_content, tenant_id, request_id, model_config, user_id))
+    asyncio.create_task(_background_output_detection(input_messages, response_content, tenant_id, request_id, model_config, user_id, application_id))
 
     # Immediately return pass status, allow response to be returned directly to user
     return {
@@ -198,7 +202,7 @@ async def _async_output_detection(input_messages: list, response_content: str, t
         'response_content': response_content  # Original response content
     }
 
-async def _background_output_detection(input_messages: list, response_content: str, tenant_id: str, request_id: str, model_config=None, user_id: str = None):
+async def _background_output_detection(input_messages: list, response_content: str, tenant_id: str, request_id: str, model_config=None, user_id: str = None, application_id: str = None):
     """Background output detection task - only record result,不影响响应"""
     try:
         # Construct detection messages: input + response
@@ -211,7 +215,8 @@ async def _background_output_detection(input_messages: list, response_content: s
         detection_result = await detection_guardrail_service.detect_messages(
             messages=detection_messages,
             tenant_id=tenant_id,
-            request_id=f"{request_id}_output_async"
+            request_id=f"{request_id}_output_async",
+            application_id=application_id
         )
 
         detection_id = detection_result.get('request_id')
@@ -236,7 +241,7 @@ async def _background_output_detection(input_messages: list, response_content: s
     except Exception as e:
         logger.error(f"Background output detection failed: {e}")
 
-async def _sync_output_detection(model_config, input_messages: list, response_content: str, tenant_id: str, request_id: str, user_id: str = None):
+async def _sync_output_detection(model_config, input_messages: list, response_content: str, tenant_id: str, request_id: str, user_id: str = None, application_id: str = None):
     """Synchronous output detection - detect completed后再决定返回内容"""
     try:
         # 构造检测messages: input + response
@@ -249,7 +254,8 @@ async def _sync_output_detection(model_config, input_messages: list, response_co
         detection_result = await detection_guardrail_service.detect_messages(
             messages=detection_messages,
             tenant_id=tenant_id,
-            request_id=f"{request_id}_output_sync"
+            request_id=f"{request_id}_output_sync",
+            application_id=application_id
         )
 
         detection_id = detection_result.get('request_id')
@@ -261,7 +267,8 @@ async def _sync_output_detection(model_config, input_messages: list, response_co
                 user_id=user_id,
                 risk_level=detection_result.get('overall_risk_level'),
                 detection_result_id=detection_id,
-                language='zh'  # Proxy service uses default Chinese
+                language='zh',  # Proxy service uses default Chinese
+                application_id=application_id
             )
 
         # Check if blocking is needed
@@ -298,14 +305,15 @@ async def _sync_output_detection(model_config, input_messages: list, response_co
 
 class StreamChunkDetector:
     """Stream output detector - support asynchronous bypass and synchronous serial two modes"""
-    def __init__(self, detection_mode: DetectionMode = DetectionMode.ASYNC_BYPASS):
+    def __init__(self, detection_mode: DetectionMode = DetectionMode.ASYNC_BYPASS, application_id: str = None):
         self.chunks_buffer = []
         self.chunk_count = 0
         self.full_content = ""
         self.risk_detected = False
         self.should_stop = False
         self.detection_mode = detection_mode
-        
+        self.application_id = application_id  # Store application_id for risk config lookup
+
         # Serial mode specific state
         self.last_chunk_held = None  # Held last chunk
         self.all_chunks_safe = False  # Whether all chunks are detected safe
@@ -399,7 +407,8 @@ class StreamChunkDetector:
             detection_result = await detection_guardrail_service.detect_messages(
                 messages=detection_messages,
                 tenant_id=tenant_id,
-                request_id=f"{request_id}_stream_async_{self.chunk_count}"
+                request_id=f"{request_id}_stream_async_{self.chunk_count}",
+                application_id=self.application_id
             )
             
             # Record detection result but not take blocking action
@@ -433,7 +442,8 @@ class StreamChunkDetector:
             detection_result = await detection_guardrail_service.detect_messages(
                 messages=detection_messages,
                 tenant_id=tenant_id,
-                request_id=f"{request_id}_stream_sync_{self.chunk_count}"
+                request_id=f"{request_id}_stream_sync_{self.chunk_count}",
+                application_id=self.application_id
             )
             
             # Check risk and decide whether to block
@@ -473,7 +483,8 @@ class StreamChunkDetector:
             detection_result = await detection_guardrail_service.detect_messages(
                 messages=detection_messages,
                 tenant_id=tenant_id,
-                request_id=f"{request_id}_stream_final_{self.chunk_count}"
+                request_id=f"{request_id}_stream_final_{self.chunk_count}",
+                application_id=self.application_id
             )
             
             # Check risk and decide whether to block
@@ -502,13 +513,13 @@ class StreamChunkDetector:
 async def _handle_gateway_streaming_response(
     upstream_response, api_config, tenant_id: str, request_id: str,
     input_detection_id: str, user_id: str, model_name: str, start_time: float,
-    input_messages: list
+    input_messages: list, application_id: str = None
 ):
     """Handle gateway streaming response with output detection"""
     try:
         # Select detection mode based on configuration
         output_detection_mode = get_detection_mode(api_config, 'output')
-        detector = StreamChunkDetector(output_detection_mode)
+        detector = StreamChunkDetector(output_detection_mode, application_id=application_id)
 
         async def stream_generator():
             full_content = ""
@@ -675,7 +686,7 @@ async def _handle_gateway_streaming_response(
 async def _handle_gateway_non_streaming_response(
     upstream_response, api_config, tenant_id: str, request_id: str,
     input_detection_id: str, user_id: str, model_name: str, start_time: float,
-    input_messages: list
+    input_messages: list, application_id: str = None
 ):
     """Handle gateway non-streaming response with output detection"""
     try:
@@ -688,7 +699,7 @@ async def _handle_gateway_non_streaming_response(
 
             # Perform output detection
             output_detection_result = await perform_output_detection(
-                api_config, input_messages, output_content, tenant_id, request_id, user_id
+                api_config, input_messages, output_content, tenant_id, request_id, user_id, application_id
             )
 
             output_detection_id = output_detection_result.get('detection_id')
@@ -737,13 +748,14 @@ async def _handle_gateway_non_streaming_response(
 
 async def _handle_streaming_chat_completion(
     model_config, request_data, request_id: str, tenant_id: str,
-    input_messages: list, input_detection_id: str, input_blocked: bool, start_time: float
+    input_messages: list, input_detection_id: str, input_blocked: bool, start_time: float,
+    application_id: str = None
 ):
     """Handle streaming chat completion"""
     try:
         # Select detection mode based on configuration
         output_detection_mode = get_detection_mode(model_config, 'output')
-        detector = StreamChunkDetector(output_detection_mode)
+        detector = StreamChunkDetector(output_detection_mode, application_id=application_id)
         
         # Create streaming response generator
         async def stream_generator():
@@ -1108,6 +1120,7 @@ async def create_gateway_chat_completion(
             raise HTTPException(status_code=401, detail="Authentication required")
 
         tenant_id = auth_ctx['data'].get('tenant_id') or auth_ctx['data'].get('tenant_id')
+        application_id = auth_ctx['data'].get('application_id')  # Get application_id from auth context
         request_id = str(uuid.uuid4())
 
         # Get user ID
@@ -1119,7 +1132,7 @@ async def create_gateway_chat_completion(
         if not user_id:
             user_id = tenant_id
 
-        logger.info(f"Gateway chat completion request {request_id} from tenant {tenant_id}, upstream_api_id: {upstream_api_id}, model: {request_data.model}, user_id: {user_id}")
+        logger.info(f"Gateway chat completion request {request_id} from tenant {tenant_id}, application {application_id}, upstream_api_id: {upstream_api_id}, model: {request_data.model}, user_id: {user_id}")
 
         # Check if user is banned
         await check_user_ban_status_proxy(tenant_id, user_id)
@@ -1149,7 +1162,7 @@ async def create_gateway_chat_completion(
         try:
             # Input detection - select asynchronous/synchronous mode based on configuration
             input_detection_result = await perform_input_detection(
-                api_config, input_messages, tenant_id, request_id, user_id
+                api_config, input_messages, tenant_id, request_id, user_id, application_id
             )
 
             input_detection_id = input_detection_result.get('detection_id')
@@ -1172,6 +1185,47 @@ async def create_gateway_chat_completion(
                         response_time_ms=int((time.time() - start_time) * 1000)
                 )
 
+                # For streaming requests, return streaming response
+                if request_data.stream:
+                    async def blocked_stream_generator():
+                        # Send suggest_answer as content chunks
+                        if suggest_answer:
+                            logger.info(f"Gateway input blocked - Sending suggest_answer as chunks: {suggest_answer[:50]}...")
+                            for chunk_str in _yield_suggest_answer_chunks(request_id, suggest_answer):
+                                yield chunk_str
+
+                        # Send final chunk with content_filter finish_reason
+                        blocked_chunk = {
+                            "id": f"chatcmpl-{request_id}",
+                            "object": "chat.completion.chunk",
+                            "created": int(time.time()),
+                            "model": request_data.model,
+                            "choices": [{
+                                "index": 0,
+                                "delta": {},
+                                "finish_reason": "content_filter"
+                            }]
+                        }
+                        blocked_chunk["detection_info"] = {
+                            "input_blocked": True,
+                            "input_detection_id": input_detection_id,
+                            "suggest_answer": suggest_answer
+                        }
+
+                        yield f"data: {json.dumps(blocked_chunk)}\n\n"
+                        yield "data: [DONE]\n\n"
+
+                    return StreamingResponse(
+                        blocked_stream_generator(),
+                        media_type="text/event-stream",
+                        headers={
+                            "Cache-Control": "no-cache",
+                            "Connection": "keep-alive",
+                            "X-Accel-Buffering": "no"
+                        }
+                    )
+
+                # For non-streaming requests, return JSON response
                 response = {
                     "id": f"chatcmpl-{request_id}",
                     "object": "chat.completion",
@@ -1227,14 +1281,14 @@ async def create_gateway_chat_completion(
                 return await _handle_gateway_streaming_response(
                     upstream_response, api_config, tenant_id, request_id,
                     input_detection_id, user_id, request_data.model, start_time,
-                    input_messages
+                    input_messages, application_id
                 )
             else:
                 # Handle non-streaming response
                 return await _handle_gateway_non_streaming_response(
                     upstream_response, api_config, tenant_id, request_id,
                     input_detection_id, user_id, request_data.model, start_time,
-                    input_messages
+                    input_messages, application_id
                 )
 
         except Exception as e:
@@ -1265,6 +1319,7 @@ async def create_chat_completion(
             raise HTTPException(status_code=401, detail="Authentication required")
 
         tenant_id = auth_ctx['data'].get('tenant_id') or auth_ctx['data'].get('tenant_id')
+        application_id = auth_ctx['data'].get('application_id')  # Get application_id from auth context
         request_id = str(uuid.uuid4())
 
         # Get user ID
@@ -1276,7 +1331,7 @@ async def create_chat_completion(
         if not user_id:
             user_id = tenant_id
 
-        logger.info(f"Chat completion request {request_id} from tenant {tenant_id} for model {request_data.model}, user_id: {user_id}")
+        logger.info(f"Chat completion request {request_id} from tenant {tenant_id}, application {application_id} for model {request_data.model}, user_id: {user_id}")
 
         # Check if user is banned
         await check_user_ban_status_proxy(tenant_id, user_id)
@@ -1293,7 +1348,7 @@ async def create_chat_completion(
                     }
                 }
             )
-        
+
         # Construct messages structure for context-aware detection
         input_messages = [{"role": msg.role, "content": msg.content} for msg in request_data.messages]
 
@@ -1306,7 +1361,7 @@ async def create_chat_completion(
         try:
             # Input detection - select asynchronous/synchronous mode based on configuration
             input_detection_result = await perform_input_detection(
-                model_config, input_messages, tenant_id, request_id, user_id
+                model_config, input_messages, tenant_id, request_id, user_id, application_id
             )
             
             input_detection_id = input_detection_result.get('detection_id')
@@ -1406,8 +1461,9 @@ async def create_chat_completion(
             if request_data.stream:
                 # Streaming request handling (input is not blocked)
                 return await _handle_streaming_chat_completion(
-                    model_config, request_data, request_id, tenant_id, 
-                    input_messages, input_detection_id, input_blocked, start_time
+                    model_config, request_data, request_id, tenant_id,
+                    input_messages, input_detection_id, input_blocked, start_time,
+                    application_id=application_id
                 )
             
             # Forward request to target model
@@ -1423,7 +1479,7 @@ async def create_chat_completion(
                 
                 # Perform output detection
                 output_detection_result = await perform_output_detection(
-                    model_config, input_messages, output_content, tenant_id, request_id, user_id
+                    model_config, input_messages, output_content, tenant_id, request_id, user_id, application_id
                 )
 
                 output_detection_id = output_detection_result.get('detection_id')
@@ -1512,6 +1568,7 @@ async def create_completion(
             raise HTTPException(status_code=401, detail="Authentication required")
 
         tenant_id = auth_ctx['data'].get('tenant_id') or auth_ctx['data'].get('tenant_id')
+        application_id = auth_ctx['data'].get('application_id')  # Get application_id from auth context
         request_id = str(uuid.uuid4())
 
         # Get user ID
@@ -1523,7 +1580,7 @@ async def create_completion(
         if not user_id:
             user_id = tenant_id
 
-        logger.info(f"Completion request {request_id} from tenant {tenant_id} for model {request_data.model}, user_id: {user_id}")
+        logger.info(f"Completion request {request_id} from tenant {tenant_id}, application {application_id} for model {request_data.model}, user_id: {user_id}")
 
         # Check if user is banned
         await check_user_ban_status_proxy(tenant_id, user_id)
@@ -1540,13 +1597,13 @@ async def create_completion(
                     }
                 }
             )
-        
+
         # Process prompt (string or string list) and construct messages structure
         if isinstance(request_data.prompt, str):
             prompt_text = request_data.prompt
         else:
             prompt_text = "\n".join(request_data.prompt)
-        
+
         # Construct messages structure for completions API (compatible with traditional prompt format)
         input_messages = [{"role": "user", "content": prompt_text}]
 
@@ -1559,7 +1616,7 @@ async def create_completion(
         try:
             # Input detection - select asynchronous/synchronous mode based on configuration
             input_detection_result = await perform_input_detection(
-                model_config, input_messages, tenant_id, request_id, user_id
+                model_config, input_messages, tenant_id, request_id, user_id, application_id
             )
             
             input_detection_id = input_detection_result.get('detection_id')
@@ -1615,7 +1672,7 @@ async def create_completion(
                 
                 # Perform output detection
                 output_detection_result = await perform_output_detection(
-                    model_config, input_messages, output_text, tenant_id, request_id, user_id
+                    model_config, input_messages, output_text, tenant_id, request_id, user_id, application_id
                 )
 
                 output_detection_id = output_detection_result.get('detection_id')

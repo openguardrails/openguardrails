@@ -3,14 +3,14 @@ Data security API routes - sensitive data detection and de-sensitization based o
 """
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_
 import uuid
 import logging
 
 from database.connection import get_db
-from database.models import Tenant, DataSecurityEntityType, TenantEntityTypeDisable
+from database.models import Tenant, DataSecurityEntityType, TenantEntityTypeDisable, Application
 from services.data_security_service import DataSecurityService
 from utils.auth import verify_token
 
@@ -42,21 +42,71 @@ class EntityTypeUpdate(BaseModel):
     check_output: Optional[bool] = None
     is_active: Optional[bool] = None
 
-def get_current_user(request: Request, db: Session = Depends(get_db)) -> Tenant:
-    """Get current user"""
+def get_current_user_and_application_from_request(request: Request, db: Session) -> Tuple[Tenant, uuid.UUID]:
+    """
+    Get current tenant and application_id from request
+    Returns: (Tenant, application_id)
+    """
+    # 0) Check for X-Application-ID header (highest priority - from frontend selector)
+    header_app_id = request.headers.get('x-application-id') or request.headers.get('X-Application-ID')
+    if header_app_id:
+        try:
+            header_app_uuid = uuid.UUID(str(header_app_id))
+            app = db.query(Application).filter(
+                Application.id == header_app_uuid,
+                Application.is_active == True
+            ).first()
+            if app:
+                tenant = db.query(Tenant).filter(Tenant.id == app.tenant_id).first()
+                if tenant:
+                    return tenant, header_app_uuid
+        except (ValueError, AttributeError):
+            pass
+
     auth_context = getattr(request.state, 'auth_context', None)
-    if not auth_context:
-        raise HTTPException(status_code=401, detail="Unauthorized")
+    if not auth_context or 'data' not in auth_context:
+        raise HTTPException(status_code=401, detail="Not authenticated")
 
-    tenant_id = auth_context.get("data", {}).get("tenant_id")
+    data = auth_context['data']
+
+    # Extract application_id first (priority)
+    application_id_value = data.get('application_id')
+    if application_id_value:
+        try:
+            application_uuid = uuid.UUID(str(application_id_value))
+            # Verify application exists and get its tenant
+            app = db.query(Application).filter(Application.id == application_uuid, Application.is_active == True).first()
+            if app:
+                tenant = db.query(Tenant).filter(Tenant.id == app.tenant_id).first()
+                if tenant:
+                    return tenant, application_uuid
+        except (ValueError, AttributeError):
+            pass
+
+    # Fallback: get tenant and use their default application
+    tenant_id = data.get('tenant_id')
     if not tenant_id:
-        raise HTTPException(status_code=401, detail="Invalid user ID")
+        raise HTTPException(status_code=401, detail="Tenant ID not found in auth context")
 
-    user = db.query(Tenant).filter(Tenant.id == uuid.UUID(tenant_id)).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    try:
+        tenant_uuid = uuid.UUID(str(tenant_id))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid tenant ID format")
 
-    return user
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_uuid).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    # Get default application for this tenant
+    default_app = db.query(Application).filter(
+        Application.tenant_id == tenant.id,
+        Application.is_active == True
+    ).first()
+
+    if not default_app:
+        raise HTTPException(status_code=404, detail="No active application found for user")
+
+    return tenant, default_app.id
 
 @router.post("/entity-types", response_model=Dict[str, Any])
 async def create_entity_type(
@@ -65,18 +115,18 @@ async def create_entity_type(
     db: Session = Depends(get_db)
 ):
     """Create sensitive data type configuration"""
-    current_user = get_current_user(request, db)
+    current_user, application_id = get_current_user_and_application_from_request(request, db)
 
-    # Check if the entity type already exists for this tenant
+    # Check if the entity type already exists for this application
     existing = db.query(DataSecurityEntityType).filter(
         and_(
             DataSecurityEntityType.entity_type == entity_data.entity_type,
-            DataSecurityEntityType.tenant_id == current_user.id
+            DataSecurityEntityType.application_id == application_id
         )
     ).first()
 
     if existing:
-        raise HTTPException(status_code=400, detail="The entity type already exists for this tenant")
+        raise HTTPException(status_code=400, detail="The entity type already exists for this application")
 
     # Create service instance
     service = DataSecurityService(db)
@@ -84,6 +134,7 @@ async def create_entity_type(
     # Create new configuration
     entity_type = service.create_entity_type(
         tenant_id=str(current_user.id),
+        application_id=str(application_id),
         entity_type=entity_data.entity_type,
         display_name=entity_data.display_name,
         risk_level=entity_data.risk_level,
@@ -121,8 +172,8 @@ async def list_entity_types(
     request: Request = None,
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
-    """Get sensitive data type configuration list (including global and user's own)"""
-    current_user = get_current_user(request, db)
+    """Get sensitive data type configuration list (including global and application's own)"""
+    current_user, application_id = get_current_user_and_application_from_request(request, db)
 
     # Create service instance
     service = DataSecurityService(db)
@@ -130,6 +181,7 @@ async def list_entity_types(
     # Get entity type list
     entity_types = service.get_entity_types(
         tenant_id=str(current_user.id),
+        application_id=str(application_id),
         risk_level=risk_level
     )
 
@@ -166,7 +218,7 @@ async def get_entity_type(
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """Get single sensitive data type configuration"""
-    current_user = get_current_user(request, db)
+    current_user, application_id = get_current_user_and_application_from_request(request, db)
 
     entity_type = db.query(DataSecurityEntityType).filter(
         DataSecurityEntityType.id == uuid.UUID(entity_type_id)
@@ -175,8 +227,8 @@ async def get_entity_type(
     if not entity_type:
         raise HTTPException(status_code=404, detail="Entity type configuration not found")
 
-    # Check permission: only global configuration or user's own configuration
-    if not entity_type.is_global and entity_type.tenant_id != current_user.id:
+    # Check permission: only global configuration or application's own configuration
+    if not entity_type.is_global and entity_type.application_id != application_id:
         raise HTTPException(status_code=403, detail="No permission to access this configuration")
 
     recognition_config = entity_type.recognition_config or {}
@@ -207,7 +259,7 @@ async def update_entity_type(
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """Update sensitive data type configuration"""
-    current_user = get_current_user(request, db)
+    current_user, application_id = get_current_user_and_application_from_request(request, db)
 
     entity_type = db.query(DataSecurityEntityType).filter(
         DataSecurityEntityType.id == uuid.UUID(entity_type_id)
@@ -222,12 +274,12 @@ async def update_entity_type(
         if not current_user.is_super_admin:
             raise HTTPException(status_code=403, detail="Only admin can modify system templates")
     elif entity_type.source_type == 'system_copy':
-        # Tenant can modify their own system copy
-        if entity_type.tenant_id != current_user.id:
+        # Application can modify their own system copy
+        if entity_type.application_id != application_id:
             raise HTTPException(status_code=403, detail="No permission to modify this configuration")
     elif entity_type.source_type == 'custom':
-        # Tenant can only modify their own custom configuration
-        if entity_type.tenant_id != current_user.id:
+        # Application can only modify their own custom configuration
+        if entity_type.application_id != application_id:
             raise HTTPException(status_code=403, detail="No permission to modify this configuration")
     else:
         # Fallback to old logic for backward compatibility
@@ -235,7 +287,7 @@ async def update_entity_type(
             # Only admin can modify global configuration
             if not current_user.is_super_admin:
                 raise HTTPException(status_code=403, detail="Only admin can modify global configuration")
-        elif entity_type.tenant_id != current_user.id:
+        elif entity_type.application_id != application_id:
             raise HTTPException(status_code=403, detail="No permission to modify this configuration")
 
     # Create service instance
@@ -264,6 +316,7 @@ async def update_entity_type(
     updated_entity = service.update_entity_type(
         entity_type_id=entity_type_id,
         tenant_id=str(current_user.id),
+        application_id=str(application_id),
         **update_kwargs
     )
 
@@ -297,7 +350,7 @@ async def delete_entity_type(
     db: Session = Depends(get_db)
 ):
     """Delete sensitive data type configuration"""
-    current_user = get_current_user(request, db)
+    current_user, application_id = get_current_user_and_application_from_request(request, db)
 
     entity_type = db.query(DataSecurityEntityType).filter(
         DataSecurityEntityType.id == uuid.UUID(entity_type_id)
@@ -312,11 +365,11 @@ async def delete_entity_type(
         if not current_user.is_super_admin:
             raise HTTPException(status_code=403, detail="Only admin can delete system templates")
     elif entity_type.source_type == 'system_copy':
-        # Tenant cannot delete system copies, but can disable them
+        # Application cannot delete system copies, but can disable them
         raise HTTPException(status_code=403, detail="Cannot delete system entity types. Please disable them instead.")
     elif entity_type.source_type == 'custom':
-        # Tenant can only delete their own custom configuration
-        if entity_type.tenant_id != current_user.id:
+        # Application can only delete their own custom configuration
+        if entity_type.application_id != application_id:
             raise HTTPException(status_code=403, detail="No permission to delete this configuration")
     else:
         # Fallback to old logic for backward compatibility
@@ -324,14 +377,14 @@ async def delete_entity_type(
             # Only admin can delete global configuration
             if not current_user.is_super_admin:
                 raise HTTPException(status_code=403, detail="Only admin can delete global configuration")
-        elif entity_type.tenant_id != current_user.id:
+        elif entity_type.application_id != application_id:
             raise HTTPException(status_code=403, detail="No permission to delete this configuration")
 
     # Create service instance
     service = DataSecurityService(db)
 
     # Delete
-    success = service.delete_entity_type(entity_type_id, str(current_user.id))
+    success = service.delete_entity_type(entity_type_id, str(current_user.id), str(application_id))
 
     if not success:
         raise HTTPException(status_code=404, detail="Delete failed")
@@ -345,11 +398,11 @@ async def create_global_entity_type(
     db: Session = Depends(get_db)
 ):
     """Create system template entity type (only admin)
-    
-    This creates a template that will be automatically copied to all tenants.
-    Each tenant gets their own editable copy.
+
+    This creates a template that will be automatically copied to all applications.
+    Each application gets their own editable copy.
     """
-    current_user = get_current_user(request, db)
+    current_user, application_id = get_current_user_and_application_from_request(request, db)
 
     # Check if the user is an admin
     if not current_user.is_super_admin:
@@ -405,19 +458,19 @@ async def create_global_entity_type(
     }
 
 @router.post("/entity-types/{entity_type}/disable")
-async def disable_entity_type_for_tenant(
+async def disable_entity_type_for_application(
     entity_type: str,
     request: Request,
     db: Session = Depends(get_db)
 ):
-    """Disable an entity type for the current tenant"""
-    current_user = get_current_user(request, db)
-    
+    """Disable an entity type for the current application"""
+    current_user, application_id = get_current_user_and_application_from_request(request, db)
+
     # Create service instance
     service = DataSecurityService(db)
-    
-    # Disable the entity type for this tenant
-    success = service.disable_entity_type_for_tenant(str(current_user.id), entity_type)
+
+    # Disable the entity type for this application
+    success = service.disable_entity_type_for_application(str(current_user.id), str(application_id), entity_type)
     
     if not success:
         raise HTTPException(status_code=500, detail="Failed to disable entity type")
@@ -425,19 +478,19 @@ async def disable_entity_type_for_tenant(
     return {"message": "Entity type disabled successfully"}
 
 @router.post("/entity-types/{entity_type}/enable")
-async def enable_entity_type_for_tenant(
+async def enable_entity_type_for_application(
     entity_type: str,
     request: Request,
     db: Session = Depends(get_db)
 ):
-    """Enable an entity type for the current tenant"""
-    current_user = get_current_user(request, db)
-    
+    """Enable an entity type for the current application"""
+    current_user, application_id = get_current_user_and_application_from_request(request, db)
+
     # Create service instance
     service = DataSecurityService(db)
-    
-    # Enable the entity type for this tenant
-    success = service.enable_entity_type_for_tenant(str(current_user.id), entity_type)
+
+    # Enable the entity type for this application
+    success = service.enable_entity_type_for_application(str(current_user.id), str(application_id), entity_type)
     
     if not success:
         raise HTTPException(status_code=500, detail="Failed to enable entity type")
@@ -449,14 +502,14 @@ async def get_disabled_entity_types(
     request: Request,
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
-    """Get list of disabled entity types for the current tenant"""
-    current_user = get_current_user(request, db)
-    
+    """Get list of disabled entity types for the current application"""
+    current_user, application_id = get_current_user_and_application_from_request(request, db)
+
     # Create service instance
     service = DataSecurityService(db)
-    
+
     # Get disabled entity types
-    disabled_types = service.get_tenant_disabled_entity_types(str(current_user.id))
+    disabled_types = service.get_application_disabled_entity_types(str(current_user.id), str(application_id))
     
     return {
         "disabled_entity_types": disabled_types

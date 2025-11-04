@@ -66,9 +66,17 @@ def verify_token(token: str) -> dict:
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        # Admin token retains original structure
+        # Admin token retains original structure (with tenant_id if available)
         if role == "admin":
-            return {"username": subject, "role": role}
+            result = {"username": subject, "role": role}
+            # Include tenant_id if present in payload (for new admin tokens)
+            tenant_id = payload.get("tenant_id")
+            if tenant_id:
+                result["tenant_id"] = tenant_id
+            email = payload.get("email")
+            if email:
+                result["email"] = email
+            return result
 
         # Ordinary tenant: ensure return contains tenant_id (UUID string), compatible with old token with only sub
         tenant_id = payload.get("tenant_id") or payload.get("user_id")  # 兼容旧字段名user_id

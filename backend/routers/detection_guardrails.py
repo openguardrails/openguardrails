@@ -38,8 +38,16 @@ async def check_guardrails(
         # Get user context
         auth_context = getattr(request.state, 'auth_context', None)
         tenant_id = None
+        application_id = None
         if auth_context:
             tenant_id = str(auth_context['data'].get('tenant_id'))
+            application_id = auth_context['data'].get('application_id')  # Extract application_id from auth
+
+        # Also check for X-Application-ID header (for frontend/online test)
+        header_app_id = request.headers.get('x-application-id') or request.headers.get('X-Application-ID')
+        if header_app_id:
+            application_id = header_app_id
+            logger.info(f"Using application_id from header: {application_id}")
 
         if not tenant_id:
             raise HTTPException(status_code=401, detail="User ID not found in auth context")
@@ -64,7 +72,8 @@ async def check_guardrails(
             request_data,
             ip_address=ip_address,
             user_agent=user_agent,
-            tenant_id=tenant_id
+            tenant_id=tenant_id,
+            application_id=application_id  # Pass application_id to service
         )
 
         # Check and apply ban policy
@@ -79,7 +88,8 @@ async def check_guardrails(
                     user_id=user_id,
                     risk_level=result.overall_risk_level,
                     detection_result_id=result.id,
-                    language=language
+                    language=language,
+                    application_id=application_id
                 )
                 logger.info(f"Ban policy check completed for user_id={user_id}")
             except Exception as e:

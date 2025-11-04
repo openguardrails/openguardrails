@@ -80,7 +80,8 @@ class GuardrailService:
         request: GuardrailRequest,
         ip_address: Optional[str] = None,
         user_agent: Optional[str] = None,
-        tenant_id: Optional[str] = None  # tenant_id for backward compatibility
+        tenant_id: Optional[str] = None,  # tenant_id for backward compatibility
+        application_id: Optional[str] = None  # application_id for new multi-application support
     ) -> GuardrailResponse:
         """Execute guardrail detection"""
 
@@ -90,19 +91,23 @@ class GuardrailService:
         # Extract user content
         user_content = self._extract_user_content(request.messages)
         try:
-            # 1. Blacklist/whitelist pre-check (using high-performance memory cache, isolated by tenant)
-            blacklist_hit, blacklist_name, blacklist_keywords = await keyword_cache.check_blacklist(user_content, tenant_id)
+            # 1. Blacklist/whitelist pre-check (using high-performance memory cache, application-scoped)
+            blacklist_hit, blacklist_name, blacklist_keywords = await keyword_cache.check_blacklist(
+                user_content, tenant_id=tenant_id, application_id=application_id
+            )
             if blacklist_hit:
                 return await self._handle_blacklist_hit(
                     request_id, user_content, blacklist_name, blacklist_keywords,
-                    ip_address, user_agent, tenant_id
+                    ip_address, user_agent, tenant_id, application_id
                 )
 
-            whitelist_hit, whitelist_name, whitelist_keywords = await keyword_cache.check_whitelist(user_content, tenant_id)
+            whitelist_hit, whitelist_name, whitelist_keywords = await keyword_cache.check_whitelist(
+                user_content, tenant_id=tenant_id, application_id=application_id
+            )
             if whitelist_hit:
                 return await self._handle_whitelist_hit(
                     request_id, user_content, whitelist_name, whitelist_keywords,
-                    ip_address, user_agent, tenant_id
+                    ip_address, user_agent, tenant_id, application_id
                 )
 
             # 2. Data leak detection for INPUT (before sending to model)
@@ -203,7 +208,7 @@ class GuardrailService:
 
             # 6. Determine suggested action and answer
             overall_risk_level, suggest_action, suggest_answer = await self._determine_action(
-                compliance_result, security_result, tenant_id, user_content, data_result, anonymized_text
+                compliance_result, security_result, tenant_id, application_id, user_content, data_result, anonymized_text
             )
 
             # 7. Asynchronously log detection results
@@ -320,7 +325,7 @@ class GuardrailService:
             # Filter out disabled risk types, but only if ALL labels are disabled
             enabled_categories = []
             for category in categories:
-                if not tenant_id or self.risk_config_service.is_risk_type_enabled(tenant_id, category):
+                if not tenant_id or self.risk_config_service.is_risk_type_enabled(tenant_id=tenant_id, risk_type=category):
                     enabled_categories.append(category)
 
             # If all categories are disabled, treat as safe
@@ -387,6 +392,7 @@ class GuardrailService:
         compliance_result: ComplianceResult,
         security_result: SecurityResult,
         tenant_id: Optional[str] = None,  # tenant_id for backward compatibility
+        application_id: Optional[str] = None,  # application_id for multi-application support
         user_query: Optional[str] = None,
         data_result: Optional[DataSecurityResult] = None,
         anonymized_text: Optional[str] = None  # De-sensitized text for data leak scenarios
@@ -423,25 +429,29 @@ class GuardrailService:
         if overall_risk_level == "no_risk":
             return overall_risk_level, "pass", None
         elif overall_risk_level == "high_risk":
-            suggest_answer = await self._get_suggest_answer(risk_categories, tenant_id, user_query)
+            suggest_answer = await self._get_suggest_answer(risk_categories, tenant_id, application_id, user_query)
             return overall_risk_level, "reject", suggest_answer
         elif overall_risk_level == "medium_risk":
             # For data leak scenarios with replace action, use anonymized text if available
             if anonymized_text and data_result and data_result.risk_level != "no_risk":
                 return overall_risk_level, "replace", anonymized_text
-            suggest_answer = await self._get_suggest_answer(risk_categories, tenant_id, user_query)
+            suggest_answer = await self._get_suggest_answer(risk_categories, tenant_id, application_id, user_query)
             return overall_risk_level, "replace", suggest_answer
         else:  # low_risk
             # For data leak scenarios with replace action, use anonymized text if available
             if anonymized_text and data_result and data_result.risk_level != "no_risk":
                 return overall_risk_level, "replace", anonymized_text
-            suggest_answer = await self._get_suggest_answer(risk_categories, tenant_id, user_query)
+            suggest_answer = await self._get_suggest_answer(risk_categories, tenant_id, application_id, user_query)
             return overall_risk_level, "replace", suggest_answer
     
-    async def _get_suggest_answer(self, categories: List[str], tenant_id: Optional[str] = None, user_query: Optional[str] = None) -> str:
+    async def _get_suggest_answer(self, categories: List[str], tenant_id: Optional[str] = None, application_id: Optional[str] = None, user_query: Optional[str] = None) -> str:
         """Get suggested answer (using enhanced template service, supports knowledge base search)
 
-        Note: Parameter name kept as tenant_id for backward compatibility
+        Args:
+            categories: Risk categories
+            tenant_id: DEPRECATED - kept for backward compatibility
+            application_id: Application ID for multi-application support
+            user_query: User query for knowledge base search
         """
         from database.models import Tenant
 
@@ -455,12 +465,16 @@ class GuardrailService:
             except Exception as e:
                 logger.warning(f"Failed to get user language for tenant {tenant_id}: {e}")
 
-        return await enhanced_template_service.get_suggest_answer(categories, tenant_id, user_query, user_language)
+        return await enhanced_template_service.get_suggest_answer(
+            categories, tenant_id=tenant_id, application_id=application_id,
+            user_query=user_query, user_language=user_language
+        )
     
     async def _handle_blacklist_hit(
         self, request_id: str, content: str, list_name: str,
         keywords: List[str], ip_address: Optional[str], user_agent: Optional[str],
-        tenant_id: Optional[str] = None
+        tenant_id: Optional[str] = None,
+        application_id: Optional[str] = None
     ) -> GuardrailResponse:
         """Handle blacklist hit"""
 
@@ -468,6 +482,7 @@ class GuardrailService:
         detection_data = {
             "request_id": request_id,
             "tenant_id": tenant_id,
+            "application_id": application_id,
             "content": content,
             "suggest_action": "reject",
             "suggest_answer": f"I'm sorry, I cannot provide content related to {list_name}.",
@@ -498,14 +513,16 @@ class GuardrailService:
     async def _handle_whitelist_hit(
         self, request_id: str, content: str, list_name: str,
         keywords: List[str], ip_address: Optional[str], user_agent: Optional[str],
-        tenant_id: Optional[str] = None
+        tenant_id: Optional[str] = None,
+        application_id: Optional[str] = None
     ) -> GuardrailResponse:
         """Handle whitelist hit"""
-        
+
         # Asynchronously record to log
         detection_data = {
             "request_id": request_id,
             "tenant_id": tenant_id,
+            "application_id": application_id,
             "content": content,
             "suggest_action": "pass",
             "suggest_answer": None,

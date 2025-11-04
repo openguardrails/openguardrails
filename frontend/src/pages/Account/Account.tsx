@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Card, Typography, Space, Button, message, Divider, Progress, Tag } from 'antd';
-import { CopyOutlined, ReloadOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
+import { CopyOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { authService, UserInfo } from '../../services/auth';
 import { configApi } from '../../services/api';
@@ -20,7 +20,6 @@ const Account: React.FC = () => {
   const [user, setUser] = useState<UserInfo | null>(null);
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
   const [subscription, setSubscription] = useState<Subscription | null>(null);
-  const [loading, setLoading] = useState(false);
 
   const fetchMe = async () => {
     try {
@@ -57,16 +56,6 @@ const Account: React.FC = () => {
     fetchSubscription();
   }, []);
 
-  const handleCopy = async () => {
-    if (!user?.api_key) return;
-    try {
-      await navigator.clipboard.writeText(user.api_key);
-      message.success(t('account.copied'));
-    } catch {
-      message.error(t('account.copyFailed'));
-    }
-  };
-
   const handleCopyDifyEndpoint = async () => {
     const endpoint = 'https://api.openguardrails.com/v1/dify/moderation';
     try {
@@ -74,19 +63,6 @@ const Account: React.FC = () => {
       message.success(t('account.copied'));
     } catch {
       message.error(t('account.copyFailed'));
-    }
-  };
-
-  const handleRegenerate = async () => {
-    try {
-      setLoading(true);
-      const data = await authService.regenerateApiKey();
-      message.success(t('account.apiKeyUpdated'));
-      setUser((prev: UserInfo | null) => prev ? { ...prev, api_key: data.api_key } : prev);
-    } catch (e: any) {
-      message.error(e.message || t('account.operationFailed'));
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -138,29 +114,24 @@ const Account: React.FC = () => {
         </div>
 
         <div>
-          <Text type="secondary">{t('account.currentApiKey')}</Text>
-          <Space style={{ width: '100%', marginTop: 8, alignItems: 'center' }}>
-            <div style={{
-              flex: 1,
-              padding: '8px 12px',
-              border: '1px solid #d9d9d9',
-              borderRadius: '6px',
-              backgroundColor: '#fafafa',
-              fontFamily: 'monospace',
-              fontSize: '14px',
-              wordBreak: 'break-all'
-            }}>
-              <Text code style={{ backgroundColor: 'transparent', border: 'none', padding: 0 }}>
-                {user?.api_key || '-'}
-              </Text>
+          <Text type="secondary">{t('account.apiKeyManagement')}</Text>
+          <div style={{
+            marginTop: 8,
+            padding: '12px 16px',
+            border: '1px solid #d9d9d9',
+            borderRadius: '6px',
+            backgroundColor: '#fafafa'
+          }}>
+            <Text>{t('account.apiKeyMigrationNotice')}</Text>
+            <div style={{ marginTop: 8 }}>
+              <Button
+                type="link"
+                onClick={() => window.location.href = '/platform/applications'}
+                style={{ padding: 0, height: 'auto' }}
+              >
+                {t('account.goToApplicationManagement')}
+              </Button>
             </div>
-            <Button icon={<CopyOutlined />} onClick={handleCopy}>{t('account.copy')}</Button>
-            <Button type="primary" loading={loading} icon={<ReloadOutlined />} onClick={handleRegenerate}>
-              {t('account.regenerate')}
-            </Button>
-          </Space>
-          <div style={{ marginTop: 8 }}>
-            <Text type="secondary">{t('account.regenerateWarning')}</Text>
           </div>
         </div>
 

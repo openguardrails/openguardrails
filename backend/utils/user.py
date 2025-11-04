@@ -131,12 +131,63 @@ def regenerate_api_key(db: Session, tenant_id: Union[str, uuid.UUID]) -> Optiona
     return new_api_key
 
 def get_user_by_api_key(db: Session, api_key: str) -> Optional[Tenant]:
-    """Get tenant by API key (only return verified tenant)"""
+    """
+    Get tenant by API key (only return verified tenant)
+    DEPRECATED: This function uses the old tenants.api_key column.
+    Use get_application_by_api_key() for new multi-application support.
+    """
     return db.query(Tenant).filter(
         Tenant.api_key == api_key,
         Tenant.is_verified == True,
         Tenant.is_active == True
     ).first()
+
+
+def get_application_by_api_key(db: Session, api_key: str) -> Optional[dict]:
+    """
+    Get application and tenant information by API key (new multi-application support)
+
+    Returns:
+        dict with keys: tenant_id, tenant_email, application_id, application_name, api_key_id
+        None if API key is invalid or inactive
+    """
+    from database.models import ApiKey, Application, Tenant
+
+    # Query the ApiKey with joined Application and Tenant
+    result = db.query(ApiKey, Application, Tenant).join(
+        Application, ApiKey.application_id == Application.id
+    ).join(
+        Tenant, ApiKey.tenant_id == Tenant.id
+    ).filter(
+        ApiKey.key == api_key,
+        ApiKey.is_active == True,
+        Application.is_active == True,
+        Tenant.is_verified == True,
+        Tenant.is_active == True
+    ).first()
+
+    if not result:
+        return None
+
+    api_key_obj, application, tenant = result
+
+    # Update last_used_at timestamp (async, non-blocking)
+    try:
+        from datetime import datetime
+        api_key_obj.last_used_at = datetime.utcnow()
+        db.commit()
+    except Exception as e:
+        logger.warning(f"Failed to update API key last_used_at: {e}")
+        db.rollback()
+
+    return {
+        "tenant_id": str(tenant.id),
+        "tenant_email": tenant.email,
+        "application_id": str(application.id),
+        "application_name": application.name,
+        "api_key_id": str(api_key_obj.id),
+        "api_key": api_key
+    }
 
 def get_user_by_email(db: Session, email: str) -> Optional[Tenant]:
     """Get tenant by email"""

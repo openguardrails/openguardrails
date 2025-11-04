@@ -4,6 +4,7 @@ import { InfoCircleOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { getRiskConfig, updateRiskConfig } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
+import { useApplication } from '../../contexts/ApplicationContext';
 
 const { Title, Text } = Typography;
 
@@ -37,6 +38,7 @@ const RiskTypeManagement: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const { onUserSwitch } = useAuth();
+  const { currentApplicationId } = useApplication();
 
   // Risk types definition - sorted by risk level (high > medium > low)
   const RISK_TYPES = [
@@ -67,8 +69,10 @@ const RiskTypeManagement: React.FC = () => {
   ];
 
   useEffect(() => {
-    loadRiskConfig();
-  }, []);
+    if (currentApplicationId) {
+      loadRiskConfig();
+    }
+  }, [currentApplicationId]);
 
   // 监听用户切换事件，自动刷新配置
   useEffect(() => {

@@ -21,6 +21,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { sensitivityThresholdApi } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
+import { useApplication } from '../../contexts/ApplicationContext';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -47,10 +48,13 @@ const SensitivityThresholdManagement: React.FC = () => {
   const [editingLevels, setEditingLevels] = useState<SensitivityLevel[]>([]);
   const [saving, setSaving] = useState(false);
   const { onUserSwitch } = useAuth();
+  const { currentApplicationId } = useApplication();
 
   useEffect(() => {
-    loadConfig();
-  }, []);
+    if (currentApplicationId) {
+      loadConfig();
+    }
+  }, [currentApplicationId]);
 
   // Listen to user switch event, automatically refresh config
   useEffect(() => {

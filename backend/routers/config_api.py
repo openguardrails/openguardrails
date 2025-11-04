@@ -1,10 +1,10 @@
-from typing import List, Optional
+from typing import List, Optional, Tuple
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from database.connection import get_db
-from database.models import Blacklist, Whitelist, ResponseTemplate, KnowledgeBase, Tenant, TenantKnowledgeBaseDisable
+from database.models import Blacklist, Whitelist, ResponseTemplate, KnowledgeBase, Tenant, TenantKnowledgeBaseDisable, Application
 from models.requests import BlacklistRequest, WhitelistRequest, ResponseTemplateRequest, KnowledgeBaseRequest
 from models.responses import (
     BlacklistResponse, WhitelistResponse, ResponseTemplateResponse, ApiResponse,
@@ -23,74 +23,122 @@ logger = setup_logger()
 router = APIRouter(tags=["Configuration"])
 security = HTTPBearer()
 
-def get_current_user_from_request(request: Request, db: Session) -> Tenant:
-    """Get current tenant from request (more robust, compatible with admin token and no switch state)"""
+def get_current_user_and_application_from_request(request: Request, db: Session) -> Tuple[Tenant, uuid.UUID]:
+    """
+    Get current tenant and application_id from request
+    Returns: (Tenant, application_id)
+    """
+    # 0) Check for X-Application-ID header (highest priority - from frontend selector)
+    header_app_id = request.headers.get('x-application-id') or request.headers.get('X-Application-ID')
+    if header_app_id:
+        try:
+            header_app_uuid = uuid.UUID(str(header_app_id))
+            app = db.query(Application).filter(
+                Application.id == header_app_uuid,
+                Application.is_active == True
+            ).first()
+            if app:
+                tenant = db.query(Tenant).filter(Tenant.id == app.tenant_id).first()
+                if tenant:
+                    return tenant, header_app_uuid
+        except (ValueError, AttributeError):
+            pass
+
     # 1) Check if there is a tenant switch session
     switch_token = request.headers.get('x-switch-session')
     if switch_token:
         switched_tenant = admin_service.get_switched_user(db, switch_token)
         if switched_tenant:
-            return switched_tenant
+            # For switched sessions, use the default application
+            default_app = db.query(Application).filter(
+                Application.tenant_id == switched_tenant.id,
+                Application.is_active == True
+            ).first()
+            if not default_app:
+                raise HTTPException(status_code=404, detail="No active application found for switched user")
+            return switched_tenant, default_app.id
 
-    # 2) Get tenant from auth context
+    # 2) Get tenant and application from auth context
     auth_context = getattr(request.state, 'auth_context', None)
     if not auth_context or 'data' not in auth_context:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     data = auth_context['data']
-    tenant_id_value = data.get('tenant_id') or data.get('tenant_id')  # Compatible with old fields
+
+    # Extract application_id first (priority)
+    application_id_value = data.get('application_id')
+    if application_id_value:
+        try:
+            application_uuid = uuid.UUID(str(application_id_value))
+            # Verify application exists and get its tenant
+            app = db.query(Application).filter(Application.id == application_uuid, Application.is_active == True).first()
+            if app:
+                tenant = db.query(Tenant).filter(Tenant.id == app.tenant_id).first()
+                if tenant:
+                    return tenant, application_uuid
+        except (ValueError, AttributeError):
+            pass
+
+    # Fallback: get tenant and use their default application
+    tenant_id_value = data.get('tenant_id') or data.get('tenant_id')
     tenant_email_value = data.get('email')
 
-    # 2a) Try to parse tenant_id as UUID and query
+    tenant = None
+
+    # Try to find tenant by ID
     if tenant_id_value:
         try:
             tenant_uuid = uuid.UUID(str(tenant_id_value))
             tenant = db.query(Tenant).filter(Tenant.id == tenant_uuid).first()
-            if tenant:
-                return tenant
         except ValueError:
-            # Continue trying to find by email
             pass
 
-    # 2b) Fall back to using email (compatible with admin token or fallback context)
-    if tenant_email_value:
+    # Fall back to email
+    if not tenant and tenant_email_value:
         tenant = db.query(Tenant).filter(Tenant.email == tenant_email_value).first()
-        if tenant:
-            return tenant
 
-    # 2c) Last resort: parse JWT in Authorization header, try again
-    auth_header = request.headers.get('authorization') or request.headers.get('Authorization')
-    if auth_header and auth_header.startswith('Bearer '):
-        token = auth_header.split(' ', 1)[1]
-        try:
-            payload = verify_token(token)
-            raw_tenant_id = payload.get('tenant_id') or payload.get('tenant_id') or payload.get('sub')
-            if raw_tenant_id:
-                try:
-                    tenant_uuid = uuid.UUID(str(raw_tenant_id))
-                    tenant = db.query(Tenant).filter(Tenant.id == tenant_uuid).first()
-                    if tenant:
-                        return tenant
-                except ValueError:
-                    pass
-            email_claim = payload.get('email') or payload.get('username')
-            if email_claim:
-                tenant = db.query(Tenant).filter(Tenant.email == email_claim).first()
-                if tenant:
-                    return tenant
-        except Exception:
-            pass
+    # Last resort: parse JWT
+    if not tenant:
+        auth_header = request.headers.get('authorization') or request.headers.get('Authorization')
+        if auth_header and auth_header.startswith('Bearer '):
+            token = auth_header.split(' ', 1)[1]
+            try:
+                payload = verify_token(token)
+                raw_tenant_id = payload.get('tenant_id') or payload.get('tenant_id') or payload.get('sub')
+                if raw_tenant_id:
+                    try:
+                        tenant_uuid = uuid.UUID(str(raw_tenant_id))
+                        tenant = db.query(Tenant).filter(Tenant.id == tenant_uuid).first()
+                    except ValueError:
+                        pass
+                if not tenant:
+                    email_claim = payload.get('email') or payload.get('username')
+                    if email_claim:
+                        tenant = db.query(Tenant).filter(Tenant.email == email_claim).first()
+            except Exception:
+                pass
 
-    # Unable to locate valid tenant
-    raise HTTPException(status_code=401, detail="User not found or invalid context")
+    if not tenant:
+        raise HTTPException(status_code=401, detail="User not found or invalid context")
+
+    # Get default application for this tenant
+    default_app = db.query(Application).filter(
+        Application.tenant_id == tenant.id,
+        Application.is_active == True
+    ).first()
+
+    if not default_app:
+        raise HTTPException(status_code=404, detail="No active application found for user")
+
+    return tenant, default_app.id
 
 # 黑名单管理
 @router.get("/config/blacklist", response_model=List[BlacklistResponse])
 async def get_blacklist(request: Request, db: Session = Depends(get_db)):
     """Get blacklist configuration"""
     try:
-        current_user = get_current_user_from_request(request, db)
-        blacklists = db.query(Blacklist).filter(Blacklist.tenant_id == current_user.id).order_by(Blacklist.created_at.desc()).all()
+        current_user, application_id = get_current_user_and_application_from_request(request, db)
+        blacklists = db.query(Blacklist).filter(Blacklist.application_id == application_id).order_by(Blacklist.created_at.desc()).all()
         return [BlacklistResponse(
             id=bl.id,
             name=bl.name,
@@ -110,9 +158,10 @@ async def get_blacklist(request: Request, db: Session = Depends(get_db)):
 async def create_blacklist(blacklist_request: BlacklistRequest, request: Request, db: Session = Depends(get_db)):
     """Create blacklist"""
     try:
-        current_user = get_current_user_from_request(request, db)
+        current_user, application_id = get_current_user_and_application_from_request(request, db)
         blacklist = Blacklist(
             tenant_id=current_user.id,
+            application_id=application_id,
             name=blacklist_request.name,
             keywords=blacklist_request.keywords,
             description=blacklist_request.description,
@@ -120,11 +169,11 @@ async def create_blacklist(blacklist_request: BlacklistRequest, request: Request
         )
         db.add(blacklist)
         db.commit()
-        
+
         # Invalidate keyword cache immediately
         await keyword_cache.invalidate_cache()
-        
-        logger.info(f"Blacklist created: {blacklist_request.name} for user: {current_user.email}")
+
+        logger.info(f"Blacklist created: {blacklist_request.name} for user: {current_user.email}, app: {application_id}")
         return ApiResponse(success=True, message="Blacklist created successfully")
     except HTTPException:
         raise
@@ -136,22 +185,22 @@ async def create_blacklist(blacklist_request: BlacklistRequest, request: Request
 async def update_blacklist(blacklist_id: int, blacklist_request: BlacklistRequest, request: Request, db: Session = Depends(get_db)):
     """Update blacklist"""
     try:
-        current_user = get_current_user_from_request(request, db)
-        blacklist = db.query(Blacklist).filter_by(id=blacklist_id, tenant_id=current_user.id).first()
+        current_user, application_id = get_current_user_and_application_from_request(request, db)
+        blacklist = db.query(Blacklist).filter_by(id=blacklist_id, application_id=application_id).first()
         if not blacklist:
             raise HTTPException(status_code=404, detail="Blacklist not found")
-        
+
         blacklist.name = blacklist_request.name
         blacklist.keywords = blacklist_request.keywords
         blacklist.description = blacklist_request.description
         blacklist.is_active = blacklist_request.is_active
-        
+
         db.commit()
-        
+
         # Invalidate keyword cache immediately
         await keyword_cache.invalidate_cache()
-        
-        logger.info(f"Blacklist updated: {blacklist_id} for user: {current_user.email}")
+
+        logger.info(f"Blacklist updated: {blacklist_id} for user: {current_user.email}, app: {application_id}")
         return ApiResponse(success=True, message="Blacklist updated successfully")
     except HTTPException:
         raise
@@ -163,18 +212,18 @@ async def update_blacklist(blacklist_id: int, blacklist_request: BlacklistReques
 async def delete_blacklist(blacklist_id: int, request: Request, db: Session = Depends(get_db)):
     """Delete blacklist"""
     try:
-        current_user = get_current_user_from_request(request, db)
-        blacklist = db.query(Blacklist).filter_by(id=blacklist_id, tenant_id=current_user.id).first()
+        current_user, application_id = get_current_user_and_application_from_request(request, db)
+        blacklist = db.query(Blacklist).filter_by(id=blacklist_id, application_id=application_id).first()
         if not blacklist:
             raise HTTPException(status_code=404, detail="Blacklist not found")
-        
+
         db.delete(blacklist)
         db.commit()
-        
+
         # Invalidate keyword cache immediately
         await keyword_cache.invalidate_cache()
-        
-        logger.info(f"Blacklist deleted: {blacklist_id} for user: {current_user.email}")
+
+        logger.info(f"Blacklist deleted: {blacklist_id} for user: {current_user.email}, app: {application_id}")
         return ApiResponse(success=True, message="Blacklist deleted successfully")
     except HTTPException:
         raise
@@ -187,13 +236,8 @@ async def delete_blacklist(blacklist_id: int, request: Request, db: Session = De
 async def get_whitelist(request: Request, db: Session = Depends(get_db)):
     """Get whitelist configuration"""
     try:
-        current_user = get_current_user_from_request(request, db)
-        # If column is missing (pre-upgrade database), try without tenant_id filter, fallback support
-        try:
-            whitelists = db.query(Whitelist).filter(Whitelist.tenant_id == current_user.id).order_by(Whitelist.created_at.desc()).all()
-        except Exception as e:
-            logger.warning(f"Whitelist query failed with tenant_id filter, falling back: {e}")
-            whitelists = db.query(Whitelist).order_by(Whitelist.created_at.desc()).all()
+        current_user, application_id = get_current_user_and_application_from_request(request, db)
+        whitelists = db.query(Whitelist).filter(Whitelist.application_id == application_id).order_by(Whitelist.created_at.desc()).all()
         return [WhitelistResponse(
             id=wl.id,
             name=wl.name,
@@ -213,9 +257,10 @@ async def get_whitelist(request: Request, db: Session = Depends(get_db)):
 async def create_whitelist(whitelist_request: WhitelistRequest, request: Request, db: Session = Depends(get_db)):
     """Create whitelist"""
     try:
-        current_user = get_current_user_from_request(request, db)
+        current_user, application_id = get_current_user_and_application_from_request(request, db)
         whitelist = Whitelist(
             tenant_id=current_user.id,
+            application_id=application_id,
             name=whitelist_request.name,
             keywords=whitelist_request.keywords,
             description=whitelist_request.description,
@@ -223,11 +268,11 @@ async def create_whitelist(whitelist_request: WhitelistRequest, request: Request
         )
         db.add(whitelist)
         db.commit()
-        
+
         # Invalidate keyword cache immediately
         await keyword_cache.invalidate_cache()
-        
-        logger.info(f"Whitelist created: {whitelist_request.name} for user: {current_user.email}")
+
+        logger.info(f"Whitelist created: {whitelist_request.name} for user: {current_user.email}, app: {application_id}")
         return ApiResponse(success=True, message="Whitelist created successfully")
     except HTTPException:
         raise
@@ -239,22 +284,22 @@ async def create_whitelist(whitelist_request: WhitelistRequest, request: Request
 async def update_whitelist(whitelist_id: int, whitelist_request: WhitelistRequest, request: Request, db: Session = Depends(get_db)):
     """Update whitelist"""
     try:
-        current_user = get_current_user_from_request(request, db)
-        whitelist = db.query(Whitelist).filter_by(id=whitelist_id, tenant_id=current_user.id).first()
+        current_user, application_id = get_current_user_and_application_from_request(request, db)
+        whitelist = db.query(Whitelist).filter_by(id=whitelist_id, application_id=application_id).first()
         if not whitelist:
             raise HTTPException(status_code=404, detail="Whitelist not found")
-        
+
         whitelist.name = whitelist_request.name
         whitelist.keywords = whitelist_request.keywords
         whitelist.description = whitelist_request.description
         whitelist.is_active = whitelist_request.is_active
-        
+
         db.commit()
-        
+
         # Invalidate keyword cache immediately
         await keyword_cache.invalidate_cache()
-        
-        logger.info(f"Whitelist updated: {whitelist_id} for user: {current_user.email}")
+
+        logger.info(f"Whitelist updated: {whitelist_id} for user: {current_user.email}, app: {application_id}")
         return ApiResponse(success=True, message="Whitelist updated successfully")
     except HTTPException:
         raise
@@ -266,18 +311,18 @@ async def update_whitelist(whitelist_id: int, whitelist_request: WhitelistReques
 async def delete_whitelist(whitelist_id: int, request: Request, db: Session = Depends(get_db)):
     """Delete whitelist"""
     try:
-        current_user = get_current_user_from_request(request, db)
-        whitelist = db.query(Whitelist).filter_by(id=whitelist_id, tenant_id=current_user.id).first()
+        current_user, application_id = get_current_user_and_application_from_request(request, db)
+        whitelist = db.query(Whitelist).filter_by(id=whitelist_id, application_id=application_id).first()
         if not whitelist:
             raise HTTPException(status_code=404, detail="Whitelist not found")
-        
+
         db.delete(whitelist)
         db.commit()
-        
+
         # Invalidate keyword cache immediately
         await keyword_cache.invalidate_cache()
-        
-        logger.info(f"Whitelist deleted: {whitelist_id} for user: {current_user.email}")
+
+        logger.info(f"Whitelist deleted: {whitelist_id} for user: {current_user.email}, app: {application_id}")
         return ApiResponse(success=True, message="Whitelist deleted successfully")
     except HTTPException:
         raise
@@ -290,13 +335,8 @@ async def delete_whitelist(whitelist_id: int, request: Request, db: Session = De
 async def get_response_templates(request: Request, db: Session = Depends(get_db)):
     """Get response template configuration"""
     try:
-        current_user = get_current_user_from_request(request, db)
-        # If column is missing (pre-upgrade database), try global template fallback
-        try:
-            templates = db.query(ResponseTemplate).filter(ResponseTemplate.tenant_id == current_user.id).order_by(ResponseTemplate.created_at.desc()).all()
-        except Exception as e:
-            logger.warning(f"ResponseTemplate query failed with tenant_id filter, falling back: {e}")
-            templates = db.query(ResponseTemplate).order_by(ResponseTemplate.created_at.desc()).all()
+        current_user, application_id = get_current_user_and_application_from_request(request, db)
+        templates = db.query(ResponseTemplate).filter(ResponseTemplate.application_id == application_id).order_by(ResponseTemplate.created_at.desc()).all()
         return [ResponseTemplateResponse(
             id=rt.id,
             category=rt.category,
@@ -317,9 +357,10 @@ async def get_response_templates(request: Request, db: Session = Depends(get_db)
 async def create_response_template(template_request: ResponseTemplateRequest, request: Request, db: Session = Depends(get_db)):
     """Create response template"""
     try:
-        current_user = get_current_user_from_request(request, db)
+        current_user, application_id = get_current_user_and_application_from_request(request, db)
         template = ResponseTemplate(
             tenant_id=current_user.id,
+            application_id=application_id,
             category=template_request.category,
             risk_level=template_request.risk_level,
             template_content=template_request.template_content,
@@ -328,12 +369,12 @@ async def create_response_template(template_request: ResponseTemplateRequest, re
         )
         db.add(template)
         db.commit()
-        
+
         # 立即失效模板缓存
         await template_cache.invalidate_cache()
         await enhanced_template_service.invalidate_cache()
-        
-        logger.info(f"Response template created: {template_request.category} for user: {current_user.email}")
+
+        logger.info(f"Response template created: {template_request.category} for user: {current_user.email}, app: {application_id}")
         return ApiResponse(success=True, message="Response template created successfully")
     except HTTPException:
         raise
@@ -345,24 +386,24 @@ async def create_response_template(template_request: ResponseTemplateRequest, re
 async def update_response_template(template_id: int, template_request: ResponseTemplateRequest, request: Request, db: Session = Depends(get_db)):
     """Update response template"""
     try:
-        current_user = get_current_user_from_request(request, db)
-        template = db.query(ResponseTemplate).filter_by(id=template_id, tenant_id=current_user.id).first()
+        current_user, application_id = get_current_user_and_application_from_request(request, db)
+        template = db.query(ResponseTemplate).filter_by(id=template_id, application_id=application_id).first()
         if not template:
             raise HTTPException(status_code=404, detail="Response template not found")
-        
+
         template.category = template_request.category
         template.risk_level = template_request.risk_level
         template.template_content = template_request.template_content
         template.is_default = template_request.is_default
         template.is_active = template_request.is_active
-        
+
         db.commit()
-        
+
         # Invalidate template cache immediately
         await template_cache.invalidate_cache()
         await enhanced_template_service.invalidate_cache()
-        
-        logger.info(f"Response template updated: {template_id} for user: {current_user.email}")
+
+        logger.info(f"Response template updated: {template_id} for user: {current_user.email}, app: {application_id}")
         return ApiResponse(success=True, message="Response template updated successfully")
     except HTTPException:
         raise
@@ -374,19 +415,19 @@ async def update_response_template(template_id: int, template_request: ResponseT
 async def delete_response_template(template_id: int, request: Request, db: Session = Depends(get_db)):
     """Delete response template"""
     try:
-        current_user = get_current_user_from_request(request, db)
-        template = db.query(ResponseTemplate).filter_by(id=template_id, tenant_id=current_user.id).first()
+        current_user, application_id = get_current_user_and_application_from_request(request, db)
+        template = db.query(ResponseTemplate).filter_by(id=template_id, application_id=application_id).first()
         if not template:
             raise HTTPException(status_code=404, detail="Response template not found")
-        
+
         db.delete(template)
         db.commit()
-        
+
         # Invalidate template cache immediately
         await template_cache.invalidate_cache()
         await enhanced_template_service.invalidate_cache()
-        
-        logger.info(f"Response template deleted: {template_id} for user: {current_user.email}")
+
+        logger.info(f"Response template deleted: {template_id} for user: {current_user.email}, app: {application_id}")
         return ApiResponse(success=True, message="Response template deleted successfully")
     except HTTPException:
         raise
@@ -458,11 +499,11 @@ async def get_knowledge_bases(
 ):
     """Get knowledge base list"""
     try:
-        current_user = get_current_user_from_request(request, db)
+        current_user, application_id = get_current_user_and_application_from_request(request, db)
 
-        # Query user's own knowledge base + global knowledge base
+        # Query application's own knowledge base + global knowledge base
         query = db.query(KnowledgeBase).filter(
-            (KnowledgeBase.tenant_id == current_user.id) | (KnowledgeBase.is_global == True)
+            (KnowledgeBase.application_id == application_id) | (KnowledgeBase.is_global == True)
         )
 
         if category:
@@ -470,7 +511,7 @@ async def get_knowledge_bases(
 
         knowledge_bases = query.order_by(KnowledgeBase.created_at.desc()).all()
 
-        # Get disabled global KB IDs for current user
+        # Get disabled global KB IDs for current user (still using tenant_id for global KB disable)
         disabled_kb_ids = set(
             disable.kb_id for disable in db.query(TenantKnowledgeBaseDisable).filter(
                 TenantKnowledgeBaseDisable.tenant_id == current_user.id
@@ -514,7 +555,7 @@ async def create_knowledge_base(
 ):
     """Create knowledge base"""
     try:
-        current_user = get_current_user_from_request(request, db)
+        current_user, application_id = get_current_user_and_application_from_request(request, db)
 
         # Debug info
         logger.info(f"Create knowledge base - category: {category}, name: {name}, description: {description}, similarity_threshold: {similarity_threshold}, is_active: {is_active}, is_global: {is_global}")
@@ -541,11 +582,19 @@ async def create_knowledge_base(
         #     raise HTTPException(status_code=400, detail="File must be a JSONL file")
 
         # Check if there is already a knowledge base with the same name
-        existing = db.query(KnowledgeBase).filter(
-            KnowledgeBase.tenant_id == current_user.id,
-            KnowledgeBase.category == category,
-            KnowledgeBase.name == name
-        ).first()
+        # For global KB, don't set application_id
+        if is_global:
+            existing = db.query(KnowledgeBase).filter(
+                KnowledgeBase.is_global == True,
+                KnowledgeBase.category == category,
+                KnowledgeBase.name == name
+            ).first()
+        else:
+            existing = db.query(KnowledgeBase).filter(
+                KnowledgeBase.application_id == application_id,
+                KnowledgeBase.category == category,
+                KnowledgeBase.name == name
+            ).first()
 
         if existing:
             raise HTTPException(status_code=400, detail="Knowledge base with this name already exists for this category")
@@ -557,8 +606,11 @@ async def create_knowledge_base(
         qa_pairs = knowledge_base_service.parse_jsonl_file(file_content)
 
         # Create database record
+        # Note: Even global KBs need an application_id (the creating application)
+        # The is_global flag controls whether it's accessible to all applications
         knowledge_base = KnowledgeBase(
             tenant_id=current_user.id,
+            application_id=application_id,
             category=category,
             name=name,
             description=description,
@@ -585,7 +637,7 @@ async def create_knowledge_base(
         # Invalidate enhanced template cache immediately
         await enhanced_template_service.invalidate_cache()
 
-        logger.info(f"Knowledge base created: {name} for category {category}, user: {current_user.email}")
+        logger.info(f"Knowledge base created: {name} for category {category}, user: {current_user.email}, app: {application_id}, global: {is_global}")
         return ApiResponse(success=True, message="Knowledge base created successfully")
 
     except HTTPException:
@@ -604,9 +656,9 @@ async def update_knowledge_base(
 ):
     """Update knowledge base (only basic information, not including file)"""
     try:
-        current_user = get_current_user_from_request(request, db)
+        current_user, application_id = get_current_user_and_application_from_request(request, db)
 
-        # Find knowledge base (user's own or global)
+        # Find knowledge base (application's own or global)
         knowledge_base = db.query(KnowledgeBase).filter(
             KnowledgeBase.id == kb_id
         ).first()
@@ -614,8 +666,8 @@ async def update_knowledge_base(
         if not knowledge_base:
             raise HTTPException(status_code=404, detail="Knowledge base not found")
 
-        # Permission check: only edit user's own knowledge base, or admin can edit global knowledge base
-        if knowledge_base.tenant_id != current_user.id and not (current_user.is_super_admin and knowledge_base.is_global):
+        # Permission check: only edit application's own knowledge base, or admin can edit global knowledge base
+        if knowledge_base.application_id != application_id and not (current_user.is_super_admin and knowledge_base.is_global):
             raise HTTPException(status_code=403, detail="Permission denied")
 
         # Check global permission (only admin can set global knowledge base)
@@ -623,12 +675,20 @@ async def update_knowledge_base(
             raise HTTPException(status_code=403, detail="Only administrators can set knowledge bases as global")
 
         # Check if there is another knowledge base with the same name
-        existing = db.query(KnowledgeBase).filter(
-            KnowledgeBase.tenant_id == current_user.id,
-            KnowledgeBase.category == kb_request.category,
-            KnowledgeBase.name == kb_request.name,
-            KnowledgeBase.id != kb_id
-        ).first()
+        if kb_request.is_global:
+            existing = db.query(KnowledgeBase).filter(
+                KnowledgeBase.is_global == True,
+                KnowledgeBase.category == kb_request.category,
+                KnowledgeBase.name == kb_request.name,
+                KnowledgeBase.id != kb_id
+            ).first()
+        else:
+            existing = db.query(KnowledgeBase).filter(
+                KnowledgeBase.application_id == application_id,
+                KnowledgeBase.category == kb_request.category,
+                KnowledgeBase.name == kb_request.name,
+                KnowledgeBase.id != kb_id
+            ).first()
 
         if existing:
             raise HTTPException(status_code=400, detail="Knowledge base with this name already exists for this category")
@@ -663,9 +723,9 @@ async def delete_knowledge_base(
 ):
     """Delete knowledge base"""
     try:
-        current_user = get_current_user_from_request(request, db)
+        current_user, application_id = get_current_user_and_application_from_request(request, db)
 
-        # Find knowledge base (user's own or global)
+        # Find knowledge base (application's own or global)
         knowledge_base = db.query(KnowledgeBase).filter(
             KnowledgeBase.id == kb_id
         ).first()
@@ -673,14 +733,14 @@ async def delete_knowledge_base(
         if not knowledge_base:
             raise HTTPException(status_code=404, detail="Knowledge base not found")
 
-        # Permission check: 
-        # 1. Users can delete their own knowledge bases
+        # Permission check:
+        # 1. Applications can delete their own knowledge bases
         # 2. Administrators can delete system-level (global) knowledge bases
         # 3. Regular users cannot delete system-level knowledge bases
-        if knowledge_base.tenant_id != current_user.id:
+        if knowledge_base.application_id != application_id:
             if not (current_user.is_super_admin and knowledge_base.is_global):
                 raise HTTPException(
-                    status_code=403, 
+                    status_code=403,
                     detail="Permission denied. You can only delete your own knowledge bases, or administrators can delete system-level knowledge bases."
                 )
 
@@ -713,11 +773,11 @@ async def replace_knowledge_base_file(
 ):
     """Replace knowledge base file"""
     try:
-        current_user = get_current_user_from_request(request, db)
+        current_user, application_id = get_current_user_and_application_from_request(request, db)
 
         knowledge_base = db.query(KnowledgeBase).filter(
             KnowledgeBase.id == kb_id,
-            KnowledgeBase.tenant_id == current_user.id
+            KnowledgeBase.application_id == application_id
         ).first()
 
         if not knowledge_base:
@@ -770,11 +830,11 @@ async def get_knowledge_base_info(
 ):
     """Get knowledge base file info"""
     try:
-        current_user = get_current_user_from_request(request, db)
+        current_user, application_id = get_current_user_and_application_from_request(request, db)
 
         knowledge_base = db.query(KnowledgeBase).filter(
             KnowledgeBase.id == kb_id,
-            KnowledgeBase.tenant_id == current_user.id
+            ((KnowledgeBase.application_id == application_id) | (KnowledgeBase.is_global == True))
         ).first()
 
         if not knowledge_base:
@@ -800,12 +860,12 @@ async def search_similar_questions(
 ):
     """Search similar questions"""
     try:
-        current_user = get_current_user_from_request(request, db)
+        current_user, application_id = get_current_user_and_application_from_request(request, db)
 
-        # Find knowledge base (user's own or global)
+        # Find knowledge base (application's own or global)
         knowledge_base = db.query(KnowledgeBase).filter(
             KnowledgeBase.id == kb_id,
-            ((KnowledgeBase.tenant_id == current_user.id) | (KnowledgeBase.is_global == True)),
+            ((KnowledgeBase.application_id == application_id) | (KnowledgeBase.is_global == True)),
             KnowledgeBase.is_active == True
         ).first()
 
@@ -840,14 +900,14 @@ async def get_knowledge_bases_by_category(
 ):
     """Get knowledge base list by category"""
     try:
-        current_user = get_current_user_from_request(request, db)
+        current_user, application_id = get_current_user_and_application_from_request(request, db)
 
         if category not in ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 'S10', 'S11', 'S12']:
             raise HTTPException(status_code=400, detail="Invalid category")
 
-        # Query user's own knowledge base + global knowledge base
+        # Query application's own knowledge base + global knowledge base
         knowledge_bases = db.query(KnowledgeBase).filter(
-            ((KnowledgeBase.tenant_id == current_user.id) | (KnowledgeBase.is_global == True)),
+            ((KnowledgeBase.application_id == application_id) | (KnowledgeBase.is_global == True)),
             KnowledgeBase.category == category,
             KnowledgeBase.is_active == True
         ).order_by(KnowledgeBase.created_at.desc()).all()

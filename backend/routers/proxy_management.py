@@ -4,12 +4,12 @@ Redesigned to support one upstream API key serving multiple models
 """
 from fastapi import APIRouter, HTTPException, Request, Depends
 from fastapi.responses import JSONResponse
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 import uuid
 from datetime import datetime
 
 from database.connection import get_admin_db_session
-from database.models import UpstreamApiConfig, ProxyRequestLog, OnlineTestModelSelection
+from database.models import UpstreamApiConfig, ProxyRequestLog, OnlineTestModelSelection, Tenant, Application
 from sqlalchemy.orm import Session
 from utils.logger import setup_logger
 from cryptography.fernet import Fernet
@@ -18,6 +18,33 @@ import base64
 
 router = APIRouter()
 logger = setup_logger()
+
+def get_current_user_from_request(request: Request, db: Session) -> Tenant:
+    """
+    Get current tenant from request
+    Returns: Tenant
+    Note: Proxy management is tenant-level (global), not application-level
+    """
+    auth_context = getattr(request.state, 'auth_context', None)
+    if not auth_context or 'data' not in auth_context:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    data = auth_context['data']
+
+    tenant_id = data.get('tenant_id')
+    if not tenant_id:
+        raise HTTPException(status_code=401, detail="Tenant ID not found in auth context")
+
+    try:
+        tenant_uuid = uuid.UUID(str(tenant_id))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid tenant ID format")
+
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_uuid).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    return tenant
 
 def _get_or_create_encryption_key() -> bytes:
     """Get or create encryption key"""
@@ -57,32 +84,20 @@ def _mask_api_key(api_key: str) -> str:
 
 @router.get("/proxy/upstream-apis")
 async def get_user_upstream_apis(request: Request):
-    """Get user upstream API configurations"""
+    """Get tenant upstream API configurations (global, not application-specific)"""
     try:
-        auth_ctx = getattr(request.state, 'auth_context', None)
-        if not auth_ctx:
-            raise HTTPException(status_code=401, detail="Authentication required")
-
-        tenant_id = auth_ctx['data']['tenant_id']
-
-        # Standardize user_id to UUID object
-        try:
-            if isinstance(tenant_id, str):
-                tenant_id_uuid = uuid.UUID(tenant_id)
-            elif hasattr(tenant_id, 'hex'):  # Already UUID object
-                tenant_id_uuid = tenant_id
-            else:
-                tenant_id_uuid = uuid.UUID(str(tenant_id))
-        except (ValueError, TypeError) as e:
-            logger.error(f"Invalid tenant_id format: {tenant_id}, error: {e}")
-            raise HTTPException(status_code=400, detail="Invalid user ID format")
-
         # Directly use database query
         db = get_admin_db_session()
         try:
+            current_user = get_current_user_from_request(request, db)
+            logger.info(f"Getting upstream configs for tenant: {current_user.id}")
+
+            # Query by tenant_id only (not application_id) - proxy configs are global
             configs = db.query(UpstreamApiConfig).filter(
-                UpstreamApiConfig.tenant_id == tenant_id_uuid
+                UpstreamApiConfig.tenant_id == current_user.id
             ).all()
+
+            logger.info(f"Found {len(configs)} upstream configs for tenant {current_user.id}")
 
             return {
                 "success": True,
@@ -115,26 +130,8 @@ async def get_user_upstream_apis(request: Request):
 
 @router.post("/proxy/upstream-apis")
 async def create_upstream_api(request: Request):
-    """Create upstream API configuration"""
+    """Create upstream API configuration (tenant-level, global)"""
     try:
-        auth_ctx = getattr(request.state, 'auth_context', None)
-        if not auth_ctx:
-            raise HTTPException(status_code=401, detail="Authentication required")
-
-        tenant_id = auth_ctx['data']['tenant_id']
-
-        # Standardize user_id to UUID object
-        try:
-            if isinstance(tenant_id, str):
-                tenant_id_uuid = uuid.UUID(tenant_id)
-            elif hasattr(tenant_id, 'hex'):  # Already UUID object
-                tenant_id_uuid = tenant_id
-            else:
-                tenant_id_uuid = uuid.UUID(str(tenant_id))
-        except (ValueError, TypeError) as e:
-            logger.error(f"Invalid tenant_id format: {tenant_id}, error: {e}")
-            raise HTTPException(status_code=400, detail="Invalid user ID format")
-
         request_data = await request.json()
 
         # Debug log
@@ -149,26 +146,38 @@ async def create_upstream_api(request: Request):
         # Directly use database operation
         db = get_admin_db_session()
         try:
-            # Check if configuration name already exists
+            current_user = get_current_user_from_request(request, db)
+
+            # Check if configuration name already exists (tenant-level check)
             existing = db.query(UpstreamApiConfig).filter(
-                UpstreamApiConfig.tenant_id == tenant_id_uuid,
+                UpstreamApiConfig.tenant_id == current_user.id,
                 UpstreamApiConfig.config_name == request_data['config_name']
             ).first()
             if existing:
                 raise ValueError(f"Upstream API configuration '{request_data['config_name']}' already exists")
+
+            # Get tenant's default application for application_id (required by DB schema)
+            default_app = db.query(Application).filter(
+                Application.tenant_id == current_user.id,
+                Application.is_active == True
+            ).first()
+
+            if not default_app:
+                raise ValueError("No active application found for tenant")
 
             # Encrypt API key
             api_key_to_encrypt = request_data['api_key']
             # Log for debugging (mask the key)
             masked_key = f"{api_key_to_encrypt[:8]}...{api_key_to_encrypt[-4:]}" if len(api_key_to_encrypt) > 12 else "***"
             logger.info(f"Creating upstream API config with api_key={masked_key}")
-            
+
             encrypted_api_key = _encrypt_api_key(api_key_to_encrypt)
 
-            # Create upstream API configuration
+            # Create upstream API configuration (use default app_id, but treat as tenant-level)
             api_config = UpstreamApiConfig(
                 id=uuid.uuid4(),
-                tenant_id=tenant_id_uuid,
+                tenant_id=current_user.id,
+                application_id=default_app.id,  # Use default app, but configs are global for tenant
                 config_name=request_data['config_name'],
                 api_base_url=request_data['api_base_url'],
                 api_key_encrypted=encrypted_api_key,
@@ -209,29 +218,14 @@ async def create_upstream_api(request: Request):
 async def get_upstream_api_detail(api_id: str, request: Request):
     """Get single upstream API configuration detail (for edit form)"""
     try:
-        auth_ctx = getattr(request.state, 'auth_context', None)
-        if not auth_ctx:
-            raise HTTPException(status_code=401, detail="Authentication required")
-
-        tenant_id = auth_ctx['data']['tenant_id']
-
-        # Standardize user_id to UUID object
-        try:
-            if isinstance(tenant_id, str):
-                tenant_id_uuid = uuid.UUID(tenant_id)
-            elif hasattr(tenant_id, 'hex'):  # Already UUID object
-                tenant_id_uuid = tenant_id
-            else:
-                tenant_id_uuid = uuid.UUID(str(tenant_id))
-        except (ValueError, TypeError) as e:
-            logger.error(f"Invalid tenant_id format: {tenant_id}, error: {e}")
-            raise HTTPException(status_code=400, detail="Invalid user ID format")
-
         db = get_admin_db_session()
         try:
+            current_user = get_current_user_from_request(request, db)
+
+            # Query by tenant_id only (configs are global for tenant)
             api_config = db.query(UpstreamApiConfig).filter(
                 UpstreamApiConfig.id == api_id,
-                UpstreamApiConfig.tenant_id == tenant_id_uuid
+                UpstreamApiConfig.tenant_id == current_user.id
             ).first()
 
             if not api_config:
@@ -278,24 +272,6 @@ async def get_upstream_api_detail(api_id: str, request: Request):
 async def update_upstream_api(api_id: str, request: Request):
     """Update upstream API configuration"""
     try:
-        auth_ctx = getattr(request.state, 'auth_context', None)
-        if not auth_ctx:
-            raise HTTPException(status_code=401, detail="Authentication required")
-
-        tenant_id = auth_ctx['data']['tenant_id']
-
-        # Standardize user_id to UUID object
-        try:
-            if isinstance(tenant_id, str):
-                tenant_id_uuid = uuid.UUID(tenant_id)
-            elif hasattr(tenant_id, 'hex'):  # Already UUID object
-                tenant_id_uuid = tenant_id
-            else:
-                tenant_id_uuid = uuid.UUID(str(tenant_id))
-        except (ValueError, TypeError) as e:
-            logger.error(f"Invalid tenant_id format: {tenant_id}, error: {e}")
-            raise HTTPException(status_code=400, detail="Invalid user ID format")
-
         request_data = await request.json()
 
         # Debug log
@@ -304,18 +280,21 @@ async def update_upstream_api(api_id: str, request: Request):
         # Directly use database operation
         db = get_admin_db_session()
         try:
+            current_user = get_current_user_from_request(request, db)
+
+            # Query by tenant_id only (configs are global for tenant)
             api_config = db.query(UpstreamApiConfig).filter(
                 UpstreamApiConfig.id == api_id,
-                UpstreamApiConfig.tenant_id == tenant_id_uuid
+                UpstreamApiConfig.tenant_id == current_user.id
             ).first()
 
             if not api_config:
                 raise ValueError(f"Upstream API configuration not found")
 
-            # Check if configuration name already exists
+            # Check if configuration name already exists (tenant-level check)
             if 'config_name' in request_data:
                 existing = db.query(UpstreamApiConfig).filter(
-                    UpstreamApiConfig.tenant_id == tenant_id_uuid,
+                    UpstreamApiConfig.tenant_id == current_user.id,
                     UpstreamApiConfig.config_name == request_data['config_name'],
                     UpstreamApiConfig.id != api_id  # Exclude current configuration
                 ).first()
@@ -363,30 +342,15 @@ async def update_upstream_api(api_id: str, request: Request):
 async def delete_upstream_api(api_id: str, request: Request):
     """Delete upstream API configuration"""
     try:
-        auth_ctx = getattr(request.state, 'auth_context', None)
-        if not auth_ctx:
-            raise HTTPException(status_code=401, detail="Authentication required")
-
-        tenant_id = auth_ctx['data']['tenant_id']
-
-        # Standardize user_id to UUID object
-        try:
-            if isinstance(tenant_id, str):
-                tenant_id_uuid = uuid.UUID(tenant_id)
-            elif hasattr(tenant_id, 'hex'):  # Already UUID object
-                tenant_id_uuid = tenant_id
-            else:
-                tenant_id_uuid = uuid.UUID(str(tenant_id))
-        except (ValueError, TypeError) as e:
-            logger.error(f"Invalid tenant_id format: {tenant_id}, error: {e}")
-            raise HTTPException(status_code=400, detail="Invalid user ID format")
-
         # Directly use database operation
         db = get_admin_db_session()
         try:
+            current_user = get_current_user_from_request(request, db)
+
+            # Query by tenant_id only (configs are global for tenant)
             api_config = db.query(UpstreamApiConfig).filter(
                 UpstreamApiConfig.id == api_id,
-                UpstreamApiConfig.tenant_id == tenant_id_uuid
+                UpstreamApiConfig.tenant_id == current_user.id
             ).first()
 
             if not api_config:
@@ -405,7 +369,7 @@ async def delete_upstream_api(api_id: str, request: Request):
             db.delete(api_config)
             db.commit()
 
-            logger.info(f"Deleted upstream API config '{config_name}' for user {tenant_id}. "
+            logger.info(f"Deleted upstream API config '{config_name}' for tenant {current_user.id}. "
                        f"Also deleted {deleted_selections_count} model selections.")
         finally:
             db.close()

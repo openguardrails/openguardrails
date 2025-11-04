@@ -267,11 +267,12 @@ class DataSecurityService:
 
     def create_entity_type(
         self,
-        tenant_id: str,  # tenant_id, for backward compatibility keep parameter name tenant_id
-        entity_type: str,
-        display_name: str,
-        risk_level: str,
-        pattern: str,
+        tenant_id: str,
+        application_id: Optional[str] = None,
+        entity_type: str = None,
+        display_name: str = None,
+        risk_level: str = None,
+        pattern: str = None,
         anonymization_method: str = 'replace',
         anonymization_config: Optional[Dict[str, Any]] = None,
         check_input: bool = True,
@@ -282,13 +283,12 @@ class DataSecurityService:
     ) -> DataSecurityEntityType:
         """Create sensitive data type configuration
 
-        Note: For backward compatibility, keep parameter name tenant_id, but actually process tenant_id
-        
         Args:
-            source_type: 'system_template' (admin creates template), 'system_copy' (tenant's copy), 'custom' (user creates)
+            tenant_id: Tenant ID
+            application_id: Application ID (optional, None for global templates)
+            source_type: 'system_template' (admin creates template), 'system_copy' (application's copy), 'custom' (user creates)
             template_id: UUID of the template if this is a copy
         """
-        tenant_id = tenant_id  # For backward compatibility, internally use tenant_id
         recognition_config = {
             'pattern': pattern,
             'check_input': check_input,
@@ -300,7 +300,8 @@ class DataSecurityService:
             source_type = 'system_template'
 
         entity_type_obj = DataSecurityEntityType(
-            tenant_id=tenant_id,  # Database field name keep as tenant_id, actually store tenant_id
+            tenant_id=tenant_id,
+            application_id=application_id if not is_global else None,  # Global templates don't have application_id
             entity_type=entity_type,
             display_name=display_name,
             category=risk_level,  # Use category field to store risk level
@@ -322,20 +323,30 @@ class DataSecurityService:
     def update_entity_type(
         self,
         entity_type_id: str,
-        tenant_id: str,  # tenant_id, for backward compatibility keep parameter name tenant_id
+        tenant_id: str,
+        application_id: Optional[str] = None,
         **kwargs
     ) -> Optional[DataSecurityEntityType]:
         """Update sensitive data type configuration
 
-        Note: For backward compatibility, keep parameter name tenant_id, but actually process tenant_id
+        Args:
+            entity_type_id: Entity type ID to update
+            tenant_id: Tenant ID
+            application_id: Application ID (optional)
         """
-        tenant_id = tenant_id  # For backward compatibility, internally use tenant_id
-        entity_type = self.db.query(DataSecurityEntityType).filter(
-            and_(
-                DataSecurityEntityType.id == entity_type_id,
-                (DataSecurityEntityType.tenant_id == tenant_id) | (DataSecurityEntityType.is_global == True)
+        # Build query conditions
+        conditions = [DataSecurityEntityType.id == entity_type_id]
+
+        # Allow access if global template or belongs to the application
+        if application_id:
+            conditions.append(
+                (DataSecurityEntityType.application_id == application_id) |
+                (DataSecurityEntityType.is_global == True)
             )
-        ).first()
+        else:
+            conditions.append(DataSecurityEntityType.is_global == True)
+
+        entity_type = self.db.query(DataSecurityEntityType).filter(and_(*conditions)).first()
 
         if not entity_type:
             return None
@@ -369,18 +380,23 @@ class DataSecurityService:
 
         return entity_type
 
-    def delete_entity_type(self, entity_type_id: str, tenant_id: str) -> bool:
+    def delete_entity_type(self, entity_type_id: str, tenant_id: str, application_id: Optional[str] = None) -> bool:
         """Delete sensitive data type configuration
 
-        Note: For backward compatibility, keep parameter name tenant_id, but actually process tenant_id
+        Args:
+            entity_type_id: Entity type ID to delete
+            tenant_id: Tenant ID
+            application_id: Application ID (optional)
         """
-        tenant_id = tenant_id  # For backward compatibility, internally use tenant_id
-        entity_type = self.db.query(DataSecurityEntityType).filter(
-            and_(
-                DataSecurityEntityType.id == entity_type_id,
-                DataSecurityEntityType.tenant_id == tenant_id
-            )
-        ).first()
+        conditions = [DataSecurityEntityType.id == entity_type_id]
+
+        # Only allow deletion if it belongs to the application
+        if application_id:
+            conditions.append(DataSecurityEntityType.application_id == application_id)
+        else:
+            conditions.append(DataSecurityEntityType.tenant_id == tenant_id)
+
+        entity_type = self.db.query(DataSecurityEntityType).filter(and_(*conditions)).first()
 
         if not entity_type:
             return False
@@ -392,25 +408,34 @@ class DataSecurityService:
 
     def get_entity_types(
         self,
-        tenant_id: str,  # tenant_id, for backward compatibility keep parameter name tenant_id
+        tenant_id: str,
+        application_id: Optional[str] = None,
         risk_level: Optional[str] = None,
         is_active: Optional[bool] = None
     ) -> List[DataSecurityEntityType]:
         """Get sensitive data type configuration list
-        
-        This method now automatically ensures tenant has copies of all system templates.
 
-        Note: For backward compatibility, keep parameter name tenant_id, but actually process tenant_id
+        This method now automatically ensures application has copies of all system templates.
+
+        Args:
+            tenant_id: Tenant ID
+            application_id: Application ID (optional)
+            risk_level: Filter by risk level (optional)
+            is_active: Filter by active status (optional)
         """
-        tenant_id = tenant_id  # For backward compatibility, internally use tenant_id
-        
-        # Ensure tenant has copies of all system templates
-        self.ensure_tenant_has_system_copies(tenant_id)
-        
-        # Get tenant's own entity types (both system_copy and custom)
-        query = self.db.query(DataSecurityEntityType).filter(
-            DataSecurityEntityType.tenant_id == tenant_id
-        )
+        # Ensure application has copies of all system templates
+        if application_id:
+            self.ensure_application_has_system_copies(tenant_id, application_id)
+
+            # Get application's own entity types (both system_copy and custom)
+            query = self.db.query(DataSecurityEntityType).filter(
+                DataSecurityEntityType.application_id == application_id
+            )
+        else:
+            # Fallback: get tenant's entity types (for backward compatibility)
+            query = self.db.query(DataSecurityEntityType).filter(
+                DataSecurityEntityType.tenant_id == tenant_id
+            )
 
         if risk_level:
             query = query.filter(DataSecurityEntityType.category == risk_level)
@@ -419,8 +444,72 @@ class DataSecurityService:
 
         return query.order_by(DataSecurityEntityType.created_at.desc()).all()
 
+    def disable_entity_type_for_application(self, tenant_id: str, application_id: str, entity_type: str) -> bool:
+        """Disable an entity type for a specific application"""
+        try:
+            # Check if already disabled
+            existing = self.db.query(TenantEntityTypeDisable).filter(
+                and_(
+                    TenantEntityTypeDisable.tenant_id == tenant_id,
+                    TenantEntityTypeDisable.application_id == application_id,
+                    TenantEntityTypeDisable.entity_type == entity_type
+                )
+            ).first()
+
+            if existing:
+                return True  # Already disabled
+
+            # Create disable record
+            disable_record = TenantEntityTypeDisable(
+                tenant_id=tenant_id,
+                application_id=application_id,
+                entity_type=entity_type
+            )
+            self.db.add(disable_record)
+            self.db.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error disabling entity type {entity_type} for application {application_id}: {e}")
+            self.db.rollback()
+            return False
+
+    def enable_entity_type_for_application(self, tenant_id: str, application_id: str, entity_type: str) -> bool:
+        """Enable an entity type for a specific application (remove disable record)"""
+        try:
+            disable_record = self.db.query(TenantEntityTypeDisable).filter(
+                and_(
+                    TenantEntityTypeDisable.tenant_id == tenant_id,
+                    TenantEntityTypeDisable.application_id == application_id,
+                    TenantEntityTypeDisable.entity_type == entity_type
+                )
+            ).first()
+
+            if disable_record:
+                self.db.delete(disable_record)
+                self.db.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error enabling entity type {entity_type} for application {application_id}: {e}")
+            self.db.rollback()
+            return False
+
+    def get_application_disabled_entity_types(self, tenant_id: str, application_id: str) -> List[str]:
+        """Get list of disabled entity types for an application"""
+        try:
+            disabled_records = self.db.query(TenantEntityTypeDisable).filter(
+                and_(
+                    TenantEntityTypeDisable.tenant_id == tenant_id,
+                    TenantEntityTypeDisable.application_id == application_id
+                )
+            ).all()
+            return [record.entity_type for record in disabled_records]
+        except Exception as e:
+            logger.error(f"Error getting disabled entity types for application {application_id}: {e}")
+            return []
+
+    # Keep old tenant methods for backward compatibility
     def disable_entity_type_for_tenant(self, tenant_id: str, entity_type: str) -> bool:
-        """Disable an entity type for a specific tenant"""
+        """Disable an entity type for a specific tenant (deprecated, use disable_entity_type_for_application)"""
         try:
             # Check if already disabled
             existing = self.db.query(TenantEntityTypeDisable).filter(
@@ -447,7 +536,7 @@ class DataSecurityService:
             return False
 
     def enable_entity_type_for_tenant(self, tenant_id: str, entity_type: str) -> bool:
-        """Enable an entity type for a specific tenant (remove disable record)"""
+        """Enable an entity type for a specific tenant (deprecated, use enable_entity_type_for_application)"""
         try:
             disable_record = self.db.query(TenantEntityTypeDisable).filter(
                 and_(
@@ -466,7 +555,7 @@ class DataSecurityService:
             return False
 
     def get_tenant_disabled_entity_types(self, tenant_id: str) -> List[str]:
-        """Get list of disabled entity types for a tenant"""
+        """Get list of disabled entity types for a tenant (deprecated, use get_application_disabled_entity_types)"""
         try:
             disabled_records = self.db.query(TenantEntityTypeDisable).filter(
                 TenantEntityTypeDisable.tenant_id == tenant_id
@@ -476,14 +565,14 @@ class DataSecurityService:
             logger.error(f"Error getting disabled entity types for tenant {tenant_id}: {e}")
             return []
     
-    def ensure_tenant_has_system_copies(self, tenant_id: str) -> int:
-        """Ensure tenant has copies of all system templates
-        
+    def ensure_application_has_system_copies(self, tenant_id: str, application_id: str) -> int:
+        """Ensure application has copies of all system templates
+
         This method:
         1. Finds all system templates (source_type='system_template')
-        2. For each template, checks if tenant has a copy
+        2. For each template, checks if application has a copy
         3. Creates missing copies with source_type='system_copy' and template_id set
-        
+
         Returns:
             Number of copies created
         """
@@ -492,30 +581,103 @@ class DataSecurityService:
             system_templates = self.db.query(DataSecurityEntityType).filter(
                 DataSecurityEntityType.source_type == 'system_template'
             ).all()
-            
+
             if not system_templates:
                 return 0
-            
+
+            # Get application's existing entity types
+            application_entity_types = self.db.query(DataSecurityEntityType).filter(
+                DataSecurityEntityType.application_id == application_id
+            ).all()
+
+            # Create a set of template IDs that application already has copies of
+            application_template_ids = set()
+            for et in application_entity_types:
+                if et.template_id:
+                    application_template_ids.add(str(et.template_id))
+
+            # Create copies for missing templates
+            copies_created = 0
+            for template in system_templates:
+                template_id_str = str(template.id)
+
+                # Skip if application already has a copy of this template
+                if template_id_str in application_template_ids:
+                    continue
+
+                # Create a copy for this application
+                recognition_config = template.recognition_config or {}
+                copy = DataSecurityEntityType(
+                    tenant_id=tenant_id,
+                    application_id=application_id,
+                    entity_type=template.entity_type,
+                    display_name=template.display_name,
+                    category=template.category,
+                    recognition_method=template.recognition_method,
+                    recognition_config=recognition_config.copy(),
+                    anonymization_method=template.anonymization_method,
+                    anonymization_config=(template.anonymization_config or {}).copy(),
+                    is_active=template.is_active,
+                    is_global=False,  # Copies are not global
+                    source_type='system_copy',
+                    template_id=template.id
+                )
+
+                self.db.add(copy)
+                copies_created += 1
+                logger.info(f"Created system copy of '{template.entity_type}' for application {application_id}")
+
+            if copies_created > 0:
+                self.db.commit()
+                logger.info(f"Created {copies_created} system entity type copies for application {application_id}")
+
+            return copies_created
+
+        except Exception as e:
+            logger.error(f"Error ensuring application {application_id} has system copies: {e}")
+            self.db.rollback()
+            return 0
+
+    def ensure_tenant_has_system_copies(self, tenant_id: str) -> int:
+        """Ensure tenant has copies of all system templates (deprecated, use ensure_application_has_system_copies)
+
+        This method:
+        1. Finds all system templates (source_type='system_template')
+        2. For each template, checks if tenant has a copy
+        3. Creates missing copies with source_type='system_copy' and template_id set
+
+        Returns:
+            Number of copies created
+        """
+        try:
+            # Get all system templates
+            system_templates = self.db.query(DataSecurityEntityType).filter(
+                DataSecurityEntityType.source_type == 'system_template'
+            ).all()
+
+            if not system_templates:
+                return 0
+
             # Get tenant's existing entity types
             tenant_entity_types = self.db.query(DataSecurityEntityType).filter(
                 DataSecurityEntityType.tenant_id == tenant_id
             ).all()
-            
+
             # Create a set of template IDs that tenant already has copies of
             tenant_template_ids = set()
             for et in tenant_entity_types:
                 if et.template_id:
                     tenant_template_ids.add(str(et.template_id))
-            
+
             # Create copies for missing templates
             copies_created = 0
             for template in system_templates:
                 template_id_str = str(template.id)
-                
+
                 # Skip if tenant already has a copy of this template
                 if template_id_str in tenant_template_ids:
                     continue
-                
+
                 # Create a copy for this tenant
                 recognition_config = template.recognition_config or {}
                 copy = DataSecurityEntityType(
@@ -532,17 +694,17 @@ class DataSecurityService:
                     source_type='system_copy',
                     template_id=template.id
                 )
-                
+
                 self.db.add(copy)
                 copies_created += 1
                 logger.info(f"Created system copy of '{template.entity_type}' for tenant {tenant_id}")
-            
+
             if copies_created > 0:
                 self.db.commit()
                 logger.info(f"Created {copies_created} system entity type copies for tenant {tenant_id}")
-            
+
             return copies_created
-            
+
         except Exception as e:
             logger.error(f"Error ensuring tenant {tenant_id} has system copies: {e}")
             self.db.rollback()

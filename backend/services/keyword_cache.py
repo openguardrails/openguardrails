@@ -9,62 +9,82 @@ from utils.logger import setup_logger
 logger = setup_logger()
 
 class KeywordCache:
-    """High-performance keyword cache service"""
-    
+    """High-performance keyword cache service (application-scoped)"""
+
     def __init__(self, cache_ttl: int = 300):  # 5 minutes cache
-        # Multi-tenant cache structure:
-        # Blacklist: {tenant_id: {list_name: {keyword1, keyword2, ...}}}
-        # Whitelist: {tenant_id: {list_name: {keyword1, keyword2, ...}}}
+        # Multi-application cache structure:
+        # Blacklist: {application_id: {list_name: {keyword1, keyword2, ...}}}
+        # Whitelist: {application_id: {list_name: {keyword1, keyword2, ...}}}
         self._blacklist_cache: Dict[str, Dict[str, Set[str]]] = {}
         self._whitelist_cache: Dict[str, Dict[str, Set[str]]] = {}
         self._cache_timestamp = 0
         self._cache_ttl = cache_ttl
         self._lock = asyncio.Lock()
-        
-    async def check_blacklist(self, content: str, tenant_id: Optional[str]) -> Tuple[bool, Optional[str], List[str]]:
-        """Check blacklist (memory cache version)"""
+
+    async def check_blacklist(self, content: str, tenant_id: Optional[str] = None, application_id: Optional[str] = None) -> Tuple[bool, Optional[str], List[str]]:
+        """
+        Check blacklist (memory cache version)
+
+        Args:
+            content: Content to check
+            tenant_id: DEPRECATED - kept for backward compatibility
+            application_id: Application ID to check keywords for
+        """
         await self._ensure_cache_fresh()
-        
-        if not tenant_id:
+
+        # Prefer application_id, fallback to tenant_id for backward compatibility
+        cache_key = application_id if application_id else tenant_id
+
+        if not cache_key:
             return False, None, []
 
         content_lower = content.lower()
-        
-        user_blacklists = self._blacklist_cache.get(str(tenant_id), {})
-        for list_name, keywords in user_blacklists.items():
+
+        app_blacklists = self._blacklist_cache.get(str(cache_key), {})
+        for list_name, keywords in app_blacklists.items():
             matched_keywords = []
-            
+
             for keyword in keywords:
                 if keyword in content_lower:
                     matched_keywords.append(keyword)
-            
+
             if matched_keywords:
-                logger.info(f"Blacklist hit: {list_name}, keywords: {matched_keywords}")
+                logger.info(f"Blacklist hit: {list_name}, keywords: {matched_keywords}, application_id: {cache_key}")
                 return True, list_name, matched_keywords
-        
+
         return False, None, []
-    
-    async def check_whitelist(self, content: str, tenant_id: Optional[str]) -> Tuple[bool, Optional[str], List[str]]:
-        """Check whitelist (memory cache version)"""
+
+    async def check_whitelist(self, content: str, tenant_id: Optional[str] = None, application_id: Optional[str] = None) -> Tuple[bool, Optional[str], List[str]]:
+        """
+        Check whitelist (memory cache version)
+
+        Args:
+            content: Content to check
+            tenant_id: DEPRECATED - kept for backward compatibility
+            application_id: Application ID to check keywords for
+        """
         await self._ensure_cache_fresh()
-        
-        if not tenant_id:
+
+        # Prefer application_id, fallback to tenant_id for backward compatibility
+        cache_key = application_id if application_id else tenant_id
+
+        if not cache_key:
             return False, None, []
 
         content_lower = content.lower()
-        
-        user_whitelists = self._whitelist_cache.get(str(tenant_id), {})
-        for list_name, keywords in user_whitelists.items():
+
+        app_whitelists = self._whitelist_cache.get(str(cache_key), {})
+        for list_name, keywords in app_whitelists.items():
             matched_keywords = []
-            
+
             for keyword in keywords:
                 if keyword in content_lower:
                     matched_keywords.append(keyword)
-            
+
             if matched_keywords:
-                logger.info(f"Whitelist hit: {list_name}, keywords: {matched_keywords}")
+                logger.info(f"Whitelist hit: {list_name}, keywords: {matched_keywords}, application_id: {cache_key}")
                 return True, list_name, matched_keywords
-        
+
         return False, None, []
     
     async def _ensure_cache_fresh(self):
@@ -78,41 +98,55 @@ class KeywordCache:
                     await self._refresh_cache()
     
     async def _refresh_cache(self):
-        """Refresh cache"""
+        """Refresh cache (application-scoped)"""
         try:
             db = get_db_session()
             try:
-                # Load blacklist (grouped by tenant)
+                # Load blacklist (grouped by application_id)
                 blacklists = db.query(Blacklist).filter_by(is_active=True).all()
                 new_blacklist_cache: Dict[str, Dict[str, Set[str]]] = {}
                 for blacklist in blacklists:
-                    tenant_id_str = str(blacklist.tenant_id)
+                    # Use application_id as cache key
+                    app_id_str = str(blacklist.application_id) if blacklist.application_id else None
+                    if not app_id_str:
+                        # Skip entries without application_id (shouldn't happen after migration)
+                        logger.warning(f"Blacklist {blacklist.id} has no application_id, skipping")
+                        continue
+
                     keywords = blacklist.keywords if isinstance(blacklist.keywords, list) else []
                     keyword_set = {keyword.lower() for keyword in keywords if keyword}
                     if not keyword_set:
                         continue
-                    if tenant_id_str not in new_blacklist_cache:
-                        new_blacklist_cache[tenant_id_str] = {}
-                    new_blacklist_cache[tenant_id_str][blacklist.name] = keyword_set
 
-                # Load whitelist (grouped by tenant)
+                    if app_id_str not in new_blacklist_cache:
+                        new_blacklist_cache[app_id_str] = {}
+                    new_blacklist_cache[app_id_str][blacklist.name] = keyword_set
+
+                # Load whitelist (grouped by application_id)
                 whitelists = db.query(Whitelist).filter_by(is_active=True).all()
                 new_whitelist_cache: Dict[str, Dict[str, Set[str]]] = {}
                 for whitelist in whitelists:
-                    tenant_id_str = str(whitelist.tenant_id)
+                    # Use application_id as cache key
+                    app_id_str = str(whitelist.application_id) if whitelist.application_id else None
+                    if not app_id_str:
+                        # Skip entries without application_id (shouldn't happen after migration)
+                        logger.warning(f"Whitelist {whitelist.id} has no application_id, skipping")
+                        continue
+
                     keywords = whitelist.keywords if isinstance(whitelist.keywords, list) else []
                     keyword_set = {keyword.lower() for keyword in keywords if keyword}
                     if not keyword_set:
                         continue
-                    if tenant_id_str not in new_whitelist_cache:
-                        new_whitelist_cache[tenant_id_str] = {}
-                    new_whitelist_cache[tenant_id_str][whitelist.name] = keyword_set
+
+                    if app_id_str not in new_whitelist_cache:
+                        new_whitelist_cache[app_id_str] = {}
+                    new_whitelist_cache[app_id_str][whitelist.name] = keyword_set
 
                 # Atomic update cache
                 self._blacklist_cache = new_blacklist_cache
                 self._whitelist_cache = new_whitelist_cache
                 self._cache_timestamp = time.time()
-                
+
                 blacklist_list_count = sum(len(lists) for lists in new_blacklist_cache.values())
                 whitelist_list_count = sum(len(lists) for lists in new_whitelist_cache.values())
                 blacklist_keyword_count = sum(
@@ -122,14 +156,14 @@ class KeywordCache:
                     sum(len(keywords) for keywords in lists.values()) for lists in new_whitelist_cache.values()
                 )
                 logger.debug(
-                    f"Keyword cache refreshed - Users: BL {len(new_blacklist_cache)}, WL {len(new_whitelist_cache)}; "
+                    f"Keyword cache refreshed - Applications: BL {len(new_blacklist_cache)}, WL {len(new_whitelist_cache)}; "
                     f"Lists: BL {blacklist_list_count}, WL {whitelist_list_count}; "
                     f"Keywords: BL {blacklist_keyword_count}, WL {whitelist_keyword_count}"
                 )
-                
+
             finally:
                 db.close()
-                
+
         except Exception as e:
             logger.error(f"Failed to refresh keyword cache: {e}")
     
@@ -151,8 +185,8 @@ class KeywordCache:
         )
 
         return {
-            "users_with_blacklists": len(self._blacklist_cache),
-            "users_with_whitelists": len(self._whitelist_cache),
+            "applications_with_blacklists": len(self._blacklist_cache),
+            "applications_with_whitelists": len(self._whitelist_cache),
             "blacklist_lists": blacklist_list_count,
             "blacklist_keywords": blacklist_keyword_count,
             "whitelist_lists": whitelist_list_count,

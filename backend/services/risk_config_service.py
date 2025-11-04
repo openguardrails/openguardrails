@@ -11,55 +11,81 @@ class RiskConfigService:
     def __init__(self, db: Session):
         self.db = db
     
-    def get_user_risk_config(self, tenant_id: str) -> Optional[RiskTypeConfig]:
-        """Get user risk config"""
+    def get_user_risk_config(self, tenant_id: str = None, application_id: str = None) -> Optional[RiskTypeConfig]:
+        """Get user risk config (supports both tenant_id and application_id)"""
         try:
-            config = self.db.query(RiskTypeConfig).filter(
-                RiskTypeConfig.tenant_id == tenant_id
-            ).first()
+            # Prefer application_id (new multi-app model)
+            if application_id:
+                config = self.db.query(RiskTypeConfig).filter(
+                    RiskTypeConfig.application_id == application_id
+                ).first()
+            elif tenant_id:
+                # Fallback to tenant_id (legacy model, get first application's config)
+                config = self.db.query(RiskTypeConfig).filter(
+                    RiskTypeConfig.tenant_id == tenant_id
+                ).first()
+            else:
+                raise ValueError("Either tenant_id or application_id must be provided")
             return config
         except Exception as e:
-            logger.error(f"Failed to get user risk config for {tenant_id}: {e}")
+            logger.error(f"Failed to get user risk config for tenant_id={tenant_id}, application_id={application_id}: {e}")
             return None
     
-    def create_default_risk_config(self, tenant_id: str) -> RiskTypeConfig:
-        """Create default risk config for user (all types default enabled)"""
+    def create_default_risk_config(self, tenant_id: str = None, application_id: str = None) -> RiskTypeConfig:
+        """Create default risk config for user/application (all types default enabled)"""
         try:
-            config = RiskTypeConfig(tenant_id=tenant_id)
+            if not application_id and not tenant_id:
+                raise ValueError("Either tenant_id or application_id must be provided")
+
+            config_data = {}
+            if application_id:
+                config_data['application_id'] = application_id
+                # Get tenant_id from application
+                from database.models import Application
+                app = self.db.query(Application).filter(Application.id == application_id).first()
+                if app:
+                    config_data['tenant_id'] = app.tenant_id
+            if tenant_id:
+                config_data['tenant_id'] = tenant_id
+
+            config = RiskTypeConfig(**config_data)
             self.db.add(config)
             self.db.commit()
             self.db.refresh(config)
-            logger.info(f"Created default risk config for user {tenant_id}")
+            logger.info(f"Created default risk config for tenant_id={tenant_id}, application_id={application_id}")
             return config
         except Exception as e:
-            logger.error(f"Failed to create default risk config for {tenant_id}: {e}")
+            logger.error(f"Failed to create default risk config for tenant_id={tenant_id}, application_id={application_id}: {e}")
             self.db.rollback()
             raise
     
-    def update_risk_config(self, tenant_id: str, config_data: Dict) -> Optional[RiskTypeConfig]:
-        """Update user risk config"""
+    def update_risk_config(self, tenant_id: str = None, application_id: str = None, config_data: Dict = None) -> Optional[RiskTypeConfig]:
+        """Update user/application risk config"""
         try:
-            config = self.get_user_risk_config(tenant_id)
+            if not config_data:
+                config_data = {}
+
+            config = self.get_user_risk_config(tenant_id=tenant_id, application_id=application_id)
             if not config:
-                config = self.create_default_risk_config(tenant_id)
-            
+                config = self.create_default_risk_config(tenant_id=tenant_id, application_id=application_id)
+
             # Update config fields
             for field, value in config_data.items():
                 if hasattr(config, field):
                     setattr(config, field, value)
-            
+
             self.db.commit()
             self.db.refresh(config)
-            logger.info(f"Updated risk config for user {tenant_id}")
+            logger.info(f"Updated risk config for tenant_id={tenant_id}, application_id={application_id}")
             return config
         except Exception as e:
-            logger.error(f"Failed to update risk config for {tenant_id}: {e}")
+            logger.error(f"Failed to update risk config for tenant_id={tenant_id}, application_id={application_id}: {e}")
             self.db.rollback()
             return None
     
-    def get_enabled_risk_types(self, tenant_id: str) -> Dict[str, bool]:
+    def get_enabled_risk_types(self, tenant_id: str = None, application_id: str = None) -> Dict[str, bool]:
         """Get user enabled risk type mapping"""
-        config = self.get_user_risk_config(tenant_id)
+        config = self.get_user_risk_config(tenant_id=tenant_id, application_id=application_id)
         if not config:
             # Return default all enabled when user has no configuration
             return {
@@ -94,14 +120,14 @@ class RiskConfigService:
             'S21': config.s21_enabled if hasattr(config, 's21_enabled') else True,
         }
     
-    def is_risk_type_enabled(self, tenant_id: str, risk_type: str) -> bool:
+    def is_risk_type_enabled(self, tenant_id: str = None, application_id: str = None, risk_type: str = None) -> bool:
         """Check if specified risk type is enabled"""
-        enabled_types = self.get_enabled_risk_types(tenant_id)
+        enabled_types = self.get_enabled_risk_types(tenant_id=tenant_id, application_id=application_id)
         return enabled_types.get(risk_type, True)  # Default enabled
     
-    def get_risk_config_dict(self, tenant_id: str) -> Dict:
-        """Get user risk config dictionary format"""
-        config = self.get_user_risk_config(tenant_id)
+    def get_risk_config_dict(self, tenant_id: str = None, application_id: str = None) -> Dict:
+        """Get user/application risk config dictionary format"""
+        config = self.get_user_risk_config(tenant_id=tenant_id, application_id=application_id)
         if not config:
             return {
                 's1_enabled': True, 's2_enabled': True, 's3_enabled': True, 's4_enabled': True,
@@ -135,12 +161,15 @@ class RiskConfigService:
             's21_enabled': config.s21_enabled if hasattr(config, 's21_enabled') else True,
         }
 
-    def update_sensitivity_thresholds(self, tenant_id: str, threshold_data: Dict) -> Optional[RiskTypeConfig]:
-        """Update user sensitivity threshold configuration"""
+    def update_sensitivity_thresholds(self, tenant_id: str = None, application_id: str = None, threshold_data: Dict = None) -> Optional[RiskTypeConfig]:
+        """Update user/application sensitivity threshold configuration"""
         try:
-            config = self.get_user_risk_config(tenant_id)
+            if not threshold_data:
+                threshold_data = {}
+
+            config = self.get_user_risk_config(tenant_id=tenant_id, application_id=application_id)
             if not config:
-                config = self.create_default_risk_config(tenant_id)
+                config = self.create_default_risk_config(tenant_id=tenant_id, application_id=application_id)
 
             # Update sensitivity threshold fields
             for field, value in threshold_data.items():
@@ -149,16 +178,16 @@ class RiskConfigService:
 
             self.db.commit()
             self.db.refresh(config)
-            logger.info(f"Updated sensitivity thresholds for user {tenant_id}")
+            logger.info(f"Updated sensitivity thresholds for tenant_id={tenant_id}, application_id={application_id}")
             return config
         except Exception as e:
-            logger.error(f"Failed to update sensitivity thresholds for {tenant_id}: {e}")
+            logger.error(f"Failed to update sensitivity thresholds for tenant_id={tenant_id}, application_id={application_id}: {e}")
             self.db.rollback()
             return None
 
-    def get_sensitivity_threshold_dict(self, tenant_id: str) -> Dict:
-        """Get user sensitivity threshold configuration dictionary format"""
-        config = self.get_user_risk_config(tenant_id)
+    def get_sensitivity_threshold_dict(self, tenant_id: str = None, application_id: str = None) -> Dict:
+        """Get user/application sensitivity threshold configuration dictionary format"""
+        config = self.get_user_risk_config(tenant_id=tenant_id, application_id=application_id)
         if not config:
             return {
                 'low_sensitivity_threshold': 0.95,
@@ -174,9 +203,9 @@ class RiskConfigService:
             'sensitivity_trigger_level': config.sensitivity_trigger_level or "medium",
         }
 
-    def get_sensitivity_thresholds(self, tenant_id: str) -> Dict[str, float]:
-        """Get user sensitivity threshold mapping"""
-        config = self.get_user_risk_config(tenant_id)
+    def get_sensitivity_thresholds(self, tenant_id: str = None, application_id: str = None) -> Dict[str, float]:
+        """Get user/application sensitivity threshold mapping"""
+        config = self.get_user_risk_config(tenant_id=tenant_id, application_id=application_id)
         if not config:
             return {
                 'low': 0.95,
@@ -190,9 +219,9 @@ class RiskConfigService:
             'high': config.high_sensitivity_threshold or 0.40
         }
 
-    def get_sensitivity_trigger_level(self, tenant_id: str) -> str:
-        """Get user sensitivity trigger level"""
-        config = self.get_user_risk_config(tenant_id)
+    def get_sensitivity_trigger_level(self, tenant_id: str = None, application_id: str = None) -> str:
+        """Get user/application sensitivity trigger level"""
+        config = self.get_user_risk_config(tenant_id=tenant_id, application_id=application_id)
         if not config:
             return "medium"
         return config.sensitivity_trigger_level or "medium"

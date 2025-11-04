@@ -113,25 +113,27 @@ class DetectionGuardrailService:
         messages: List[Dict[str, str]],
         tenant_id: str,
         request_id: str,
-        model_sensitivity_trigger_level: Optional[str] = None
+        model_sensitivity_trigger_level: Optional[str] = None,
+        application_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Context-aware detection method - support messages structure for question-answer pairs
         Directly use messages list for detection, support multi-turn conversation context
         """
         from models.requests import GuardrailRequest, Message
-        
+
         # Convert dictionary format messages to Message objects
         message_objects = []
         for msg in messages:
             message_objects.append(Message(role=msg["role"], content=msg["content"]))
-        
+
         request = GuardrailRequest(model="detection", messages=message_objects)
-        
+
         # Call full detection method
         result = await self.check_guardrails(
             request=request,
             tenant_id=tenant_id,
+            application_id=application_id,
             model_sensitivity_trigger_level=model_sensitivity_trigger_level
         )
         
@@ -152,6 +154,7 @@ class DetectionGuardrailService:
         ip_address: Optional[str] = None,
         user_agent: Optional[str] = None,
         tenant_id: Optional[str] = None,
+        application_id: Optional[str] = None,
         model_sensitivity_trigger_level: Optional[str] = None
     ) -> GuardrailResponse:
         """Execute guardrail detection (only write log file)"""
@@ -165,7 +168,7 @@ class DetectionGuardrailService:
         # If no messages after truncation, return error
         if not truncated_messages:
             logger.warning(f"No valid messages after truncation for request {request_id}")
-            return await self._handle_error(request_id, "", "No valid messages after truncation", tenant_id)
+            return await self._handle_error(request_id, "", "No valid messages after truncation", tenant_id, application_id)
         
         # Extract user content (using truncated messages)
         user_content = self._extract_user_content(truncated_messages)
@@ -176,14 +179,14 @@ class DetectionGuardrailService:
             if blacklist_hit:
                 return await self._handle_blacklist_hit(
                     request_id, user_content, blacklist_name, blacklist_keywords,
-                    ip_address, user_agent, tenant_id
+                    ip_address, user_agent, tenant_id, application_id
                 )
-            
+
             whitelist_hit, whitelist_name, whitelist_keywords = await keyword_cache.check_whitelist(user_content, tenant_id)
             if whitelist_hit:
                 return await self._handle_whitelist_hit(
                     request_id, user_content, whitelist_name, whitelist_keywords,
-                    ip_address, user_agent, tenant_id
+                    ip_address, user_agent, tenant_id, application_id
                 )
             
             # 2. Data security detection
@@ -233,7 +236,7 @@ class DetectionGuardrailService:
 
             # 4. Parse model response and apply risk type filtering and sensitivity threshold
             compliance_result, security_result = await self._parse_model_response_with_sensitivity(
-                model_response, sensitivity_score, tenant_id, model_sensitivity_trigger_level
+                model_response, sensitivity_score, tenant_id, model_sensitivity_trigger_level, application_id
             )
 
             # 5. Determine suggested action and answer (include data security result)
@@ -245,7 +248,7 @@ class DetectionGuardrailService:
             await self._log_detection_result(
                 request_id, user_content, compliance_result, security_result, data_result,
                 suggest_action, suggest_answer, model_response,
-                ip_address, user_agent, tenant_id, sensitivity_score,
+                ip_address, user_agent, tenant_id, application_id, sensitivity_score,
                 has_image=has_image, image_count=len(saved_image_paths), image_paths=saved_image_paths
             )
 
@@ -268,7 +271,7 @@ class DetectionGuardrailService:
         except Exception as e:
             logger.error(f"Guardrail check error: {e}")
             # When an error occurs, return safe default response
-            return await self._handle_error(request_id, user_content, str(e), tenant_id)
+            return await self._handle_error(request_id, user_content, str(e), tenant_id, application_id)
     
     def _extract_user_content(self, messages: List[Message]) -> str:
         """Extract complete conversation content
@@ -368,8 +371,10 @@ class DetectionGuardrailService:
         if response.startswith("unsafe\n"):
             category = response.split('\n')[1] if '\n' in response else ""
 
-            # Check if tenant has disabled this risk type
-            if tenant_id and not await risk_config_cache.is_risk_type_enabled(tenant_id, category):
+            # Check if tenant/application has disabled this risk type
+            # Note: This method is deprecated and only used for backward compatibility
+            # Modern code should use _parse_model_response_with_sensitivity which accepts application_id
+            if tenant_id and not await risk_config_cache.is_risk_type_enabled(tenant_id=tenant_id, risk_type=category):
                 logger.info(f"Risk type {category} is disabled for user {tenant_id}, treating as safe")
                 return (
                     ComplianceResult(risk_level="no_risk", categories=[]),
@@ -398,11 +403,18 @@ class DetectionGuardrailService:
 
     async def _parse_model_response_with_sensitivity(
         self, response: str, sensitivity_score: Optional[float], tenant_id: Optional[str] = None,
-        model_sensitivity_trigger_level: Optional[str] = None
+        model_sensitivity_trigger_level: Optional[str] = None, application_id: Optional[str] = None
     ) -> Tuple[ComplianceResult, SecurityResult]:
         """Parse model response and apply risk type filtering and sensitivity threshold
 
         Supports multiple labels separated by commas (e.g., "unsafe\nS2,S5,S7")
+
+        Args:
+            response: Model response string
+            sensitivity_score: Sensitivity score from model
+            tenant_id: Tenant ID (deprecated, kept for backward compatibility)
+            model_sensitivity_trigger_level: Sensitivity trigger level override
+            application_id: Application ID (preferred for risk config lookup)
         """
         response = response.strip()
 
@@ -424,22 +436,29 @@ class DetectionGuardrailService:
                 )
 
             # Filter out disabled risk types, but only if ALL labels are disabled
+            # Use application_id if available, otherwise fallback to tenant_id
             enabled_categories = []
             for category in categories:
-                if not tenant_id or await risk_config_cache.is_risk_type_enabled(tenant_id, category):
+                is_enabled = await risk_config_cache.is_risk_type_enabled(
+                    tenant_id=tenant_id,
+                    application_id=application_id,
+                    risk_type=category
+                )
+                if is_enabled:
                     enabled_categories.append(category)
 
             # If all categories are disabled, treat as safe
             if not enabled_categories:
-                logger.info(f"All risk types {categories} are disabled for user {tenant_id}, treating as safe")
+                cache_key = application_id if application_id else tenant_id
+                logger.info(f"All risk types {categories} are disabled for application/user {cache_key}, treating as safe")
                 return (
                     ComplianceResult(risk_level="no_risk", categories=[]),
                     SecurityResult(risk_level="no_risk", categories=[])
                 )
 
             # Check sensitivity trigger level (apply to all enabled categories)
-            if sensitivity_score is not None and tenant_id:
-                if not await self._should_trigger_detection(sensitivity_score, tenant_id):
+            if sensitivity_score is not None and (tenant_id or application_id):
+                if not await self._should_trigger_detection(sensitivity_score, tenant_id, application_id):
                     logger.info(f"Sensitivity score {sensitivity_score} below current threshold for {enabled_categories}, treating as safe")
                     return (
                         ComplianceResult(risk_level="no_risk", categories=[]),
@@ -645,24 +664,25 @@ class DetectionGuardrailService:
 
 
 
-    async def _get_sensitivity_trigger_level(self, tenant_id: str) -> str:
-        """Get user configured sensitivity trigger level"""
+    async def _get_sensitivity_trigger_level(self, tenant_id: str = None, application_id: str = None) -> str:
+        """Get user/application configured sensitivity trigger level"""
         try:
             from services.risk_config_cache import risk_config_cache
-            trigger_level = await risk_config_cache.get_sensitivity_trigger_level(tenant_id)
+            trigger_level = await risk_config_cache.get_sensitivity_trigger_level(tenant_id=tenant_id, application_id=application_id)
             return trigger_level if trigger_level else "medium"  # Default medium sensitivity trigger
         except Exception as e:
-            logger.warning(f"Failed to get sensitivity trigger level for user {tenant_id}: {e}")
+            cache_key = application_id if application_id else tenant_id
+            logger.warning(f"Failed to get sensitivity trigger level for {cache_key}: {e}")
             return "medium"  # Default medium sensitivity trigger
 
-    async def _should_trigger_detection(self, sensitivity_score: float, tenant_id: str) -> bool:
+    async def _should_trigger_detection(self, sensitivity_score: float, tenant_id: str = None, application_id: str = None) -> bool:
         """Check if should trigger detection based on sensitivity score and current sensitivity level threshold"""
         try:
-            # Get user current sensitivity level
-            current_level = await self._get_sensitivity_trigger_level(tenant_id)
+            # Get user/application current sensitivity level
+            current_level = await self._get_sensitivity_trigger_level(tenant_id, application_id)
 
             # Get sensitivity threshold configuration
-            thresholds = await risk_config_cache.get_sensitivity_thresholds(tenant_id)
+            thresholds = await risk_config_cache.get_sensitivity_thresholds(tenant_id=tenant_id, application_id=application_id)
 
             # Get corresponding threshold based on current sensitivity level
             if current_level == "low":
@@ -678,20 +698,23 @@ class DetectionGuardrailService:
             return sensitivity_score >= threshold
 
         except Exception as e:
-            logger.warning(f"Failed to check sensitivity trigger for user {tenant_id}: {e}")
+            cache_key = application_id if application_id else tenant_id
+            logger.warning(f"Failed to check sensitivity trigger for {cache_key}: {e}")
             # Default use medium sensitivity threshold
             return sensitivity_score >= 0.60
     
     async def _handle_blacklist_hit(
         self, request_id: str, content: str, list_name: str,
         keywords: List[str], ip_address: Optional[str], user_agent: Optional[str],
-        tenant_id: Optional[str] = None
+        tenant_id: Optional[str] = None,
+        application_id: Optional[str] = None
     ) -> GuardrailResponse:
         """Handle blacklist hit"""
 
         detection_data = {
             "request_id": request_id,
             "tenant_id": tenant_id,
+            "application_id": application_id,
             "content": content,
             "suggest_action": "reject",
             "suggest_answer": f"Sorry, I can't provide content involving {list_name}.",
@@ -724,13 +747,15 @@ class DetectionGuardrailService:
     async def _handle_whitelist_hit(
         self, request_id: str, content: str, list_name: str,
         keywords: List[str], ip_address: Optional[str], user_agent: Optional[str],
-        tenant_id: Optional[str] = None
+        tenant_id: Optional[str] = None,
+        application_id: Optional[str] = None
     ) -> GuardrailResponse:
         """Handle whitelist hit"""
 
         detection_data = {
             "request_id": request_id,
             "tenant_id": tenant_id,
+            "application_id": application_id,
             "content": content,
             "suggest_action": "pass",
             "suggest_answer": None,
@@ -765,7 +790,8 @@ class DetectionGuardrailService:
         security_result: SecurityResult, data_result: DataSecurityResult,
         suggest_action: str, suggest_answer: Optional[str],
         model_response: str, ip_address: Optional[str], user_agent: Optional[str],
-        tenant_id: Optional[str] = None, sensitivity_score: Optional[float] = None,
+        tenant_id: Optional[str] = None, application_id: Optional[str] = None,
+        sensitivity_score: Optional[float] = None,
         has_image: bool = False, image_count: int = 0, image_paths: List[str] = None
     ):
         """Asynchronously record detection results to log file (not write to database)"""
@@ -776,6 +802,7 @@ class DetectionGuardrailService:
         detection_data = {
             "request_id": request_id,
             "tenant_id": tenant_id,
+            "application_id": application_id,
             "content": clean_null_characters(content) if content else content,
             "suggest_action": suggest_action,
             "suggest_answer": clean_null_characters(suggest_answer) if suggest_answer else suggest_answer,
@@ -797,12 +824,13 @@ class DetectionGuardrailService:
         }
         await async_detection_logger.log_detection(detection_data)
     
-    async def _handle_error(self, request_id: str, content: str, error: str, tenant_id: Optional[str] = None) -> GuardrailResponse:
+    async def _handle_error(self, request_id: str, content: str, error: str, tenant_id: Optional[str] = None, application_id: Optional[str] = None) -> GuardrailResponse:
         """Handle error situation"""
 
         detection_data = {
             "request_id": request_id,
             "tenant_id": tenant_id,
+            "application_id": application_id,
             "content": content,
             "suggest_action": "pass",
             "suggest_answer": None,

@@ -23,6 +23,7 @@
 
 ## ✨ Core Features
 
+- 📱 **Multi-Application Management** 🆕 - Manage multiple applications within one tenant account, each with isolated configurations
 - 🪄 **Two Usage Modes** - Detection API + Security Gateway
 - 🛡️ **Triple Protection** - Prompt attack detection + Content compliance detection + Data leak detection
 - 🧠 **Context Awareness** - Intelligent safety detection based on conversation context

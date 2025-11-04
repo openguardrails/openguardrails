@@ -42,7 +42,7 @@ const ProxyModelManagement: React.FC = () => {
   const [formKey, setFormKey] = useState(0); // For forcing form re-rendering
   const [form] = Form.useForm();
   const { onUserSwitch } = useAuth();
-  
+
   // Directly manage switch states (minimal configuration)
   const [switchStates, setSwitchStates] = useState({
     enabled: true,
@@ -383,7 +383,15 @@ const ProxyModelManagement: React.FC = () => {
 
   return (
     <div>
-      <Card 
+      <Alert
+        message={t('proxy.securityGatewayInfo')}
+        description={t('proxy.securityGatewayInfoDesc')}
+        type="info"
+        showIcon
+        style={{ marginBottom: 16 }}
+      />
+
+      <Card
         title={
           <Space>
             <ApiOutlined />
@@ -391,9 +399,9 @@ const ProxyModelManagement: React.FC = () => {
           </Space>
         }
         extra={
-          <Button 
-            type="primary" 
-            icon={<PlusOutlined />} 
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
             onClick={() => showModal()}
           >
             {t('proxy.addModel')}

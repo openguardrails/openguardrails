@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { Table, Button, Modal, Form, Input, message, Tag, Select } from 'antd';
 import { EditOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { configApi } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
+import { useApplication } from '../../contexts/ApplicationContext';
 import type { ResponseTemplate } from '../../types';
 
 const { TextArea } = Input;
@@ -17,6 +18,7 @@ const ResponseTemplateManagement: React.FC = () => {
   const [editingItem, setEditingItem] = useState<ResponseTemplate | null>(null);
   const [form] = Form.useForm();
   const { onUserSwitch } = useAuth();
+  const { currentApplicationId } = useApplication();
 
   const getRiskLevelLabel = (riskLevel: string) => {
     const riskLevelMap: { [key: string]: string } = {
@@ -60,8 +62,10 @@ const ResponseTemplateManagement: React.FC = () => {
   ];
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    if (currentApplicationId) {
+      fetchData();
+    }
+  }, [currentApplicationId]);
 
   // Listen to user switch event, automatically refresh data
   useEffect(() => {
@@ -189,7 +193,11 @@ const ResponseTemplateManagement: React.FC = () => {
     return item?.label || category;
   };
 
-  const columns = [
+  // Get current language - used for rendering content
+  const currentLang = i18n.language || 'en';
+
+  // Use useMemo to ensure columns re-render when language changes
+  const columns = useMemo(() => [
     {
       title: t('template.riskCategory'),
       dataIndex: 'category',
@@ -234,7 +242,7 @@ const ResponseTemplateManagement: React.FC = () => {
           return content;
         } else if (typeof content === 'object') {
           // Display only the current language content
-          const currentLang = i18n.language || 'en';
+          // Use currentLang from component scope to ensure reactivity
           const displayContent = content[currentLang] || content['en'] || content['zh'] || '';
           return displayContent;
         }
@@ -260,7 +268,7 @@ const ResponseTemplateManagement: React.FC = () => {
         </Button>
       ),
     },
-  ];
+  ], [currentLang, t]);
 
   return (
     <div>

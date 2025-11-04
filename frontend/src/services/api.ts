@@ -37,7 +37,7 @@ api.interceptors.request.use(
     if (config.url && config.url.includes('/auth/')) {
       return config;
     }
-    
+
     // Add authentication header - Use JWT token first, then use API key
     const authToken = localStorage.getItem('auth_token');
     const apiToken = localStorage.getItem('api_token');
@@ -52,7 +52,15 @@ api.interceptors.request.use(
     if (switchToken) {
       config.headers['X-Switch-Session'] = switchToken;
     }
-    
+
+    // Add current application ID
+    // Note: Proxy management APIs are tenant-level (global), not application-specific
+    const isProxyManagementRequest = config.url && config.url.includes('/proxy/upstream-apis');
+    const applicationId = localStorage.getItem('current_application_id');
+    if (applicationId && !isProxyManagementRequest) {
+      config.headers['X-Application-ID'] = applicationId;
+    }
+
     return config;
   },
   (error) => {

@@ -35,6 +35,7 @@ const Documentation: React.FC = () => {
               href: '#quick-start',
               title: t('docs.quickStart'),
               children: [
+                { key: 'application-management', href: '#application-management', title: t('docs.applicationManagement') },
                 { key: 'api-usage', href: '#api-usage', title: t('docs.apiUsage') },
                 { key: 'gateway-usage', href: '#gateway-usage', title: t('docs.gatewayUsage') },
                 { key: 'dify-integration', href: '#dify-integration', title: t('docs.difyIntegration') },
@@ -89,8 +90,54 @@ const Documentation: React.FC = () => {
               <Title level={3} style={{ margin: 0 }}>{t('docs.quickStart')}</Title>
             </Space>
 
+            {/* Application Management */}
+            <div id="application-management" style={{ marginTop: 24 }}>
+              <Title level={4}>{t('docs.applicationManagement')}</Title>
+              <Paragraph>
+                {t('docs.applicationManagementDesc')}
+              </Paragraph>
+
+              <Alert
+                message={t('docs.applicationManagementFeature')}
+                description={t('docs.applicationManagementFeatureDesc')}
+                type="success"
+                showIcon
+                style={{ marginBottom: 16 }}
+              />
+
+              <div style={{ marginTop: 16 }}>
+                <Text strong>{t('docs.applicationUseCases')}:</Text>
+                <ul style={{ marginTop: 8 }}>
+                  <li>{t('docs.applicationUseCase1')}</li>
+                  <li>{t('docs.applicationUseCase2')}</li>
+                  <li>{t('docs.applicationUseCase3')}</li>
+                  <li>{t('docs.applicationUseCase4')}</li>
+                </ul>
+              </div>
+
+              <div style={{ marginTop: 16 }}>
+                <Text strong>{t('docs.applicationIsolation')}:</Text>
+                <ul style={{ marginTop: 8 }}>
+                  <li>{t('docs.applicationIsolation1')}</li>
+                  <li>{t('docs.applicationIsolation2')}</li>
+                  <li>{t('docs.applicationIsolation3')}</li>
+                  <li>{t('docs.applicationIsolation4')}</li>
+                  <li>{t('docs.applicationIsolation5')}</li>
+                  <li>{t('docs.applicationIsolation6')}</li>
+                </ul>
+              </div>
+
+              <Alert
+                message={t('docs.applicationManagementTip')}
+                description={t('docs.applicationManagementTipDesc')}
+                type="info"
+                showIcon
+                style={{ marginTop: 16 }}
+              />
+            </div>
+
             {/* API Usage */}
-            <div id="api-usage" style={{ marginTop: 24 }}>
+            <div id="api-usage" style={{ marginTop: 32 }}>
               <Title level={4}>{t('docs.apiUsage')}</Title>
               <Paragraph>
                 {t('docs.apiUsageDesc')}
@@ -367,19 +414,6 @@ print("Result:", result)
               <Title level={4}>{t('docs.apiOverview')}</Title>
               <Paragraph>{t('docs.apiOverviewDesc')}</Paragraph>
 
-              <Alert
-                message={t('docs.apiDocumentationNote')}
-                description={
-                  <div>
-                    <div>{t('docs.swaggerUiAvailable')}: <Text code>http://localhost:5001/docs</Text></div>
-                    <div>{t('docs.redocAvailable')}: <Text code>http://localhost:5001/redoc</Text></div>
-                  </div>
-                }
-                type="info"
-                showIcon
-                style={{ marginTop: 16 }}
-              />
-
               <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 16 }}>
                 <thead>
                   <tr style={{ borderBottom: '2px solid #f0f0f0' }}>
@@ -436,6 +470,7 @@ curl -X POST "http://localhost:5001/v1/guardrails" \\
   -H "Authorization: Bearer ${user?.api_key || 'your-api-key'}" \\
   -H "Content-Type: application/json" \\
   -d '{
+    "model": "OpenGuardrails-Text",
     "messages": [
       {"role": "user", "content": "Test content"}
     ]
@@ -452,7 +487,10 @@ headers = {
 response = requests.post(
     "http://localhost:5001/v1/guardrails",
     headers=headers,
-    json={"messages": [{"role": "user", "content": "Test content"}]}
+    json={
+        "model": "OpenGuardrails-Text",
+        "messages": [{"role": "user", "content": "Test content"}]
+    }
 )
 `}
               </pre>

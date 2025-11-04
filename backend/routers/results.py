@@ -1,5 +1,6 @@
-from typing import List, Optional
+from typing import List, Optional, Tuple
 import json
+import uuid
 from pathlib import Path
 from io import BytesIO
 from datetime import datetime
@@ -11,7 +12,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill
 from database.connection import get_db
-from database.models import DetectionResult
+from database.models import DetectionResult, Tenant, Application
 from models.responses import DetectionResultResponse, PaginatedResponse
 from utils.logger import setup_logger
 from utils.url_signature import generate_signed_media_url
@@ -19,6 +20,74 @@ from config import settings
 
 logger = setup_logger()
 router = APIRouter(tags=["Results"])
+
+def get_current_user_and_application_from_request(request: Request, db: Session) -> Tuple[Tenant, uuid.UUID]:
+    """
+    Get current tenant and application_id from request
+    Returns: (Tenant, application_id)
+    """
+    # First, always get auth context to verify user
+    auth_context = getattr(request.state, 'auth_context', None)
+    if not auth_context or 'data' not in auth_context:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    data = auth_context['data']
+
+    # Get current user's tenant_id
+    tenant_id = data.get('tenant_id')
+    if not tenant_id:
+        raise HTTPException(status_code=401, detail="Tenant ID not found in auth context")
+
+    try:
+        tenant_uuid = uuid.UUID(str(tenant_id))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid tenant ID format")
+
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_uuid).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    # 0) Check for X-Application-ID header (highest priority - from frontend selector)
+    header_app_id = request.headers.get('x-application-id') or request.headers.get('X-Application-ID')
+    if header_app_id:
+        try:
+            header_app_uuid = uuid.UUID(str(header_app_id))
+            app = db.query(Application).filter(
+                Application.id == header_app_uuid,
+                Application.tenant_id == tenant.id,  # Must belong to current user's tenant
+                Application.is_active == True
+            ).first()
+            if app:
+                return tenant, header_app_uuid
+        except (ValueError, AttributeError):
+            pass
+
+    # 1) Check application_id in auth token (from API call with specific application)
+    application_id_value = data.get('application_id')
+    if application_id_value:
+        try:
+            application_uuid = uuid.UUID(str(application_id_value))
+            # Verify application exists, is active, and belongs to current tenant
+            app = db.query(Application).filter(
+                Application.id == application_uuid,
+                Application.tenant_id == tenant.id,
+                Application.is_active == True
+            ).first()
+            if app:
+                return tenant, application_uuid
+        except (ValueError, AttributeError):
+            pass
+
+    # 2) Fallback: get default application for this tenant (ordered by creation time)
+    default_app = db.query(Application).filter(
+        Application.tenant_id == tenant.id,
+        Application.is_active == True
+    ).order_by(Application.created_at.asc()).first()
+
+    if not default_app:
+        raise HTTPException(status_code=404, detail="No active application found for user")
+
+    return tenant, default_app.id
 
 @router.get("/results")
 async def get_detection_results(
@@ -38,24 +107,14 @@ async def get_detection_results(
 ):
     """Get detection results"""
     try:
-        # Get user context
-        auth_context = getattr(request.state, 'auth_context', None)
-        tenant_id = None
-        if auth_context and auth_context.get('data'):
-            tenant_id = auth_context['data'].get('tenant_id')
-        
+        # Get user and application context
+        current_user, application_id = get_current_user_and_application_from_request(request, db)
+
         # Build query conditions
         filters = []
-        
-        # Add user filter conditions
-        if tenant_id is not None:
-            try:
-                import uuid
-                tenant_uuid = uuid.UUID(str(tenant_id))
-                filters.append(DetectionResult.tenant_id == tenant_uuid)
-            except ValueError:
-                # If tenant_id format is invalid, return empty result
-                raise HTTPException(status_code=400, detail="Invalid user ID format")
+
+        # Add application filter condition
+        filters.append(DetectionResult.application_id == application_id)
         
         # Risk level filter - support overall risk level or specific type risk level
         if risk_level:
@@ -98,19 +157,7 @@ async def get_detection_results(
             filters.append(DetectionResult.request_id.like(f'%{request_id_search}%'))
         
         # Build base query
-        base_query = db.query(DetectionResult)
-        if filters:
-            base_query = base_query.filter(and_(*filters))
-        else:
-            # If no filter conditions, also must limit user
-            if tenant_id is not None:
-                try:
-                    import uuid
-                    tenant_uuid = uuid.UUID(str(tenant_id))
-                    base_query = base_query.filter(DetectionResult.tenant_id == tenant_uuid)
-                except ValueError:
-                    # If tenant_id format is invalid, return empty result
-                    raise HTTPException(status_code=400, detail="Invalid user ID format")
+        base_query = db.query(DetectionResult).filter(and_(*filters))
         
         # Get total
         total = base_query.count()
@@ -196,22 +243,14 @@ async def export_detection_results(
 ):
     """Export detection results to Excel"""
     try:
-        # Get user context
-        auth_context = getattr(request.state, 'auth_context', None)
-        tenant_id = None
-        if auth_context and auth_context.get('data'):
-            tenant_id = auth_context['data'].get('tenant_id')
+        # Get user and application context
+        current_user, application_id = get_current_user_and_application_from_request(request, db)
 
         # Build query conditions (same as get_detection_results)
         filters = []
 
-        if tenant_id is not None:
-            try:
-                import uuid
-                tenant_uuid = uuid.UUID(str(tenant_id))
-                filters.append(DetectionResult.tenant_id == tenant_uuid)
-            except ValueError:
-                raise HTTPException(status_code=400, detail="Invalid user ID format")
+        # Add application filter condition
+        filters.append(DetectionResult.application_id == application_id)
 
         if risk_level:
             filters.append(or_(
@@ -249,17 +288,7 @@ async def export_detection_results(
             filters.append(DetectionResult.request_id.like(f'%{request_id_search}%'))
 
         # Build query
-        base_query = db.query(DetectionResult)
-        if filters:
-            base_query = base_query.filter(and_(*filters))
-        else:
-            if tenant_id is not None:
-                try:
-                    import uuid
-                    tenant_uuid = uuid.UUID(str(tenant_id))
-                    base_query = base_query.filter(DetectionResult.tenant_id == tenant_uuid)
-                except ValueError:
-                    raise HTTPException(status_code=400, detail="Invalid user ID format")
+        base_query = db.query(DetectionResult).filter(and_(*filters))
 
         # Get all results (limit to 10000 for safety)
         results = base_query.order_by(
@@ -346,28 +375,18 @@ async def export_detection_results(
 
 @router.get("/results/{result_id}", response_model=DetectionResultResponse)
 async def get_detection_result(result_id: int, request: Request, db: Session = Depends(get_db)):
-    """Get single detection result detail (ensure current user can only view their own results)"""
+    """Get single detection result detail (ensure current application can only view their own results)"""
     try:
-        # Get user context
-        auth_context = getattr(request.state, 'auth_context', None)
-        tenant_id = None
-        if auth_context and auth_context.get('data'):
-            tenant_id = auth_context['data'].get('tenant_id')
+        # Get user and application context
+        current_user, application_id = get_current_user_and_application_from_request(request, db)
 
         result = db.query(DetectionResult).filter_by(id=result_id).first()
         if not result:
             raise HTTPException(status_code=404, detail="Detection result not found")
 
-        # Permission check: can only view own records
-        if tenant_id is not None:
-            # Convert string type tenant_id to UUID for comparison
-            try:
-                import uuid
-                tenant_uuid = uuid.UUID(str(tenant_id))
-                if result.tenant_id != tenant_uuid:
-                    raise HTTPException(status_code=403, detail="Forbidden")
-            except ValueError:
-                raise HTTPException(status_code=403, detail="Invalid user ID format")
+        # Permission check: can only view application's own records
+        if result.application_id != application_id:
+            raise HTTPException(status_code=403, detail="Forbidden")
 
         # Generate signed image URLs
         image_urls = []

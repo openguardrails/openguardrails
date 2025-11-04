@@ -57,62 +57,92 @@ class AuthContextMiddleware(BaseHTTPMiddleware):
         return response
     
     async def _get_auth_context(self, token: str):
-        """Get authentication context (optimized version)"""
+        """Get authentication context (optimized version with application support)"""
         from utils.auth_cache import auth_cache
-        
+
         # Check cache
         cached_auth = auth_cache.get(token)
         if cached_auth:
             return cached_auth
-        
+
         # Cache miss, verify token
         from database.connection import get_detection_db_session
-        from database.models import Tenant
-        from utils.user import get_user_by_api_key
+        from database.models import Tenant, Application
+        from utils.user import get_user_by_api_key, get_application_by_api_key
         from utils.auth import verify_token
-        
+
         db = get_detection_db_session()
         try:
             auth_context = None
-            
-            # JWT verification
+
+            # JWT verification (for admin/tenant login via frontend)
             try:
                 user_data = verify_token(token)
                 raw_tenant_id = user_data.get('tenant_id') or user_data.get('sub')
-                
+
                 if isinstance(raw_tenant_id, str):
                     try:
                         tenant_uuid = uuid.UUID(raw_tenant_id)
                         user = db.query(Tenant).filter(Tenant.id == tenant_uuid).first()
                         if user:
+                            # For JWT auth, get the first active application (or None if no apps exist yet)
+                            first_app = db.query(Application).filter(
+                                Application.tenant_id == tenant_uuid,
+                                Application.is_active == True
+                            ).first()
+
                             auth_context = {
-                                "type": "jwt", 
+                                "type": "jwt",
                                 "data": {
                                     "tenant_id": str(user.id),
-                                    "email": user.email
+                                    "email": user.email,
+                                    "application_id": str(first_app.id) if first_app else None,
+                                    "application_name": first_app.name if first_app else None
                                 }
                             }
                     except ValueError:
                         pass
             except:
-                # API key verification
-                user = get_user_by_api_key(db, token)
-                if user:
+                # API key verification (new multi-application support)
+                app_data = get_application_by_api_key(db, token)
+                if app_data:
                     auth_context = {
-                        "type": "api_key", 
+                        "type": "api_key",
                         "data": {
-                            "tenant_id": str(user.id),
-                            "email": user.email,
-                            "api_key": user.api_key
+                            "tenant_id": app_data["tenant_id"],
+                            "email": app_data["tenant_email"],
+                            "application_id": app_data["application_id"],
+                            "application_name": app_data["application_name"],
+                            "api_key": app_data["api_key"]
                         }
                     }
-            
+                else:
+                    # Fallback to old API key verification (for backward compatibility during migration)
+                    user = get_user_by_api_key(db, token)
+                    if user:
+                        # Get the first active application for this tenant
+                        first_app = db.query(Application).filter(
+                            Application.tenant_id == user.id,
+                            Application.is_active == True
+                        ).first()
+
+                        auth_context = {
+                            "type": "api_key_legacy",
+                            "data": {
+                                "tenant_id": str(user.id),
+                                "email": user.email,
+                                "api_key": user.api_key,
+                                "application_id": str(first_app.id) if first_app else None,
+                                "application_name": first_app.name if first_app else None
+                            }
+                        }
+
             # Cache authentication result
             if auth_context:
                 auth_cache.set(token, auth_context)
-            
+
             return auth_context
-            
+
         finally:
             db.close()
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { Row, Col, Card, Statistic, Spin, Alert } from 'antd';
 import {
   SafetyOutlined,
@@ -12,18 +12,16 @@ import ReactECharts from 'echarts-for-react';
 import { useTranslation } from 'react-i18next';
 import { dashboardApi } from '../../services/api';
 import type { DashboardStats } from '../../types';
+import { useApplication } from '../../contexts/ApplicationContext';
 
 const Dashboard: React.FC = () => {
   const { t } = useTranslation();
+  const { currentApplicationId } = useApplication();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchStats();
-  }, []);
-
-  const fetchStats = async () => {
+  const fetchStats = useCallback(async () => {
     try {
       setLoading(true);
       const data = await dashboardApi.getStats();
@@ -35,7 +33,11 @@ const Dashboard: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [t, currentApplicationId]);
+
+  useEffect(() => {
+    fetchStats();
+  }, [fetchStats]);
 
   const getRiskDistributionOption = () => {
     if (!stats) return {};

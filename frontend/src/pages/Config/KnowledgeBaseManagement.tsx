@@ -30,6 +30,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { knowledgeBaseApi } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
+import { useApplication } from '../../contexts/ApplicationContext';
 import type { KnowledgeBase, SimilarQuestionResult } from '../../types';
 
 const { TextArea } = Input;
@@ -52,6 +53,7 @@ const KnowledgeBaseManagement: React.FC = () => {
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchForm] = Form.useForm();
   const { user, onUserSwitch } = useAuth();
+  const { currentApplicationId } = useApplication();
 
   const categories = [
     { value: 'S1', label: `S1 - ${t('category.S1')}` },
@@ -78,8 +80,10 @@ const KnowledgeBaseManagement: React.FC = () => {
   ];
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    if (currentApplicationId) {
+      fetchData();
+    }
+  }, [currentApplicationId]);
 
   // Listen to user switch event, automatically refresh data
   useEffect(() => {

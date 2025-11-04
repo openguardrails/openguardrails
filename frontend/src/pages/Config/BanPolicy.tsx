@@ -4,6 +4,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { useTranslation } from 'react-i18next';
 import { configApi } from '../../services/api';
 import { translateRiskLevel, getRiskLevelColor } from '../../utils/i18nMapper';
+import { useApplication } from '../../contexts/ApplicationContext';
 
 const { Option } = Select;
 
@@ -48,6 +49,7 @@ const BanPolicy: React.FC = () => {
   const [historyVisible, setHistoryVisible] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState<string>('');
   const [userHistory, setUserHistory] = useState<RiskTrigger[]>([]);
+  const { currentApplicationId } = useApplication();
 
   // Get translated risk level text - use i18nMapper to handle both English and Chinese formats
   const getRiskLevelText = (level: string): string => {
@@ -102,9 +104,11 @@ const BanPolicy: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchPolicy();
-    fetchBannedUsers();
-  }, []);
+    if (currentApplicationId) {
+      fetchPolicy();
+      fetchBannedUsers();
+    }
+  }, [currentApplicationId]);
 
   // Save policy
   const handleSave = async () => {

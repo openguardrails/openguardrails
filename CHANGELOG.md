@@ -9,6 +9,360 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [4.0.0] - 2025-11-04
+
+### 🚀 Major Architecture Update - Multi-Application Management
+
+**Breaking Changes**: This release introduces a major architectural change to support multi-application management within a single tenant account. While existing API keys continue to work (automatically migrated to a default application), the data model has been restructured for better scalability.
+
+#### 🎯 What's New
+
+OpenGuardrails v4.0.0 introduces **Application Management** - a powerful new architecture that allows developers to manage multiple applications within one tenant account, each with completely isolated configurations.
+
+**Use Cases:**
+- 🏢 **Enterprise Teams**: Manage different products/services with separate guardrail policies
+- 🧪 **Development Workflows**: Maintain separate configs for dev, staging, and production environments
+- 👥 **Multi-Tenant SaaS**: Provide isolated guardrail configurations for each customer
+- 🔄 **A/B Testing**: Test different safety policies side-by-side
+
+### Added
+
+#### 📱 **Application Management System**
+- **New Application Entity**: Introduced `applications` table as the primary isolation boundary
+- **Application CRUD**: Full create, read, update, delete operations for applications
+- **Application Context Header**: New `X-Application-ID` header for API requests to specify which application to use
+- **Default Application**: Automatic creation of "Default Application" for all tenants during migration
+- **Application-Scoped API Keys**: Each API key now belongs to a specific application
+- **Application Summary**: Real-time protection configuration summary for each application:
+  - Risk types enabled count (e.g., 21/21)
+  - Ban policy status (enabled/disabled)
+  - Sensitivity level (low/medium/high)
+  - Data security entities count
+  - Blacklist/whitelist counts
+  - Knowledge base entries count
+
+#### 🔧 **Configuration Isolation**
+All protection configurations are now scoped to the application level:
+- ✅ **Risk Type Configuration**: Each application has independent risk category settings
+- ✅ **Ban Policy**: Application-specific user banning rules
+- ✅ **Data Security Entity Types**: Isolated data leak detection patterns
+- ✅ **Blacklists/Whitelists**: Application-scoped keyword filtering
+- ✅ **Response Templates**: Custom response templates per application
+- ✅ **Knowledge Bases**: Application-specific Q&A knowledge bases
+- ✅ **Proxy Configurations**: Proxy settings remain tenant-level (shared across apps)
+
+#### 🗄️ **Database Changes**
+- **New Table**: `applications` - Store application metadata
+  - `id` (UUID, PK), `tenant_id`, `name`, `description`
+  - `is_active`, `created_at`, `updated_at`
+
+- **Schema Updates**: Added `application_id` column to:
+  - `api_keys` - Link API keys to applications
+  - `risk_type_configs` - Application-scoped risk settings
+  - `ban_policies` - Application-scoped ban rules
+  - `data_security_entity_types` - Application-scoped DLP patterns
+  - `blacklists` - Application-scoped blacklists
+  - `whitelists` - Application-scoped whitelists
+  - `response_templates` - Application-scoped response templates
+  - `knowledge_bases` - Application-scoped knowledge bases
+  - `detection_results` - Track which application handled each request
+
+- **Migration Scripts**:
+  - `011_add_application_management.sql` - Add applications table and columns
+  - `012_remove_old_tenant_id_unique_constraints.sql` - Update constraints to use (tenant_id, application_id) instead of just tenant_id
+
+#### 🌐 **API Updates**
+
+**New Application Management Endpoints** (Admin Service - Port 5000):
+```
+GET    /api/v1/applications                    # List all applications
+POST   /api/v1/applications                    # Create new application
+PUT    /api/v1/applications/{app_id}           # Update application
+DELETE /api/v1/applications/{app_id}           # Delete application
+GET    /api/v1/applications/{app_id}/keys      # List API keys for app
+POST   /api/v1/applications/{app_id}/keys      # Create API key for app
+DELETE /api/v1/applications/{app_id}/keys/{key_id}  # Delete API key
+PUT    /api/v1/applications/{app_id}/keys/{key_id}/toggle  # Toggle key status
+```
+
+**Application Context Header**:
+```http
+# Specify which application to use for the request
+X-Application-ID: 3b9d3c1d-4ecb-4013-9508-a7067c4abf8b
+```
+
+**Backward Compatibility**:
+- ✅ Existing API keys continue to work (automatically linked to default application)
+- ✅ Requests without `X-Application-ID` header use the application linked to the API key
+- ✅ All existing APIs support application context
+
+#### 🎨 **Frontend Updates**
+
+**New Application Management Page** (`/platform/config/applications`):
+- Create and manage multiple applications
+- View protection configuration summary for each app
+- Manage application-specific API keys
+- Toggle application active status
+- View API key usage statistics
+- Copy/show/hide API keys with one click
+
+**Updated Configuration Pages**:
+All configuration pages now respect the selected application context:
+- Risk Type Management
+- Ban Policy
+- Data Security (DLP)
+- Blacklist/Whitelist Management
+- Response Templates
+- Knowledge Base Management
+
+**New Application Selector Component**:
+- Global application context switcher in the header
+- Shows current application name
+- Quick switch between applications
+- Remembers last selected application in localStorage
+
+#### 🔄 **Automatic Migration & Initialization**
+
+**Zero-Downtime Migration**:
+- ✅ Automatic creation of "Default Application" for all existing tenants
+- ✅ All existing API keys automatically linked to default application
+- ✅ All existing configurations copied to default application
+- ✅ Unique constraints updated to support multi-application architecture
+- ✅ No data loss - all existing data preserved
+
+**New Application Auto-Setup**:
+When creating a new application, the system automatically initializes:
+1. **Risk Type Config**: All 21 risk types enabled by default
+2. **Ban Policy**: Disabled by default (ready to configure)
+3. **Data Security Entity Types**: System templates copied and activated
+4. **No other configs**: Blacklists, whitelists, templates, knowledge bases start empty
+
+#### 📊 **Application Metrics**
+
+Each application tracks:
+- Total API keys (active + inactive)
+- Last detection request timestamp
+- Total detection requests count
+- Risk distribution statistics
+- Configuration completeness
+
+### Changed
+
+#### 🔄 **Data Model Restructure**
+
+**Before (v3.x):**
+```
+Tenant → API Keys
+Tenant → Configurations (Risk, Ban, DLP, etc.)
+Tenant → Detection Results
+```
+
+**After (v4.0):**
+```
+Tenant → Applications → API Keys
+       → Applications → Configurations (Risk, Ban, DLP, etc.)
+       → Applications → Detection Results
+```
+
+**Benefits:**
+- 🎯 Better configuration isolation
+- 📈 Easier scaling for enterprise customers
+- 🔒 Improved security with application-level access control
+- 🧪 Simplified testing and deployment workflows
+
+#### 🔧 **Service Updates**
+
+**Admin Service** (`backend/admin_service.py`):
+- Added application management routes
+- Updated all config APIs to support application context
+- Added application context middleware
+
+**Detection Service** (`backend/detection_service.py`):
+- Reads application context from `X-Application-ID` header or API key
+- Loads application-specific configurations
+- Records application_id in detection results
+
+**Proxy Service** (`backend/proxy_service.py`):
+- Supports application context for detection
+- Proxy configs remain tenant-level (shared)
+
+#### 📁 **New Files**
+
+**Backend**:
+- `backend/routers/applications.py` - Application management routes
+- `backend/contexts/ApplicationContext.tsx` - React context for app selection
+- `backend/migrations/versions/011_add_application_management.sql` - Migration script
+- `backend/migrations/versions/012_remove_old_tenant_id_unique_constraints.sql` - Constraint updates
+- `backend/fix_existing_apps.py` - Migration helper script
+- `backend/diagnose_app_config.py` - Diagnostic tool
+
+**Frontend**:
+- `frontend/src/pages/Config/ApplicationManagement.tsx` - App management UI
+- `frontend/src/components/ApplicationSelector/` - App selector component
+- `frontend/src/contexts/ApplicationContext.tsx` - Application context provider
+
+### Migration Guide
+
+#### For Existing Deployments
+
+**Automatic Migration** (recommended):
+```bash
+# Simply restart services - migrations run automatically!
+docker compose restart
+
+# Or rebuild and restart
+docker compose down
+docker compose up -d
+```
+
+The migration will:
+1. ✅ Create `applications` table
+2. ✅ Add `application_id` columns to all config tables
+3. ✅ Create "Default Application" for each tenant
+4. ✅ Link all existing API keys to default application
+5. ✅ Copy all existing configs to default application
+6. ✅ Update unique constraints
+
+**Verify Migration Success**:
+```bash
+# Check applications table
+docker exec openguardrails-postgres psql -U openguardrails -d openguardrails \
+  -c "SELECT id, tenant_id, name FROM applications;"
+
+# Check API keys are linked
+docker exec openguardrails-postgres psql -U openguardrails -d openguardrails \
+  -c "SELECT id, application_id, key FROM api_keys LIMIT 5;"
+```
+
+#### For Developers
+
+**Using Application Context in API Calls**:
+
+```python
+# Python SDK (will be updated in next SDK release)
+from openguardrails import OpenGuardrails
+
+client = OpenGuardrails(
+    api_key="sk-xxai-your-key",
+    application_id="3b9d3c1d-4ecb-4013-9508-a7067c4abf8b"  # Optional
+)
+
+# HTTP API
+curl -X POST "http://localhost:5001/v1/guardrails" \
+  -H "Authorization: Bearer sk-xxai-your-key" \
+  -H "X-Application-ID: 3b9d3c1d-4ecb-4013-9508-a7067c4abf8b" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "OpenGuardrails-Text", "messages": [...]}'
+```
+
+**Managing Applications via API**:
+
+```python
+import requests
+
+# List applications
+response = requests.get(
+    "http://localhost:5000/api/v1/applications",
+    headers={"Authorization": "Bearer your-jwt-token"}
+)
+
+# Create new application
+response = requests.post(
+    "http://localhost:5000/api/v1/applications",
+    headers={"Authorization": "Bearer your-jwt-token"},
+    json={
+        "name": "Production App",
+        "description": "Production environment guardrails"
+    }
+)
+
+# Create API key for application
+app_id = response.json()["id"]
+response = requests.post(
+    f"http://localhost:5000/api/v1/applications/{app_id}/keys",
+    headers={"Authorization": "Bearer your-jwt-token"},
+    json={"name": "Production API Key"}
+)
+```
+
+### Backward Compatibility
+
+✅ **Fully Backward Compatible**:
+- All existing API keys continue to work
+- No changes required to existing client code
+- `X-Application-ID` header is optional (defaults to API key's application)
+- All existing endpoints support application context
+
+⚠️ **Recommended Updates**:
+- Update SDKs to latest versions (when released)
+- Use `X-Application-ID` header for explicit application selection
+- Migrate to application management UI for better organization
+
+### Fixed
+
+- 🐛 Configuration isolation issues when managing multiple environments
+- 🐛 API key management limitations for large teams
+- 🐛 Difficulty testing different guardrail policies simultaneously
+- 🔧 Improved unique constraint handling for multi-application scenarios
+
+### Breaking Changes
+
+**Database Schema**:
+- ⚠️ All configuration tables now require `application_id`
+- ⚠️ Unique constraints changed from `(tenant_id, name)` to `(tenant_id, application_id, name)`
+- ✅ Migration handles these changes automatically
+
+**API Keys**:
+- ⚠️ API keys are now application-scoped (one key per application)
+- ✅ Existing keys automatically linked to default application
+- ✅ Old API keys continue to work without changes
+
+### Technical Details
+
+**Application Initialization**:
+```python
+# When creating a new application, automatically initialize:
+def initialize_application_configs(application_id, tenant_id):
+    # 1. Risk Type Config (all 21 types enabled)
+    # 2. Ban Policy (disabled, ready to configure)
+    # 3. Data Security Entity Types (system templates copied)
+```
+
+**Application Context Resolution**:
+```
+1. Check X-Application-ID header
+2. If not present, get application_id from API key
+3. Load application-specific configurations
+4. Apply application context to all operations
+```
+
+**Protection Summary Calculation**:
+```python
+protection_summary = {
+    "risk_types_enabled": 21,      # Count of enabled risk types
+    "total_risk_types": 21,        # Total available risk types
+    "ban_policy_enabled": False,   # Ban policy status
+    "sensitivity_level": "medium", # Sensitivity threshold
+    "data_security_entities": 6,   # Active DLP entities
+    "blacklist_count": 2,          # Active blacklists
+    "whitelist_count": 1,          # Active whitelists
+    "knowledge_base_count": 5      # Active KB entries
+}
+```
+
+### Documentation Updates
+
+- Updated [README.md](README.md) with application management feature
+- Updated [CLAUDE.md](CLAUDE.md) with new architecture details
+- Updated [API_REFERENCE.md](docs/API_REFERENCE.md) with new endpoints
+- Added application management examples
+
+---
+
+## [3.0.0] - 2025-01-20
+
 ### 🚀 Deployment & Developer Experience
 
 #### Added

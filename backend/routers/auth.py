@@ -28,7 +28,7 @@ class UserInfo(BaseModel):
     role: str
 
 @router.post("/login", response_model=LoginResponse)
-async def login(login_data: LoginRequest):
+async def login(login_data: LoginRequest, db: Session = Depends(get_db)):
     """Admin login"""
     if not authenticate_admin(login_data.username, login_data.password):
         raise HTTPException(
@@ -36,13 +36,28 @@ async def login(login_data: LoginRequest):
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
+    # Get admin user tenant_id from database
+    from database.models import Tenant
+    admin_user = db.query(Tenant).filter(Tenant.email == login_data.username).first()
+    if not admin_user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Admin user not found in database",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     access_token_expires = timedelta(minutes=settings.jwt_access_token_expire_minutes)
     access_token = create_access_token(
-        data={"sub": login_data.username, "role": "admin"},
+        data={
+            "sub": login_data.username,
+            "role": "admin",
+            "tenant_id": str(admin_user.id),
+            "email": admin_user.email
+        },
         expires_delta=access_token_expires
     )
-    
+
     return LoginResponse(
         access_token=access_token,
         token_type="bearer",

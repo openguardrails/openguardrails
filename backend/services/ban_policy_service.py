@@ -21,46 +21,58 @@ class BanPolicyService:
     """Ban policy service class"""
 
     @staticmethod
-    async def get_ban_policy(tenant_id: str) -> Optional[Dict[str, Any]]:
-        """Get tenant's ban policy configuration"""
+    async def get_ban_policy(application_id: str) -> Optional[Dict[str, Any]]:
+        """Get application's ban policy configuration"""
         db = get_admin_db_session()
         try:
             result = db.execute(
                 text("""
-                SELECT id, tenant_id, enabled, risk_level, trigger_count,
+                SELECT id, tenant_id, application_id, enabled, risk_level, trigger_count,
                        time_window_minutes, ban_duration_minutes,
                        created_at, updated_at
                 FROM ban_policies
-                WHERE tenant_id = :tenant_id
+                WHERE application_id = :application_id
                 """),
-                {"tenant_id": tenant_id}
+                {"application_id": application_id}
             )
             row = result.fetchone()
             if row:
                 return {
                     'id': str(row[0]),
                     'tenant_id': str(row[1]),
-                    'enabled': row[2],
-                    'risk_level': row[3],
-                    'trigger_count': row[4],
-                    'time_window_minutes': row[5],
-                    'ban_duration_minutes': row[6],
-                    'created_at': row[7],
-                    'updated_at': row[8]
+                    'application_id': str(row[2]),
+                    'enabled': row[3],
+                    'risk_level': row[4],
+                    'trigger_count': row[5],
+                    'time_window_minutes': row[6],
+                    'ban_duration_minutes': row[7],
+                    'created_at': row[8],
+                    'updated_at': row[9]
                 }
             return None
         finally:
             db.close()
 
     @staticmethod
-    async def update_ban_policy(tenant_id: str, policy_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def update_ban_policy(application_id: str, policy_data: Dict[str, Any]) -> Dict[str, Any]:
         """Update ban policy configuration"""
         db = get_admin_db_session()
         try:
+            # First get tenant_id from application_id
+            app_result = db.execute(
+                text("SELECT tenant_id FROM applications WHERE id = :application_id"),
+                {"application_id": application_id}
+            )
+            app_row = app_result.fetchone()
+            if not app_row:
+                raise ValueError(f"Application {application_id} not found")
+
+            tenant_id = str(app_row[0])
+
             # Check if policy exists
             result = db.execute(
-                text("SELECT id FROM ban_policies WHERE tenant_id = :tenant_id"),
-                {"tenant_id": tenant_id}
+                text("SELECT id FROM ban_policies WHERE application_id = :application_id"),
+                {"application_id": application_id}
             )
             existing = result.fetchone()
 
@@ -75,13 +87,13 @@ class BanPolicyService:
                         time_window_minutes = :time_window_minutes,
                         ban_duration_minutes = :ban_duration_minutes,
                         updated_at = CURRENT_TIMESTAMP
-                    WHERE tenant_id = :tenant_id
-                    RETURNING id, tenant_id, enabled, risk_level, trigger_count,
+                    WHERE application_id = :application_id
+                    RETURNING id, tenant_id, application_id, enabled, risk_level, trigger_count,
                               time_window_minutes, ban_duration_minutes,
                               created_at, updated_at
                     """),
                     {
-                        "tenant_id": tenant_id,
+                        "application_id": application_id,
                         "enabled": policy_data.get('enabled', False),
                         "risk_level": policy_data.get('risk_level', 'high_risk'),
                         "trigger_count": policy_data.get('trigger_count', 3),
@@ -91,19 +103,22 @@ class BanPolicyService:
                 )
                 db.commit()
             else:
-                # Create new policy
+                # Create new policy with explicit UUID generation
+                policy_id = str(uuid.uuid4())
                 result = db.execute(
                     text("""
-                    INSERT INTO ban_policies (tenant_id, enabled, risk_level, trigger_count,
-                                             time_window_minutes, ban_duration_minutes)
-                    VALUES (:tenant_id, :enabled, :risk_level, :trigger_count,
+                    INSERT INTO ban_policies (id, tenant_id, application_id, enabled, risk_level,
+                                             trigger_count, time_window_minutes, ban_duration_minutes)
+                    VALUES (:id, :tenant_id, :application_id, :enabled, :risk_level, :trigger_count,
                             :time_window_minutes, :ban_duration_minutes)
-                    RETURNING id, tenant_id, enabled, risk_level, trigger_count,
+                    RETURNING id, tenant_id, application_id, enabled, risk_level, trigger_count,
                               time_window_minutes, ban_duration_minutes,
                               created_at, updated_at
                     """),
                     {
+                        "id": policy_id,
                         "tenant_id": tenant_id,
+                        "application_id": application_id,
                         "enabled": policy_data.get('enabled', False),
                         "risk_level": policy_data.get('risk_level', 'high_risk'),
                         "trigger_count": policy_data.get('trigger_count', 3),
@@ -117,13 +132,14 @@ class BanPolicyService:
             return {
                 'id': str(row[0]),
                 'tenant_id': str(row[1]),
-                'enabled': row[2],
-                'risk_level': row[3],
-                'trigger_count': row[4],
-                'time_window_minutes': row[5],
-                'ban_duration_minutes': row[6],
-                'created_at': row[7],
-                'updated_at': row[8]
+                'application_id': str(row[2]),
+                'enabled': row[3],
+                'risk_level': row[4],
+                'trigger_count': row[5],
+                'time_window_minutes': row[6],
+                'ban_duration_minutes': row[7],
+                'created_at': row[8],
+                'updated_at': row[9]
             }
         except Exception as e:
             db.rollback()
@@ -132,7 +148,7 @@ class BanPolicyService:
             db.close()
 
     @staticmethod
-    async def check_user_banned(tenant_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+    async def check_user_banned(application_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         """Check if user is banned"""
         db = get_admin_db_session()
         try:
@@ -141,14 +157,14 @@ class BanPolicyService:
                 SELECT id, user_id, banned_at, ban_until, trigger_count,
                        risk_level, reason
                 FROM user_ban_records
-                WHERE tenant_id = :tenant_id
+                WHERE application_id = :application_id
                   AND user_id = :user_id
                   AND is_active = true
                   AND ban_until > CURRENT_TIMESTAMP
                 ORDER BY banned_at DESC
                 LIMIT 1
                 """),
-                {"tenant_id": tenant_id, "user_id": user_id}
+                {"application_id": application_id, "user_id": user_id}
             )
             row = result.fetchone()
             if row:
@@ -171,10 +187,11 @@ class BanPolicyService:
         user_id: str,
         risk_level: str,
         detection_result_id: Optional[str] = None,
-        language: str = 'zh'
+        language: str = 'zh',
+        application_id: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """Check and apply ban policy"""
-        logger.info(f"check_and_apply_ban_policy called: tenant_id={tenant_id}, user_id={user_id}, risk_level={risk_level}")
+        logger.info(f"check_and_apply_ban_policy called: tenant_id={tenant_id}, user_id={user_id}, risk_level={risk_level}, application_id={application_id}")
         db = get_admin_db_session()
         try:
             # Get ban policy
@@ -214,16 +231,31 @@ class BanPolicyService:
 
             # Record risk trigger
             logger.info(f"Recording risk trigger for user_id={user_id}")
+            # Generate UUID for id
+            import uuid as uuid_lib
+            trigger_id = str(uuid_lib.uuid4())
+            # If no application_id provided, query from tenant's default application
+            if not application_id:
+                from database.models import Application
+                default_app = db.query(Application).filter(
+                    Application.tenant_id == tenant_id,
+                    Application.name == "Default Application"
+                ).first()
+                if default_app:
+                    application_id = str(default_app.id)
+
             db.execute(
                 text("""
-                INSERT INTO user_risk_triggers (tenant_id, user_id, detection_result_id, risk_level, triggered_at)
-                VALUES (:tenant_id, :user_id, :detection_result_id, :risk_level, CURRENT_TIMESTAMP)
+                INSERT INTO user_risk_triggers (id, tenant_id, user_id, detection_result_id, risk_level, triggered_at, application_id)
+                VALUES (:id, :tenant_id, :user_id, :detection_result_id, :risk_level, CURRENT_TIMESTAMP, :application_id)
                 """),
                 {
+                    "id": trigger_id,
                     "tenant_id": tenant_id,
                     "user_id": user_id,
                     "detection_result_id": detection_result_id,
-                    "risk_level": risk_level
+                    "risk_level": risk_level,
+                    "application_id": application_id
                 }
             )
             db.commit()
@@ -330,7 +362,7 @@ class BanPolicyService:
             db.close()
 
     @staticmethod
-    async def get_banned_users(tenant_id: str, skip: int = 0, limit: int = 100) -> List[Dict[str, Any]]:
+    async def get_banned_users(application_id: str, skip: int = 0, limit: int = 100) -> List[Dict[str, Any]]:
         """Get banned users list"""
         db = get_admin_db_session()
         try:
@@ -343,11 +375,11 @@ class BanPolicyService:
                            ELSE 'unbanned'
                        END as status
                 FROM user_ban_records
-                WHERE tenant_id = :tenant_id
+                WHERE application_id = :application_id
                 ORDER BY banned_at DESC
                 LIMIT :limit OFFSET :skip
                 """),
-                {"tenant_id": tenant_id, "skip": skip, "limit": limit}
+                {"application_id": application_id, "skip": skip, "limit": limit}
             )
 
             users = []
@@ -369,7 +401,7 @@ class BanPolicyService:
             db.close()
 
     @staticmethod
-    async def unban_user(tenant_id: str, user_id: str) -> bool:
+    async def unban_user(application_id: str, user_id: str) -> bool:
         """Manual unban user"""
         db = get_admin_db_session()
         try:
@@ -377,11 +409,11 @@ class BanPolicyService:
                 text("""
                 UPDATE user_ban_records
                 SET is_active = false, ban_until = CURRENT_TIMESTAMP
-                WHERE tenant_id = :tenant_id
+                WHERE application_id = :application_id
                   AND user_id = :user_id
                   AND is_active = true
                 """),
-                {"tenant_id": tenant_id, "user_id": user_id}
+                {"application_id": application_id, "user_id": user_id}
             )
             db.commit()
 
@@ -400,7 +432,7 @@ class BanPolicyService:
 
     @staticmethod
     async def get_user_risk_history(
-        tenant_id: str,
+        application_id: str,
         user_id: str,
         days: int = 7
     ) -> List[Dict[str, Any]]:
@@ -413,12 +445,12 @@ class BanPolicyService:
                 text("""
                 SELECT id, detection_result_id, risk_level, triggered_at
                 FROM user_risk_triggers
-                WHERE tenant_id = :tenant_id
+                WHERE application_id = :application_id
                   AND user_id = :user_id
                   AND triggered_at > :since
                 ORDER BY triggered_at DESC
                 """),
-                {"tenant_id": tenant_id, "user_id": user_id, "since": since}
+                {"application_id": application_id, "user_id": user_id, "since": since}
             )
 
             history = []

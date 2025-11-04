@@ -4,6 +4,7 @@ import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { configApi } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
+import { useApplication } from '../../contexts/ApplicationContext';
 import type { Whitelist } from '../../types';
 
 const { TextArea } = Input;
@@ -16,10 +17,13 @@ const WhitelistManagement: React.FC = () => {
   const [editingItem, setEditingItem] = useState<Whitelist | null>(null);
   const [form] = Form.useForm();
   const { onUserSwitch } = useAuth();
+  const { currentApplicationId } = useApplication();
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    if (currentApplicationId) {
+      fetchData();
+    }
+  }, [currentApplicationId]);
 
   // Listen to user switch event, automatically refresh data
   useEffect(() => {

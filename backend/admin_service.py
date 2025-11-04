@@ -16,7 +16,7 @@ from pathlib import Path
 
 from config import settings
 from database.connection import init_db, create_admin_engine
-from routers import dashboard, config_api, results, auth, user, sync, admin, online_test, test_models, risk_config_api, proxy_management, concurrent_stats, media, data_security, billing
+from routers import dashboard, config_api, results, auth, user, sync, admin, online_test, test_models, risk_config_api, proxy_management, concurrent_stats, media, data_security, billing, applications
 from utils.logger import setup_logger
 from services.admin_service import admin_service
 
@@ -50,7 +50,8 @@ class AuthContextMiddleware(BaseHTTPMiddleware):
                     try:
                         auth_context = await self._get_auth_context(token, switch_session)
                         request.state.auth_context = auth_context
-                    except:
+                    except Exception as e:
+                        logger.error(f"Failed to get auth_context: {e}")
                         request.state.auth_context = None
                 else:
                     request.state.auth_context = None
@@ -61,41 +62,43 @@ class AuthContextMiddleware(BaseHTTPMiddleware):
         return response
     
     async def _get_auth_context(self, token: str, switch_session: str = None):
-        """Get authentication context (full version, supports user switch)"""
+        """Get authentication context (full version, supports user switch and application)"""
         from utils.auth_cache import auth_cache
-        
+
         # Generate cache key
         cache_key = f"{token}:{switch_session or ''}"
-        
+
         # Check cache
         cached_auth = auth_cache.get(cache_key)
         if cached_auth:
             return cached_auth
-        
+
         from database.connection import get_admin_db_session
-        from database.models import Tenant
-        from utils.user import get_user_by_api_key
+        from database.models import Tenant, Application
+        from utils.user import get_user_by_api_key, get_application_by_api_key
         from utils.auth import verify_token
-        
+
         db = get_admin_db_session()
         try:
             auth_context = None
-            
+
             # JWT verification
             try:
                 user_data = verify_token(token)
                 role = user_data.get('role')
-                
+
                 if role == 'admin':
                     subject_email = user_data.get('username') or user_data.get('sub')
                     admin_user = db.query(Tenant).filter(Tenant.email == subject_email).first()
                     if admin_user:
+                        # Admin does not have a specific application context (manages all)
                         auth_context = {
                             "type": "jwt_admin",
                             "data": {
                                 "tenant_id": str(admin_user.id),
                                 "email": admin_user.email,
-                                "is_super_admin": admin_service.is_super_admin(admin_user)
+                                "is_super_admin": admin_service.is_super_admin(admin_user),
+                                "application_id": None  # Admin has no specific application
                             }
                         }
                 else:
@@ -106,13 +109,19 @@ class AuthContextMiddleware(BaseHTTPMiddleware):
                             tenant_uuid = uuid.UUID(raw_tenant_id)
                         except ValueError:
                             pass
-                    
+
                     user = db.query(Tenant).filter(Tenant.id == tenant_uuid).first() if tenant_uuid else None
                     if user:
                         # Check user switch
                         if switch_session and admin_service.is_super_admin(user):
                             switched_user = admin_service.get_switched_user(db, switch_session)
                             if switched_user:
+                                # Get first app for switched user
+                                first_app = db.query(Application).filter(
+                                    Application.tenant_id == switched_user.id,
+                                    Application.is_active == True
+                                ).first()
+
                                 auth_context = {
                                     "type": "jwt_switched",
                                     "data": {
@@ -120,56 +129,98 @@ class AuthContextMiddleware(BaseHTTPMiddleware):
                                         "email": switched_user.email,
                                         "original_admin_id": str(user.id),
                                         "original_admin_email": user.email,
-                                        "switch_session": switch_session
+                                        "switch_session": switch_session,
+                                        "application_id": str(first_app.id) if first_app else None,
+                                        "application_name": first_app.name if first_app else None
                                     }
                                 }
-                        
+
                         if not auth_context:
+                            # Get first active application for this tenant
+                            first_app = db.query(Application).filter(
+                                Application.tenant_id == user.id,
+                                Application.is_active == True
+                            ).first()
+
                             auth_context = {
-                                "type": "jwt", 
+                                "type": "jwt",
                                 "data": {
                                     "tenant_id": str(user.id),
                                     "email": user.email,
-                                    "is_super_admin": admin_service.is_super_admin(user)
+                                    "is_super_admin": admin_service.is_super_admin(user),
+                                    "application_id": str(first_app.id) if first_app else None,
+                                    "application_name": first_app.name if first_app else None
                                 }
                             }
             except:
-                # API key verification
-                user = get_user_by_api_key(db, token)
-                if user:
-                    # Check user switch
-                    if switch_session and admin_service.is_super_admin(user):
-                        switched_user = admin_service.get_switched_user(db, switch_session)
-                        if switched_user:
+                # API key verification (try new multi-application support first)
+                app_data = get_application_by_api_key(db, token)
+                if app_data:
+                    # New API key format with application support
+                    auth_context = {
+                        "type": "api_key",
+                        "data": {
+                            "tenant_id": app_data["tenant_id"],
+                            "email": app_data["tenant_email"],
+                            "application_id": app_data["application_id"],
+                            "application_name": app_data["application_name"],
+                            "api_key": app_data["api_key"],
+                            "is_super_admin": False  # API keys are not admin
+                        }
+                    }
+                else:
+                    # Fallback to old API key (for backward compatibility)
+                    user = get_user_by_api_key(db, token)
+                    if user:
+                        # Check user switch
+                        if switch_session and admin_service.is_super_admin(user):
+                            switched_user = admin_service.get_switched_user(db, switch_session)
+                            if switched_user:
+                                # Get first app for switched user
+                                first_app = db.query(Application).filter(
+                                    Application.tenant_id == switched_user.id,
+                                    Application.is_active == True
+                                ).first()
+
+                                auth_context = {
+                                    "type": "api_key_switched",
+                                    "data": {
+                                        "tenant_id": str(switched_user.id),
+                                        "email": switched_user.email,
+                                        "api_key": switched_user.api_key,
+                                        "original_admin_id": str(user.id),
+                                        "original_admin_email": user.email,
+                                        "switch_session": switch_session,
+                                        "application_id": str(first_app.id) if first_app else None,
+                                        "application_name": first_app.name if first_app else None
+                                    }
+                                }
+
+                        if not auth_context:
+                            # Get first active application for this tenant
+                            first_app = db.query(Application).filter(
+                                Application.tenant_id == user.id,
+                                Application.is_active == True
+                            ).first()
+
                             auth_context = {
-                                "type": "api_key_switched",
+                                "type": "api_key_legacy",
                                 "data": {
-                                    "tenant_id": str(switched_user.id),
-                                    "email": switched_user.email,
-                                    "api_key": switched_user.api_key,
-                                    "original_admin_id": str(user.id),
-                                    "original_admin_email": user.email,
-                                    "switch_session": switch_session
+                                    "tenant_id": str(user.id),
+                                    "email": user.email,
+                                    "api_key": user.api_key,
+                                    "is_super_admin": admin_service.is_super_admin(user),
+                                    "application_id": str(first_app.id) if first_app else None,
+                                    "application_name": first_app.name if first_app else None
                                 }
                             }
-                    
-                    if not auth_context:
-                        auth_context = {
-                            "type": "api_key", 
-                            "data": {
-                                "tenant_id": str(user.id),
-                                "email": user.email,
-                                "api_key": user.api_key,
-                                "is_super_admin": admin_service.is_super_admin(user)
-                            }
-                        }
-            
+
             # Cache authentication result
             if auth_context:
                 auth_cache.set(cache_key, auth_context)
-            
+
             return auth_context
-            
+
         finally:
             db.close()
 
@@ -336,6 +387,7 @@ app.include_router(proxy_management.router, prefix="/api/v1", dependencies=[Depe
 app.include_router(concurrent_stats.router, dependencies=[Depends(verify_user_auth)])
 app.include_router(data_security.router, dependencies=[Depends(verify_user_auth)])
 app.include_router(billing.router, dependencies=[Depends(verify_user_auth)])  # Billing APIs
+app.include_router(applications.router, prefix="/api/v1/applications", dependencies=[Depends(verify_user_auth)])  # Application Management
 
 # Import and register ban policy routes
 from routers import ban_policy_api

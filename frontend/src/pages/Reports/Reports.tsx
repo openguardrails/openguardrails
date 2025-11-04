@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { Card, Row, Col, Spin, Alert, DatePicker, Statistic } from 'antd';
 import { SafetyOutlined, LockOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
@@ -6,11 +6,13 @@ import ReactECharts from 'echarts-for-react';
 import dayjs from 'dayjs';
 import { dashboardApi } from '../../services/api';
 import type { DashboardStats } from '../../types';
+import { useApplication } from '../../contexts/ApplicationContext';
 
 const { RangePicker } = DatePicker;
 
 const Reports: React.FC = () => {
   const { t } = useTranslation();
+  const { currentApplicationId } = useApplication();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [categoryData, setCategoryData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -20,14 +22,10 @@ const Reports: React.FC = () => {
     dayjs()
   ]);
 
-  useEffect(() => {
-    fetchReportData();
-  }, [dateRange]);
-
-  const fetchReportData = async () => {
+  const fetchReportData = useCallback(async () => {
     try {
       setLoading(true);
-      
+
       // get stats and category distribution data in parallel
       const [statsData, categoryDistributionData] = await Promise.all([
         dashboardApi.getStats(),
@@ -36,7 +34,7 @@ const Reports: React.FC = () => {
           end_date: dateRange[1].format('YYYY-MM-DD')
         })
       ]);
-      
+
       setStats(statsData);
       setCategoryData(categoryDistributionData.categories || []);
       setError(null);
@@ -46,7 +44,11 @@ const Reports: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [t, currentApplicationId, dateRange]);
+
+  useEffect(() => {
+    fetchReportData();
+  }, [fetchReportData]);
 
   const getCategoryDistributionOption = () => {
     return {

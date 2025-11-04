@@ -19,6 +19,7 @@ import { PlusOutlined, EditOutlined, DeleteOutlined, GlobalOutlined, UserOutline
 import { useTranslation } from 'react-i18next';
 import { dataSecurityApi } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
+import { useApplication } from '../../contexts/ApplicationContext';
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -67,10 +68,13 @@ const EntityTypeManagement: React.FC = () => {
   const [riskLevelFilter, setRiskLevelFilter] = useState<string | undefined>(undefined);
   const [form] = Form.useForm();
   const { user } = useAuth();
+  const { currentApplicationId } = useApplication();
 
   useEffect(() => {
-    loadEntityTypes();
-  }, []);
+    if (currentApplicationId) {
+      loadEntityTypes();
+    }
+  }, [currentApplicationId]);
 
   const loadEntityTypes = async () => {
     setLoading(true);

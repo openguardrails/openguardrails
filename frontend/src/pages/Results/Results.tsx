@@ -6,6 +6,7 @@ import dayjs from 'dayjs';
 import { resultsApi, dataSecurityApi } from '../../services/api';
 import type { DetectionResult, PaginatedResponse, DataSecurityEntityType } from '../../types';
 import { translateRiskLevel, getRiskLevelColor } from '../../utils/i18nMapper';
+import { useApplication } from '../../contexts/ApplicationContext';
 
 const { RangePicker } = DatePicker;
 const { Option } = Select;
@@ -13,6 +14,7 @@ const { Text, Paragraph } = Typography;
 
 const Results: React.FC = () => {
   const { t } = useTranslation();
+  const { currentApplicationId } = useApplication();
   const [data, setData] = useState<PaginatedResponse<DetectionResult> | null>(null);
   const [loading, setLoading] = useState(false);
   const [selectedResult, setSelectedResult] = useState<DetectionResult | null>(null);
@@ -35,7 +37,7 @@ const Results: React.FC = () => {
 
   useEffect(() => {
     fetchResults();
-  }, [pagination.current, pagination.pageSize, filters]);
+  }, [pagination.current, pagination.pageSize, filters, currentApplicationId]);
 
   useEffect(() => {
     fetchDataEntityTypes();

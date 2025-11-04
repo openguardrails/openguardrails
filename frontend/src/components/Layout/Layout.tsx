@@ -14,10 +14,12 @@ import {
   ExperimentOutlined,
   BookOutlined,
   CreditCardOutlined,
+  AppstoreOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../../contexts/AuthContext';
 import { adminApi, configApi } from '../../services/api';
 import LanguageSwitcher from '../LanguageSwitcher/LanguageSwitcher';
+import ApplicationSelector from '../ApplicationSelector';
 
 const { Header, Sider, Content } = AntLayout;
 
@@ -86,6 +88,11 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       key: '/reports',
       icon: <BarChartOutlined />,
       label: t('nav.reports'),
+    },
+    {
+      key: '/applications',
+      icon: <AppstoreOutlined />,
+      label: t('nav.applications'),
     },
     {
       key: '/security-gateway',
@@ -313,6 +320,9 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
             {/* Language Switcher */}
             <LanguageSwitcher />
+
+            {/* Application Selector */}
+            <ApplicationSelector />
 
             {/* Tenant switch status display */}
             {switchInfo.is_switched && (

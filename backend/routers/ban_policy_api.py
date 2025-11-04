@@ -5,19 +5,56 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from typing import Optional, List
 from services.ban_policy_service import BanPolicyService
+from database.connection import get_db
+from database.models import Application
+from sqlalchemy.orm import Session
+import uuid
 import logging
 
-def get_current_tenant_id(request: Request) -> str:
-    """Get current tenant ID from request context"""
+def get_current_application_id(request: Request, db: Session = Depends(get_db)) -> str:
+    """Get current application ID from request context"""
+    # 0) Check for X-Application-ID header (highest priority - from frontend selector)
+    header_app_id = request.headers.get('x-application-id') or request.headers.get('X-Application-ID')
+    if header_app_id:
+        try:
+            header_app_uuid = uuid.UUID(str(header_app_id))
+            app = db.query(Application).filter(
+                Application.id == header_app_uuid,
+                Application.is_active == True
+            ).first()
+            if app:
+                return str(app.id)
+        except (ValueError, AttributeError):
+            pass
+
     auth_context = getattr(request.state, 'auth_context', None)
     if not auth_context:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    tenant_id = str(auth_context['data'].get('tenant_id'))
+    # Try to get application_id from auth context (new API keys)
+    application_id = auth_context['data'].get('application_id')
+    if application_id:
+        return str(application_id)
+
+    # Fallback: get tenant_id and find default application
+    tenant_id = auth_context['data'].get('tenant_id')
     if not tenant_id:
         raise HTTPException(status_code=401, detail="Tenant ID not found in auth context")
 
-    return tenant_id
+    # Find default application for this tenant
+    try:
+        tenant_uuid = uuid.UUID(str(tenant_id))
+        default_app = db.query(Application).filter(
+            Application.tenant_id == tenant_uuid,
+            Application.is_active == True
+        ).first()
+
+        if not default_app:
+            raise HTTPException(status_code=404, detail="No active application found for user")
+
+        return str(default_app.id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid tenant ID format")
 
 logger = logging.getLogger(__name__)
 
@@ -39,10 +76,10 @@ class UnbanUserRequest(BaseModel):
 
 
 @router.get("")
-async def get_ban_policy(tenant_id: str = Depends(get_current_tenant_id)):
-    """Get current tenant's ban policy configuration"""
+async def get_ban_policy(application_id: str = Depends(get_current_application_id)):
+    """Get current application's ban policy configuration"""
     try:
-        policy = await BanPolicyService.get_ban_policy(tenant_id)
+        policy = await BanPolicyService.get_ban_policy(application_id)
 
         if not policy:
             # If no policy, return default values
@@ -64,12 +101,12 @@ async def get_ban_policy(tenant_id: str = Depends(get_current_tenant_id)):
 @router.put("")
 async def update_ban_policy(
     policy_data: BanPolicyUpdate,
-    tenant_id: str = Depends(get_current_tenant_id)
+    application_id: str = Depends(get_current_application_id)
 ):
     """Update ban policy configuration"""
     try:
         policy = await BanPolicyService.update_ban_policy(
-            tenant_id,
+            application_id,
             policy_data.dict()
         )
 
@@ -133,12 +170,12 @@ async def get_ban_policy_templates():
 async def get_banned_users(
     skip: int = Query(0, ge=0, description="Number of records to skip"),
     limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
-    tenant_id: str = Depends(get_current_tenant_id)
+    application_id: str = Depends(get_current_application_id)
 ):
     """Get list of banned users"""
     try:
         users = await BanPolicyService.get_banned_users(
-            tenant_id,
+            application_id,
             skip=skip,
             limit=limit
         )
@@ -153,11 +190,11 @@ async def get_banned_users(
 @router.post("/unban")
 async def unban_user(
     request: UnbanUserRequest,
-    tenant_id: str = Depends(get_current_tenant_id)
+    application_id: str = Depends(get_current_application_id)
 ):
     """Manually unban user"""
     try:
-        success = await BanPolicyService.unban_user(tenant_id, request.user_id)
+        success = await BanPolicyService.unban_user(application_id, request.user_id)
 
         if success:
             return {
@@ -179,12 +216,12 @@ async def unban_user(
 async def get_user_risk_history(
     user_id: str,
     days: int = Query(7, ge=1, le=30, description="Number of days to query"),
-    tenant_id: str = Depends(get_current_tenant_id)
+    application_id: str = Depends(get_current_application_id)
 ):
     """Get user risk trigger history"""
     try:
         history = await BanPolicyService.get_user_risk_history(
-            tenant_id,
+            application_id,
             user_id,
             days=days
         )
@@ -204,11 +241,11 @@ async def get_user_risk_history(
 @router.get("/check-status/{user_id}")
 async def check_user_ban_status(
     user_id: str,
-    tenant_id: str = Depends(get_current_tenant_id)
+    application_id: str = Depends(get_current_application_id)
 ):
     """Check user ban status"""
     try:
-        ban_record = await BanPolicyService.check_user_banned(tenant_id, user_id)
+        ban_record = await BanPolicyService.check_user_banned(application_id, user_id)
 
         if ban_record:
             return {

@@ -51,10 +51,10 @@ class OnlineTestModelInfo(BaseModel):
     id: str
     config_name: str
     api_base_url: str
-    model_name: str
-    enabled: bool
+    provider: Optional[str] = None
+    is_active: bool
     selected: bool = False  # Whether it is selected for online test
-    
+
     # 允许以 model_ 开头的字段名
     model_config = ConfigDict(protected_namespaces=())
 
@@ -76,23 +76,59 @@ async def get_online_test_models(
         tenant_id = None
         if auth_context:
             tenant_id = str(auth_context['data'].get('tenant_id'))
-        
+
         if not tenant_id:
             raise HTTPException(status_code=401, detail="User ID not found in auth context")
-        
+
         # Get user UUID
         try:
             tenant_uuid = uuid.UUID(tenant_id)
         except ValueError:
             logger.error(f"Invalid tenant_id format: {tenant_id}")
             raise HTTPException(status_code=400, detail="Invalid user ID format")
-        
-        # Get user's proxy model configuration
-        from database.models import ProxyModelConfig, OnlineTestModelSelection
-        proxy_models = db.query(ProxyModelConfig).filter(
-            ProxyModelConfig.tenant_id == tenant_uuid,
-            ProxyModelConfig.enabled == True
-        ).all()
+
+        # Get application_id from header or auth context (application-level filtering)
+        from database.models import UpstreamApiConfig, OnlineTestModelSelection, Application
+
+        # 0) Check for X-Application-ID header (highest priority - from frontend selector)
+        header_app_id = request.headers.get('x-application-id') or request.headers.get('X-Application-ID')
+
+        # 1) Use header application ID if present
+        application_id = None
+        if header_app_id:
+            try:
+                application_id = uuid.UUID(header_app_id)
+            except ValueError:
+                logger.error(f"Invalid application_id format from header: {header_app_id}")
+                raise HTTPException(status_code=400, detail="Invalid application ID format")
+
+        # 2) If no header, check auth context (for API key authentication)
+        if not application_id and auth_context:
+            auth_app_id = auth_context['data'].get('application_id')
+            if auth_app_id:
+                try:
+                    application_id = uuid.UUID(auth_app_id)
+                except ValueError:
+                    logger.error(f"Invalid application_id format from auth: {auth_app_id}")
+
+        # 3) If still no application_id, get the first application for this tenant (backward compatibility)
+        if not application_id:
+            first_app = db.query(Application).filter(
+                Application.tenant_id == tenant_uuid
+            ).first()
+            if first_app:
+                application_id = first_app.id
+
+        # Get user's upstream API configuration filtered by application
+        query = db.query(UpstreamApiConfig).filter(
+            UpstreamApiConfig.tenant_id == tenant_uuid,
+            UpstreamApiConfig.is_active == True
+        )
+
+        if application_id:
+            query = query.filter(UpstreamApiConfig.application_id == application_id)
+
+        proxy_models = query.all()
         
         # Get user's online test model selection
         selections = db.query(OnlineTestModelSelection).filter(
@@ -109,8 +145,8 @@ async def get_online_test_models(
                 id=str(model.id),
                 config_name=model.config_name,
                 api_base_url=model.api_base_url,
-                model_name=model.model_name,
-                enabled=model.enabled,
+                provider=model.provider,
+                is_active=model.is_active,
                 selected=selection_map.get(str(model.id), False)
             )
             result.append(model_info)
@@ -136,18 +172,48 @@ async def update_model_selection(
         tenant_id = None
         if auth_context:
             tenant_id = str(auth_context['data'].get('tenant_id'))
-        
+
         if not tenant_id:
             raise HTTPException(status_code=401, detail="User ID not found in auth context")
-        
+
         # Get user UUID
         try:
             tenant_uuid = uuid.UUID(tenant_id)
         except ValueError:
             logger.error(f"Invalid tenant_id format: {tenant_id}")
             raise HTTPException(status_code=400, detail="Invalid user ID format")
-        
-        from database.models import OnlineTestModelSelection, ProxyModelConfig
+
+        # Get application_id from header or auth context (application-level filtering)
+        from database.models import OnlineTestModelSelection, UpstreamApiConfig, Application
+
+        # 0) Check for X-Application-ID header (highest priority - from frontend selector)
+        header_app_id = request.headers.get('x-application-id') or request.headers.get('X-Application-ID')
+
+        # 1) Use header application ID if present
+        application_id = None
+        if header_app_id:
+            try:
+                application_id = uuid.UUID(header_app_id)
+            except ValueError:
+                logger.error(f"Invalid application_id format from header: {header_app_id}")
+                raise HTTPException(status_code=400, detail="Invalid application ID format")
+
+        # 2) If no header, check auth context (for API key authentication)
+        if not application_id and auth_context:
+            auth_app_id = auth_context['data'].get('application_id')
+            if auth_app_id:
+                try:
+                    application_id = uuid.UUID(auth_app_id)
+                except ValueError:
+                    logger.error(f"Invalid application_id format from auth: {auth_app_id}")
+
+        # 3) If still no application_id, get the first application for this tenant (backward compatibility)
+        if not application_id:
+            first_app = db.query(Application).filter(
+                Application.tenant_id == tenant_uuid
+            ).first()
+            if first_app:
+                application_id = first_app.id
         
         # Update selection status for each model
         for selection in request_data.model_selections:
@@ -161,14 +227,19 @@ async def update_model_selection(
                 logger.error(f"Invalid model_id format: {model_id}")
                 continue
             
-            # Validate model belongs to the user
-            proxy_model = db.query(ProxyModelConfig).filter(
-                ProxyModelConfig.id == proxy_model_uuid,
-                ProxyModelConfig.tenant_id == tenant_uuid
-            ).first()
-            
+            # Validate model belongs to the user and application
+            query = db.query(UpstreamApiConfig).filter(
+                UpstreamApiConfig.id == proxy_model_uuid,
+                UpstreamApiConfig.tenant_id == tenant_uuid
+            )
+
+            if application_id:
+                query = query.filter(UpstreamApiConfig.application_id == application_id)
+
+            proxy_model = query.first()
+
             if not proxy_model:
-                continue  # Skip models that do not belong to the user
+                continue  # Skip models that do not belong to the user/application
             
             # Find existing selection record
             existing_selection = db.query(OnlineTestModelSelection).filter(
@@ -206,7 +277,7 @@ async def online_test(
 ):
     """
     Online test API
-    
+
     Support testing guardrail detection capability, and also test the response of the protected model
     """
     try:
@@ -215,10 +286,49 @@ async def online_test(
         tenant_id = None
         if auth_context:
             tenant_id = str(auth_context['data'].get('tenant_id'))
-        
+
         if not tenant_id:
             raise HTTPException(status_code=401, detail="User ID not found in auth context")
-        
+
+        # Get application_id from header or auth context (application-level filtering)
+        from database.models import Application
+
+        # 0) Check for X-Application-ID header (highest priority - from frontend selector)
+        header_app_id = request.headers.get('x-application-id') or request.headers.get('X-Application-ID')
+
+        # 1) Use header application ID if present
+        application_id = None
+        if header_app_id:
+            try:
+                application_id = uuid.UUID(header_app_id)
+            except ValueError:
+                logger.error(f"Invalid application_id format from header: {header_app_id}")
+                raise HTTPException(status_code=400, detail="Invalid application ID format")
+
+        # 2) If no header, check auth context (for API key authentication)
+        if not application_id and auth_context:
+            auth_app_id = auth_context['data'].get('application_id')
+            if auth_app_id:
+                try:
+                    application_id = uuid.UUID(auth_app_id)
+                except ValueError:
+                    logger.error(f"Invalid application_id format from auth: {auth_app_id}")
+
+        # 3) If still no application_id, get the first application for this tenant (backward compatibility)
+        if not application_id:
+            # Get user UUID first
+            try:
+                tenant_uuid = uuid.UUID(tenant_id)
+            except ValueError:
+                logger.error(f"Invalid tenant_id format: {tenant_id}")
+                raise HTTPException(status_code=400, detail="Invalid user ID format")
+
+            first_app = db.query(Application).filter(
+                Application.tenant_id == tenant_uuid
+            ).first()
+            if first_app:
+                application_id = first_app.id
+
         # Construct message format
         messages = []
         if request_data.input_type == 'question':
@@ -280,39 +390,49 @@ async def online_test(
         if not user_api_key:
             raise HTTPException(status_code=400, detail="User API key not found")
         
-        # Use user API key to call guardrail API
+        # Use user API key to call guardrail API (with application_id)
         has_images = request_data.images and len(request_data.images) > 0
-        guardrail_dict = await call_guardrail_api(user_api_key, messages, tenant_uuid, db, has_images)
+        guardrail_dict = await call_guardrail_api(user_api_key, messages, tenant_uuid, db, has_images, application_id)
         
         # If question type, get user selected proxy model for test
         model_results = {}
         original_responses = {}
         if request_data.input_type == 'question':
-            # Get user selected proxy model configuration from database
-            from database.models import ProxyModelConfig, OnlineTestModelSelection
-            
+            # Get user selected upstream API configuration from database
+            from database.models import UpstreamApiConfig, OnlineTestModelSelection
+
             # If specified model in request, use specified model, otherwise use user selected model
             if request_data.models:
-                # Compatible with original request format, but now using proxy_model_configs
+                # Compatible with original request format, but now using upstream_api_configs
                 enabled_model_ids = [m.id for m in request_data.models if m.enabled]
                 logger.info(f"Testing specific models: {enabled_model_ids}")
-                
-                db_models = db.query(ProxyModelConfig).filter(
-                    ProxyModelConfig.id.in_(enabled_model_ids),
-                    ProxyModelConfig.tenant_id == tenant_uuid,
-                    ProxyModelConfig.enabled == True
-                ).all()
+
+                query = db.query(UpstreamApiConfig).filter(
+                    UpstreamApiConfig.id.in_(enabled_model_ids),
+                    UpstreamApiConfig.tenant_id == tenant_uuid,
+                    UpstreamApiConfig.is_active == True
+                )
+
+                if application_id:
+                    query = query.filter(UpstreamApiConfig.application_id == application_id)
+
+                db_models = query.all()
             else:
-                # Get user selected proxy model
-                selected_models_query = db.query(ProxyModelConfig).join(
+                # Get user selected upstream API configs
+                selected_models_query = db.query(UpstreamApiConfig).join(
                     OnlineTestModelSelection,
-                    ProxyModelConfig.id == OnlineTestModelSelection.proxy_model_id
+                    UpstreamApiConfig.id == OnlineTestModelSelection.proxy_model_id
                 ).filter(
-                    ProxyModelConfig.tenant_id == tenant_uuid,
-                    ProxyModelConfig.enabled == True,
+                    UpstreamApiConfig.tenant_id == tenant_uuid,
+                    UpstreamApiConfig.is_active == True,
                     OnlineTestModelSelection.selected == True
                 )
-                
+
+                if application_id:
+                    selected_models_query = selected_models_query.filter(
+                        UpstreamApiConfig.application_id == application_id
+                    )
+
                 db_models = selected_models_query.all()
             
             logger.info(f"Found {len(db_models)} models in database")
@@ -327,14 +447,24 @@ async def online_test(
                     logger.error(f"Failed to decrypt API key for model {db_model.id}: {e}")
                     continue
                 
+                # Determine default model name based on provider
+                # For upstream configs, use sensible defaults based on provider
+                default_model_names = {
+                    'openai': 'gpt-4',
+                    'anthropic': 'claude-3-5-sonnet-20241022',
+                    'local': 'local-model',
+                    'other': 'default-model'
+                }
+                model_name = default_model_names.get(db_model.provider or 'other', 'default-model')
+
                 # Create ModelConfig object
                 model_config = ModelConfig(
                     id=str(db_model.id),
                     name=db_model.config_name,
                     base_url=db_model.api_base_url,
                     api_key=decrypted_api_key,
-                    model_name=db_model.model_name,
-                    enabled=db_model.enabled
+                    model_name=model_name,
+                    enabled=db_model.is_active
                 )
                 # Directly call model to get original response
                 original_task = test_model_api(model_config, messages)
@@ -395,22 +525,27 @@ async def online_test(
         else:
             raise HTTPException(status_code=500, detail=f"Test execution failed: {str(e)}")
 
-async def call_guardrail_api(api_key: str, messages: List[Dict[str, Any]], tenant_uuid: uuid.UUID, db: Session, has_images: bool = False) -> Dict[str, Any]:
+async def call_guardrail_api(api_key: str, messages: List[Dict[str, Any]], tenant_uuid: uuid.UUID, db: Session, has_images: bool = False, application_id: Optional[uuid.UUID] = None) -> Dict[str, Any]:
     """Call guardrail API"""
     try:
         # Build guardrail API URL - automatically adapt to environment based on configuration
         guardrail_url = f"http://{settings.detection_host}:{settings.detection_port}/v1/guardrails"
-        
+
         # Select appropriate model based on whether there is image
         model_name = "OpenGuardrails-VL" if has_images else "OpenGuardrails-Text"
-        
+
+        # Build headers (include application_id if available)
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}"
+        }
+        if application_id:
+            headers["X-Application-ID"] = str(application_id)
+
         async with httpx.AsyncClient(timeout=180.0) as client:  # Increase guardrail API timeout to 3 minutes
             response = await client.post(
                 guardrail_url,
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {api_key}"
-                },
+                headers=headers,
                 json={
                     "model": model_name,
                     "messages": messages

@@ -14,22 +14,17 @@ class StatsService:
     def __init__(self, db: Session):
         self.db = db
     
-    def get_dashboard_stats(self, tenant_id: str = None) -> Dict[str, Any]:
+    def get_dashboard_stats(self, application_id: uuid.UUID = None) -> Dict[str, Any]:
         """Get dashboard stats data
 
-        Note: Parameter name remains tenant_id for backward compatibility, but tenant_id is actually processed
+        Args:
+            application_id: Application ID to filter by
         """
         try:
-            # Build base query, support tenant filter
+            # Build base query, filter by application
             base_query = self.db.query(DetectionResult)
-            if tenant_id is not None:
-                # Convert incoming tenant_id (actually tenant_id) to UUID for comparison
-                try:
-                    tenant_uuid = uuid.UUID(str(tenant_id))
-                    base_query = base_query.filter(DetectionResult.tenant_id == tenant_uuid)
-                except ValueError:
-                    # Invalid tenant_id, return empty stats
-                    return self._get_empty_stats()
+            if application_id is not None:
+                base_query = base_query.filter(DetectionResult.application_id == application_id)
             
             # Total requests
             total_requests = base_query.count()
@@ -55,12 +50,8 @@ class StatsService:
                 DetectionResult.compliance_risk_level,
                 DetectionResult.data_risk_level
             )
-            if tenant_id is not None:
-                try:
-                    tenant_uuid = uuid.UUID(str(tenant_id))
-                    results_query = results_query.filter(DetectionResult.tenant_id == tenant_uuid)
-                except ValueError:
-                    return self._get_empty_stats()
+            if application_id is not None:
+                results_query = results_query.filter(DetectionResult.application_id == application_id)
             results = results_query.all()
             
             high_risk_count = 0
@@ -90,7 +81,7 @@ class StatsService:
             }
             
             # Recent 7 days trends
-            daily_trends = self._get_daily_trends(7, tenant_id)
+            daily_trends = self._get_daily_trends(7, application_id)
             
             return {
                 "total_requests": total_requests,
@@ -129,16 +120,18 @@ class StatsService:
 
         return "no_risk"
     
-    def _get_daily_trends(self, days: int, tenant_id: str = None) -> List[Dict[str, Any]]:
+    def _get_daily_trends(self, days: int, application_id: uuid.UUID = None) -> List[Dict[str, Any]]:
         """Get daily trends data
 
-        Note: Parameter name remains tenant_id for backward compatibility, but tenant_id is actually processed
+        Args:
+            days: Number of days to get trends for
+            application_id: Application ID to filter by
         """
         try:
             end_date = datetime.now().date()
             start_date = end_date - timedelta(days=days-1)
 
-            # Get records within specified date range, support tenant filter
+            # Get records within specified date range, filter by application
             query = self.db.query(
                 func.date(DetectionResult.created_at).label('date'),
                 DetectionResult.security_risk_level,
@@ -148,14 +141,9 @@ class StatsService:
                 func.date(DetectionResult.created_at) >= start_date
             )
 
-            # If tenant ID is provided, perform tenant filter
-            if tenant_id is not None:
-                try:
-                    tenant_uuid = uuid.UUID(str(tenant_id))
-                    query = query.filter(DetectionResult.tenant_id == tenant_uuid)
-                except ValueError:
-                    # Invalid tenant_id, return empty data
-                    return []
+            # If application ID is provided, perform application filter
+            if application_id is not None:
+                query = query.filter(DetectionResult.application_id == application_id)
             
             daily_records = query.all()
             
@@ -216,10 +204,13 @@ class StatsService:
             logger.error(f"Get daily trends error: {e}")
             return []
     
-    def get_category_distribution(self, start_date: str = None, end_date: str = None, tenant_id: str = None) -> List[Dict[str, Any]]:
+    def get_category_distribution(self, start_date: str = None, end_date: str = None, application_id: uuid.UUID = None) -> List[Dict[str, Any]]:
         """Get risk category distribution statistics
 
-        Note: Parameter name remains tenant_id for backward compatibility, but tenant_id is actually processed
+        Args:
+            start_date: Start date for filtering (YYYY-MM-DD)
+            end_date: End date for filtering (YYYY-MM-DD)
+            application_id: Application ID to filter by
         """
         try:
             # Build query conditions - query records with security or compliance risks
@@ -228,12 +219,8 @@ class StatsService:
                 (DetectionResult.compliance_risk_level != "no_risk")
             )
 
-            if tenant_id is not None:
-                try:
-                    tenant_uuid = uuid.UUID(str(tenant_id))
-                    query = query.filter(DetectionResult.tenant_id == tenant_uuid)
-                except ValueError:
-                    return []
+            if application_id is not None:
+                query = query.filter(DetectionResult.application_id == application_id)
             if start_date:
                 query = query.filter(func.date(DetectionResult.created_at) >= start_date)
             if end_date:
