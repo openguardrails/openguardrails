@@ -53,24 +53,9 @@ class AsyncDetectionLogger:
         # Add timestamp (with timezone info)
         cleaned_data['logged_at'] = datetime.now(timezone.utc).isoformat()
         
-        # Direct write to file (simplified version for debugging)
-        try:
-            today = datetime.now().strftime('%Y%m%d')
-            log_file_path = self.log_dir / f"detection_{today}.jsonl"
-            
-            import json
-            import aiofiles
-            async with aiofiles.open(log_file_path, 'a', encoding='utf-8') as f:
-                json_line = json.dumps(cleaned_data, ensure_ascii=False) + '\n'
-                await f.write(json_line)
-                await f.flush()
-            
-            logger.debug(f"Logged detection: {cleaned_data['request_id']}")
-        except Exception as e:
-            logger.error(f"Failed to log detection: {e}")
-        
-        # Also add to queue (for compatibility)
+        # Add to queue for batch processing by writer loop
         await self._queue.put(cleaned_data)
+        logger.debug(f"Queued detection for logging: {cleaned_data['request_id']}")
     
     async def _writer_loop(self):
         """Async write loop (batch optimized version)"""
