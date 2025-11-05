@@ -19,6 +19,7 @@ const ResponseTemplateManagement: React.FC = () => {
   const [form] = Form.useForm();
   const { onUserSwitch } = useAuth();
   const { currentApplicationId } = useApplication();
+  const [currentLang, setCurrentLang] = useState(i18n.language || 'en');
 
   const getRiskLevelLabel = (riskLevel: string) => {
     const riskLevelMap: { [key: string]: string } = {
@@ -75,6 +76,19 @@ const ResponseTemplateManagement: React.FC = () => {
     return unsubscribe;
   }, [onUserSwitch]);
 
+  // Listen to language change events to update currentLang state
+  useEffect(() => {
+    const handleLanguageChange = (lng: string) => {
+      setCurrentLang(lng);
+    };
+
+    i18n.on('languageChanged', handleLanguageChange);
+
+    return () => {
+      i18n.off('languageChanged', handleLanguageChange);
+    };
+  }, [i18n]);
+
   const fetchData = async () => {
     try {
       setLoading(true);
@@ -86,13 +100,15 @@ const ResponseTemplateManagement: React.FC = () => {
       
       // Create default reject content for missing categories
       for (const category of missingCategories) {
-        // Use internationalized default reject content
-        const currentLang = i18n.language || 'en';
-        const defaultContent = t(`template.defaultContents.${category.value}`);
+        // Create multilingual content object with both English and Chinese
+        // Use i18n.getFixedT to get translations in specific languages
+        const getTranslation = (lang: string) => {
+          return i18n.getFixedT(lang)(`template.defaultContents.${category.value}`);
+        };
 
-        // Create multilingual content object
         const multilingualContent: Record<string, string> = {
-          [currentLang]: defaultContent
+          en: getTranslation('en'),
+          zh: getTranslation('zh')
         };
 
         try {
@@ -193,9 +209,6 @@ const ResponseTemplateManagement: React.FC = () => {
     return item?.label || category;
   };
 
-  // Get current language - used for rendering content
-  const currentLang = i18n.language || 'en';
-
   // Use useMemo to ensure columns re-render when language changes
   const columns = useMemo(() => [
     {
@@ -243,8 +256,25 @@ const ResponseTemplateManagement: React.FC = () => {
         } else if (typeof content === 'object') {
           // Display only the current language content
           // Use currentLang from component scope to ensure reactivity
-          const displayContent = content[currentLang] || content['en'] || content['zh'] || '';
-          return displayContent;
+          const displayContent = content[currentLang];
+
+          if (displayContent) {
+            return displayContent;
+          } else {
+            // Show placeholder when content doesn't exist for current language
+            const availableLangs = Object.keys(content);
+            if (availableLangs.length > 0) {
+              const firstAvailableLang = availableLangs[0];
+              return (
+                <span style={{ color: '#999', fontStyle: 'italic' }}>
+                  {t('template.noContentForLanguage', {
+                    language: currentLang === 'zh' ? '中文' : 'English'
+                  })} ({t('template.clickEditToAdd')})
+                </span>
+              );
+            }
+            return '';
+          }
         }
         return '';
       }

@@ -36,9 +36,11 @@ const Documentation: React.FC = () => {
               title: t('docs.quickStart'),
               children: [
                 { key: 'application-management', href: '#application-management', title: t('docs.applicationManagement') },
+                { key: 'quick-test', href: '#quick-test', title: t('docs.quickTest') },
                 { key: 'api-usage', href: '#api-usage', title: t('docs.apiUsage') },
                 { key: 'gateway-usage', href: '#gateway-usage', title: t('docs.gatewayUsage') },
                 { key: 'dify-integration', href: '#dify-integration', title: t('docs.difyIntegration') },
+                { key: 'n8n-integration', href: '#n8n-integration', title: t('docs.n8nIntegration') },
                 { key: 'protection-config', href: '#protection-config', title: t('docs.protectionConfig') },
               ],
             },
@@ -136,6 +138,55 @@ const Documentation: React.FC = () => {
               />
             </div>
 
+            {/* Quick Test */}
+            <div id="quick-test" style={{ marginTop: 32 }}>
+              <Title level={4}>{t('docs.quickTest')}</Title>
+              <Paragraph>
+                {t('docs.quickTestDesc')}
+              </Paragraph>
+
+              <div style={{ marginTop: 16 }}>
+                <Text strong>{t('docs.quickTestMacLinux')}:</Text>
+                <pre style={{
+                  backgroundColor: '#f6f8fa',
+                  padding: 16,
+                  borderRadius: 6,
+                  overflow: 'auto',
+                  fontSize: 13,
+                  lineHeight: 1.5,
+                  marginTop: 8
+                }}>
+{`curl -X POST "https://api.openguardrails.com/v1/guardrails" \\
+  -H "Authorization: Bearer ${user?.api_key || 'your-api-key'}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "OpenGuardrails-Text",
+    "messages": [
+      {"role": "user", "content": "How to make a bomb?"}
+    ]
+  }'`}
+                </pre>
+              </div>
+
+              <div style={{ marginTop: 16 }}>
+                <Text strong>{t('docs.quickTestWindows')}:</Text>
+                <pre style={{
+                  backgroundColor: '#f6f8fa',
+                  padding: 16,
+                  borderRadius: 6,
+                  overflow: 'auto',
+                  fontSize: 13,
+                  lineHeight: 1.5,
+                  marginTop: 8
+                }}>
+{`curl.exe -X POST "https://api.openguardrails.com/v1/guardrails" \`
+  -H "Authorization: Bearer ${user?.api_key || 'your-api-key'}" \`
+  -H "Content-Type: application/json" \`
+  -d '{"model": "OpenGuardrails-Text", "messages": [{"role": "user", "content": "How to make a bomb?"}]}'`}
+                </pre>
+              </div>
+            </div>
+
             {/* API Usage */}
             <div id="api-usage" style={{ marginTop: 32 }}>
               <Title level={4}>{t('docs.apiUsage')}</Title>
@@ -206,7 +257,7 @@ else:
 
 # Just change base_url and api_key
 client = OpenAI(
-    base_url="http://localhost:5002/v1/gateway/<upstream_api_id>/",
+    base_url="https://api.openguardrails.com/v1/gateway/<upstream_api_id>/",
     api_key="${user?.api_key || 'your-api-key'}"
 )
 
@@ -216,6 +267,8 @@ response = client.chat.completions.create(
     model="gpt-4",  # Your original upstream model name
     messages=[{"role": "user", "content": "Hello"}]
 )
+
+# Note: For private deployment, replace api.openguardrails.com with your server address
 `}
               </pre>
 
@@ -240,7 +293,7 @@ response = client.chat.completions.create(
 {`from openai import OpenAI
 
 client = OpenAI(
-    base_url="http://localhost:5002/v1/gateway/<upstream_api_id>/",
+    base_url="https://api.openguardrails.com/v1/gateway/<upstream_api_id>/",
     api_key="${user?.api_key || 'your-api-key'}"
 )
 
@@ -270,6 +323,8 @@ thinking, result = chat_with_openai("How to make a bomb?")
 print("Thinking:", thinking)
 print("Result:", result)
 # Output: Result: "I'm sorry, I can't answer questions involving violent crime."
+
+# Note: For private deployment, replace api.openguardrails.com with your server address
 `}
               </pre>
             </div>
@@ -384,6 +439,131 @@ print("Result:", result)
               </div>
             </div>
 
+            {/* n8n Integration */}
+            <div id="n8n-integration" style={{ marginTop: 32 }}>
+              <Title level={4}>{t('docs.n8nIntegration')}</Title>
+              <Paragraph>
+                {t('docs.n8nIntegrationDesc')}
+              </Paragraph>
+
+              <Alert
+                message={t('docs.n8nTwoMethods')}
+                description={t('docs.n8nTwoMethodsDesc')}
+                type="info"
+                showIcon
+                style={{ marginBottom: 16 }}
+              />
+
+              <div style={{ marginTop: 24 }}>
+                <Text strong style={{ fontSize: 16 }}>{t('docs.n8nMethod1')}</Text>
+
+                <div style={{ marginTop: 12 }}>
+                  <Text strong>{t('docs.n8nMethod1Installation')}:</Text>
+                  <ol style={{ marginTop: 8 }}>
+                    <li>{t('docs.n8nMethod1InstallStep1')}</li>
+                    <li>{t('docs.n8nMethod1InstallStep2')}</li>
+                    <li>{t('docs.n8nMethod1InstallStep3')}</li>
+                  </ol>
+                </div>
+
+                <div style={{ marginTop: 12 }}>
+                  <Text strong>{t('docs.n8nMethod1Features')}:</Text>
+                  <ul style={{ marginTop: 8 }}>
+                    <li>{t('docs.n8nMethod1Feature1')}</li>
+                    <li>{t('docs.n8nMethod1Feature2')}</li>
+                    <li>{t('docs.n8nMethod1Feature3')}</li>
+                    <li>{t('docs.n8nMethod1Feature4')}</li>
+                  </ul>
+                </div>
+
+                <div style={{ marginTop: 16, padding: 16, backgroundColor: '#f6f8fa', borderRadius: 6 }}>
+                  <Text strong>{t('docs.n8nExampleWorkflow')}:</Text>
+                  <pre style={{ marginTop: 8, marginBottom: 0, whiteSpace: 'pre-wrap' }}>
+{t('docs.n8nExampleStep1')}
+{t('docs.n8nExampleStep2')}
+{t('docs.n8nExampleStep3')}
+{t('docs.n8nExampleStep3Yes')}
+{t('docs.n8nExampleStep3No')}
+{t('docs.n8nExampleStep4')}
+{t('docs.n8nExampleStep5')}
+{t('docs.n8nExampleStep6')}
+{t('docs.n8nExampleStep6Yes')}
+{t('docs.n8nExampleStep6No')}
+                  </pre>
+                </div>
+
+                <div style={{ marginTop: 12 }}>
+                  <Text strong>{t('docs.n8nDetectionOptions')}:</Text>
+                  <ul style={{ marginTop: 8 }}>
+                    <li>{t('docs.n8nDetectionOption1')}</li>
+                    <li>{t('docs.n8nDetectionOption2')}</li>
+                    <li>{t('docs.n8nDetectionOption3')}</li>
+                    <li>{t('docs.n8nDetectionOption4')}</li>
+                  </ul>
+                </div>
+              </div>
+
+              <div style={{ marginTop: 24 }}>
+                <Text strong style={{ fontSize: 16 }}>{t('docs.n8nMethod2')}</Text>
+                <Paragraph style={{ marginTop: 8 }}>
+                  {t('docs.n8nMethod2Desc')}
+                </Paragraph>
+
+                <Text strong>{t('docs.n8nMethod2SetupSteps')}:</Text>
+                <ol style={{ marginTop: 12 }}>
+                  <li>
+                    <Text strong>{t('docs.n8nMethod2Step1')}</Text>
+                    <ul style={{ marginTop: 8 }}>
+                      <li>{t('docs.n8nMethod2Step1Name')}</li>
+                      <li>{t('docs.n8nMethod2Step1Value')}</li>
+                    </ul>
+                  </li>
+                  <li style={{ marginTop: 12 }}>
+                    <Text strong>{t('docs.n8nMethod2Step2')}</Text>
+                    <ul style={{ marginTop: 8 }}>
+                      <li>{t('docs.n8nMethod2Step2Method')}</li>
+                      <li>{t('docs.n8nMethod2Step2Url')}</li>
+                      <li>{t('docs.n8nMethod2Step2Auth')}</li>
+                    </ul>
+                  </li>
+                </ol>
+
+                <div style={{ marginTop: 16 }}>
+                  <Text strong>{t('docs.n8nMethod2RequestBody')}:</Text>
+                  <pre style={{
+                    backgroundColor: '#f6f8fa',
+                    padding: 12,
+                    borderRadius: 6,
+                    marginTop: 8,
+                    fontSize: 13
+                  }}>
+{`{
+  "model": "OpenGuardrails-Text",
+  "messages": [
+    {
+      "role": "user",
+      "content": "{{ $json.userInput }}"
+    }
+  ],
+  "extra_body": {
+    "enable_security": true,
+    "enable_compliance": true,
+    "enable_data_security": true
+  }
+}`}
+                  </pre>
+                </div>
+
+                <Alert
+                  message={t('docs.n8nImportWorkflows')}
+                  description={t('docs.n8nImportWorkflowsDesc')}
+                  type="success"
+                  showIcon
+                  style={{ marginTop: 16 }}
+                />
+              </div>
+            </div>
+
             {/* Protection Configuration */}
             <div id="protection-config" style={{ marginTop: 32 }}>
               <Title level={4}>{t('docs.protectionConfig')}</Title>
@@ -466,7 +646,7 @@ print("Result:", result)
                 marginTop: 8
               }}>
 {`# Using cURL
-curl -X POST "http://localhost:5001/v1/guardrails" \\
+curl -X POST "https://api.openguardrails.com/v1/guardrails" \\
   -H "Authorization: Bearer ${user?.api_key || 'your-api-key'}" \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -485,13 +665,15 @@ headers = {
 }
 
 response = requests.post(
-    "http://localhost:5001/v1/guardrails",
+    "https://api.openguardrails.com/v1/guardrails",
     headers=headers,
     json={
         "model": "OpenGuardrails-Text",
         "messages": [{"role": "user", "content": "Test content"}]
     }
 )
+
+# Note: For private deployment, replace api.openguardrails.com with your server address
 `}
               </pre>
             </div>
