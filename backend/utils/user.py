@@ -3,7 +3,7 @@ import string
 import uuid
 from typing import Optional, Union
 from sqlalchemy.orm import Session
-from database.models import Tenant, EmailVerification
+from database.models import Tenant, EmailVerification, Application, ApiKey
 from utils.auth import get_password_hash
 from utils.logger import setup_logger
 from datetime import datetime
@@ -41,6 +41,75 @@ def create_user(db: Session, email: str, password: str) -> Tenant:
     db.refresh(tenant)
     return tenant
 
+def create_default_application_and_key(db: Session, tenant_id: Union[str, uuid.UUID], tenant_email: str) -> Optional[dict]:
+    """
+    Create default application and API key for new user
+
+    Returns:
+        dict with keys: application_id, api_key
+        None if creation failed
+    """
+    try:
+        if isinstance(tenant_id, str):
+            tenant_id = uuid.UUID(tenant_id)
+
+        # Create default application
+        app = Application(
+            tenant_id=tenant_id,
+            name="Default Application",
+            description="Default application created automatically",
+            is_active=True
+        )
+        db.add(app)
+        db.flush()  # Flush to get the app.id
+
+        # Generate unique API key
+        api_key = generate_api_key()
+        while db.query(ApiKey).filter(ApiKey.key == api_key).first():
+            api_key = generate_api_key()
+
+        # Create API key for the application
+        key = ApiKey(
+            tenant_id=tenant_id,
+            application_id=app.id,
+            key=api_key,
+            name="Default API Key",
+            is_active=True
+        )
+        db.add(key)
+        db.flush()
+
+        # Update tenant.api_key for backward compatibility (v4.0.0 migration)
+        # The old tenants.api_key field is maintained for backward compatibility
+        try:
+            tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+            if tenant:
+                tenant.api_key = api_key
+                db.flush()
+        except Exception as e:
+            logger.warning(f"Failed to update tenant.api_key for backward compatibility: {e}")
+
+        # Initialize application configurations (risk config, ban policy, entity types)
+        try:
+            from routers.applications import initialize_application_configs
+            initialize_application_configs(db, str(app.id), str(tenant_id))
+            logger.info(f"Created default application and API key for tenant {tenant_email}")
+        except Exception as e:
+            logger.error(f"Failed to initialize configs for default application: {e}")
+            # Continue anyway - the app and key are created
+
+        db.commit()
+
+        return {
+            "application_id": str(app.id),
+            "api_key": api_key
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to create default application for tenant {tenant_email}: {e}")
+        db.rollback()
+        return None
+
 def verify_user_email(db: Session, email: str, verification_code: str) -> bool:
     """Verify tenant email"""
     # Find valid verification code
@@ -68,6 +137,17 @@ def verify_user_email(db: Session, email: str, verification_code: str) -> bool:
 
     # Then try to create default configurations (these are not critical for user activation)
     if tenant:
+        # Create default application and API key for new tenant
+        try:
+            result = create_default_application_and_key(db, tenant.id, tenant.email)
+            if result:
+                logger.info(f"Created default application ({result['application_id']}) and API key for tenant {tenant.email}")
+            else:
+                logger.error(f"Failed to create default application for tenant {tenant.email}")
+        except Exception as e:
+            logger.error(f"Failed to create default application for tenant {tenant.email}: {e}")
+            # Not affect tenant activation process, just record error
+
         # Create default reply templates for new tenant
         try:
             from services.template_service import create_user_default_templates

@@ -28,8 +28,16 @@ const ApplicationSelector: React.FC = () => {
       const apps = response.data.filter((app: Application) => app.is_active);
       setApplications(apps);
 
-      // Set default application if none selected
-      if (!currentApplicationId && apps.length > 0) {
+      // Validate currentApplicationId exists in the fetched applications
+      if (currentApplicationId) {
+        const appExists = apps.some((app: Application) => app.id === currentApplicationId);
+        if (!appExists && apps.length > 0) {
+          // If current app doesn't exist, set to first available app
+          console.warn(`Current application ID ${currentApplicationId} not found, switching to first available app`);
+          setCurrentApplicationId(apps[0].id);
+        }
+      } else if (apps.length > 0) {
+        // Set default application if none selected
         setCurrentApplicationId(apps[0].id);
       }
     } catch (error) {
@@ -55,8 +63,10 @@ const ApplicationSelector: React.FC = () => {
     setCurrentApplicationId(value);
   };
 
-  // Only show currentApplicationId if we have loaded applications
-  const displayValue = loading ? undefined : currentApplicationId;
+  // Only show currentApplicationId if we have loaded applications and it's valid
+  const displayValue = loading ? undefined : (
+    applications.some(app => app.id === currentApplicationId) ? currentApplicationId : undefined
+  );
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
