@@ -457,6 +457,10 @@ class ProxyService:
             "prompt": request_data.prompt
         }
         
+        # Process extra_body parameters
+        if hasattr(request_data, 'extra_body') and request_data.extra_body:
+            payload.update(request_data.extra_body)
+
         # Add optional parameters
         optional_params = [
             'temperature', 'top_p', 'n', 'stream', 'logprobs', 'echo', 
@@ -521,7 +525,8 @@ class ProxyService:
         top_p: Optional[float] = None,
         frequency_penalty: Optional[float] = None,
         presence_penalty: Optional[float] = None,
-        stop: Optional[List[str]] = None
+        stop: Optional[List[str]] = None,
+        extra_body: Optional[Dict[str, Any]] = None,
     ):
         """Call upstream API with gateway pattern (pass through model name)"""
         api_key = self._decrypt_api_key(api_config.api_key_encrypted)
@@ -545,6 +550,9 @@ class ProxyService:
             "messages": messages,
             "stream": stream
         }
+        # Process extra_body parameters
+        if extra_body:
+            payload.update(extra_body)
 
         # Add optional parameters
         if temperature is not None:

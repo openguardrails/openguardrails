@@ -1289,6 +1289,16 @@ async def create_gateway_chat_completion(
                 {"role": msg.role, "content": msg.content}
                 for msg in request_data.messages
             ]
+
+            # Collect any extra fields from request that are not part of request_data into extra_fields
+            body_json = await request.json()
+            extra_fields = request_data.extra_body if request_data.extra_body else {}
+            for key in body_json.keys():
+                if key not in request_data.__fields__:
+                    extra_fields[key] = body_json[key]
+            if extra_fields:
+                logger.info(f"Gateway chat completion request {request_id} got extra fields: {extra_fields}")
+
             upstream_response = await proxy_service.call_upstream_api_gateway(
                 api_config=api_config,
                 model_name=request_data.model,  # Pass through original model name
@@ -1299,7 +1309,8 @@ async def create_gateway_chat_completion(
                 top_p=request_data.top_p,
                 frequency_penalty=request_data.frequency_penalty,
                 presence_penalty=request_data.presence_penalty,
-                stop=request_data.stop
+                stop=request_data.stop,
+                extra_body=extra_fields,
             )
 
             # Handle streaming response
