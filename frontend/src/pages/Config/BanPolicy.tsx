@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { configApi } from '../../services/api';
 import { translateRiskLevel, getRiskLevelColor } from '../../utils/i18nMapper';
 import { useApplication } from '../../contexts/ApplicationContext';
+import { useAuth } from '../../contexts/AuthContext';
 
 const { Option } = Select;
 
@@ -50,6 +51,7 @@ const BanPolicy: React.FC = () => {
   const [selectedUserId, setSelectedUserId] = useState<string>('');
   const [userHistory, setUserHistory] = useState<RiskTrigger[]>([]);
   const { currentApplicationId } = useApplication();
+  const { onUserSwitch } = useAuth();
 
   // Get translated risk level text - use i18nMapper to handle both English and Chinese formats
   const getRiskLevelText = (level: string): string => {
@@ -109,6 +111,15 @@ const BanPolicy: React.FC = () => {
       fetchBannedUsers();
     }
   }, [currentApplicationId]);
+
+  // Listen to user switch event, automatically refresh data
+  useEffect(() => {
+    const unsubscribe = onUserSwitch(() => {
+      fetchPolicy();
+      fetchBannedUsers();
+    });
+    return unsubscribe;
+  }, [onUserSwitch]);
 
   // Save policy
   const handleSave = async () => {

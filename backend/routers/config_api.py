@@ -18,6 +18,7 @@ from services.template_cache import template_cache
 from services.enhanced_template_service import enhanced_template_service
 from services.admin_service import admin_service
 from services.knowledge_base_service import knowledge_base_service
+from routers.proxy_management import get_current_user_from_request
 
 logger = setup_logger()
 router = APIRouter(tags=["Configuration"])

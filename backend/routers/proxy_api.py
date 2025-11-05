@@ -1121,6 +1121,32 @@ async def create_gateway_chat_completion(
 
         tenant_id = auth_ctx['data'].get('tenant_id') or auth_ctx['data'].get('tenant_id')
         application_id = auth_ctx['data'].get('application_id')  # Get application_id from auth context
+        
+        # If application_id is not provided, find default application for this tenant
+        if not application_id and tenant_id:
+            try:
+                from database.connection import get_admin_db_session
+                from database.models import Application
+                import uuid as uuid_module
+                
+                db = get_admin_db_session()
+                try:
+                    tenant_uuid = uuid_module.UUID(str(tenant_id))
+                    default_app = db.query(Application).filter(
+                        Application.tenant_id == tenant_uuid,
+                        Application.is_active == True
+                    ).order_by(Application.created_at.asc()).first()
+                    
+                    if default_app:
+                        application_id = str(default_app.id)
+                        logger.debug(f"Gateway: Using default application {application_id} for tenant {tenant_id}")
+                    else:
+                        logger.warning(f"Gateway: No active application found for tenant {tenant_id}")
+                finally:
+                    db.close()
+            except (ValueError, Exception) as e:
+                logger.warning(f"Gateway: Failed to find default application for tenant {tenant_id}: {e}")
+        
         request_id = str(uuid.uuid4())
 
         # Get user ID
@@ -1320,6 +1346,32 @@ async def create_chat_completion(
 
         tenant_id = auth_ctx['data'].get('tenant_id') or auth_ctx['data'].get('tenant_id')
         application_id = auth_ctx['data'].get('application_id')  # Get application_id from auth context
+        
+        # If application_id is not provided, find default application for this tenant
+        if not application_id and tenant_id:
+            try:
+                from database.connection import get_admin_db_session
+                from database.models import Application
+                import uuid as uuid_module
+                
+                db = get_admin_db_session()
+                try:
+                    tenant_uuid = uuid_module.UUID(str(tenant_id))
+                    default_app = db.query(Application).filter(
+                        Application.tenant_id == tenant_uuid,
+                        Application.is_active == True
+                    ).order_by(Application.created_at.asc()).first()
+                    
+                    if default_app:
+                        application_id = str(default_app.id)
+                        logger.debug(f"Legacy proxy: Using default application {application_id} for tenant {tenant_id}")
+                    else:
+                        logger.warning(f"Legacy proxy: No active application found for tenant {tenant_id}")
+                finally:
+                    db.close()
+            except (ValueError, Exception) as e:
+                logger.warning(f"Legacy proxy: Failed to find default application for tenant {tenant_id}: {e}")
+        
         request_id = str(uuid.uuid4())
 
         # Get user ID
@@ -1569,6 +1621,32 @@ async def create_completion(
 
         tenant_id = auth_ctx['data'].get('tenant_id') or auth_ctx['data'].get('tenant_id')
         application_id = auth_ctx['data'].get('application_id')  # Get application_id from auth context
+        
+        # If application_id is not provided, find default application for this tenant
+        if not application_id and tenant_id:
+            try:
+                from database.connection import get_admin_db_session
+                from database.models import Application
+                import uuid as uuid_module
+                
+                db = get_admin_db_session()
+                try:
+                    tenant_uuid = uuid_module.UUID(str(tenant_id))
+                    default_app = db.query(Application).filter(
+                        Application.tenant_id == tenant_uuid,
+                        Application.is_active == True
+                    ).order_by(Application.created_at.asc()).first()
+                    
+                    if default_app:
+                        application_id = str(default_app.id)
+                        logger.debug(f"Completion proxy: Using default application {application_id} for tenant {tenant_id}")
+                    else:
+                        logger.warning(f"Completion proxy: No active application found for tenant {tenant_id}")
+                finally:
+                    db.close()
+            except (ValueError, Exception) as e:
+                logger.warning(f"Completion proxy: Failed to find default application for tenant {tenant_id}: {e}")
+        
         request_id = str(uuid.uuid4())
 
         # Get user ID

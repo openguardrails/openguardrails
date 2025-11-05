@@ -1,8 +1,9 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useState, ReactNode, useCallback } from 'react';
 
 interface ApplicationContextType {
   currentApplicationId: string | null;
   setCurrentApplicationId: (id: string | null) => void;
+  refreshApplications: () => void;
 }
 
 const ApplicationContext = createContext<ApplicationContextType | undefined>(undefined);
@@ -12,6 +13,9 @@ export const ApplicationProvider: React.FC<{ children: ReactNode }> = ({ childre
   const [currentApplicationId, setCurrentApplicationId] = useState<string | null>(() => {
     return localStorage.getItem('current_application_id');
   });
+  
+  // Refresh trigger for ApplicationSelector
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   // Update localStorage when applicationId changes
   const handleSetApplicationId = (id: string | null) => {
@@ -23,8 +27,20 @@ export const ApplicationProvider: React.FC<{ children: ReactNode }> = ({ childre
     }
   };
 
+  // Function to trigger refresh of applications list
+  const refreshApplications = useCallback(() => {
+    setRefreshTrigger(prev => prev + 1);
+  }, []);
+
   return (
-    <ApplicationContext.Provider value={{ currentApplicationId, setCurrentApplicationId: handleSetApplicationId }}>
+    <ApplicationContext.Provider 
+      value={{ 
+        currentApplicationId, 
+        setCurrentApplicationId: handleSetApplicationId,
+        refreshApplications,
+        // Internal: expose refreshTrigger for ApplicationSelector
+        _refreshTrigger: refreshTrigger,
+      } as ApplicationContextType & { _refreshTrigger: number }}>
       {children}
     </ApplicationContext.Provider>
   );

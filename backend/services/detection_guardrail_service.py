@@ -14,6 +14,7 @@ from models.responses import GuardrailResponse, GuardrailResult, ComplianceResul
 from utils.logger import setup_logger
 from utils.message_truncator import MessageTruncator
 from database.connection import get_db_session
+from database.models import Application
 
 logger = setup_logger()
 
@@ -170,19 +171,44 @@ class DetectionGuardrailService:
             logger.warning(f"No valid messages after truncation for request {request_id}")
             return await self._handle_error(request_id, "", "No valid messages after truncation", tenant_id, application_id)
         
+        # If application_id is not provided but tenant_id is, find default application
+        if not application_id and tenant_id:
+            try:
+                db = get_db_session()
+                try:
+                    tenant_uuid = uuid.UUID(str(tenant_id))
+                    default_app = db.query(Application).filter(
+                        Application.tenant_id == tenant_uuid,
+                        Application.is_active == True
+                    ).order_by(Application.created_at.asc()).first()
+                    
+                    if default_app:
+                        application_id = str(default_app.id)
+                        logger.debug(f"Using default application {application_id} for tenant {tenant_id}")
+                    else:
+                        logger.warning(f"No active application found for tenant {tenant_id}")
+                finally:
+                    db.close()
+            except (ValueError, Exception) as e:
+                logger.warning(f"Failed to find default application for tenant {tenant_id}: {e}")
+
         # Extract user content (using truncated messages)
         user_content = self._extract_user_content(truncated_messages)
         
         try:
-            # 1. Blacklist/whitelist pre-check (using high-performance memory cache, isolated by tenant)
-            blacklist_hit, blacklist_name, blacklist_keywords = await keyword_cache.check_blacklist(user_content, tenant_id)
+            # 1. Blacklist/whitelist pre-check (using high-performance memory cache, application-scoped)
+            blacklist_hit, blacklist_name, blacklist_keywords = await keyword_cache.check_blacklist(
+                user_content, tenant_id=tenant_id, application_id=application_id
+            )
             if blacklist_hit:
                 return await self._handle_blacklist_hit(
                     request_id, user_content, blacklist_name, blacklist_keywords,
                     ip_address, user_agent, tenant_id, application_id
                 )
 
-            whitelist_hit, whitelist_name, whitelist_keywords = await keyword_cache.check_whitelist(user_content, tenant_id)
+            whitelist_hit, whitelist_name, whitelist_keywords = await keyword_cache.check_whitelist(
+                user_content, tenant_id=tenant_id, application_id=application_id
+            )
             if whitelist_hit:
                 return await self._handle_whitelist_hit(
                     request_id, user_content, whitelist_name, whitelist_keywords,
@@ -241,7 +267,7 @@ class DetectionGuardrailService:
 
             # 5. Determine suggested action and answer (include data security result)
             overall_risk_level, suggest_action, suggest_answer = await self._determine_action_with_data(
-                compliance_result, security_result, data_result, tenant_id, user_content, data_anonymized_text
+                compliance_result, security_result, data_result, tenant_id, application_id, user_content, data_anonymized_text
             )
             
             # 6. Asynchronously record detection results to log file (not write to database)
@@ -574,6 +600,7 @@ class DetectionGuardrailService:
         security_result: SecurityResult,
         data_result: DataSecurityResult,
         tenant_id: Optional[str] = None,
+        application_id: Optional[str] = None,
         user_query: Optional[str] = None,
         data_anonymized_text: Optional[str] = None
     ) -> Tuple[str, str, Optional[str]]:
@@ -609,7 +636,7 @@ class DetectionGuardrailService:
 
         # If there is no data leakage de-sensitized text, use traditional template answer
         if not suggest_answer:
-            suggest_answer = await self._get_suggest_answer(all_categories, tenant_id, user_query)
+            suggest_answer = await self._get_suggest_answer(all_categories, tenant_id, application_id, user_query)
 
         # Determine action based on risk level
         if overall_risk_level == "high_risk":
@@ -617,7 +644,7 @@ class DetectionGuardrailService:
         else:  # Medium or low risk
             return overall_risk_level, "replace", suggest_answer
 
-    async def _determine_action(self, compliance_result: ComplianceResult, security_result: SecurityResult, tenant_id: Optional[str] = None, user_query: Optional[str] = None) -> Tuple[str, str, Optional[str]]:
+    async def _determine_action(self, compliance_result: ComplianceResult, security_result: SecurityResult, tenant_id: Optional[str] = None, application_id: Optional[str] = None, user_query: Optional[str] = None) -> Tuple[str, str, Optional[str]]:
         """Determine suggested action"""
         overall_risk_level = "no_risk"
         risk_categories = []
@@ -634,16 +661,16 @@ class DetectionGuardrailService:
         if overall_risk_level == "no_risk":
             return overall_risk_level, "pass", None
         elif overall_risk_level == "high_risk":
-            suggest_answer = await self._get_suggest_answer(risk_categories, tenant_id, user_query)
+            suggest_answer = await self._get_suggest_answer(risk_categories, tenant_id, application_id, user_query)
             return overall_risk_level, "reject", suggest_answer
         elif overall_risk_level == "medium_risk":
-            suggest_answer = await self._get_suggest_answer(risk_categories, tenant_id, user_query)
+            suggest_answer = await self._get_suggest_answer(risk_categories, tenant_id, application_id, user_query)
             return overall_risk_level, "replace", suggest_answer
         else:  # low_risk
-            suggest_answer = await self._get_suggest_answer(risk_categories, tenant_id, user_query)
+            suggest_answer = await self._get_suggest_answer(risk_categories, tenant_id, application_id, user_query)
             return overall_risk_level, "replace", suggest_answer
     
-    async def _get_suggest_answer(self, categories: List[str], tenant_id: Optional[str] = None, user_query: Optional[str] = None) -> str:
+    async def _get_suggest_answer(self, categories: List[str], tenant_id: Optional[str] = None, application_id: Optional[str] = None, user_query: Optional[str] = None) -> str:
         """Get suggested answer (using enhanced template service, support knowledge base search)"""
         from services.enhanced_template_service import enhanced_template_service
         from database.models import Tenant
@@ -660,7 +687,7 @@ class DetectionGuardrailService:
             except Exception as e:
                 logger.warning(f"Failed to get user language for tenant {tenant_id}: {e}")
 
-        return await enhanced_template_service.get_suggest_answer(categories, tenant_id, user_query, user_language)
+        return await enhanced_template_service.get_suggest_answer(categories, tenant_id=tenant_id, application_id=application_id, user_query=user_query, user_language=user_language)
 
 
 

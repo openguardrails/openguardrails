@@ -3,7 +3,7 @@ import json
 from typing import List, Dict, Tuple, Optional, Union
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
-from database.models import DetectionResult, ResponseTemplate
+from database.models import DetectionResult, ResponseTemplate, Application
 from services.model_service import model_service
 from services.keyword_service import KeywordService
 from services.keyword_cache import keyword_cache
@@ -87,6 +87,23 @@ class GuardrailService:
 
         # Generate request ID
         request_id = f"guardrails-{uuid.uuid4().hex}"
+
+        # If application_id is not provided but tenant_id is, find default application
+        if not application_id and tenant_id:
+            try:
+                tenant_uuid = uuid.UUID(str(tenant_id))
+                default_app = self.db.query(Application).filter(
+                    Application.tenant_id == tenant_uuid,
+                    Application.is_active == True
+                ).order_by(Application.created_at.asc()).first()
+                
+                if default_app:
+                    application_id = str(default_app.id)
+                    logger.debug(f"Using default application {application_id} for tenant {tenant_id}")
+                else:
+                    logger.warning(f"No active application found for tenant {tenant_id}")
+            except (ValueError, Exception) as e:
+                logger.warning(f"Failed to find default application for tenant {tenant_id}: {e}")
 
         # Extract user content
         user_content = self._extract_user_content(request.messages)
@@ -208,7 +225,8 @@ class GuardrailService:
 
             # 6. Determine suggested action and answer
             overall_risk_level, suggest_action, suggest_answer = await self._determine_action(
-                compliance_result, security_result, tenant_id, application_id, user_content, data_result, anonymized_text
+                compliance_result, security_result, tenant_id=tenant_id, application_id=application_id, 
+                user_query=user_content, data_result=data_result, anonymized_text=anonymized_text
             )
 
             # 7. Asynchronously log detection results

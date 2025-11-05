@@ -67,7 +67,7 @@ const EntityTypeManagement: React.FC = () => {
   const [searchText, setSearchText] = useState('');
   const [riskLevelFilter, setRiskLevelFilter] = useState<string | undefined>(undefined);
   const [form] = Form.useForm();
-  const { user } = useAuth();
+  const { user, onUserSwitch } = useAuth();
   const { currentApplicationId } = useApplication();
 
   useEffect(() => {
@@ -75,6 +75,14 @@ const EntityTypeManagement: React.FC = () => {
       loadEntityTypes();
     }
   }, [currentApplicationId]);
+
+  // Listen to user switch event, automatically refresh data
+  useEffect(() => {
+    const unsubscribe = onUserSwitch(() => {
+      loadEntityTypes();
+    });
+    return unsubscribe;
+  }, [onUserSwitch]);
 
   const loadEntityTypes = async () => {
     setLoading(true);

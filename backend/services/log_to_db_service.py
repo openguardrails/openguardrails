@@ -2,6 +2,8 @@ import asyncio
 import json
 import uuid
 import pickle
+import fcntl
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Set, Dict
@@ -20,15 +22,43 @@ class LogToDbService:
         self.task = None
         self.processed_files: Dict[str, int] = {}  # filename -> processed line count
         self._state_file = None  # Will be initialized when starting
+        self._lock_file = None  # Lock file to ensure only one instance runs
+        self._lock_fd = None  # Lock file descriptor
     
     async def start(self):
-        """Start log to DB service"""
+        """Start log to DB service (only one instance per machine, uses file lock)"""
         if self.running:
             return
         
         # Initialize state file path
         from config import settings
         self._state_file = Path(settings.data_dir) / "log_to_db_service_state.pkl"
+        self._lock_file = Path(settings.data_dir) / "log_to_db_service.lock"
+        
+        # Try to acquire file lock (ensures only one worker runs this service)
+        try:
+            # Ensure directory exists
+            self._lock_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Open lock file
+            self._lock_fd = open(self._lock_file, 'w')
+            
+            # Try to acquire exclusive lock (non-blocking)
+            try:
+                fcntl.flock(self._lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                logger.info("Acquired lock for LogToDbService - this worker will process logs")
+            except BlockingIOError:
+                # Another worker already has the lock
+                self._lock_fd.close()
+                self._lock_fd = None
+                logger.info("Another worker is processing logs (lock held), skipping LogToDbService startup")
+                return  # Don't start this instance
+        except Exception as e:
+            logger.warning(f"Failed to acquire lock for LogToDbService: {e}, continuing anyway")
+            # Continue without lock (fallback for systems without fcntl support)
+            if self._lock_fd:
+                self._lock_fd.close()
+                self._lock_fd = None
         
         # Load processed files state
         await self._load_processed_files_state()
@@ -52,6 +82,22 @@ class LogToDbService:
                 await self.task
             except asyncio.CancelledError:
                 pass
+        
+        # Release lock file
+        if self._lock_fd:
+            try:
+                fcntl.flock(self._lock_fd.fileno(), fcntl.LOCK_UN)
+            except Exception:
+                pass
+            self._lock_fd.close()
+            self._lock_fd = None
+            # Clean up lock file
+            try:
+                if self._lock_file and self._lock_file.exists():
+                    self._lock_file.unlink()
+            except Exception:
+                pass
+        
         logger.info("Log to DB service stopped")
     
     async def _process_logs_loop(self):
@@ -125,9 +171,10 @@ class LogToDbService:
             start_line: Line number to start from (0-indexed, counting non-empty lines only)
 
         Returns:
-            Number of lines successfully processed
+            Number of lines read (including duplicates/invalid lines) to advance the processed counter
         """
         processed_count = 0
+        lines_read = 0
         try:
             db = get_admin_db_session()
             try:
@@ -142,6 +189,9 @@ class LogToDbService:
                         if current_line < start_line:
                             current_line += 1
                             continue
+
+                        # Count this as a line we've read (even if it's a duplicate or invalid)
+                        lines_read += 1
 
                         try:
                             log_data = json.loads(line)
@@ -160,7 +210,8 @@ class LogToDbService:
 
                         current_line += 1
 
-                logger.info(f"Processed {processed_count} new lines from {log_file.name}")
+                if lines_read > 0:
+                    logger.info(f"Processed {processed_count} new lines from {log_file.name} (read {lines_read} lines, {lines_read - processed_count} skipped as duplicates/invalid)")
 
             finally:
                 db.close()
@@ -168,7 +219,8 @@ class LogToDbService:
         except Exception as e:
             logger.error(f"Error processing log file {log_file}: {e}")
 
-        return processed_count
+        # Return lines_read to advance the counter, preventing infinite loops when all lines are duplicates
+        return lines_read
     
     async def _save_log_to_db(self, db: Session, log_data: dict) -> bool:
         """Save log data to database
@@ -203,6 +255,17 @@ class LogToDbService:
                     application_id = uuid.UUID(application_id)
                 except ValueError:
                     application_id = None
+            
+            # If application_id is missing but tenant_id exists, find default application
+            if not application_id and tenant_id:
+                from database.models import Application
+                default_app = db.query(Application).filter(
+                    Application.tenant_id == tenant_id,
+                    Application.is_active == True
+                ).order_by(Application.created_at.asc()).first()
+                if default_app:
+                    application_id = default_app.id
+                    logger.debug(f"Found default application {application_id} for tenant {tenant_id}")
             
             # Parse created time
             created_at = None

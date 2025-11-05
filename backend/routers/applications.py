@@ -91,64 +91,87 @@ def initialize_application_configs(db: Session, application_id: str, tenant_id: 
     """
     try:
         # 1. Create RiskTypeConfig with all risk types enabled by default
-        risk_config = RiskTypeConfig(
-            application_id=application_id,
-            tenant_id=tenant_id,
-            s1_enabled=True, s2_enabled=True, s3_enabled=True, s4_enabled=True,
-            s5_enabled=True, s6_enabled=True, s7_enabled=True, s8_enabled=True,
-            s9_enabled=True, s10_enabled=True, s11_enabled=True, s12_enabled=True,
-            s13_enabled=True, s14_enabled=True, s15_enabled=True, s16_enabled=True,
-            s17_enabled=True, s18_enabled=True, s19_enabled=True, s20_enabled=True,
-            s21_enabled=True,
-            low_sensitivity_threshold=0.95,
-            medium_sensitivity_threshold=0.60,
-            high_sensitivity_threshold=0.40,
-            sensitivity_trigger_level="medium"
-        )
-        db.add(risk_config)
-        logger.info(f"Created RiskTypeConfig for application {application_id}")
+        # Check if config already exists for this application_id
+        existing_risk_config = db.query(RiskTypeConfig).filter(
+            RiskTypeConfig.application_id == application_id
+        ).first()
+        
+        if existing_risk_config:
+            logger.info(f"RiskTypeConfig already exists for application {application_id}, skipping creation")
+        else:
+            risk_config = RiskTypeConfig(
+                application_id=application_id,
+                tenant_id=tenant_id,
+                s1_enabled=True, s2_enabled=True, s3_enabled=True, s4_enabled=True,
+                s5_enabled=True, s6_enabled=True, s7_enabled=True, s8_enabled=True,
+                s9_enabled=True, s10_enabled=True, s11_enabled=True, s12_enabled=True,
+                s13_enabled=True, s14_enabled=True, s15_enabled=True, s16_enabled=True,
+                s17_enabled=True, s18_enabled=True, s19_enabled=True, s20_enabled=True,
+                s21_enabled=True,
+                low_sensitivity_threshold=0.95,
+                medium_sensitivity_threshold=0.60,
+                high_sensitivity_threshold=0.40,
+                sensitivity_trigger_level="medium"
+            )
+            db.add(risk_config)
+            logger.info(f"Created RiskTypeConfig for application {application_id}")
 
         # 2. Create BanPolicy (disabled by default)
-        ban_policy = BanPolicy(
-            application_id=application_id,
-            tenant_id=tenant_id,
-            enabled=False,
-            risk_level='high_risk',
-            trigger_count=3,
-            time_window_minutes=10,
-            ban_duration_minutes=1440  # 24 hours
-        )
-        db.add(ban_policy)
-        logger.info(f"Created BanPolicy for application {application_id}")
+        existing_ban_policy = db.query(BanPolicy).filter(
+            BanPolicy.application_id == application_id
+        ).first()
+        
+        if existing_ban_policy:
+            logger.info(f"BanPolicy already exists for application {application_id}, skipping creation")
+        else:
+            ban_policy = BanPolicy(
+                application_id=application_id,
+                tenant_id=tenant_id,
+                enabled=False,
+                risk_level='high_risk',
+                trigger_count=3,
+                time_window_minutes=10,
+                ban_duration_minutes=1440  # 24 hours
+            )
+            db.add(ban_policy)
+            logger.info(f"Created BanPolicy for application {application_id}")
 
         # 3. Copy DataSecurityEntityTypes from system templates
-        system_templates = db.query(DataSecurityEntityType).filter(
-            DataSecurityEntityType.source_type == 'system_template',
-            DataSecurityEntityType.application_id.is_(None)
-        ).all()
-
-        if system_templates:
-            for template in system_templates:
-                # Copy system template to this application
-                copy = DataSecurityEntityType(
-                    tenant_id=tenant_id,
-                    application_id=application_id,
-                    entity_type=template.entity_type,
-                    display_name=template.display_name,
-                    category=template.category,
-                    recognition_method=template.recognition_method,
-                    recognition_config=(template.recognition_config or {}).copy() if isinstance(template.recognition_config, dict) else {},
-                    anonymization_method=template.anonymization_method,
-                    anonymization_config=(template.anonymization_config or {}).copy() if isinstance(template.anonymization_config, dict) else {},
-                    is_active=True,
-                    is_global=False,
-                    source_type='system_copy',
-                    template_id=template.id
-                )
-                db.add(copy)
-            logger.info(f"Created {len(system_templates)} DataSecurityEntityTypes for application {application_id}")
+        # Check if entity types already exist for this application
+        existing_entity_types = db.query(DataSecurityEntityType).filter(
+            DataSecurityEntityType.application_id == application_id
+        ).count()
+        
+        if existing_entity_types > 0:
+            logger.info(f"DataSecurityEntityTypes already exist for application {application_id} ({existing_entity_types} found), skipping creation")
         else:
-            logger.warning(f"No system templates found for DataSecurityEntityTypes")
+            system_templates = db.query(DataSecurityEntityType).filter(
+                DataSecurityEntityType.source_type == 'system_template',
+                DataSecurityEntityType.application_id.is_(None)
+            ).all()
+
+            if system_templates:
+                for template in system_templates:
+                    # Copy system template to this application
+                    copy = DataSecurityEntityType(
+                        tenant_id=tenant_id,
+                        application_id=application_id,
+                        entity_type=template.entity_type,
+                        display_name=template.display_name,
+                        category=template.category,
+                        recognition_method=template.recognition_method,
+                        recognition_config=(template.recognition_config or {}).copy() if isinstance(template.recognition_config, dict) else {},
+                        anonymization_method=template.anonymization_method,
+                        anonymization_config=(template.anonymization_config or {}).copy() if isinstance(template.anonymization_config, dict) else {},
+                        is_active=True,
+                        is_global=False,
+                        source_type='system_copy',
+                        template_id=template.id
+                    )
+                    db.add(copy)
+                logger.info(f"Created {len(system_templates)} DataSecurityEntityTypes for application {application_id}")
+            else:
+                logger.warning(f"No system templates found for DataSecurityEntityTypes")
 
         db.commit()
         logger.info(f"Successfully initialized all configurations for application {application_id}")
@@ -156,6 +179,15 @@ def initialize_application_configs(db: Session, application_id: str, tenant_id: 
     except Exception as e:
         logger.error(f"Failed to initialize configurations for application {application_id}: {e}")
         db.rollback()
+        
+        # Check if this is a unique constraint violation on tenant_id
+        error_str = str(e)
+        if "ix_risk_type_config_user_id" in error_str or "tenant_id" in error_str.lower():
+            raise ValueError(
+                "Database constraint error: A unique constraint on tenant_id is preventing "
+                "multiple applications. This indicates a migration issue. Please run migration 014 "
+                "to fix this: '014_force_remove_tenant_id_unique_constraints.sql'"
+            )
         raise
 
 @router.get("", response_model=List[ApplicationResponse])

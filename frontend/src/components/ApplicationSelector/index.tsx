@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Select, Spin, message } from 'antd';
 import { useTranslation } from 'react-i18next';
 import api from '../../services/api';
@@ -15,15 +15,13 @@ interface Application {
 
 const ApplicationSelector: React.FC = () => {
   const { t } = useTranslation();
-  const { currentApplicationId, setCurrentApplicationId } = useApplication();
+  // Access context with refreshTrigger
+  const context = useApplication() as ReturnType<typeof useApplication> & { _refreshTrigger?: number };
+  const { currentApplicationId, setCurrentApplicationId } = context;
   const [applications, setApplications] = useState<Application[]>([]);
   const [loading, setLoading] = useState(true); // Start with loading=true
 
-  useEffect(() => {
-    fetchApplications();
-  }, []);
-
-  const fetchApplications = async () => {
+  const fetchApplications = useCallback(async () => {
     setLoading(true);
     try {
       const response = await api.get('/api/v1/applications');
@@ -39,7 +37,19 @@ const ApplicationSelector: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentApplicationId, setCurrentApplicationId, t]);
+
+  useEffect(() => {
+    fetchApplications();
+  }, [fetchApplications]);
+
+  // Refresh when refreshTrigger changes
+  useEffect(() => {
+    if (context._refreshTrigger !== undefined && context._refreshTrigger > 0) {
+      fetchApplications();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [context._refreshTrigger]);
 
   const handleChange = (value: string) => {
     setCurrentApplicationId(value);

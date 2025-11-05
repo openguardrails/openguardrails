@@ -20,6 +20,16 @@ CREATE TABLE IF NOT EXISTS applications (
     CONSTRAINT uq_applications_tenant_name UNIQUE(tenant_id, name)
 );
 
+-- Ensure default is set even if table already exists
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns 
+               WHERE table_name = 'applications' AND column_name = 'id' 
+               AND column_default IS NULL) THEN
+        ALTER TABLE applications ALTER COLUMN id SET DEFAULT gen_random_uuid();
+    END IF;
+END $$;
+
 CREATE INDEX IF NOT EXISTS idx_applications_tenant_id ON applications(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_applications_is_active ON applications(is_active);
 
@@ -44,6 +54,16 @@ CREATE TABLE IF NOT EXISTS api_keys (
     updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
 );
 
+-- Ensure default is set even if table already exists
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns 
+               WHERE table_name = 'api_keys' AND column_name = 'id' 
+               AND column_default IS NULL) THEN
+        ALTER TABLE api_keys ALTER COLUMN id SET DEFAULT gen_random_uuid();
+    END IF;
+END $$;
+
 CREATE INDEX IF NOT EXISTS idx_api_keys_key ON api_keys(key);
 CREATE INDEX IF NOT EXISTS idx_api_keys_application_id ON api_keys(application_id);
 CREATE INDEX IF NOT EXISTS idx_api_keys_tenant_id ON api_keys(tenant_id);
@@ -66,25 +86,27 @@ DECLARE
     new_app_id UUID;
 BEGIN
     FOR tenant_record IN SELECT id, email FROM tenants LOOP
-        -- Create "Default Application" for each tenant
-        INSERT INTO applications (tenant_id, name, description, is_active)
-        VALUES (
-            tenant_record.id,
-            'Default Application',
-            'Automatically created during migration. All existing configurations have been migrated to this application.',
-            true
-        )
-        ON CONFLICT (tenant_id, name) DO NOTHING
-        RETURNING id INTO new_app_id;
-
-        -- If application already exists (idempotent migration), get its ID
+        -- Check if application already exists (idempotent migration)
+        SELECT id INTO new_app_id
+        FROM applications
+        WHERE tenant_id = tenant_record.id AND name = 'Default Application';
+        
+        -- Create "Default Application" for each tenant if it doesn't exist
         IF new_app_id IS NULL THEN
-            SELECT id INTO new_app_id
-            FROM applications
-            WHERE tenant_id = tenant_record.id AND name = 'Default Application';
+            INSERT INTO applications (id, tenant_id, name, description, is_active)
+            VALUES (
+                gen_random_uuid(),
+                tenant_record.id,
+                'Default Application',
+                'Automatically created during migration. All existing configurations have been migrated to this application.',
+                true
+            )
+            RETURNING id INTO new_app_id;
+            
+            RAISE NOTICE 'Created Default Application for tenant % (email: %)', tenant_record.id, tenant_record.email;
+        ELSE
+            RAISE NOTICE 'Default Application already exists for tenant % (email: %)', tenant_record.id, tenant_record.email;
         END IF;
-
-        RAISE NOTICE 'Created Default Application for tenant % (email: %)', tenant_record.id, tenant_record.email;
     END LOOP;
 END $$;
 
@@ -104,16 +126,12 @@ BEGIN
         WHERE tenant_id = tenant_record.id AND name = 'Default Application';
 
         IF app_id IS NOT NULL THEN
-            -- Migrate existing API key to api_keys table
-            INSERT INTO api_keys (tenant_id, application_id, key, name, is_active)
-            VALUES (
-                tenant_record.id,
-                app_id,
-                tenant_record.api_key,
-                'Migrated API Key',
-                true
-            )
-            ON CONFLICT (key) DO NOTHING;
+            -- Migrate existing API key to api_keys table (skip if already exists)
+            INSERT INTO api_keys (id, tenant_id, application_id, key, name, is_active)
+            SELECT gen_random_uuid(), tenant_record.id, app_id, tenant_record.api_key, 'Migrated API Key', true
+            WHERE NOT EXISTS (
+                SELECT 1 FROM api_keys WHERE key = tenant_record.api_key
+            );
 
             RAISE NOTICE 'Migrated API key for tenant % (email: %)', tenant_record.id, tenant_record.email;
         ELSE

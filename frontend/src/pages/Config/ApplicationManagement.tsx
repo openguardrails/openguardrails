@@ -4,6 +4,7 @@ import { PlusOutlined, EditOutlined, DeleteOutlined, KeyOutlined, CopyOutlined, 
 import type { ColumnsType } from 'antd/es/table';
 import { useTranslation } from 'react-i18next';
 import api from '../../services/api';
+import { useApplication } from '../../contexts/ApplicationContext';
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
@@ -43,6 +44,7 @@ interface ApiKey {
 
 const ApplicationManagement: React.FC = () => {
   const { t } = useTranslation();
+  const { refreshApplications } = useApplication();
   const [applications, setApplications] = useState<Application[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
@@ -101,6 +103,7 @@ const ApplicationManagement: React.FC = () => {
       await api.delete(`/api/v1/applications/${appId}`);
       message.success(t('applicationManagement.deleteSuccess'));
       fetchApplications();
+      refreshApplications(); // Refresh ApplicationSelector
     } catch (error: any) {
       if (error.response?.status === 400) {
         message.error(t('applicationManagement.cannotDeleteLast'));
@@ -122,6 +125,7 @@ const ApplicationManagement: React.FC = () => {
       }
       setModalVisible(false);
       fetchApplications();
+      refreshApplications(); // Refresh ApplicationSelector
     } catch (error) {
       message.error(t('applicationManagement.saveError'));
     }

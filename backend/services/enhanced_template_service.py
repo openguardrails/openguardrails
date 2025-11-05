@@ -19,7 +19,7 @@ class EnhancedTemplateService:
     def __init__(self, cache_ttl: int = 600):
         # Template cache
         self._template_cache: Dict[str, Dict[str, Dict[bool, str]]] = {}
-        # Knowledge base cache: {tenant_id: {category: [knowledge_base_ids]}}
+        # Knowledge base cache: {application_id: {category: [knowledge_base_ids]}}
         self._knowledge_base_cache: Dict[str, Dict[str, List[int]]] = {}
         # Global knowledge base cache: {category: [knowledge_base_ids]}
         self._global_knowledge_base_cache: Dict[str, List[int]] = {}
@@ -29,12 +29,13 @@ class EnhancedTemplateService:
         self._cache_ttl = cache_ttl
         self._lock = asyncio.Lock()
 
-    async def get_suggest_answer(self, categories: List[str], tenant_id: Optional[str] = None, user_query: Optional[str] = None, user_language: Optional[str] = None) -> str:
+    async def get_suggest_answer(self, categories: List[str], tenant_id: Optional[str] = None, application_id: Optional[str] = None, user_query: Optional[str] = None, user_language: Optional[str] = None) -> str:
         """
         Get suggested answer, first search from knowledge base, if not found, use default template
         Args:
             categories: Risk categories list
-            tenant_id: User ID
+            tenant_id: DEPRECATED - kept for backward compatibility
+            application_id: Application ID for multi-application support
             user_query: User original question (for knowledge base search)
             user_language: User's preferred language (e.g., 'en', 'zh')
         Returns:
@@ -48,10 +49,13 @@ class EnhancedTemplateService:
         try:
             # 1. Try to get answer from knowledge base
             if user_query and user_query.strip():
-                kb_answer = await self._search_knowledge_base_answer(categories, tenant_id, user_query.strip())
+                logger.debug(f"Knowledge base search: application_id={application_id}, tenant_id={tenant_id}, user_query={user_query[:50]}..., categories={categories}")
+                kb_answer = await self._search_knowledge_base_answer(categories, tenant_id, application_id, user_query.strip())
                 if kb_answer:
-                    logger.info(f"Found answer from knowledge base for user {tenant_id}, category: {categories}")
+                    logger.info(f"Found answer from knowledge base for application {application_id}, category: {categories}, query: {user_query[:50]}...")
                     return kb_answer
+                else:
+                    logger.debug(f"No answer found in knowledge base for application {application_id}, query: {user_query[:50]}...")
 
             # 2. Knowledge base didn't find answer, use traditional template logic
             return await self._get_template_answer(categories, tenant_id, user_language)
@@ -60,9 +64,33 @@ class EnhancedTemplateService:
             logger.error(f"Get suggest answer error: {e}")
             return self._get_default_answer(tenant_id, user_language)
 
-    async def _search_knowledge_base_answer(self, categories: List[str], tenant_id: Optional[str], user_query: str) -> Optional[str]:
+    async def _search_knowledge_base_answer(self, categories: List[str], tenant_id: Optional[str], application_id: Optional[str], user_query: str) -> Optional[str]:
         """Search answer from knowledge base"""
-        if not tenant_id:
+        # If no application_id, try to find default application from tenant_id
+        if not application_id and tenant_id:
+            try:
+                from database.connection import get_db_session
+                from database.models import Application
+                import uuid as uuid_module
+                
+                db = get_db_session()
+                try:
+                    tenant_uuid = uuid_module.UUID(str(tenant_id))
+                    default_app = db.query(Application).filter(
+                        Application.tenant_id == tenant_uuid,
+                        Application.is_active == True
+                    ).order_by(Application.created_at.asc()).first()
+                    
+                    if default_app:
+                        application_id = str(default_app.id)
+                        logger.debug(f"Knowledge base search: Using default application {application_id} for tenant {tenant_id}")
+                finally:
+                    db.close()
+            except (ValueError, Exception) as e:
+                logger.warning(f"Knowledge base search: Failed to find default application for tenant {tenant_id}: {e}")
+        
+        if not application_id:
+            logger.warning("Knowledge base search: No application_id available, skipping search")
             return None
 
         try:
@@ -107,12 +135,16 @@ class EnhancedTemplateService:
             category_risk_mapping.sort(key=lambda x: x[2], reverse=True)
 
             # Search knowledge base by highest risk level
-            user_cache = self._knowledge_base_cache.get(str(tenant_id), {})
+            app_cache = self._knowledge_base_cache.get(str(application_id), {})
+            logger.debug(f"Knowledge base cache for application {application_id}: {list(app_cache.keys())} categories")
+            logger.debug(f"Global knowledge base cache: {list(self._global_knowledge_base_cache.keys())} categories")
 
             for category_key, risk_level, priority in category_risk_mapping:
-                # Collect knowledge base IDs to search: user's own + global
-                knowledge_base_ids = user_cache.get(category_key, []).copy()
+                # Collect knowledge base IDs to search: application's own + global
+                knowledge_base_ids = app_cache.get(category_key, []).copy()
                 global_kb_ids = self._global_knowledge_base_cache.get(category_key, [])
+                
+                logger.debug(f"Category {category_key}: app KBs={len(knowledge_base_ids)}, global KBs={len(global_kb_ids)}")
 
                 # Filter out disabled global KBs for this tenant
                 disabled_kb_ids = self._tenant_disabled_kb_cache.get(str(tenant_id), set())
@@ -122,12 +154,16 @@ class EnhancedTemplateService:
 
                 # Remove duplicates
                 knowledge_base_ids = list(set(knowledge_base_ids))
+                
+                logger.debug(f"Total KBs to search for category {category_key}: {len(knowledge_base_ids)}")
 
                 # Get database session for fetching KB's similarity threshold
-                db = next(get_db_session())
+                from database.connection import get_db_session
+                db = get_db_session()
                 try:
                     for kb_id in knowledge_base_ids:
                         try:
+                            logger.debug(f"Searching KB {kb_id} with query: {user_query[:50]}...")
                             # Search similar questions (will use KB's configured threshold)
                             results = knowledge_base_service.search_similar_questions(
                                 user_query,
@@ -138,12 +174,14 @@ class EnhancedTemplateService:
 
                             if results:
                                 best_result = results[0]
-                                kb_type = "global" if kb_id in global_kb_ids else "user"
-                                logger.info(f"Found similar question in {kb_type} KB {kb_id}: similarity={best_result['similarity_score']:.3f}")
+                                kb_type = "global" if kb_id in global_kb_ids else "application"
+                                logger.info(f"Found similar question in {kb_type} KB {kb_id}: similarity={best_result['similarity_score']:.3f}, query: {user_query[:50]}...")
                                 return best_result['answer']
+                            else:
+                                logger.debug(f"No similar questions found in KB {kb_id} for query: {user_query[:50]}...")
 
                         except Exception as e:
-                            logger.warning(f"Error searching knowledge base {kb_id}: {e}")
+                            logger.warning(f"Error searching knowledge base {kb_id}: {e}", exc_info=True)
                             continue
                 finally:
                     db.close()
@@ -311,15 +349,21 @@ class EnhancedTemplateService:
                 global_kb_cache: Dict[str, List[int]] = {}
 
                 for kb in knowledge_bases:
-                    user_key = str(kb.tenant_id)
+                    # Use application_id as cache key (application-scoped)
+                    app_key = str(kb.application_id) if kb.application_id else None
+                    if not app_key:
+                        # Skip entries without application_id (shouldn't happen after migration)
+                        logger.warning(f"Knowledge base {kb.id} has no application_id, skipping")
+                        continue
+                    
                     category = kb.category
 
-                    # User's own knowledge base
-                    if user_key not in new_kb_cache:
-                        new_kb_cache[user_key] = {}
-                    if category not in new_kb_cache[user_key]:
-                        new_kb_cache[user_key][category] = []
-                    new_kb_cache[user_key][category].append(kb.id)
+                    # Application's own knowledge base
+                    if app_key not in new_kb_cache:
+                        new_kb_cache[app_key] = {}
+                    if category not in new_kb_cache[app_key]:
+                        new_kb_cache[app_key][category] = []
+                    new_kb_cache[app_key][category].append(kb.id)
 
                     # Global knowledge base
                     if kb.is_global:
