@@ -28,16 +28,23 @@ const ApplicationSelector: React.FC = () => {
       const apps = response.data.filter((app: Application) => app.is_active);
       setApplications(apps);
 
-      // Validate currentApplicationId exists in the fetched applications
-      if (currentApplicationId) {
-        const appExists = apps.some((app: Application) => app.id === currentApplicationId);
+      // Get current value from localStorage (most up-to-date)
+      const storedAppId = localStorage.getItem('current_application_id');
+
+      // Validate stored application ID exists in the fetched applications
+      if (storedAppId) {
+        const appExists = apps.some((app: Application) => app.id === storedAppId);
         if (!appExists && apps.length > 0) {
-          // If current app doesn't exist, set to first available app
-          console.warn(`Current application ID ${currentApplicationId} not found, switching to first available app`);
+          // If stored app doesn't exist, set to first available app
+          console.warn(`Stored application ID ${storedAppId} not found, switching to first available app`);
           setCurrentApplicationId(apps[0].id);
+        } else if (appExists) {
+          // Update context state to match localStorage (in case they got out of sync)
+          setCurrentApplicationId(storedAppId);
         }
       } else if (apps.length > 0) {
         // Set default application if none selected
+        console.log('No application selected, setting first available app:', apps[0].id);
         setCurrentApplicationId(apps[0].id);
       }
     } catch (error) {
@@ -45,11 +52,12 @@ const ApplicationSelector: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [currentApplicationId, setCurrentApplicationId, t]);
+  }, [setCurrentApplicationId, t]); // Remove currentApplicationId from dependencies to avoid infinite loop
 
   useEffect(() => {
     fetchApplications();
-  }, [fetchApplications]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Run only once on mount
 
   // Refresh when refreshTrigger changes
   useEffect(() => {

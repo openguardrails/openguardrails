@@ -65,7 +65,7 @@ class AsyncDetectionLogger:
         batch_size = 1  # Immediate write mode (for debugging)
         last_flush_time = asyncio.get_event_loop().time()
         flush_interval = 0.1  # 0.1 seconds force flush (immediate write)
-        
+
         try:
             while self._running:
                 try:
@@ -73,38 +73,49 @@ class AsyncDetectionLogger:
                     current_time = asyncio.get_event_loop().time()
                     try:
                         data = await asyncio.wait_for(self._queue.get(), timeout=0.5)
-                        
+
                         # Stop signal
                         if data is None:
                             break
-                        
+
                         batch.append(data)
-                        
+
                         # Check if need to write
                         should_flush = (
-                            len(batch) >= batch_size or 
+                            len(batch) >= batch_size or
                             (current_time - last_flush_time) >= flush_interval
                         )
-                        
+
                         if should_flush and batch:
-                            await self._flush_batch(batch, current_date, current_file)
-                            batch.clear()
-                            last_flush_time = current_time
-                            
-                            # Update file handle
+                            # Ensure file handle is open before flushing
                             today = datetime.now().strftime('%Y%m%d')
-                            if current_date != today:
+                            if current_date != today or current_file is None:
                                 if current_file:
                                     await current_file.close()
-                                
+
                                 current_date = today
                                 log_file_path = self.log_dir / f"detection_{today}.jsonl"
                                 current_file = await aiofiles.open(log_file_path, 'a', encoding='utf-8')
                                 logger.debug(f"Opened new log file: {log_file_path}")
+
+                            await self._flush_batch(batch, current_date, current_file)
+                            batch.clear()
+                            last_flush_time = current_time
                         
                     except asyncio.TimeoutError:
                         # Timeout, check if need to flush accumulated data
                         if batch and (current_time - last_flush_time) >= flush_interval:
+                            # Ensure file handle is open before flushing
+                            today = datetime.now().strftime('%Y%m%d')
+                            if current_date != today or current_file is None:
+                                if current_file:
+                                    await current_file.close()
+
+                                current_date = today
+                                log_file_path = self.log_dir / f"detection_{today}.jsonl"
+                                current_file = await aiofiles.open(log_file_path, 'a', encoding='utf-8')
+                                logger.debug(f"Opened new log file: {log_file_path}")
+
                             await self._flush_batch(batch, current_date, current_file)
                             batch.clear()
                             last_flush_time = current_time
