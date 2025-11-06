@@ -1,69 +1,34 @@
 /**
- * IP-based Language Detection Utility
- * Detects user's language based on their IP address location
+ * Language Detection Utility (Offline-friendly)
+ * Detects user's language without requiring external internet access
  */
-
-interface IPLocationResponse {
-  country_code?: string;
-  country?: string;
-}
 
 /**
- * Detect language based on IP geolocation
- * Returns 'zh' for Chinese users, 'en' for others
+ * Get default language from server configuration
+ * Returns server-configured default language ('en' or 'zh')
  */
-export async function detectLanguageByIP(): Promise<string> {
+export async function getDefaultLanguageFromConfig(): Promise<string> {
   try {
-    // Try multiple IP geolocation services
-    const services = [
-      'https://ipapi.co/json/',
-      'https://ip-api.com/json/',
-      'https://ipwho.is/'
-    ];
-
-    for (const service of services) {
-      try {
-        const response = await fetch(service, {
-          method: 'GET',
-          signal: AbortSignal.timeout(3000) // 3 second timeout
-        });
-
-        if (response.ok) {
-          const data: IPLocationResponse = await response.json();
-          const countryCode = data.country_code || data.country || '';
-
-          // Check if user is from China
-          if (countryCode.toUpperCase() === 'CN' || countryCode.toUpperCase() === 'CHINA') {
-            return 'zh';
-          }
-
-          // Return English for all other countries
-          return 'en';
-        }
-      } catch (error) {
-        console.warn(`Failed to detect location from ${service}:`, error);
-        continue; // Try next service
-      }
+    const response = await fetch('/api/v1/auth/default-language');
+    if (response.ok) {
+      const data = await response.json();
+      return data.default_language || 'en';
     }
-
-    // Default to English if all services fail
-    console.warn('All IP geolocation services failed, defaulting to English');
     return 'en';
-
   } catch (error) {
-    console.error('Error detecting language by IP:', error);
-    return 'en'; // Default to English on error
+    console.warn('Failed to fetch default language from config:', error);
+    return 'en'; // Fallback to English
   }
 }
 
 /**
- * Initialize language based on priority:
+ * Initialize language based on priority (NO IP detection - offline-friendly):
  * 1. URL query parameter (?lng=en or ?lng=zh)
  * 2. User saved language preference (if logged in)
  * 3. LocalStorage saved preference
- * 4. IP-based detection
+ * 4. Server default language configuration
  * 5. Browser language
- * 6. Default to English
+ * 6. Fallback to English
  */
 export async function initializeLanguage(userLanguage?: string): Promise<string> {
   // 1. Check URL query parameter
@@ -86,13 +51,15 @@ export async function initializeLanguage(userLanguage?: string): Promise<string>
     return savedLang;
   }
 
-  // 4. IP-based detection
+  // 4. Server default language configuration
   try {
-    const detectedLang = await detectLanguageByIP();
-    localStorage.setItem('i18nextLng', detectedLang);
-    return detectedLang;
+    const configLang = await getDefaultLanguageFromConfig();
+    if (configLang === 'en' || configLang === 'zh') {
+      localStorage.setItem('i18nextLng', configLang);
+      return configLang;
+    }
   } catch (error) {
-    console.error('IP-based language detection failed:', error);
+    console.warn('Failed to get server default language:', error);
   }
 
   // 5. Browser language
@@ -102,7 +69,7 @@ export async function initializeLanguage(userLanguage?: string): Promise<string>
     return 'zh';
   }
 
-  // 6. Default to English
+  // 6. Fallback to English
   localStorage.setItem('i18nextLng', 'en');
   return 'en';
 }

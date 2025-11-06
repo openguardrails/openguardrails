@@ -208,8 +208,15 @@ const ApplicationManagement: React.FC = () => {
       title: t('applicationManagement.description'),
       dataIndex: 'description',
       key: 'description',
-      ellipsis: true,
-      render: (text) => text || '-',
+      width: 250,
+      ellipsis: {
+        showTitle: false,
+      },
+      render: (text) => (
+        <Tooltip placement="topLeft" title={text}>
+          {text || '-'}
+        </Tooltip>
+      ),
     },
     {
       title: t('applicationManagement.protectionSummary'),

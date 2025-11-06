@@ -102,19 +102,39 @@ class EnhancedTemplateService:
                 "no_risk": 0
             }
 
-            # Risk level mapping
+            # Risk level mapping (must match RISK_LEVEL_MAPPING in guardrail_service.py)
             risk_level_mapping = {
                 'S2': 'high_risk', 'S3': 'high_risk', 'S5': 'high_risk', 'S9': 'high_risk',
-                'S1': 'medium_risk', 'S4': 'medium_risk', 'S6': 'medium_risk', 'S7': 'medium_risk',
-                'S8': 'low_risk', 'S10': 'low_risk', 'S11': 'low_risk', 'S12': 'low_risk',
+                'S15': 'high_risk', 'S17': 'high_risk',  # Weapons of Mass Destruction, Sexual Crimes
+                'S4': 'medium_risk', 'S7': 'medium_risk', 'S16': 'medium_risk',  # Harm to Minors, Pornography, Self-Harm
+                'S1': 'low_risk', 'S6': 'low_risk', 'S8': 'low_risk', 'S10': 'low_risk',
+                'S11': 'low_risk', 'S12': 'low_risk', 'S13': 'low_risk', 'S14': 'low_risk',
+                'S18': 'low_risk', 'S19': 'low_risk', 'S20': 'low_risk', 'S21': 'low_risk',
             }
 
-            # Category name mapping
+            # Category name mapping (must match CATEGORY_NAMES in guardrail_service.py)
             category_names = {
-                'S1': 'General Political Topics', 'S2': 'Sensitive Political Topics', 'S3': 'Damage to National Image',
-                'S4': 'Harm to Minors', 'S5': 'Violent Crime', 'S6': 'Illegal Activities',
-                'S7': 'Pornography', 'S8': 'Discriminatory Content', 'S9': 'Prompt Injection',
-                'S10': 'Insults', 'S11': 'Privacy Violation', 'S12': 'Business Violations',
+                'S1': 'General Political Topics',
+                'S2': 'Sensitive Political Topics',
+                'S3': 'Insult to National Symbols or Leaders',
+                'S4': 'Harm to Minors',
+                'S5': 'Violent Crime',
+                'S6': 'Non-Violent Crime',
+                'S7': 'Pornography',
+                'S8': 'Hate & Discrimination',
+                'S9': 'Prompt Attacks',
+                'S10': 'Profanity',
+                'S11': 'Privacy Invasion',
+                'S12': 'Commercial Violations',
+                'S13': 'Intellectual Property Infringement',
+                'S14': 'Harassment',
+                'S15': 'Weapons of Mass Destruction',
+                'S16': 'Self-Harm',
+                'S17': 'Sexual Crimes',
+                'S18': 'Threats',
+                'S19': 'Professional Financial Advice',
+                'S20': 'Professional Medical Advice',
+                'S21': 'Professional Legal Advice',
             }
 
             # Convert category name to category code, and calculate risk level
@@ -203,19 +223,39 @@ class EnhancedTemplateService:
                 "no_risk": 0
             }
 
-            # Risk level mapping
+            # Risk level mapping (must match RISK_LEVEL_MAPPING in guardrail_service.py)
             risk_level_mapping = {
                 'S2': 'high_risk', 'S3': 'high_risk', 'S5': 'high_risk', 'S9': 'high_risk',
-                'S1': 'medium_risk', 'S4': 'medium_risk', 'S6': 'medium_risk', 'S7': 'medium_risk',
-                'S8': 'low_risk', 'S10': 'low_risk', 'S11': 'low_risk', 'S12': 'low_risk',
+                'S15': 'high_risk', 'S17': 'high_risk',  # Weapons of Mass Destruction, Sexual Crimes
+                'S4': 'medium_risk', 'S7': 'medium_risk', 'S16': 'medium_risk',  # Harm to Minors, Pornography, Self-Harm
+                'S1': 'low_risk', 'S6': 'low_risk', 'S8': 'low_risk', 'S10': 'low_risk',
+                'S11': 'low_risk', 'S12': 'low_risk', 'S13': 'low_risk', 'S14': 'low_risk',
+                'S18': 'low_risk', 'S19': 'low_risk', 'S20': 'low_risk', 'S21': 'low_risk',
             }
 
-            # Category name mapping
+            # Category name mapping (must match CATEGORY_NAMES in guardrail_service.py)
             category_names = {
-                'S1': 'General Political Topics', 'S2': 'Sensitive Political Topics', 'S3': 'Damage to National Image',
-                'S4': 'Harm to Minors', 'S5': 'Violent Crime', 'S6': 'Illegal Activities',
-                'S7': 'Pornography', 'S8': 'Discriminatory Content', 'S9': 'Prompt Injection',
-                'S10': 'Insults', 'S11': 'Privacy Violation', 'S12': 'Business Violations',
+                'S1': 'General Political Topics',
+                'S2': 'Sensitive Political Topics',
+                'S3': 'Insult to National Symbols or Leaders',
+                'S4': 'Harm to Minors',
+                'S5': 'Violent Crime',
+                'S6': 'Non-Violent Crime',
+                'S7': 'Pornography',
+                'S8': 'Hate & Discrimination',
+                'S9': 'Prompt Attacks',
+                'S10': 'Profanity',
+                'S11': 'Privacy Invasion',
+                'S12': 'Commercial Violations',
+                'S13': 'Intellectual Property Infringement',
+                'S14': 'Harassment',
+                'S15': 'Weapons of Mass Destruction',
+                'S16': 'Self-Harm',
+                'S17': 'Sexual Crimes',
+                'S18': 'Threats',
+                'S19': 'Professional Financial Advice',
+                'S20': 'Professional Medical Advice',
+                'S21': 'Professional Legal Advice',
             }
 
             # Convert category name to category code, and calculate risk level

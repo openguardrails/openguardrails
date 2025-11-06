@@ -48,7 +48,7 @@ services:
       - SERVICE_NAME=admin
 
       # Database configuration
-      - DATABASE_URL=postgresql://openguardrails:your_password@postgres:5432/openguardrails
+      - DATABASE_URL=postgresql://openguardrails:your_password@postgres:54321/openguardrails
       - RESET_DATABASE_ON_STARTUP=false
       
       # Application configuration
@@ -66,7 +66,11 @@ services:
       # Administrator configuration
       - SUPER_ADMIN_USERNAME=admin@yourdomain.com
       - SUPER_ADMIN_PASSWORD=CHANGE-THIS-PASSWORD-IN-PRODUCTION
-      
+
+      # Default language configuration (for offline deployments)
+      # Options: 'en' (English) or 'zh' (Chinese)
+      - DEFAULT_LANGUAGE=en
+
       # Embedding model API configuration
       - EMBEDDING_API_BASE_URL=http://host.docker.internal:58004/v1
       - EMBEDDING_API_KEY=EMPTY
@@ -122,7 +126,7 @@ services:
       - SERVICE_NAME=detection
 
       # Database configuration
-      - DATABASE_URL=postgresql://openguardrails:your_password@postgres:5432/openguardrails
+      - DATABASE_URL=postgresql://openguardrails:your_password@postgres:54321/openguardrails
 
       # Application configuration
       - DEBUG=false
@@ -145,6 +149,10 @@ services:
 
       # CORS configuration
       - CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+
+      # Default language configuration (for offline deployments)
+      # Options: 'en' (English) or 'zh' (Chinese)
+      - DEFAULT_LANGUAGE=en
 
       # Dual service configuration
       - DETECTION_PORT=5001
@@ -183,7 +191,7 @@ services:
       - SERVICE_NAME=proxy
 
       # Database configuration
-      - DATABASE_URL=postgresql://openguardrails:your_password@postgres:5432/openguardrails
+      - DATABASE_URL=postgresql://openguardrails:your_password@postgres:54321/openguardrails
 
       # Application configuration
       - DEBUG=false
@@ -206,6 +214,10 @@ services:
 
       # CORS configuration
       - CORS_ORIGINS=*
+
+      # Default language configuration (for offline deployments)
+      # Options: 'en' (English) or 'zh' (Chinese)
+      - DEFAULT_LANGUAGE=en
 
       # Proxy service configuration (high concurrency)
       - PROXY_PORT=5002

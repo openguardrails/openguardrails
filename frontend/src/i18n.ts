@@ -3,37 +3,47 @@ import { initReactI18next } from 'react-i18next';
 import LanguageDetector from 'i18next-browser-languagedetector';
 import enTranslations from './locales/en.json';
 import zhTranslations from './locales/zh.json';
-import { getLanguageFromIp } from './utils/ipLocation';
 
-// Language detection order:
+// Language detection order (NO IP detection - offline-friendly):
 // 1. Query parameter (?lng=en or ?lng=zh)
-// 2. LocalStorage
-// 3. IP-based geolocation (China mainland = zh, others = en)
-// 4. Navigator language (browser setting)
-// 5. Default to 'en'
+// 2. LocalStorage (user preference)
+// 3. Navigator language (browser setting)
+// 4. Default language from server config
+// 5. Fallback to 'en'
 
-// Custom IP-based language detector
-const ipLanguageDetector = {
-  name: 'ipDetector',
+// Custom server config language detector
+const configLanguageDetector = {
+  name: 'configDetector',
 
   async lookup() {
     try {
-      const lang = await getLanguageFromIp();
-      return lang;
+      // Only fetch default language if no localStorage preference exists
+      const savedLang = localStorage.getItem('i18nextLng');
+      if (savedLang) {
+        return undefined; // Let other detectors handle it
+      }
+
+      // Fetch default language from server config
+      const response = await fetch('/api/v1/auth/default-language');
+      if (response.ok) {
+        const data = await response.json();
+        return data.default_language || 'en';
+      }
+      return 'en';
     } catch (error) {
-      console.error('IP language detection failed:', error);
-      return undefined;
+      console.warn('Failed to fetch default language from config, using fallback:', error);
+      return 'en'; // Fallback to English if API fails
     }
   },
 
   cacheUserLanguage() {
-    // No caching needed for IP detection
+    // No caching needed for config detection
   }
 };
 
 // Add custom detector to LanguageDetector
 const languageDetector = new LanguageDetector();
-languageDetector.addDetector(ipLanguageDetector as any);
+languageDetector.addDetector(configLanguageDetector as any);
 
 i18n
   .use(languageDetector)
@@ -53,7 +63,7 @@ i18n
       escapeValue: false // React already escapes values
     },
     detection: {
-      order: ['querystring', 'localStorage', 'ipDetector', 'navigator'],
+      order: ['querystring', 'localStorage', 'navigator', 'configDetector'],
       caches: ['localStorage'],
       lookupQuerystring: 'lng'
     }

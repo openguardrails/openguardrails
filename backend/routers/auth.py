@@ -14,6 +14,9 @@ from config import settings
 router = APIRouter(tags=["Authentication"])
 security = HTTPBearer()
 
+class DefaultLanguageResponse(BaseModel):
+    default_language: str
+
 class LoginRequest(BaseModel):
     username: str
     password: str
@@ -26,6 +29,15 @@ class LoginResponse(BaseModel):
 class UserInfo(BaseModel):
     username: str
     role: str
+
+@router.get("/default-language", response_model=DefaultLanguageResponse)
+async def get_default_language():
+    """
+    Get default language configuration for the platform.
+    This is a public endpoint that doesn't require authentication.
+    Used by frontend to initialize language when there's no stored preference.
+    """
+    return DefaultLanguageResponse(default_language=settings.default_language)
 
 @router.post("/login", response_model=LoginResponse)
 async def login(login_data: LoginRequest, db: Session = Depends(get_db)):

@@ -131,11 +131,15 @@ class Settings(BaseSettings):
 
     # Development and operations: whether to reset database (delete and rebuild all tables)
     reset_database_on_startup: bool = False
-    
+
     # Private deployment configuration: whether to store detection results in the database
     # true: store to database (SaaS mode, complete data analysis)
     # false: only write log file (private mode, reduce database pressure)
     store_detection_results: bool = True
+
+    # Default language configuration for private deployments without internet access
+    # Options: 'en' (English) or 'zh' (Chinese)
+    default_language: str = "en"
 
     class Config:
         # Ensure we load the .env file next to this config module,
