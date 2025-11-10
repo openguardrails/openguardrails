@@ -4,7 +4,8 @@ from sqlalchemy.orm import Session
 from database.connection import get_db
 from database.models import (
     Application, ApiKey, Tenant, RiskTypeConfig, BanPolicy,
-    DataSecurityEntityType, ResponseTemplate, Blacklist, Whitelist, KnowledgeBase
+    DataSecurityEntityType, ResponseTemplate, Blacklist, Whitelist, KnowledgeBase,
+    ApplicationScannerConfig, Scanner
 )
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
@@ -245,21 +246,21 @@ async def list_applications(
                 KnowledgeBase.is_active == True
             ).count()
 
-            # Calculate enabled risk types count
-            enabled_risk_types = 0
-            if risk_config:
-                risk_fields = [
-                    's1_enabled', 's2_enabled', 's3_enabled', 's4_enabled', 's5_enabled',
-                    's6_enabled', 's7_enabled', 's8_enabled', 's9_enabled', 's10_enabled',
-                    's11_enabled', 's12_enabled', 's13_enabled', 's14_enabled', 's15_enabled',
-                    's16_enabled', 's17_enabled', 's18_enabled', 's19_enabled', 's20_enabled',
-                    's21_enabled'
-                ]
-                enabled_risk_types = sum(1 for field in risk_fields if getattr(risk_config, field, False))
+            # Calculate enabled scanners count (new scanner system)
+            # Count all scanners that are enabled for this application
+            enabled_scanners_count = db.query(ApplicationScannerConfig).filter(
+                ApplicationScannerConfig.application_id == app.id,
+                ApplicationScannerConfig.is_enabled == True
+            ).count()
+
+            # Count total available scanners for this application
+            total_scanners_count = db.query(ApplicationScannerConfig).filter(
+                ApplicationScannerConfig.application_id == app.id
+            ).count()
 
             protection_summary = {
-                "risk_types_enabled": enabled_risk_types,
-                "total_risk_types": 21,
+                "risk_types_enabled": enabled_scanners_count,  # Renamed to scanners_enabled for clarity
+                "total_risk_types": total_scanners_count,      # Renamed to total_scanners for clarity
                 "ban_policy_enabled": ban_policy.enabled if ban_policy else False,
                 "sensitivity_level": risk_config.sensitivity_trigger_level if risk_config else "medium",
                 "data_security_entities": data_security_count,

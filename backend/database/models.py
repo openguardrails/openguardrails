@@ -597,3 +597,170 @@ class TenantSubscription(Base):
 
     # Association relationships
     tenant = relationship("Tenant")
+
+
+# =====================================================
+# Scanner Package System Models
+# =====================================================
+
+class ScannerPackage(Base):
+    """Scanner package metadata"""
+    __tablename__ = "scanner_packages"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    package_code = Column(String(100), nullable=False, index=True)
+    package_name = Column(String(200), nullable=False)
+    author = Column(String(200), nullable=False, default='OpenGuardrails')
+    description = Column(Text)
+    version = Column(String(50), nullable=False, default='1.0.0')
+    license = Column(String(100), default='proprietary')
+
+    # Package type
+    package_type = Column(String(50), nullable=False)  # 'builtin', 'purchasable'
+    is_official = Column(Boolean, nullable=False, default=True)
+    requires_purchase = Column(Boolean, nullable=False, default=False)
+
+    # Purchase settings (for purchasable packages)
+    price = Column(Float, nullable=True)  # Original price as number for dynamic display
+    price_display = Column(String(100))   # Fallback display text
+    file_path = Column(String(512))
+
+    # Metadata
+    is_active = Column(Boolean, nullable=False, default=True, index=True)
+    archived = Column(Boolean, nullable=False, default=False, index=True)  # Archive status
+    archive_reason = Column(Text)  # Reason for archiving
+    archived_at = Column(DateTime(timezone=True))  # Archive timestamp
+    archived_by = Column(UUID(as_uuid=True), ForeignKey("tenants.id"))  # Admin who archived
+    display_order = Column(Integer, default=0)
+    scanner_count = Column(Integer, default=0)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    scanners = relationship("Scanner", back_populates="package", cascade="all, delete-orphan")
+    purchases = relationship("PackagePurchase", back_populates="package", cascade="all, delete-orphan")
+
+
+class Scanner(Base):
+    """Individual scanner definition"""
+    __tablename__ = "scanners"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    package_id = Column(UUID(as_uuid=True), ForeignKey("scanner_packages.id", ondelete="CASCADE"))
+
+    # Scanner identification
+    tag = Column(String(50), unique=True, nullable=False, index=True)
+    name = Column(String(200), nullable=False)
+    description = Column(Text)
+
+    # Scanner configuration
+    scanner_type = Column(String(50), nullable=False)  # 'genai', 'regex', 'keyword'
+    definition = Column(Text, nullable=False)
+
+    # Default behavior (package defaults)
+    default_risk_level = Column(String(20), nullable=False)  # 'high_risk', 'medium_risk', 'low_risk'
+    default_scan_prompt = Column(Boolean, nullable=False, default=True)
+    default_scan_response = Column(Boolean, nullable=False, default=True)
+
+    # Metadata
+    is_active = Column(Boolean, nullable=False, default=True, index=True)
+    display_order = Column(Integer, default=0)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    package = relationship("ScannerPackage", back_populates="scanners")
+    configs = relationship("ApplicationScannerConfig", back_populates="scanner", cascade="all, delete-orphan")
+    custom_scanners = relationship("CustomScanner", back_populates="scanner", cascade="all, delete-orphan")
+
+
+class ApplicationScannerConfig(Base):
+    """Per-application scanner configuration overrides"""
+    __tablename__ = "application_scanner_configs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    application_id = Column(UUID(as_uuid=True), ForeignKey("applications.id", ondelete="CASCADE"), nullable=False, index=True)
+    scanner_id = Column(UUID(as_uuid=True), ForeignKey("scanners.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Override settings (NULL = use package defaults)
+    is_enabled = Column(Boolean, nullable=False, default=True)
+    risk_level_override = Column(String(20))  # NULL = use default_risk_level
+    scan_prompt_override = Column(Boolean)     # NULL = use default_scan_prompt
+    scan_response_override = Column(Boolean)   # NULL = use default_scan_response
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    application = relationship("Application")
+    scanner = relationship("Scanner", back_populates="configs")
+
+    # Constraints
+    __table_args__ = (
+        UniqueConstraint('application_id', 'scanner_id', name='uq_app_scanner_config'),
+    )
+
+
+class PackagePurchase(Base):
+    """Package purchase tracking"""
+    __tablename__ = "package_purchases"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    package_id = Column(UUID(as_uuid=True), ForeignKey("scanner_packages.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Purchase lifecycle
+    status = Column(String(50), nullable=False, default='pending', index=True)  # 'pending', 'approved', 'rejected'
+    request_email = Column(String(255))
+    request_message = Column(Text)
+
+    # Admin actions
+    approved_by = Column(UUID(as_uuid=True), ForeignKey("tenants.id"))
+    approved_at = Column(DateTime(timezone=True))
+    rejection_reason = Column(Text)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    tenant = relationship("Tenant", foreign_keys=[tenant_id])
+    package = relationship("ScannerPackage", back_populates="purchases")
+    approver = relationship("Tenant", foreign_keys=[approved_by])
+
+    # Constraints
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'package_id', name='uq_tenant_package_purchase'),
+    )
+
+
+class CustomScanner(Base):
+    """User-defined custom scanners (S100+)"""
+    __tablename__ = "custom_scanners"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    application_id = Column(UUID(as_uuid=True), ForeignKey("applications.id", ondelete="CASCADE"), nullable=False, index=True)
+    scanner_id = Column(UUID(as_uuid=True), ForeignKey("scanners.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
+
+    # Custom scanner metadata
+    notes = Column(Text)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    application = relationship("Application")
+    scanner = relationship("Scanner", back_populates="custom_scanners")
+    creator = relationship("Tenant")
+
+    # Constraints
+    __table_args__ = (
+        UniqueConstraint('application_id', 'scanner_id', name='uq_app_custom_scanner'),
+    )

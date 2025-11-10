@@ -187,6 +187,75 @@ class ModelService:
             logger.error(f"VL Model API error: {e}")
             raise
 
+    async def check_messages_with_scanner_definitions(
+        self,
+        messages: List[dict],
+        scanner_definitions: List[str],
+        use_vl_model: bool = False
+    ) -> Tuple[str, Optional[float]]:
+        """
+        Check content security with custom scanner definitions and return sensitivity score
+
+        Args:
+            messages: List of message dictionaries
+            scanner_definitions: List of scanner definition strings
+                Format: ["S2: Sensitive Political Topics. [definition]", ...]
+            use_vl_model: Whether to use vision-language model
+
+        Returns:
+            Tuple of (model_response, sensitivity_score)
+            Model response format: "safe" or "unsafe\nS2,S5,S7"
+        """
+        try:
+            # Combine scanner definitions into unsafe_categories string
+            # Format expected by OpenGuardrails-Text model
+            unsafe_categories = ". \n".join(scanner_definitions)
+
+            payload = {
+                "model": settings.guardrails_vl_model_name if use_vl_model else settings.guardrails_model_name,
+                "messages": messages,
+                "temperature": 0.0,
+                "logprobs": True,
+                "chat_template_kwargs": {
+                    "unsafe_categories": unsafe_categories
+                }
+            }
+
+            # Use appropriate API URL and headers
+            api_url = self._vl_api_url if use_vl_model else self._api_url
+            headers = self._vl_headers if use_vl_model else self._headers
+
+            response = await self._client.post(
+                api_url,
+                json=payload,
+                headers=headers
+            )
+
+            if response.status_code == 200:
+                result_data = response.json()
+                result = result_data["choices"][0]["message"]["content"].strip()
+
+                # Extract sensitivity score
+                sensitivity_score = None
+                if "logprobs" in result_data["choices"][0] and result_data["choices"][0]["logprobs"]:
+                    logprobs_data = result_data["choices"][0]["logprobs"]
+                    if "content" in logprobs_data and logprobs_data["content"]:
+                        # Get logprob of the first token
+                        first_token_logprob = logprobs_data["content"][0]["logprob"]
+                        # Convert to probability
+                        sensitivity_score = math.exp(first_token_logprob)
+
+                logger.debug(f"Model response: {result}, sensitivity: {sensitivity_score}")
+                return result, sensitivity_score
+            else:
+                logger.error(f"Model API error: {response.status_code} - {response.text}")
+                raise Exception(f"API call failed with status {response.status_code}")
+
+        except Exception as e:
+            logger.error(f"Model API error with scanner definitions: {e}")
+            # Return safe default result
+            return "safe", None
+
     def _has_image_content(self, messages: List[dict]) -> bool:
         """Check if the message contains image content"""
         for msg in messages:

@@ -105,8 +105,12 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       label: t('nav.config'),
       children: [
         {
-          key: '/config/risk-types',
-          label: t('config.riskType'),
+          key: '/config/official-scanners',
+          label: t('scannerPackages.officialScanners'),
+        },
+        {
+          key: '/config/custom-scanners',
+          label: t('customScanners.title'),
         },
         {
           key: '/config/sensitivity-thresholds',
@@ -155,6 +159,10 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         {
           key: '/admin/subscriptions',
           label: t('nav.subscriptionManagement'),
+        },
+        {
+          key: '/admin/package-marketplace',
+          label: t('nav.packageMarketplace'),
         },
       ],
     }] : []),

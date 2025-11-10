@@ -6,10 +6,11 @@ import BlacklistManagement from './BlacklistManagement';
 import WhitelistManagement from './WhitelistManagement';
 import ResponseTemplateManagement from './ResponseTemplateManagement';
 import KnowledgeBaseManagement from './KnowledgeBaseManagement';
-import RiskTypeManagement from './RiskTypeManagement';
 import SensitivityThresholdManagement from './SensitivityThresholdManagement';
 import DataSecurity from '../DataSecurity';
 import BanPolicy from './BanPolicy';
+import OfficialScannersManagement from './OfficialScannersManagement';
+import CustomScannersManagement from './CustomScannersManagement';
 
 const Config: React.FC = () => {
   const { t } = useTranslation();
@@ -22,11 +23,12 @@ const Config: React.FC = () => {
     if (path.includes('/whitelist')) return 'whitelist';
     if (path.includes('/responses')) return 'responses';
     if (path.includes('/knowledge-bases')) return 'knowledge-bases';
-    if (path.includes('/risk-types')) return 'risk-types';
     if (path.includes('/sensitivity-thresholds')) return 'sensitivity-thresholds';
     if (path.includes('/data-security')) return 'data-security';
     if (path.includes('/ban-policy')) return 'ban-policy';
-    return 'risk-types';
+    if (path.includes('/official-scanners')) return 'official-scanners';
+    if (path.includes('/custom-scanners')) return 'custom-scanners';
+    return 'official-scanners';
   };
 
   const handleTabChange = (key: string) => {
@@ -36,9 +38,14 @@ const Config: React.FC = () => {
 
   const items = [
     {
-      key: 'risk-types',
-      label: t('config.riskType'),
-      children: <RiskTypeManagement />,
+      key: 'official-scanners',
+      label: t('scannerPackages.officialScanners'),
+      children: <OfficialScannersManagement />,
+    },
+    {
+      key: 'custom-scanners',
+      label: t('customScanners.title'),
+      children: <CustomScannersManagement />,
     },
     {
       key: 'sensitivity-thresholds',

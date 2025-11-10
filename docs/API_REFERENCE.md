@@ -118,10 +118,8 @@ Detect safety risks in AI conversations with full context awareness.
       "content": "string or array"
     }
   ],
-  "extra_body": {
-    "skip_input_guardrails": false,
-    "skip_output_guardrails": false
-  }
+  "skip_input_guardrails": false,
+  "skip_output_guardrails": false
 }
 ```
 
@@ -1138,10 +1136,20 @@ Main detection request model.
 {
   model?: string;                // Optional model identifier
   messages: Message[];           // Conversation messages
-  extra_body?: {                 // Optional control parameters
+
+  // Note: For Python SDK/client libraries, use extra_body
+  extra_body?: {                 // For OpenAI Python SDK only
     skip_input_guardrails?: boolean;
     skip_output_guardrails?: boolean;
   }
+
+  // For direct HTTP/curl requests, use top-level parameters:
+  skip_input_guardrails?: boolean;
+  skip_output_guardrails?: boolean;
+  xxai_app_user_id?: string;
+  enable_security?: boolean;
+  enable_compliance?: boolean;
+  enable_data_security?: boolean;
 }
 ```
 

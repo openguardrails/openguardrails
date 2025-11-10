@@ -318,33 +318,6 @@ export const testModelsApi = {
     api.post('/api/v1/test/models/selection', { model_selections }).then(res => res.data),
 };
 
-// Risk type configuration API
-export const riskConfigApi = {
-  // Get risk configuration
-  get: () => api.get('/api/v1/config/risk-types').then(res => res.data),
-
-  // Update risk configuration
-  update: (config: {
-    s1_enabled: boolean;
-    s2_enabled: boolean;
-    s3_enabled: boolean;
-    s4_enabled: boolean;
-    s5_enabled: boolean;
-    s6_enabled: boolean;
-    s7_enabled: boolean;
-    s8_enabled: boolean;
-    s9_enabled: boolean;
-    s10_enabled: boolean;
-    s11_enabled: boolean;
-    s12_enabled: boolean;
-  }) => api.put('/api/v1/config/risk-types', config).then(res => res.data),
-
-  // Get enabled risk types
-  getEnabled: () => api.get('/api/v1/config/risk-types/enabled').then(res => res.data),
-
-  // Reset to default configuration
-  reset: () => api.post('/api/v1/config/risk-types/reset').then(res => res.data),
-};
 
 // Sensitivity threshold configuration API
 export const sensitivityThresholdApi = {
@@ -511,8 +484,141 @@ export const dataSecurityApi = {
     api.get(`/api/v1/results/${requestId}`).then(res => res.data),
 };
 
-// Convenient functions
-export const getRiskConfig = () => riskConfigApi.get();
-export const updateRiskConfig = (config: any) => riskConfigApi.update(config);
+// Scanner Package System API
+export const scannerPackagesApi = {
+  // Get all packages visible to current user
+  getAll: (packageType?: 'builtin' | 'purchasable'): Promise<any[]> =>
+    api.get('/api/v1/scanner-packages/', { params: { package_type: packageType } }).then(res => res.data),
+
+  // Get package details including scanner definitions
+  getDetail: (packageId: string): Promise<any> =>
+    api.get(`/api/v1/scanner-packages/${packageId}`).then(res => res.data),
+
+  // Get marketplace packages (purchasable packages)
+  getMarketplace: (): Promise<any[]> =>
+    api.get('/api/v1/scanner-packages/marketplace/list').then(res => res.data),
+
+  // Get marketplace package preview (no purchase required, hides definitions for unpurchased packages)
+  getMarketplaceDetail: (packageId: string): Promise<any> =>
+    api.get(`/api/v1/scanner-packages/marketplace/${packageId}`).then(res => res.data),
+
+  // Admin: Get all packages (no purchase filtering)
+  getAllAdmin: (packageType?: 'builtin' | 'purchasable', includeArchived?: boolean): Promise<any[]> =>
+    api.get('/api/v1/scanner-packages/admin/packages', { params: { package_type: packageType, include_archived: includeArchived } }).then(res => res.data),
+
+  // Admin: Upload purchasable package
+  uploadPackage: (packageData: any): Promise<any> =>
+    api.post('/api/v1/scanner-packages/admin/upload', packageData).then(res => res.data),
+
+  // Admin: Update package metadata
+  updatePackage: (packageId: string, updates: any): Promise<any> =>
+    api.put(`/api/v1/scanner-packages/admin/${packageId}`, updates).then(res => res.data),
+
+  // Admin: Archive package
+  archivePackage: (packageId: string, reason?: string): Promise<{ success: boolean; message: string }> =>
+    api.post(`/api/v1/scanner-packages/admin/${packageId}/archive`, reason ? { reason } : {}).then(res => res.data),
+
+  // Admin: Unarchive package
+  unarchivePackage: (packageId: string): Promise<{ success: boolean; message: string }> =>
+    api.post(`/api/v1/scanner-packages/admin/${packageId}/unarchive`).then(res => res.data),
+
+  // Admin: Delete package (legacy - now archives)
+  deletePackage: (packageId: string): Promise<{ success: boolean; message: string }> =>
+    api.delete(`/api/v1/scanner-packages/admin/${packageId}`).then(res => res.data),
+
+  // Admin: Get package statistics
+  getStatistics: (packageId: string): Promise<any> =>
+    api.get(`/api/v1/scanner-packages/admin/${packageId}/statistics`).then(res => res.data),
+};
+
+export const scannerConfigsApi = {
+  // Get all scanner configurations for application
+  getAll: (includeDisabled: boolean = true): Promise<any[]> =>
+    api.get('/api/v1/scanner-configs', { params: { include_disabled: includeDisabled } }).then(res => res.data),
+
+  // Get only enabled scanner configurations
+  getEnabled: (scanType?: 'prompt' | 'response'): Promise<any[]> =>
+    api.get('/api/v1/scanner-configs/enabled', { params: { scan_type: scanType } }).then(res => res.data),
+
+  // Update scanner configuration
+  update: (scannerId: string, updates: any): Promise<{ success: boolean; message: string; data: any }> =>
+    api.put(`/api/v1/scanner-configs/${scannerId}`, updates).then(res => res.data),
+
+  // Bulk update scanner configurations
+  bulkUpdate: (updates: Array<{ scanner_id: string; [key: string]: any }>): Promise<{ success: boolean; message: string; data: any }> =>
+    api.post('/api/v1/scanner-configs/bulk-update', { updates }).then(res => res.data),
+
+  // Reset scanner configuration to defaults
+  reset: (scannerId: string): Promise<{ success: boolean; message: string }> =>
+    api.post(`/api/v1/scanner-configs/${scannerId}/reset`).then(res => res.data),
+
+  // Reset all configurations to defaults
+  resetAll: (): Promise<{ success: boolean; message: string; data: any }> =>
+    api.post('/api/v1/scanner-configs/reset-all').then(res => res.data),
+
+  // Initialize default configs for all available scanners
+  initialize: (): Promise<{ success: boolean; message: string; data: any }> =>
+    api.post('/api/v1/scanner-configs/initialize').then(res => res.data),
+};
+
+export const customScannersApi = {
+  // Get all custom scanners for application
+  getAll: (): Promise<any[]> =>
+    api.get('/api/v1/custom-scanners').then(res => res.data),
+
+  // Get custom scanner by ID
+  get: (scannerId: string): Promise<any> =>
+    api.get(`/api/v1/custom-scanners/${scannerId}`).then(res => res.data),
+
+  // Create custom scanner
+  create: (scannerData: {
+    scanner_type: 'genai' | 'regex' | 'keyword';
+    name: string;
+    definition: string;
+    risk_level: 'high_risk' | 'medium_risk' | 'low_risk';
+    scan_prompt?: boolean;
+    scan_response?: boolean;
+    notes?: string;
+  }): Promise<any> =>
+    api.post('/api/v1/custom-scanners', scannerData).then(res => res.data),
+
+  // Update custom scanner
+  update: (scannerId: string, updates: any): Promise<any> =>
+    api.put(`/api/v1/custom-scanners/${scannerId}`, updates).then(res => res.data),
+
+  // Delete custom scanner
+  delete: (scannerId: string): Promise<{ success: boolean; message: string }> =>
+    api.delete(`/api/v1/custom-scanners/${scannerId}`).then(res => res.data),
+};
+
+export const purchasesApi = {
+  // Request to purchase a package
+  request: (packageId: string, email: string, message?: string): Promise<any> =>
+    api.post('/api/v1/purchases/request', { package_id: packageId, email, message }).then(res => res.data),
+
+  // Get current user's purchase requests
+  getMyPurchases: (status?: 'pending' | 'approved' | 'rejected'): Promise<any[]> =>
+    api.get('/api/v1/purchases/my-purchases', { params: { status_filter: status } }).then(res => res.data),
+
+  // Cancel own purchase request
+  cancel: (purchaseId: string): Promise<{ success: boolean; message: string }> =>
+    api.delete(`/api/v1/purchases/${purchaseId}`).then(res => res.data),
+
+  // Admin: Get all pending purchase requests
+  getPending: (): Promise<any[]> =>
+    api.get('/api/v1/purchases/admin/pending').then(res => res.data),
+
+  // Admin: Approve purchase request
+  approve: (purchaseId: string): Promise<any> =>
+    api.post(`/api/v1/purchases/admin/${purchaseId}/approve`).then(res => res.data),
+
+  // Admin: Reject purchase request
+  reject: (purchaseId: string, rejectionReason: string): Promise<any> =>
+    api.post(`/api/v1/purchases/admin/${purchaseId}/reject`, { rejection_reason: rejectionReason }).then(res => res.data),
+
+  // Admin: Get purchase statistics
+  getStatistics: (packageId?: string): Promise<{ success: boolean; message: string; data: any }> =>
+    api.get('/api/v1/purchases/admin/statistics', { params: { package_id: packageId } }).then(res => res.data),
+};
 
 export default api;

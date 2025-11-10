@@ -196,3 +196,156 @@ class DifyModerationResponse(BaseModel):
     inputs: Optional[Dict[str, Any]] = None  # For overridden action (input moderation)
     query: Optional[str] = None  # For overridden action (input moderation)
     text: Optional[str] = None  # For overridden action (output moderation)
+
+
+# =====================================================
+# Scanner Package System Response Models
+# =====================================================
+
+class ScannerResponse(BaseModel):
+    """Scanner response model"""
+    id: str
+    tag: str
+    name: str
+    description: Optional[str]
+    scanner_type: str
+    definition: str
+    default_risk_level: str
+    default_scan_prompt: bool
+    default_scan_response: bool
+
+
+class PackageResponse(BaseModel):
+    """Scanner package response model"""
+    id: str
+    package_code: str
+    package_name: str
+    author: str
+    description: Optional[str]
+    version: str
+    license: str
+    package_type: str
+    scanner_count: int
+    price: Optional[float] = None
+    price_display: Optional[str] = None
+    created_at: Optional[str]
+    updated_at: Optional[str]
+    archived: bool = False
+    archived_at: Optional[str] = None
+    archive_reason: Optional[str] = None
+
+
+class PackageDetailResponse(BaseModel):
+    """Package detail response model (includes scanners)"""
+    id: str
+    package_code: str
+    package_name: str
+    author: str
+    description: Optional[str]
+    version: str
+    license: str
+    package_type: str
+    scanner_count: int
+    price: Optional[float] = None
+    price_display: Optional[str] = None
+    scanners: List[Dict[str, Any]]
+    created_at: Optional[str]
+    updated_at: Optional[str]
+
+
+class MarketplacePackageResponse(BaseModel):
+    """Marketplace package response model (no scanner definitions)"""
+    id: str
+    package_code: str
+    package_name: str
+    author: str
+    description: Optional[str]
+    version: str
+    scanner_count: int
+    price: Optional[float] = None
+    price_display: Optional[str]
+    purchase_status: Optional[str]  # None, 'pending', 'approved', 'rejected'
+    purchased: bool
+    purchase_requested: bool
+    created_at: Optional[str]
+
+
+class ScannerConfigResponse(BaseModel):
+    """Scanner configuration response model"""
+    id: str
+    tag: str
+    name: str
+    description: Optional[str]
+    scanner_type: str
+    package_name: str
+    package_id: Optional[str]
+    is_custom: bool
+    # Effective settings (with overrides applied)
+    is_enabled: bool
+    risk_level: str
+    scan_prompt: bool
+    scan_response: bool
+    # Default values
+    default_risk_level: str
+    default_scan_prompt: bool
+    default_scan_response: bool
+    # Override indicators
+    has_risk_level_override: bool
+    has_scan_prompt_override: bool
+    has_scan_response_override: bool
+
+
+class CustomScannerResponse(BaseModel):
+    """Custom scanner response model"""
+    id: str
+    custom_scanner_id: str
+    tag: str
+    name: str
+    description: Optional[str]
+    scanner_type: str
+    definition: str
+    default_risk_level: str
+    default_scan_prompt: bool
+    default_scan_response: bool
+    notes: Optional[str]
+    created_by: str
+    created_at: Optional[str]
+    updated_at: Optional[str]
+    is_enabled: bool = True
+
+
+class PurchaseResponse(BaseModel):
+    """Purchase response model"""
+    id: str
+    package_id: str
+    package_name: Optional[str]
+    package_code: Optional[str]
+    status: str
+    request_email: str
+    request_message: Optional[str]
+    rejection_reason: Optional[str]
+    approved_at: Optional[str]
+    created_at: Optional[str]
+
+
+class PurchasePendingResponse(BaseModel):
+    """Pending purchase response model (for admin)"""
+    id: str
+    tenant_id: str
+    tenant_email: Optional[str]
+    package_id: str
+    package_name: Optional[str]
+    package_code: Optional[str]
+    request_email: str
+    request_message: Optional[str]
+    created_at: Optional[str]
+
+
+class PackageStatisticsResponse(BaseModel):
+    """Package statistics response model"""
+    package_id: str
+    package_name: str
+    total_purchases: int
+    approved_purchases: int
+    pending_purchases: int
+    scanner_count: int

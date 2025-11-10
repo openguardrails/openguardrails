@@ -47,8 +47,20 @@
               "value": "={{ [{\"role\": \"user\", \"content\": $json.user_message}] }}"
             },
             {
-              "name": "extra_body",
-              "value": "={{ {\"xxai_app_user_id\": $json.user_id, \"enable_security\": true, \"enable_compliance\": true, \"enable_data_security\": true} }}"
+              "name": "xxai_app_user_id",
+              "value": "={{ $json.user_id }}"
+            },
+            {
+              "name": "enable_security",
+              "value": true
+            },
+            {
+              "name": "enable_compliance",
+              "value": true
+            },
+            {
+              "name": "enable_data_security",
+              "value": true
             }
           ]
         },
@@ -161,8 +173,20 @@
               "value": "={{ [{\"role\": \"assistant\", \"content\": $json.message.content}] }}"
             },
             {
-              "name": "extra_body",
-              "value": "={{ {\"xxai_app_user_id\": $json.user_id, \"enable_security\": true, \"enable_compliance\": true, \"enable_data_security\": true} }}"
+              "name": "xxai_app_user_id",
+              "value": "={{ $json.user_id }}"
+            },
+            {
+              "name": "enable_security",
+              "value": true
+            },
+            {
+              "name": "enable_compliance",
+              "value": true
+            },
+            {
+              "name": "enable_data_security",
+              "value": true
             }
           ]
         },

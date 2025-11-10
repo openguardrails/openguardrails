@@ -545,11 +545,9 @@ print("Result:", result)
       "content": "{{ $json.userInput }}"
     }
   ],
-  "extra_body": {
-    "enable_security": true,
-    "enable_compliance": true,
-    "enable_data_security": true
-  }
+  "enable_security": true,
+  "enable_compliance": true,
+  "enable_data_security": true
 }`}
                   </pre>
                 </div>
@@ -714,10 +712,8 @@ response = requests.post(
       "content": "Assistant response"
     }
   ],
-  "extra_body": {
-    "skip_input_guardrails": false,
-    "skip_output_guardrails": false
-  }
+  "skip_input_guardrails": false,
+  "skip_output_guardrails": false
 }`}
                     </pre>
                   </div>

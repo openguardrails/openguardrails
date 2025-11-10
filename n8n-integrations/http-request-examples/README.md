@@ -90,11 +90,9 @@ User Input → Input Check (OpenGuardrails) → IF Pass → LLM Call → Output 
       "content": "{{ $json.content }}"
     }
   ],
-  "extra_body": {
-    "enable_security": true,
-    "enable_compliance": true,
-    "enable_data_security": true
-  }
+  "enable_security": true,
+  "enable_compliance": true,
+  "enable_data_security": true
 }
 ```
 
@@ -176,11 +174,9 @@ For chatbot scenarios with conversation history:
       "content": "{{ $json.currentMessage }}"
     }
   ],
-  "extra_body": {
-    "enable_security": true,
-    "enable_compliance": true,
-    "enable_data_security": true
-  }
+  "enable_security": true,
+  "enable_compliance": true,
+  "enable_data_security": true
 }
 ```
 
@@ -192,12 +188,10 @@ Track specific users for ban policy enforcement:
 {
   "model": "OpenGuardrails-Text",
   "messages": [...],
-  "extra_body": {
-    "xxai_app_user_id": "{{ $json.userId }}",
-    "enable_security": true,
-    "enable_compliance": true,
-    "enable_data_security": true
-  }
+  "xxai_app_user_id": "{{ $json.userId }}",
+  "enable_security": true,
+  "enable_compliance": true,
+  "enable_data_security": true
 }
 ```
 
@@ -209,11 +203,9 @@ Enable only specific detection types:
 {
   "model": "OpenGuardrails-Text",
   "messages": [...],
-  "extra_body": {
-    "enable_security": true,        // Prompt attacks only
-    "enable_compliance": false,      // Skip content safety
-    "enable_data_security": false    // Skip data leak detection
-  }
+  "enable_security": true,        // Prompt attacks only
+  "enable_compliance": false,      // Skip content safety
+  "enable_data_security": false    // Skip data leak detection
 }
 ```
 

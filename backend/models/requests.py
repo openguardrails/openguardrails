@@ -223,3 +223,96 @@ class DifyModerationRequest(BaseModel):
         if v not in valid_points:
             raise ValueError(f'point must be one of: {valid_points}')
         return v
+
+
+# =====================================================
+# Scanner Package System Request Models
+# =====================================================
+
+class PackageUploadRequest(BaseModel):
+    """Package upload request with JSON data and price"""
+    package_data: dict = Field(..., description="Package JSON data")
+    price: Optional[float] = Field(None, description="Package price as number", ge=0)
+    language: Optional[str] = Field("en", description="User language for price formatting")
+
+
+class PackageUpdateRequest(BaseModel):
+    """Package metadata update request"""
+    package_name: Optional[str] = Field(None, description="Package name")
+    description: Optional[str] = Field(None, description="Package description")
+    version: Optional[str] = Field(None, description="Package version")
+    price_display: Optional[str] = Field(None, description="Price display string")
+    is_active: Optional[bool] = Field(None, description="Whether package is active")
+    display_order: Optional[int] = Field(None, description="Display order")
+
+
+class ScannerConfigUpdateRequest(BaseModel):
+    """Scanner configuration update request"""
+    is_enabled: Optional[bool] = Field(None, description="Whether scanner is enabled")
+    risk_level: Optional[str] = Field(None, description="Risk level override: high_risk, medium_risk, low_risk")
+    scan_prompt: Optional[bool] = Field(None, description="Whether to scan prompts")
+    scan_response: Optional[bool] = Field(None, description="Whether to scan responses")
+
+    @validator('risk_level')
+    def validate_risk_level(cls, v):
+        if v is not None and v not in ['high_risk', 'medium_risk', 'low_risk']:
+            raise ValueError('risk_level must be one of: high_risk, medium_risk, low_risk')
+        return v
+
+
+class ScannerConfigBulkUpdateItem(BaseModel):
+    """Single scanner config update in bulk update"""
+    scanner_id: str = Field(..., description="Scanner UUID")
+    is_enabled: Optional[bool] = Field(None, description="Whether scanner is enabled")
+    risk_level: Optional[str] = Field(None, description="Risk level override")
+    scan_prompt: Optional[bool] = Field(None, description="Whether to scan prompts")
+    scan_response: Optional[bool] = Field(None, description="Whether to scan responses")
+
+
+class ScannerConfigBulkUpdateRequest(BaseModel):
+    """Bulk scanner configuration update request"""
+    updates: List[ScannerConfigBulkUpdateItem] = Field(..., description="List of scanner config updates")
+
+
+class CustomScannerCreateRequest(BaseModel):
+    """Custom scanner creation request"""
+    scanner_type: str = Field(..., description="Scanner type: genai, regex, keyword", pattern="^(genai|regex|keyword)$")
+    name: str = Field(..., description="Scanner name", min_length=1, max_length=200)
+    definition: str = Field(..., description="Scanner definition", min_length=1, max_length=2000)
+    description: Optional[str] = Field(None, description="Scanner description", max_length=500)
+    risk_level: str = Field(..., description="Default risk level: high_risk, medium_risk, low_risk", pattern="^(high_risk|medium_risk|low_risk)$")
+    scan_prompt: bool = Field(True, description="Whether to scan prompts by default")
+    scan_response: bool = Field(True, description="Whether to scan responses by default")
+    notes: Optional[str] = Field(None, description="User notes about this scanner", max_length=1000)
+
+
+class CustomScannerUpdateRequest(BaseModel):
+    """Custom scanner update request"""
+    name: Optional[str] = Field(None, description="Scanner name", min_length=1, max_length=200)
+    definition: Optional[str] = Field(None, description="Scanner definition", min_length=1, max_length=2000)
+    description: Optional[str] = Field(None, description="Scanner description", max_length=500)
+    risk_level: Optional[str] = Field(None, description="Default risk level", pattern="^(high_risk|medium_risk|low_risk)$")
+    scan_prompt: Optional[bool] = Field(None, description="Whether to scan prompts by default")
+    scan_response: Optional[bool] = Field(None, description="Whether to scan responses by default")
+    notes: Optional[str] = Field(None, description="User notes", max_length=1000)
+    is_enabled: Optional[bool] = Field(None, description="Whether this scanner is enabled")
+
+
+class PurchaseRequestCreate(BaseModel):
+    """Package purchase request"""
+    package_id: str = Field(..., description="Package UUID to purchase")
+    email: str = Field(..., description="Contact email for purchase")
+    message: Optional[str] = Field(None, description="Optional message to admin", max_length=1000)
+
+    @validator('email')
+    def validate_email(cls, v):
+        import re
+        email_regex = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        if not re.match(email_regex, v):
+            raise ValueError('Invalid email format')
+        return v
+
+
+class PurchaseApprovalRequest(BaseModel):
+    """Purchase approval/rejection request"""
+    rejection_reason: Optional[str] = Field(None, description="Reason for rejection (required if rejecting)", max_length=500)

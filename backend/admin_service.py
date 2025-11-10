@@ -16,7 +16,7 @@ from pathlib import Path
 
 from config import settings
 from database.connection import init_db, create_admin_engine
-from routers import dashboard, config_api, results, auth, user, sync, admin, online_test, test_models, risk_config_api, proxy_management, concurrent_stats, media, data_security, billing, applications
+from routers import dashboard, config_api, results, auth, user, sync, admin, online_test, test_models, proxy_management, concurrent_stats, media, data_security, billing, applications, scanner_packages_api, scanner_configs_api, custom_scanners_api, purchase_api, risk_config_api
 from utils.logger import setup_logger
 from services.admin_service import admin_service
 
@@ -91,14 +91,20 @@ class AuthContextMiddleware(BaseHTTPMiddleware):
                     subject_email = user_data.get('username') or user_data.get('sub')
                     admin_user = db.query(Tenant).filter(Tenant.email == subject_email).first()
                     if admin_user:
-                        # Admin does not have a specific application context (manages all)
+                        # Get first active application for admin user
+                        first_app = db.query(Application).filter(
+                            Application.tenant_id == admin_user.id,
+                            Application.is_active == True
+                        ).first()
+
                         auth_context = {
                             "type": "jwt_admin",
                             "data": {
                                 "tenant_id": str(admin_user.id),
                                 "email": admin_user.email,
                                 "is_super_admin": admin_service.is_super_admin(admin_user),
-                                "application_id": None  # Admin has no specific application
+                                "application_id": str(first_app.id) if first_app else None,
+                                "application_name": first_app.name if first_app else None
                             }
                         }
                 else:
@@ -382,16 +388,23 @@ app.include_router(sync.router, prefix="/api/v1", dependencies=[Depends(verify_u
 app.include_router(admin.router, prefix="/api/v1", dependencies=[Depends(verify_user_auth)])
 app.include_router(online_test.router, prefix="/api/v1", dependencies=[Depends(verify_user_auth)])
 app.include_router(test_models.router, prefix="/api/v1", dependencies=[Depends(verify_user_auth)])
-app.include_router(risk_config_api.router, dependencies=[Depends(verify_user_auth)])
 app.include_router(proxy_management.router, prefix="/api/v1", dependencies=[Depends(verify_user_auth)])
 app.include_router(concurrent_stats.router, dependencies=[Depends(verify_user_auth)])
 app.include_router(data_security.router, dependencies=[Depends(verify_user_auth)])
 app.include_router(billing.router, dependencies=[Depends(verify_user_auth)])  # Billing APIs
 app.include_router(applications.router, prefix="/api/v1/applications", dependencies=[Depends(verify_user_auth)])  # Application Management
 
+# Scanner Package System routes
+app.include_router(scanner_packages_api.router, dependencies=[Depends(verify_user_auth)])  # Scanner Packages
+app.include_router(scanner_configs_api.router, dependencies=[Depends(verify_user_auth)])  # Scanner Configs
+app.include_router(custom_scanners_api.router, dependencies=[Depends(verify_user_auth)])  # Custom Scanners
+app.include_router(purchase_api.router, dependencies=[Depends(verify_user_auth)])  # Package Purchases
+
 # Import and register ban policy routes
 from routers import ban_policy_api
 app.include_router(ban_policy_api.router, dependencies=[Depends(verify_user_auth)])
+# Risk configuration routes
+app.include_router(risk_config_api.router, dependencies=[Depends(verify_user_auth)])
 # Media router: image upload/delete needs authentication, but image access does not need authentication
 # First register image access routes that do not need authentication
 from fastapi import APIRouter
@@ -422,10 +435,12 @@ app.include_router(media.router, prefix="/api/v1", dependencies=[Depends(verify_
 # Global exception handling
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
+    import traceback
     logger.error(f"Admin service exception: {exc}")
+    logger.error(f"Traceback: {traceback.format_exc()}")
     return JSONResponse(
         status_code=500,
-        content={"detail": "Admin service internal error"}
+        content={"detail": f"Admin service internal error: {str(exc)}"}
     )
 
 if __name__ == "__main__":

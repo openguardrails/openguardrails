@@ -334,10 +334,12 @@ class ProxyService:
         payload["model"] = model_config.model_name  # Replace with actual model name
         payload["messages"] = [{"role": msg.role, "content": msg.content} for msg in request_data.messages]
         payload["stream"] = True  # Force enable streaming mode
-        
-        # Process extra_body parameters
+
+        # Process extra_body parameters (exclude internal xxai_app_user_id)
         if hasattr(request_data, 'extra_body') and request_data.extra_body:
-            payload.update(request_data.extra_body)
+            for key, value in request_data.extra_body.items():
+                if key != "xxai_app_user_id":  # Skip internal parameter
+                    payload[key] = value
         
         try:
             async with self.http_client.stream("POST", url, headers=headers, json=payload) as response:
@@ -396,10 +398,12 @@ class ProxyService:
         payload = request_data.dict(exclude_unset=True)  # Only include user actual passed parameters
         payload["model"] = model_config.model_name  # Replace with actual model name
         payload["messages"] = [{"role": msg.role, "content": msg.content} for msg in request_data.messages]
-        
-        # Process extra_body parameters
+
+        # Process extra_body parameters (exclude internal xxai_app_user_id)
         if hasattr(request_data, 'extra_body') and request_data.extra_body:
-            payload.update(request_data.extra_body)
+            for key, value in request_data.extra_body.items():
+                if key != "xxai_app_user_id":  # Skip internal parameter
+                    payload[key] = value
         
         # Use shared HTTP client to send request
         try:
@@ -473,7 +477,13 @@ class ProxyService:
                     payload[param] = float(getattr(model_config, param))
                 elif param == 'max_tokens':
                     payload[param] = model_config.max_tokens
-        
+
+        # Process extra_body parameters (exclude internal xxai_app_user_id)
+        if hasattr(request_data, 'extra_body') and request_data.extra_body:
+            for key, value in request_data.extra_body.items():
+                if key != "xxai_app_user_id":  # Skip internal parameter
+                    payload[key] = value
+
         # Use shared HTTP client to send request
         try:
             response = await self.http_client.post(url, headers=headers, json=payload)
@@ -521,7 +531,8 @@ class ProxyService:
         top_p: Optional[float] = None,
         frequency_penalty: Optional[float] = None,
         presence_penalty: Optional[float] = None,
-        stop: Optional[List[str]] = None
+        stop: Optional[List[str]] = None,
+        extra_body: Optional[Dict[str, Any]] = None
     ):
         """Call upstream API with gateway pattern (pass through model name)"""
         api_key = self._decrypt_api_key(api_config.api_key_encrypted)
@@ -560,6 +571,15 @@ class ProxyService:
         if stop is not None:
             payload["stop"] = stop
 
+        # Add extra_body parameters (exclude internal xxai_app_user_id)
+        if extra_body:
+            for key, value in extra_body.items():
+                if key != "xxai_app_user_id":  # Skip internal parameter
+                    payload[key] = value
+
+        # Log the payload being sent to upstream for debugging
+        logger.info(f"Upstream payload being sent: {json.dumps(payload, ensure_ascii=False)}")
+
         # Use shared HTTP client to send request
         try:
             if stream:
@@ -569,7 +589,10 @@ class ProxyService:
                 # Non-streaming request
                 response = await self.http_client.post(url, headers=headers, json=payload)
                 response.raise_for_status()
-                return response.json()
+                response_json = response.json()
+                # Log upstream response for debugging
+                logger.info(f"Upstream response received: {json.dumps(response_json, ensure_ascii=False)[:2000]}")  # Truncate long responses
+                return response_json
 
         except httpx.HTTPStatusError as e:
             logger.error(f"HTTP error calling gateway upstream {api_config.api_base_url}: {e}")

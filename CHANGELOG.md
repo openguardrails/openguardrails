@@ -11,6 +11,324 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.1.0] - 2025-11-10
+
+### 🚀 Major Architecture Update - Scanner Package System
+
+**Breaking Changes**: This release completely replaces the hardcoded 21 risk types (S1-S21) with a flexible scanner package system. While existing configurations are automatically migrated, this represents a fundamental shift in how content safety detection works.
+
+#### 🎯 What's New
+
+OpenGuardrails v4.1.0 introduces the **Scanner Package System** - a revolutionary flexible detection architecture that supports official packages, purchasable scanners, and custom user-defined detection rules.
+
+**Key Innovations:**
+- 🏗️ **Dynamic Detection**: No more hardcoded risk types - add new scanners without code changes
+- 📦 **Package Management**: Official, purchasable, and custom scanner packages
+- 🔧 **Three Scanner Types**: GenAI (AI-powered), Regex (pattern), Keyword (matching)
+- 🏪 **Marketplace**: Admin-controlled package marketplace with purchase approval workflow
+- 🔒 **Application-Scoped**: Custom scanners work within the multi-application architecture
+
+### Added
+
+#### 📦 **Flexible Scanner Package System**
+- **Built-in Official Packages**: System-provided packages migrated from S1-S21 risk types
+- **Purchasable Official Packages**: Admin-published packages with commercial licensing
+- **Custom Scanners**: User-defined scanners (S100+) with per-application scope
+- **Three Scanner Types**:
+  - **GenAI Scanner**: Uses OpenGuardrails-Text model for intelligent detection
+  - **Regex Scanner**: Python regex pattern matching for structured data
+  - **Keyword Scanner**: Comma-separated keyword matching
+
+#### 🏪 **Package Marketplace & Management**
+- **Scanner Package Marketplace**: Browse and request purchasable packages
+- **Purchase Approval Workflow**: Admin approval for package purchases
+- **Version Management**: Package versioning and update support
+- **Archive System**: Package archiving for deprecated content
+- **Price Management**: Commercial package pricing and display
+
+#### 🔧 **Custom Scanner Creation**
+- **Auto-Tag Assignment**: S100+ automatically assigned to custom scanners
+- **Per-Application Scope**: Custom scanners belong to specific applications
+- **Flexible Configuration**: Enable/disable, risk level overrides, scan targets
+- **Three Input Methods**: Form-based UI, bulk upload, API creation
+- **Usage Limits**: Tier-based limits (10 free, 50 subscribed)
+
+#### 🗄️ **Database Architecture Updates**
+- **Five New Tables**:
+  - `scanner_packages` - Package metadata and management
+  - `scanners` - Individual scanner definitions
+  - `application_scanner_configs` - Per-application scanner settings
+  - `package_purchases` - Purchase tracking and approval
+  - `custom_scanners` - User-defined custom scanners
+
+- **Migration System**:
+  - Automatic migration from hardcoded S1-S21 to package system
+  - Preservation of all existing user configurations
+  - Backward compatibility during transition period
+
+#### 🎨 **User Interface Overhaul**
+
+**New Scanner Management Pages**:
+- **Official Scanners** (`/platform/config/official-scanners`)
+  - View built-in packages (Sensitive Topics, Restricted Topics)
+  - Browse marketplace for purchasable packages
+  - Configure individual scanners (enable/disable, risk levels)
+  - Scanner type indicators (GenAI/Regex/Keyword)
+
+- **Custom Scanners** (`/platform/config/custom-scanners`)
+  - Create custom scanners with intuitive forms
+  - Auto-assigned S100+ tags
+  - Edit/delete custom scanners
+  - Usage tracking and limits display
+
+- **Admin Package Marketplace** (`/platform/admin/package-marketplace`)
+  - Upload purchasable packages
+  - Review purchase requests
+  - Approve/reject purchases
+  - Package management (archive, pricing)
+
+#### 🔌 **Enhanced Detection Flow**
+- **Parallel Processing**: GenAI, regex, and keyword scanners run simultaneously
+- **Single Model Call**: All GenAI scanners combined for optimal performance
+- **Intelligent Routing**: Scanner type determines processing method
+- **Result Aggregation**: Combined results with highest risk level priority
+
+#### 🌐 **New API Endpoints**
+
+**Package Management**:
+```
+GET  /api/v1/scanner-packages              # List user's packages
+GET  /api/v1/scanner-packages/marketplace   # Browse marketplace
+POST /api/v1/scanner-packages/admin/upload  # Upload package (admin)
+```
+
+**Scanner Configuration**:
+```
+GET  /api/v1/scanner-configs                # Get app scanner configs
+PUT  /api/v1/scanner-configs/{id}          # Update scanner config
+POST /api/v1/scanner-configs/reset         # Reset to defaults
+```
+
+**Custom Scanners**:
+```
+GET  /api/v1/custom-scanners               # List custom scanners
+POST /api/v1/custom-scanners               # Create custom scanner
+PUT  /api/v1/custom-scanners/{id}         # Update custom scanner
+DELETE /api/v1/custom-scanners/{id}       # Delete custom scanner
+```
+
+**Purchase Management**:
+```
+POST /api/v1/scanner-purchases/request     # Request purchase
+POST /api/v1/scanner-purchases/{id}/approve # Approve purchase (admin)
+```
+
+#### 🌍 **Enhanced Internationalization**
+- Added comprehensive translations for scanner system
+- English and Chinese support for all new UI components
+- Contextual help and documentation localization
+
+#### 📚 **Documentation & Integration**
+- **n8n Integration**: Complete workflow automation platform integration
+  - Dedicated OpenGuardrails community node
+  - HTTP Request node examples
+  - Pre-built workflow templates
+  - Content safety for automated workflows
+
+- **Enhanced Quick Test**: Terminal commands for easy API testing
+  - Mac/Linux and Windows PowerShell examples
+  - One-command testing setup
+
+### Changed
+
+#### 🔄 **Complete Risk Type System Replacement**
+
+**Before (v4.0):**
+- 21 hardcoded risk types (S1-S21)
+- Boolean configuration fields
+- Schema changes required for new types
+- Limited to predefined categories
+
+**After (v4.1):**
+- Flexible scanner package system
+- Dynamic scanner creation
+- No schema changes for new scanners
+- Unlimited custom scanner types
+
+#### 🛠️ **Detection Service Refactor**
+- **New Detection Flow**: Parallel processing of multiple scanner types
+- **Performance Optimization**: <10% latency increase despite added functionality
+- **Migration Compatibility**: Existing S1-S21 configurations preserved
+- **Enhanced Logging**: Matched scanner tags in detection results
+
+#### 📁 **Frontend Architecture Updates**
+- **Component Refactoring**: Risk type management replaced with scanner management
+- **Dynamic Rendering**: UI adapts to available scanners dynamically
+- **Enhanced State Management**: Application-scoped scanner configurations
+- **Improved User Experience**: Intuitive scanner creation and management
+
+### Migration Guide
+
+#### Automatic Migration
+
+The migration from S1-S21 risk types to scanner packages happens **automatically**:
+
+```bash
+# Migration runs automatically on service startup
+docker compose up -d
+
+# Or restart existing deployment
+docker compose restart
+```
+
+**What Gets Migrated**:
+1. ✅ All existing enable/disable configurations
+2. ✅ Custom risk level settings
+3. ✅ Application-specific configurations
+4. ✅ Response template associations
+5. ✅ Detection history (with backward compatibility)
+
+**Built-in Package Mapping**:
+- **Sensitive Topics Package**: S1-S18 (General political, violent content, etc.)
+- **Restricted Topics Package**: S19-S21 (Professional advice categories)
+
+#### For Developers
+
+**Creating Custom Scanners**:
+
+```python
+# Create custom scanner via API
+import requests
+
+response = requests.post(
+    "http://localhost:5000/api/v1/custom-scanners",
+    headers={"Authorization": "Bearer your-jwt-token"},
+    json={
+        "scanner_type": "genai",
+        "name": "Bank Fraud Detection",
+        "definition": "Detect banking fraud attempts and financial scams",
+        "risk_level": "high_risk",
+        "scan_prompt": True,
+        "scan_response": True,
+        "notes": "Custom scanner for financial applications"
+    }
+)
+
+# Returns auto-assigned tag like "S100"
+scanner = response.json()
+print(f"Created scanner: {scanner['tag']}")
+```
+
+**Using Custom Scanners in Detection**:
+
+```python
+from openguardrails import OpenGuardrails
+
+client = OpenGuardrails("sk-xxai-your-api-key")
+
+# Detection automatically uses all enabled scanners
+response = client.check_prompt(
+    "How to commit bank fraud",
+    application_id="your-app-id"  # Custom scanners are app-specific
+)
+
+# Response includes matched custom scanner tags
+print(f"Matched scanners: {response.matched_scanner_tags}")
+# Output: "S5,S100" (existing S5 + custom S100)
+```
+
+### Breaking Changes
+
+#### Database Schema Changes
+- ⚠️ `risk_type_config` table deprecated (kept for rollback safety)
+- ⚠️ New `scanner_packages`, `scanners`, `application_scanner_configs` tables
+- ✅ Migration handled automatically - no manual intervention required
+
+#### API Changes
+- ⚠️ Risk type configuration endpoints deprecated
+- ✅ New scanner package endpoints available
+- ✅ Backward compatibility maintained during transition
+
+#### Frontend Changes
+- ⚠️ Old risk type management pages removed
+- ✅ New scanner management pages available
+- ✅ All user preferences automatically migrated
+
+### Technical Features
+
+#### Performance Optimization
+- **Parallel Processing**: Regex and keyword scanners run alongside GenAI model calls
+- **Single Model Call**: All GenAI scanner definitions combined into one request
+- **Latency Impact**: <10% increase despite massive functionality expansion
+- **Scalability**: Supports unlimited custom scanners per application
+
+#### Security Enhancements
+- **Commercial Content Protection**: Purchasable package definitions not exposed before purchase
+- **Application Isolation**: Custom scanners strictly scoped to applications
+- **Rate Limiting**: Custom scanner creation limits by subscription tier
+- **Audit Trail**: Complete purchase and scanner creation history
+
+#### Extensibility Features
+- **Plug-in Architecture**: Easy addition of new scanner types
+- **Version Management**: Package versioning and update support
+- **Dynamic Loading**: Hot-reload of scanner definitions without restart
+- **Custom Logic**: Support for complex scanner combination rules
+
+### Migration Verification
+
+#### Verify Migration Success
+
+```bash
+# Check scanner packages
+docker exec openguardrails-postgres psql -U openguardrails -d openguardrails \
+  -c "SELECT package_code, scanner_count FROM scanner_packages;"
+
+# Check migrated configurations
+docker exec openguardrails-postgres psql -U openguardrails -d openguardrails \
+  -c "SELECT COUNT(*) FROM application_scanner_configs WHERE is_enabled = true;"
+
+# Check custom scanners
+docker exec openguardrails-postgres psql -U openguardrails -d openguardrails \
+  -c "SELECT tag, name FROM custom_scanners;"
+```
+
+#### Test New Functionality
+
+```bash
+# Test package marketplace
+curl -H "Authorization: Bearer your-jwt-token" \
+  "http://localhost:5000/api/v1/scanner-packages/marketplace"
+
+# Test custom scanner creation
+curl -X POST "http://localhost:5000/api/v1/custom-scanners" \
+  -H "Authorization: Bearer your-jwt-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scanner_type": "keyword",
+    "name": "Test Custom Scanner",
+    "definition": "test, keyword, custom",
+    "risk_level": "low_risk"
+  }'
+```
+
+### Documentation Updates
+
+- Updated README.md with scanner package system documentation
+- Added comprehensive scanner package API documentation
+- Created n8n integration guides with ready-to-use workflows
+- Enhanced migration documentation with examples
+- Added custom scanner creation tutorials
+
+### Fixed
+
+- 🐛 **Rigid Risk Type System**: Replaced with flexible scanner packages
+- 🐛 **Database Schema Inflexibility**: Dynamic scanner addition without migrations
+- 🐛 **Limited Customization**: Users can now create unlimited custom detection rules
+- 🔧 **Performance Optimization**: Parallel processing maintains detection speed
+- 🔧 **User Experience**: Intuitive scanner creation and management interface
+
+---
+
 ## [4.0.0] - 2025-11-04
 
 ### 🚀 Major Architecture Update - Multi-Application Management
@@ -530,7 +848,9 @@ function MyComponent() {
   - `frontend/src/pages/Config/BanPolicy.tsx` - Ban policy configuration page
 
 - 🆔 **User ID Tracking**
-  - Detection API now supports `extra_body.xxai_app_user_id` parameter for tenant app user ID
+  - Detection API now supports `xxai_app_user_id` parameter for tenant app user ID
+  - For Python SDK: use `extra_body={"xxai_app_user_id": "user123"}`
+  - For HTTP/curl: use top-level parameter `"xxai_app_user_id": "user123"`
   - Enables ban policy and behavior analysis based on user ID
   - All SDKs (Python, Java, Node.js, Go) now support an optional `user_id` parameter
   - Useful for implementing user-level risk control and audit tracking
@@ -603,9 +923,7 @@ curl -X POST "http://localhost:5001/v1/guardrails" \
       "messages": [
         {"role": "user", "content": "How to make a bomb"}
       ],
-      "extra_body": {
-        "xxai_app_user_id": "user123"
-      }
+      "xxai_app_user_id": "user123"
     }'
 ```
 

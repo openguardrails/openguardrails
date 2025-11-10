@@ -257,13 +257,77 @@ class DetectionGuardrailService:
                                 content_parts.append({"type": "image_url", "image_url": {"url": processed_url}})
                     messages_dict.append({"role": msg.role, "content": content_parts})
 
-            # Select detection model based on whether there are images
-            model_response, sensitivity_score = await model_service.check_messages_with_sensitivity(messages_dict, use_vl_model=has_image)
+            # 4. Execute scanner-based detection (new system) or fall back to legacy detection
+            matched_scanner_tags = []  # Initialize for logging
 
-            # 4. Parse model response and apply risk type filtering and sensitivity threshold
-            compliance_result, security_result = await self._parse_model_response_with_sensitivity(
-                model_response, sensitivity_score, tenant_id, model_sensitivity_trigger_level, application_id
-            )
+            if application_id:
+                # Use new scanner detection system
+                try:
+                    from services.scanner_detection_service import ScannerDetectionService
+                    from uuid import UUID
+
+                    # Create scanner detection service with database session
+                    scanner_db = get_db_session()
+                    try:
+                        scanner_service = ScannerDetectionService(scanner_db)
+
+                        # Determine scan type based on message structure
+                        # If last message is assistant, this is response detection
+                        scan_type = 'response' if truncated_messages and truncated_messages[-1].role == 'assistant' else 'prompt'
+
+                        logger.info(f"Using scanner detection for application {application_id}, scan_type={scan_type}")
+
+                        # Execute scanner detection
+                        detection_result = await scanner_service.execute_detection(
+                            content=user_content,
+                            application_id=UUID(application_id),
+                            tenant_id=tenant_id,
+                            scan_type=scan_type,
+                            messages_for_genai=messages_dict  # Full context for GenAI scanners
+                        )
+
+                        # Convert scanner detection result to compliance/security results
+                        if detection_result.overall_risk_level == "no_risk":
+                            compliance_result = ComplianceResult(risk_level="no_risk", categories=[])
+                            security_result = SecurityResult(risk_level="no_risk", categories=[])
+                        else:
+                            # Determine risk levels for compliance and security
+                            compliance_risk = detection_result.overall_risk_level if detection_result.compliance_categories else "no_risk"
+                            security_risk = detection_result.overall_risk_level if detection_result.security_categories else "no_risk"
+
+                            compliance_result = ComplianceResult(
+                                risk_level=compliance_risk,
+                                categories=detection_result.compliance_categories
+                            )
+                            security_result = SecurityResult(
+                                risk_level=security_risk,
+                                categories=detection_result.security_categories
+                            )
+
+                        # Store matched scanner tags for logging
+                        matched_scanner_tags = detection_result.matched_scanner_tags
+                        sensitivity_score = None  # Scanner system doesn't use single sensitivity score
+                        model_response = "scanner_detection"  # Indicate scanner-based detection was used
+
+                        logger.info(f"Scanner detection complete: risk={detection_result.overall_risk_level}, matched_tags={matched_scanner_tags}")
+
+                    finally:
+                        scanner_db.close()
+
+                except Exception as scanner_error:
+                    logger.error(f"Scanner detection failed, falling back to legacy detection: {scanner_error}")
+                    # Fall back to legacy detection
+                    model_response, sensitivity_score = await model_service.check_messages_with_sensitivity(messages_dict, use_vl_model=has_image)
+                    compliance_result, security_result = await self._parse_model_response_with_sensitivity(
+                        model_response, sensitivity_score, tenant_id, model_sensitivity_trigger_level, application_id
+                    )
+            else:
+                # No application_id: use legacy detection for backward compatibility
+                logger.warning(f"No application_id provided, using legacy detection for tenant {tenant_id}")
+                model_response, sensitivity_score = await model_service.check_messages_with_sensitivity(messages_dict, use_vl_model=has_image)
+                compliance_result, security_result = await self._parse_model_response_with_sensitivity(
+                    model_response, sensitivity_score, tenant_id, model_sensitivity_trigger_level, application_id
+                )
 
             # 5. Determine suggested action and answer (include data security result)
             overall_risk_level, suggest_action, suggest_answer = await self._determine_action_with_data(
@@ -275,7 +339,8 @@ class DetectionGuardrailService:
                 request_id, user_content, compliance_result, security_result, data_result,
                 suggest_action, suggest_answer, model_response,
                 ip_address, user_agent, tenant_id, application_id, sensitivity_score,
-                has_image=has_image, image_count=len(saved_image_paths), image_paths=saved_image_paths
+                has_image=has_image, image_count=len(saved_image_paths), image_paths=saved_image_paths,
+                matched_scanner_tags=matched_scanner_tags
             )
 
             # 7. Construct response
@@ -819,7 +884,8 @@ class DetectionGuardrailService:
         model_response: str, ip_address: Optional[str], user_agent: Optional[str],
         tenant_id: Optional[str] = None, application_id: Optional[str] = None,
         sensitivity_score: Optional[float] = None,
-        has_image: bool = False, image_count: int = 0, image_paths: List[str] = None
+        has_image: bool = False, image_count: int = 0, image_paths: List[str] = None,
+        matched_scanner_tags: List[str] = None
     ):
         """Asynchronously record detection results to log file (not write to database)"""
 
@@ -847,7 +913,8 @@ class DetectionGuardrailService:
             "hit_keywords": None,
             "has_image": has_image,
             "image_count": image_count,
-            "image_paths": image_paths or []
+            "image_paths": image_paths or [],
+            "matched_scanner_tags": matched_scanner_tags or []
         }
         await async_detection_logger.log_detection(detection_data)
     

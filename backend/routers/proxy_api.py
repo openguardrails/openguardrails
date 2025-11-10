@@ -320,21 +320,28 @@ class StreamChunkDetector:
         self.pending_detections = set()  # Pending detection task ID
         self.detection_result = None
     
-    async def add_chunk(self, chunk_content: str, reasoning_content: str, model_config, input_messages: list, 
+    async def add_chunk(self, chunk_content: str, reasoning_content: str, tool_calls_content: str, model_config, input_messages: list,
                        tenant_id: str, request_id: str) -> bool:
         """Add chunk and detect, return whether to stop stream"""
-        if not chunk_content.strip() and not reasoning_content.strip():
+        if not chunk_content.strip() and not reasoning_content.strip() and not tool_calls_content.strip():
             return False
-            
+
         self.chunks_buffer.append(chunk_content)
         # Only add when reasoning detection is enabled and there is reasoning content
         if reasoning_content.strip() and getattr(model_config, 'enable_reasoning_detection', True):
             self.chunks_buffer.append(f"[推理过程]{reasoning_content}")
+        # Always add tool_calls content for security detection (tool prompt attacks)
+        if tool_calls_content.strip():
+            self.chunks_buffer.append(f"[工具调用]{tool_calls_content}")
+
         self.chunk_count += 1
         self.full_content += chunk_content
         # Only add when reasoning detection is enabled and there is reasoning content
         if reasoning_content.strip() and getattr(model_config, 'enable_reasoning_detection', True):
             self.full_content += f"\n[推理过程]{reasoning_content}"
+        # Always add tool_calls content for security detection
+        if tool_calls_content.strip():
+            self.full_content += f"\n[工具调用]{tool_calls_content}"
         
         # Check if detection threshold is reached (using user configured value)
         detection_threshold = getattr(model_config, 'stream_chunk_size', 50)  # Using configured chunk detection interval
@@ -591,9 +598,16 @@ async def _handle_gateway_streaming_response(
                                         if content or reasoning_content:
                                             full_content += content
 
-                                            # Detect chunk
+                                            # Extract tool_calls content for security detection (also need to extract tool_calls from chunk)
+                                            tool_calls_content = ""
+                                            has_tool_calls = _chunk_has_tool_calls(chunk_data)
+                                            if has_tool_calls:
+                                                tool_calls_content = _extract_tool_calls_content(chunk_data)
+                                                logger.debug(f"Extracted tool_calls content for detection: {tool_calls_content[:100]}...")
+
+                                            # Detect chunk (including all content types)
                                             should_stop = await detector.add_chunk(
-                                                content, reasoning_content, api_config,
+                                                content, reasoning_content, tool_calls_content, api_config,
                                                 input_messages, tenant_id, request_id
                                             )
 
@@ -771,10 +785,12 @@ async def _handle_streaming_chat_completion(
                 ):
                     chunks_queue.append(chunk)
                     
-                    # Parse chunk content
+                    # Parse chunk content - extract all relevant fields
                     chunk_content = _extract_chunk_content(chunk, "content")
                     reasoning_content = ""
-                    
+                    tool_calls_content = ""
+                    has_tool_calls = _chunk_has_tool_calls(chunk)
+
                     # Decide whether to perform reasoning detection based on configuration
                     if getattr(model_config, 'enable_reasoning_detection', True):
                         try:
@@ -783,11 +799,17 @@ async def _handle_streaming_chat_completion(
                             # If model does not support reasoning field, it will not crash, just log
                             logger.debug(f"Model does not support reasoning_content field: {e}")
                             reasoning_content = ""
-                    
-                    if chunk_content or reasoning_content:
-                        # Detect chunk (including reasoning content)
+
+                    # Extract tool_calls content for security detection (crucial for preventing tool prompt attacks)
+                    if has_tool_calls:
+                        tool_calls_content = _extract_tool_calls_content(chunk)
+                        logger.debug(f"Extracted tool_calls content for detection: {tool_calls_content[:100]}...")
+
+                    # Detect chunk if it has any content (text, reasoning, or tool_calls)
+                    if chunk_content or reasoning_content or tool_calls_content:
+                        # Detect chunk (including all content types)
                         should_stop = await detector.add_chunk(
-                            chunk_content, reasoning_content, model_config, input_messages, tenant_id, request_id
+                            chunk_content, reasoning_content, tool_calls_content, model_config, input_messages, tenant_id, request_id
                         )
                         
                         if should_stop:
@@ -813,7 +835,7 @@ async def _handle_streaming_chat_completion(
                     
                     # In serial mode, keep last chunk; in asynchronous mode, output immediately
                     if detector.detection_mode == DetectionMode.ASYNC_BYPASS:
-                        # Asynchronous mode: output all chunks immediately
+                        # Asynchronous mode: output all chunks immediately (including tool_calls)
                         yield f"data: {json.dumps(chunk)}\n\n"
                     else:
                         # Serial mode: output all chunks except last chunk
@@ -931,6 +953,43 @@ def _extract_chunk_content(chunk: dict, content_field: str = "content") -> str:
     except Exception:
         pass
     return ""
+
+
+def _extract_tool_calls_content(chunk: dict) -> str:
+    """Extract tool_calls content from chunk for security detection"""
+    try:
+        if 'choices' in chunk and chunk['choices']:
+            choice = chunk['choices'][0]
+            if 'delta' in choice and 'tool_calls' in choice['delta']:
+                tool_calls = choice['delta']['tool_calls']
+                if not tool_calls:
+                    return ""
+
+                # Convert tool_calls to text for detection
+                tool_calls_text = ""
+                for tool_call in tool_calls:
+                    if 'function' in tool_call:
+                        func = tool_call['function']
+                        func_name = func.get('name', '')
+                        func_args = func.get('arguments', '')
+                        tool_calls_text += f"[工具调用] {func_name}({func_args}) "
+
+                return tool_calls_text.strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _chunk_has_tool_calls(chunk: dict) -> bool:
+    """Check if chunk contains tool_calls"""
+    try:
+        if 'choices' in chunk and chunk['choices']:
+            choice = chunk['choices'][0]
+            if 'delta' in choice and 'tool_calls' in choice['delta']:
+                return bool(choice['delta']['tool_calls'])
+    except Exception:
+        pass
+    return False
 
 
 def _create_content_chunk(request_id: str, content: str) -> dict:
@@ -1289,6 +1348,27 @@ async def create_gateway_chat_completion(
                 {"role": msg.role, "content": msg.content}
                 for msg in request_data.messages
             ]
+
+            # Handle extra_body: OpenAI SDK unfolds extra_body parameters into the main request body,
+            # while curl sends them as a nested extra_body object. We need to handle both cases.
+            extra_params = {}
+
+            # If extra_body exists, add its parameters
+            if request_data.extra_body:
+                extra_params.update(request_data.extra_body)
+
+            # Also check for any extra fields that might have been unfolded from extra_body
+            # Pydantic stores extra fields in model_extra when extra="allow"
+            if hasattr(request_data, 'model_extra') and request_data.model_extra:
+                for key, value in request_data.model_extra.items():
+                    if key not in ['tenant_id', 'application_id']:  # Skip internal fields
+                        extra_params[key] = value
+                        logger.info(f"Gateway: Found extra field from model_extra '{key}' with value: {value}")
+
+            # Log the extra parameters for debugging
+            if extra_params:
+                logger.info(f"Gateway: Found extra parameters to pass to upstream: {list(extra_params.keys())}")
+
             upstream_response = await proxy_service.call_upstream_api_gateway(
                 api_config=api_config,
                 model_name=request_data.model,  # Pass through original model name
@@ -1299,7 +1379,8 @@ async def create_gateway_chat_completion(
                 top_p=request_data.top_p,
                 frequency_penalty=request_data.frequency_penalty,
                 presence_penalty=request_data.presence_penalty,
-                stop=request_data.stop
+                stop=request_data.stop,
+                extra_body=extra_params if extra_params else request_data.extra_body
             )
 
             # Handle streaming response
@@ -1527,21 +1608,47 @@ async def create_chat_completion(
             
             # Output detection - select asynchronous/synchronous mode based on configuration
             if model_response.get('choices'):
-                output_content = model_response['choices'][0]['message']['content']
-                
-                # Perform output detection
+                message = model_response['choices'][0]['message']
+                output_content = message.get('content', '')
+
+                # Extract and include tool_calls content for security detection
+                tool_calls_content = ""
+                if 'tool_calls' in message and message['tool_calls']:
+                    tool_calls_text = []
+                    for tool_call in message['tool_calls']:
+                        if 'function' in tool_call:
+                            func = tool_call['function']
+                            func_name = func.get('name', '')
+                            func_args = func.get('arguments', '')
+                            tool_calls_text.append(f"[工具调用] {func_name}({func_args})")
+                    tool_calls_content = ' '.join(tool_calls_text)
+                    logger.debug(f"Non-streaming detected tool_calls: {tool_calls_content[:100]}...")
+
+                # Combine all content for detection
+                combined_content = output_content
+                if tool_calls_content:
+                    combined_content = f"{output_content}\n{tool_calls_content}"
+
+                # Perform output detection with combined content
                 output_detection_result = await perform_output_detection(
-                    model_config, input_messages, output_content, tenant_id, request_id, user_id, application_id
+                    model_config, input_messages, combined_content, tenant_id, request_id, user_id, application_id
                 )
 
                 output_detection_id = output_detection_result.get('detection_id')
                 output_blocked = output_detection_result.get('blocked', False)
                 final_content = output_detection_result.get('response_content', output_content)
-                
-                # Update response content
-                model_response['choices'][0]['message']['content'] = final_content
+
+                # Update response content (only modify text content, preserve tool_calls)
                 if output_blocked:
+                    message['content'] = final_content
+                    # For security reasons, remove tool_calls if content is blocked
+                    if 'tool_calls' in message:
+                        del message['tool_calls']
                     model_response['choices'][0]['finish_reason'] = 'content_filter'
+                else:
+                    # Safe to keep original content but update if service modified it
+                    if 'content' in message:
+                        message['content'] = final_content
             
             # Record successful request log
             usage = model_response.get('usage', {})

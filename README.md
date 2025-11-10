@@ -23,7 +23,8 @@
 
 ## ✨ Core Features
 
-- 📱 **Multi-Application Management** 🆕 - Manage multiple applications within one tenant account, each with isolated configurations
+- 🏗️ **Scanner Package System** 🆕 - Flexible detection architecture with official, purchasable, and custom scanners
+- 📱 **Multi-Application Management** - Manage multiple applications within one tenant account, each with isolated configurations
 - 🪄 **Two Usage Modes** - Detection API + Security Gateway
 - 🛡️ **Triple Protection** - Prompt attack detection + Content compliance detection + Data leak detection
 - 🧠 **Context Awareness** - Intelligent safety detection based on conversation context
@@ -38,6 +39,71 @@
 - ⚡ **High Performance** - Asynchronous processing, supporting high-concurrency access
 - 🔌 **Easy Integration** - Compatible with OpenAI API format, one-line code integration
 - 🎯 **Configurable Sensitivity** - Three-tier sensitivity threshold configuration for automated pipeline scenarios
+
+## 🏗️ Scanner Package System 🆕
+
+**OpenGuardrails v4.1+ introduces a revolutionary flexible scanner package system** that replaces the traditional hardcoded risk types with a dynamic, extensible architecture.
+
+### 📦 Three Types of Scanner Packages
+
+#### 🔧 **Built-in Official Packages**
+System-provided packages that come pre-installed with OpenGuardrails:
+- **Sensitive Topics Package**: S1-S18 (covers political content, violence, hate speech, etc.)
+- **Restricted Topics Package**: S19-S21 (professional advice categories)
+- Ready to use out of the box with configurable risk levels
+
+#### 🛒 **Purchasable Official Packages**
+Premium scanner packages available through the admin marketplace:
+- Commercial-grade detection patterns for specific industries
+- Curated by OpenGuardrails team with regular updates
+- Purchase approval workflow for enterprise customers
+- Example packages: Healthcare Compliance, Financial Regulations, Legal Industry
+
+#### ✨ **Custom Scanners (S100+)**
+User-defined scanners for business-specific needs:
+- **Auto-tagged**: S100, S101, S102... automatically assigned
+- **Application-scoped**: Custom scanners belong to specific applications
+- **Three Scanner Types**:
+  - **GenAI Scanner**: Uses OpenGuardrails-Text model for intelligent detection
+  - **Regex Scanner**: Python regex patterns for structured data detection
+  - **Keyword Scanner**: Comma-separated keyword lists for simple matching
+
+### 🎯 Key Advantages
+
+**vs Traditional Risk Types:**
+- ✅ **Unlimited Flexibility**: Create unlimited custom scanners without code changes
+- ✅ **No Database Migrations**: Add new scanners without schema updates
+- ✅ **Business-Specific Detection**: Tailor detection rules to your specific use case
+- ✅ **Performance Optimized**: Parallel processing maintains <10% latency impact
+- ✅ **Marketplace Ecosystem**: Share and sell scanner packages
+
+**Example Use Cases:**
+```python
+# Create custom scanner for banking applications
+curl -X POST "http://localhost:5000/api/v1/custom-scanners" \
+  -H "Authorization: Bearer your-jwt-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scanner_type": "genai",
+    "name": "Bank Fraud Detection",
+    "definition": "Detect banking fraud attempts, financial scams, and illegal financial advice",
+    "risk_level": "high_risk",
+    "scan_prompt": true,
+    "scan_response": true
+  }'
+
+# Returns auto-assigned tag: "S100"
+```
+
+### 🎨 Management Interface
+
+- **Official Scanners** (`/platform/config/official-scanners`): Manage built-in and purchased packages
+- **Custom Scanners** (`/platform/config/custom-scanners`): Create and manage user-defined scanners
+- **Admin Marketplace** (`/platform/admin/package-marketplace`): Upload and manage purchasable packages
+
+### 🔄 Migration from Risk Types
+
+Existing S1-S21 risk type configurations are **automatically migrated** to the new scanner package system on upgrade - no manual intervention required.
 
 ## 🚀 Dual Mode Support
 
@@ -145,9 +211,7 @@ curl -X POST "https://api.openguardrails.com/v1/guardrails" \
       "messages": [
         {"role": "user", "content": "Tell me some illegal ways to make money"}
       ],
-      "extra_body": {
-        "xxai_app_user_id": "your-user-id"
-      }
+      "xxai_app_user_id": "your-user-id"
     }'
 ```
 Example output:
@@ -218,6 +282,68 @@ By selecting **OpenGuardrails** as the moderation API extension, users gain acce
 * 📚 **Knowledge-based response moderation** — supports contextual and knowledge-aware moderation.
 * 💰 **Free and open** — no per-request cost or usage limit.
 * 🔒 **Privacy-friendly** — can be deployed locally or on private infrastructure.
+
+## 🔧 Creating Custom Scanners 🆕
+
+One of the most powerful features of OpenGuardrails v4.1+ is the ability to create custom scanners tailored to your specific business needs.
+
+### ⚡ Quick Example: Banking Fraud Detection
+
+```python
+import requests
+
+# 1. Create a custom scanner for banking applications
+response = requests.post(
+    "http://localhost:5000/api/v1/custom-scanners",
+    headers={"Authorization": "Bearer your-jwt-token"},
+    json={
+        "scanner_type": "genai",
+        "name": "Bank Fraud Detection",
+        "definition": "Detect banking fraud attempts, financial scams, illegal financial advice, and money laundering instructions",
+        "risk_level": "high_risk",
+        "scan_prompt": True,
+        "scan_response": True,
+        "notes": "Custom scanner for financial applications"
+    }
+)
+
+scanner = response.json()
+print(f"Created custom scanner: {scanner['tag']}")  # Auto-assigned: S100
+```
+
+### 🎯 Using Custom Scanners in Detection
+
+```python
+from openguardrails import OpenGuardrails
+
+client = OpenGuardrails("sk-xxai-your-api-key")
+
+# Detection automatically uses all enabled scanners (including custom)
+response = client.check_prompt(
+    "How can I launder money through my bank account?",
+    application_id="your-banking-app-id"  # Custom scanners are app-specific
+)
+
+# Response includes matched custom scanner tags
+print(f"Risk level: {response.overall_risk_level}")
+print(f"Matched scanners: {getattr(response, 'matched_scanner_tags', 'N/A')}")
+# Output: "high_risk" and "S5,S100" (existingViolent Crime + custom Bank Fraud)
+```
+
+### 📚 Available Custom Scanner Types
+
+| Type | Best For | Example | Performance |
+|------|----------|---------|-------------|
+| **GenAI** | Complex concepts, contextual understanding | Medical advice detection | Model call (high accuracy) |
+| **Regex** | Structured data, pattern matching | Credit card numbers, phone numbers | Instant (no model call) |
+| **Keyword** | Simple blocking, keyword lists | Competitor brands, prohibited terms | Instant (no model call) |
+
+### 🎨 Management UI
+
+Access the visual scanner management interface:
+- **Official Scanners**: `/platform/config/official-scanners`
+- **Custom Scanners**: `/platform/config/custom-scanners`
+- **Admin Marketplace**: `/platform/admin/package-marketplace`
 
 ## 🚀 OpenGuardrails Quick Deployment Guide
 
@@ -564,6 +690,80 @@ We provide professional AI safety solutions:
 - **API Customization**: Custom API interfaces for business needs
 - **UI Customization**: Customized management interface and user experience
 - **Integration Services**: Deep integration with existing systems
+- **n8n Workflow Integration**: Complete integration with n8n automation platform
+
+## 🔌 n8n Integration 🆕
+
+Automate your AI safety workflows with OpenGuardrails + n8n integration! Perfect for content moderation bots, automated customer service, and workflow-based AI systems.
+
+### 🎯 Two Easy Integration Methods
+
+#### Method 1: OpenGuardrails Community Node (Recommended)
+```bash
+# Install in your n8n instance
+# Settings → Community Nodes → Install
+n8n-nodes-openguardrails
+```
+
+**Features:**
+- ✅ Content safety validation
+- ✅ Input/output moderation for chatbots
+- ✅ Context-aware multi-turn conversation checks
+- ✅ Configurable risk thresholds and actions
+
+#### Method 2: HTTP Request Node
+Use n8n's built-in HTTP Request node to call OpenGuardrails API directly.
+
+### 🛠️ Ready-to-Use Workflow Templates
+
+Check the `n8n-integrations/http-request-examples/` folder for pre-built templates:
+
+- **`basic-content-check.json`** - Simple content moderation workflow
+- **`chatbot-with-moderation.json`** - Complete AI chatbot with input/output protection
+
+### 📖 Example Workflow: Protected AI Chatbot
+
+```
+1️⃣ Webhook (receive user message)
+2️⃣ OpenGuardrails - Input Moderation
+3️⃣ IF (action = pass)
+   ├─ ✅ YES → Continue to LLM
+   └ ❌ NO → Return safe response
+4️⃣ OpenAI/Assistant API
+5️⃣ OpenGuardrails - Output Moderation
+6️⃣ IF (action = pass)
+   ├─ ✅ YES → Return to user
+   └ ❌ NO → Return safe response
+```
+
+### 🚀 Quick Setup
+
+**Header Auth Setup:**
+- Name: `Authorization`
+- Value: `Bearer sk-xxai-YOUR-API-KEY`
+
+**HTTP Request Configuration:**
+```json
+{
+  "method": "POST",
+  "url": "https://api.openguardrails.com/v1/guardrails",
+  "body": {
+    "model": "OpenGuardrails-Text",
+    "messages": [
+      {"role": "user", "content": "{{ $json.message }}"}
+    ],
+    "enable_security": true,
+    "enable_compliance": true,
+    "enable_data_security": true
+  }
+}
+```
+
+### 📚 More Resources
+
+- [n8n Community Node Documentation](https://github.com/openguardrails/n8n-nodes-openguardrails)
+- [Workflow Examples](n8n-integrations/http-request-examples/)
+- [Integration Guide](docs/N8N_INTEGRATION.md)
 
 > 📧 **Contact Us**: thomas@openguardrails.com
 > 🌐 **Official Website**: https://openguardrails.com
