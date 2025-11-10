@@ -3,7 +3,7 @@ import asyncio
 from typing import Dict, Optional
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
-from sqlalchemy import text, select, update
+from sqlalchemy import text, select, update, and_
 from database.models import TenantRateLimit, TenantRateLimitCounter, Tenant
 from utils.logger import setup_logger
 
@@ -257,19 +257,31 @@ class RateLimitService:
             logger.error(f"Failed to disable tenant rate limit for {tenant_id}: {e}")
             raise
     
-    def list_user_rate_limits(self, skip: int = 0, limit: int = 100, search: str = None):
-        """List all tenant rate limit configurations
+    def list_user_rate_limits(self, skip: int = 0, limit: int = 100, search: str = None, 
+                              sort_by: str = 'requests_per_second', sort_order: str = 'desc'):
+        """List all tenants with their rate limit configurations (including tenants without configurations)
 
         Note: For backward compatibility, function name remains list_user_rate_limits
         Args:
             skip: Number of records to skip for pagination
             limit: Maximum number of records to return
             search: Search string to filter by tenant email
+            sort_by: Field to sort by ('requests_per_second' or 'email')
+            sort_order: Sort order ('asc' or 'desc')
         """
+        # Query all tenants with LEFT JOIN to rate limits
+        # Only include tenant-level rate limits (application_id IS NULL) or tenants without rate limits
+        # This ensures each tenant appears only once
         query = (
-            self.db.query(TenantRateLimit)
-            .join(Tenant, TenantRateLimit.tenant_id == Tenant.id)
-            .filter(TenantRateLimit.is_active == True)
+            self.db.query(Tenant, TenantRateLimit)
+            .outerjoin(
+                TenantRateLimit, 
+                and_(
+                    TenantRateLimit.tenant_id == Tenant.id,
+                    TenantRateLimit.is_active == True,
+                    TenantRateLimit.application_id.is_(None)  # Only tenant-level rate limits
+                )
+            )
         )
         
         # Add search filter if provided
@@ -278,6 +290,32 @@ class RateLimitService:
         
         # Get total count before pagination
         total = query.count()
+        
+        # Apply sorting
+        if sort_by == 'requests_per_second':
+            # For sorting by rate limit, we need to handle NULL values (tenants without configs)
+            # Default to 1 RPS for tenants without configurations
+            if sort_order.lower() == 'asc':
+                query = query.order_by(
+                    TenantRateLimit.requests_per_second.asc().nullsfirst(),
+                    Tenant.email.asc()
+                )
+            else:
+                query = query.order_by(
+                    TenantRateLimit.requests_per_second.desc().nullslast(),
+                    Tenant.email.asc()
+                )
+        elif sort_by == 'email':
+            if sort_order.lower() == 'asc':
+                query = query.order_by(Tenant.email.asc())
+            else:
+                query = query.order_by(Tenant.email.desc())
+        else:
+            # Default: sort by rate limit descending
+            query = query.order_by(
+                TenantRateLimit.requests_per_second.desc().nullslast(),
+                Tenant.email.asc()
+            )
         
         # Apply pagination
         results = query.offset(skip).limit(limit).all()

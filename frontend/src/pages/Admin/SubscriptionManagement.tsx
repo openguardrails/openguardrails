@@ -16,6 +16,8 @@ const SubscriptionManagement: React.FC = () => {
   const [pageSize, setPageSize] = useState(20);
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState<'free' | 'subscribed' | undefined>(undefined);
+  const [sortBy, setSortBy] = useState<'current_month_usage' | 'usage_reset_at'>('current_month_usage');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [selectedSubscription, setSelectedSubscription] = useState<SubscriptionListItem | null>(null);
   const [newSubscriptionType, setNewSubscriptionType] = useState<'free' | 'subscribed'>('free');
@@ -27,7 +29,9 @@ const SubscriptionManagement: React.FC = () => {
         skip: (currentPage - 1) * pageSize,
         limit: pageSize,
         search: search || undefined,
-        subscription_type: filterType
+        subscription_type: filterType,
+        sort_by: sortBy,
+        sort_order: sortOrder
       });
       setSubscriptions(data);
       setTotal(totalCount);
@@ -40,7 +44,7 @@ const SubscriptionManagement: React.FC = () => {
 
   useEffect(() => {
     fetchSubscriptions();
-  }, [currentPage, pageSize, search, filterType]);
+  }, [currentPage, pageSize, search, filterType, sortBy, sortOrder]);
 
   const handleEditSubscription = (subscription: SubscriptionListItem) => {
     setSelectedSubscription(subscription);
@@ -95,6 +99,8 @@ const SubscriptionManagement: React.FC = () => {
       title: t('admin.subscriptions.usage'),
       key: 'usage',
       width: 300,
+      sorter: true,
+      sortOrder: sortBy === 'current_month_usage' ? (sortOrder === 'asc' ? 'ascend' : 'descend') : null,
       render: (_: any, record: SubscriptionListItem) => (
         <Space direction="vertical" size="small" style={{ width: '100%' }}>
           <div>
@@ -115,6 +121,8 @@ const SubscriptionManagement: React.FC = () => {
       dataIndex: 'usage_reset_at',
       key: 'usage_reset_at',
       width: 150,
+      sorter: true,
+      sortOrder: sortBy === 'usage_reset_at' ? (sortOrder === 'asc' ? 'ascend' : 'descend') : null,
       render: (date: string) => new Date(date).toLocaleDateString(),
     },
     {
@@ -187,6 +195,15 @@ const SubscriptionManagement: React.FC = () => {
           dataSource={subscriptions}
           rowKey="id"
           loading={loading}
+          onChange={(pagination, filters, sorter: any) => {
+            if (sorter && sorter.columnKey) {
+              const newSortBy = sorter.columnKey === 'usage' ? 'current_month_usage' : sorter.columnKey;
+              const newSortOrder = sorter.order === 'ascend' ? 'asc' : 'desc';
+              setSortBy(newSortBy);
+              setSortOrder(newSortOrder);
+              setCurrentPage(1); // Reset to first page when sorting changes
+            }
+          }}
           pagination={{
             current: currentPage,
             pageSize: pageSize,

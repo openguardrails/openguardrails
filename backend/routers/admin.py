@@ -260,15 +260,20 @@ async def get_all_rate_limits(
     skip: int = 0,
     limit: int = 100,
     search: str = None,
+    sort_by: str = 'requests_per_second',
+    sort_order: str = 'desc',
     db: Session = Depends(get_db)
 ):
     """
-    Get all tenants rate limit configuration (only super admin can access)
+    Get all tenants with their rate limit configurations (only super admin can access)
+    Includes all tenants, even those without rate limit configurations
     
     Args:
         skip: Number of records to skip for pagination
         limit: Maximum number of records to return
         search: Search string to filter by tenant email
+        sort_by: Field to sort by ('requests_per_second' or 'email')
+        sort_order: Sort order ('asc' or 'desc')
     """
     try:
         current_tenant = get_current_user(request)
@@ -276,15 +281,19 @@ async def get_all_rate_limits(
             raise HTTPException(status_code=403, detail="Access denied: Super admin required")
         
         rate_limit_service = RateLimitService(db)
-        rate_limits, total = rate_limit_service.list_user_rate_limits(skip, limit, search)
+        results, total = rate_limit_service.list_user_rate_limits(skip, limit, search, sort_by, sort_order)
         
         result = []
-        for rate_limit in rate_limits:
+        for tenant, rate_limit in results:
+            # If tenant has no rate limit config, use default value (1 RPS)
+            requests_per_second = rate_limit.requests_per_second if rate_limit else 1
+            is_active = rate_limit.is_active if rate_limit else False
+            
             result.append(RateLimitResponse(
-                tenant_id=str(rate_limit.tenant_id),
-                email=rate_limit.tenant.email,
-                requests_per_second=rate_limit.requests_per_second,
-                is_active=rate_limit.is_active
+                tenant_id=str(tenant.id),
+                email=tenant.email,
+                requests_per_second=requests_per_second,
+                is_active=is_active
             ))
         
         return {

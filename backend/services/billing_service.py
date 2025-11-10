@@ -332,8 +332,14 @@ class BillingService:
             raise
 
     def list_subscriptions(self, db: Session, skip: int = 0, limit: int = 100,
-                          search: str = None, subscription_type: str = None):
-        """List all tenant subscriptions with pagination and filters"""
+                          search: str = None, subscription_type: str = None,
+                          sort_by: str = 'current_month_usage', sort_order: str = 'desc'):
+        """List all tenant subscriptions with pagination and filters
+        
+        Args:
+            sort_by: Field to sort by ('current_month_usage' or 'usage_reset_at')
+            sort_order: Sort order ('asc' or 'desc')
+        """
         try:
             query = db.query(TenantSubscription).join(
                 Tenant, TenantSubscription.tenant_id == Tenant.id
@@ -345,6 +351,21 @@ class BillingService:
 
             if subscription_type and subscription_type in self.SUBSCRIPTION_CONFIGS:
                 query = query.filter(TenantSubscription.subscription_type == subscription_type)
+
+            # Apply sorting
+            if sort_by == 'current_month_usage':
+                if sort_order.lower() == 'asc':
+                    query = query.order_by(TenantSubscription.current_month_usage.asc())
+                else:
+                    query = query.order_by(TenantSubscription.current_month_usage.desc())
+            elif sort_by == 'usage_reset_at':
+                if sort_order.lower() == 'asc':
+                    query = query.order_by(TenantSubscription.usage_reset_at.asc())
+                else:
+                    query = query.order_by(TenantSubscription.usage_reset_at.desc())
+            else:
+                # Default: sort by usage descending
+                query = query.order_by(TenantSubscription.current_month_usage.desc())
 
             # Get total count
             total = query.count()

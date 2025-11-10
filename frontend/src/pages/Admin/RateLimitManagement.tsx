@@ -60,15 +60,19 @@ const RateLimitManagement: React.FC = () => {
   const [searchText, setSearchText] = useState('');
   const [total, setTotal] = useState(0);
   const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
+  const [sortBy, setSortBy] = useState<'requests_per_second' | 'email'>('requests_per_second');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [form] = Form.useForm();
 
-  const loadRateLimits = async (search?: string, page = 1, pageSize = 10) => {
+  const loadRateLimits = async (search?: string, page = 1, pageSize = 10, sortByParam?: string, sortOrderParam?: string) => {
     setLoading(true);
     try {
       const response = await adminApi.getRateLimits({
         skip: (page - 1) * pageSize,
         limit: pageSize,
-        search: search || undefined
+        search: search || undefined,
+        sort_by: sortByParam || sortBy,
+        sort_order: sortOrderParam || sortOrder
       });
       setRateLimits(response.data || []);
       setTotal(response.total || 0);
@@ -90,19 +94,29 @@ const RateLimitManagement: React.FC = () => {
   };
 
   useEffect(() => {
-    loadRateLimits(searchText, pagination.current, pagination.pageSize);
+    loadRateLimits(searchText, pagination.current, pagination.pageSize, sortBy, sortOrder);
     loadUsers();
   }, []);
 
   const handleSearch = (value: string) => {
     setSearchText(value);
     setPagination({ ...pagination, current: 1 });
-    loadRateLimits(value, 1, pagination.pageSize);
+    loadRateLimits(value, 1, pagination.pageSize, sortBy, sortOrder);
   };
 
-  const handleTableChange = (newPagination: any) => {
+  const handleTableChange = (newPagination: any, filters: any, sorter: any) => {
     setPagination(newPagination);
-    loadRateLimits(searchText, newPagination.current, newPagination.pageSize);
+    
+    // Handle sorting
+    if (sorter && sorter.columnKey) {
+      const newSortBy = sorter.columnKey === 'rps' ? 'requests_per_second' : sorter.columnKey;
+      const newSortOrder = sorter.order === 'ascend' ? 'asc' : 'desc';
+      setSortBy(newSortBy);
+      setSortOrder(newSortOrder);
+      loadRateLimits(searchText, newPagination.current, newPagination.pageSize, newSortBy, newSortOrder);
+    } else {
+      loadRateLimits(searchText, newPagination.current, newPagination.pageSize, sortBy, sortOrder);
+    }
   };
 
   const handleEdit = (rateLimit: RateLimit) => {
@@ -141,7 +155,7 @@ const RateLimitManagement: React.FC = () => {
       
       setModalVisible(false);
       form.resetFields();
-      loadRateLimits(searchText, pagination.current, pagination.pageSize);
+      loadRateLimits(searchText, pagination.current, pagination.pageSize, sortBy, sortOrder);
     } catch (error: any) {
       console.error('Save rate limit failed:', error);
       message.error(error.response?.data?.detail || t('common.saveFailed'));
@@ -152,7 +166,7 @@ const RateLimitManagement: React.FC = () => {
     try {
       await adminApi.removeUserRateLimit(tenantId);
       message.success(t('rateLimit.rateLimitDeleted'));
-      loadRateLimits(searchText, pagination.current, pagination.pageSize);
+      loadRateLimits(searchText, pagination.current, pagination.pageSize, sortBy, sortOrder);
     } catch (error: any) {
       console.error('Delete rate limit failed:', error);
       message.error(error.response?.data?.detail || t('common.deleteFailed'));
@@ -200,6 +214,8 @@ const RateLimitManagement: React.FC = () => {
     {
       title: t('rateLimit.rateLimitConfig'),
       key: 'rps',
+      sorter: true,
+      sortOrder: sortBy === 'requests_per_second' ? (sortOrder === 'asc' ? 'ascend' : 'descend') : null,
       render: (_: any, record: RateLimit) => getRpsDisplay(record.requests_per_second),
     },
     {
@@ -331,7 +347,7 @@ const RateLimitManagement: React.FC = () => {
             />
             <Button
               icon={<ReloadOutlined />}
-              onClick={() => loadRateLimits(searchText, pagination.current, pagination.pageSize)}
+              onClick={() => loadRateLimits(searchText, pagination.current, pagination.pageSize, sortBy, sortOrder)}
               loading={loading}
             >
               {t('common.refresh')}

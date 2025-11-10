@@ -155,6 +155,8 @@ async def list_all_subscriptions(
     limit: int = 100,
     search: Optional[str] = None,
     subscription_type: Optional[str] = None,
+    sort_by: Optional[str] = 'current_month_usage',
+    sort_order: Optional[str] = 'desc',
     db: Session = Depends(get_db)
 ):
     """List all tenant subscriptions (admin only)"""
@@ -168,7 +170,7 @@ async def list_all_subscriptions(
             )
 
         results, total = billing_service.list_subscriptions(
-            db, skip, limit, search, subscription_type
+            db, skip, limit, search, subscription_type, sort_by, sort_order
         )
 
         return {

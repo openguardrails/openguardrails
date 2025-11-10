@@ -30,6 +30,8 @@ export const billingService = {
     limit?: number;
     search?: string;
     subscription_type?: 'free' | 'subscribed';
+    sort_by?: 'current_month_usage' | 'usage_reset_at';
+    sort_order?: 'asc' | 'desc';
   }): Promise<{ data: SubscriptionListItem[]; total: number }> {
     const response = await api.get('/api/v1/admin/billing/subscriptions', { params });
     return {
