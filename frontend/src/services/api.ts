@@ -295,7 +295,7 @@ export const adminApi = {
     api.post(`/api/v1/admin/users/${tenantId}/reset-api-key`).then(res => res.data),
 
   // Tenant rate limit management
-  getRateLimits: (params?: { skip?: number; limit?: number; search?: string }): Promise<{ status: string; data: any[]; total: number }> =>
+  getRateLimits: (params?: { skip?: number; limit?: number; search?: string; sort_by?: string; sort_order?: string }): Promise<{ status: string; data: any[]; total: number }> =>
     api.get('/api/v1/admin/rate-limits', { params }).then(res => res.data),
 
   setUserRateLimit: (data: {
