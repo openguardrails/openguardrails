@@ -59,7 +59,7 @@ def load_builtin_packages(db: Session):
 
     # Try multiple locations for built-in packages
     possible_dirs = [
-        backend_dir / 'config' / 'builtin_scanners',
+        backend_dir / 'builtin_scanners',
         backend_dir.parent / 'docs' / 'scanner_packages_examples',  # Fallback to examples
     ]
 

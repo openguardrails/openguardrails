@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from database.connection import get_db_session
 from database.models import (
     ScannerPackage, Scanner, ApplicationScannerConfig,
-    Application, Tenant
+    Application, Tenant, RiskTypeConfig
 )
 from utils.logger import setup_logger
 
@@ -115,7 +115,7 @@ def create_or_update_scanners(db, package_id: str, scanners_data: list) -> list:
 
 
 def initialize_scanner_configs_for_applications(db, scanners: list):
-    """Initialize scanner configs for all existing applications"""
+    """Initialize scanner configs for all existing applications based on risk_type_config"""
     # Get all applications
     applications = db.query(Application).filter(Application.is_active == True).all()
 
@@ -123,6 +123,43 @@ def initialize_scanner_configs_for_applications(db, scanners: list):
 
     for app in applications:
         logger.info(f"Initializing scanner configs for application: {app.name} (ID: {app.id})")
+
+        # Get existing risk_type_config for this application
+        risk_config = db.query(RiskTypeConfig).filter(
+            RiskTypeConfig.application_id == app.id
+        ).first()
+
+        # Build enabled state mapping from risk_type_config
+        enabled_map = {}
+        if risk_config:
+            # Map S1-S21 enabled states from risk_type_config
+            enabled_map = {
+                'S1': risk_config.s1_enabled if hasattr(risk_config, 's1_enabled') else True,
+                'S2': risk_config.s2_enabled if hasattr(risk_config, 's2_enabled') else True,
+                'S3': risk_config.s3_enabled if hasattr(risk_config, 's3_enabled') else True,
+                'S4': risk_config.s4_enabled if hasattr(risk_config, 's4_enabled') else True,
+                'S5': risk_config.s5_enabled if hasattr(risk_config, 's5_enabled') else True,
+                'S6': risk_config.s6_enabled if hasattr(risk_config, 's6_enabled') else True,
+                'S7': risk_config.s7_enabled if hasattr(risk_config, 's7_enabled') else True,
+                'S8': risk_config.s8_enabled if hasattr(risk_config, 's8_enabled') else True,
+                'S9': risk_config.s9_enabled if hasattr(risk_config, 's9_enabled') else True,
+                'S10': risk_config.s10_enabled if hasattr(risk_config, 's10_enabled') else True,
+                'S11': risk_config.s11_enabled if hasattr(risk_config, 's11_enabled') else True,
+                'S12': risk_config.s12_enabled if hasattr(risk_config, 's12_enabled') else True,
+                'S13': risk_config.s13_enabled if hasattr(risk_config, 's13_enabled') else True,
+                'S14': risk_config.s14_enabled if hasattr(risk_config, 's14_enabled') else True,
+                'S15': risk_config.s15_enabled if hasattr(risk_config, 's15_enabled') else True,
+                'S16': risk_config.s16_enabled if hasattr(risk_config, 's16_enabled') else True,
+                'S17': risk_config.s17_enabled if hasattr(risk_config, 's17_enabled') else True,
+                'S18': risk_config.s18_enabled if hasattr(risk_config, 's18_enabled') else True,
+                'S19': risk_config.s19_enabled if hasattr(risk_config, 's19_enabled') else True,
+                'S20': risk_config.s20_enabled if hasattr(risk_config, 's20_enabled') else True,
+                'S21': risk_config.s21_enabled if hasattr(risk_config, 's21_enabled') else True,
+            }
+            logger.info(f"  Found existing risk_type_config, using configured enabled states")
+        else:
+            # No risk_type_config found, default to all enabled
+            logger.info(f"  No risk_type_config found, defaulting to all enabled")
 
         for scanner in scanners:
             # Check if config already exists
@@ -135,11 +172,14 @@ def initialize_scanner_configs_for_applications(db, scanners: list):
                 logger.debug(f"  Config already exists for scanner {scanner.tag}")
                 continue
 
-            # Create new config with default settings (enabled, no overrides)
+            # Get enabled state from risk_type_config if available, otherwise default to True
+            is_enabled = enabled_map.get(scanner.tag, True) if enabled_map else True
+
+            # Create new config with settings from risk_type_config
             config = ApplicationScannerConfig(
                 application_id=app.id,
                 scanner_id=scanner.id,
-                is_enabled=True,
+                is_enabled=is_enabled,
                 risk_level_override=None,  # NULL means use package default
                 scan_prompt_override=None,
                 scan_response_override=None
