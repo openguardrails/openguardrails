@@ -20,5 +20,8 @@
       "ignoreNote": "如果您没有请求重置密码，请忽略此邮件，您的密码将保持不变。",
       "footer": "OpenGuardrails平台 - 保护AI应用安全"
     }
+  },
+  "guardrail": {
+    "blacklistHit": "抱歉，我无法提供涉及{list_name}的内容。"
   }
 }

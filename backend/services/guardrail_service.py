@@ -14,6 +14,7 @@ from services.data_security_service import DataSecurityService
 from models.requests import GuardrailRequest, Message
 from models.responses import GuardrailResponse, GuardrailResult, ComplianceResult, SecurityResult, DataSecurityResult
 from utils.logger import setup_logger
+from utils.i18n_loader import get_translation
 
 logger = setup_logger()
 
@@ -496,6 +497,25 @@ class GuardrailService:
     ) -> GuardrailResponse:
         """Handle blacklist hit"""
 
+        # Get user's language preference
+        user_language = 'en'  # Default to English
+        if tenant_id:
+            try:
+                from database.models import Tenant
+                tenant = self.db.query(Tenant).filter(Tenant.id == tenant_id).first()
+                if tenant and tenant.language:
+                    user_language = tenant.language
+            except Exception as e:
+                logger.warning(f"Failed to get user language for tenant {tenant_id}: {e}")
+
+        # Get localized blacklist hit message
+        try:
+            blacklist_message = get_translation(user_language, 'guardrail', 'blacklistHit')
+            suggest_answer = blacklist_message.format(list_name=list_name)
+        except Exception as e:
+            logger.warning(f"Failed to get translation for blacklist hit: {e}, using default")
+            suggest_answer = f"Sorry, I can't provide content involving {list_name}."
+
         # Asynchronously log to database
         detection_data = {
             "request_id": request_id,
@@ -503,7 +523,7 @@ class GuardrailService:
             "application_id": application_id,
             "content": content,
             "suggest_action": "reject",
-            "suggest_answer": f"I'm sorry, I cannot provide content related to {list_name}.",
+            "suggest_answer": suggest_answer,
             "hit_keywords": json.dumps(keywords),
             "model_response": "blacklist_hit",
             "ip_address": ip_address,
@@ -525,7 +545,7 @@ class GuardrailService:
             ),
             overall_risk_level="high_risk",
             suggest_action="reject",
-            suggest_answer=f"Sorry, I can't provide content involving {list_name}."
+            suggest_answer=suggest_answer
         )
     
     async def _handle_whitelist_hit(
