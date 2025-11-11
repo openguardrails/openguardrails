@@ -6,3 +6,5 @@ ADD COLUMN IF NOT EXISTS model_name VARCHAR(200);
 
 COMMENT ON COLUMN online_test_model_selections.model_name IS 'Model name specified by user for testing (e.g., gpt-4, claude-3-5-sonnet-20241022, openrouter model names)';
 
+
+

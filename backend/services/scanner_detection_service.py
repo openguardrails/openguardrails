@@ -81,15 +81,24 @@ class ScannerDetectionService:
         """
         logger.info(f"Executing scanner detection for app {application_id}, scan_type={scan_type}")
 
-        # 1. Get enabled scanners for this application and scan type
-        enabled_scanners = self.scanner_config_service.get_enabled_scanners(
+        # 1. Get ALL scanners for this application and scan type (including disabled ones)
+        # We need to send all scanner definitions to the model, then filter results by enabled status
+        all_scanners = self.scanner_config_service.get_application_scanners(
             application_id=application_id,
             tenant_id=UUID(tenant_id),
-            scan_type=scan_type
+            include_disabled=True
         )
 
-        if not enabled_scanners:
-            logger.info(f"No enabled scanners for app {application_id}, scan_type={scan_type}")
+        # Filter by scan type
+        if scan_type == 'prompt':
+            scanners_for_scan_type = [s for s in all_scanners if s['scan_prompt']]
+        elif scan_type == 'response':
+            scanners_for_scan_type = [s for s in all_scanners if s['scan_response']]
+        else:
+            scanners_for_scan_type = all_scanners
+
+        if not scanners_for_scan_type:
+            logger.info(f"No scanners for app {application_id}, scan_type={scan_type}")
             return AggregatedDetectionResult(
                 overall_risk_level="no_risk",
                 matched_scanners=[],
@@ -97,31 +106,37 @@ class ScannerDetectionService:
                 security_categories=[]
             )
 
-        logger.info(f"Found {len(enabled_scanners)} enabled scanners")
+        # Get enabled scanners separately for filtering results later
+        enabled_scanner_tags = set([
+            s['tag'] for s in scanners_for_scan_type if s['is_enabled']
+        ])
 
-        # 2. Group scanners by type
-        genai_scanners = [s for s in enabled_scanners if s['scanner_type'] == 'genai']
-        regex_scanners = [s for s in enabled_scanners if s['scanner_type'] == 'regex']
-        keyword_scanners = [s for s in enabled_scanners if s['scanner_type'] == 'keyword']
+        logger.info(f"Found {len(scanners_for_scan_type)} total scanners, {len(enabled_scanner_tags)} enabled")
+
+        # 2. Group ALL scanners by type (including disabled ones for GenAI)
+        genai_scanners = [s for s in scanners_for_scan_type if s['scanner_type'] == 'genai']
+        # For regex/keyword, we only execute enabled scanners to save computation
+        regex_scanners = [s for s in scanners_for_scan_type if s['scanner_type'] == 'regex' and s['is_enabled']]
+        keyword_scanners = [s for s in scanners_for_scan_type if s['scanner_type'] == 'keyword' and s['is_enabled']]
 
         logger.info(f"Scanner types: GenAI={len(genai_scanners)}, Regex={len(regex_scanners)}, Keyword={len(keyword_scanners)}")
 
         # 3. Execute scanners (can be parallelized in future)
         all_results = []
 
-        # Execute GenAI scanners (single model call with all definitions)
+        # Execute GenAI scanners (single model call with ALL definitions, then filter)
         if genai_scanners:
             genai_results = await self._execute_genai_scanners(
-                genai_scanners, content, messages_for_genai
+                genai_scanners, content, messages_for_genai, enabled_scanner_tags
             )
             all_results.extend(genai_results)
 
-        # Execute Regex scanners (Python regex matching)
+        # Execute Regex scanners (Python regex matching) - only enabled
         if regex_scanners:
             regex_results = self._execute_regex_scanners(regex_scanners, content)
             all_results.extend(regex_results)
 
-        # Execute Keyword scanners (case-insensitive search)
+        # Execute Keyword scanners (case-insensitive search) - only enabled
         if keyword_scanners:
             keyword_results = self._execute_keyword_scanners(keyword_scanners, content)
             all_results.extend(keyword_results)
@@ -133,26 +148,28 @@ class ScannerDetectionService:
         self,
         scanners: List[Dict],
         content: str,
-        messages: Optional[List[Dict]] = None
+        messages: Optional[List[Dict]] = None,
+        enabled_scanner_tags: Optional[set] = None
     ) -> List[ScannerDetectionResult]:
         """
         Execute GenAI scanners using OpenGuardrails-Text model
 
-        All GenAI scanner definitions are combined into a single model call
-        for efficiency.
+        All GenAI scanner definitions (both enabled and disabled) are sent to the model
+        in a single call. Results are then filtered to only include enabled scanners.
 
         Args:
-            scanners: List of GenAI scanner configs
+            scanners: List of ALL GenAI scanner configs (both enabled and disabled)
             content: Content to check
             messages: Full message context (preferred over content)
+            enabled_scanner_tags: Set of tags for enabled scanners (for filtering results)
 
         Returns:
-            List of ScannerDetectionResult
+            List of ScannerDetectionResult (only for enabled scanners)
         """
-        logger.info(f"Executing {len(scanners)} GenAI scanners")
+        logger.info(f"Executing {len(scanners)} GenAI scanners (including disabled ones)")
 
         try:
-            # Prepare scanner definitions for model
+            # Prepare scanner definitions for model - send ALL scanners
             # Format for builtin scanners: "S2: Sensitive Political Topics"
             # Format for custom/purchasable scanners: "S100: Custom Scanner Name. [definition]"
             scanner_definitions = []
@@ -178,11 +195,25 @@ class ScannerDetectionService:
             if messages is None:
                 messages = [{"role": "user", "content": content}]
 
-            # Call model with scanner definitions
+            # Check if messages contain images
+            has_image = False
+            for msg in messages:
+                msg_content = msg.get("content")
+                if isinstance(msg_content, list):
+                    for part in msg_content:
+                        if isinstance(part, dict) and part.get("type") == "image_url":
+                            has_image = True
+                            break
+                if has_image:
+                    break
+
+            # Call model with ALL scanner definitions (both enabled and disabled)
             # The model will return format: "unsafe\nS2,S5" or "safe"
+            # Use VL model if messages contain images
             model_response, sensitivity_score = await model_service.check_messages_with_scanner_definitions(
                 messages=messages,
-                scanner_definitions=scanner_definitions
+                scanner_definitions=scanner_definitions,
+                use_vl_model=has_image
             )
 
             logger.info(f"GenAI model response: {model_response}, sensitivity: {sensitivity_score}")
@@ -192,23 +223,43 @@ class ScannerDetectionService:
             response = model_response.strip()
 
             if response == "safe":
-                # No scanners matched
+                # No scanners matched - only return results for enabled scanners
                 for scanner in scanners:
-                    results.append(ScannerDetectionResult(
-                        scanner_tag=scanner['tag'],
-                        scanner_name=scanner['name'],
-                        scanner_type='genai',
-                        risk_level=scanner['risk_level'],
-                        matched=False
-                    ))
+                    # Filter: only include enabled scanners in results
+                    if enabled_scanner_tags is None or scanner['tag'] in enabled_scanner_tags:
+                        results.append(ScannerDetectionResult(
+                            scanner_tag=scanner['tag'],
+                            scanner_name=scanner['name'],
+                            scanner_type='genai',
+                            risk_level=scanner['risk_level'],
+                            matched=False
+                        ))
             elif response.startswith("unsafe\n"):
-                # Parse matched scanner tags
+                # Parse matched scanner tags from model response
                 categories_line = response.split('\n')[1] if '\n' in response else ""
                 matched_tags = [tag.strip() for tag in categories_line.split(',') if tag.strip()]
 
+                logger.info(f"Model returned matched tags: {matched_tags}")
+
+                # Filter matched tags: only keep enabled ones
+                if enabled_scanner_tags is not None:
+                    filtered_matched_tags = [tag for tag in matched_tags if tag in enabled_scanner_tags]
+                    disabled_tags = [tag for tag in matched_tags if tag not in enabled_scanner_tags]
+                    if disabled_tags:
+                        logger.info(f"Filtered out disabled scanner tags: {disabled_tags}")
+                    logger.info(f"Enabled matched tags after filtering: {filtered_matched_tags}")
+                else:
+                    filtered_matched_tags = matched_tags
+
+                # Create results only for enabled scanners
                 for scanner in scanners:
                     tag = scanner['tag']
-                    matched = tag in matched_tags
+                    # Skip disabled scanners
+                    if enabled_scanner_tags is not None and tag not in enabled_scanner_tags:
+                        continue
+
+                    # Check if this enabled scanner was matched (after filtering)
+                    matched = tag in filtered_matched_tags
 
                     results.append(ScannerDetectionResult(
                         scanner_tag=tag,
@@ -219,22 +270,23 @@ class ScannerDetectionService:
                         match_details=f"Sensitivity: {sensitivity_score}" if matched else None
                     ))
             else:
-                # Unexpected format, treat all as not matched
+                # Unexpected format, treat all as not matched - only return enabled scanners
                 logger.warning(f"Unexpected model response format: {response}")
                 for scanner in scanners:
-                    results.append(ScannerDetectionResult(
-                        scanner_tag=scanner['tag'],
-                        scanner_name=scanner['name'],
-                        scanner_type='genai',
-                        risk_level=scanner['risk_level'],
-                        matched=False
-                    ))
+                    if enabled_scanner_tags is None or scanner['tag'] in enabled_scanner_tags:
+                        results.append(ScannerDetectionResult(
+                            scanner_tag=scanner['tag'],
+                            scanner_name=scanner['name'],
+                            scanner_type='genai',
+                            risk_level=scanner['risk_level'],
+                            matched=False
+                        ))
 
             return results
 
         except Exception as e:
             logger.error(f"Error executing GenAI scanners: {e}")
-            # Return all scanners as not matched on error
+            # Return all enabled scanners as not matched on error
             return [
                 ScannerDetectionResult(
                     scanner_tag=s['tag'],
@@ -243,6 +295,7 @@ class ScannerDetectionService:
                     risk_level=s['risk_level'],
                     matched=False
                 ) for s in scanners
+                if enabled_scanner_tags is None or s['tag'] in enabled_scanner_tags
             ]
 
     def _execute_regex_scanners(
