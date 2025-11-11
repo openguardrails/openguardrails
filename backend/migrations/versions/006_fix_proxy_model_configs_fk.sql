@@ -6,13 +6,22 @@
 -- Description: Fix foreign key constraint on proxy_model_configs.tenant_id to reference tenants table
 
 -- Drop the incorrect foreign key constraint if it exists
-ALTER TABLE proxy_model_configs DROP CONSTRAINT IF EXISTS proxy_model_configs_user_id_fkey;
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_tables WHERE tablename = 'proxy_model_configs'
+    ) THEN
+        ALTER TABLE proxy_model_configs DROP CONSTRAINT IF EXISTS proxy_model_configs_user_id_fkey;
+    END IF;
+END $$;
 
 -- Add the correct foreign key constraint (use IF NOT EXISTS equivalent with DO block)
 DO $$
 BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint WHERE conname = 'proxy_model_configs_tenant_id_fkey'
+    ) and EXISTS (
+        SELECT 1 FROM pg_tables WHERE tablename = 'proxy_model_configs'
     ) THEN
         ALTER TABLE proxy_model_configs ADD CONSTRAINT proxy_model_configs_tenant_id_fkey 
             FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
