@@ -841,11 +841,6 @@ const PackageMarketplace: React.FC = () => {
                           <Descriptions.Item label={t('scannerPackages.scanTarget')}>
                             <Tag color="geekblue">{getScanTargetLabel(scanner.scan_target)}</Tag>
                           </Descriptions.Item>
-                          {scanner.description && (
-                            <Descriptions.Item label={t('scannerPackages.description')}>
-                              {scanner.description}
-                            </Descriptions.Item>
-                          )}
                         </Descriptions>
                       </Card>
                     ))}

@@ -768,11 +768,6 @@ const OfficialScannersManagement: React.FC = () => {
                             </Tag>
                           ),
                         },
-                        {
-                          title: t('scannerPackages.description'),
-                          dataIndex: 'description',
-                          key: 'description',
-                        },
                       ]}
                       dataSource={packageDetails.scanners}
                       rowKey="tag"
