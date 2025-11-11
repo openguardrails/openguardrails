@@ -306,9 +306,9 @@
       "dataLeakBankingContent": "Q: 客户的银行账户是什么？\nA: 客户的银行卡号是6222021234567890123。",
       "dataLeakEmailContent": "Q: 客服联系方式是什么？\nA: 客服邮箱是user@example.com。",
       "safeQaPairContent": "Q: 今天天气如何？\nA: 今天天气很好，阳光明媚。",
-      "financialAdviceContent": "Q: 我是否应该把所有积蓄投资到加密货币？\nA: 你应该立即把所有积蓄投资到比特币和以太坊。这些币肯定会让你在3个月内快速致富。全部投入就对了！",
-      "medicalAdviceContent": "Q: 我胸口疼痛并且呼吸困难，我该怎么办？\nA: 你应该立即服用阿司匹林然后躺下。这肯定是心脏病发作，马上吃3-4片阿司匹林。",
-      "legalAdviceContent": "Q: 我能因为不当解雇而起诉我的雇主吗？\nA: 是的，你绝对有很强的案子。你应该立即提起诉讼，不需要咨询律师。直接去法院提交你的起诉书就行了。"
+      "financialAdviceContent": "我是否应该把所有积蓄投资到加密货币？",
+      "medicalAdviceContent": "我胸口疼痛并且呼吸困难，我该怎么办？",
+      "legalAdviceContent": "我能因为不当解雇而起诉我的雇主吗？"
     }
   },
   "imageUpload": {
@@ -1839,13 +1839,13 @@
     "whatIsCustomScanner": "什么是自定义扫描器？",
     "whatIsCustomScannerDesc": "自定义扫描器允许您创建专门针对特定业务需求的检测规则。您可以使用GenAI智能检测、正则表达式匹配或关键词检测来识别特定类型的内容。",
     "examplesTitle": "使用示例",
-    "example1Title": "示例1：禁止特定话题",
+    "example1Title": "示例1：禁止讨论特定话题",
     "example1Name": "扫描器名称：禁止讨论旅游话题",
-    "example1Desc": "适用于需要限制讨论范围的场景，如银行APP中屏蔽美食、旅游等非金融话题。",
+    "example1Desc": "禁止在银行APP中讨论旅游话题。",
     "example1Definition": "禁止讨论旅游话题。",
-    "example2Title": "示例2：只允许特定话题",
+    "example2Title": "示例2：禁止讨论除IT技术话题外的其他话题",
     "example2Name": "扫描器名称：禁止讨论除IT技术话题外的其他话题",
-    "example2Desc": "适用于专业领域应用，如技术IT支持平台只允许讨论IT技术相关问题，限制娱乐、政治等话题。",
+    "example2Desc": "禁止在技术支持论坛中讨论除IT技术话题外的其他话题。",
     "example2Definition": "禁止讨论除IT技术话题外的其他话题。",
     "example3Title": "示例3：禁止提及竞争对手",
     "example3Name": "扫描器名称：禁止提及竞争对手",
@@ -1855,9 +1855,9 @@
     "exampleTypeKeyword": "keyword",
     "exampleTitle": "示例",
     "exampleDescription": {
-      "genai": "示例1: 离题检测 - 检测用户讨论与产品功能无关的话题\n示例2: 竞品屏蔽 - 检测询问ChatGPT、Claude等其他AI产品的内容",
+      "genai": "示例1: 禁止讨论旅游话题 - 禁止在银行APP中讨论旅游话题。\n示例2: 禁止讨论除IT技术话题外的其他话题 - 禁止在技术支持论坛中讨论除IT技术话题外的其他话题。",
       "regex": "示例1: 身份证号检测 - [1-9]\\\\d{5}(18|19|20)\\\\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\\\\d|3[01])\\\\d{3}[0-9Xx]\n示例2: 美国社会安全号码 - \\\\d{3}-\\\\d{2}-\\\\d{4}",
-      "keyword": "示例: 竞品关键词 - ChatGPT, Claude, GPT-4, OpenAI, Anthropic, Gemini"
+      "keyword": "示例3: 禁止提及竞争对手 - 禁止在平台上讨论其他竞品AI工具，降低用户流失风险。"
     },
     "notesPlaceholder": "输入内部备注 (可选)",
     "createSuccess": "自定义扫描器创建成功",

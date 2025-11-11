@@ -309,9 +309,9 @@
       "dataLeakBankingContent": "Q: What is the customer's bank account?\nA: The customer's bank card number is 6222021234567890123.",
       "dataLeakEmailContent": "Q: What is the support contact?\nA: The support email is user@example.com.",
       "safeQaPairContent": "Q: How is the weather today?\nA: The weather is great today, sunny and bright.",
-      "financialAdviceContent": "Q: Should I invest all my savings in cryptocurrency?\nA: You should invest all your savings in Bitcoin and Ethereum right now. These coins will definitely make you rich quickly within 3 months. Just go all-in!",
-      "medicalAdviceContent": "Q: I have chest pain and difficulty breathing. What should I do?\nA: You should take aspirin immediately and then lie down. This is definitely a heart attack, so take 3-4 aspirin tablets right away.",
-      "legalAdviceContent": "Q: Can I sue my employer for wrongful termination?\nA: Yes, you absolutely have a strong case. You should file the lawsuit immediately without consulting a lawyer. Just go to the courthouse and submit your complaint directly."
+      "financialAdviceContent": "Should I invest all my savings in cryptocurrency?",
+      "medicalAdviceContent": "I have chest pain and difficulty breathing. What should I do?",
+      "legalAdviceContent": "Can I sue my employer for wrongful termination?"
     }
   },
   "imageUpload": {
@@ -1842,14 +1842,14 @@
     "whatIsCustomScanner": "What are Custom Scanners?",
     "whatIsCustomScannerDesc": "Custom scanners allow you to create detection rules specifically tailored to your business needs. You can use GenAI intelligent detection, regex pattern matching, or keyword detection to identify specific types of content.",
     "examplesTitle": "Usage Examples",
-    "example1Title": "Example 1: Block Specific Topics",
-    "example1Name": "Scanner Name: Block Travel Topics",
-    "example1Desc": "Discuss travel topics is forbidden.",
-    "example1Definition": "Users discuss travel topics.",
-    "example2Title": "Example 2: Block Any Topics Except IT Technology Topics",
-    "example2Name": "Scanner Name: Block Any Topics Except IT Technology Topics",
-    "example2Desc": "Block any topics except IT technology topics.",
-    "example2Definition": "Block any topics except IT technology topics.",
+    "example1Title": "Example 1: Never iscuss Specific Topics",
+    "example1Name": "Scanner Name: Never Discuss Travel Topics",
+    "example1Desc": "Do not allow any discussion of travel topics in a bank app.",
+    "example1Definition": "Never discuss travel topics.",
+    "example2Title": "Example 2: Never Discuss Any Topics Except IT Technology Topics",
+    "example2Name": "Scanner Name: Never Discuss Any Topics Except IT Technology Topics",
+    "example2Desc": "Never discuss any topics except IT technology topics in a technical support forum.",
+    "example2Definition": "Never discuss any topics except IT technology topics.",
     "example3Title": "Example 3: Competitor Mention Restriction",
     "example3Name": "Scanner Name: Competitor Mention Restriction",
     "example3Desc": "Suitable for protecting brand business interests by preventing users from discussing other competing AI tools on your platform, reducing user churn risk.",
@@ -1858,9 +1858,9 @@
     "exampleTypeKeyword": "keyword",
     "exampleTitle": "Examples",
     "exampleDescription": {
-      "genai": "Example 1: Off-topic Detection - Detect when users discuss topics unrelated to product features\\nExample 2: Competitor Blocking - Detect inquiries about ChatGPT, Claude, or other AI products",
+      "genai": "Example 1: Never Discuss Travel Topics - Do not allow any discussion of travel topics in a bank app.\\nExample 2: Never Discuss Any Topics Except IT Technology Topics - Never discuss any topics except IT technology topics in a technical support forum.",
       "regex": "Example 1: China ID Card - [1-9]\\\\d{5}(18|19|20)\\\\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\\\\d|3[01])\\\\d{3}[0-9Xx]\\nExample 2: US Social Security Number - \\\\d{3}-\\\\d{2}-\\\\d{4}",
-      "keyword": "Example: Competitor Keywords - ChatGPT, Claude, GPT-4, OpenAI, Anthropic, Gemini"
+      "keyword": "Example 3: Competitor Mention Restriction - Suitable for protecting brand business interests by preventing users from discussing other competing AI tools on your platform, reducing user churn risk."
     },
     "notesPlaceholder": "Enter internal notes (optional)",
     "createSuccess": "Custom scanner created successfully",

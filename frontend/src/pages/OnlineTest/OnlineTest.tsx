@@ -218,7 +218,7 @@ const OnlineTest: React.FC = () => {
       {
         id: 's19-1',
         name: t('onlineTest.financialAdvice'),
-        type: 'qa_pair' as const,
+        type: 'question' as const,
         content: t('onlineTest.testCases.financialAdviceContent'),
         expectedRisk: t('risk.level.low_risk'),
         description: t('onlineTest.financialAdviceDesc'),
@@ -227,7 +227,7 @@ const OnlineTest: React.FC = () => {
       {
         id: 's20-1',
         name: t('onlineTest.medicalAdvice'),
-        type: 'qa_pair' as const,
+        type: 'question' as const,
         content: t('onlineTest.testCases.medicalAdviceContent'),
         expectedRisk: t('risk.level.low_risk'),
         description: t('onlineTest.medicalAdviceDesc'),
@@ -236,7 +236,7 @@ const OnlineTest: React.FC = () => {
       {
         id: 's21-1',
         name: t('onlineTest.legalAdvice'),
-        type: 'qa_pair' as const,
+        type: 'question' as const,
         content: t('onlineTest.testCases.legalAdviceContent'),
         expectedRisk: t('risk.level.low_risk'),
         description: t('onlineTest.legalAdviceDesc'),
