@@ -14,7 +14,8 @@ import {
   Select,
   Switch,
   message,
-  Tabs
+  Tabs,
+  Collapse
 } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -38,6 +39,7 @@ interface TestModel {
   model_name: string;
   enabled: boolean;
   selected: boolean;  // Whether it has been selected for online testing
+  user_model_name?: string;  // User-specified model name for testing
 }
 
 interface TestCase {
@@ -106,7 +108,12 @@ const OnlineTest: React.FC = () => {
   const loadModels = async () => {
     try {
       const modelsData = await testModelsApi.getModels();
-      setModels(modelsData);
+      // Map model_name from backend to user_model_name in frontend
+      const mappedModels = modelsData.map((model: any) => ({
+        ...model,
+        user_model_name: model.model_name || ''
+      }));
+      setModels(mappedModels);
     } catch (error) {
       console.error('Failed to load models:', error);
       message.error(t('onlineTest.loadModelsFailed'));
@@ -122,10 +129,11 @@ const OnlineTest: React.FC = () => {
       setModels(newModels);
       setModelSelectionChanged(true);
 
-      // Save to backend
+      // Save to backend with model_name
       const selections = newModels.map(model => ({
         id: model.id,
-        selected: model.selected
+        selected: model.selected,
+        model_name: model.user_model_name || null
       }));
 
       await testModelsApi.updateSelection(selections);
@@ -134,6 +142,30 @@ const OnlineTest: React.FC = () => {
     } catch (error) {
       console.error('Failed to update model selection:', error);
       message.error(t('onlineTest.loadModelsFailed'));
+      // Roll back local state
+      loadModels();
+    }
+  };
+
+  // 更新模型名称
+  const updateModelName = async (modelId: string, modelName: string) => {
+    try {
+      const newModels = models.map(model =>
+        model.id === modelId ? { ...model, user_model_name: modelName } : model
+      );
+      setModels(newModels);
+
+      // Save to backend
+      const selections = newModels.map(model => ({
+        id: model.id,
+        selected: model.selected,
+        model_name: model.user_model_name || null
+      }));
+
+      await testModelsApi.updateSelection(selections);
+    } catch (error) {
+      console.error('Failed to update model name:', error);
+      message.error(t('onlineTest.updateModelNameFailed'));
       // Roll back local state
       loadModels();
     }
@@ -552,38 +584,72 @@ const OnlineTest: React.FC = () => {
                       style={{ marginBottom: 16 }}
                     />
                   ) : (
-                    <div style={{ 
-                      border: '1px solid #d9d9d9',
-                      borderRadius: 6,
-                      padding: 12,
-                      backgroundColor: '#fafafa',
-                      maxHeight: 120,
-                      overflowY: 'auto'
-                    }}>
-                      <Space direction="vertical" style={{ width: '100%' }}>
-                        {models.map((model) => (
-                          <div key={model.id} style={{ 
-                            display: 'flex', 
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            padding: '4px 0'
-                          }}>
-                            <div style={{ flex: 1 }}>
-                              <span style={{ fontWeight: 500 }}>{model.config_name}</span>
-                              <br />
-                              <Text type="secondary" style={{ fontSize: '12px' }}>
-                                {model.model_name} - {model.api_base_url}
-                              </Text>
+                    <Collapse
+                      defaultActiveKey={models.filter(m => m.selected).map(m => m.id)}
+                      style={{ backgroundColor: '#fafafa' }}
+                    >
+                      {models.map((model) => (
+                        <Collapse.Panel
+                          key={model.id}
+                          header={
+                            <div style={{ 
+                              display: 'flex', 
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              width: '100%'
+                            }}>
+                              <div style={{ flex: 1, marginRight: 12 }}>
+                                <Space>
+                                  <span style={{ fontWeight: 500 }}>{model.config_name}</span>
+                                  {model.selected && (
+                                    <Tag color="blue" style={{ margin: 0 }}>
+                                      {t('onlineTest.selected')}
+                                    </Tag>
+                                  )}
+                                </Space>
+                              </div>
+                              <Switch
+                                checked={model.selected}
+                                onChange={(checked) => {
+                                  updateModelSelection(model.id, checked);
+                                }}
+                                onClick={(checked, e) => {
+                                  e.stopPropagation(); // 防止触发折叠面板的展开/收起
+                                }}
+                                size="small"
+                              />
                             </div>
-                            <Switch
-                              checked={model.selected}
-                              onChange={(checked) => updateModelSelection(model.id, checked)}
-                              size="small"
-                            />
+                          }
+                        >
+                          <div style={{ padding: '12px 0' }}>
+                            <Space direction="vertical" style={{ width: '100%' }} size="middle">
+                              <div>
+                                <Text type="secondary" style={{ fontSize: '12px', display: 'block', marginBottom: 4 }}>
+                                  {t('onlineTest.apiBaseUrl')}
+                                </Text>
+                                <Text style={{ fontSize: '13px' }}>{model.api_base_url}</Text>
+                              </div>
+                              
+                              {model.selected && (
+                                <div>
+                                  <Text type="secondary" style={{ fontSize: '12px', display: 'block', marginBottom: 4 }}>
+                                    {t('onlineTest.modelNameLabel')}
+                                  </Text>
+                                  <Input
+                                    size="small"
+                                    placeholder={t('onlineTest.modelNamePlaceholder')}
+                                    value={model.user_model_name}
+                                    onChange={(e) => updateModelName(model.id, e.target.value)}
+                                    onBlur={(e) => updateModelName(model.id, e.target.value)}
+                                    style={{ width: '100%' }}
+                                  />
+                                </div>
+                              )}
+                            </Space>
                           </div>
-                        ))}
-                      </Space>
-                    </div>
+                        </Collapse.Panel>
+                      ))}
+                    </Collapse>
                   )}
                   {models.filter(m => m.selected).length > 0 && (
                     <Text style={{ fontSize: '12px', color: '#1890ff' }}>

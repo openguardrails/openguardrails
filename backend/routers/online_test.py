@@ -54,12 +54,13 @@ class OnlineTestModelInfo(BaseModel):
     provider: Optional[str] = None
     is_active: bool
     selected: bool = False  # Whether it is selected for online test
+    model_name: Optional[str] = None  # Model name specified by user for testing
 
     # 允许以 model_ 开头的字段名
     model_config = ConfigDict(protected_namespaces=())
 
 class UpdateModelSelectionRequest(BaseModel):
-    model_selections: List[Dict[str, Any]]  # [{"id": "model_id", "selected": True/False}]
+    model_selections: List[Dict[str, Any]]  # [{"id": "model_id", "selected": True/False, "model_name": "..."}]
     
     # Allow fields to start with model_
     model_config = ConfigDict(protected_namespaces=())
@@ -87,46 +88,16 @@ async def get_online_test_models(
             logger.error(f"Invalid tenant_id format: {tenant_id}")
             raise HTTPException(status_code=400, detail="Invalid user ID format")
 
-        # Get application_id from header or auth context (application-level filtering)
-        from database.models import UpstreamApiConfig, OnlineTestModelSelection, Application
+        # Note: Security Gateway configurations are tenant-level and available across all applications
+        # We don't filter by application_id for upstream API configs
+        from database.models import UpstreamApiConfig, OnlineTestModelSelection
 
-        # 0) Check for X-Application-ID header (highest priority - from frontend selector)
-        header_app_id = request.headers.get('x-application-id') or request.headers.get('X-Application-ID')
-
-        # 1) Use header application ID if present
-        application_id = None
-        if header_app_id:
-            try:
-                application_id = uuid.UUID(header_app_id)
-            except ValueError:
-                logger.error(f"Invalid application_id format from header: {header_app_id}")
-                raise HTTPException(status_code=400, detail="Invalid application ID format")
-
-        # 2) If no header, check auth context (for API key authentication)
-        if not application_id and auth_context:
-            auth_app_id = auth_context['data'].get('application_id')
-            if auth_app_id:
-                try:
-                    application_id = uuid.UUID(auth_app_id)
-                except ValueError:
-                    logger.error(f"Invalid application_id format from auth: {auth_app_id}")
-
-        # 3) If still no application_id, get the first application for this tenant (backward compatibility)
-        if not application_id:
-            first_app = db.query(Application).filter(
-                Application.tenant_id == tenant_uuid
-            ).first()
-            if first_app:
-                application_id = first_app.id
-
-        # Get user's upstream API configuration filtered by application
+        # Get user's upstream API configuration (tenant-level, not filtered by application)
+        # Security Gateway configurations are tenant-level and should be available across all applications
         query = db.query(UpstreamApiConfig).filter(
             UpstreamApiConfig.tenant_id == tenant_uuid,
             UpstreamApiConfig.is_active == True
         )
-
-        if application_id:
-            query = query.filter(UpstreamApiConfig.application_id == application_id)
 
         proxy_models = query.all()
         
@@ -135,19 +106,21 @@ async def get_online_test_models(
             OnlineTestModelSelection.tenant_id == tenant_uuid
         ).all()
         
-        # Create selection mapping
-        selection_map = {str(sel.proxy_model_id): sel.selected for sel in selections}
+        # Create selection mapping with model_name
+        selection_map = {str(sel.proxy_model_id): {"selected": sel.selected, "model_name": sel.model_name} for sel in selections}
         
         # Construct return data
         result = []
         for model in proxy_models:
+            selection_data = selection_map.get(str(model.id), {"selected": False, "model_name": None})
             model_info = OnlineTestModelInfo(
                 id=str(model.id),
                 config_name=model.config_name,
                 api_base_url=model.api_base_url,
                 provider=model.provider,
                 is_active=model.is_active,
-                selected=selection_map.get(str(model.id), False)
+                selected=selection_data["selected"],
+                model_name=selection_data["model_name"]
             )
             result.append(model_info)
         
@@ -183,42 +156,15 @@ async def update_model_selection(
             logger.error(f"Invalid tenant_id format: {tenant_id}")
             raise HTTPException(status_code=400, detail="Invalid user ID format")
 
-        # Get application_id from header or auth context (application-level filtering)
-        from database.models import OnlineTestModelSelection, UpstreamApiConfig, Application
+        # Note: Security Gateway configurations are tenant-level and available across all applications
+        # We don't filter by application_id for upstream API configs
+        from database.models import OnlineTestModelSelection, UpstreamApiConfig
 
-        # 0) Check for X-Application-ID header (highest priority - from frontend selector)
-        header_app_id = request.headers.get('x-application-id') or request.headers.get('X-Application-ID')
-
-        # 1) Use header application ID if present
-        application_id = None
-        if header_app_id:
-            try:
-                application_id = uuid.UUID(header_app_id)
-            except ValueError:
-                logger.error(f"Invalid application_id format from header: {header_app_id}")
-                raise HTTPException(status_code=400, detail="Invalid application ID format")
-
-        # 2) If no header, check auth context (for API key authentication)
-        if not application_id and auth_context:
-            auth_app_id = auth_context['data'].get('application_id')
-            if auth_app_id:
-                try:
-                    application_id = uuid.UUID(auth_app_id)
-                except ValueError:
-                    logger.error(f"Invalid application_id format from auth: {auth_app_id}")
-
-        # 3) If still no application_id, get the first application for this tenant (backward compatibility)
-        if not application_id:
-            first_app = db.query(Application).filter(
-                Application.tenant_id == tenant_uuid
-            ).first()
-            if first_app:
-                application_id = first_app.id
-        
         # Update selection status for each model
         for selection in request_data.model_selections:
             model_id = selection['id']
             selected = selection['selected']
+            model_name = selection.get('model_name', None)  # Get model_name from request
             
             # Validate model ID format
             try:
@@ -227,19 +173,15 @@ async def update_model_selection(
                 logger.error(f"Invalid model_id format: {model_id}")
                 continue
             
-            # Validate model belongs to the user and application
-            query = db.query(UpstreamApiConfig).filter(
+            # Validate model belongs to the user (tenant-level validation)
+            # Security Gateway configurations are tenant-level, not application-specific
+            proxy_model = db.query(UpstreamApiConfig).filter(
                 UpstreamApiConfig.id == proxy_model_uuid,
                 UpstreamApiConfig.tenant_id == tenant_uuid
-            )
-
-            if application_id:
-                query = query.filter(UpstreamApiConfig.application_id == application_id)
-
-            proxy_model = query.first()
+            ).first()
 
             if not proxy_model:
-                continue  # Skip models that do not belong to the user/application
+                continue  # Skip models that do not belong to the user
             
             # Find existing selection record
             existing_selection = db.query(OnlineTestModelSelection).filter(
@@ -250,12 +192,14 @@ async def update_model_selection(
             if existing_selection:
                 # Update existing record
                 existing_selection.selected = selected
+                existing_selection.model_name = model_name
             else:
                 # Create new record
                 new_selection = OnlineTestModelSelection(
                     tenant_id=tenant_uuid,
                     proxy_model_id=proxy_model_uuid,
-                    selected=selected
+                    selected=selected,
+                    model_name=model_name
                 )
                 db.add(new_selection)
         
@@ -407,19 +351,25 @@ async def online_test(
                 enabled_model_ids = [m.id for m in request_data.models if m.enabled]
                 logger.info(f"Testing specific models: {enabled_model_ids}")
 
-                query = db.query(UpstreamApiConfig).filter(
+                # Note: Security Gateway configurations are tenant-level, not application-specific
+                # Do NOT filter by application_id as it's deprecated and always NULL
+                # Also get model_name from OnlineTestModelSelection if exists
+                query = db.query(UpstreamApiConfig, OnlineTestModelSelection.model_name).outerjoin(
+                    OnlineTestModelSelection,
+                    (UpstreamApiConfig.id == OnlineTestModelSelection.proxy_model_id) &
+                    (OnlineTestModelSelection.tenant_id == tenant_uuid)
+                ).filter(
                     UpstreamApiConfig.id.in_(enabled_model_ids),
                     UpstreamApiConfig.tenant_id == tenant_uuid,
                     UpstreamApiConfig.is_active == True
                 )
 
-                if application_id:
-                    query = query.filter(UpstreamApiConfig.application_id == application_id)
-
-                db_models = query.all()
+                db_models_with_names = query.all()
             else:
                 # Get user selected upstream API configs
-                selected_models_query = db.query(UpstreamApiConfig).join(
+                # Note: Security Gateway configurations are tenant-level, not application-specific
+                # Do NOT filter by application_id as it's deprecated and always NULL
+                selected_models_query = db.query(UpstreamApiConfig, OnlineTestModelSelection.model_name).join(
                     OnlineTestModelSelection,
                     UpstreamApiConfig.id == OnlineTestModelSelection.proxy_model_id
                 ).filter(
@@ -428,18 +378,13 @@ async def online_test(
                     OnlineTestModelSelection.selected == True
                 )
 
-                if application_id:
-                    selected_models_query = selected_models_query.filter(
-                        UpstreamApiConfig.application_id == application_id
-                    )
-
-                db_models = selected_models_query.all()
+                db_models_with_names = selected_models_query.all()
             
-            logger.info(f"Found {len(db_models)} models in database")
+            logger.info(f"Found {len(db_models_with_names)} models in database")
             
             # Call all enabled models to get original response (not through guardrail)
             original_tasks = []
-            for db_model in db_models:
+            for db_model, user_model_name in db_models_with_names:
                 # Decrypt API key
                 try:
                     decrypted_api_key = proxy_service._decrypt_api_key(db_model.api_key_encrypted)
@@ -447,15 +392,19 @@ async def online_test(
                     logger.error(f"Failed to decrypt API key for model {db_model.id}: {e}")
                     continue
                 
-                # Determine default model name based on provider
-                # For upstream configs, use sensible defaults based on provider
-                default_model_names = {
-                    'openai': 'gpt-4',
-                    'anthropic': 'claude-3-5-sonnet-20241022',
-                    'local': 'local-model',
-                    'other': 'default-model'
-                }
-                model_name = default_model_names.get(db_model.provider or 'other', 'default-model')
+                # Use user-specified model_name if available, otherwise use sensible defaults
+                if user_model_name:
+                    model_name = user_model_name
+                else:
+                    # Determine default model name based on provider
+                    # For upstream configs, use sensible defaults based on provider
+                    default_model_names = {
+                        'openai': 'gpt-4',
+                        'anthropic': 'claude-3-5-sonnet-20241022',
+                        'local': 'local-model',
+                        'other': 'default-model'
+                    }
+                    model_name = default_model_names.get(db_model.provider or 'other', 'default-model')
 
                 # Create ModelConfig object
                 model_config = ModelConfig(

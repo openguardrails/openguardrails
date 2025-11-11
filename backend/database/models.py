@@ -51,7 +51,7 @@ class Application(Base):
     ban_policies = relationship("BanPolicy", back_populates="application", cascade="all, delete-orphan")
     knowledge_bases = relationship("KnowledgeBase", back_populates="application", cascade="all, delete-orphan")
     data_security_entity_types = relationship("DataSecurityEntityType", back_populates="application", cascade="all, delete-orphan")
-    upstream_api_configs = relationship("UpstreamApiConfig", back_populates="application", cascade="all, delete-orphan")
+    # Note: upstream_api_configs relationship removed - Security Gateway configs are tenant-level, not application-specific
     test_models = relationship("TestModelConfig", back_populates="application", cascade="all, delete-orphan")
     rate_limits = relationship("TenantRateLimit", back_populates="application", cascade="all, delete-orphan")
     detection_results = relationship("DetectionResult", back_populates="application")
@@ -325,8 +325,8 @@ class UpstreamApiConfig(Base):
     __tablename__ = "upstream_api_configs"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)  # Used in gateway URL
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)  # Kept for backward compatibility
-    application_id = Column(UUID(as_uuid=True), ForeignKey("applications.id", ondelete="CASCADE"), nullable=False, index=True)  # Associated application
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)  # Tenant-level configuration
+    application_id = Column(UUID(as_uuid=True), ForeignKey("applications.id", ondelete="CASCADE"), nullable=True, index=False)  # DEPRECATED: Always NULL. Applications are determined by API key when calling gateway
     config_name = Column(String(100), nullable=False, index=True)  # Display name (e.g., "OpenAI Production")
     api_base_url = Column(String(512), nullable=False)  # Upstream API base URL
     api_key_encrypted = Column(Text, nullable=False)  # Encrypted upstream API key
@@ -346,10 +346,10 @@ class UpstreamApiConfig(Base):
 
     # Association relationships
     tenant = relationship("Tenant")
-    application = relationship("Application", back_populates="upstream_api_configs")
+    # Note: application relationship removed - Security Gateway configs are tenant-level, not application-specific
 
     __table_args__ = (
-        UniqueConstraint('application_id', 'config_name', name='upstream_api_configs_application_name_unique'),
+        UniqueConstraint('tenant_id', 'config_name', name='upstream_api_configs_tenant_name_unique'),
     )
 
 class ProxyModelConfig(Base):
@@ -446,15 +446,16 @@ class OnlineTestModelSelection(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
-    proxy_model_id = Column(UUID(as_uuid=True), ForeignKey("proxy_model_configs_deprecated.id"), nullable=False, index=True)
+    proxy_model_id = Column(UUID(as_uuid=True), ForeignKey("upstream_api_configs.id"), nullable=False, index=True)
     selected = Column(Boolean, default=False, nullable=False)  # Whether it is selected for online test
+    model_name = Column(String(200), nullable=True)  # Model name specified by user for testing
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     # Association relationships
     tenant = relationship("Tenant")
-    proxy_model = relationship("ProxyModelConfig")
+    proxy_model = relationship("UpstreamApiConfig")
 
     # Add unique constraint, ensure each tenant has only one record for each proxy model
     __table_args__ = (

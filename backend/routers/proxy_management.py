@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime
 
 from database.connection import get_admin_db_session
-from database.models import UpstreamApiConfig, ProxyRequestLog, OnlineTestModelSelection, Tenant, Application
+from database.models import UpstreamApiConfig, ProxyRequestLog, OnlineTestModelSelection, Tenant
 from sqlalchemy.orm import Session
 from utils.logger import setup_logger
 from cryptography.fernet import Fernet
@@ -156,14 +156,8 @@ async def create_upstream_api(request: Request):
             if existing:
                 raise ValueError(f"Upstream API configuration '{request_data['config_name']}' already exists")
 
-            # Get tenant's default application for application_id (required by DB schema)
-            default_app = db.query(Application).filter(
-                Application.tenant_id == current_user.id,
-                Application.is_active == True
-            ).first()
-
-            if not default_app:
-                raise ValueError("No active application found for tenant")
+            # Security Gateway configurations are tenant-level and do not belong to any application
+            # Applications are determined by the API key used when calling the gateway
 
             # Encrypt API key
             api_key_to_encrypt = request_data['api_key']
@@ -173,11 +167,11 @@ async def create_upstream_api(request: Request):
 
             encrypted_api_key = _encrypt_api_key(api_key_to_encrypt)
 
-            # Create upstream API configuration (use default app_id, but treat as tenant-level)
+            # Create upstream API configuration (tenant-level, no application_id)
             api_config = UpstreamApiConfig(
                 id=uuid.uuid4(),
                 tenant_id=current_user.id,
-                application_id=default_app.id,  # Use default app, but configs are global for tenant
+                application_id=None,  # Security Gateway configs are tenant-level, not application-specific
                 config_name=request_data['config_name'],
                 api_base_url=request_data['api_base_url'],
                 api_key_encrypted=encrypted_api_key,
