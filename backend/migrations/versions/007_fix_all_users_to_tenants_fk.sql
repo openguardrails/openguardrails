@@ -50,12 +50,14 @@ END $$;
 -- ============================================================
 -- Fix proxy_model_configs table (THIS IS THE ONE USER REPORTED)
 -- ============================================================
-ALTER TABLE proxy_model_configs DROP CONSTRAINT IF EXISTS proxy_model_configs_user_id_fkey;
 DO $$
 BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint WHERE conname = 'proxy_model_configs_tenant_id_fkey'
+    ) and EXISTS (
+        SELECT 1 FROM pg_tables WHERE tablename = 'proxy_model_configs'
     ) THEN
+        ALTER TABLE proxy_model_configs DROP CONSTRAINT IF EXISTS proxy_model_configs_user_id_fkey;
         ALTER TABLE proxy_model_configs ADD CONSTRAINT proxy_model_configs_tenant_id_fkey 
             FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
     END IF;
@@ -121,12 +123,19 @@ END $$;
 -- Fix user_rate_limit_counters table (column name is user_id, not tenant_id)
 -- Note: This table uses 'user_id' column name, but should reference tenants table
 -- ============================================================
-ALTER TABLE user_rate_limit_counters DROP CONSTRAINT IF EXISTS user_rate_limit_counters_user_id_fkey;
 -- Keep the column name as user_id for now, but reference tenants table
 DO $$
 BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_tables WHERE tablename = 'user_rate_limit_counters'
+    ) THEN
+        ALTER TABLE user_rate_limit_counters DROP CONSTRAINT IF EXISTS user_rate_limit_counters_user_id_fkey;
+    END IF;
+
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint WHERE conname = 'user_rate_limit_counters_user_id_fkey'
+    ) and EXISTS (
+        SELECT 1 FROM pg_tables WHERE tablename = 'user_rate_limit_counters'
     ) THEN
         ALTER TABLE user_rate_limit_counters ADD CONSTRAINT user_rate_limit_counters_user_id_fkey 
             FOREIGN KEY (user_id) REFERENCES tenants(id) ON DELETE CASCADE;
@@ -137,12 +146,19 @@ END $$;
 -- Fix user_rate_limits table (column name is user_id, not tenant_id)
 -- Note: This table uses 'user_id' column name, but should reference tenants table
 -- ============================================================
-ALTER TABLE user_rate_limits DROP CONSTRAINT IF EXISTS user_rate_limits_user_id_fkey;
 -- Keep the column name as user_id for now, but reference tenants table
 DO $$
 BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_tables WHERE tablename = 'user_rate_limits'
+    ) THEN
+        ALTER TABLE user_rate_limits DROP CONSTRAINT IF EXISTS user_rate_limits_user_id_fkey;
+    END IF;
+
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint WHERE conname = 'user_rate_limits_user_id_fkey'
+    ) and EXISTS (
+        SELECT 1 FROM pg_tables WHERE tablename = 'user_rate_limits'
     ) THEN
         ALTER TABLE user_rate_limits ADD CONSTRAINT user_rate_limits_user_id_fkey 
             FOREIGN KEY (user_id) REFERENCES tenants(id) ON DELETE CASCADE;
@@ -153,22 +169,36 @@ END $$;
 -- Fix user_switches table (has two foreign keys to fix)
 -- Note: This table might be renamed to tenant_switches in the future
 -- ============================================================
-ALTER TABLE user_switches DROP CONSTRAINT IF EXISTS user_switches_admin_user_id_fkey;
 DO $$
 BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_tables WHERE tablename = 'user_switches'
+    ) THEN
+        ALTER TABLE user_switches DROP CONSTRAINT IF EXISTS user_switches_admin_user_id_fkey;
+    END IF;
+
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint WHERE conname = 'user_switches_admin_user_id_fkey'
+    ) and EXISTS (
+        SELECT 1 FROM pg_tables WHERE tablename = 'user_switches'
     ) THEN
         ALTER TABLE user_switches ADD CONSTRAINT user_switches_admin_user_id_fkey 
             FOREIGN KEY (admin_user_id) REFERENCES tenants(id) ON DELETE CASCADE;
     END IF;
 END $$;
 
-ALTER TABLE user_switches DROP CONSTRAINT IF EXISTS user_switches_target_user_id_fkey;
 DO $$
 BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_tables WHERE tablename = 'user_switches'
+    ) THEN
+        ALTER TABLE user_switches DROP CONSTRAINT IF EXISTS user_switches_target_user_id_fkey;
+    END IF;
+
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint WHERE conname = 'user_switches_target_user_id_fkey'
+    ) and EXISTS (
+        SELECT 1 FROM pg_tables WHERE tablename = 'user_switches'
     ) THEN
         ALTER TABLE user_switches ADD CONSTRAINT user_switches_target_user_id_fkey 
             FOREIGN KEY (target_user_id) REFERENCES tenants(id) ON DELETE CASCADE;
