@@ -106,6 +106,8 @@ class Settings(BaseSettings):
     smtp_use_tls: Optional[bool] = None
     smtp_use_ssl: Optional[bool] = None
     
+    # Frontend URL configuration
+    frontend_url: str = "https://openguardrails.com"
 
     # Server configuration - dual service architecture
     host: str = "0.0.0.0"

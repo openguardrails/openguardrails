@@ -128,9 +128,7 @@ async def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(
     db.commit()
 
     # Build reset URL
-    # In production, this should be the frontend URL
-    frontend_url = settings.frontend_url if hasattr(settings, 'frontend_url') else "http://localhost:3000"
-    reset_url = f"{frontend_url}/platform/reset-password?token={reset_token}"
+    reset_url = f"{settings.frontend_url}/platform/reset-password?token={reset_token}"
 
     # Send reset email
     try:
