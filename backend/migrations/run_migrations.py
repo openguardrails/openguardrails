@@ -101,12 +101,18 @@ def execute_migration(conn, version: int, description: str, file_path: Path) -> 
         # Execute SQL (may contain multiple statements)
         conn.execute(text(sql_content))
 
-        # Record successful execution
+        # Record successful execution (use INSERT ON CONFLICT for idempotency)
         conn.execute(
             text(f"""
                 INSERT INTO {MIGRATION_TABLE}
                 (version, description, filename, success)
                 VALUES (:version, :description, :filename, true)
+                ON CONFLICT (version) DO UPDATE SET
+                    description = EXCLUDED.description,
+                    filename = EXCLUDED.filename,
+                    executed_at = CURRENT_TIMESTAMP,
+                    success = true,
+                    error_message = NULL
             """),
             {
                 "version": version,
@@ -124,13 +130,19 @@ def execute_migration(conn, version: int, description: str, file_path: Path) -> 
         error_msg = str(e)
         logger.error(f"✗ Migration {version} failed: {error_msg}")
 
-        # Record failed execution
+        # Record failed execution (use INSERT ON CONFLICT for idempotency)
         try:
             conn.execute(
                 text(f"""
                     INSERT INTO {MIGRATION_TABLE}
                     (version, description, filename, success, error_message)
                     VALUES (:version, :description, :filename, false, :error)
+                    ON CONFLICT (version) DO UPDATE SET
+                        description = EXCLUDED.description,
+                        filename = EXCLUDED.filename,
+                        executed_at = CURRENT_TIMESTAMP,
+                        success = false,
+                        error_message = EXCLUDED.error_message
                 """),
                 {
                     "version": version,

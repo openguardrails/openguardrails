@@ -37,75 +37,103 @@ CREATE INDEX IF NOT EXISTS idx_upstream_api_configs_is_active ON upstream_api_co
 
 -- ============================================================================
 -- Step 2: Migrate existing data from proxy_model_configs to upstream_api_configs
+-- NOTE: Only run if proxy_model_configs table exists (may not exist in fresh deployments)
 -- ============================================================================
 
--- Group by tenant_id + api_base_url + api_key to consolidate duplicate API configs
-INSERT INTO upstream_api_configs (
-    id,
-    tenant_id,
-    config_name,
-    api_base_url,
-    api_key_encrypted,
-    provider,
-    is_active,
-    block_on_input_risk,
-    block_on_output_risk,
-    enable_reasoning_detection,
-    stream_chunk_size,
-    description,
-    created_at,
-    updated_at
-)
-SELECT
-    gen_random_uuid() as id,
-    tenant_id,
-    -- Use the first config_name as the display name, append "(Migrated)" to avoid conflicts
-    MIN(config_name) || ' (Migrated)' as config_name,
-    api_base_url,
-    api_key_encrypted,
-    -- Infer provider from api_base_url
-    CASE
-        WHEN api_base_url LIKE '%openai%' THEN 'openai'
-        WHEN api_base_url LIKE '%anthropic%' THEN 'anthropic'
-        WHEN api_base_url LIKE '%localhost%' OR api_base_url LIKE '%127.0.0.1%' THEN 'local'
-        ELSE 'other'
-    END as provider,
-    BOOL_OR(enabled) as is_active,  -- Active if any old config was enabled
-    BOOL_OR(block_on_input_risk) as block_on_input_risk,
-    BOOL_OR(block_on_output_risk) as block_on_output_risk,
-    BOOL_OR(enable_reasoning_detection) as enable_reasoning_detection,
-    MAX(stream_chunk_size) as stream_chunk_size,
-    'Migrated from proxy_model_configs. Original models: ' || STRING_AGG(model_name, ', ') as description,
-    MIN(created_at) as created_at,
-    MAX(updated_at) as updated_at
-FROM proxy_model_configs
-GROUP BY tenant_id, api_base_url, api_key_encrypted
-ON CONFLICT (tenant_id, config_name) DO NOTHING;
+DO $$
+BEGIN
+    -- Check if proxy_model_configs table exists
+    IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'proxy_model_configs'
+    ) THEN
+        -- Migrate data from old table to new table
+        INSERT INTO upstream_api_configs (
+            id,
+            tenant_id,
+            config_name,
+            api_base_url,
+            api_key_encrypted,
+            provider,
+            is_active,
+            block_on_input_risk,
+            block_on_output_risk,
+            enable_reasoning_detection,
+            stream_chunk_size,
+            description,
+            created_at,
+            updated_at
+        )
+        SELECT
+            gen_random_uuid() as id,
+            tenant_id,
+            -- Use the first config_name as the display name, append "(Migrated)" to avoid conflicts
+            MIN(config_name) || ' (Migrated)' as config_name,
+            api_base_url,
+            api_key_encrypted,
+            -- Infer provider from api_base_url
+            CASE
+                WHEN api_base_url LIKE '%openai%' THEN 'openai'
+                WHEN api_base_url LIKE '%anthropic%' THEN 'anthropic'
+                WHEN api_base_url LIKE '%localhost%' OR api_base_url LIKE '%127.0.0.1%' THEN 'local'
+                ELSE 'other'
+            END as provider,
+            BOOL_OR(enabled) as is_active,  -- Active if any old config was enabled
+            BOOL_OR(block_on_input_risk) as block_on_input_risk,
+            BOOL_OR(block_on_output_risk) as block_on_output_risk,
+            BOOL_OR(enable_reasoning_detection) as enable_reasoning_detection,
+            MAX(stream_chunk_size) as stream_chunk_size,
+            'Migrated from proxy_model_configs. Original models: ' || STRING_AGG(model_name, ', ') as description,
+            MIN(created_at) as created_at,
+            MAX(updated_at) as updated_at
+        FROM proxy_model_configs
+        GROUP BY tenant_id, api_base_url, api_key_encrypted
+        ON CONFLICT (tenant_id, config_name) DO NOTHING;
+
+        RAISE NOTICE 'Successfully migrated data from proxy_model_configs';
+    ELSE
+        RAISE NOTICE 'Table proxy_model_configs does not exist, skipping data migration';
+    END IF;
+END $$;
 
 -- ============================================================================
 -- Step 3: Update proxy_request_logs to reference new table
+-- NOTE: Only run if proxy_model_configs table exists
 -- ============================================================================
 
 -- Add new column for upstream_api_config_id
 ALTER TABLE proxy_request_logs
 ADD COLUMN IF NOT EXISTS upstream_api_config_id UUID;
 
--- Create a mapping table to help migrate foreign keys
-CREATE TEMP TABLE config_mapping AS
-SELECT
-    pmc.id as old_config_id,
-    uac.id as new_config_id
-FROM proxy_model_configs pmc
-JOIN upstream_api_configs uac ON
-    pmc.tenant_id = uac.tenant_id AND
-    pmc.api_base_url = uac.api_base_url AND
-    pmc.api_key_encrypted = uac.api_key_encrypted;
+DO $$
+BEGIN
+    -- Only run mapping if proxy_model_configs table exists
+    IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'proxy_model_configs'
+    ) THEN
+        -- Create a mapping table to help migrate foreign keys
+        CREATE TEMP TABLE IF NOT EXISTS config_mapping AS
+        SELECT
+            pmc.id as old_config_id,
+            uac.id as new_config_id
+        FROM proxy_model_configs pmc
+        JOIN upstream_api_configs uac ON
+            pmc.tenant_id = uac.tenant_id AND
+            pmc.api_base_url = uac.api_base_url AND
+            pmc.api_key_encrypted = uac.api_key_encrypted;
 
--- Update proxy_request_logs with new foreign keys
-UPDATE proxy_request_logs prl
-SET upstream_api_config_id = cm.new_config_id
-FROM config_mapping cm
-WHERE prl.proxy_config_id = cm.old_config_id;
+        -- Update proxy_request_logs with new foreign keys
+        UPDATE proxy_request_logs prl
+        SET upstream_api_config_id = cm.new_config_id
+        FROM config_mapping cm
+        WHERE prl.proxy_config_id = cm.old_config_id;
+
+        RAISE NOTICE 'Successfully updated proxy_request_logs foreign keys';
+    ELSE
+        RAISE NOTICE 'Table proxy_model_configs does not exist, skipping proxy_request_logs migration';
+    END IF;
+END $$;
 
 -- Add foreign key constraint for new column
 ALTER TABLE proxy_request_logs
@@ -127,9 +155,20 @@ DROP TABLE IF EXISTS proxy_model_configs_deprecated CASCADE;
 ALTER TABLE IF EXISTS proxy_model_configs
 RENAME TO proxy_model_configs_deprecated;
 
--- Add comment to old table
-COMMENT ON TABLE proxy_model_configs_deprecated IS
-'DEPRECATED: Replaced by upstream_api_configs. Kept for rollback purposes. Will be dropped in future migration.';
+-- Add comment to old table (only if it exists)
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'proxy_model_configs_deprecated'
+    ) THEN
+        EXECUTE 'COMMENT ON TABLE proxy_model_configs_deprecated IS
+''DEPRECATED: Replaced by upstream_api_configs. Kept for rollback purposes. Will be dropped in future migration.''';
+        RAISE NOTICE 'Added comment to proxy_model_configs_deprecated table';
+    ELSE
+        RAISE NOTICE 'Table proxy_model_configs_deprecated does not exist, skipping comment';
+    END IF;
+END $$;
 
 -- Make old foreign key nullable for smooth transition
 ALTER TABLE proxy_request_logs

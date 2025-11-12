@@ -8,9 +8,17 @@
 -- Drop the incorrect foreign key constraint
 ALTER TABLE detection_results DROP CONSTRAINT IF EXISTS detection_results_user_id_fkey;
 
--- Add the correct foreign key constraint
-ALTER TABLE detection_results ADD CONSTRAINT detection_results_tenant_id_fkey 
-    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
+-- Add the correct foreign key constraint (idempotent)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'detection_results_tenant_id_fkey'
+    ) THEN
+        ALTER TABLE detection_results ADD CONSTRAINT detection_results_tenant_id_fkey
+            FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
+    END IF;
+END $$;
 
 -- Optionally, rename the index to match the new constraint name
 ALTER INDEX IF EXISTS ix_detection_results_user_id RENAME TO ix_detection_results_tenant_id;

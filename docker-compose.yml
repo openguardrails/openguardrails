@@ -48,7 +48,7 @@ services:
       - SERVICE_NAME=admin
 
       # Database configuration
-      - DATABASE_URL=postgresql://openguardrails:your_password@postgres:54321/openguardrails
+      - DATABASE_URL=postgresql://openguardrails:your_password@postgres:5432/openguardrails
       - RESET_DATABASE_ON_STARTUP=false
       
       # Application configuration
@@ -126,7 +126,7 @@ services:
       - SERVICE_NAME=detection
 
       # Database configuration
-      - DATABASE_URL=postgresql://openguardrails:your_password@postgres:54321/openguardrails
+      - DATABASE_URL=postgresql://openguardrails:your_password@postgres:5432/openguardrails
 
       # Application configuration
       - DEBUG=false
@@ -191,7 +191,7 @@ services:
       - SERVICE_NAME=proxy
 
       # Database configuration
-      - DATABASE_URL=postgresql://openguardrails:your_password@postgres:54321/openguardrails
+      - DATABASE_URL=postgresql://openguardrails:your_password@postgres:5432/openguardrails
 
       # Application configuration
       - DEBUG=false

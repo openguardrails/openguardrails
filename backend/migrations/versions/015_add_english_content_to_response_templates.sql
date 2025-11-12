@@ -13,12 +13,21 @@ DECLARE
     template_record RECORD;
     new_content JSONB;
     english_text TEXT;
+    template_count INTEGER;
 BEGIN
+    -- Check if response_templates table has any data
+    SELECT COUNT(*) INTO template_count FROM response_templates;
+
+    IF template_count = 0 THEN
+        RAISE NOTICE 'No response templates found, skipping migration 015';
+        RETURN;
+    END IF;
+
     -- Loop through all response templates
     FOR template_record IN
-        SELECT id, category, template_content
+        SELECT id, category, template_content::jsonb as template_content
         FROM response_templates
-        WHERE template_content ? 'zh' AND NOT (template_content ? 'en')
+        WHERE (template_content::jsonb) ? 'zh' AND NOT ((template_content::jsonb) ? 'en')
     LOOP
         -- Determine English content based on category
         CASE template_record.category
