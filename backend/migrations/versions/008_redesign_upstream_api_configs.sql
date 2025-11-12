@@ -134,16 +134,24 @@ ON proxy_request_logs(upstream_api_config_id);
 -- Step 4: Mark old table as deprecated (keep for rollback, will drop in future)
 -- ============================================================================
 
--- Drop the empty deprecated table if it already exists (from previous failed migration)
-DROP TABLE IF EXISTS proxy_model_configs_deprecated CASCADE;
 
--- Rename old table to indicate deprecation
-ALTER TABLE IF EXISTS proxy_model_configs
-RENAME TO proxy_model_configs_deprecated;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_tables WHERE tablename = 'proxy_model_configs_deprecated'
+    ) THEN
+        -- Drop the empty deprecated table if it already exists (from previous failed migration)
+        DROP TABLE IF EXISTS proxy_model_configs_deprecated CASCADE;
 
--- Add comment to old table
-COMMENT ON TABLE proxy_model_configs_deprecated IS
-'DEPRECATED: Replaced by upstream_api_configs. Kept for rollback purposes. Will be dropped in future migration.';
+        -- Rename old table to indicate deprecation
+        ALTER TABLE IF EXISTS proxy_model_configs
+        RENAME TO proxy_model_configs_deprecated;
+
+        -- Add comment to old table
+        COMMENT ON TABLE proxy_model_configs_deprecated IS
+        'DEPRECATED: Replaced by upstream_api_configs. Kept for rollback purposes. Will be dropped in future migration.';
+    END IF;
+END $$;
 
 -- Make old foreign key nullable for smooth transition
 ALTER TABLE proxy_request_logs
