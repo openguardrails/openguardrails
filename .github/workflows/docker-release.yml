@@ -16,15 +16,15 @@ jobs:
       matrix:
         include:
           - service: admin
-            dockerfile: Dockerfile
+            dockerfile: backend/Dockerfile
             context: backend
             image: openguardrails-admin
           - service: detection
-            dockerfile: Dockerfile
+            dockerfile: backend/Dockerfile
             context: backend
             image: openguardrails-detection
           - service: proxy
-            dockerfile: Dockerfile
+            dockerfile: backend/Dockerfile
             context: backend
             image: openguardrails-proxy
           - service: frontend
@@ -65,6 +65,8 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64,linux/arm64
+          build-args: |
+            SERVICE_TYPE=${{ matrix.service }}
 
       - name: Image digest
         run: echo "Image pushed successfully for ${{ matrix.service }}"

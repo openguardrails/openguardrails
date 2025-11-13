@@ -2,6 +2,9 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# Build arguments for service selection
+ARG SERVICE_TYPE=default
+
 # Install system dependencies (including postgresql-client for pg_isready)
 RUN apt-get update && apt-get install -y \
     gcc \
@@ -31,6 +34,17 @@ EXPOSE 5000 5001 5002
 # Use entrypoint for startup initialization
 ENTRYPOINT ["/app/entrypoint.sh"]
 
-# Default startup command (will be overridden by docker-compose)
-# Use admin service as default for backwards compatibility
-CMD ["python3", "start_admin_service.py"]
+# Default startup command based on service type
+RUN if [ "$SERVICE_TYPE" = "admin" ]; then \
+        echo 'CMD ["python3", "start_admin_service.py"]' > /app/start_cmd.sh; \
+    elif [ "$SERVICE_TYPE" = "detection" ]; then \
+        echo 'CMD ["python3", "start_detection_service.py"]' > /app/start_cmd.sh; \
+    elif [ "$SERVICE_TYPE" = "proxy" ]; then \
+        echo 'CMD ["python3", "start_proxy_service.py"]' > /app/start_cmd.sh; \
+    else \
+        echo 'CMD ["python3", "start_admin_service.py"]' > /app/start_cmd.sh; \
+    fi
+RUN chmod +x /app/start_cmd.sh
+
+# Use the generated startup command
+CMD ["/bin/bash", "/app/start_cmd.sh"]
