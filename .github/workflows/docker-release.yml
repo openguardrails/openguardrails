@@ -16,16 +16,16 @@ jobs:
       matrix:
         include:
           - service: admin
-            dockerfile: backend/Dockerfile
-            context: .
+            dockerfile: Dockerfile
+            context: backend
             image: openguardrails-admin
           - service: detection
-            dockerfile: backend/Dockerfile
-            context: .
+            dockerfile: Dockerfile
+            context: backend
             image: openguardrails-detection
           - service: proxy
-            dockerfile: backend/Dockerfile
-            context: .
+            dockerfile: Dockerfile
+            context: backend
             image: openguardrails-proxy
           - service: frontend
             dockerfile: frontend/Dockerfile
