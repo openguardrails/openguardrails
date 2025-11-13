@@ -446,12 +446,137 @@ print("Result:", result)
                 {t('docs.n8nIntegrationDesc')}
               </Paragraph>
 
+              {/* Step 1: Create Credential */}
+              <div style={{ marginTop: 24 }}>
+                <Text strong style={{ fontSize: 16 }}>{t('docs.n8nCreateCredential')}</Text>
+                <Paragraph style={{ marginTop: 8 }}>
+                  {t('docs.n8nCreateCredentialDesc')}
+                </Paragraph>
+
+                <ol style={{ marginTop: 12 }}>
+                  <li style={{ marginBottom: 16 }}>
+                    <Text strong>{t('docs.n8nCredentialStep1')}</Text>
+                    <br />
+                    <Text>{t('docs.n8nCredentialStep1Desc')}</Text>
+                    <div style={{ textAlign: 'center', marginTop: 8 }}>
+                      <img
+                        src="/n8n-1.png"
+                        alt="n8n Create Credential"
+                        style={{
+                          maxWidth: '60%',
+                          height: 'auto',
+                          borderRadius: 8,
+                          border: '1px solid #f0f0f0',
+                          boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                        }}
+                      />
+                    </div>
+                  </li>
+
+                  <li style={{ marginBottom: 16 }}>
+                    <Text strong>{t('docs.n8nCredentialStep2')}</Text>
+                    <br />
+                    <Text>{t('docs.n8nCredentialStep2Desc')}</Text>
+                    <div style={{ textAlign: 'center', marginTop: 8 }}>
+                      <img
+                        src="/n8n-2.png"
+                        alt="n8n Select Bearer Auth"
+                        style={{
+                          maxWidth: '60%',
+                          height: 'auto',
+                          borderRadius: 8,
+                          border: '1px solid #f0f0f0',
+                          boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                        }}
+                      />
+                    </div>
+                  </li>
+
+                  <li style={{ marginBottom: 16 }}>
+                    <Text strong>{t('docs.n8nCredentialStep3')}</Text>
+                    <br />
+                    <Text>{t('docs.n8nCredentialStep3Desc')}</Text>
+                    <div style={{ textAlign: 'center', marginTop: 8 }}>
+                      <img
+                        src="/n8n-3.png"
+                        alt="OpenGuardrails Application Management"
+                        style={{
+                          maxWidth: '80%',
+                          height: 'auto',
+                          borderRadius: 8,
+                          border: '1px solid #f0f0f0',
+                          boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                        }}
+                      />
+                    </div>
+                  </li>
+
+                  <li style={{ marginBottom: 16 }}>
+                    <Text strong>{t('docs.n8nCredentialStep4')}</Text>
+                    <br />
+                    <Text>{t('docs.n8nCredentialStep4Desc')}</Text>
+                    <div style={{ textAlign: 'center', marginTop: 8 }}>
+                      <img
+                        src="/n8n-4.png"
+                        alt="Copy API Key"
+                        style={{
+                          maxWidth: '80%',
+                          height: 'auto',
+                          borderRadius: 8,
+                          border: '1px solid #f0f0f0',
+                          boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                        }}
+                      />
+                    </div>
+                  </li>
+
+                  <li style={{ marginBottom: 16 }}>
+                    <Text strong>{t('docs.n8nCredentialStep5')}</Text>
+                    <br />
+                    <Text>{t('docs.n8nCredentialStep5Desc')}</Text>
+                    <div style={{ textAlign: 'center', marginTop: 8 }}>
+                      <img
+                        src="/n8n-5.png"
+                        alt="Paste API Key in n8n"
+                        style={{
+                          maxWidth: '80%',
+                          height: 'auto',
+                          borderRadius: 8,
+                          border: '1px solid #f0f0f0',
+                          boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                        }}
+                      />
+                    </div>
+                  </li>
+
+                  <li style={{ marginBottom: 16 }}>
+                    <Text strong>{t('docs.n8nCredentialStep6')}</Text>
+                    <br />
+                    <Text>{t('docs.n8nCredentialStep6Desc')}</Text>
+                    <div style={{ textAlign: 'center', marginTop: 8 }}>
+                      <img
+                        src="/n8n-6.png"
+                        alt="Credential Created"
+                        style={{
+                          maxWidth: '80%',
+                          height: 'auto',
+                          borderRadius: 8,
+                          border: '1px solid #f0f0f0',
+                          boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                        }}
+                      />
+                    </div>
+                  </li>
+                </ol>
+              </div>
+
+              {/* Step 2: Choose Integration Method */}
               <Alert
                 message={t('docs.n8nTwoMethods')}
                 description={t('docs.n8nTwoMethodsDesc')}
                 type="info"
                 showIcon
-                style={{ marginBottom: 16 }}
+                style={{ marginTop: 24, marginBottom: 16 }}
               />
 
               <div style={{ marginTop: 24 }}>
@@ -510,23 +635,12 @@ print("Result:", result)
                 </Paragraph>
 
                 <Text strong>{t('docs.n8nMethod2SetupSteps')}:</Text>
-                <ol style={{ marginTop: 12 }}>
-                  <li>
-                    <Text strong>{t('docs.n8nMethod2Step1')}</Text>
-                    <ul style={{ marginTop: 8 }}>
-                      <li>{t('docs.n8nMethod2Step1Name')}</li>
-                      <li>{t('docs.n8nMethod2Step1Value')}</li>
-                    </ul>
-                  </li>
-                  <li style={{ marginTop: 12 }}>
-                    <Text strong>{t('docs.n8nMethod2Step2')}</Text>
-                    <ul style={{ marginTop: 8 }}>
-                      <li>{t('docs.n8nMethod2Step2Method')}</li>
-                      <li>{t('docs.n8nMethod2Step2Url')}</li>
-                      <li>{t('docs.n8nMethod2Step2Auth')}</li>
-                    </ul>
-                  </li>
-                </ol>
+                <ul style={{ marginTop: 12 }}>
+                  <li>{t('docs.n8nMethod2Step1')}</li>
+                  <li>{t('docs.n8nMethod2Step2Method')}</li>
+                  <li>{t('docs.n8nMethod2Step2Url')}</li>
+                  <li>{t('docs.n8nMethod2Step2Auth')}</li>
+                </ul>
 
                 <div style={{ marginTop: 16 }}>
                   <Text strong>{t('docs.n8nMethod2RequestBody')}:</Text>
@@ -1258,69 +1372,6 @@ print(f"Risk Level: {response.overall_risk_level}")
 
           {/* Footer */}
           <Divider />
-
-          {/* Dashboard Screenshot */}
-          <div style={{ marginTop: 32 }}>
-            <Title level={4}>{t('docs.dashboardOverview') || 'Dashboard Overview'}</Title>
-            <Paragraph>
-              {t('docs.dashboardOverviewDesc') || 'The OpenGuardrails platform provides a comprehensive dashboard for monitoring and managing your AI safety guardrails.'}
-            </Paragraph>
-            <div style={{ textAlign: 'center', marginTop: 16 }}>
-              <img
-                src="/dashboard.png"
-                alt="Dashboard Overview"
-                style={{
-                  maxWidth: '100%',
-                  height: 'auto',
-                  borderRadius: 8,
-                  border: '1px solid #f0f0f0',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-                }}
-              />
-            </div>
-          </div>
-
-          {/* Dify Integration Screenshots */}
-          <div style={{ marginTop: 32 }}>
-            <Title level={4}>{t('docs.difyIntegrationScreenshots') || 'Dify Integration Screenshots'}</Title>
-            <Paragraph>
-              {t('docs.difyIntegrationScreenshotsDesc') || 'Below are screenshots showing how to configure OpenGuardrails as a moderation extension in Dify.'}
-            </Paragraph>
-
-            <div style={{ marginTop: 16 }}>
-              <Text strong>{t('docs.difyModerationSettings') || 'Dify Content Moderation Settings'}</Text>
-              <div style={{ textAlign: 'center', marginTop: 8 }}>
-                <img
-                  src="/dify-moderation.png"
-                  alt="Dify Moderation Settings"
-                  style={{
-                    maxWidth: '100%',
-                    height: 'auto',
-                    borderRadius: 8,
-                    border: '1px solid #f0f0f0',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-                  }}
-                />
-              </div>
-            </div>
-
-            <div style={{ marginTop: 24 }}>
-              <Text strong>{t('docs.difyApiExtensionConfig') || 'Dify API Extension Configuration'}</Text>
-              <div style={{ textAlign: 'center', marginTop: 8 }}>
-                <img
-                  src="/dify-moderation-extension.png"
-                  alt="Dify API Extension Configuration"
-                  style={{
-                    maxWidth: '100%',
-                    height: 'auto',
-                    borderRadius: 8,
-                    border: '1px solid #f0f0f0',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-                  }}
-                />
-              </div>
-            </div>
-          </div>
 
           <Divider />
           <div style={{ textAlign: 'center', color: '#666' }}>

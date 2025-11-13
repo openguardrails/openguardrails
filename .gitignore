@@ -73,4 +73,5 @@ data/
 tests
 sdks/
 CLAUDE.md
+AGENTS.md
 models/
