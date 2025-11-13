@@ -29,7 +29,7 @@ jobs:
             image: openguardrails-proxy
           - service: frontend
             dockerfile: frontend/Dockerfile
-            context: frontend
+            context: .
             image: openguardrails-frontend
 
     steps:
