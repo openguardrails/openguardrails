@@ -6,7 +6,7 @@ on:
       - 'v*.*.*'  # Triggers on tags like v1.0.0, v2.1.3, etc.
 
 env:
-  DOCKER_HUB_USERNAME: thomaslwang
+  DOCKER_HUB_USERNAME: openguardrails
   REGISTRY: docker.io
 
 jobs:
@@ -87,9 +87,9 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "The following Docker images have been built and pushed to Docker Hub:" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- \`thomaslwang/openguardrails-admin:${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`thomaslwang/openguardrails-detection:${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`thomaslwang/openguardrails-proxy:${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`thomaslwang/openguardrails-frontend:${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`openguardrails/openguardrails-admin:${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`openguardrails/openguardrails-detection:${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`openguardrails/openguardrails-proxy:${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`openguardrails/openguardrails-frontend:${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Also tagged as \`:latest\`" >> $GITHUB_STEP_SUMMARY
