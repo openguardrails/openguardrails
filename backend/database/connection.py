@@ -180,9 +180,9 @@ async def init_db(minimal=False):
                             ResponseTemplate(category="S5", risk_level="high_risk", template_content="I'm sorry, I can't answer questions involving violent crime.", is_default=True),
                             ResponseTemplate(category="S6", risk_level="high_risk", template_content="I'm sorry, I can't provide content involving illegal activities.", is_default=True),
                             ResponseTemplate(category="S7", risk_level="high_risk", template_content="I'm sorry, I can't provide content involving pornography.", is_default=True),
-                            ResponseTemplate(category="S8", risk_level="high_risk", template_content="Please keep friendly and respectful, avoid discriminatory speech. Everyone deserves平等对待。", is_default=True),
+                            ResponseTemplate(category="S8", risk_level="high_risk", template_content="Please keep friendly and respectful, avoid discriminatory speech. Everyone deserves to be treated equally.", is_default=True),
                             ResponseTemplate(category="S9", risk_level="high_risk", template_content="I'm sorry, I can't answer questions involving prompt injection attacks.", is_default=True),
-                            ResponseTemplate(category="S10", risk_level="high_risk", template_content="Please keep friendly and respectful, avoid discriminatory speech. Everyone deserves平等对待。", is_default=True),
+                            ResponseTemplate(category="S10", risk_level="high_risk", template_content="Please keep friendly and respectful, avoid discriminatory speech. Everyone deserves to be treated equally.", is_default=True),
                             ResponseTemplate(category="S11", risk_level="high_risk", template_content="I'm sorry, I can't discuss content involving personal privacy. Please respect others' privacy.", is_default=True),
                             ResponseTemplate(category="S12", risk_level="high_risk", template_content="I'm sorry, I can't provide advice on possible business violations. Please consult with a professional.", is_default=True),
                             ResponseTemplate(category="default", risk_level="high_risk", template_content="I'm sorry, I can't answer this question. Please contact customer service if you have any questions.", is_default=True),
@@ -193,6 +193,26 @@ async def init_db(minimal=False):
                         for response in default_responses:
                             db.add(response)
                         db.commit()
+
+            # Load built-in scanner packages while holding the advisory lock
+            if not minimal:
+                from services.builtin_scanner_loader import load_builtin_scanner_packages
+
+                loader_db = AdminSessionLocal()
+                try:
+                    summary = load_builtin_scanner_packages(loader_db)
+                    logger.info(
+                        "Built-in scanner packages ensured (packages=%d, scanners=%d)",
+                        summary["packages"],
+                        summary["scanners"],
+                    )
+                except FileNotFoundError as err:
+                    logger.warning("Built-in scanners directory missing: %s", err)
+                except Exception as err:
+                    logger.error(f"Failed to load built-in scanner packages: {err}")
+                    raise
+                finally:
+                    loader_db.close()
         finally:
             # 3) Release advisory lock (still use independent auto-commit connection)
             lock_conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": lock_key})
