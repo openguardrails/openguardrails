@@ -7,6 +7,9 @@ import { authService, UserInfo } from '../../services/auth';
 const { Title, Text, Paragraph } = Typography;
 const { Panel } = Collapse;
 
+// Get base URL from import.meta.env or default to /platform/
+const BASE_URL = import.meta.env.BASE_URL || '/platform/';
+
 const Documentation: React.FC = () => {
   const { t } = useTranslation();
   const [user, setUser] = useState<UserInfo | null>(null);
@@ -338,7 +341,7 @@ print("Result:", result)
 
               <div style={{ textAlign: 'center', marginTop: 16, marginBottom: 16 }}>
                 <img
-                  src="/dify-moderation.png"
+                  src={`${BASE_URL}dify-moderation.png`}
                   alt="Dify Moderation"
                   style={{
                     maxWidth: '60%',
@@ -368,7 +371,7 @@ print("Result:", result)
 
               <div style={{ textAlign: 'center', marginTop: 16, marginBottom: 16 }}>
                 <img
-                  src="/dify-moderation-extension.png"
+                  src={`${BASE_URL}dify-moderation-extension.png`}
                   alt="Dify Moderation API Extension"
                   style={{
                     maxWidth: '60%',
@@ -460,7 +463,7 @@ print("Result:", result)
                     <Text>{t('docs.n8nCredentialStep1Desc')}</Text>
                     <div style={{ textAlign: 'center', marginTop: 8 }}>
                       <img
-                        src="/n8n-1.png"
+                        src={`${BASE_URL}n8n-1.png`}
                         alt="n8n Create Credential"
                         style={{
                           maxWidth: '60%',
@@ -479,7 +482,7 @@ print("Result:", result)
                     <Text>{t('docs.n8nCredentialStep2Desc')}</Text>
                     <div style={{ textAlign: 'center', marginTop: 8 }}>
                       <img
-                        src="/n8n-2.png"
+                        src={`${BASE_URL}n8n-2.png`}
                         alt="n8n Select Bearer Auth"
                         style={{
                           maxWidth: '60%',
@@ -498,7 +501,7 @@ print("Result:", result)
                     <Text>{t('docs.n8nCredentialStep3Desc')}</Text>
                     <div style={{ textAlign: 'center', marginTop: 8 }}>
                       <img
-                        src="/n8n-3.png"
+                        src={`${BASE_URL}n8n-3.png`}
                         alt="OpenGuardrails Application Management"
                         style={{
                           maxWidth: '80%',
@@ -517,7 +520,7 @@ print("Result:", result)
                     <Text>{t('docs.n8nCredentialStep4Desc')}</Text>
                     <div style={{ textAlign: 'center', marginTop: 8 }}>
                       <img
-                        src="/n8n-4.png"
+                        src={`${BASE_URL}n8n-4.png`}
                         alt="Copy API Key"
                         style={{
                           maxWidth: '80%',
@@ -536,7 +539,7 @@ print("Result:", result)
                     <Text>{t('docs.n8nCredentialStep5Desc')}</Text>
                     <div style={{ textAlign: 'center', marginTop: 8 }}>
                       <img
-                        src="/n8n-5.png"
+                        src={`${BASE_URL}n8n-5.png`}
                         alt="Paste API Key in n8n"
                         style={{
                           maxWidth: '80%',
@@ -555,7 +558,7 @@ print("Result:", result)
                     <Text>{t('docs.n8nCredentialStep6Desc')}</Text>
                     <div style={{ textAlign: 'center', marginTop: 8 }}>
                       <img
-                        src="/n8n-6.png"
+                        src={`${BASE_URL}n8n-6.png`}
                         alt="Credential Created"
                         style={{
                           maxWidth: '80%',
