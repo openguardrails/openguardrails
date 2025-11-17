@@ -14,6 +14,19 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify password"""
     return pwd_context.verify(plain_password, hashed_password)
 
+def check_existing_password_strength(plain_password: str, hashed_password: str) -> bool:
+    """
+    Check if existing user's password meets current strength requirements
+    This function verifies the password first, then checks its strength
+    """
+    # First verify the password is correct
+    if not verify_password(plain_password, hashed_password):
+        return False
+
+    # Then check if it meets current strength requirements
+    from utils.validators import is_password_strong
+    return is_password_strong(plain_password)
+
 def get_password_hash(password: str) -> str:
     """Get password hash"""
     return pwd_context.hash(password)

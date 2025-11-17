@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Form, Input, Button, Card, Typography, message, Space, Alert } from 'antd';
+import { Form, Input, Button, Card, Typography, message, Space, Alert, Modal } from 'antd';
 import { UserOutlined, LockOutlined } from '@ant-design/icons';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
@@ -18,6 +18,8 @@ const Login: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [showVerificationAlert, setShowVerificationAlert] = useState(false);
   const [unverifiedEmail, setUnverifiedEmail] = useState('');
+  const [showPasswordChangeModal, setShowPasswordChangeModal] = useState(false);
+  const [passwordMessage, setPasswordMessage] = useState('');
   const { login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -31,9 +33,15 @@ const Login: React.FC = () => {
       setShowVerificationAlert(false);
       // Get current language from localStorage
       const currentLanguage = localStorage.getItem('i18nextLng') || 'en';
-      await login(values.email, values.password, currentLanguage);
-      message.success(t('login.loginSuccess'));
-      navigate(from, { replace: true });
+      const loginResult = await login(values.email, values.password, currentLanguage);
+
+      if (loginResult.requiresPasswordChange) {
+        setPasswordMessage(loginResult.passwordMessage || 'Your password does not meet current security requirements. Please update it.');
+        setShowPasswordChangeModal(true);
+      } else {
+        message.success(t('login.loginSuccess'));
+        navigate(from, { replace: true });
+      }
     } catch (error: any) {
       console.error('Login error:', error);
       console.error('Error details:', {
@@ -173,6 +181,27 @@ const Login: React.FC = () => {
             </Space>
           </div>
         </Card>
+
+        {/* Password Change Modal */}
+        <Modal
+          title={t('login.passwordChangeRequired')}
+          open={showPasswordChangeModal}
+          onCancel={() => setShowPasswordChangeModal(false)}
+          footer={[
+            <Button key="later" onClick={() => setShowPasswordChangeModal(false)}>
+              {t('login.changeLater')}
+            </Button>,
+            <Button key="change" type="primary" onClick={() => {
+              setShowPasswordChangeModal(false);
+              navigate('/account?tab=password');
+            }}>
+              {t('login.changeNow')}
+            </Button>
+          ]}
+        >
+          <p>{passwordMessage}</p>
+          <p>{t('login.passwordChangeDescription')}</p>
+        </Modal>
       </div>
     </div>
   );

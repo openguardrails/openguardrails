@@ -359,18 +359,24 @@ Access the visual scanner management interface:
 
 Download and launch the OpenGuardrails main model service using **vLLM**.
 
+First, set your Hugging Face token:
+
 ```bash
 export HF_TOKEN=your-hf-token
+```
 
+Then start the OpenGuardrails-Text model:
+
+```bash
 docker run --runtime nvidia --gpus all \
     -v ~/.cache/huggingface:/root/.cache/huggingface \
     --env "HF_TOKEN=$HF_TOKEN" \
     -p 58002:8000 \
     --ipc=host \
-    vllm/vllm-openai:v0.10.2 \
+    vllm/vllm-openai:v0.10.1 \
     --model openguardrails/OpenGuardrails-Text-2510 \
     --served-model-name OpenGuardrails-Text
-````
+```
 
 Once the container starts, the model API will be available at:
 
@@ -380,7 +386,7 @@ http://localhost:58002/v1
 
 Quick test of OpenGuardrails-Text model
 
-``` bash
+```bash
 curl -X POST "http://localhost:58002/v1/chat/completions" \
     -H "Authorization: Bearer $YOUR_API_KEY" \
     -H "Content-Type: application/json" \
@@ -404,7 +410,7 @@ docker run --runtime nvidia --gpus all \
     --env "HF_TOKEN=$HF_TOKEN" \
     -p 58004:8000 \
     --ipc=host \
-    vllm/vllm-openai:v0.10.2 \
+    vllm/vllm-openai:v0.10.1 \
     --model BAAI/bge-m3 \
     --served-model-name bge-m3
 ```
@@ -417,7 +423,7 @@ http://localhost:58004/v1
 
 Quick test of embedding model
 
-``` bash
+```bash
 curl http://localhost:58004/v1/embeddings \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $YOUR_API_KEY" \

@@ -23,6 +23,8 @@ export interface LoginResponse {
   api_key?: string;
   tenant_id?: string;
   is_super_admin?: boolean;
+  requires_password_change?: boolean;
+  password_message?: string;
 }
 
 export interface UserInfo {
@@ -98,8 +100,22 @@ class AuthService {
     if (!token) {
       throw new Error('No authentication token found');
     }
-    const response = await axios.put<{ status: string; message: string; language: string }>(`${this.baseURL}/api/v1/users/language`, 
-      { language }, 
+    const response = await axios.put<{ status: string; message: string; language: string }>(`${this.baseURL}/api/v1/users/language`,
+      { language },
+      {
+        headers: { Authorization: `Bearer ${token}` },
+      }
+    );
+    return response.data;
+  }
+
+  async changePassword(currentPassword: string, newPassword: string): Promise<{ status: string; message: string }> {
+    const token = this.getToken();
+    if (!token) {
+      throw new Error('No authentication token found');
+    }
+    const response = await axios.post<{ status: string; message: string }>(`${this.baseURL}/api/v1/users/change-password`,
+      { current_password: currentPassword, new_password: newPassword },
       {
         headers: { Authorization: `Bearer ${token}` },
       }

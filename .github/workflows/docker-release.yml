@@ -1,0 +1,95 @@
+name: Build and Push Docker Images on Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'  # Triggers on tags like v1.0.0, v2.1.3, etc.
+
+env:
+  DOCKER_HUB_USERNAME: openguardrails
+  REGISTRY: docker.io
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - service: admin
+            dockerfile: backend/Dockerfile
+            context: backend
+            image: openguardrails-admin
+          - service: detection
+            dockerfile: backend/Dockerfile
+            context: backend
+            image: openguardrails-detection
+          - service: proxy
+            dockerfile: backend/Dockerfile
+            context: backend
+            image: openguardrails-proxy
+          - service: frontend
+            dockerfile: frontend/Dockerfile
+            context: .
+            image: openguardrails-frontend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_TOKEN }}
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          # Remove 'v' prefix from tag (e.g., v1.0.0 -> 1.0.0)
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: |
+            ${{ env.DOCKER_HUB_USERNAME }}/${{ matrix.image }}:latest
+            ${{ env.DOCKER_HUB_USERNAME }}/${{ matrix.image }}:${{ steps.version.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            SERVICE_TYPE=${{ matrix.service }}
+
+      - name: Image digest
+        run: echo "Image pushed successfully for ${{ matrix.service }}"
+
+  create-release-summary:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Create release summary
+        run: |
+          echo "## Docker Images Published" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The following Docker images have been built and pushed to Docker Hub:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- \`openguardrails/openguardrails-admin:${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`openguardrails/openguardrails-detection:${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`openguardrails/openguardrails-proxy:${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`openguardrails/openguardrails-frontend:${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Also tagged as \`:latest\`" >> $GITHUB_STEP_SUMMARY

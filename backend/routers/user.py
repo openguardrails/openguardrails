@@ -41,6 +41,8 @@ class LoginResponse(BaseModel):
     api_key: str
     tenant_id: str  # Changed to string UUID
     is_super_admin: bool
+    requires_password_change: bool = False
+    password_message: Optional[str] = None
 
 class UserInfo(BaseModel):
     id: str  # Changed to string UUID
@@ -94,6 +96,12 @@ async def register_user(register_data: RegisterRequest, db: Session = Depends(ge
     # Create tenant
     try:
         tenant = create_user(db, register_data.email, register_data.password)
+    except ValueError as e:
+        # Handle password validation errors gracefully
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -226,6 +234,11 @@ async def login_user(login_data: LoginRequest, request: Request, db: Session = D
             detail="Account not verified. Please check your email address and complete verification."
         )
 
+    # Check if password meets current strength requirements
+    from utils.auth import check_existing_password_strength
+    requires_password_change = not check_existing_password_strength(login_data.password, tenant.password_hash)
+    password_message = "Your password does not meet current security requirements. Please update it to a stronger password." if requires_password_change else None
+
     # Update user language preference if provided
     if login_data.language and login_data.language in ['en', 'zh']:
         tenant.language = login_data.language
@@ -247,7 +260,9 @@ async def login_user(login_data: LoginRequest, request: Request, db: Session = D
         expires_in=settings.jwt_access_token_expire_minutes * 60,
         api_key=tenant.api_key,
         tenant_id=str(tenant.id),
-        is_super_admin=is_super_admin
+        is_super_admin=is_super_admin,
+        requires_password_change=requires_password_change,
+        password_message=password_message
     )
 
 @router.get("/me", response_model=UserInfo)
@@ -310,6 +325,48 @@ async def logout_user():
 
 class UpdateLanguageRequest(BaseModel):
     language: str
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+@router.post("/change-password", response_model=dict)
+async def change_password(
+    password_data: ChangePasswordRequest,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+):
+    """Change current user's password"""
+    # Get current user
+    tenant = get_current_user_from_token(credentials, db)
+
+    # Verify current password
+    from utils.auth import verify_password
+    if not verify_password(password_data.current_password, tenant.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect"
+        )
+
+    # Validate new password strength
+    from utils.validators import validate_password_strength
+    password_validation = validate_password_strength(password_data.new_password)
+
+    if not password_validation["is_valid"]:
+        error_messages = ", ".join(password_validation["errors"])
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"New password does not meet security requirements: {error_messages}"
+        )
+
+    # Update password
+    tenant.password_hash = get_password_hash(password_data.new_password)
+    db.commit()
+
+    return {
+        "status": "success",
+        "message": "Password changed successfully"
+    }
 
 @router.put("/language", response_model=dict)
 async def update_user_language(

@@ -13,7 +13,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   switchInfo: SwitchInfo;
-  login: (email: string, password: string, language?: string) => Promise<void>;
+  login: (email: string, password: string, language?: string) => Promise<{ requiresPasswordChange?: boolean; passwordMessage?: string }>;
   logout: () => Promise<void>;
   switchToUser: (userId: string) => Promise<void>;
   exitSwitch: () => Promise<void>;
@@ -106,11 +106,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       const response = await authService.login({ email, password, language });
       authService.setToken(response.access_token);
-      
+
       const userInfo = await authService.getCurrentUser();
       setUser(userInfo);
       setIsAuthenticated(true);
-      
+
       // Set language preference after successful login
       if (userInfo.language) {
         localStorage.setItem('i18nextLng', userInfo.language);
@@ -118,13 +118,18 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         const i18n = (await import('../i18n')).default;
         await i18n.changeLanguage(userInfo.language);
       }
-      
+
       // Refresh switch status after login, avoid 401 prompt due to concurrent requests on homepage
       try {
         await refreshSwitchStatus();
       } catch (e) {
         // Ignore switch status error
       }
+
+      return {
+        requiresPasswordChange: response.requires_password_change,
+        passwordMessage: response.password_message
+      };
     } catch (error) {
       console.error('Login failed:', error);
       throw error;
