@@ -21,6 +21,14 @@ def generate_api_key() -> str:
 
 def create_user(db: Session, email: str, password: str) -> Tenant:
     """Create new tenant"""
+    # Validate password strength
+    from utils.validators import validate_password_strength
+    password_validation = validate_password_strength(password)
+
+    if not password_validation["is_valid"]:
+        error_messages = ", ".join(password_validation["errors"])
+        raise ValueError(f"Password does not meet security requirements: {error_messages}")
+
     hashed_password = get_password_hash(password)
     api_key = generate_api_key()
 

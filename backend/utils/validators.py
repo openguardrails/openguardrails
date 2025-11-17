@@ -84,3 +84,67 @@ def extract_keywords(text: str) -> List[str]:
     # Simple keyword extraction, can be optimized later
     words = re.findall(r'\w+', text.lower())
     return [word for word in words if len(word) > 2]
+
+def validate_password_strength(password: str) -> dict:
+    """
+    Validate password strength
+
+    Requirements:
+    - At least 8 characters long
+    - Contains uppercase letters
+    - Contains lowercase letters
+    - Contains numbers
+
+    Returns:
+        dict with keys:
+        - is_valid: bool
+        - errors: list of error messages
+        - strength_score: int (0-100)
+    """
+    errors = []
+    strength_score = 0
+
+    # Length check
+    if len(password) < 8:
+        errors.append("Password must be at least 8 characters long")
+    else:
+        strength_score += 25
+
+    # Uppercase check
+    if not re.search(r'[A-Z]', password):
+        errors.append("Password must contain at least one uppercase letter")
+    else:
+        strength_score += 25
+
+    # Lowercase check
+    if not re.search(r'[a-z]', password):
+        errors.append("Password must contain at least one lowercase letter")
+    else:
+        strength_score += 25
+
+    # Number check
+    if not re.search(r'\d', password):
+        errors.append("Password must contain at least one number")
+    else:
+        strength_score += 25
+
+    # Bonus points for special characters
+    if re.search(r'[!@#$%^&*(),.?":{}|<>]', password):
+        strength_score = min(100, strength_score + 10)
+
+    # Bonus points for longer passwords
+    if len(password) >= 12:
+        strength_score = min(100, strength_score + 10)
+
+    is_valid = len(errors) == 0
+
+    return {
+        "is_valid": is_valid,
+        "errors": errors,
+        "strength_score": strength_score
+    }
+
+def is_password_strong(password: str) -> bool:
+    """Simple boolean check for password strength"""
+    result = validate_password_strength(password)
+    return result["is_valid"]

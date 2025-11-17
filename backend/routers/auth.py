@@ -164,11 +164,15 @@ async def reset_password(request: ResetPasswordRequest, db: Session = Depends(ge
             detail="User not found"
         )
 
-    # Validate new password
-    if len(request.new_password) < 8:
+    # Validate new password strength
+    from utils.validators import validate_password_strength
+    password_validation = validate_password_strength(request.new_password)
+
+    if not password_validation["is_valid"]:
+        error_messages = ", ".join(password_validation["errors"])
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Password must be at least 8 characters long"
+            detail=f"Password does not meet security requirements: {error_messages}"
         )
 
     # Update password

@@ -133,6 +133,30 @@ const Register: React.FC = () => {
     }
   };
 
+  const validatePassword = (_: any, value: string) => {
+    if (!value) {
+      return Promise.reject(new Error(t('register.passwordRequired')));
+    }
+
+    if (value.length < 8) {
+      return Promise.reject(new Error(t('register.passwordMinLength')));
+    }
+
+    if (!/[A-Z]/.test(value)) {
+      return Promise.reject(new Error(t('register.passwordUppercase')));
+    }
+
+    if (!/[a-z]/.test(value)) {
+      return Promise.reject(new Error(t('register.passwordLowercase')));
+    }
+
+    if (!/\d/.test(value)) {
+      return Promise.reject(new Error(t('register.passwordNumber')));
+    }
+
+    return Promise.resolve();
+  };
+
   const renderRegisterForm = () => (
     <Form
       name="register"
@@ -158,8 +182,7 @@ const Register: React.FC = () => {
       <Form.Item
         name="password"
         rules={[
-          { required: true, message: t('register.passwordRequired') },
-          { min: 8, message: t('register.passwordMinLength') },
+          { validator: validatePassword },
         ]}
       >
         <Input.Password
