@@ -448,6 +448,11 @@
     },
     "applications": "Applications"
   },
+  "scanner": {
+    "custom": "Custom",
+    "marketplace": "Marketplace",
+    "official": "Official"
+  },
   "blacklist": {
     "title": "Blacklist Management",
     "description": "Description",
@@ -649,7 +654,32 @@
     "similarityThresholdRequired": "Please set similarity threshold",
     "similarityThresholdRange": "Similarity threshold must be between 0-1",
     "similarityThresholdPlaceholder": "Enter similarity threshold (0-1), e.g., 0.7",
-    "noSimilarQuestions": "No similar questions found"
+    "noSimilarQuestions": "No similar questions found",
+    "scannerType": "Scanner Type",
+    "selectScannerType": "Please select scanner type",
+    "selectScannerTypePlaceholder": "Please select scanner type",
+    "scanner": "Scanner",
+    "selectScanner": "Please select scanner",
+    "selectScannerPlaceholder": "Please select scanner",
+    "officialScanner": "Official Scanner",
+    "emptyFile": "File is empty",
+    "formatError": "Line {{line}} format error: {{error}}",
+    "invalidJSON": "Invalid JSON format",
+    "missingFields": "Line {{line}} missing required fields (questionid, question, answer)",
+    "invalidFieldType": "Line {{line}} field type error",
+    "emptyContent": "Line {{line}} has empty content",
+    "parseError": "Line {{line}} parse error: {{error}}",
+    "noValidPairs": "No valid Q&A pairs found",
+    "readFileFailed": "Failed to read file",
+    "replaceSuccess": "File replaced successfully",
+    "replaceFailed": "File replace failed",
+    "deleteFailed": "Delete failed",
+    "searchFailed": "Search failed",
+    "enterSearchContent": "Please enter search content",
+    "toggleFailed": "Toggle failed",
+    "disabledByYou": "Disabled by you",
+    "enabledSuccess": "Knowledge base enabled successfully",
+    "disabledSuccess": "Knowledge base disabled successfully"
   },
   "proxy": {
     "title": "Security Gateway Configuration",

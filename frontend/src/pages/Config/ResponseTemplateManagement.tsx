@@ -215,20 +215,61 @@ const ResponseTemplateManagement: React.FC = () => {
       title: t('template.riskCategory'),
       dataIndex: 'category',
       key: 'category',
-      render: (category: string) => (
-        <Tag color={category === 'default' ? 'blue' : 'orange'}>
-          {getCategoryLabel(category)}
-        </Tag>
-      ),
+      render: (category: string, record: ResponseTemplate) => {
+        // If scanner_type is blacklist, show blacklist name
+        if (record.scanner_type === 'blacklist' && record.scanner_identifier) {
+          return (
+            <Tag color="purple">
+              {t('config.blacklist')} - {record.scanner_identifier}
+            </Tag>
+          );
+        }
+        // If scanner_type is whitelist, show whitelist name
+        if (record.scanner_type === 'whitelist' && record.scanner_identifier) {
+          return (
+            <Tag color="green">
+              {t('config.whitelist')} - {record.scanner_identifier}
+            </Tag>
+          );
+        }
+        // If scanner_type is custom_scanner, show "tag - name"
+        if (record.scanner_type === 'custom_scanner' && record.scanner_identifier) {
+          const displayText = record.scanner_name
+            ? `${record.scanner_identifier} - ${record.scanner_name}`
+            : record.scanner_identifier;
+          return (
+            <Tag color="cyan">
+              {displayText}
+            </Tag>
+          );
+        }
+        // If scanner_type is official_scanner or marketplace_scanner, show "tag - name"
+        if ((record.scanner_type === 'official_scanner' || record.scanner_type === 'marketplace_scanner') && record.scanner_identifier) {
+          const displayText = record.scanner_name
+            ? `${record.scanner_identifier} - ${record.scanner_name}`
+            : record.scanner_identifier;
+          return (
+            <Tag color="blue">
+              {displayText}
+            </Tag>
+          );
+        }
+        // Otherwise show standard category
+        return (
+          <Tag color={category === 'default' ? 'blue' : 'orange'}>
+            {getCategoryLabel(category)}
+          </Tag>
+        );
+      },
     },
     {
       title: t('results.riskLevel'),
-      dataIndex: 'category',
+      dataIndex: 'risk_level',
       key: 'risk_level',
-      render: (category: string) => {
-        // Get the risk level from the category mapping (not from database)
-        const categoryConfig = categories.find(c => c.value === category);
-        const riskLevel = categoryConfig?.riskLevel || 'no_risk';
+      render: (riskLevel: string) => {
+        // Use the risk_level directly from the record instead of looking up by category
+        // This ensures blacklist and custom scanners show correct risk level
+        const actualRiskLevel = riskLevel || 'no_risk';
 
         const getColor = (riskLevel: string) => {
           if (riskLevel === 'high_risk' || riskLevel === '高风险') return 'red';
@@ -238,8 +279,8 @@ const ResponseTemplateManagement: React.FC = () => {
         };
 
         return (
-          <Tag color={getColor(riskLevel)}>
-            {getRiskLevelLabel(riskLevel)}
+          <Tag color={getColor(actualRiskLevel)}>
+            {getRiskLevelLabel(actualRiskLevel)}
           </Tag>
         );
       },
@@ -250,21 +291,22 @@ const ResponseTemplateManagement: React.FC = () => {
       key: 'template_content',
       ellipsis: true,
       width: 400,
-      render: (content: any) => {
+      render: (content: any, record: ResponseTemplate) => {
+        let displayText = '';
+
         if (typeof content === 'string') {
-          return content;
+          displayText = content;
         } else if (typeof content === 'object') {
           // Display only the current language content
           // Use currentLang from component scope to ensure reactivity
           const displayContent = content[currentLang];
 
           if (displayContent) {
-            return displayContent;
+            displayText = displayContent;
           } else {
             // Show placeholder when content doesn't exist for current language
             const availableLangs = Object.keys(content);
             if (availableLangs.length > 0) {
-              const firstAvailableLang = availableLangs[0];
               return (
                 <span style={{ color: '#999', fontStyle: 'italic' }}>
                   {t('template.noContentForLanguage', {
@@ -276,7 +318,22 @@ const ResponseTemplateManagement: React.FC = () => {
             return '';
           }
         }
-        return '';
+
+        // Replace {scanner_name} placeholder with actual scanner name (not tag)
+        if (displayText) {
+          if (record.scanner_type === 'blacklist' || record.scanner_type === 'whitelist') {
+            // For blacklist/whitelist, use scanner_identifier (which is the list name)
+            displayText = displayText.replace(/{scanner_name}/g, record.scanner_identifier || '');
+          } else if (record.scanner_name) {
+            // For custom/marketplace scanners, use scanner_name (not tag)
+            displayText = displayText.replace(/{scanner_name}/g, record.scanner_name);
+          } else if (record.scanner_identifier) {
+            // Fallback to scanner_identifier if scanner_name is not available
+            displayText = displayText.replace(/{scanner_name}/g, record.scanner_identifier);
+          }
+        }
+
+        return displayText || '';
       }
     },
     {

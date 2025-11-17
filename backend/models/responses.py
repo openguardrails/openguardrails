@@ -79,9 +79,17 @@ class WhitelistResponse(BaseModel):
     updated_at: datetime
 
 class ResponseTemplateResponse(BaseModel):
-    """Response template response model"""
+    """Response template response model - supports all scanner types"""
     id: int
-    category: str
+    tenant_id: Optional[str] = None
+    application_id: Optional[str] = None
+
+    # Support both legacy and new formats
+    category: Optional[str] = None
+    scanner_type: Optional[str] = None
+    scanner_identifier: Optional[str] = None
+    scanner_name: Optional[str] = None  # Scanner name from Scanner table (for custom/marketplace scanners)
+
     risk_level: str
     template_content: Dict[str, str]  # Multilingual content: {"en": "...", "zh": "...", ...}
     is_default: bool
@@ -138,9 +146,15 @@ class ProxyModelListResponse(BaseModel):
     data: List[Dict[str, Any]]
 
 class KnowledgeBaseResponse(BaseModel):
-    """Knowledge base response model"""
+    """Knowledge base response model - supports all scanner types"""
     id: int
-    category: str
+
+    # Support both legacy and new formats
+    category: Optional[str] = None
+    scanner_type: Optional[str] = None
+    scanner_identifier: Optional[str] = None
+    scanner_name: Optional[str] = None  # Scanner human-readable name for display
+
     name: str
     description: Optional[str]
     file_path: str

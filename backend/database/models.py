@@ -174,14 +174,22 @@ class Whitelist(Base):
     application = relationship("Application", back_populates="whitelists")
 
 class ResponseTemplate(Base):
-    """Response template table"""
+    """Response template table - supports all scanner types"""
     __tablename__ = "response_templates"
 
     id = Column(Integer, primary_key=True, index=True)
     # Allow null: When it is a system-level default template, tenant_id is null
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=True, index=True)  # Associated tenant (can be null for global templates)
     application_id = Column(UUID(as_uuid=True), ForeignKey("applications.id", ondelete="CASCADE"), nullable=True, index=True)  # Associated application (nullable for global templates)
-    category = Column(String(50), nullable=False, index=True)  # Risk category (S1-S12, default)
+
+    # Legacy field: Risk category (S1-S21, default) - kept for backward compatibility
+    category = Column(String(50), nullable=True, index=True)
+
+    # New fields for unified scanner support
+    scanner_type = Column(String(50), nullable=True, index=True)  # Scanner type: blacklist, whitelist, official_scanner, marketplace_scanner, custom_scanner
+    scanner_identifier = Column(String(255), nullable=True)  # Scanner identifier: blacklist name, whitelist name, or scanner tag (S1, S2, S100, etc.)
+    scanner_name = Column(String(255), nullable=True)  # Scanner human-readable name for display (e.g., "Bank Fraud", "Travel Discussion")
+
     risk_level = Column(String(20), nullable=False)  # Risk level
     template_content = Column(JSON, nullable=False)  # Multilingual response template content: {"en": "...", "zh": "...", ...}
     is_default = Column(Boolean, default=False)  # Whether it is a default template
@@ -418,13 +426,21 @@ class ProxyRequestLog(Base):
     proxy_config = relationship("ProxyModelConfig")
 
 class KnowledgeBase(Base):
-    """Knowledge base table"""
+    """Knowledge base table - supports all scanner types"""
     __tablename__ = "knowledge_bases"
 
     id = Column(Integer, primary_key=True, index=True)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)  # Kept for backward compatibility
     application_id = Column(UUID(as_uuid=True), ForeignKey("applications.id", ondelete="CASCADE"), nullable=False, index=True)  # Associated application
-    category = Column(String(50), nullable=False, index=True)  # Risk category (S1-S12)
+
+    # Legacy field: Risk category (S1-S21) - kept for backward compatibility
+    category = Column(String(50), nullable=True, index=True)
+
+    # New fields for unified scanner support
+    scanner_type = Column(String(50), nullable=True, index=True)  # Scanner type: blacklist, whitelist, official_scanner, marketplace_scanner, custom_scanner
+    scanner_identifier = Column(String(255), nullable=True)  # Scanner identifier: blacklist name, whitelist name, or scanner tag (S1, S2, S100, etc.)
+    scanner_name = Column(String(255), nullable=True)  # Scanner human-readable name for display (e.g., "Bank Fraud", "Travel Discussion")
+
     name = Column(String(255), nullable=False)  # Knowledge base name
     description = Column(Text)  # Description
     file_path = Column(String(512), nullable=False)  # Original JSONL file path

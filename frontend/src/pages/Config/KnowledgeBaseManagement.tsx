@@ -55,6 +55,24 @@ const KnowledgeBaseManagement: React.FC = () => {
   const { user, onUserSwitch } = useAuth();
   const { currentApplicationId } = useApplication();
 
+  // Available scanners for knowledge base creation
+  const [availableScanners, setAvailableScanners] = useState<{
+    blacklists: Array<{ value: string; label: string }>;
+    whitelists: Array<{ value: string; label: string }>;
+    official_scanners: Array<{ value: string; label: string }>;
+    marketplace_scanners: Array<{ value: string; label: string }>;
+    custom_scanners: Array<{ value: string; label: string }>;
+  }>({
+    blacklists: [],
+    whitelists: [],
+    official_scanners: [],
+    marketplace_scanners: [],
+    custom_scanners: []
+  });
+
+  // Selected scanner type
+  const [selectedScannerType, setSelectedScannerType] = useState<string>('official_scanner');
+
   const categories = [
     { value: 'S1', label: `S1 - ${t('category.S1')}` },
     { value: 'S2', label: `S2 - ${t('category.S2')}` },
@@ -82,6 +100,7 @@ const KnowledgeBaseManagement: React.FC = () => {
   useEffect(() => {
     if (currentApplicationId) {
       fetchData();
+      fetchAvailableScanners();
     }
   }, [currentApplicationId]);
 
@@ -89,6 +108,7 @@ const KnowledgeBaseManagement: React.FC = () => {
   useEffect(() => {
     const unsubscribe = onUserSwitch(() => {
       fetchData();
+      fetchAvailableScanners();
     });
     return unsubscribe;
   }, [onUserSwitch]);
@@ -105,9 +125,19 @@ const KnowledgeBaseManagement: React.FC = () => {
     }
   };
 
+  const fetchAvailableScanners = async () => {
+    try {
+      const result = await knowledgeBaseApi.getAvailableScanners();
+      setAvailableScanners(result);
+    } catch (error) {
+      console.error('Error fetching available scanners:', error);
+    }
+  };
+
   const handleAdd = () => {
     setEditingItem(null);
     form.resetFields();
+    setSelectedScannerType('official_scanner'); // Reset scanner type to default
     setModalVisible(true);
   };
 
@@ -210,7 +240,7 @@ const KnowledgeBaseManagement: React.FC = () => {
         }
 
         const file = values.file[0].originFileObj;
-        
+
         // Validate file content
         const isValid = await validateTextFile(file);
         if (!isValid) {
@@ -219,7 +249,16 @@ const KnowledgeBaseManagement: React.FC = () => {
 
         const formData = new FormData();
         formData.append('file', file);
-        formData.append('category', values.category);
+
+        // Support both old (category) and new (scanner_type + scanner_identifier) formats
+        if (values.scanner_type && values.scanner_identifier) {
+          formData.append('scanner_type', values.scanner_type);
+          formData.append('scanner_identifier', values.scanner_identifier);
+        } else if (values.category) {
+          // Legacy format - will be converted to scanner_type=official_scanner in backend
+          formData.append('category', values.category);
+        }
+
         formData.append('name', values.name);
         formData.append('description', values.description || '');
         formData.append('similarity_threshold', values.similarity_threshold?.toString() || '0.7');
@@ -232,6 +271,7 @@ const KnowledgeBaseManagement: React.FC = () => {
       }
 
       setModalVisible(false);
+      setSelectedScannerType('official_scanner'); // Reset scanner type after successful submission
       fetchData();
     } catch (error: any) {
       console.error('Error saving knowledge base:', error);
@@ -326,9 +366,59 @@ const KnowledgeBaseManagement: React.FC = () => {
     }
   };
 
-  const getCategoryLabel = (category: string) => {
-    const item = categories.find(c => c.value === category);
-    return item?.label || category;
+  const getCategoryLabel = (kb: KnowledgeBase) => {
+    // Handle new scanner type format
+    if (kb.scanner_type) {
+      switch (kb.scanner_type) {
+        case 'blacklist':
+          // Show blacklist name
+          return kb.scanner_identifier
+            ? `${t('config.blacklist')} - ${kb.scanner_identifier}`
+            : (t('config.blacklist') || 'Blacklist');
+        case 'whitelist':
+          // Show whitelist name
+          return kb.scanner_identifier
+            ? `${t('config.whitelist')} - ${kb.scanner_identifier}`
+            : (t('config.whitelist') || 'Whitelist');
+        case 'official_scanner':
+          // For official scanners (S1-S21 and custom official S100+)
+          if (kb.scanner_identifier) {
+            const item = categories.find(c => c.value === kb.scanner_identifier);
+            if (item) {
+              return item.label;  // S1-S21: return full label like "S1 - General Political Topics"
+            }
+            // For S100+ official scanners, show "tag - name" format
+            if (kb.scanner_name) {
+              return `${kb.scanner_identifier} - ${kb.scanner_name}`;
+            }
+            // Fallback to just the tag
+            return kb.scanner_identifier;
+          }
+          return t('scannerPackages.builtinPackages') || 'Built-in Scanner';
+        case 'marketplace_scanner':
+          // For marketplace scanners, show "tag - name" format
+          if (kb.scanner_identifier && kb.scanner_name) {
+            return `${kb.scanner_identifier} - ${kb.scanner_name}`;
+          }
+          return kb.scanner_identifier || (t('scannerPackages.purchasedPackages') || 'Third-Party Scanner');
+        case 'custom_scanner':
+          // For custom scanners, show "tag - name" format
+          if (kb.scanner_identifier && kb.scanner_name) {
+            return `${kb.scanner_identifier} - ${kb.scanner_name}`;
+          }
+          return kb.scanner_identifier || (t('customScanners.title') || 'Custom Scanner');
+        default:
+          return kb.scanner_type;
+      }
+    }
+
+    // Fallback to legacy category field
+    if (kb.category) {
+      const item = categories.find(c => c.value === kb.category);
+      return item?.label || kb.category;
+    }
+
+    return '-';
   };
 
   const getFileName = (filePath: string) => {
@@ -347,10 +437,10 @@ const KnowledgeBaseManagement: React.FC = () => {
       title: t('results.category'),
       dataIndex: 'category',
       key: 'category',
-      width: 180,
-      render: (category: string) => (
+      width: 160,
+      render: (_: any, record: KnowledgeBase) => (
         <Tag color="blue">
-          {getCategoryLabel(category)}
+          {getCategoryLabel(record)}
         </Tag>
       ),
     },
@@ -358,14 +448,14 @@ const KnowledgeBaseManagement: React.FC = () => {
       title: t('knowledge.knowledgeBaseName'),
       dataIndex: 'name',
       key: 'name',
-      width: 150,
+      width: 120,
       ellipsis: true,
     },
     {
       title: t('common.description'),
       dataIndex: 'description',
       key: 'description',
-      width: 200,
+      width: 150,
       ellipsis: true,
       render: (text: string) => text || '-',
     },
@@ -591,7 +681,10 @@ const KnowledgeBaseManagement: React.FC = () => {
       <Modal
         title={editingItem ? t('knowledge.editKnowledgeBase') : t('knowledge.addKnowledgeBase')}
         open={modalVisible}
-        onCancel={() => setModalVisible(false)}
+        onCancel={() => {
+          setModalVisible(false);
+          setSelectedScannerType('official_scanner'); // Reset scanner type when modal is closed
+        }}
         onOk={() => form.submit()}
         width={600}
         confirmLoading={fileUploadLoading}
@@ -602,16 +695,63 @@ const KnowledgeBaseManagement: React.FC = () => {
           onFinish={handleSubmit}
         >
           <Form.Item
-            name="category"
-            label={t('knowledge.riskCategory')}
-            rules={[{ required: true, message: t('knowledge.selectRiskCategory') }]}
+            name="scanner_type"
+            label={t('knowledge.scannerType') || 'Scanner Type'}
+            rules={[{ required: !editingItem, message: t('knowledge.selectScannerType') || 'Please select scanner type' }]}
+            initialValue="official_scanner"
           >
-            <Select placeholder={t('knowledge.selectRiskCategoryPlaceholder')}>
-              {categories.map(category => (
-                <Option key={category.value} value={category.value}>
-                  {category.label}
-                </Option>
-              ))}
+            <Select
+              placeholder={t('knowledge.selectScannerTypePlaceholder') || 'Select scanner type'}
+              onChange={(value) => {
+                setSelectedScannerType(value);
+                form.setFieldValue('scanner_identifier', undefined);
+              }}
+              disabled={!!editingItem}
+            >
+              <Option value="official_scanner">{t('scannerPackages.builtinPackages') || 'Built-in Scanners'}</Option>
+              <Option value="marketplace_scanner">{t('scannerPackages.purchasedPackages') || 'Third-Party Scanners'}</Option>
+              <Option value="custom_scanner">{t('customScanners.title') || 'Custom Scanners'}</Option>
+              <Option value="blacklist">{t('config.blacklist') || 'Blacklist'}</Option>
+            </Select>
+          </Form.Item>
+
+          <Form.Item
+            name="scanner_identifier"
+            label={t('knowledge.scanner') || 'Scanner'}
+            rules={[{ required: !editingItem, message: t('knowledge.selectScanner') || 'Please select scanner' }]}
+          >
+            <Select
+              placeholder={t('knowledge.selectScannerPlaceholder') || 'Select scanner'}
+              disabled={!!editingItem}
+              showSearch
+              filterOption={(input, option) =>
+                String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+              }
+            >
+              {selectedScannerType === 'official_scanner' &&
+                availableScanners.official_scanners.map(scanner => (
+                  <Option key={scanner.value} value={scanner.value} label={scanner.label}>
+                    {scanner.label}
+                  </Option>
+                ))}
+              {selectedScannerType === 'blacklist' &&
+                availableScanners.blacklists.map(scanner => (
+                  <Option key={scanner.value} value={scanner.value} label={scanner.label}>
+                    {scanner.label}
+                  </Option>
+                ))}
+              {selectedScannerType === 'marketplace_scanner' &&
+                availableScanners.marketplace_scanners.map(scanner => (
+                  <Option key={scanner.value} value={scanner.value} label={scanner.label}>
+                    {scanner.label}
+                  </Option>
+                ))}
+              {selectedScannerType === 'custom_scanner' &&
+                availableScanners.custom_scanners.map(scanner => (
+                  <Option key={scanner.value} value={scanner.value} label={scanner.label}>
+                    {scanner.label}
+                  </Option>
+                ))}
             </Select>
           </Form.Item>
 

@@ -467,7 +467,7 @@ class GuardrailService:
         """Get suggested answer (using enhanced template service, supports knowledge base search)
 
         Args:
-            categories: Risk categories
+            categories: Risk categories (scanner names, not tags)
             tenant_id: DEPRECATED - kept for backward compatibility
             application_id: Application ID for multi-application support
             user_query: User query for knowledge base search
@@ -484,9 +484,17 @@ class GuardrailService:
             except Exception as e:
                 logger.warning(f"Failed to get user language for tenant {tenant_id}: {e}")
 
+        # Use first category as scanner_name for template variable replacement
+        # Categories contain scanner names (not tags), e.g., "Sensitive Political Topics", "Bank Fraud"
+        scanner_name = categories[0] if categories else None
+
         return await enhanced_template_service.get_suggest_answer(
-            categories, tenant_id=tenant_id, application_id=application_id,
-            user_query=user_query, user_language=user_language
+            categories,
+            tenant_id=tenant_id,
+            application_id=application_id,
+            user_query=user_query,
+            user_language=user_language,
+            scanner_name=scanner_name  # Pass scanner name for {scanner_name} variable replacement
         )
     
     async def _handle_blacklist_hit(
@@ -508,13 +516,18 @@ class GuardrailService:
             except Exception as e:
                 logger.warning(f"Failed to get user language for tenant {tenant_id}: {e}")
 
-        # Get localized blacklist hit message
-        try:
-            blacklist_message = get_translation(user_language, 'guardrail', 'blacklistHit')
-            suggest_answer = blacklist_message.format(list_name=list_name)
-        except Exception as e:
-            logger.warning(f"Failed to get translation for blacklist hit: {e}, using default")
-            suggest_answer = f"Sorry, I can't provide content involving {list_name}."
+        # Use enhanced template service to get blacklist response (supports custom templates and knowledge base)
+        from services.enhanced_template_service import enhanced_template_service
+        suggest_answer = await enhanced_template_service.get_suggest_answer(
+            categories=[],  # Blacklist doesn't use legacy categories
+            tenant_id=tenant_id,
+            application_id=application_id,
+            user_query=content,  # User's original input for KB search
+            user_language=user_language,
+            scanner_type='blacklist',  # Scanner type
+            scanner_identifier=list_name,  # Blacklist name
+            scanner_name=list_name  # For {scanner_name} variable replacement
+        )
 
         # Asynchronously log to database
         detection_data = {

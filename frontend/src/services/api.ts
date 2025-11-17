@@ -443,6 +443,16 @@ export const knowledgeBaseApi = {
   // Check if global knowledge base is disabled
   checkDisabled: (id: number): Promise<{ kb_id: number; is_global: boolean; is_disabled: boolean }> =>
     api.get(`/api/v1/config/knowledge-bases/${id}/is-disabled`).then(res => res.data),
+
+  // Get available scanners for knowledge base creation
+  getAvailableScanners: (): Promise<{
+    blacklists: Array<{ value: string; label: string }>;
+    whitelists: Array<{ value: string; label: string }>;
+    official_scanners: Array<{ value: string; label: string }>;
+    marketplace_scanners: Array<{ value: string; label: string }>;
+    custom_scanners: Array<{ value: string; label: string }>;
+  }> =>
+    api.get('/api/v1/config/knowledge-bases/available-scanners').then(res => res.data),
 };
 
 // Data security API

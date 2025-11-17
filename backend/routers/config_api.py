@@ -4,7 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from database.connection import get_db
-from database.models import Blacklist, Whitelist, ResponseTemplate, KnowledgeBase, Tenant, TenantKnowledgeBaseDisable, Application
+from database.models import (
+    Blacklist, Whitelist, ResponseTemplate, KnowledgeBase, Tenant,
+    TenantKnowledgeBaseDisable, Application, Scanner, ScannerPackage, CustomScanner
+)
 from models.requests import BlacklistRequest, WhitelistRequest, ResponseTemplateRequest, KnowledgeBaseRequest
 from models.responses import (
     BlacklistResponse, WhitelistResponse, ResponseTemplateResponse, ApiResponse,
@@ -333,21 +336,45 @@ async def delete_whitelist(whitelist_id: int, request: Request, db: Session = De
 
 # Response template management
 @router.get("/config/responses", response_model=List[ResponseTemplateResponse])
-async def get_response_templates(request: Request, db: Session = Depends(get_db)):
-    """Get response template configuration"""
+async def get_response_templates(
+    request: Request,
+    db: Session = Depends(get_db),
+    scanner_type: Optional[str] = None,
+    scanner_identifier: Optional[str] = None
+):
+    """Get response template configuration, optionally filtered by scanner type/identifier"""
     try:
         current_user, application_id = get_current_user_and_application_from_request(request, db)
-        templates = db.query(ResponseTemplate).filter(ResponseTemplate.application_id == application_id).order_by(ResponseTemplate.created_at.desc()).all()
+
+        # Query response templates (scanner_name now stored in table, no JOIN needed)
+        query = db.query(ResponseTemplate).filter(
+            ResponseTemplate.application_id == application_id,
+            ResponseTemplate.is_active == True
+        )
+
+        # Apply filters if provided
+        if scanner_type:
+            query = query.filter(ResponseTemplate.scanner_type == scanner_type)
+        if scanner_identifier:
+            query = query.filter(ResponseTemplate.scanner_identifier == scanner_identifier)
+
+        results = query.order_by(ResponseTemplate.created_at.desc()).all()
+
         return [ResponseTemplateResponse(
             id=rt.id,
+            tenant_id=str(rt.tenant_id) if rt.tenant_id else None,
+            application_id=str(rt.application_id) if rt.application_id else None,
             category=rt.category,
+            scanner_type=rt.scanner_type,
+            scanner_identifier=rt.scanner_identifier,
+            scanner_name=rt.scanner_name,  # Now directly from table
             risk_level=rt.risk_level,
             template_content=rt.template_content,
             is_default=rt.is_default,
             is_active=rt.is_active,
             created_at=rt.created_at,
             updated_at=rt.updated_at
-        ) for rt in templates]
+        ) for rt in results]
     except HTTPException:
         raise
     except Exception as e:
@@ -356,13 +383,16 @@ async def get_response_templates(request: Request, db: Session = Depends(get_db)
 
 @router.post("/config/responses", response_model=ApiResponse)
 async def create_response_template(template_request: ResponseTemplateRequest, request: Request, db: Session = Depends(get_db)):
-    """Create response template"""
+    """Create response template - supports all scanner types"""
     try:
         current_user, application_id = get_current_user_and_application_from_request(request, db)
+
         template = ResponseTemplate(
             tenant_id=current_user.id,
             application_id=application_id,
             category=template_request.category,
+            scanner_type=template_request.scanner_type,
+            scanner_identifier=template_request.scanner_identifier,
             risk_level=template_request.risk_level,
             template_content=template_request.template_content,
             is_default=template_request.is_default,
@@ -371,11 +401,13 @@ async def create_response_template(template_request: ResponseTemplateRequest, re
         db.add(template)
         db.commit()
 
-        # 立即失效模板缓存
+        # Invalidate template cache immediately
         await template_cache.invalidate_cache()
         await enhanced_template_service.invalidate_cache()
 
-        logger.info(f"Response template created: {template_request.category} for user: {current_user.email}, app: {application_id}")
+        # Log with appropriate identifier
+        identifier = template_request.scanner_identifier or template_request.category
+        logger.info(f"Response template created: {identifier} (type: {template_request.scanner_type}) for user: {current_user.email}, app: {application_id}")
         return ApiResponse(success=True, message="Response template created successfully")
     except HTTPException:
         raise
@@ -385,7 +417,7 @@ async def create_response_template(template_request: ResponseTemplateRequest, re
 
 @router.put("/config/responses/{template_id}", response_model=ApiResponse)
 async def update_response_template(template_id: int, template_request: ResponseTemplateRequest, request: Request, db: Session = Depends(get_db)):
-    """Update response template"""
+    """Update response template - supports all scanner types"""
     try:
         current_user, application_id = get_current_user_and_application_from_request(request, db)
         template = db.query(ResponseTemplate).filter_by(id=template_id, application_id=application_id).first()
@@ -393,6 +425,8 @@ async def update_response_template(template_id: int, template_request: ResponseT
             raise HTTPException(status_code=404, detail="Response template not found")
 
         template.category = template_request.category
+        template.scanner_type = template_request.scanner_type
+        template.scanner_identifier = template_request.scanner_identifier
         template.risk_level = template_request.risk_level
         template.template_content = template_request.template_content
         template.is_default = template_request.is_default
@@ -404,7 +438,8 @@ async def update_response_template(template_id: int, template_request: ResponseT
         await template_cache.invalidate_cache()
         await enhanced_template_service.invalidate_cache()
 
-        logger.info(f"Response template updated: {template_id} for user: {current_user.email}, app: {application_id}")
+        identifier = template_request.scanner_identifier or template_request.category
+        logger.info(f"Response template updated: {template_id} ({identifier}) for user: {current_user.email}, app: {application_id}")
         return ApiResponse(success=True, message="Response template updated successfully")
     except HTTPException:
         raise
@@ -523,6 +558,9 @@ async def get_knowledge_bases(
         return [KnowledgeBaseResponse(
             id=kb.id,
             category=kb.category,
+            scanner_type=kb.scanner_type,
+            scanner_identifier=kb.scanner_identifier,
+            scanner_name=kb.scanner_name,  # Include scanner_name for display
             name=kb.name,
             description=kb.description,
             file_path=kb.file_path,
@@ -545,7 +583,9 @@ async def get_knowledge_bases(
 @router.post("/config/knowledge-bases", response_model=ApiResponse)
 async def create_knowledge_base(
     file: UploadFile = File(...),
-    category: str = Form(...),
+    category: str = Form(None),  # Made optional - can be replaced by scanner_type + scanner_identifier
+    scanner_type: str = Form(None),  # Scanner type: blacklist, whitelist, official_scanner, marketplace_scanner, custom_scanner
+    scanner_identifier: str = Form(None),  # Scanner identifier: blacklist ID, scanner tag (S1, S100, etc.)
     name: str = Form(...),
     description: str = Form(""),
     similarity_threshold: float = Form(0.7),
@@ -554,18 +594,29 @@ async def create_knowledge_base(
     request: Request = None,
     db: Session = Depends(get_db)
 ):
-    """Create knowledge base"""
+    """Create knowledge base - supports all scanner types (official, blacklist, custom, marketplace)"""
     try:
         current_user, application_id = get_current_user_and_application_from_request(request, db)
 
         # Debug info
-        logger.info(f"Create knowledge base - category: {category}, name: {name}, description: {description}, similarity_threshold: {similarity_threshold}, is_active: {is_active}, is_global: {is_global}")
+        logger.info(f"Create knowledge base - category: {category}, scanner_type: {scanner_type}, scanner_identifier: {scanner_identifier}, name: {name}, description: {description}, similarity_threshold: {similarity_threshold}, is_active: {is_active}, is_global: {is_global}")
         logger.info(f"File info - filename: {file.filename}, content_type: {file.content_type}")
 
-        # Validate parameters
-        if not category or not name:
-            logger.error(f"Missing required parameters - category: {category}, name: {name}")
-            raise HTTPException(status_code=400, detail="Category and name are required")
+        # Validate parameters - must have either category OR (scanner_type + scanner_identifier)
+        if not name:
+            logger.error(f"Missing required parameter: name")
+            raise HTTPException(status_code=400, detail="Name is required")
+
+        # Determine scanner type and identifier
+        if scanner_type and scanner_identifier:
+            # New format: using scanner_type and scanner_identifier
+            pass
+        elif category:
+            # Legacy format: using category (S1-S21)
+            scanner_type = 'official_scanner'
+            scanner_identifier = category
+        else:
+            raise HTTPException(status_code=400, detail="Either category OR (scanner_type + scanner_identifier) is required")
 
         # Validate similarity_threshold
         if similarity_threshold < 0 or similarity_threshold > 1:
@@ -575,30 +626,66 @@ async def create_knowledge_base(
         if is_global and not current_user.is_super_admin:
             raise HTTPException(status_code=403, detail="Only administrators can create global knowledge bases")
 
-        if category not in ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 'S10', 'S11', 'S12']:
-            raise HTTPException(status_code=400, detail="Invalid category")
+        # Validate scanner_type
+        valid_scanner_types = ['blacklist', 'whitelist', 'official_scanner', 'marketplace_scanner', 'custom_scanner']
+        if scanner_type not in valid_scanner_types:
+            raise HTTPException(status_code=400, detail=f"Invalid scanner_type. Must be one of: {', '.join(valid_scanner_types)}")
 
-        # Validate file type (no longer strictly depend on file extension, depend on content validation)
-        # if not file.filename.endswith('.jsonl'):
-        #     raise HTTPException(status_code=400, detail="File must be a JSONL file")
+        # Validate scanner exists based on type
+        if scanner_type == 'blacklist':
+            # Validate blacklist exists
+            blacklist = db.query(Blacklist).filter(
+                Blacklist.application_id == application_id,
+                Blacklist.name == scanner_identifier
+            ).first()
+            if not blacklist:
+                raise HTTPException(status_code=404, detail=f"Blacklist '{scanner_identifier}' not found")
+        elif scanner_type == 'whitelist':
+            # Validate whitelist exists
+            whitelist = db.query(Whitelist).filter(
+                Whitelist.application_id == application_id,
+                Whitelist.name == scanner_identifier
+            ).first()
+            if not whitelist:
+                raise HTTPException(status_code=404, detail=f"Whitelist '{scanner_identifier}' not found")
+        elif scanner_type == 'official_scanner':
+            # Validate official scanner tag (S1-S21)
+            scanner = db.query(Scanner).filter(Scanner.tag == scanner_identifier).first()
+            if not scanner:
+                raise HTTPException(status_code=404, detail=f"Official scanner '{scanner_identifier}' not found")
+        elif scanner_type == 'marketplace_scanner':
+            # Validate marketplace scanner exists
+            scanner = db.query(Scanner).filter(Scanner.tag == scanner_identifier).first()
+            if not scanner:
+                raise HTTPException(status_code=404, detail=f"Marketplace scanner '{scanner_identifier}' not found")
+        elif scanner_type == 'custom_scanner':
+            # Validate custom scanner exists for this application
+            custom_scanner = db.query(CustomScanner).join(Scanner).filter(
+                CustomScanner.application_id == application_id,
+                Scanner.tag == scanner_identifier
+            ).first()
+            if not custom_scanner:
+                raise HTTPException(status_code=404, detail=f"Custom scanner '{scanner_identifier}' not found")
 
-        # Check if there is already a knowledge base with the same name
-        # For global KB, don't set application_id
+        # Check if there is already a knowledge base with the same name and scanner
+        # For global KB, check globally
         if is_global:
             existing = db.query(KnowledgeBase).filter(
                 KnowledgeBase.is_global == True,
-                KnowledgeBase.category == category,
+                KnowledgeBase.scanner_type == scanner_type,
+                KnowledgeBase.scanner_identifier == scanner_identifier,
                 KnowledgeBase.name == name
             ).first()
         else:
             existing = db.query(KnowledgeBase).filter(
                 KnowledgeBase.application_id == application_id,
-                KnowledgeBase.category == category,
+                KnowledgeBase.scanner_type == scanner_type,
+                KnowledgeBase.scanner_identifier == scanner_identifier,
                 KnowledgeBase.name == name
             ).first()
 
         if existing:
-            raise HTTPException(status_code=400, detail="Knowledge base with this name already exists for this category")
+            raise HTTPException(status_code=400, detail="Knowledge base with this name already exists for this scanner")
 
         # Read file content
         file_content = await file.read()
@@ -612,7 +699,9 @@ async def create_knowledge_base(
         knowledge_base = KnowledgeBase(
             tenant_id=current_user.id,
             application_id=application_id,
-            category=category,
+            category=category,  # Keep for backward compatibility
+            scanner_type=scanner_type,
+            scanner_identifier=scanner_identifier,
             name=name,
             description=description,
             file_path="",  # Will be set below
@@ -638,7 +727,7 @@ async def create_knowledge_base(
         # Invalidate enhanced template cache immediately
         await enhanced_template_service.invalidate_cache()
 
-        logger.info(f"Knowledge base created: {name} for category {category}, user: {current_user.email}, app: {application_id}, global: {is_global}")
+        logger.info(f"Knowledge base created: {name} for scanner {scanner_type}:{scanner_identifier}, user: {current_user.email}, app: {application_id}, global: {is_global}")
         return ApiResponse(success=True, message="Knowledge base created successfully")
 
     except HTTPException:
@@ -647,6 +736,88 @@ async def create_knowledge_base(
         db.rollback()
         logger.error(f"Create knowledge base error: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to create knowledge base: {str(e)}")
+
+@router.get("/config/knowledge-bases/available-scanners", response_model=dict)
+async def get_available_scanners_for_knowledge_base(
+    request: Request = None,
+    db: Session = Depends(get_db)
+):
+    """Get all available scanners for knowledge base creation (blacklists, official, custom, marketplace)"""
+    try:
+        current_user, application_id = get_current_user_and_application_from_request(request, db)
+
+        result = {
+            "blacklists": [],
+            "whitelists": [],
+            "official_scanners": [],
+            "marketplace_scanners": [],
+            "custom_scanners": []
+        }
+
+        # Get blacklists
+        blacklists = db.query(Blacklist).filter(
+            Blacklist.application_id == application_id,
+            Blacklist.is_active == True
+        ).all()
+        result["blacklists"] = [
+            {"value": bl.name, "label": f"Blacklist - {bl.name}"}
+            for bl in blacklists
+        ]
+
+        # Get whitelists
+        whitelists = db.query(Whitelist).filter(
+            Whitelist.application_id == application_id,
+            Whitelist.is_active == True
+        ).all()
+        result["whitelists"] = [
+            {"value": wl.name, "label": f"Whitelist - {wl.name}"}
+            for wl in whitelists
+        ]
+
+        # Get official scanners (S1-S21) from scanners table
+        # Join with scanner_packages to get only official scanners
+        official_scanners = db.query(Scanner).join(
+            ScannerPackage, Scanner.package_id == ScannerPackage.id
+        ).filter(
+            ScannerPackage.is_official == True,
+            ScannerPackage.package_type == 'builtin'
+        ).order_by(Scanner.tag).all()
+        result["official_scanners"] = [
+            {"value": s.tag, "label": f"{s.tag} - {s.name}"}
+            for s in official_scanners
+        ]
+
+        # Get marketplace scanners (purchased packages)
+        # This requires checking package_purchases table
+        # For now, we'll just get all scanners from purchasable packages
+        marketplace_scanners = db.query(Scanner).join(
+            ScannerPackage, Scanner.package_id == ScannerPackage.id
+        ).filter(
+            ScannerPackage.package_type == 'purchasable'
+        ).order_by(Scanner.tag).all()
+        result["marketplace_scanners"] = [
+            {"value": s.tag, "label": f"{s.tag} - {s.name}"}
+            for s in marketplace_scanners
+        ]
+
+        # Get custom scanners for this application
+        custom_scanners = db.query(Scanner).join(
+            CustomScanner, CustomScanner.scanner_id == Scanner.id
+        ).filter(
+            CustomScanner.application_id == application_id
+        ).order_by(Scanner.tag).all()
+        result["custom_scanners"] = [
+            {"value": s.tag, "label": f"{s.tag} - {s.name}"}
+            for s in custom_scanners
+        ]
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get available scanners error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get available scanners")
 
 @router.put("/config/knowledge-bases/{kb_id}", response_model=ApiResponse)
 async def update_knowledge_base(

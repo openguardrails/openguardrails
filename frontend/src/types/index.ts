@@ -100,6 +100,9 @@ export interface Whitelist {
 export interface ResponseTemplate {
   id: number;
   category: string;
+  scanner_type?: string | null;  // Scanner type: blacklist, whitelist, official_scanner, custom_scanner, etc.
+  scanner_identifier?: string | null;  // Scanner identifier: blacklist name, scanner tag, etc.
+  scanner_name?: string | null;  // Scanner name from Scanner table (for custom/marketplace scanners)
   risk_level: string;
   template_content: { [key: string]: string };  // Multilingual content: { en: "...", zh: "...", ... }
   is_default: boolean;
@@ -139,7 +142,10 @@ export interface DailyTrend {
 // Knowledge base related types
 export interface KnowledgeBase {
   id: number;
-  category: string;
+  category?: string | null;  // Legacy field (S1-S21) - nullable for new scanner types
+  scanner_type?: string | null;  // Scanner type: blacklist, whitelist, official_scanner, etc.
+  scanner_identifier?: string | null;  // Scanner identifier: blacklist name, scanner tag, etc.
+  scanner_name?: string | null;  // Scanner human-readable name for display
   name: string;
   description?: string;
   file_path: string;

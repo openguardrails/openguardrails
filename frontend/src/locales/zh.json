@@ -445,6 +445,11 @@
     },
     "applications": "应用管理"
   },
+  "scanner": {
+    "custom": "自定义",
+    "marketplace": "商城",
+    "official": "官方"
+  },
   "blacklist": {
     "title": "黑名单管理",
     "description": "描述",
@@ -645,7 +650,32 @@
     "similarityThresholdRequired": "请设置相似度阈值",
     "similarityThresholdRange": "相似度阈值必须在0-1之间",
     "similarityThresholdPlaceholder": "请输入相似度阈值（0-1），例如：0.7",
-    "noSimilarQuestions": "没有相似的问题"
+    "noSimilarQuestions": "没有相似的问题",
+    "scannerType": "扫描器类型",
+    "selectScannerType": "请选择扫描器类型",
+    "selectScannerTypePlaceholder": "请选择扫描器类型",
+    "scanner": "扫描器",
+    "selectScanner": "请选择扫描器",
+    "selectScannerPlaceholder": "请选择扫描器",
+    "officialScanner": "官方扫描器",
+    "emptyFile": "文件为空",
+    "formatError": "第 {{line}} 行格式错误：{{error}}",
+    "invalidJSON": "JSON 格式无效",
+    "missingFields": "第 {{line}} 行缺少必需字段（questionid, question, answer）",
+    "invalidFieldType": "第 {{line}} 行字段类型错误",
+    "emptyContent": "第 {{line}} 行内容为空",
+    "parseError": "第 {{line}} 行解析错误：{{error}}",
+    "noValidPairs": "没有找到有效的问答对",
+    "readFileFailed": "读取文件失败",
+    "replaceSuccess": "文件替换成功",
+    "replaceFailed": "文件替换失败",
+    "deleteFailed": "删除失败",
+    "searchFailed": "搜索失败",
+    "enterSearchContent": "请输入搜索内容",
+    "toggleFailed": "切换失败",
+    "disabledByYou": "由您禁用",
+    "enabledSuccess": "知识库已启用",
+    "disabledSuccess": "知识库已禁用"
   },
   "proxy": {
     "title": "安全网关配置",

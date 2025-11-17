@@ -1,5 +1,5 @@
 from typing import List, Optional, Union, Any, Dict
-from pydantic import BaseModel, Field, validator, ConfigDict
+from pydantic import BaseModel, Field, validator, model_validator, ConfigDict
 
 class ImageUrl(BaseModel):
     """Image URL model - support file:// path, http(s):// URL or data:image base64 encoding"""
@@ -84,20 +84,35 @@ class WhitelistRequest(BaseModel):
         return [kw.strip() for kw in v if kw.strip()]
 
 class ResponseTemplateRequest(BaseModel):
-    """Response template request model"""
-    category: str = Field(..., description="Risk category")
+    """Response template request model - supports all scanner types"""
+    # Legacy field (optional for backward compatibility)
+    category: Optional[str] = Field(None, description="Risk category (legacy: S1-S21, default)")
+
+    # New fields for unified scanner support
+    scanner_type: Optional[str] = Field(None, description="Scanner type: blacklist, whitelist, official_scanner, marketplace_scanner, custom_scanner")
+    scanner_identifier: Optional[str] = Field(None, description="Scanner identifier: blacklist name, whitelist name, scanner tag (S1, S100, etc.)")
+
     risk_level: str = Field(..., description="Risk level")
     template_content: Dict[str, str] = Field(..., description="Multilingual response template content: {'en': '...', 'zh': '...', ...}")
     is_default: bool = Field(False, description="Whether it is a default template")
     is_active: bool = Field(True, description="Whether enabled")
-    
+
     @validator('category')
     def validate_category(cls, v):
-        valid_categories = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 'S10', 'S11', 'S12', 'S13', 'S14', 'S15', 'S16', 'S17', 'S18', 'S19', 'S20', 'S21', 'default']
-        if v not in valid_categories:
-            raise ValueError(f'category must be one of: {valid_categories}')
+        if v is not None:
+            valid_categories = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 'S10', 'S11', 'S12', 'S13', 'S14', 'S15', 'S16', 'S17', 'S18', 'S19', 'S20', 'S21', 'default']
+            if v not in valid_categories:
+                raise ValueError(f'category must be one of: {valid_categories}')
         return v
-    
+
+    @validator('scanner_type')
+    def validate_scanner_type(cls, v):
+        if v is not None:
+            valid_types = ['blacklist', 'whitelist', 'official_scanner', 'marketplace_scanner', 'custom_scanner']
+            if v not in valid_types:
+                raise ValueError(f'scanner_type must be one of: {valid_types}')
+        return v
+
     @validator('risk_level')
     def validate_risk_level(cls, v):
         # Accept both underscore format (from database/frontend) and space format (legacy)
@@ -106,6 +121,20 @@ class ResponseTemplateRequest(BaseModel):
             raise ValueError('risk_level must be one of: no_risk, low_risk, medium_risk, high_risk (or legacy: no risk, low risk, medium risk, high risk)')
         # Normalize to underscore format for consistency
         return v.replace(' ', '_')
+
+    @validator('template_content')
+    def validate_template_content(cls, v):
+        # Must contain at least 'en' or 'zh'
+        if not v or (not v.get('en') and not v.get('zh')):
+            raise ValueError("template_content must contain at least 'en' or 'zh'")
+        return v
+
+    @model_validator(mode='after')
+    def validate_scanner_info(self):
+        # Must have either category or (scanner_type + scanner_identifier)
+        if not self.category and not (self.scanner_type and self.scanner_identifier):
+            raise ValueError("Must provide either 'category' or both 'scanner_type' and 'scanner_identifier'")
+        return self
 
 class ProxyCompletionRequest(BaseModel):
     """Proxy completion request model"""
@@ -182,8 +211,14 @@ class ConfidenceThresholdRequest(BaseModel):
     confidence_trigger_level: str = Field(..., description="Lowest confidence level to trigger detection", pattern="^(low|medium|high)$")
 
 class KnowledgeBaseRequest(BaseModel):
-    """Knowledge base request model"""
-    category: str = Field(..., description="Risk category")
+    """Knowledge base request model - supports all scanner types"""
+    # Legacy field (optional for backward compatibility)
+    category: Optional[str] = Field(None, description="Risk category (legacy: S1-S21)")
+
+    # New fields for unified scanner support
+    scanner_type: Optional[str] = Field(None, description="Scanner type: blacklist, whitelist, official_scanner, marketplace_scanner, custom_scanner")
+    scanner_identifier: Optional[str] = Field(None, description="Scanner identifier: blacklist name, whitelist name, scanner tag (S1, S100, etc.)")
+
     name: str = Field(..., description="Knowledge base name")
     description: Optional[str] = Field(None, description="Description")
     similarity_threshold: float = Field(0.7, description="Similarity threshold for this knowledge base (0-1)", ge=0, le=1)
@@ -192,9 +227,18 @@ class KnowledgeBaseRequest(BaseModel):
 
     @validator('category')
     def validate_category(cls, v):
-        valid_categories = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 'S10', 'S11', 'S12', 'S13', 'S14', 'S15', 'S16', 'S17', 'S18', 'S19', 'S20', 'S21']
-        if v not in valid_categories:
-            raise ValueError(f'category must be one of: {valid_categories}')
+        if v is not None:
+            valid_categories = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 'S10', 'S11', 'S12', 'S13', 'S14', 'S15', 'S16', 'S17', 'S18', 'S19', 'S20', 'S21']
+            if v not in valid_categories:
+                raise ValueError(f'category must be one of: {valid_categories}')
+        return v
+
+    @validator('scanner_type')
+    def validate_scanner_type(cls, v):
+        if v is not None:
+            valid_types = ['blacklist', 'whitelist', 'official_scanner', 'marketplace_scanner', 'custom_scanner']
+            if v not in valid_types:
+                raise ValueError(f'scanner_type must be one of: {valid_types}')
         return v
 
     @validator('name')
@@ -204,6 +248,13 @@ class KnowledgeBaseRequest(BaseModel):
         if len(v.strip()) > 255:
             raise ValueError('name too long (max 255 characters)')
         return v.strip()
+
+    @model_validator(mode='after')
+    def validate_kb_scanner_info(self):
+        # Must have either category or (scanner_type + scanner_identifier)
+        if not self.category and not (self.scanner_type and self.scanner_identifier):
+            raise ValueError("Must provide either 'category' or both 'scanner_type' and 'scanner_identifier'")
+        return self
 
 class DifyModerationParams(BaseModel):
     """Dify moderation request params model"""
