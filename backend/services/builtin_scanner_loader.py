@@ -19,6 +19,7 @@ from database.models import (
     Scanner,
     ScannerPackage,
 )
+from services.response_template_service import ResponseTemplateService
 from utils.logger import setup_logger
 
 logger = setup_logger()

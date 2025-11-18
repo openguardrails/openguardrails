@@ -16,6 +16,7 @@ const ResponseTemplateManagement: React.FC = () => {
   const [data, setData] = useState<ResponseTemplate[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [editingItem, setEditingItem] = useState<ResponseTemplate | null>(null);
   const [form] = Form.useForm();
   const { onUserSwitch } = useAuth();
@@ -222,8 +223,27 @@ const ResponseTemplateManagement: React.FC = () => {
       currentContent = record.template_content[currentLang] || '';
     }
 
+    // Prepare the display label for category field based on scanner type
+    let categoryDisplayValue = record.category;
+    
+    // For special scanner types (blacklist, custom_scanner, marketplace_scanner), 
+    // we need to set a display value since they don't use standard S1-S21 categories
+    if (record.scanner_type === 'blacklist' && record.scanner_identifier) {
+      categoryDisplayValue = `${t('config.blacklist')} - ${record.scanner_identifier}`;
+    } else if (record.scanner_type === 'custom_scanner' && record.scanner_identifier) {
+      const displayText = record.scanner_name
+        ? `${record.scanner_identifier} - ${record.scanner_name}`
+        : record.scanner_identifier;
+      categoryDisplayValue = displayText;
+    } else if (record.scanner_type === 'marketplace_scanner' && record.scanner_identifier) {
+      const displayText = record.scanner_name
+        ? `${record.scanner_identifier} - ${record.scanner_name}`
+        : record.scanner_identifier;
+      categoryDisplayValue = displayText;
+    }
+
     form.setFieldsValue({
-      category: record.category,
+      category: categoryDisplayValue,
       template_content: currentContent
     });
     setModalVisible(true);
@@ -257,23 +277,30 @@ const ResponseTemplateManagement: React.FC = () => {
         return;
       }
 
+      setSubmitting(true);
+
       // Update reject content, keep the original category and risk level
       const submissionData = {
         category: editingItem.category,
+        scanner_type: editingItem.scanner_type,
+        scanner_identifier: editingItem.scanner_identifier,
         risk_level: editingItem.risk_level,
         template_content: multilingualContent,
-        is_default: true,
-        is_active: true
+        is_default: editingItem.is_default,
+        is_active: editingItem.is_active
       };
 
       await configApi.responses.update(editingItem.id, submissionData);
       message.success(t('template.updateSuccess'));
 
       setModalVisible(false);
-      fetchData();
+      form.resetFields();
+      await fetchData();
     } catch (error) {
       console.error('Error updating reject response:', error);
       message.error(t('common.saveFailed'));
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -459,8 +486,13 @@ const ResponseTemplateManagement: React.FC = () => {
       <Modal
         title={t('template.editRejectContent')}
         open={modalVisible}
-        onCancel={() => setModalVisible(false)}
+        onCancel={() => {
+          setModalVisible(false);
+          form.resetFields();
+          setSubmitting(false);
+        }}
         onOk={() => form.submit()}
+        confirmLoading={submitting}
         width={600}
       >
         <Form
@@ -472,13 +504,20 @@ const ResponseTemplateManagement: React.FC = () => {
             name="category"
             label={t('template.riskCategory')}
           >
-            <Select disabled>
-              {categories.map(category => (
-                <Option key={category.value} value={category.value}>
-                  {category.label}
-                </Option>
-              ))}
-            </Select>
+            {/* For special scanner types (blacklist, custom, marketplace), show as plain text input (disabled) */}
+            {editingItem && (editingItem.scanner_type === 'blacklist' || 
+                            editingItem.scanner_type === 'custom_scanner' || 
+                            editingItem.scanner_type === 'marketplace_scanner') ? (
+              <Input disabled />
+            ) : (
+              <Select disabled>
+                {categories.map(category => (
+                  <Option key={category.value} value={category.value}>
+                    {category.label}
+                  </Option>
+                ))}
+              </Select>
+            )}
           </Form.Item>
 
           <Form.Item
