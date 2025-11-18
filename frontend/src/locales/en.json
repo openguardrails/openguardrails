@@ -665,7 +665,7 @@
     "noPurchasedScannersDescription": "You haven't purchased any third-party scanner packages yet. ",
     "goToMarketplace": "Go to Marketplace",
     "toBrowseAndPurchase": " to browse and purchase scanner packages.",
-    "officialScanner": "Official Scanner",
+    "officialScanner": "Standard Scanner",
     "emptyFile": "File is empty",
     "formatError": "Line {{line}} format error: {{error}}",
     "invalidJSON": "Invalid JSON format",
@@ -1774,9 +1774,9 @@
     "fetchError": "Failed to fetch applications"
   },
   "scannerPackages": {
-    "title": "Official Scanners",
+    "title": "Standard Scanners",
     "description": "Description",
-    "officialScanners": "Official Scanners",
+    "officialScanners": "Standard Scanners",
     "builtinPackages": "Built-in Packages",
     "purchasedPackages": "Third-Party Packages",
     "marketplace": "Package Marketplace",

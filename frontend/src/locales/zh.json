@@ -661,7 +661,7 @@
     "noPurchasedScannersDescription": "您还没有购买任何第三方扫描器包。",
     "goToMarketplace": "前往市场",
     "toBrowseAndPurchase": "浏览和购买扫描器包。",
-    "officialScanner": "官方扫描器",
+    "officialScanner": "标准扫描器",
     "emptyFile": "文件为空",
     "formatError": "第 {{line}} 行格式错误：{{error}}",
     "invalidJSON": "JSON 格式无效",
@@ -1771,9 +1771,9 @@
     "fetchError": "获取应用列表失败"
   },
   "scannerPackages": {
-    "title": "官方扫描器",
+    "title": "标准扫描器",
     "description": "描述",
-    "officialScanners": "官方扫描器",
+    "officialScanners": "标准扫描器",
     "builtinPackages": "内置扫描器包",
     "purchasedPackages": "第三方扫描器包",
     "marketplace": "扫描器市场",
