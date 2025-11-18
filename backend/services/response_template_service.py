@@ -33,15 +33,20 @@ class ResponseTemplateService:
         Returns:
             Created ResponseTemplate or None if already exists
         """
-        # Check if template already exists
+        # Enhanced duplicate check - check by scanner_identifier, name, or category (backward compatibility)
         existing = self.db.query(ResponseTemplate).filter(
             ResponseTemplate.application_id == application_id,
-            ResponseTemplate.scanner_type == 'official_scanner',
-            ResponseTemplate.scanner_identifier == scanner.tag
+            ResponseTemplate.tenant_id == tenant_id,
+            (
+                (ResponseTemplate.scanner_type == 'official_scanner') &
+                (ResponseTemplate.scanner_identifier == scanner.tag)
+            ) |
+            (ResponseTemplate.scanner_name == scanner.name) |
+            (ResponseTemplate.category == scanner.tag)
         ).first()
 
         if existing:
-            logger.info(f"Template for official scanner {scanner.tag} already exists")
+            logger.info(f"Template for official scanner {scanner.tag} already exists (ID: {existing.id})")
             return None
 
         # Get default multilingual content based on scanner tag
@@ -87,15 +92,20 @@ class ResponseTemplateService:
         Returns:
             Created ResponseTemplate or None if already exists
         """
-        # Check if template already exists
+        # Enhanced duplicate check
         existing = self.db.query(ResponseTemplate).filter(
             ResponseTemplate.application_id == application_id,
-            ResponseTemplate.scanner_type == 'custom_scanner',
-            ResponseTemplate.scanner_identifier == scanner.tag
+            ResponseTemplate.tenant_id == tenant_id,
+            (
+                (ResponseTemplate.scanner_type == 'custom_scanner') &
+                (ResponseTemplate.scanner_identifier == scanner.tag)
+            ) |
+            (ResponseTemplate.scanner_name == scanner.name) |
+            (ResponseTemplate.category == scanner.tag)
         ).first()
 
         if existing:
-            logger.info(f"Template for custom scanner {scanner.tag} already exists")
+            logger.info(f"Template for custom scanner {scanner.tag} already exists (ID: {existing.id})")
             return None
 
         default_content = {
@@ -142,15 +152,20 @@ class ResponseTemplateService:
         Returns:
             Created ResponseTemplate or None if already exists
         """
-        # Check if template already exists
+        # Enhanced duplicate check
         existing = self.db.query(ResponseTemplate).filter(
             ResponseTemplate.application_id == application_id,
-            ResponseTemplate.scanner_type == 'marketplace_scanner',
-            ResponseTemplate.scanner_identifier == scanner.tag
+            ResponseTemplate.tenant_id == tenant_id,
+            (
+                (ResponseTemplate.scanner_type == 'marketplace_scanner') &
+                (ResponseTemplate.scanner_identifier == scanner.tag)
+            ) |
+            (ResponseTemplate.scanner_name == scanner.name) |
+            (ResponseTemplate.category == scanner.tag)
         ).first()
 
         if existing:
-            logger.info(f"Template for marketplace scanner {scanner.tag} already exists")
+            logger.info(f"Template for marketplace scanner {scanner.tag} already exists (ID: {existing.id})")
             return None
 
         default_content = {
@@ -197,15 +212,20 @@ class ResponseTemplateService:
         Returns:
             Created ResponseTemplate or None if already exists
         """
-        # Check if template already exists
+        # Enhanced duplicate check
         existing = self.db.query(ResponseTemplate).filter(
             ResponseTemplate.application_id == application_id,
-            ResponseTemplate.scanner_type == 'blacklist',
-            ResponseTemplate.scanner_identifier == blacklist.name
+            ResponseTemplate.tenant_id == tenant_id,
+            (
+                (ResponseTemplate.scanner_type == 'blacklist') &
+                (ResponseTemplate.scanner_identifier == blacklist.name)
+            ) |
+            (ResponseTemplate.scanner_name == blacklist.name) |
+            (ResponseTemplate.category == blacklist.name)
         ).first()
 
         if existing:
-            logger.info(f"Template for blacklist '{blacklist.name}' already exists")
+            logger.info(f"Template for blacklist '{blacklist.name}' already exists (ID: {existing.id})")
             return None
 
         default_content = {
