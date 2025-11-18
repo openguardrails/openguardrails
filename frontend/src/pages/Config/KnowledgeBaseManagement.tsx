@@ -25,13 +25,15 @@ import {
   DeleteOutlined,
   UploadOutlined,
   SearchOutlined,
-  InfoCircleOutlined
+  InfoCircleOutlined,
+  ReloadOutlined
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { knowledgeBaseApi } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { useApplication } from '../../contexts/ApplicationContext';
 import type { KnowledgeBase, SimilarQuestionResult } from '../../types';
+import { eventBus, EVENTS } from '../../utils/eventBus';
 
 const { TextArea } = Input;
 const { Option } = Select;
@@ -113,6 +115,82 @@ const KnowledgeBaseManagement: React.FC = () => {
     return unsubscribe;
   }, [onUserSwitch]);
 
+  // Listen to scanner events from other components
+  useEffect(() => {
+    const handleScannerDeleted = (payload: { scannerId: string; scannerTag: string }) => {
+      console.log('Scanner deleted event received:', payload);
+      // Refresh both available scanners and knowledge base list
+      fetchAvailableScanners();
+      fetchData();
+    };
+
+    const handleScannerCreated = () => {
+      console.log('Scanner created event received');
+      // Refresh available scanners list
+      fetchAvailableScanners();
+    };
+
+    const handleScannerUpdated = () => {
+      console.log('Scanner updated event received');
+      // Refresh available scanners list
+      fetchAvailableScanners();
+    };
+
+    const handleBlacklistDeleted = (payload: { blacklistId: string; blacklistName: string }) => {
+      console.log('Blacklist deleted event received:', payload);
+      // Refresh both available scanners and knowledge base list
+      fetchAvailableScanners();
+      fetchData();
+    };
+
+    const handleBlacklistCreated = () => {
+      console.log('Blacklist created event received');
+      // Refresh available scanners list
+      fetchAvailableScanners();
+    };
+
+    const handleWhitelistDeleted = (payload: { whitelistId: string; whitelistName: string }) => {
+      console.log('Whitelist deleted event received:', payload);
+      // Refresh both available scanners and knowledge base list
+      fetchAvailableScanners();
+      fetchData();
+    };
+
+    const handleWhitelistCreated = () => {
+      console.log('Whitelist created event received');
+      // Refresh available scanners list
+      fetchAvailableScanners();
+    };
+
+    const handleMarketplaceScannerPurchased = (payload: { packageId: string; packageName: string }) => {
+      console.log('Marketplace scanner purchased event received:', payload);
+      // Refresh available scanners list
+      fetchAvailableScanners();
+    };
+
+    // Subscribe to all relevant events
+    const unsubscribeScannerDeleted = eventBus.on(EVENTS.SCANNER_DELETED, handleScannerDeleted);
+    const unsubscribeScannerCreated = eventBus.on(EVENTS.SCANNER_CREATED, handleScannerCreated);
+    const unsubscribeScannerUpdated = eventBus.on(EVENTS.SCANNER_UPDATED, handleScannerUpdated);
+    const unsubscribeBlacklistDeleted = eventBus.on(EVENTS.BLACKLIST_DELETED, handleBlacklistDeleted);
+    const unsubscribeBlacklistCreated = eventBus.on(EVENTS.BLACKLIST_CREATED, handleBlacklistCreated);
+    const unsubscribeWhitelistDeleted = eventBus.on(EVENTS.WHITELIST_DELETED, handleWhitelistDeleted);
+    const unsubscribeWhitelistCreated = eventBus.on(EVENTS.WHITELIST_CREATED, handleWhitelistCreated);
+    const unsubscribeMarketplaceScannerPurchased = eventBus.on(EVENTS.MARKETPLACE_SCANNER_PURCHASED, handleMarketplaceScannerPurchased);
+
+    // Cleanup subscriptions on unmount
+    return () => {
+      unsubscribeScannerDeleted();
+      unsubscribeScannerCreated();
+      unsubscribeScannerUpdated();
+      unsubscribeBlacklistDeleted();
+      unsubscribeBlacklistCreated();
+      unsubscribeWhitelistDeleted();
+      unsubscribeWhitelistCreated();
+      unsubscribeMarketplaceScannerPurchased();
+    };
+  }, []);
+
   const fetchData = async () => {
     try {
       setLoading(true);
@@ -134,10 +212,12 @@ const KnowledgeBaseManagement: React.FC = () => {
     }
   };
 
-  const handleAdd = () => {
+  const handleAdd = async () => {
     setEditingItem(null);
     form.resetFields();
     setSelectedScannerType('official_scanner'); // Reset scanner type to default
+    // Refresh available scanners list to get latest blacklists, custom scanners, etc.
+    await fetchAvailableScanners();
     setModalVisible(true);
   };
 
@@ -638,13 +718,25 @@ const KnowledgeBaseManagement: React.FC = () => {
               </p>
             </Col>
             <Col>
-              <Button
-                type="primary"
-                icon={<PlusOutlined />}
-                onClick={handleAdd}
-              >
-                {t('knowledge.addKnowledgeBase')}
-              </Button>
+              <Space>
+                <Button
+                  icon={<ReloadOutlined />}
+                  onClick={async () => {
+                    await fetchAvailableScanners();
+                    await fetchData();
+                  }}
+                  loading={loading}
+                >
+                  {t('common.refresh')}
+                </Button>
+                <Button
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  onClick={handleAdd}
+                >
+                  {t('knowledge.addKnowledgeBase')}
+                </Button>
+              </Space>
             </Col>
           </Row>
         </div>
@@ -754,6 +846,25 @@ const KnowledgeBaseManagement: React.FC = () => {
                 ))}
             </Select>
           </Form.Item>
+          
+          {/* Show alert when marketplace scanner type is selected but no scanners available */}
+          {selectedScannerType === 'marketplace_scanner' && availableScanners.marketplace_scanners.length === 0 && (
+            <Alert
+              message={t('knowledge.noPurchasedScannersTitle') || 'No Purchased Third-Party Scanners'}
+              description={
+                <span>
+                  {t('knowledge.noPurchasedScannersDescription') || 'You haven\'t purchased any third-party scanner packages yet. '}
+                  <a href="/platform/config/official-scanners#marketplace" target="_blank" rel="noopener noreferrer">
+                    {t('knowledge.goToMarketplace') || 'Go to Marketplace'}
+                  </a>
+                  {t('knowledge.toBrowseAndPurchase') || ' to browse and purchase scanner packages.'}
+                </span>
+              }
+              type="info"
+              showIcon
+              style={{ marginBottom: 16 }}
+            />
+          )}
 
           <Form.Item
             name="name"

@@ -6,6 +6,7 @@ import { configApi } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { useApplication } from '../../contexts/ApplicationContext';
 import type { Whitelist } from '../../types';
+import { eventBus, EVENTS } from '../../utils/eventBus';
 
 const { TextArea } = Input;
 
@@ -73,6 +74,8 @@ const WhitelistManagement: React.FC = () => {
       } else {
         await configApi.whitelist.create(submitData);
         message.success(t('common.createSuccess'));
+        // Emit event to notify other components
+        eventBus.emit(EVENTS.WHITELIST_CREATED);
       }
 
       setModalVisible(false);
@@ -88,6 +91,8 @@ const WhitelistManagement: React.FC = () => {
       await configApi.whitelist.delete(record.id);
       message.success(t('common.deleteSuccess'));
       fetchData();
+      // Emit event to notify other components
+      eventBus.emit(EVENTS.WHITELIST_DELETED, { whitelistId: record.id, whitelistName: record.name });
     } catch (error) {
       console.error('Error deleting whitelist:', error);
       message.error(t('common.deleteFailed'));

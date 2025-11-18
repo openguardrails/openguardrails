@@ -6,6 +6,7 @@ import { configApi } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { useApplication } from '../../contexts/ApplicationContext';
 import type { Blacklist } from '../../types';
+import { eventBus, EVENTS } from '../../utils/eventBus';
 
 const { TextArea } = Input;
 
@@ -71,6 +72,8 @@ const BlacklistManagement: React.FC = () => {
           await configApi.blacklist.delete(record.id);
           message.success(t('common.deleteSuccess'));
           fetchData();
+          // Emit event to notify other components
+          eventBus.emit(EVENTS.BLACKLIST_DELETED, { blacklistId: record.id, blacklistName: record.name });
         } catch (error) {
           console.error('Error deleting blacklist:', error);
         }
@@ -91,6 +94,8 @@ const BlacklistManagement: React.FC = () => {
       } else {
         await configApi.blacklist.create(submitData);
         message.success(t('common.createSuccess'));
+        // Emit event to notify other components
+        eventBus.emit(EVENTS.BLACKLIST_CREATED);
       }
 
       setModalVisible(false);

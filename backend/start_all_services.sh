@@ -13,6 +13,13 @@ fi
 # Set environment variable
 export PYTHONPATH="$PWD:$PYTHONPATH"
 
+# Run database migrations first (will be skipped if already up to date)
+echo "Checking database migrations..."
+python3 migrations/run_migrations.py || {
+    echo "Warning: Migration check failed, continuing anyway..."
+}
+echo ""
+
 # Start detection service (background running)
 echo "Starting Detection Service on port 5001..."
 python3 start_detection_service.py &

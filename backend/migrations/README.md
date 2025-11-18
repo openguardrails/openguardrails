@@ -4,16 +4,22 @@ This directory contains database migration scripts for OpenGuardrails.
 
 ## Automatic Migration on Startup
 
-**Starting from version 2.x, database migrations run automatically on first deployment!**
+**Database migrations run automatically on every admin service startup!**
 
-When you run `docker compose up -d` for the first time:
+### All Deployment Methods Supported
 
-1. PostgreSQL starts and becomes healthy
-2. Admin service starts and automatically runs pending migrations via [entrypoint.sh](../entrypoint.sh:1-24)
-3. Detection and Proxy services start after migrations complete
-4. All services are ready to use
+Migrations run automatically regardless of how you start the services:
 
-**No manual intervention needed!** This ensures a smooth first-time deployment experience.
+1. **Docker Compose**: Migrations run via [entrypoint.sh](../entrypoint.sh:1-35) before uvicorn starts
+2. **Systemd Services**: Migrations run via [start_admin_service.py](../start_admin_service.py:11-34) on service startup
+3. **Manual Scripts**: Migrations run via [start_all_services.sh](../start_all_services.sh:16-21) before services start
+4. **Deployment Scripts**: Migrations run in deployment scripts (e.g., `xiangxin_conf/deploy/deploy_be.sh`)
+
+**No manual intervention needed!** This ensures:
+- ✅ Smooth first-time deployment
+- ✅ Automatic schema updates on upgrades
+- ✅ No missed migrations when pulling new code
+- ✅ Safe concurrent startups (uses PostgreSQL advisory locks)
 
 ### How It Works
 

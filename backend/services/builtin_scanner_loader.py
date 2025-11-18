@@ -178,6 +178,41 @@ def _initialize_scanner_configs_for_applications(
         db.flush()
 
 
+def _initialize_response_templates_for_applications(
+    db: Session, scanners: List[Scanner]
+) -> None:
+    """
+    Initialize response templates for official scanners across all applications.
+    Called when loading built-in scanner packages.
+    """
+    applications = db.query(Application).filter(Application.is_active == True).all()  # noqa: E712
+    logger.info("Initializing response templates for %d applications", len(applications))
+
+    template_service = ResponseTemplateService(db)
+
+    for app in applications:
+        logger.info("Creating response templates for application %s", app.name)
+        
+        for scanner in scanners:
+            if not scanner.is_active:
+                continue
+            
+            try:
+                # Create response template for official scanner
+                template_service.create_template_for_official_scanner(
+                    scanner=scanner,
+                    application_id=app.id,
+                    tenant_id=app.tenant_id
+                )
+            except Exception as e:
+                logger.error(
+                    f"Failed to create response template for scanner {scanner.tag} "
+                    f"in app {app.id}: {e}"
+                )
+        
+        db.flush()
+
+
 def load_builtin_scanner_packages(
     db: Session,
     builtin_dir: Optional[Path] = None,
@@ -216,6 +251,8 @@ def load_builtin_scanner_packages(
 
     if initialize_configs and all_scanners:
         _initialize_scanner_configs_for_applications(db, all_scanners)
+        # Also initialize response templates for official scanners
+        _initialize_response_templates_for_applications(db, all_scanners)
 
     if auto_commit:
         db.commit()

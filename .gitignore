@@ -74,3 +74,5 @@ tests
 sdks/
 models/
 backend/builtin_scanners/*.json
+frontend/public/logo_dark.png
+frontend/public/logo.png

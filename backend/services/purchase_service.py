@@ -9,9 +9,10 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from database.models import (
-    PackagePurchase, ScannerPackage, Tenant, TenantSubscription
+    PackagePurchase, ScannerPackage, Tenant, TenantSubscription, Application
 )
 from utils.logger import setup_logger
+from services.response_template_service import ResponseTemplateService
 
 logger = setup_logger()
 
@@ -219,6 +220,18 @@ class PurchaseService:
             f"package={purchase.package_id}, approved_by={approved_by}"
         )
 
+        # Auto-create response templates for all scanners in this package
+        # for all applications owned by this tenant
+        try:
+            self._create_templates_for_purchased_scanners(
+                purchase=purchase,
+                tenant_id=purchase.tenant_id
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to create response templates for purchase {purchase_id}: {e}"
+            )
+
         return purchase
 
     def reject_purchase(
@@ -295,6 +308,55 @@ class PurchaseService:
         )
 
         return True
+
+    def _create_templates_for_purchased_scanners(
+        self,
+        purchase: PackagePurchase,
+        tenant_id: UUID
+    ):
+        """
+        Create response templates for all scanners in a purchased package,
+        for all applications owned by the tenant.
+
+        Args:
+            purchase: PackagePurchase object
+            tenant_id: Tenant UUID
+        """
+        # Get all applications owned by this tenant
+        applications = self.db.query(Application).filter(
+            Application.tenant_id == tenant_id,
+            Application.is_active == True
+        ).all()
+
+        if not applications:
+            logger.info(f"No active applications found for tenant {tenant_id}")
+            return
+
+        # Get all scanners in the purchased package
+        package = purchase.package
+        if not package or not package.scanners:
+            logger.warning(f"No scanners found in package {purchase.package_id}")
+            return
+
+        template_service = ResponseTemplateService(self.db)
+
+        # Create templates for each scanner in each application
+        for app in applications:
+            for scanner in package.scanners:
+                if not scanner.is_active:
+                    continue
+
+                try:
+                    template_service.create_template_for_marketplace_scanner(
+                        scanner=scanner,
+                        application_id=app.id,
+                        tenant_id=tenant_id
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"Failed to create template for scanner {scanner.tag} "
+                        f"in app {app.id}: {e}"
+                    )
 
     def get_purchase_statistics(
         self,

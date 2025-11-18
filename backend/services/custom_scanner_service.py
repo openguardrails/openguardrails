@@ -13,6 +13,7 @@ from database.models import (
     TenantSubscription
 )
 from utils.logger import setup_logger
+from services.response_template_service import ResponseTemplateService
 
 logger = setup_logger()
 
@@ -191,6 +192,17 @@ class CustomScannerService:
             f"for app={application_id}, type={scanner.scanner_type}"
         )
 
+        # Auto-create response template for this custom scanner
+        try:
+            template_service = ResponseTemplateService(self.db)
+            template_service.create_template_for_custom_scanner(
+                scanner=scanner,
+                application_id=application_id,
+                tenant_id=tenant_id
+            )
+        except Exception as e:
+            logger.error(f"Failed to create response template for custom scanner {scanner.tag}: {e}")
+
         return {
             'id': str(scanner.id),
             'custom_scanner_id': str(custom_scanner.id),
@@ -310,12 +322,40 @@ class CustomScannerService:
         tag = scanner.tag
         name = scanner.name
 
-        # Soft delete by marking as inactive
+        # Auto-delete response template for this custom scanner
+        try:
+            template_service = ResponseTemplateService(self.db)
+            template_service.delete_template_for_scanner(
+                scanner_tag=tag,
+                scanner_type='custom_scanner',
+                application_id=application_id
+            )
+        except Exception as e:
+            logger.error(f"Failed to delete response template for custom scanner {tag}: {e}")
+
+        # Delete knowledge bases associated with this custom scanner
+        try:
+            from database.models import KnowledgeBase
+            deleted_kbs = self.db.query(KnowledgeBase).filter(
+                KnowledgeBase.application_id == application_id,
+                KnowledgeBase.scanner_type == 'custom_scanner',
+                KnowledgeBase.scanner_identifier == tag
+            ).delete(synchronize_session=False)
+            if deleted_kbs > 0:
+                logger.info(f"Deleted {deleted_kbs} knowledge base(s) associated with custom scanner {tag}")
+        except Exception as e:
+            logger.error(f"Failed to delete knowledge bases for custom scanner {tag}: {e}")
+
+        # Soft delete by marking as inactive and modifying tag to avoid unique constraint
+        # This allows the same tag to be reused for new scanners
+        import time
+        deleted_tag = f"{tag}_deleted_{int(time.time())}"
+        scanner.tag = deleted_tag
         scanner.is_active = False
         self.db.commit()
 
         logger.warning(
-            f"Deleted custom scanner: {tag} ({name}) from app={application_id}"
+            f"Deleted custom scanner: {tag} ({name}) from app={application_id}, renamed tag to {deleted_tag}"
         )
 
         return True

@@ -4,6 +4,7 @@ import { PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined } from '@ant
 import { useTranslation } from 'react-i18next';
 import { customScannersApi } from '../../services/api';
 import { useApplication } from '../../contexts/ApplicationContext';
+import { eventBus, EVENTS } from '../../utils/eventBus';
 
 const { TextArea } = Input;
 const { Option } = Select;
@@ -104,6 +105,8 @@ const CustomScannersManagement: React.FC = () => {
           await customScannersApi.delete(scanner.id);
           message.success(t('customScanners.deleteSuccess'));
           await loadData();
+          // Emit event to notify other components
+          eventBus.emit(EVENTS.SCANNER_DELETED, { scannerId: scanner.id, scannerTag: scanner.tag });
         } catch (error) {
           message.error(t('customScanners.deleteFailed'));
         }
@@ -119,9 +122,13 @@ const CustomScannersManagement: React.FC = () => {
       if (editingScanner) {
         await customScannersApi.update(editingScanner.id, values);
         message.success(t('customScanners.updateSuccess'));
+        // Emit event to notify other components
+        eventBus.emit(EVENTS.SCANNER_UPDATED, { scannerId: editingScanner.id });
       } else {
         await customScannersApi.create(values);
         message.success(t('customScanners.createSuccess'));
+        // Emit event to notify other components
+        eventBus.emit(EVENTS.SCANNER_CREATED);
       }
 
       setModalVisible(false);

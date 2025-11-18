@@ -6,7 +6,8 @@ from sqlalchemy.orm import Session
 from database.connection import get_db
 from database.models import (
     Blacklist, Whitelist, ResponseTemplate, KnowledgeBase, Tenant,
-    TenantKnowledgeBaseDisable, Application, Scanner, ScannerPackage, CustomScanner
+    TenantKnowledgeBaseDisable, Application, Scanner, ScannerPackage, CustomScanner,
+    PackagePurchase
 )
 from models.requests import BlacklistRequest, WhitelistRequest, ResponseTemplateRequest, KnowledgeBaseRequest
 from models.responses import (
@@ -21,6 +22,7 @@ from services.template_cache import template_cache
 from services.enhanced_template_service import enhanced_template_service
 from services.admin_service import admin_service
 from services.knowledge_base_service import knowledge_base_service
+from services.response_template_service import ResponseTemplateService
 from routers.proxy_management import get_current_user_from_request
 
 logger = setup_logger()
@@ -173,9 +175,21 @@ async def create_blacklist(blacklist_request: BlacklistRequest, request: Request
         )
         db.add(blacklist)
         db.commit()
+        db.refresh(blacklist)
 
         # Invalidate keyword cache immediately
         await keyword_cache.invalidate_cache()
+
+        # Auto-create response template for this blacklist
+        try:
+            template_service = ResponseTemplateService(db)
+            template_service.create_template_for_blacklist(
+                blacklist=blacklist,
+                application_id=application_id,
+                tenant_id=current_user.id
+            )
+        except Exception as e:
+            logger.error(f"Failed to create response template for blacklist {blacklist.name}: {e}")
 
         logger.info(f"Blacklist created: {blacklist_request.name} for user: {current_user.email}, app: {application_id}")
         return ApiResponse(success=True, message="Blacklist created successfully")
@@ -220,6 +234,19 @@ async def delete_blacklist(blacklist_id: int, request: Request, db: Session = De
         blacklist = db.query(Blacklist).filter_by(id=blacklist_id, application_id=application_id).first()
         if not blacklist:
             raise HTTPException(status_code=404, detail="Blacklist not found")
+
+        # Store blacklist name before deletion
+        blacklist_name = blacklist.name
+
+        # Auto-delete response template for this blacklist
+        try:
+            template_service = ResponseTemplateService(db)
+            template_service.delete_template_for_blacklist(
+                blacklist_name=blacklist_name,
+                application_id=application_id
+            )
+        except Exception as e:
+            logger.error(f"Failed to delete response template for blacklist {blacklist_name}: {e}")
 
         db.delete(blacklist)
         db.commit()
@@ -387,12 +414,35 @@ async def create_response_template(template_request: ResponseTemplateRequest, re
     try:
         current_user, application_id = get_current_user_and_application_from_request(request, db)
 
+        # Auto-populate scanner_name based on scanner_type and scanner_identifier
+        scanner_name = None
+        if template_request.scanner_type and template_request.scanner_identifier:
+            if template_request.scanner_type == 'blacklist':
+                blacklist = db.query(Blacklist).filter(
+                    Blacklist.application_id == application_id,
+                    Blacklist.name == template_request.scanner_identifier
+                ).first()
+                if blacklist:
+                    scanner_name = blacklist.name
+            elif template_request.scanner_type == 'whitelist':
+                whitelist = db.query(Whitelist).filter(
+                    Whitelist.application_id == application_id,
+                    Whitelist.name == template_request.scanner_identifier
+                ).first()
+                if whitelist:
+                    scanner_name = whitelist.name
+            elif template_request.scanner_type in ['official_scanner', 'marketplace_scanner', 'custom_scanner']:
+                scanner = db.query(Scanner).filter(Scanner.tag == template_request.scanner_identifier).first()
+                if scanner:
+                    scanner_name = scanner.name
+
         template = ResponseTemplate(
             tenant_id=current_user.id,
             application_id=application_id,
             category=template_request.category,
             scanner_type=template_request.scanner_type,
             scanner_identifier=template_request.scanner_identifier,
+            scanner_name=scanner_name,  # Auto-populate scanner name for display
             risk_level=template_request.risk_level,
             template_content=template_request.template_content,
             is_default=template_request.is_default,
@@ -631,7 +681,8 @@ async def create_knowledge_base(
         if scanner_type not in valid_scanner_types:
             raise HTTPException(status_code=400, detail=f"Invalid scanner_type. Must be one of: {', '.join(valid_scanner_types)}")
 
-        # Validate scanner exists based on type
+        # Validate scanner exists based on type and get scanner_name
+        scanner_name = None
         if scanner_type == 'blacklist':
             # Validate blacklist exists
             blacklist = db.query(Blacklist).filter(
@@ -640,6 +691,7 @@ async def create_knowledge_base(
             ).first()
             if not blacklist:
                 raise HTTPException(status_code=404, detail=f"Blacklist '{scanner_identifier}' not found")
+            scanner_name = blacklist.name
         elif scanner_type == 'whitelist':
             # Validate whitelist exists
             whitelist = db.query(Whitelist).filter(
@@ -648,16 +700,19 @@ async def create_knowledge_base(
             ).first()
             if not whitelist:
                 raise HTTPException(status_code=404, detail=f"Whitelist '{scanner_identifier}' not found")
+            scanner_name = whitelist.name
         elif scanner_type == 'official_scanner':
-            # Validate official scanner tag (S1-S21)
+            # Validate official scanner tag (S1-S21 or S100+)
             scanner = db.query(Scanner).filter(Scanner.tag == scanner_identifier).first()
             if not scanner:
                 raise HTTPException(status_code=404, detail=f"Official scanner '{scanner_identifier}' not found")
+            scanner_name = scanner.name
         elif scanner_type == 'marketplace_scanner':
             # Validate marketplace scanner exists
             scanner = db.query(Scanner).filter(Scanner.tag == scanner_identifier).first()
             if not scanner:
                 raise HTTPException(status_code=404, detail=f"Marketplace scanner '{scanner_identifier}' not found")
+            scanner_name = scanner.name
         elif scanner_type == 'custom_scanner':
             # Validate custom scanner exists for this application
             custom_scanner = db.query(CustomScanner).join(Scanner).filter(
@@ -666,6 +721,7 @@ async def create_knowledge_base(
             ).first()
             if not custom_scanner:
                 raise HTTPException(status_code=404, detail=f"Custom scanner '{scanner_identifier}' not found")
+            scanner_name = custom_scanner.scanner.name
 
         # Check if there is already a knowledge base with the same name and scanner
         # For global KB, check globally
@@ -702,6 +758,7 @@ async def create_knowledge_base(
             category=category,  # Keep for backward compatibility
             scanner_type=scanner_type,
             scanner_identifier=scanner_identifier,
+            scanner_name=scanner_name,  # Auto-populate scanner name for display
             name=name,
             description=description,
             file_path="",  # Will be set below
@@ -787,24 +844,39 @@ async def get_available_scanners_for_knowledge_base(
             for s in official_scanners
         ]
 
-        # Get marketplace scanners (purchased packages)
-        # This requires checking package_purchases table
-        # For now, we'll just get all scanners from purchasable packages
-        marketplace_scanners = db.query(Scanner).join(
-            ScannerPackage, Scanner.package_id == ScannerPackage.id
-        ).filter(
-            ScannerPackage.package_type == 'purchasable'
-        ).order_by(Scanner.tag).all()
+        # Get marketplace scanners (purchased packages only)
+        # Only return scanners from packages that the user has purchased and approved
+        tenant_id = current_user.id
+        
+        # Get approved purchases for this tenant
+        approved_package_ids = db.query(PackagePurchase.package_id).filter(
+            PackagePurchase.tenant_id == tenant_id,
+            PackagePurchase.status == 'approved'
+        ).all()
+        approved_package_ids = [pkg_id[0] for pkg_id in approved_package_ids]
+        
+        # Get scanners from purchased packages
+        marketplace_scanners = []
+        if approved_package_ids:
+            marketplace_scanners = db.query(Scanner).join(
+                ScannerPackage, Scanner.package_id == ScannerPackage.id
+            ).filter(
+                ScannerPackage.package_type == 'purchasable',
+                Scanner.package_id.in_(approved_package_ids),
+                Scanner.is_active == True
+            ).order_by(Scanner.tag).all()
+        
         result["marketplace_scanners"] = [
             {"value": s.tag, "label": f"{s.tag} - {s.name}"}
             for s in marketplace_scanners
         ]
 
-        # Get custom scanners for this application
+        # Get custom scanners for this application (only active scanners)
         custom_scanners = db.query(Scanner).join(
             CustomScanner, CustomScanner.scanner_id == Scanner.id
         ).filter(
-            CustomScanner.application_id == application_id
+            CustomScanner.application_id == application_id,
+            Scanner.is_active == True
         ).order_by(Scanner.tag).all()
         result["custom_scanners"] = [
             {"value": s.tag, "label": f"{s.tag} - {s.name}"}

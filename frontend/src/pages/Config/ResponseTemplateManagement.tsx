@@ -1,11 +1,12 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { Table, Button, Modal, Form, Input, message, Tag, Select } from 'antd';
-import { EditOutlined } from '@ant-design/icons';
+import { EditOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
-import { configApi } from '../../services/api';
+import { configApi, knowledgeBaseApi } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { useApplication } from '../../contexts/ApplicationContext';
 import type { ResponseTemplate } from '../../types';
+import { eventBus, EVENTS } from '../../utils/eventBus';
 
 const { TextArea } = Input;
 const { Option } = Select;
@@ -20,6 +21,21 @@ const ResponseTemplateManagement: React.FC = () => {
   const { onUserSwitch } = useAuth();
   const { currentApplicationId } = useApplication();
   const [currentLang, setCurrentLang] = useState(i18n.language || 'en');
+
+  // Available scanners for template creation
+  const [availableScanners, setAvailableScanners] = useState<{
+    blacklists: Array<{ value: string; label: string }>;
+    whitelists: Array<{ value: string; label: string }>;
+    official_scanners: Array<{ value: string; label: string }>;
+    marketplace_scanners: Array<{ value: string; label: string }>;
+    custom_scanners: Array<{ value: string; label: string }>;
+  }>({
+    blacklists: [],
+    whitelists: [],
+    official_scanners: [],
+    marketplace_scanners: [],
+    custom_scanners: []
+  });
 
   const getRiskLevelLabel = (riskLevel: string) => {
     const riskLevelMap: { [key: string]: string } = {
@@ -64,17 +80,105 @@ const ResponseTemplateManagement: React.FC = () => {
 
   useEffect(() => {
     if (currentApplicationId) {
-      fetchData();
+      loadAllData();
     }
   }, [currentApplicationId]);
 
   // Listen to user switch event, automatically refresh data
   useEffect(() => {
     const unsubscribe = onUserSwitch(() => {
-      fetchData();
+      loadAllData();
     });
     return unsubscribe;
   }, [onUserSwitch]);
+
+  // Listen to scanner events from other components
+  useEffect(() => {
+    const handleScannerDeleted = (payload: { scannerId: string; scannerTag: string }) => {
+      console.log('Scanner deleted event received in ResponseTemplateManagement:', payload);
+      // Refresh both available scanners and response templates list
+      loadAllData();
+    };
+
+    const handleScannerCreated = () => {
+      console.log('Scanner created event received in ResponseTemplateManagement');
+      // Refresh available scanners list
+      loadAllData();
+    };
+
+    const handleScannerUpdated = () => {
+      console.log('Scanner updated event received in ResponseTemplateManagement');
+      // Refresh available scanners list
+      loadAllData();
+    };
+
+    const handleBlacklistDeleted = (payload: { blacklistId: string; blacklistName: string }) => {
+      console.log('Blacklist deleted event received in ResponseTemplateManagement:', payload);
+      // Refresh both available scanners and response templates list
+      loadAllData();
+    };
+
+    const handleBlacklistCreated = () => {
+      console.log('Blacklist created event received in ResponseTemplateManagement');
+      // Refresh available scanners list
+      loadAllData();
+    };
+
+    const handleWhitelistDeleted = (payload: { whitelistId: string; whitelistName: string }) => {
+      console.log('Whitelist deleted event received in ResponseTemplateManagement:', payload);
+      // Refresh both available scanners and response templates list
+      loadAllData();
+    };
+
+    const handleWhitelistCreated = () => {
+      console.log('Whitelist created event received in ResponseTemplateManagement');
+      // Refresh available scanners list
+      loadAllData();
+    };
+
+    const handleMarketplaceScannerPurchased = (payload: { packageId: string; packageName: string }) => {
+      console.log('Marketplace scanner purchased event received in ResponseTemplateManagement:', payload);
+      // Refresh available scanners list
+      loadAllData();
+    };
+
+    // Subscribe to all relevant events
+    const unsubscribeScannerDeleted = eventBus.on(EVENTS.SCANNER_DELETED, handleScannerDeleted);
+    const unsubscribeScannerCreated = eventBus.on(EVENTS.SCANNER_CREATED, handleScannerCreated);
+    const unsubscribeScannerUpdated = eventBus.on(EVENTS.SCANNER_UPDATED, handleScannerUpdated);
+    const unsubscribeBlacklistDeleted = eventBus.on(EVENTS.BLACKLIST_DELETED, handleBlacklistDeleted);
+    const unsubscribeBlacklistCreated = eventBus.on(EVENTS.BLACKLIST_CREATED, handleBlacklistCreated);
+    const unsubscribeWhitelistDeleted = eventBus.on(EVENTS.WHITELIST_DELETED, handleWhitelistDeleted);
+    const unsubscribeWhitelistCreated = eventBus.on(EVENTS.WHITELIST_CREATED, handleWhitelistCreated);
+    const unsubscribeMarketplaceScannerPurchased = eventBus.on(EVENTS.MARKETPLACE_SCANNER_PURCHASED, handleMarketplaceScannerPurchased);
+
+    // Cleanup subscriptions on unmount
+    return () => {
+      unsubscribeScannerDeleted();
+      unsubscribeScannerCreated();
+      unsubscribeScannerUpdated();
+      unsubscribeBlacklistDeleted();
+      unsubscribeBlacklistCreated();
+      unsubscribeWhitelistDeleted();
+      unsubscribeWhitelistCreated();
+      unsubscribeMarketplaceScannerPurchased();
+    };
+  }, []);
+
+  const loadAllData = async () => {
+    // First fetch available scanners, then fetch and create templates
+    await fetchAvailableScanners();
+    await fetchData();
+  };
+
+  const fetchAvailableScanners = async () => {
+    try {
+      const result = await knowledgeBaseApi.getAvailableScanners();
+      setAvailableScanners(result);
+    } catch (error) {
+      console.error('Error fetching available scanners:', error);
+    }
+  };
 
   // Listen to language change events to update currentLang state
   useEffect(() => {
@@ -92,41 +196,10 @@ const ResponseTemplateManagement: React.FC = () => {
   const fetchData = async () => {
     try {
       setLoading(true);
+      // Simply fetch and display existing templates
+      // No automatic creation - templates are created when scanners/blacklists are created
       const result = await configApi.responses.list();
-      
-      // Ensure each category has one reject record, if not, create a default one
-      const existingCategories = result.map((item: ResponseTemplate) => item.category);
-      const missingCategories = categories.filter(cat => !existingCategories.includes(cat.value));
-      
-      // Create default reject content for missing categories
-      for (const category of missingCategories) {
-        // Create multilingual content object with both English and Chinese
-        // Use i18n.getFixedT to get translations in specific languages
-        const getTranslation = (lang: string) => {
-          return i18n.getFixedT(lang)(`template.defaultContents.${category.value}`);
-        };
-
-        const multilingualContent: Record<string, string> = {
-          en: getTranslation('en'),
-          zh: getTranslation('zh')
-        };
-
-        try {
-          await configApi.responses.create({
-            category: category.value,
-            risk_level: category.riskLevel,
-            template_content: multilingualContent,
-            is_default: true,
-            is_active: true
-          });
-        } catch (error) {
-          console.error(`Failed to create default template for ${category.value}:`, error);
-        }
-      }
-      
-      // Re-fetch data
-      const updatedResult = await configApi.responses.list();
-      setData(updatedResult);
+      setData(result);
     } catch (error) {
       console.error('Error fetching response templates:', error);
     } finally {
@@ -359,11 +432,20 @@ const ResponseTemplateManagement: React.FC = () => {
 
   return (
     <div>
-      <div style={{ marginBottom: 16 }}>
-        <h3>{t('template.rejectAnswerLibrary')}</h3>
-        <p style={{ color: '#666', marginBottom: 16 }}>
-          {t('template.rejectAnswerDescription')}
-        </p>
+      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div>
+          <h3>{t('template.rejectAnswerLibrary')}</h3>
+          <p style={{ color: '#666', marginBottom: 16 }}>
+            {t('template.rejectAnswerDescription')}
+          </p>
+        </div>
+        <Button
+          icon={<ReloadOutlined />}
+          onClick={loadAllData}
+          loading={loading}
+        >
+          {t('common.refresh')}
+        </Button>
       </div>
 
       <Table

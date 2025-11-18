@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { scannerPackagesApi, scannerConfigsApi, purchasesApi } from '../../services/api';
 import { useApplication } from '../../contexts/ApplicationContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { eventBus, EVENTS } from '../../utils/eventBus';
 
 interface ScannerConfig {
   id: string;
@@ -80,6 +81,13 @@ const OfficialScannersManagement: React.FC = () => {
   const [detailsPackage, setDetailsPackage] = useState<Package | null>(null);
   const [packageDetails, setPackageDetails] = useState<any>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
+  
+  // Active tab key - support URL hash for direct navigation
+  const [activeTabKey, setActiveTabKey] = useState<string>(() => {
+    // Get initial tab from URL hash (e.g., #marketplace)
+    const hash = window.location.hash.replace('#', '');
+    return ['builtin', 'purchased', 'marketplace'].includes(hash) ? hash : 'builtin';
+  });
 
   useEffect(() => {
     // Load packages regardless of application selection (built-in packages are global)
@@ -236,6 +244,8 @@ const OfficialScannersManagement: React.FC = () => {
       handleClosePurchaseModal();
       // Reload data to refresh marketplace packages
       await loadPackagesOnly();
+      // Emit event to notify other components
+      eventBus.emit(EVENTS.MARKETPLACE_SCANNER_PURCHASED, { packageId: purchasePackage.id, packageName: purchasePackage.package_name });
     } catch (error: any) {
       console.error('Failed to submit purchase request:', error);
       message.error(error.response?.data?.detail || t('scannerPackages.purchaseRequestFailed'));
@@ -446,6 +456,12 @@ const OfficialScannersManagement: React.FC = () => {
           }
         >
           <Tabs
+            activeKey={activeTabKey}
+            onChange={(key) => {
+              setActiveTabKey(key);
+              // Update URL hash for shareable links
+              window.location.hash = key;
+            }}
             items={[
               {
                 key: 'builtin',
