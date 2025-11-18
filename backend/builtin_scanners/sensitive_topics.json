@@ -1,0 +1,163 @@
+{
+    "package_code": "sensitive-topics",
+    "package_name": "Sensitive Topics Package",
+    "author": "OpenGuardrails",
+    "description": "Comprehensive detection for sensitive and harmful content across 18 risk categories",
+    "version": "1.0.0",
+    "license": "Apache-2.0",
+    "scanners": [
+        {
+        "tag": "S1",
+        "type": "genai",
+        "name": "General Political Topics",
+        "definition": "General political discussions, political figures, political parties, political ideologies, and political events",
+        "risk_level": "low_risk",
+        "scan_prompt": true,
+        "scan_response": true
+        },
+        {
+        "tag": "S2",
+        "type": "genai",
+        "name": "Sensitive Political Topics",
+        "definition": "Content promoting subversion of state power, separatism, terrorism, or extreme political ideologies that threaten national security",
+        "risk_level": "high_risk",
+        "scan_prompt": true,
+        "scan_response": true
+        },
+        {
+        "tag": "S3",
+        "type": "genai",
+        "name": "Insult to National Symbols",
+        "definition": "Content insulting or disrespecting national leaders, national flag, national emblem, national anthem, or other national symbols",
+        "risk_level": "high_risk",
+        "scan_prompt": true,
+        "scan_response": true
+        },
+        {
+        "tag": "S4",
+        "type": "genai",
+        "name": "Harm to Minors",
+        "definition": "Content involving child exploitation, child abuse, child sexual content, child nudity, or other content harmful to minors",
+        "risk_level": "medium_risk",
+        "scan_prompt": true,
+        "scan_response": true
+        },
+        {
+        "tag": "S5",
+        "type": "genai",
+        "name": "Violent Crime",
+        "definition": "Content depicting or promoting violent crimes including murder, assault, terrorism, torture, or other violent criminal activities",
+        "risk_level": "high_risk",
+        "scan_prompt": true,
+        "scan_response": true
+        },
+        {
+        "tag": "S6",
+        "type": "genai",
+        "name": "Non-Violent Crime",
+        "definition": "Content related to non-violent crimes including fraud, drug trafficking, human trafficking, cybercrime, money laundering, or other illegal activities",
+        "risk_level": "medium_risk",
+        "scan_prompt": true,
+        "scan_response": true
+        },
+        {
+        "tag": "S7",
+        "type": "genai",
+        "name": "Pornography",
+        "definition": "Content containing explicit sexual acts, adult nudity, sexual content, or pornographic material",
+        "risk_level": "medium_risk",
+        "scan_prompt": true,
+        "scan_response": true
+        },
+        {
+        "tag": "S8",
+        "type": "genai",
+        "name": "Hate & Discrimination",
+        "definition": "Content promoting hate, discrimination, prejudice, or bias based on race, ethnicity, religion, gender, sexual orientation, disability, or other protected characteristics",
+        "risk_level": "low_risk",
+        "scan_prompt": true,
+        "scan_response": true
+        },
+        {
+        "tag": "S10",
+        "type": "genai",
+        "name": "Profanity",
+        "definition": "Content containing profane language, vulgar expressions, offensive slurs, or obscene speech",
+        "risk_level": "low_risk",
+        "scan_prompt": true,
+        "scan_response": true
+        },
+        {
+        "tag": "S11",
+        "type": "genai",
+        "name": "Privacy Invasion",
+        "definition": "Content involving unauthorized disclosure of personal information, identity theft, doxxing, or violations of personal privacy",
+        "risk_level": "low_risk",
+        "scan_prompt": true,
+        "scan_response": true
+        },
+        {
+        "tag": "S12",
+        "type": "genai",
+        "name": "Commercial Violations",
+        "definition": "Content related to commercial fraud, false advertising, unfair competition, pyramid schemes, or violations of commercial regulations",
+        "risk_level": "low_risk",
+        "scan_prompt": true,
+        "scan_response": true
+        },
+        {
+        "tag": "S13",
+        "type": "genai",
+        "name": "Intellectual Property Infringement",
+        "definition": "Content involving plagiarism, copyright infringement, patent violations, trademark violations, or theft of intellectual property",
+        "risk_level": "low_risk",
+        "scan_prompt": true,
+        "scan_response": true
+        },
+        {
+        "tag": "S14",
+        "type": "genai",
+        "name": "Harassment",
+        "definition": "Content involving harassment, bullying, stalking, humiliation, verbal abuse, or persistent unwanted contact",
+        "risk_level": "low_risk",
+        "scan_prompt": true,
+        "scan_response": true
+        },
+        {
+        "tag": "S15",
+        "type": "genai",
+        "name": "Weapons of Mass Destruction",
+        "definition": "Content related to chemical weapons, biological weapons, nuclear weapons, radiological weapons, or other weapons of mass destruction",
+        "risk_level": "high_risk",
+        "scan_prompt": true,
+        "scan_response": true
+        },
+        {
+        "tag": "S16",
+        "type": "genai",
+        "name": "Self-Harm",
+        "definition": "Content promoting or encouraging self-harm, suicide, eating disorders, or other self-destructive behaviors",
+        "risk_level": "medium_risk",
+        "scan_prompt": true,
+        "scan_response": true
+        },
+        {
+        "tag": "S17",
+        "type": "genai",
+        "name": "Sexual Crimes",
+        "definition": "Content related to sexual assault, rape, sexual harassment, sexual exploitation, or other sexual crimes",
+        "risk_level": "high_risk",
+        "scan_prompt": true,
+        "scan_response": true
+        },
+        {
+        "tag": "S18",
+        "type": "genai",
+        "name": "Threats",
+        "definition": "Content containing violent threats, intimidation, coercion, or threatening language directed at individuals or groups",
+        "risk_level": "low_risk",
+        "scan_prompt": true,
+        "scan_response": true
+        }
+    ]
+}
