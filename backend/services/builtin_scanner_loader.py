@@ -76,22 +76,37 @@ def _create_or_update_scanners(
 
     for scanner_data in scanners_data:
         tag = scanner_data["tag"]
-        scanner = (
-            db.query(Scanner)
-            .filter(Scanner.tag == tag, Scanner.package_id == package_id)
-            .first()
-        )
 
-        if scanner:
-            logger.info("Updating scanner %s", tag)
-            scanner.scanner_type = scanner_data["type"]
-            scanner.name = scanner_data["name"]
-            scanner.definition = scanner_data["definition"]
-            scanner.default_risk_level = scanner_data["risk_level"]
-            scanner.default_scan_prompt = scanner_data.get("scan_prompt", True)
-            scanner.default_scan_response = scanner_data.get("scan_response", False)
-            scanner.is_active = True
+        # First check if scanner with this tag already exists (regardless of package_id)
+        existing_scanner = db.query(Scanner).filter(Scanner.tag == tag).first()
+
+        if existing_scanner:
+            # Check if it's already in the correct package
+            if existing_scanner.package_id == package_id:
+                logger.info("Updating scanner %s", tag)
+                existing_scanner.scanner_type = scanner_data["type"]
+                existing_scanner.name = scanner_data["name"]
+                existing_scanner.definition = scanner_data["definition"]
+                existing_scanner.default_risk_level = scanner_data["risk_level"]
+                existing_scanner.default_scan_prompt = scanner_data.get("scan_prompt", True)
+                existing_scanner.default_scan_response = scanner_data.get("scan_response", False)
+                existing_scanner.is_active = True
+                scanner = existing_scanner
+            else:
+                # Scanner exists but belongs to a different package
+                # For built-in packages, we should update the existing one and move it to this package
+                logger.info("Moving existing scanner %s to package %s", tag, package_id)
+                existing_scanner.package_id = package_id
+                existing_scanner.scanner_type = scanner_data["type"]
+                existing_scanner.name = scanner_data["name"]
+                existing_scanner.definition = scanner_data["definition"]
+                existing_scanner.default_risk_level = scanner_data["risk_level"]
+                existing_scanner.default_scan_prompt = scanner_data.get("scan_prompt", True)
+                existing_scanner.default_scan_response = scanner_data.get("scan_response", False)
+                existing_scanner.is_active = True
+                scanner = existing_scanner
         else:
+            # Scanner doesn't exist at all, create new one
             logger.info("Creating scanner %s", tag)
             scanner = Scanner(
                 package_id=package_id,
