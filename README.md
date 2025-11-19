@@ -4,7 +4,7 @@
 <br>
 
 <p align="center">
-        🤗 <a href="https://huggingface.co/openguardrails">Hugging Face</a>&nbsp&nbsp ｜  &nbsp&nbsp<a href="https://www.openguardrails.com">Website</a>&nbsp&nbsp ｜  &nbsp&nbsp<a href="https://arxiv.org/abs/2510.19169">Tech Report</a>
+        🤗 <a href="https://huggingface.co/openguardrails">Hugging Face</a>&nbsp&nbsp ｜  &nbsp&nbsp<a href="https://www.openguardrails.com/platform/">Free Platform</a>&nbsp&nbsp ｜  &nbsp&nbsp<a href="https://arxiv.org/abs/2510.19169">Tech Report</a>
 </p>
 
 # OpenGuardrails
