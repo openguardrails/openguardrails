@@ -679,8 +679,8 @@ class DetectionGuardrailService:
             all_categories.extend(compliance_result.categories)
         if security_result.risk_level != "no_risk":
             all_categories.extend(security_result.categories)
-        if data_result.risk_level != "no_risk":
-            all_categories.extend(data_result.categories)
+        # Note: data_result.categories contain internal entity types (ID_CARD_NUMBER_SYS, etc.)
+        # These should NOT be used for template lookups, only for risk level calculation
 
         # Determine highest risk level
         overall_risk_level = "no_risk"

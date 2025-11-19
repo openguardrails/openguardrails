@@ -175,8 +175,38 @@ class DataSecurityService:
         if not detected_entities:
             return text
 
+        # Remove overlapping entities where one is completely contained within another
+        # Keep the longer entity (prefer mask over replace for same-length overlapping entities)
+        filtered_entities = []
+        for i, entity1 in enumerate(detected_entities):
+            is_contained = False
+            for j, entity2 in enumerate(detected_entities):
+                if i != j:
+                    # Check if entity1 is completely contained within entity2
+                    if (entity1['start'] >= entity2['start'] and
+                        entity1['end'] <= entity2['end'] and
+                        len(entity1['text']) < len(entity2['text'])):
+                        is_contained = True
+                        break
+                    # If same range, prefer mask over replace
+                    elif (entity1['start'] == entity2['start'] and
+                          entity1['end'] == entity2['end'] and
+                          entity1.get('anonymization_method') == 'mask' and
+                          entity2.get('anonymization_method') == 'replace'):
+                        # entity1 (mask) should replace entity2 (replace) later
+                        continue
+                    elif (entity1['start'] == entity2['start'] and
+                          entity1['end'] == entity2['end'] and
+                          entity1.get('anonymization_method') == 'replace' and
+                          entity2.get('anonymization_method') == 'mask'):
+                        is_contained = True  # entity1 (replace) should be ignored in favor of entity2 (mask)
+                        break
+            if not is_contained:
+                filtered_entities.append(entity1)
+
         # Sort by position in descending order, replace from back to front to avoid position offset
-        sorted_entities = sorted(detected_entities, key=lambda x: x['start'], reverse=True)
+        # For overlapping entities with same start, longer ones first
+        sorted_entities = sorted(filtered_entities, key=lambda x: (x['start'], len(x['text'])), reverse=True)
 
         anonymized_text = text
         for entity in sorted_entities:
