@@ -307,6 +307,7 @@ class DetectionGuardrailService:
 
                         # Store matched scanner tags for logging
                         matched_scanner_tags = detection_result.matched_scanner_tags
+                        matched_scanners = detection_result.matched_scanners  # Keep full scanner info for answer matching
                         sensitivity_score = None  # Scanner system doesn't use single sensitivity score
                         model_response = "scanner_detection"  # Indicate scanner-based detection was used
 
@@ -318,6 +319,7 @@ class DetectionGuardrailService:
                 except Exception as scanner_error:
                     logger.error(f"Scanner detection failed, falling back to legacy detection: {scanner_error}")
                     # Fall back to legacy detection
+                    matched_scanners = []  # No scanner info for legacy detection
                     model_response, sensitivity_score = await model_service.check_messages_with_sensitivity(messages_dict, use_vl_model=has_image)
                     compliance_result, security_result = await self._parse_model_response_with_sensitivity(
                         model_response, sensitivity_score, tenant_id, model_sensitivity_trigger_level, application_id
@@ -325,6 +327,7 @@ class DetectionGuardrailService:
             else:
                 # No application_id: use legacy detection for backward compatibility
                 logger.warning(f"No application_id provided, using legacy detection for tenant {tenant_id}")
+                matched_scanners = []  # No scanner info for legacy detection
                 model_response, sensitivity_score = await model_service.check_messages_with_sensitivity(messages_dict, use_vl_model=has_image)
                 compliance_result, security_result = await self._parse_model_response_with_sensitivity(
                     model_response, sensitivity_score, tenant_id, model_sensitivity_trigger_level, application_id
@@ -332,7 +335,7 @@ class DetectionGuardrailService:
 
             # 5. Determine suggested action and answer (include data security result)
             overall_risk_level, suggest_action, suggest_answer = await self._determine_action_with_data(
-                compliance_result, security_result, data_result, tenant_id, application_id, user_content, data_anonymized_text
+                compliance_result, security_result, data_result, tenant_id, application_id, user_content, data_anonymized_text, matched_scanners
             )
             
             # 6. Asynchronously record detection results to log file (not write to database)
@@ -668,7 +671,8 @@ class DetectionGuardrailService:
         tenant_id: Optional[str] = None,
         application_id: Optional[str] = None,
         user_query: Optional[str] = None,
-        data_anonymized_text: Optional[str] = None
+        data_anonymized_text: Optional[str] = None,
+        matched_scanners: Optional[list] = None
     ) -> Tuple[str, str, Optional[str]]:
         """Determine suggested action (include data security detection result)"""
         # Collect all risk levels and categories
@@ -679,8 +683,8 @@ class DetectionGuardrailService:
             all_categories.extend(compliance_result.categories)
         if security_result.risk_level != "no_risk":
             all_categories.extend(security_result.categories)
-        if data_result.risk_level != "no_risk":
-            all_categories.extend(data_result.categories)
+        # Note: data_result.categories contain internal entity types (ID_CARD_NUMBER_SYS, etc.)
+        # These should NOT be used for template lookups, only for risk level calculation
 
         # Determine highest risk level
         overall_risk_level = "no_risk"
@@ -702,7 +706,7 @@ class DetectionGuardrailService:
 
         # If there is no data leakage de-sensitized text, use traditional template answer
         if not suggest_answer:
-            suggest_answer = await self._get_suggest_answer(all_categories, tenant_id, application_id, user_query)
+            suggest_answer = await self._get_suggest_answer(all_categories, tenant_id, application_id, user_query, matched_scanners)
 
         # Determine action based on risk level
         if overall_risk_level == "high_risk":
@@ -710,7 +714,7 @@ class DetectionGuardrailService:
         else:  # Medium or low risk
             return overall_risk_level, "replace", suggest_answer
 
-    async def _determine_action(self, compliance_result: ComplianceResult, security_result: SecurityResult, tenant_id: Optional[str] = None, application_id: Optional[str] = None, user_query: Optional[str] = None) -> Tuple[str, str, Optional[str]]:
+    async def _determine_action(self, compliance_result: ComplianceResult, security_result: SecurityResult, tenant_id: Optional[str] = None, application_id: Optional[str] = None, user_query: Optional[str] = None, matched_scanners: Optional[list] = None) -> Tuple[str, str, Optional[str]]:
         """Determine suggested action"""
         overall_risk_level = "no_risk"
         risk_categories = []
@@ -727,16 +731,16 @@ class DetectionGuardrailService:
         if overall_risk_level == "no_risk":
             return overall_risk_level, "pass", None
         elif overall_risk_level == "high_risk":
-            suggest_answer = await self._get_suggest_answer(risk_categories, tenant_id, application_id, user_query)
+            suggest_answer = await self._get_suggest_answer(risk_categories, tenant_id, application_id, user_query, matched_scanners)
             return overall_risk_level, "reject", suggest_answer
         elif overall_risk_level == "medium_risk":
-            suggest_answer = await self._get_suggest_answer(risk_categories, tenant_id, application_id, user_query)
+            suggest_answer = await self._get_suggest_answer(risk_categories, tenant_id, application_id, user_query, matched_scanners)
             return overall_risk_level, "replace", suggest_answer
         else:  # low_risk
-            suggest_answer = await self._get_suggest_answer(risk_categories, tenant_id, application_id, user_query)
+            suggest_answer = await self._get_suggest_answer(risk_categories, tenant_id, application_id, user_query, matched_scanners)
             return overall_risk_level, "replace", suggest_answer
     
-    async def _get_suggest_answer(self, categories: List[str], tenant_id: Optional[str] = None, application_id: Optional[str] = None, user_query: Optional[str] = None) -> str:
+    async def _get_suggest_answer(self, categories: List[str], tenant_id: Optional[str] = None, application_id: Optional[str] = None, user_query: Optional[str] = None, matched_scanners: Optional[list] = None) -> str:
         """Get suggested answer (using enhanced template service, support knowledge base search)"""
         from services.enhanced_template_service import enhanced_template_service
         from database.models import Tenant
@@ -753,9 +757,22 @@ class DetectionGuardrailService:
             except Exception as e:
                 logger.warning(f"Failed to get user language for tenant {tenant_id}: {e}")
 
-        # Use first category as scanner_name for template variable replacement
-        # Categories contain scanner names (not tags), e.g., "Sensitive Political Topics", "Bank Fraud"
-        scanner_name = categories[0] if categories else None
+        # Extract scanner information from matched scanners (use highest risk scanner)
+        scanner_type = None
+        scanner_identifier = None
+        scanner_name = None
+        
+        if matched_scanners and len(matched_scanners) > 0:
+            # Use the first matched scanner (highest priority)
+            first_scanner = matched_scanners[0]
+            scanner_type = "official_scanner"  # All scanners in new system are official_scanner type
+            scanner_identifier = first_scanner.scanner_tag  # Use scanner tag as identifier (e.g., S8, S100)
+            scanner_name = first_scanner.scanner_name  # Human-readable name for template variable
+            logger.info(f"Using scanner info for answer matching: type={scanner_type}, identifier={scanner_identifier}, name={scanner_name}")
+        elif categories:
+            # Fallback: use first category as scanner_name
+            scanner_name = categories[0]
+            logger.debug(f"No matched_scanners provided, using first category as scanner_name: {scanner_name}")
 
         return await enhanced_template_service.get_suggest_answer(
             categories,
@@ -763,7 +780,9 @@ class DetectionGuardrailService:
             application_id=application_id,
             user_query=user_query,
             user_language=user_language,
-            scanner_name=scanner_name  # Pass scanner name for {scanner_name} variable replacement
+            scanner_type=scanner_type,
+            scanner_identifier=scanner_identifier,
+            scanner_name=scanner_name
         )
 
 

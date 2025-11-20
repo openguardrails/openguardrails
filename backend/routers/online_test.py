@@ -486,7 +486,8 @@ async def call_guardrail_api(api_key: str, messages: List[Dict[str, Any]], tenan
         # Build headers (include application_id if available)
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}"
+            "Authorization": f"Bearer {api_key}",
+            "X-Online-Test": "true"  # Mark this as online test request to bypass rate limiting
         }
         if application_id:
             headers["X-Application-ID"] = str(application_id)
@@ -526,7 +527,7 @@ async def call_guardrail_api(api_key: str, messages: List[Dict[str, Any]], tenan
                     from services.rate_limiter import RateLimitService
                     rate_limit_service = RateLimitService(db)
                     rate_limit_config = rate_limit_service.get_user_rate_limit(str(tenant_uuid))
-                    rate_limit = rate_limit_config.requests_per_second if rate_limit_config and rate_limit_config.is_active else 1
+                    rate_limit = rate_limit_config.requests_per_second if rate_limit_config and rate_limit_config.is_active else 10
                     
                     rate_limit_text = "No limit" if rate_limit == 0 else f"{rate_limit} requests/second"
                     
@@ -557,7 +558,7 @@ async def call_guardrail_api(api_key: str, messages: List[Dict[str, Any]], tenan
                 from services.rate_limiter import RateLimitService
                 rate_limit_service = RateLimitService(db)
                 rate_limit_config = rate_limit_service.get_user_rate_limit(str(tenant_uuid))
-                rate_limit = rate_limit_config.requests_per_second if rate_limit_config and rate_limit_config.is_active else 1
+                rate_limit = rate_limit_config.requests_per_second if rate_limit_config and rate_limit_config.is_active else 10
                 
                 rate_limit_text = "No limit" if rate_limit == 0 else f"{rate_limit} requests/second"
                 

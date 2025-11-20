@@ -193,12 +193,64 @@ class GuardrailService:
                 else:
                     messages_dict.append({"role": msg.role, "content": content})
 
-            # Select model based on whether there are images
-            use_vl_model = has_image
-            model_response, _ = await model_service.check_messages_with_sensitivity(messages_dict, use_vl_model=use_vl_model)
+            # 4. Execute scanner-based detection (new system) or fall back to legacy detection
+            matched_scanners = []  # Initialize for answer matching
+            
+            if application_id:
+                # Use new scanner detection system
+                try:
+                    from services.scanner_detection_service import ScannerDetectionService
+                    from uuid import UUID
 
-            # 4. Parse model response and apply risk type filtering
-            compliance_result, security_result = self._parse_model_response(model_response, tenant_id)
+                    logger.info(f"Using scanner detection for application {application_id}")
+
+                    # Determine scan type based on message structure
+                    scan_type = 'response' if has_assistant_message else 'prompt'
+
+                    # Execute scanner detection
+                    scanner_service = ScannerDetectionService(self.db)
+                    detection_result = await scanner_service.execute_detection(
+                        content=user_content,
+                        application_id=UUID(application_id),
+                        tenant_id=tenant_id,
+                        scan_type=scan_type,
+                        messages_for_genai=messages_dict  # Full context for GenAI scanners
+                    )
+
+                    # Convert scanner detection result to compliance/security results
+                    if detection_result.overall_risk_level == "no_risk":
+                        compliance_result = ComplianceResult(risk_level="no_risk", categories=[])
+                        security_result = SecurityResult(risk_level="no_risk", categories=[])
+                    else:
+                        # Determine risk levels for compliance and security
+                        compliance_risk = detection_result.overall_risk_level if detection_result.compliance_categories else "no_risk"
+                        security_risk = detection_result.overall_risk_level if detection_result.security_categories else "no_risk"
+
+                        compliance_result = ComplianceResult(
+                            risk_level=compliance_risk,
+                            categories=detection_result.compliance_categories
+                        )
+                        security_result = SecurityResult(
+                            risk_level=security_risk,
+                            categories=detection_result.security_categories
+                        )
+
+                    # Store matched scanners for answer matching
+                    matched_scanners = detection_result.matched_scanners
+                    logger.info(f"Scanner detection complete: risk={detection_result.overall_risk_level}, matched_scanners={[s.scanner_tag for s in matched_scanners]}")
+
+                except Exception as scanner_error:
+                    logger.error(f"Scanner detection failed, falling back to legacy detection: {scanner_error}")
+                    # Fall back to legacy detection
+                    use_vl_model = has_image
+                    model_response, _ = await model_service.check_messages_with_sensitivity(messages_dict, use_vl_model=use_vl_model)
+                    compliance_result, security_result = self._parse_model_response(model_response, tenant_id)
+            else:
+                # No application_id: use legacy detection for backward compatibility
+                logger.warning(f"No application_id provided, using legacy detection for tenant {tenant_id}")
+                use_vl_model = has_image
+                model_response, _ = await model_service.check_messages_with_sensitivity(messages_dict, use_vl_model=use_vl_model)
+                compliance_result, security_result = self._parse_model_response(model_response, tenant_id)
 
             # 5. Data leak detection for OUTPUT (after getting LLM response)
             if has_assistant_message:
@@ -227,7 +279,8 @@ class GuardrailService:
             # 6. Determine suggested action and answer
             overall_risk_level, suggest_action, suggest_answer = await self._determine_action(
                 compliance_result, security_result, tenant_id=tenant_id, application_id=application_id, 
-                user_query=user_content, data_result=data_result, anonymized_text=anonymized_text
+                user_query=user_content, data_result=data_result, anonymized_text=anonymized_text,
+                matched_scanners=matched_scanners
             )
 
             # 7. Asynchronously log detection results
@@ -414,7 +467,8 @@ class GuardrailService:
         application_id: Optional[str] = None,  # application_id for multi-application support
         user_query: Optional[str] = None,
         data_result: Optional[DataSecurityResult] = None,
-        anonymized_text: Optional[str] = None  # De-sensitized text for data leak scenarios
+        anonymized_text: Optional[str] = None,  # De-sensitized text for data leak scenarios
+        matched_scanners: Optional[list] = None  # Matched scanners from scanner detection
     ) -> Tuple[str, str, Optional[str]]:
         """Determine suggested action and answer"""
 
@@ -448,22 +502,22 @@ class GuardrailService:
         if overall_risk_level == "no_risk":
             return overall_risk_level, "pass", None
         elif overall_risk_level == "high_risk":
-            suggest_answer = await self._get_suggest_answer(risk_categories, tenant_id, application_id, user_query)
+            suggest_answer = await self._get_suggest_answer(risk_categories, tenant_id, application_id, user_query, matched_scanners)
             return overall_risk_level, "reject", suggest_answer
         elif overall_risk_level == "medium_risk":
             # For data leak scenarios with replace action, use anonymized text if available
             if anonymized_text and data_result and data_result.risk_level != "no_risk":
                 return overall_risk_level, "replace", anonymized_text
-            suggest_answer = await self._get_suggest_answer(risk_categories, tenant_id, application_id, user_query)
+            suggest_answer = await self._get_suggest_answer(risk_categories, tenant_id, application_id, user_query, matched_scanners)
             return overall_risk_level, "replace", suggest_answer
         else:  # low_risk
             # For data leak scenarios with replace action, use anonymized text if available
             if anonymized_text and data_result and data_result.risk_level != "no_risk":
                 return overall_risk_level, "replace", anonymized_text
-            suggest_answer = await self._get_suggest_answer(risk_categories, tenant_id, application_id, user_query)
+            suggest_answer = await self._get_suggest_answer(risk_categories, tenant_id, application_id, user_query, matched_scanners)
             return overall_risk_level, "replace", suggest_answer
     
-    async def _get_suggest_answer(self, categories: List[str], tenant_id: Optional[str] = None, application_id: Optional[str] = None, user_query: Optional[str] = None) -> str:
+    async def _get_suggest_answer(self, categories: List[str], tenant_id: Optional[str] = None, application_id: Optional[str] = None, user_query: Optional[str] = None, matched_scanners: Optional[list] = None) -> str:
         """Get suggested answer (using enhanced template service, supports knowledge base search)
 
         Args:
@@ -471,6 +525,7 @@ class GuardrailService:
             tenant_id: DEPRECATED - kept for backward compatibility
             application_id: Application ID for multi-application support
             user_query: User query for knowledge base search
+            matched_scanners: Matched scanners from scanner detection (optional)
         """
         from database.models import Tenant
 
@@ -484,9 +539,22 @@ class GuardrailService:
             except Exception as e:
                 logger.warning(f"Failed to get user language for tenant {tenant_id}: {e}")
 
-        # Use first category as scanner_name for template variable replacement
-        # Categories contain scanner names (not tags), e.g., "Sensitive Political Topics", "Bank Fraud"
-        scanner_name = categories[0] if categories else None
+        # Extract scanner information from matched scanners (use highest risk scanner)
+        scanner_type = None
+        scanner_identifier = None
+        scanner_name = None
+        
+        if matched_scanners and len(matched_scanners) > 0:
+            # Use the first matched scanner (highest priority)
+            first_scanner = matched_scanners[0]
+            scanner_type = "official_scanner"  # All scanners in new system are official_scanner type
+            scanner_identifier = first_scanner.scanner_tag  # Use scanner tag as identifier (e.g., S8, S100)
+            scanner_name = first_scanner.scanner_name  # Human-readable name for template variable
+            logger.info(f"Using scanner info for answer matching: type={scanner_type}, identifier={scanner_identifier}, name={scanner_name}")
+        elif categories:
+            # Fallback: use first category as scanner_name
+            scanner_name = categories[0]
+            logger.debug(f"No matched_scanners provided, using first category as scanner_name: {scanner_name}")
 
         return await enhanced_template_service.get_suggest_answer(
             categories,
@@ -494,7 +562,9 @@ class GuardrailService:
             application_id=application_id,
             user_query=user_query,
             user_language=user_language,
-            scanner_name=scanner_name  # Pass scanner name for {scanner_name} variable replacement
+            scanner_type=scanner_type,
+            scanner_identifier=scanner_identifier,
+            scanner_name=scanner_name
         )
     
     async def _handle_blacklist_hit(

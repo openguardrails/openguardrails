@@ -48,7 +48,7 @@ class EnhancedTemplateService:
 
         # If neither categories nor scanner info provided, return default
         if not categories and not (scanner_type and scanner_identifier):
-            return self._get_default_answer(tenant_id, user_language, scanner_name)
+            return self._get_default_answer(application_id, user_language, scanner_name)
 
         try:
             # 1. Try to get answer from knowledge base
@@ -74,7 +74,7 @@ class EnhancedTemplateService:
             # 2. Knowledge base didn't find answer, use traditional template logic
             return await self._get_template_answer(
                 categories=categories,
-                tenant_id=tenant_id,
+                application_id=application_id,
                 user_language=user_language,
                 scanner_type=scanner_type,
                 scanner_identifier=scanner_identifier,
@@ -83,7 +83,7 @@ class EnhancedTemplateService:
 
         except Exception as e:
             logger.error(f"Get suggest answer error: {e}")
-            return self._get_default_answer(tenant_id, user_language, scanner_name)
+            return self._get_default_answer(application_id, user_language, scanner_name)
 
     async def _search_knowledge_base_answer(self, categories: List[str], tenant_id: Optional[str], application_id: Optional[str], user_query: str, scanner_type: Optional[str] = None, scanner_identifier: Optional[str] = None) -> Optional[str]:
         """Search answer from knowledge base"""
@@ -276,7 +276,7 @@ class EnhancedTemplateService:
             logger.error(f"Search knowledge base answer error: {e}")
             return None
 
-    async def _get_template_answer(self, categories: List[str], tenant_id: Optional[str], user_language: Optional[str] = None, scanner_type: Optional[str] = None, scanner_identifier: Optional[str] = None, scanner_name: Optional[str] = None) -> str:
+    async def _get_template_answer(self, categories: List[str], application_id: Optional[str], user_language: Optional[str] = None, scanner_type: Optional[str] = None, scanner_identifier: Optional[str] = None, scanner_name: Optional[str] = None) -> str:
         """Use traditional template to get answer"""
         try:
             # Define risk level priority
@@ -344,10 +344,10 @@ class EnhancedTemplateService:
                 # Build scanner cache key: "scanner_type:scanner_identifier"
                 scanner_key = f"{scanner_type}:{scanner_identifier}"
 
-                # Search in user cache
-                user_cache = self._template_cache.get(str(tenant_id or "__none__"), {})
-                if scanner_key in user_cache:
-                    templates = user_cache[scanner_key]
+                # Search in application cache
+                app_cache = self._template_cache.get(str(application_id or "__none__"), {})
+                if scanner_key in app_cache:
+                    templates = app_cache[scanner_key]
                     if False in templates:  # Non-default template
                         answer = self._get_localized_content(templates[False], user_language)
                         if scanner_name and '{scanner_name}' in answer:
@@ -371,10 +371,10 @@ class EnhancedTemplateService:
 
             # Priority 2: Find template by highest risk level (legacy category-based lookup)
             for category_key, risk_level, priority in category_risk_mapping:
-                # First find template for "current user" (non-default priority), if not found, fallback to global default
-                user_cache = self._template_cache.get(str(tenant_id or "__none__"), {})
-                if category_key in user_cache:
-                    templates = user_cache[category_key]
+                # First find template for "current application" (non-default priority), if not found, fallback to global default
+                app_cache = self._template_cache.get(str(application_id or "__none__"), {})
+                if category_key in app_cache:
+                    templates = app_cache[category_key]
                     if False in templates:  # Non-default template
                         answer = self._get_localized_content(templates[False], user_language)
                         if scanner_name and '{scanner_name}' in answer:
@@ -386,7 +386,7 @@ class EnhancedTemplateService:
                             answer = answer.replace('{scanner_name}', scanner_name)
                         return answer
 
-                # Fallback to "global default user" None template (for system-level default template)
+                # Fallback to "global default" None template (for system-level default template)
                 global_cache = self._template_cache.get("__global__", {})
                 if category_key in global_cache:
                     templates = global_cache[category_key]
@@ -396,11 +396,11 @@ class EnhancedTemplateService:
                             answer = answer.replace('{scanner_name}', scanner_name)
                         return answer
 
-            return self._get_default_answer(tenant_id, user_language, scanner_name)
+            return self._get_default_answer(application_id, user_language, scanner_name)
 
         except Exception as e:
             logger.error(f"Get template answer error: {e}")
-            return self._get_default_answer(tenant_id, user_language, scanner_name)
+            return self._get_default_answer(application_id, user_language, scanner_name)
 
     def _get_localized_content(self, content: any, user_language: Optional[str] = None) -> str:
         """
@@ -435,12 +435,12 @@ class EnhancedTemplateService:
         # Fallback to generic message
         return "Sorry, I can't answer this question. If you have any questions, please contact customer service."
 
-    def _get_default_answer(self, tenant_id: Optional[str] = None, user_language: Optional[str] = None, scanner_name: Optional[str] = None) -> str:
+    def _get_default_answer(self, application_id: Optional[str] = None, user_language: Optional[str] = None, scanner_name: Optional[str] = None) -> str:
         """Get default answer"""
-        # First find user-defined default
-        user_cache = self._template_cache.get(str(tenant_id or "__none__"), {})
-        if "default" in user_cache and True in user_cache["default"]:
-            answer = self._get_localized_content(user_cache["default"][True], user_language)
+        # First find application-defined default
+        app_cache = self._template_cache.get(str(application_id or "__none__"), {})
+        if "default" in app_cache and True in app_cache["default"]:
+            answer = self._get_localized_content(app_cache["default"][True], user_language)
             # Replace {scanner_name} variable if provided
             if scanner_name and '{scanner_name}' in answer:
                 answer = answer.replace('{scanner_name}', scanner_name)
@@ -486,7 +486,8 @@ class EnhancedTemplateService:
                 new_template_cache: Dict[str, Dict[str, Dict[bool, str]]] = {}
 
                 for template in templates:
-                    user_key = str(template.tenant_id) if template.tenant_id is not None else "__global__"
+                    # Use application_id as cache key (application-scoped), consistent with knowledge bases
+                    app_key = str(template.application_id) if template.application_id is not None else "__global__"
                     is_default = template.is_default
                     content = template.template_content
 
@@ -500,11 +501,11 @@ class EnhancedTemplateService:
                         cache_key = template.category
 
                     if cache_key:
-                        if user_key not in new_template_cache:
-                            new_template_cache[user_key] = {}
-                        if cache_key not in new_template_cache[user_key]:
-                            new_template_cache[user_key][cache_key] = {}
-                        new_template_cache[user_key][cache_key][is_default] = content
+                        if app_key not in new_template_cache:
+                            new_template_cache[app_key] = {}
+                        if cache_key not in new_template_cache[app_key]:
+                            new_template_cache[app_key][cache_key] = {}
+                        new_template_cache[app_key][cache_key][is_default] = content
 
                 # 2. Load all enabled knowledge bases
                 knowledge_bases = db.query(KnowledgeBase).filter_by(is_active=True).all()
@@ -576,7 +577,7 @@ class EnhancedTemplateService:
                 )
 
                 logger.debug(
-                    f"Enhanced template cache refreshed - Users: {len(new_template_cache)}, "
+                    f"Enhanced template cache refreshed - Applications: {len(new_template_cache)}, "
                     f"Templates: {template_count}, Knowledge Bases: {kb_count}"
                 )
 
@@ -607,7 +608,7 @@ class EnhancedTemplateService:
         global_kb_count = sum(len(kb_ids) for kb_ids in self._global_knowledge_base_cache.values())
 
         return {
-            "users": len(self._template_cache),
+            "applications": len(self._template_cache),
             "templates": template_count,
             "knowledge_bases": kb_count,
             "global_knowledge_bases": global_kb_count,
