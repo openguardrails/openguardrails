@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Table, Switch, Button, message, Spin, Tabs, Tag, Space, Modal, Descriptions, Tooltip, Drawer } from 'antd';
-import { InfoCircleOutlined, ReloadOutlined, ShoppingOutlined, EyeOutlined, CreditCardOutlined } from '@ant-design/icons';
+import { InfoCircleOutlined, ReloadOutlined, ShoppingOutlined, EyeOutlined, LoadingOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
 import { scannerPackagesApi, scannerConfigsApi, purchasesApi } from '../../services/api';
@@ -266,35 +266,48 @@ const OfficialScannersManagement: React.FC = () => {
 
       // Check if package has a price (requires payment)
       if (purchasePackage.price && purchasePackage.price > 0) {
-        // Create payment and redirect
+        // Paid package - redirect to payment
         setPaymentLoading(true);
+        
         const response = await paymentService.createPackagePayment(purchasePackage.id);
 
         if (response.success) {
-          paymentService.redirectToPayment(response);
+          // Keep the modal open while redirecting
+          setTimeout(() => {
+            paymentService.redirectToPayment(response);
+          }, 500);
         } else {
           message.error(response.error || t('payment.error.createFailed'));
+          setPaymentLoading(false);
+          setPurchaseModalVisible(false);
         }
-        setPaymentLoading(false);
       } else {
-        // Free package - use old request flow
-        await purchasesApi.request(
+        // Free package - direct purchase (auto-approved, no admin review needed)
+        setPaymentLoading(true);
+        
+        await purchasesApi.directPurchase(
           purchasePackage.id,
-          user?.email || '',
-          ''
+          user?.email || ''
         );
 
-        message.success(t('scannerPackages.purchaseRequestSubmitted'));
+        message.success(t('scannerPackages.purchaseCompleted'));
         handleClosePurchaseModal();
+        setPaymentLoading(false);
+        
         // Reload data to refresh marketplace packages
         await loadPackagesOnly();
+        
         // Emit event to notify other components
-        eventBus.emit(EVENTS.MARKETPLACE_SCANNER_PURCHASED, { packageId: purchasePackage.id, packageName: purchasePackage.package_name });
+        eventBus.emit(EVENTS.MARKETPLACE_SCANNER_PURCHASED, { 
+          packageId: purchasePackage.id, 
+          packageName: purchasePackage.package_name 
+        });
       }
     } catch (error: any) {
-      console.error('Failed to submit purchase request:', error);
-      message.error(error.response?.data?.detail || t('scannerPackages.purchaseRequestFailed'));
+      console.error('Failed to purchase package:', error);
+      message.error(error.response?.data?.detail || t('scannerPackages.purchaseFailed'));
       setPaymentLoading(false);
+      setPurchaseModalVisible(false);
     }
   };
 
@@ -552,10 +565,10 @@ const OfficialScannersManagement: React.FC = () => {
         </Card>
 
         <Modal
-          title={purchasePackage?.price && purchasePackage.price > 0
+          title={paymentLoading ? null : (purchasePackage?.price && purchasePackage.price > 0
             ? t('payment.confirm.packageTitle')
             : t('scannerPackages.submitPurchaseRequest')
-          }
+          )}
           open={purchaseModalVisible}
           onOk={handleSubmitPurchase}
           onCancel={handleClosePurchaseModal}
@@ -564,57 +577,72 @@ const OfficialScannersManagement: React.FC = () => {
             : t('common.submit')
           }
           cancelText={t('common.cancel')}
-          width={600}
+          width={paymentLoading ? 400 : 600}
           confirmLoading={paymentLoading || saving}
+          closable={!paymentLoading}
+          maskClosable={!paymentLoading}
+          keyboard={!paymentLoading}
+          centered
+          zIndex={2000}
         >
-          {purchasePackage && (
-            <Space direction="vertical" style={{ width: '100%' }} size="large">
-              <Descriptions column={1} bordered size="small">
-                <Descriptions.Item label={t('scannerPackages.packageName')}>
-                  {purchasePackage.package_name}
-                </Descriptions.Item>
-                <Descriptions.Item label={t('scannerPackages.author')}>
-                  {purchasePackage.author}
-                </Descriptions.Item>
-                <Descriptions.Item label={t('scannerPackages.version')}>
-                  {purchasePackage.version}
-                </Descriptions.Item>
-                <Descriptions.Item label={t('scannerPackages.scannerCount')}>
-                  {purchasePackage.scanner_count}
-                </Descriptions.Item>
-                <Descriptions.Item label={t('scannerPackages.priceDisplay')}>
-                  {formatPriceDisplay(purchasePackage.price, purchasePackage.price_display)}
-                </Descriptions.Item>
-                {purchasePackage.description && (
-                  <Descriptions.Item label={t('scannerPackages.description')}>
-                    {purchasePackage.description}
+          {paymentLoading ? (
+            // Show loading state during payment redirect
+            <div style={{ 
+              padding: '40px 20px',
+              textAlign: 'center'
+            }}>
+              <Spin
+                indicator={<LoadingOutlined style={{ fontSize: 48, color: '#1890ff' }} spin />}
+                size="large"
+              />
+              <div style={{ 
+                marginTop: 24, 
+                fontSize: 16, 
+                fontWeight: 500,
+                color: '#262626'
+              }}>
+                {paymentConfig?.provider === 'alipay' 
+                  ? t('payment.redirecting.alipay', '正在跳转到支付宝...') 
+                  : t('payment.redirecting.stripe', '正在跳转到支付页面...')
+                }
+              </div>
+              <div style={{ 
+                marginTop: 12, 
+                fontSize: 14, 
+                color: '#8c8c8c'
+              }}>
+                {t('payment.processing.pleaseWait', '请稍候，请勿关闭页面或刷新')}
+              </div>
+            </div>
+          ) : (
+            // Show package details for confirmation
+            purchasePackage && (
+              <Space direction="vertical" style={{ width: '100%' }} size="large">
+                <Descriptions column={1} bordered size="small">
+                  <Descriptions.Item label={t('scannerPackages.packageName')}>
+                    {purchasePackage.package_name}
                   </Descriptions.Item>
-                )}
-              </Descriptions>
+                  <Descriptions.Item label={t('scannerPackages.author')}>
+                    {purchasePackage.author}
+                  </Descriptions.Item>
+                  <Descriptions.Item label={t('scannerPackages.version')}>
+                    {purchasePackage.version}
+                  </Descriptions.Item>
+                  <Descriptions.Item label={t('scannerPackages.scannerCount')}>
+                    {purchasePackage.scanner_count}
+                  </Descriptions.Item>
+                  <Descriptions.Item label={t('scannerPackages.priceDisplay')}>
+                    {formatPriceDisplay(purchasePackage.price, purchasePackage.price_display)}
+                  </Descriptions.Item>
+                  {purchasePackage.description && (
+                    <Descriptions.Item label={t('scannerPackages.description')}>
+                      {purchasePackage.description}
+                    </Descriptions.Item>
+                  )}
+                </Descriptions>
 
-              <div style={{
-                padding: '16px',
-                backgroundColor: '#f0f2f5',
-                borderRadius: '4px',
-                textAlign: 'center'
-              }}>
-                <p style={{ marginBottom: '8px', fontSize: '14px', color: '#595959' }}>
-                  {t('scannerPackages.confirmPurchaseRequest')}
-                </p>
-              </div>
-
-              <div style={{
-                padding: '12px',
-                backgroundColor: '#e6f7ff',
-                borderRadius: '4px',
-                border: '1px solid #91d5ff'
-              }}>
-                <p style={{ marginBottom: '0', fontSize: '13px', color: '#096dd9' }}>
-                  <InfoCircleOutlined style={{ marginRight: '8px' }} />
-                  {t('scannerPackages.purchaseRequestInfo')}
-                </p>
-              </div>
-            </Space>
+              </Space>
+            )
           )}
         </Modal>
 

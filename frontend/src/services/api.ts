@@ -602,7 +602,11 @@ export const customScannersApi = {
 };
 
 export const purchasesApi = {
-  // Request to purchase a package
+  // Direct purchase for free packages (auto-approved, no admin review)
+  directPurchase: (packageId: string, email: string): Promise<any> =>
+    api.post('/api/v1/purchases/direct', { package_id: packageId, email }).then(res => res.data),
+
+  // Request to purchase a package (DEPRECATED - use payment API or directPurchase instead)
   request: (packageId: string, email: string, message?: string): Promise<any> =>
     api.post('/api/v1/purchases/request', { package_id: packageId, email, message }).then(res => res.data),
 

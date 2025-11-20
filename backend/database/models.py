@@ -733,7 +733,16 @@ class ApplicationScannerConfig(Base):
 
 
 class PackagePurchase(Base):
-    """Package purchase tracking"""
+    """
+    Package purchase tracking.
+    
+    Modern flow (with payment system):
+    - Paid packages: Payment completed -> auto-approved (status='approved')
+    - Free packages: Direct purchase -> auto-approved (status='approved')
+    
+    Legacy flow (deprecated):
+    - Manual request -> admin review -> approved/rejected
+    """
     __tablename__ = "package_purchases"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
@@ -745,7 +754,7 @@ class PackagePurchase(Base):
     request_email = Column(String(255))
     request_message = Column(Text)
 
-    # Admin actions
+    # Admin actions (used in legacy manual approval flow)
     approved_by = Column(UUID(as_uuid=True), ForeignKey("tenants.id"))
     approved_at = Column(DateTime(timezone=True))
     rejection_reason = Column(Text)

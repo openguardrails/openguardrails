@@ -1,4 +1,4 @@
-import axios from 'axios';
+import api from './api';
 
 const API_BASE = '/api/v1/payment';
 
@@ -49,7 +49,7 @@ export const paymentService = {
    * Get payment configuration for frontend
    */
   async getConfig(): Promise<PaymentConfig> {
-    const response = await axios.get(`${API_BASE}/config`);
+    const response = await api.get(`${API_BASE}/config`);
     return response.data;
   },
 
@@ -57,7 +57,7 @@ export const paymentService = {
    * Create a subscription payment
    */
   async createSubscriptionPayment(): Promise<PaymentResponse> {
-    const response = await axios.post(`${API_BASE}/subscription/create`, {});
+    const response = await api.post(`${API_BASE}/subscription/create`, {});
     return response.data;
   },
 
@@ -65,7 +65,7 @@ export const paymentService = {
    * Create a package purchase payment
    */
   async createPackagePayment(packageId: string): Promise<PaymentResponse> {
-    const response = await axios.post(`${API_BASE}/package/create`, {
+    const response = await api.post(`${API_BASE}/package/create`, {
       package_id: packageId
     });
     return response.data;
@@ -75,7 +75,7 @@ export const paymentService = {
    * Cancel the current subscription
    */
   async cancelSubscription(): Promise<{ success: boolean; cancel_at?: string }> {
-    const response = await axios.post(`${API_BASE}/subscription/cancel`);
+    const response = await api.post(`${API_BASE}/subscription/cancel`);
     return response.data;
   },
 
@@ -87,7 +87,7 @@ export const paymentService = {
     status?: string;
     limit?: number;
   }): Promise<{ orders: PaymentOrder[] }> {
-    const response = await axios.get(`${API_BASE}/orders`, { params });
+    const response = await api.get(`${API_BASE}/orders`, { params });
     return response.data;
   },
 
@@ -95,7 +95,7 @@ export const paymentService = {
    * Get current subscription status
    */
   async getSubscriptionStatus(): Promise<SubscriptionStatus> {
-    const response = await axios.get(`${API_BASE}/subscription/status`);
+    const response = await api.get(`${API_BASE}/subscription/status`);
     return response.data;
   },
 

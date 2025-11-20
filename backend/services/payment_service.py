@@ -66,6 +66,8 @@ class PaymentService:
         currency = self.get_currency()
         amount = self.get_subscription_price()
 
+        logger.info(f"Creating subscription payment: provider={provider}, currency={currency}, amount={amount}, tenant_id={tenant_id}")
+
         # Generate order ID
         order_id = f"sub_{uuid.uuid4().hex[:16]}"
 
@@ -83,9 +85,11 @@ class PaymentService:
         db.add(payment_order)
         db.commit()
         db.refresh(payment_order)
+        logger.info(f"Payment order created in database: {order_id}")
 
         try:
             if provider == 'alipay':
+                logger.info(f"Creating Alipay subscription order: {order_id}")
                 # Create Alipay payment
                 result = await alipay_service.create_subscription_order(
                     order_id=order_id,

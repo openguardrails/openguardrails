@@ -358,6 +358,89 @@ class PurchaseService:
                         f"in app {app.id}: {e}"
                     )
 
+    def direct_purchase_free_package(
+        self,
+        tenant_id: UUID,
+        package_id: UUID,
+        email: str
+    ) -> PackagePurchase:
+        """
+        Directly purchase a free package without approval (auto-approved).
+        Used for packages with price = 0 or None.
+
+        Args:
+            tenant_id: Tenant UUID
+            package_id: Package UUID
+            email: Contact email
+
+        Returns:
+            Approved purchase record
+
+        Raises:
+            ValueError: If package not found, not free, or already purchased
+        """
+        # Verify package exists and is free
+        package = self.db.query(ScannerPackage).filter(
+            ScannerPackage.id == package_id,
+            ScannerPackage.is_active == True
+        ).first()
+
+        if not package:
+            raise ValueError("Package not found")
+
+        # Check if package is free
+        if package.price and package.price > 0:
+            raise ValueError("Package is not free. Please use payment flow.")
+
+        # Check if already purchased
+        existing = self.db.query(PackagePurchase).filter(
+            PackagePurchase.tenant_id == tenant_id,
+            PackagePurchase.package_id == package_id
+        ).first()
+
+        if existing:
+            if existing.status == 'approved':
+                raise ValueError("Package already purchased")
+            else:
+                # If somehow there's a pending/rejected record, update it to approved
+                existing.status = 'approved'
+                existing.request_email = email
+                existing.approved_at = datetime.utcnow()
+                self.db.commit()
+                self.db.refresh(existing)
+                logger.info(f"Updated existing purchase to approved: tenant={tenant_id}, package={package_id}")
+                return existing
+
+        # Create auto-approved purchase record
+        purchase = PackagePurchase(
+            tenant_id=tenant_id,
+            package_id=package_id,
+            status='approved',  # Auto-approved for free packages
+            request_email=email,
+            approved_at=datetime.utcnow()
+        )
+        self.db.add(purchase)
+        self.db.commit()
+        self.db.refresh(purchase)
+
+        logger.info(
+            f"Direct purchase completed (free package): tenant={tenant_id}, "
+            f"package={package.package_name}, email={email}"
+        )
+
+        # Auto-create response templates
+        try:
+            self._create_templates_for_purchased_scanners(
+                purchase=purchase,
+                tenant_id=tenant_id
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to create response templates for purchase {purchase.id}: {e}"
+            )
+
+        return purchase
+
     def get_purchase_statistics(
         self,
         package_id: Optional[UUID] = None

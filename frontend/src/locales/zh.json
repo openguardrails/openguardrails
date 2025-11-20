@@ -1740,6 +1740,13 @@
       "confirm": "是的，取消",
       "success": "订阅将在计费周期结束时取消",
       "failed": "取消订阅失败"
+    },
+    "redirecting": {
+      "alipay": "正在跳转到支付宝...",
+      "stripe": "正在跳转到支付页面..."
+    },
+    "processing": {
+      "pleaseWait": "请稍候，请勿关闭页面或刷新"
     }
   },
   "applicationManagement": {
@@ -1829,8 +1836,8 @@
     "notPurchased": "未购买",
     "viewDetails": "查看详情",
     "configure": "配置",
-    "requestPurchase": "申请购买",
-    "purchaseRequested": "已申请购买",
+    "requestPurchase": "购买",
+    "purchaseRequested": "已购买",
     "purchaseApproved": "购买已批准",
     "purchaseRejected": "购买已拒绝",
     "purchasePending": "购买审核中",
@@ -1870,10 +1877,12 @@
     "purchaseEmail": "联系邮箱",
     "purchaseMessage": "购买留言",
     "purchaseMessagePlaceholder": "请描述您的使用场景和需求",
-    "confirmPurchaseRequest": "确认提交购买申请?",
-    "submitPurchaseRequest": "提交购买申请",
+    "confirmPurchaseRequest": "确认购买?",
+    "submitPurchaseRequest": "购买",
     "purchaseRequestSubmitted": "购买申请提交成功",
     "purchaseRequestFailed": "提交购买申请失败",
+    "purchaseCompleted": "购买成功，扫描器包已添加",
+    "purchaseFailed": "购买失败",
     "myPurchases": "我的购买申请",
     "purchaseStatus": "状态",
     "purchaseDate": "申请日期",

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Header
 from sqlalchemy.orm import Session
 from typing import Optional
 from pydantic import BaseModel
+import traceback
 
 from database.connection import get_db
 from database.models import Tenant, TenantSubscription
@@ -124,6 +125,7 @@ async def create_subscription_payment(
     """
     try:
         current_user = get_current_user(request, db)
+        logger.info(f"Creating subscription payment for tenant: {current_user.id}, email: {current_user.email}")
 
         # Check if already subscribed
         subscription = db.query(TenantSubscription).filter(
@@ -131,16 +133,19 @@ async def create_subscription_payment(
         ).first()
 
         if subscription and subscription.subscription_type == 'subscribed':
+            logger.info(f"Tenant {current_user.id} is already subscribed")
             return PaymentResponse(
                 success=False,
                 error="Already subscribed"
             )
 
+        logger.info(f"Calling payment_service.create_subscription_payment for tenant {current_user.id}")
         result = await payment_service.create_subscription_payment(
             db=db,
             tenant_id=str(current_user.id),
             email=current_user.email
         )
+        logger.info(f"Payment creation successful for tenant {current_user.id}")
 
         return PaymentResponse(**result)
 
@@ -148,14 +153,14 @@ async def create_subscription_payment(
         logger.error(f"Subscription payment creation failed: {e}")
         return PaymentResponse(success=False, error=str(e))
     except Exception as e:
-        logger.error(f"Subscription payment creation error: {e}")
-        raise HTTPException(status_code=500, detail="Payment creation failed")
+        logger.error(f"Subscription payment creation error: {str(e)}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Payment creation failed: {str(e)}")
 
 
 @router.post("/package/create", response_model=PaymentResponse)
 async def create_package_payment(
     request: Request,
-    package_id: str,
+    payment_request: CreatePackagePaymentRequest,
     db: Session = Depends(get_db)
 ):
     """
@@ -164,13 +169,17 @@ async def create_package_payment(
     """
     try:
         current_user = get_current_user(request, db)
+        
+        logger.info(f"Creating package payment for tenant: {current_user.id}, package_id: {payment_request.package_id}")
 
         result = await payment_service.create_package_payment(
             db=db,
             tenant_id=str(current_user.id),
             email=current_user.email,
-            package_id=package_id
+            package_id=payment_request.package_id
         )
+        
+        logger.info(f"Package payment created successfully: {result}")
 
         return PaymentResponse(**result)
 
@@ -178,8 +187,8 @@ async def create_package_payment(
         logger.error(f"Package payment creation failed: {e}")
         return PaymentResponse(success=False, error=str(e))
     except Exception as e:
-        logger.error(f"Package payment creation error: {e}")
-        raise HTTPException(status_code=500, detail="Payment creation failed")
+        logger.error(f"Package payment creation error: {str(e)}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Payment creation failed: {str(e)}")
 
 
 @router.post("/subscription/cancel")

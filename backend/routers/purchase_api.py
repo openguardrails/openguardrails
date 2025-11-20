@@ -50,6 +50,66 @@ def require_super_admin(request: Request) -> dict:
 # User Purchase Endpoints
 # =====================================================
 
+@router.post("/direct", response_model=PurchaseResponse, status_code=status.HTTP_201_CREATED)
+async def direct_purchase_free_package(
+    request: Request,
+    request_data: PurchaseRequestCreate,
+    db: Session = Depends(get_db)
+):
+    """
+    Directly purchase a free package (auto-approved, no admin review needed).
+    
+    This endpoint is used for packages with price = 0 or None.
+    The purchase is immediately approved and the package becomes available.
+    
+    For paid packages, use the payment API instead.
+    """
+    current_user = get_current_user(request)
+    service = PurchaseService(db)
+    tenant_id = UUID(current_user['tenant_id'])
+
+    try:
+        package_id = UUID(request_data.package_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid package ID format"
+        )
+
+    try:
+        purchase = service.direct_purchase_free_package(
+            tenant_id=tenant_id,
+            package_id=package_id,
+            email=request_data.email
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+    logger.info(
+        f"User {current_user['email']} directly purchased free package: "
+        f"package={package_id}"
+    )
+
+    # Get package info
+    package = purchase.package
+
+    return PurchaseResponse(
+        id=str(purchase.id),
+        package_id=str(purchase.package_id),
+        package_name=package.package_name if package else None,
+        package_code=package.package_code if package else None,
+        status=purchase.status,
+        request_email=purchase.request_email,
+        request_message=purchase.request_message,
+        rejection_reason=purchase.rejection_reason,
+        approved_at=purchase.approved_at.isoformat() if purchase.approved_at else None,
+        created_at=purchase.created_at.isoformat() if purchase.created_at else None
+    )
+
+
 @router.post("/request", response_model=PurchaseResponse, status_code=status.HTTP_201_CREATED)
 async def request_purchase(
     request: Request,
@@ -57,7 +117,7 @@ async def request_purchase(
     db: Session = Depends(get_db)
 ):
     """
-    Request to purchase a package.
+    Request to purchase a package (DEPRECATED - use payment API or direct purchase instead).
 
     Requirements:
     - Must be a subscribed user (free tier cannot purchase)

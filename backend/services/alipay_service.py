@@ -51,8 +51,13 @@ class AlipayService:
     def _get_client(self) -> DefaultAlipayClient:
         """Get or create Alipay client"""
         if self._client is None:
+            logger.info(f"Initializing Alipay client: app_id={self.app_id}, gateway={self.gateway}")
+            logger.info(f"Config check - app_id: {'SET' if self.app_id else 'NOT SET'}, private_key: {'SET' if self.private_key else 'NOT SET'}, public_key: {'SET' if self.public_key else 'NOT SET'}")
+            
             if not self.app_id or not self.private_key or not self.public_key:
-                raise ValueError("Alipay is not configured")
+                error_msg = f"Alipay is not configured - app_id: {bool(self.app_id)}, private_key: {bool(self.private_key)}, public_key: {bool(self.public_key)}"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
 
             # Configure client
             config = AlipayClientConfig()
@@ -61,7 +66,9 @@ class AlipayService:
             config.app_private_key = self.private_key
             config.alipay_public_key = self.public_key
 
+            logger.info("Creating DefaultAlipayClient instance")
             self._client = DefaultAlipayClient(alipay_client_config=config, logger=logger)
+            logger.info("Alipay client initialized successfully")
 
         return self._client
 
@@ -69,8 +76,8 @@ class AlipayService:
         self,
         order_id: str,
         amount: float,
-        subject: str = "OpenGuardrails 订阅服务",
-        body: str = "OpenGuardrails 月度订阅"
+        subject: str = "象信AI安全护栏订阅服务",
+        body: str = "象信AI安全护栏月度订阅"
     ) -> Dict[str, Any]:
         """
         Create a subscription payment order (PC page payment)
@@ -136,7 +143,7 @@ class AlipayService:
         return await self.create_subscription_order(
             order_id=order_id,
             amount=amount,
-            subject=f"OpenGuardrails - {package_name}",
+            subject=f"象信AI安全护栏 - {package_name}",
             body=f"购买扫描器包: {package_name}"
         )
 

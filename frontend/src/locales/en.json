@@ -1743,6 +1743,13 @@
       "confirm": "Yes, Cancel",
       "success": "Subscription will be cancelled at the end of the billing period",
       "failed": "Failed to cancel subscription"
+    },
+    "redirecting": {
+      "alipay": "Redirecting to Alipay...",
+      "stripe": "Redirecting to payment page..."
+    },
+    "processing": {
+      "pleaseWait": "Please wait, do not close or refresh the page"
     }
   },
   "applicationManagement": {
@@ -1832,8 +1839,8 @@
     "notPurchased": "Not Purchased",
     "viewDetails": "View Details",
     "configure": "Configure",
-    "requestPurchase": "Request Purchase",
-    "purchaseRequested": "Purchase Requested",
+    "requestPurchase": "Purchase",
+    "purchaseRequested": "Purchased",
     "purchaseApproved": "Purchase Approved",
     "purchaseRejected": "Purchase Rejected",
     "purchasePending": "Purchase Pending",
@@ -1873,10 +1880,12 @@
     "purchaseEmail": "Contact Email",
     "purchaseMessage": "Purchase Message",
     "purchaseMessagePlaceholder": "Please describe your use case and requirements",
-    "confirmPurchaseRequest": "Confirm to submit purchase request?",
-    "submitPurchaseRequest": "Submit Purchase Request",
+    "confirmPurchaseRequest": "Confirm to purchase?",
+    "submitPurchaseRequest": "Purchase",
     "purchaseRequestSubmitted": "Purchase request submitted successfully",
     "purchaseRequestFailed": "Failed to submit purchase request",
+    "purchaseCompleted": "Purchase completed, scanner package added",
+    "purchaseFailed": "Purchase failed",
     "myPurchases": "My Purchase Requests",
     "purchaseStatus": "Status",
     "purchaseDate": "Request Date",
