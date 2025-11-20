@@ -88,7 +88,7 @@ BEGIN
         'US BANK NUMBER',
         'medium',
         'regex',
-        '{"pattern": "\\\\d{8,17}", "check_input": true, "check_output": true}',
+        '{"pattern": "\\\\d{8,19}", "check_input": true, "check_output": true}',
         'replace',
         '{}',
         true,
