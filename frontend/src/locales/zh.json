@@ -1705,7 +1705,42 @@
     "feature3": "定制模型训练和优化",
     "feature4": "专属客户经理",
     "subscriptionNotFound": "未找到订阅",
-    "subscriptionNotFoundDesc": "我们无法找到您账户的订阅信息。这可能发生在计费系统实施之前创建的账户。请联系支持寻求帮助: {{email}}"
+    "subscriptionNotFoundDesc": "我们无法找到您账户的订阅信息。这可能发生在计费系统实施之前创建的账户。请联系支持寻求帮助: {{email}}",
+    "price": "价格",
+    "month": "月",
+    "subscriptionActive": "订阅已激活",
+    "nextBillingDate": "下次扣费日期：{{date}}",
+    "expiresOn": "订阅到期日期：{{date}}",
+    "cancelledAtPeriodEnd": "已取消 - 在当前周期结束前仍可使用"
+  },
+  "payment": {
+    "success": "支付成功！",
+    "cancelled": "支付已取消",
+    "error": {
+      "createFailed": "创建支付失败",
+      "unknown": "发生未知错误"
+    },
+    "confirm": {
+      "subscriptionTitle": "确认订阅",
+      "subscriptionContent": "每月将收取 {{price}}。您可以随时取消。",
+      "packageTitle": "确认购买",
+      "packageContent": "您正在购买 {{name}}，价格为 {{price}}。这是一次性付款。",
+      "proceed": "继续支付"
+    },
+    "button": {
+      "subscribe": "立即订阅",
+      "purchase": "购买",
+      "upgradeNow": "立即升级",
+      "cancelSubscription": "取消订阅",
+      "payNow": "立即支付"
+    },
+    "cancel": {
+      "title": "取消订阅",
+      "content": "确定要取消订阅吗？您的订阅将在当前计费周期结束前保持有效。",
+      "confirm": "是的，取消",
+      "success": "订阅将在计费周期结束时取消",
+      "failed": "取消订阅失败"
+    }
   },
   "applicationManagement": {
     "title": "应用管理",

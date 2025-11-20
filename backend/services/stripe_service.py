@@ -1,0 +1,362 @@
+"""
+Stripe payment service for international users
+Uses Stripe SDK for payment processing
+"""
+
+import stripe
+from datetime import datetime
+from typing import Optional, Dict, Any
+
+from config import settings
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+
+class StripeService:
+    """Stripe payment service"""
+
+    def __init__(self):
+        self.secret_key = settings.stripe_secret_key
+        self.publishable_key = settings.stripe_publishable_key
+        self.webhook_secret = settings.stripe_webhook_secret
+        self.price_id_monthly = settings.stripe_price_id_monthly
+
+        # Initialize Stripe
+        if self.secret_key:
+            stripe.api_key = self.secret_key
+
+    async def create_customer(
+        self,
+        email: str,
+        tenant_id: str,
+        name: Optional[str] = None
+    ) -> str:
+        """
+        Create a Stripe customer
+
+        Args:
+            email: Customer email
+            tenant_id: Tenant ID for metadata
+            name: Customer name
+
+        Returns:
+            Stripe customer ID
+        """
+        if not self.secret_key:
+            raise ValueError("Stripe is not configured")
+
+        customer = stripe.Customer.create(
+            email=email,
+            name=name,
+            metadata={
+                "tenant_id": str(tenant_id)
+            }
+        )
+
+        logger.info(f"Created Stripe customer: {customer.id} for tenant: {tenant_id}")
+        return customer.id
+
+    async def create_subscription_checkout(
+        self,
+        customer_id: str,
+        success_url: str,
+        cancel_url: str,
+        tenant_id: str
+    ) -> Dict[str, Any]:
+        """
+        Create a Stripe Checkout session for subscription
+
+        Args:
+            customer_id: Stripe customer ID
+            success_url: URL to redirect after successful payment
+            cancel_url: URL to redirect after cancelled payment
+            tenant_id: Tenant ID for metadata
+
+        Returns:
+            Dict containing checkout session URL
+        """
+        if not self.secret_key:
+            raise ValueError("Stripe is not configured")
+
+        if not self.price_id_monthly:
+            raise ValueError("Stripe price ID not configured")
+
+        session = stripe.checkout.Session.create(
+            customer=customer_id,
+            payment_method_types=['card'],
+            line_items=[{
+                'price': self.price_id_monthly,
+                'quantity': 1,
+            }],
+            mode='subscription',
+            success_url=success_url,
+            cancel_url=cancel_url,
+            metadata={
+                "tenant_id": str(tenant_id),
+                "order_type": "subscription"
+            }
+        )
+
+        logger.info(f"Created Stripe checkout session: {session.id}")
+
+        return {
+            "session_id": session.id,
+            "checkout_url": session.url,
+            "customer_id": customer_id
+        }
+
+    async def create_package_checkout(
+        self,
+        customer_id: str,
+        amount: int,  # Amount in cents
+        package_id: str,
+        package_name: str,
+        success_url: str,
+        cancel_url: str,
+        tenant_id: str
+    ) -> Dict[str, Any]:
+        """
+        Create a Stripe Checkout session for one-time package purchase
+
+        Args:
+            customer_id: Stripe customer ID
+            amount: Amount in cents (USD)
+            package_id: Package ID being purchased
+            package_name: Package name for display
+            success_url: URL to redirect after successful payment
+            cancel_url: URL to redirect after cancelled payment
+            tenant_id: Tenant ID for metadata
+
+        Returns:
+            Dict containing checkout session URL
+        """
+        if not self.secret_key:
+            raise ValueError("Stripe is not configured")
+
+        session = stripe.checkout.Session.create(
+            customer=customer_id,
+            payment_method_types=['card'],
+            line_items=[{
+                'price_data': {
+                    'currency': 'usd',
+                    'product_data': {
+                        'name': package_name,
+                        'description': f'OpenGuardrails Scanner Package: {package_name}',
+                    },
+                    'unit_amount': amount,
+                },
+                'quantity': 1,
+            }],
+            mode='payment',
+            success_url=success_url,
+            cancel_url=cancel_url,
+            metadata={
+                "tenant_id": str(tenant_id),
+                "package_id": str(package_id),
+                "order_type": "package"
+            }
+        )
+
+        logger.info(f"Created Stripe package checkout session: {session.id}")
+
+        return {
+            "session_id": session.id,
+            "checkout_url": session.url,
+            "customer_id": customer_id
+        }
+
+    async def create_payment_intent(
+        self,
+        amount: int,  # Amount in cents
+        currency: str = "usd",
+        customer_id: Optional[str] = None,
+        metadata: Optional[Dict[str, str]] = None
+    ) -> Dict[str, Any]:
+        """
+        Create a Stripe PaymentIntent for custom payment flows
+
+        Args:
+            amount: Amount in cents
+            currency: Currency code
+            customer_id: Optional Stripe customer ID
+            metadata: Optional metadata
+
+        Returns:
+            Dict containing client_secret for frontend
+        """
+        if not self.secret_key:
+            raise ValueError("Stripe is not configured")
+
+        intent_params = {
+            "amount": amount,
+            "currency": currency,
+            "automatic_payment_methods": {"enabled": True},
+        }
+
+        if customer_id:
+            intent_params["customer"] = customer_id
+
+        if metadata:
+            intent_params["metadata"] = metadata
+
+        intent = stripe.PaymentIntent.create(**intent_params)
+
+        logger.info(f"Created PaymentIntent: {intent.id}")
+
+        return {
+            "client_secret": intent.client_secret,
+            "payment_intent_id": intent.id
+        }
+
+    async def cancel_subscription(self, subscription_id: str) -> Dict[str, Any]:
+        """
+        Cancel a Stripe subscription at period end
+
+        Args:
+            subscription_id: Stripe subscription ID
+
+        Returns:
+            Updated subscription info
+        """
+        if not self.secret_key:
+            raise ValueError("Stripe is not configured")
+
+        subscription = stripe.Subscription.modify(
+            subscription_id,
+            cancel_at_period_end=True
+        )
+
+        logger.info(f"Cancelled subscription: {subscription_id} at period end")
+
+        return {
+            "subscription_id": subscription.id,
+            "status": subscription.status,
+            "cancel_at_period_end": subscription.cancel_at_period_end,
+            "current_period_end": datetime.fromtimestamp(subscription.current_period_end)
+        }
+
+    async def reactivate_subscription(self, subscription_id: str) -> Dict[str, Any]:
+        """
+        Reactivate a cancelled subscription
+
+        Args:
+            subscription_id: Stripe subscription ID
+
+        Returns:
+            Updated subscription info
+        """
+        if not self.secret_key:
+            raise ValueError("Stripe is not configured")
+
+        subscription = stripe.Subscription.modify(
+            subscription_id,
+            cancel_at_period_end=False
+        )
+
+        logger.info(f"Reactivated subscription: {subscription_id}")
+
+        return {
+            "subscription_id": subscription.id,
+            "status": subscription.status,
+            "cancel_at_period_end": subscription.cancel_at_period_end
+        }
+
+    async def get_subscription(self, subscription_id: str) -> Dict[str, Any]:
+        """
+        Get subscription details
+
+        Args:
+            subscription_id: Stripe subscription ID
+
+        Returns:
+            Subscription details
+        """
+        if not self.secret_key:
+            raise ValueError("Stripe is not configured")
+
+        subscription = stripe.Subscription.retrieve(subscription_id)
+
+        return {
+            "subscription_id": subscription.id,
+            "status": subscription.status,
+            "current_period_start": datetime.fromtimestamp(subscription.current_period_start),
+            "current_period_end": datetime.fromtimestamp(subscription.current_period_end),
+            "cancel_at_period_end": subscription.cancel_at_period_end,
+            "customer_id": subscription.customer
+        }
+
+    def verify_webhook(self, payload: bytes, sig_header: str) -> Dict[str, Any]:
+        """
+        Verify and parse Stripe webhook event
+
+        Args:
+            payload: Raw request body
+            sig_header: Stripe-Signature header
+
+        Returns:
+            Parsed webhook event
+        """
+        if not self.webhook_secret:
+            raise ValueError("Stripe webhook secret not configured")
+
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, self.webhook_secret
+        )
+
+        return event
+
+    def parse_checkout_completed(self, event: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Parse checkout.session.completed event
+
+        Args:
+            event: Stripe webhook event
+
+        Returns:
+            Parsed checkout result
+        """
+        session = event['data']['object']
+
+        result = {
+            "session_id": session.get('id'),
+            "customer_id": session.get('customer'),
+            "subscription_id": session.get('subscription'),
+            "payment_intent_id": session.get('payment_intent'),
+            "amount_total": session.get('amount_total'),
+            "currency": session.get('currency'),
+            "payment_status": session.get('payment_status'),
+            "metadata": session.get('metadata', {}),
+        }
+
+        return result
+
+    def parse_invoice_paid(self, event: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Parse invoice.paid event (for recurring subscription payments)
+
+        Args:
+            event: Stripe webhook event
+
+        Returns:
+            Parsed invoice result
+        """
+        invoice = event['data']['object']
+
+        return {
+            "invoice_id": invoice.get('id'),
+            "customer_id": invoice.get('customer'),
+            "subscription_id": invoice.get('subscription'),
+            "amount_paid": invoice.get('amount_paid'),
+            "currency": invoice.get('currency'),
+            "period_start": datetime.fromtimestamp(invoice['period_start']) if invoice.get('period_start') else None,
+            "period_end": datetime.fromtimestamp(invoice['period_end']) if invoice.get('period_end') else None,
+        }
+
+    def get_publishable_key(self) -> str:
+        """Get publishable key for frontend"""
+        return self.publishable_key
+
+
+# Global instance
+stripe_service = StripeService()

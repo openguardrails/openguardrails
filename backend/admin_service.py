@@ -16,7 +16,7 @@ from pathlib import Path
 
 from config import settings
 from database.connection import init_db, create_admin_engine
-from routers import dashboard, config_api, results, auth, user, sync, admin, online_test, test_models, proxy_management, concurrent_stats, media, data_security, billing, applications, scanner_packages_api, scanner_configs_api, custom_scanners_api, purchase_api, risk_config_api
+from routers import dashboard, config_api, results, auth, user, sync, admin, online_test, test_models, proxy_management, concurrent_stats, media, data_security, billing, applications, scanner_packages_api, scanner_configs_api, custom_scanners_api, purchase_api, risk_config_api, payment_api
 from utils.logger import setup_logger
 from services.admin_service import admin_service
 
@@ -399,6 +399,9 @@ app.include_router(scanner_packages_api.router, dependencies=[Depends(verify_use
 app.include_router(scanner_configs_api.router, dependencies=[Depends(verify_user_auth)])  # Scanner Configs
 app.include_router(custom_scanners_api.router, dependencies=[Depends(verify_user_auth)])  # Custom Scanners
 app.include_router(purchase_api.router, dependencies=[Depends(verify_user_auth)])  # Package Purchases
+
+# Payment routes (webhook endpoints don't require auth, others do)
+app.include_router(payment_api.router)  # Payment API
 
 # Import and register ban policy routes
 from routers import ban_policy_api

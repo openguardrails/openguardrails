@@ -1,9 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { Card, Typography, Space, Progress, Tag, Statistic, Row, Col, Divider, Alert, Button, message } from 'antd';
-import { CreditCardOutlined, CalendarOutlined, LineChartOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Card, Typography, Space, Progress, Tag, Statistic, Row, Col, Divider, Alert, Button, message, Modal } from 'antd';
+import { CreditCardOutlined, CalendarOutlined, LineChartOutlined, ReloadOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router-dom';
 import { billingService } from '../../services/billing';
 import { configApi } from '../../services/api';
+import paymentService, { PaymentConfig, SubscriptionStatus } from '../../services/payment';
+import { PaymentButton } from '../../components/Payment';
 import type { Subscription as SubscriptionType, UsageInfo } from '../../types/billing';
 
 const { Title, Text } = Typography;
@@ -16,10 +19,14 @@ interface SystemInfo {
 
 const Subscription: React.FC = () => {
   const { t } = useTranslation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [subscription, setSubscription] = useState<SubscriptionType | null>(undefined);
   const [usageInfo, setUsageInfo] = useState<UsageInfo | null>(null);
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
+  const [paymentConfig, setPaymentConfig] = useState<PaymentConfig | null>(null);
+  const [subscriptionStatus, setSubscriptionStatus] = useState<SubscriptionStatus | null>(null);
   const [loading, setLoading] = useState(false);
+  const [cancelLoading, setCancelLoading] = useState(false);
 
   const fetchSubscription = async () => {
     setLoading(true);
@@ -52,10 +59,71 @@ const Subscription: React.FC = () => {
     }
   };
 
+  const fetchPaymentConfig = async () => {
+    try {
+      const config = await paymentService.getConfig();
+      setPaymentConfig(config);
+    } catch (e) {
+      console.error('Fetch payment config failed', e);
+    }
+  };
+
+  const fetchSubscriptionStatus = async () => {
+    try {
+      const status = await paymentService.getSubscriptionStatus();
+      setSubscriptionStatus(status);
+    } catch (e) {
+      console.error('Fetch subscription status failed', e);
+    }
+  };
+
+  const handleCancelSubscription = async () => {
+    Modal.confirm({
+      title: t('payment.cancel.title'),
+      content: t('payment.cancel.content'),
+      okText: t('payment.cancel.confirm'),
+      cancelText: t('common.cancel'),
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        setCancelLoading(true);
+        try {
+          const result = await paymentService.cancelSubscription();
+          if (result.success) {
+            message.success(t('payment.cancel.success'));
+            fetchSubscriptionStatus();
+            fetchSubscription();
+          }
+        } catch (e: any) {
+          message.error(e.response?.data?.detail || t('payment.cancel.failed'));
+        } finally {
+          setCancelLoading(false);
+        }
+      }
+    });
+  };
+
   useEffect(() => {
     fetchSubscription();
     fetchUsageInfo();
     fetchSystemInfo();
+    fetchPaymentConfig();
+    fetchSubscriptionStatus();
+
+    // Handle payment callback
+    const paymentStatus = searchParams.get('payment');
+    if (paymentStatus === 'success') {
+      message.success(t('payment.success'));
+      // Clear the URL params
+      setSearchParams({});
+      // Refresh data
+      setTimeout(() => {
+        fetchSubscription();
+        fetchSubscriptionStatus();
+      }, 1000);
+    } else if (paymentStatus === 'cancelled') {
+      message.info(t('payment.cancelled'));
+      setSearchParams({});
+    }
   }, []);
 
   const handleRefresh = () => {
@@ -128,19 +196,67 @@ const Subscription: React.FC = () => {
           </div>
 
           {/* Upgrade Prompt */}
-          {subscription.subscription_type === 'free' && (
+          {subscription.subscription_type === 'free' && paymentConfig && (
             <Alert
               message={t('billing.upgradeAvailable')}
               description={
-                <Space direction="vertical" size="small">
+                <Space direction="vertical" size="small" style={{ width: '100%' }}>
                   <Text>{t('billing.upgradeDescription')}</Text>
-                  <Text type="secondary">
-                    {t('billing.contactSupport', { email: systemInfo?.support_email || 'support@openguardrails.com' })}
+                  <Text strong>
+                    {t('billing.price')}: {paymentService.formatPrice(paymentConfig.subscription_price, paymentConfig.currency)}/{t('billing.month')}
                   </Text>
+                  <div style={{ marginTop: 8 }}>
+                    <PaymentButton
+                      type="subscription"
+                      amount={paymentConfig.subscription_price}
+                      currency={paymentConfig.currency}
+                      provider={paymentConfig.provider}
+                      buttonText={t('payment.button.upgradeNow')}
+                      onSuccess={() => {
+                        fetchSubscription();
+                        fetchSubscriptionStatus();
+                      }}
+                    />
+                  </div>
                 </Space>
               }
               type="info"
               showIcon
+            />
+          )}
+
+          {/* Subscription Active Info */}
+          {subscription.subscription_type === 'subscribed' && subscriptionStatus && (
+            <Alert
+              message={t('billing.subscriptionActive')}
+              description={
+                <Space direction="vertical" size="small">
+                  {subscriptionStatus.expires_at && (
+                    <Text>
+                      {subscriptionStatus.cancel_at_period_end
+                        ? t('billing.expiresOn', { date: new Date(subscriptionStatus.expires_at).toLocaleDateString() })
+                        : t('billing.nextBillingDate', { date: new Date(subscriptionStatus.expires_at).toLocaleDateString() })
+                      }
+                    </Text>
+                  )}
+                  {!subscriptionStatus.cancel_at_period_end && (
+                    <Button
+                      danger
+                      size="small"
+                      loading={cancelLoading}
+                      onClick={handleCancelSubscription}
+                    >
+                      {t('payment.button.cancelSubscription')}
+                    </Button>
+                  )}
+                  {subscriptionStatus.cancel_at_period_end && (
+                    <Tag color="orange">{t('billing.cancelledAtPeriodEnd')}</Tag>
+                  )}
+                </Space>
+              }
+              type="success"
+              showIcon
+              icon={<CheckCircleOutlined />}
             />
           )}
         </Space>
@@ -288,7 +404,7 @@ const Subscription: React.FC = () => {
             </Col>
           </Row>
 
-          {subscription.subscription_type === 'free' && (
+          {subscription.subscription_type === 'free' && paymentConfig && (
             <>
               <Divider style={{ margin: '12px 0' }} />
               <div style={{
@@ -297,7 +413,7 @@ const Subscription: React.FC = () => {
                 border: '1px solid #ffe58f',
                 borderRadius: '4px'
               }}>
-                <Space direction="vertical" size="small">
+                <Space direction="vertical" size="small" style={{ width: '100%' }}>
                   <Text strong>{t('billing.upgradeToUnlockMore')}</Text>
                   <ul style={{ margin: '8px 0', paddingLeft: 20 }}>
                     <li>{t('billing.feature1')}</li>
@@ -305,9 +421,17 @@ const Subscription: React.FC = () => {
                     <li>{t('billing.feature3')}</li>
                     <li>{t('billing.feature4')}</li>
                   </ul>
-                  <Text type="secondary">
-                    {t('billing.contactSupport', { email: systemInfo?.support_email || 'support@openguardrails.com' })}
-                  </Text>
+                  <PaymentButton
+                    type="subscription"
+                    amount={paymentConfig.subscription_price}
+                    currency={paymentConfig.currency}
+                    provider={paymentConfig.provider}
+                    buttonText={`${t('payment.button.upgradeNow')} - ${paymentService.formatPrice(paymentConfig.subscription_price, paymentConfig.currency)}/${t('billing.month')}`}
+                    onSuccess={() => {
+                      fetchSubscription();
+                      fetchSubscriptionStatus();
+                    }}
+                  />
                 </Space>
               </div>
             </>

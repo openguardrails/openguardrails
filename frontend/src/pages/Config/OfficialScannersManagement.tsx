@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Table, Switch, Button, message, Spin, Tabs, Tag, Space, Modal, Descriptions, Tooltip, Drawer } from 'antd';
-import { InfoCircleOutlined, ReloadOutlined, ShoppingOutlined, EyeOutlined } from '@ant-design/icons';
+import { InfoCircleOutlined, ReloadOutlined, ShoppingOutlined, EyeOutlined, CreditCardOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router-dom';
 import { scannerPackagesApi, scannerConfigsApi, purchasesApi } from '../../services/api';
 import { useApplication } from '../../contexts/ApplicationContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { eventBus, EVENTS } from '../../utils/eventBus';
+import paymentService, { PaymentConfig } from '../../services/payment';
 
 interface ScannerConfig {
   id: string;
@@ -48,6 +50,7 @@ interface Package {
 
 const OfficialScannersManagement: React.FC = () => {
   const { t, i18n } = useTranslation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
   const { currentApplicationId } = useApplication();
 
@@ -81,7 +84,9 @@ const OfficialScannersManagement: React.FC = () => {
   const [detailsPackage, setDetailsPackage] = useState<Package | null>(null);
   const [packageDetails, setPackageDetails] = useState<any>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
-  
+  const [paymentConfig, setPaymentConfig] = useState<PaymentConfig | null>(null);
+  const [paymentLoading, setPaymentLoading] = useState(false);
+
   // Active tab key - support URL hash for direct navigation
   const [activeTabKey, setActiveTabKey] = useState<string>(() => {
     // Get initial tab from URL hash (e.g., #marketplace)
@@ -96,6 +101,31 @@ const OfficialScannersManagement: React.FC = () => {
     // Load scanner configs only if application is selected
     if (currentApplicationId) {
       loadScannerConfigs();
+    }
+
+    // Load payment config
+    const loadPaymentConfig = async () => {
+      try {
+        const config = await paymentService.getConfig();
+        setPaymentConfig(config);
+      } catch (e) {
+        console.error('Failed to load payment config:', e);
+      }
+    };
+    loadPaymentConfig();
+
+    // Handle payment callback
+    const paymentStatus = searchParams.get('payment');
+    if (paymentStatus === 'success') {
+      message.success(t('payment.success'));
+      setSearchParams({});
+      // Reload packages
+      setTimeout(() => {
+        loadPackagesOnly();
+      }, 1000);
+    } else if (paymentStatus === 'cancelled') {
+      message.info(t('payment.cancelled'));
+      setSearchParams({});
     }
   }, [currentApplicationId]);
 
@@ -234,21 +264,37 @@ const OfficialScannersManagement: React.FC = () => {
     try {
       if (!purchasePackage) return;
 
-      await purchasesApi.request(
-        purchasePackage.id,
-        user?.email || '',
-        ''
-      );
+      // Check if package has a price (requires payment)
+      if (purchasePackage.price && purchasePackage.price > 0) {
+        // Create payment and redirect
+        setPaymentLoading(true);
+        const response = await paymentService.createPackagePayment(purchasePackage.id);
 
-      message.success(t('scannerPackages.purchaseRequestSubmitted'));
-      handleClosePurchaseModal();
-      // Reload data to refresh marketplace packages
-      await loadPackagesOnly();
-      // Emit event to notify other components
-      eventBus.emit(EVENTS.MARKETPLACE_SCANNER_PURCHASED, { packageId: purchasePackage.id, packageName: purchasePackage.package_name });
+        if (response.success) {
+          paymentService.redirectToPayment(response);
+        } else {
+          message.error(response.error || t('payment.error.createFailed'));
+        }
+        setPaymentLoading(false);
+      } else {
+        // Free package - use old request flow
+        await purchasesApi.request(
+          purchasePackage.id,
+          user?.email || '',
+          ''
+        );
+
+        message.success(t('scannerPackages.purchaseRequestSubmitted'));
+        handleClosePurchaseModal();
+        // Reload data to refresh marketplace packages
+        await loadPackagesOnly();
+        // Emit event to notify other components
+        eventBus.emit(EVENTS.MARKETPLACE_SCANNER_PURCHASED, { packageId: purchasePackage.id, packageName: purchasePackage.package_name });
+      }
     } catch (error: any) {
       console.error('Failed to submit purchase request:', error);
       message.error(error.response?.data?.detail || t('scannerPackages.purchaseRequestFailed'));
+      setPaymentLoading(false);
     }
   };
 
@@ -506,14 +552,20 @@ const OfficialScannersManagement: React.FC = () => {
         </Card>
 
         <Modal
-          title={t('scannerPackages.submitPurchaseRequest')}
+          title={purchasePackage?.price && purchasePackage.price > 0
+            ? t('payment.confirm.packageTitle')
+            : t('scannerPackages.submitPurchaseRequest')
+          }
           open={purchaseModalVisible}
           onOk={handleSubmitPurchase}
           onCancel={handleClosePurchaseModal}
-          okText={t('common.submit')}
+          okText={purchasePackage?.price && purchasePackage.price > 0
+            ? t('payment.button.payNow')
+            : t('common.submit')
+          }
           cancelText={t('common.cancel')}
           width={600}
-          confirmLoading={saving}
+          confirmLoading={paymentLoading || saving}
         >
           {purchasePackage && (
             <Space direction="vertical" style={{ width: '100%' }} size="large">

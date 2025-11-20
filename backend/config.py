@@ -143,6 +143,26 @@ class Settings(BaseSettings):
     # Options: 'en' (English) or 'zh' (Chinese)
     default_language: str = "en"
 
+    # Payment configuration
+    # Alipay configuration (used when default_language is 'zh')
+    alipay_app_id: str = ""
+    alipay_private_key: str = ""
+    alipay_public_key: str = ""
+    alipay_notify_url: str = ""  # e.g., https://yourdomain.com/api/v1/payment/webhook/alipay
+    alipay_return_url: str = ""  # e.g., https://yourdomain.com/platform/billing/subscription
+    alipay_gateway: str = "https://openapi.alipay.com/gateway.do"  # Production gateway
+    # alipay_gateway: str = "https://openapi-sandbox.dl.alipaydev.com/gateway.do"  # Sandbox gateway
+
+    # Stripe configuration (used when default_language is not 'zh')
+    stripe_secret_key: str = ""
+    stripe_publishable_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_price_id_monthly: str = ""  # Stripe Price ID for monthly subscription ($19/month)
+
+    # Subscription pricing
+    subscription_price_cny: float = 19.0  # Monthly price in CNY
+    subscription_price_usd: float = 19.0  # Monthly price in USD
+
     class Config:
         # Ensure we load the .env file next to this config module,
         # regardless of the current working directory

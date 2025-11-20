@@ -35,5 +35,24 @@ def setup_logger():
     logger.setLevel(getattr(logging, settings.log_level.upper()))
     logger.addHandler(file_handler)
     logger.addHandler(console_handler)
-    
+
     return logger
+
+
+def get_logger(name: str = None):
+    """
+    Get a logger instance with the given name.
+
+    Args:
+        name: Logger name (typically __name__ of the calling module)
+
+    Returns:
+        Logger instance
+    """
+    # Ensure base logger is set up
+    setup_logger()
+
+    # Return child logger with the given name
+    if name:
+        return logging.getLogger(f"openguardrails.{name}")
+    return logging.getLogger("openguardrails")

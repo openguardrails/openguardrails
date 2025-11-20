@@ -609,6 +609,15 @@ class TenantSubscription(Base):
     monthly_quota = Column(Integer, nullable=False, default=10000)  # Monthly API call quota
     current_month_usage = Column(Integer, nullable=False, default=0)  # Current month usage
     usage_reset_at = Column(DateTime(timezone=True), nullable=False)  # Next reset date (1st of next month)
+
+    # Payment provider IDs
+    stripe_customer_id = Column(String(255), index=True)  # Stripe customer ID
+    alipay_user_id = Column(String(255), index=True)  # Alipay user ID
+
+    # Subscription dates
+    subscription_started_at = Column(DateTime(timezone=True))  # When subscription started
+    subscription_expires_at = Column(DateTime(timezone=True))  # When subscription expires
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -781,3 +790,74 @@ class CustomScanner(Base):
     __table_args__ = (
         UniqueConstraint('application_id', 'scanner_id', name='uq_app_custom_scanner'),
     )
+
+
+# =====================================================
+# Payment System Models
+# =====================================================
+
+class PaymentOrder(Base):
+    """Payment order table - stores all payment transactions"""
+    __tablename__ = "payment_orders"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    order_type = Column(String(50), nullable=False, index=True)  # 'subscription' or 'package'
+    amount = Column(Float, nullable=False)
+    currency = Column(String(10), nullable=False)  # 'CNY' or 'USD'
+    payment_provider = Column(String(50), nullable=False, index=True)  # 'alipay' or 'stripe'
+    status = Column(String(50), nullable=False, default='pending', index=True)  # 'pending', 'paid', 'failed', 'refunded', 'cancelled'
+
+    # Provider-specific IDs
+    provider_order_id = Column(String(255), index=True)  # Our order ID sent to provider
+    provider_transaction_id = Column(String(255), index=True)  # Transaction ID from provider
+
+    # For package purchases
+    package_id = Column(UUID(as_uuid=True), ForeignKey("scanner_packages.id", ondelete="SET NULL"), index=True)
+
+    # Additional metadata
+    order_metadata = Column(JSON, default={})
+
+    # Timestamps
+    paid_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    tenant = relationship("Tenant")
+    package = relationship("ScannerPackage")
+
+
+class SubscriptionPayment(Base):
+    """Subscription payment table - tracks recurring subscription payments"""
+    __tablename__ = "subscription_payments"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    payment_order_id = Column(UUID(as_uuid=True), ForeignKey("payment_orders.id", ondelete="SET NULL"), index=True)
+
+    # Billing cycle
+    billing_cycle_start = Column(DateTime(timezone=True), nullable=False)
+    billing_cycle_end = Column(DateTime(timezone=True), nullable=False)
+
+    # Provider-specific subscription IDs
+    stripe_subscription_id = Column(String(255), index=True)
+    stripe_customer_id = Column(String(255), index=True)
+    alipay_agreement_id = Column(String(255), index=True)
+
+    # Status
+    status = Column(String(50), nullable=False, default='active', index=True)  # 'active', 'cancelled', 'expired', 'past_due'
+    cancel_at_period_end = Column(Boolean, default=False)
+
+    # Next payment info
+    next_payment_date = Column(DateTime(timezone=True), index=True)
+    next_payment_amount = Column(Float)
+
+    # Timestamps
+    cancelled_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    tenant = relationship("Tenant")
+    payment_order = relationship("PaymentOrder")

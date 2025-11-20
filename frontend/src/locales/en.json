@@ -1708,7 +1708,42 @@
     "feature3": "Custom model training and optimization",
     "feature4": "Dedicated account manager",
     "subscriptionNotFound": "Subscription Not Found",
-    "subscriptionNotFoundDesc": "We could not find a subscription for your account. This may happen for accounts created before the billing system was implemented. Please contact support for assistance: {{email}}"
+    "subscriptionNotFoundDesc": "We could not find a subscription for your account. This may happen for accounts created before the billing system was implemented. Please contact support for assistance: {{email}}",
+    "price": "Price",
+    "month": "month",
+    "subscriptionActive": "Subscription Active",
+    "nextBillingDate": "Next billing date: {{date}}",
+    "expiresOn": "Subscription expires on: {{date}}",
+    "cancelledAtPeriodEnd": "Cancelled - Active until period end"
+  },
+  "payment": {
+    "success": "Payment completed successfully!",
+    "cancelled": "Payment was cancelled",
+    "error": {
+      "createFailed": "Failed to create payment",
+      "unknown": "An unknown error occurred"
+    },
+    "confirm": {
+      "subscriptionTitle": "Confirm Subscription",
+      "subscriptionContent": "You will be charged {{price}} per month. You can cancel anytime.",
+      "packageTitle": "Confirm Purchase",
+      "packageContent": "You are purchasing {{name}} for {{price}}. This is a one-time payment.",
+      "proceed": "Proceed to Payment"
+    },
+    "button": {
+      "subscribe": "Subscribe Now",
+      "purchase": "Purchase",
+      "upgradeNow": "Upgrade Now",
+      "cancelSubscription": "Cancel Subscription",
+      "payNow": "Pay Now"
+    },
+    "cancel": {
+      "title": "Cancel Subscription",
+      "content": "Are you sure you want to cancel your subscription? Your subscription will remain active until the end of the current billing period.",
+      "confirm": "Yes, Cancel",
+      "success": "Subscription will be cancelled at the end of the billing period",
+      "failed": "Failed to cancel subscription"
+    }
   },
   "applicationManagement": {
     "title": "Application Management",
