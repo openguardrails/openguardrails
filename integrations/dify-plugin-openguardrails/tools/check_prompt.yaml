@@ -1,0 +1,52 @@
+identity:
+  name: "check_prompt"
+  author: "openguardrails"
+  label:
+    en_US: "OGR Check Prompt"
+description:
+  human:
+    en_US: "Detect user input for prompt attacks, jailbreaks, malicious operations and content safety issues based on OWASP TOP 10 LLM Applications and GB/T45654-2025 standards"
+  llm: "Use this tool to detect security risks in user input/prompts, including prompt injection, jailbreak attempts, malicious operations, and content safety violations. This is essential for protecting LLM applications from various attack vectors."
+parameters:
+  - name: prompt
+    type: string
+    required: true
+    label:
+      en_US: "User Prompt"
+    human_description:
+      en_US: "The user input prompt text to be analyzed for security risks"
+    llm_description: "The user input prompt that needs to be checked for security risks including prompt attacks, jailbreaks, malicious operations, and content safety issues"
+    form: llm
+  - name: user_id
+    type: string
+    required: false
+    label:
+      en_US: "User ID"
+    human_description:
+      en_US: "The user ID to be used for risk control"
+    llm_description: "The user ID to be used for risk control"
+    form: llm
+output_schema:
+  type: object
+  properties:
+    id:
+      type: string
+      description: "Unique identifier for the guardrails check"
+    overall_risk_level:
+      type: string
+      description: "Overall risk level: no_risk, low_risk, medium_risk, high_risk"
+    suggest_action:
+      type: string
+      description: "Suggested action: pass, reject, replace"
+    suggest_answer:
+      type: string
+      description: "Suggested alternative answer if action is replace, empty string if not applicable"
+    categories:
+      type: string
+      description: "Risk categories, separated by commas"
+    score:
+      type: number
+      description: "Detection probability score (0.0-1.0)"
+extra:
+  python:
+    source: tools/check_prompt.py

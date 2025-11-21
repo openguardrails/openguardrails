@@ -1,0 +1,38 @@
+identity:
+  author: "openguardrails"
+  name: "openguardrails"
+  label:
+    en_US: "OpenGuardrails - Free Open-source Contextual"
+  description:
+    en_US: "Free Open source contextual AI guardrails for protecting against prompt attacks, content safety and sensitive data leakage."
+  icon: "icon.png"
+  icon_dark: "icon-dark.png"
+
+credentials_for_provider:
+  api_key:
+    type: secret-input
+    required: true
+    label:
+      en_US: API Key
+    placeholder:
+      en_US: Enter your OpenGuardrails API key
+    help:
+      en_US: "Get your free API key from OpenGuardrails management console: https://OpenGuardrails.com/platform/"
+    url: https://OpenGuardrails.com/platform/
+  base_url:
+    type: text-input
+    required: false
+    label:
+      en_US: Base URL
+    placeholder:
+      en_US: Leave empty to use the free cloud API (https://api.openguardrails.com/v1).
+    help:
+      en_US: "If you have a private deployment, enter your private OpenGuardrails server URL (e.g., http://localhost:5001/v1)."
+    url: https://OpenGuardrails.com/platform/
+
+tools:
+  - tools/check_prompt.yaml
+  - tools/check_response_ctx.yaml
+extra:
+  python:
+    source: provider/openguardrails.py

@@ -1,0 +1,81 @@
+# OpenGuardrails Higress Plugin Configuration Examples
+
+# Example 1: Using Public API - Check Request Only
+# Use this for quick start with public OpenGuardrails API
+---
+serviceName: api.openguardrails.com.dns
+servicePort: 443
+serviceHost: "api.openguardrails.com"
+apiKey: "sk-xxai-your-api-key-here"  # Get from https://openguardrails.com/platform/
+checkRequest: true
+checkResponse: false
+
+---
+# Example 2: Using Public API - Check Both Request and Response
+# Recommended for comprehensive protection
+serviceName: api.openguardrails.com.dns
+servicePort: 443
+serviceHost: "api.openguardrails.com"
+apiKey: "sk-xxai-your-api-key-here"
+checkRequest: true
+checkResponse: true
+
+---
+# Example 3: Private Deployment
+# For users who deployed OpenGuardrails locally (data stays local)
+serviceName: openguardrails-internal.dns
+servicePort: 5001
+serviceHost: "openguardrails.internal.yourdomain.com"
+apiKey: "sk-xxai-your-private-api-key"
+checkRequest: true
+checkResponse: true
+timeout: 3000  # Adjust based on your network latency
+
+---
+# Example 4: Custom Deny Message
+# Customize the response when content is blocked
+serviceName: api.openguardrails.com.dns
+servicePort: 443
+serviceHost: "api.openguardrails.com"
+apiKey: "sk-xxai-your-api-key-here"
+checkRequest: true
+checkResponse: true
+denyMessage: "Your question contains sensitive content. Please rephrase your question."
+denyCode: 400
+
+---
+# Example 5: Non-OpenAI Protocol
+# For custom API formats (e.g., Bailian App, custom backends)
+serviceName: api.openguardrails.com.dns
+servicePort: 443
+serviceHost: "api.openguardrails.com"
+apiKey: "sk-xxai-your-api-key-here"
+checkRequest: true
+checkResponse: true
+requestContentJsonPath: "input.prompt"
+responseContentJsonPath: "output.text"
+protocol: original
+denyMessage: "I'm sorry, I cannot answer your question"
+
+---
+# Example 6: High Performance Setup
+# For high-concurrency scenarios with custom timeout
+serviceName: api.openguardrails.com.dns
+servicePort: 443
+serviceHost: "api.openguardrails.com"
+apiKey: "sk-xxai-your-api-key-here"
+checkRequest: true
+checkResponse: false  # Disable response check to reduce latency
+timeout: 2000  # Faster timeout for high-throughput scenarios
+
+---
+# Example 7: Development/Testing Setup
+# For local testing with detailed error messages
+serviceName: localhost.dns
+servicePort: 5001
+serviceHost: "localhost"
+apiKey: "sk-xxai-dev-test-key"
+checkRequest: true
+checkResponse: true
+timeout: 10000  # Longer timeout for debugging
+denyCode: 200  # Return 200 even when blocked (for client compatibility)
