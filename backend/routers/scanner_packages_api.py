@@ -8,7 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 
-from database.connection import get_db
+from database.connection import get_admin_db
 from database.models import ScannerPackage
 from services.scanner_package_service import ScannerPackageService
 from models.requests import PackageUploadRequest, PackageUpdateRequest
@@ -54,7 +54,7 @@ def require_super_admin(request: Request) -> dict:
 async def get_all_packages(
     request: Request,
     package_type: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     current_user = get_current_user(request)
     """
@@ -102,7 +102,7 @@ async def get_all_packages(
 async def get_package_detail(
     package_id: str,
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     current_user = get_current_user(request)
     """
@@ -148,7 +148,7 @@ async def get_package_detail(
 @router.get("/marketplace/list", response_model=List[MarketplacePackageResponse])
 async def get_marketplace_packages(
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     current_user = get_current_user(request)
     """
@@ -176,7 +176,7 @@ async def get_marketplace_packages(
 async def get_marketplace_package_detail(
     package_id: str,
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     current_user = get_current_user(request)
     """
@@ -227,7 +227,7 @@ async def get_all_packages_admin(
     request: Request,
     package_type: Optional[str] = None,
     include_archived: Optional[bool] = False,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_admin_db),
     current_user: dict = Depends(require_super_admin)
 ):
     """
@@ -272,7 +272,7 @@ async def get_all_packages_admin(
 async def upload_purchasable_package(
     upload_request: PackageUploadRequest,
     request: Request,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_admin_db),
     current_user: dict = Depends(require_super_admin)
 ):
     """
@@ -375,7 +375,7 @@ async def update_package(
     package_id: str,
     updates: PackageUpdateRequest,
     request: Request,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_admin_db),
     current_user: dict = Depends(require_super_admin)
 ):
     """
@@ -433,7 +433,7 @@ async def archive_package(
     package_id: str,
     request: Request,
     archive_data: Optional[dict] = None,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_admin_db),
     current_user: dict = Depends(require_super_admin)
 ):
     """
@@ -486,7 +486,7 @@ async def archive_package(
 async def unarchive_package(
     package_id: str,
     request: Request,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_admin_db),
     current_user: dict = Depends(require_super_admin)
 ):
     """
@@ -529,7 +529,7 @@ async def unarchive_package(
 async def delete_package(
     package_id: str,
     request: Request,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_admin_db),
     current_user: dict = Depends(require_super_admin)
 ):
     """
@@ -573,7 +573,7 @@ async def delete_package(
 async def get_package_statistics(
     package_id: str,
     request: Request,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_admin_db),
     current_user: dict = Depends(require_super_admin)
 ):
     """

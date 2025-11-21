@@ -114,6 +114,13 @@ class PaymentService:
 
                 customer_id = subscription.stripe_customer_id if subscription else None
 
+                # Verify customer exists in Stripe, create new one if not
+                if customer_id:
+                    customer_exists = await stripe_service.customer_exists(customer_id)
+                    if not customer_exists:
+                        logger.warning(f"Stored customer {customer_id} not found in Stripe, creating new customer for tenant {tenant_id}")
+                        customer_id = None
+
                 if not customer_id:
                     customer_id = await stripe_service.create_customer(
                         email=email,
@@ -248,6 +255,13 @@ class PaymentService:
                 ).first()
 
                 customer_id = subscription.stripe_customer_id if subscription else None
+
+                # Verify customer exists in Stripe, create new one if not
+                if customer_id:
+                    customer_exists = await stripe_service.customer_exists(customer_id)
+                    if not customer_exists:
+                        logger.warning(f"Stored customer {customer_id} not found in Stripe, creating new customer for tenant {tenant_id}")
+                        customer_id = None
 
                 if not customer_id:
                     customer_id = await stripe_service.create_customer(

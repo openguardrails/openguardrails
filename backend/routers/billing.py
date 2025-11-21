@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
 
-from database.connection import get_db
+from database.connection import get_admin_db
 from services.billing_service import billing_service
 from services.admin_service import admin_service
 from database.models import Tenant
@@ -85,7 +85,7 @@ class UpdateSubscriptionRequest(BaseModel):
 @router.get("/api/v1/billing/subscription", response_model=SubscriptionResponse)
 async def get_my_subscription(
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Get current tenant's subscription information"""
     try:
@@ -112,7 +112,7 @@ async def get_my_subscription(
 @router.get("/api/v1/billing/usage")
 async def get_my_usage(
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Get current tenant's usage statistics"""
     try:
@@ -157,7 +157,7 @@ async def list_all_subscriptions(
     subscription_type: Optional[str] = None,
     sort_by: Optional[str] = 'current_month_usage',
     sort_order: Optional[str] = 'desc',
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """List all tenant subscriptions (admin only)"""
     try:
@@ -193,7 +193,7 @@ async def update_tenant_subscription(
     tenant_id: str,
     request_data: UpdateSubscriptionRequest,
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Update tenant subscription type (admin only)"""
     try:
@@ -242,7 +242,7 @@ async def update_tenant_subscription(
 async def reset_tenant_quota(
     tenant_id: str,
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Manually reset tenant's monthly quota (admin only)"""
     try:
@@ -279,7 +279,7 @@ async def reset_tenant_quota(
 @router.post("/api/v1/admin/billing/reset-all-quotas")
 async def reset_all_quotas(
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Reset all tenants' monthly quotas (admin only, for scheduled tasks)"""
     try:

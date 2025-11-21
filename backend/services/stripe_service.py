@@ -4,6 +4,7 @@ Uses Stripe SDK for payment processing
 """
 
 import stripe
+from stripe import _error as stripe_error
 from datetime import datetime
 from typing import Optional, Dict, Any
 from urllib.parse import quote
@@ -26,6 +27,31 @@ class StripeService:
         # Initialize Stripe
         if self.secret_key:
             stripe.api_key = self.secret_key
+
+    async def customer_exists(self, customer_id: str) -> bool:
+        """
+        Check if a Stripe customer exists
+
+        Args:
+            customer_id: Stripe customer ID
+
+        Returns:
+            True if customer exists, False otherwise
+        """
+        if not self.secret_key:
+            return False
+
+        try:
+            stripe.Customer.retrieve(customer_id)
+            return True
+        except stripe_error.InvalidRequestError as e:
+            if 'No such customer' in str(e):
+                logger.warning(f"Stripe customer not found: {customer_id}")
+                return False
+            raise
+        except Exception as e:
+            logger.error(f"Error checking customer existence: {e}")
+            return False
 
     async def create_customer(
         self,
@@ -237,7 +263,7 @@ class StripeService:
                 "currency": session.currency,
                 "metadata": session.metadata
             }
-        except stripe.error.StripeError as e:
+        except stripe_error.StripeError as e:
             logger.error(f"Failed to retrieve Stripe session {session_id}: {e}")
             return None
 

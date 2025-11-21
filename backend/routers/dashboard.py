@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
-from database.connection import get_db
+from database.connection import get_admin_db
 from database.models import Tenant, Application
 from services.stats_service import StatsService
 from models.responses import DashboardStats
@@ -81,7 +81,7 @@ def get_current_user_and_application_from_request(request: Request, db: Session)
     return tenant, default_app.id
 
 @router.get("/dashboard/stats", response_model=DashboardStats)
-async def get_dashboard_stats(request: Request, db: Session = Depends(get_db)):
+async def get_dashboard_stats(request: Request, db: Session = Depends(get_admin_db)):
     """Get dashboard stats"""
     try:
         # Get user and application context
@@ -102,7 +102,7 @@ async def get_category_distribution(
     request: Request,
     start_date: Optional[str] = Query(None, description="Start date YYYY-MM-DD"),
     end_date: Optional[str] = Query(None, description="End date YYYY-MM-DD"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Get risk category distribution stats"""
     try:

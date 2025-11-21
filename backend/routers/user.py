@@ -5,7 +5,7 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 from typing import Optional
 
-from database.connection import get_db
+from database.connection import get_admin_db
 from database.models import Tenant, EmailVerification
 from utils.auth import create_access_token, verify_token, verify_password, get_password_hash
 from utils.user import create_user, verify_user_email, regenerate_api_key, get_user_by_email, get_user_by_api_key, record_login_attempt, check_login_rate_limit
@@ -83,7 +83,7 @@ def get_current_user_from_token(credentials: HTTPAuthorizationCredentials, db: S
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 @router.post("/register")
-async def register_user(register_data: RegisterRequest, db: Session = Depends(get_db)):
+async def register_user(register_data: RegisterRequest, db: Session = Depends(get_admin_db)):
     """Tenant registration"""
     # Check if email already exists
     existing_tenant = get_user_by_email(db, register_data.email)
@@ -135,7 +135,7 @@ async def register_user(register_data: RegisterRequest, db: Session = Depends(ge
     return {"message": "Registration successful. Please check your email for verification code."}
 
 @router.post("/verify-email")
-async def verify_email(verify_data: VerifyEmailRequest, db: Session = Depends(get_db)):
+async def verify_email(verify_data: VerifyEmailRequest, db: Session = Depends(get_admin_db)):
     """Verify email"""
     if not verify_user_email(db, verify_data.email, verify_data.verification_code):
         raise HTTPException(
@@ -146,7 +146,7 @@ async def verify_email(verify_data: VerifyEmailRequest, db: Session = Depends(ge
     return {"message": "Email verified successfully. You can now login."}
 
 @router.post("/resend-verification-code")
-async def resend_verification_code(resend_data: ResendCodeRequest, db: Session = Depends(get_db)):
+async def resend_verification_code(resend_data: ResendCodeRequest, db: Session = Depends(get_admin_db)):
     """Resend verification code"""
     try:
         # Check if tenant exists and is not verified
@@ -196,7 +196,7 @@ async def resend_verification_code(resend_data: ResendCodeRequest, db: Session =
         )
 
 @router.post("/login", response_model=LoginResponse)
-async def login_user(login_data: LoginRequest, request: Request, db: Session = Depends(get_db)):
+async def login_user(login_data: LoginRequest, request: Request, db: Session = Depends(get_admin_db)):
     """Tenant login"""
     # Get client information
     client_ip = request.client.host if request.client else "unknown"
@@ -268,7 +268,7 @@ async def login_user(login_data: LoginRequest, request: Request, db: Session = D
 @router.get("/me", response_model=UserInfo)
 async def get_current_user_info(
     credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Get current tenant information"""
     tenant = get_current_user_from_token(credentials, db)
@@ -304,7 +304,7 @@ async def get_current_user_info(
 @router.post("/regenerate-api-key", response_model=ApiKeyResponse)
 async def regenerate_user_api_key(
     credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Regenerate API key"""
     tenant = get_current_user_from_token(credentials, db)
@@ -334,7 +334,7 @@ class ChangePasswordRequest(BaseModel):
 async def change_password(
     password_data: ChangePasswordRequest,
     credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Change current user's password"""
     # Get current user
@@ -372,7 +372,7 @@ async def change_password(
 async def update_user_language(
     language_data: UpdateLanguageRequest,
     credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Update user language preference"""
     # Validate language

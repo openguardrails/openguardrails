@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Request, HTTPException
 from sqlalchemy.orm import Session
-from database.connection import get_db
+from database.connection import get_proxy_db
 from services.guardrail_service import GuardrailService
 from services.ban_policy_service import BanPolicyService
 from utils.i18n import get_language_from_request
@@ -35,7 +35,7 @@ async def check_user_ban_status(tenant_id: str, user_id: str):
 async def check_guardrails(
     request_data: GuardrailRequest,
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_proxy_db)
 ):
     """
     Guardrail detection API - compatible with OpenAI format
@@ -143,7 +143,7 @@ async def list_models():
 async def check_input_guardrails(
     request_data: InputGuardrailRequest,
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_proxy_db)
 ):
     """
     Input detection API - compatible with dify/coze etc. agent platform plugins
@@ -225,7 +225,7 @@ async def check_input_guardrails(
 async def check_output_guardrails(
     request_data: OutputGuardrailRequest,
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_proxy_db)
 ):
     """
     Output detection API - compatible with dify/coze etc. agent platform plugins

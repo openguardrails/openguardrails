@@ -8,7 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status, Header, Request
 from sqlalchemy.orm import Session
 
-from database.connection import get_db
+from database.connection import get_admin_db
 from services.scanner_config_service import ScannerConfigService
 from models.requests import (
     ScannerConfigUpdateRequest,
@@ -82,7 +82,7 @@ async def get_application_scanners(
     request: Request,
     include_disabled: bool = True,
     application_id: UUID = Depends(get_application_id),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Get all scanner configurations for application.
@@ -120,7 +120,7 @@ async def get_enabled_scanners(
     request: Request,
     scan_type: Optional[str] = None,
     application_id: UUID = Depends(get_application_id),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Get only enabled scanner configurations for detection.
@@ -160,7 +160,7 @@ async def update_scanner_config(
     scanner_id: str,
     updates: ScannerConfigUpdateRequest,
     application_id: UUID = Depends(get_application_id),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Update scanner configuration for application.
@@ -214,7 +214,7 @@ async def bulk_update_scanner_configs(
     request: Request,
     bulk_updates: ScannerConfigBulkUpdateRequest,
     application_id: UUID = Depends(get_application_id),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Bulk update multiple scanner configurations.
@@ -266,7 +266,7 @@ async def reset_scanner_config(
     request: Request,
     scanner_id: str,
     application_id: UUID = Depends(get_application_id),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Reset scanner configuration to package defaults.
@@ -310,7 +310,7 @@ async def reset_scanner_config(
 async def reset_all_configs(
     request: Request,
     application_id: UUID = Depends(get_application_id),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Reset ALL scanner configurations to package defaults.
@@ -338,7 +338,7 @@ async def reset_all_configs(
 async def initialize_default_configs(
     request: Request,
     application_id: UUID = Depends(get_application_id),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Initialize default configs for all available scanners.

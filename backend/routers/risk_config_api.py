@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from typing import Dict, Tuple
 import uuid
-from database.connection import get_db
+from database.connection import get_admin_db
 from database.models import Tenant, Application
 from services.risk_config_service import RiskConfigService
 from services.risk_config_cache import risk_config_cache
@@ -190,7 +190,7 @@ class SensitivityThresholdResponse(BaseModel):
 @router.get("/risk-types", response_model=RiskConfigResponse)
 async def get_risk_config(
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Get application risk type configuration"""
     try:
@@ -206,7 +206,7 @@ async def get_risk_config(
 async def update_risk_config(
     config_request: RiskConfigRequest,
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Update application risk type configuration"""
     try:
@@ -235,7 +235,7 @@ async def update_risk_config(
 @router.get("/risk-types/enabled", response_model=Dict[str, bool])
 async def get_enabled_risk_types(
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Get application enabled risk type mapping"""
     try:
@@ -250,7 +250,7 @@ async def get_enabled_risk_types(
 @router.post("/risk-types/reset")
 async def reset_risk_config(
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Reset risk type configuration to default (all enabled)"""
     try:
@@ -283,7 +283,7 @@ async def reset_risk_config(
 @router.get("/sensitivity-thresholds", response_model=SensitivityThresholdResponse)
 async def get_sensitivity_thresholds(
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Get application sensitivity threshold configuration"""
     try:
@@ -299,7 +299,7 @@ async def get_sensitivity_thresholds(
 async def update_sensitivity_thresholds(
     threshold_request: SensitivityThresholdRequest,
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Update application sensitivity threshold configuration"""
     try:
@@ -328,7 +328,7 @@ async def update_sensitivity_thresholds(
 @router.post("/sensitivity-thresholds/reset")
 async def reset_sensitivity_thresholds(
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Reset sensitivity threshold configuration to default"""
     try:

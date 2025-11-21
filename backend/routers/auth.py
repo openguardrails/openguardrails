@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from utils.auth import authenticate_admin, create_access_token, verify_token, generate_reset_token, get_password_hash
 from utils.email import send_password_reset_email, get_reset_token_expiry
-from database.connection import get_db
+from database.connection import get_admin_db
 from database.models import Tenant, PasswordResetToken
 from config import settings
 
@@ -40,7 +40,7 @@ async def get_default_language():
     return DefaultLanguageResponse(default_language=settings.default_language)
 
 @router.post("/login", response_model=LoginResponse)
-async def login(login_data: LoginRequest, db: Session = Depends(get_db)):
+async def login(login_data: LoginRequest, db: Session = Depends(get_admin_db)):
     """Admin login"""
     if not authenticate_admin(login_data.username, login_data.password):
         raise HTTPException(
@@ -103,7 +103,7 @@ class ResetPasswordRequest(BaseModel):
     new_password: str
 
 @router.post("/forgot-password")
-async def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(get_db)):
+async def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(get_admin_db)):
     """Request password reset - send reset email"""
     # Check if user exists
     user = db.query(Tenant).filter(Tenant.email == request.email).first()
@@ -141,7 +141,7 @@ async def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(
     return {"message": "If the email exists, a password reset link will be sent"}
 
 @router.post("/reset-password")
-async def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db)):
+async def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_admin_db)):
     """Reset password using token"""
     # Find valid reset token
     reset_record = db.query(PasswordResetToken).filter(
@@ -186,7 +186,7 @@ async def reset_password(request: ResetPasswordRequest, db: Session = Depends(ge
     return {"message": "Password reset successful"}
 
 @router.post("/verify-reset-token")
-async def verify_reset_token(token: str, db: Session = Depends(get_db)):
+async def verify_reset_token(token: str, db: Session = Depends(get_admin_db)):
     """Verify if reset token is valid"""
     reset_record = db.query(PasswordResetToken).filter(
         PasswordResetToken.reset_token == token,

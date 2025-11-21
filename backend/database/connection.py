@@ -19,8 +19,8 @@ detection_engine = create_engine(
 # Management service engine - low concurrency optimization
 admin_engine = create_engine(
     settings.database_url,
-    pool_size=3,  # Management service connection pool  
-    max_overflow=5,  # Management service overflow connection
+    pool_size=10,  # Management service connection pool (increased for better concurrency)
+    max_overflow=20,  # Management service overflow connection (increased for peak loads)
     pool_pre_ping=True,
     pool_recycle=1800,
     pool_timeout=30,
@@ -59,6 +59,22 @@ def get_database_url():
 def get_db():
     """Get database session"""
     db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+def get_admin_db():
+    """Get admin service database session"""
+    db = AdminSessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+def get_proxy_db():
+    """Get proxy service database session"""
+    db = ProxySessionLocal()
     try:
         yield db
     finally:

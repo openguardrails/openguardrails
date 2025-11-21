@@ -1,14 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Table, Button, message, Spin, Space, Modal, Upload, Tag, Tabs, Input, Drawer, Descriptions, Badge, Form } from 'antd';
-import { UploadOutlined, ReloadOutlined, DeleteOutlined, CheckOutlined, CloseOutlined, EyeOutlined, EditOutlined } from '@ant-design/icons';
+import { Card, Table, Button, message, Spin, Space, Modal, Upload, Tag, Input, Drawer, Descriptions, Badge, Form } from 'antd';
+import { UploadOutlined, ReloadOutlined, DeleteOutlined, EyeOutlined, EditOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import i18n from 'i18next';
 import { useAuth } from '../../contexts/AuthContext';
-import { scannerPackagesApi, purchasesApi } from '../../services/api';
+import { scannerPackagesApi } from '../../services/api';
 import type { UploadFile } from 'antd';
 
 const { TextArea } = Input;
-const { TabPane } = Tabs;
 
 interface Package {
   id: string;
@@ -24,18 +23,6 @@ interface Package {
   archived?: boolean;
   archived_at?: string;
   archive_reason?: string;
-}
-
-interface PendingPurchase {
-  id: string;
-  tenant_id: string;
-  tenant_email?: string;
-  package_id: string;
-  package_name?: string;
-  package_code?: string;
-  request_email: string;
-  request_message?: string;
-  created_at?: string;
 }
 
 interface Scanner {
@@ -76,13 +63,9 @@ const PackageMarketplace: React.FC = () => {
   };
   const [loading, setLoading] = useState(true);
   const [packages, setPackages] = useState<Package[]>([]);
-  const [pendingPurchases, setPendingPurchases] = useState<PendingPurchase[]>([]);
   const [uploadModalVisible, setUploadModalVisible] = useState(false);
-  const [rejectModalVisible, setRejectModalVisible] = useState(false);
   const [archiveModalVisible, setArchiveModalVisible] = useState(false);
-  const [selectedPurchase, setSelectedPurchase] = useState<PendingPurchase | null>(null);
   const [selectedPackageForArchive, setSelectedPackageForArchive] = useState<Package | null>(null);
-  const [rejectionReason, setRejectionReason] = useState('');
   const [archiveReason, setArchiveReason] = useState('');
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [drawerVisible, setDrawerVisible] = useState(false);
@@ -102,14 +85,10 @@ const PackageMarketplace: React.FC = () => {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [packagesData, purchasesData] = await Promise.all([
-        isSuperAdmin
-          ? scannerPackagesApi.getAllAdmin('purchasable', true)  // Admin: see all purchasable packages (including archived)
-          : scannerPackagesApi.getAll('purchasable'),      // Regular user: only purchased packages
-        purchasesApi.getPending(),
-      ]);
+      const packagesData = isSuperAdmin
+        ? await scannerPackagesApi.getAllAdmin('purchasable', true)  // Admin: see all purchasable packages (including archived)
+        : await scannerPackagesApi.getAll('purchasable');      // Regular user: only purchased packages
       setPackages(packagesData);
-      setPendingPurchases(purchasesData);
     } catch (error) {
       message.error(t('packageMarketplace.loadFailed'));
       console.error('Failed to load marketplace data:', error);
@@ -222,36 +201,6 @@ const PackageMarketplace: React.FC = () => {
     });
   };
 
-  const handleApprovePurchase = async (purchase: PendingPurchase) => {
-    try {
-      await purchasesApi.approve(purchase.id);
-      message.success(t('packageMarketplace.approveSuccess'));
-      await loadData();
-    } catch (error) {
-      message.error(t('packageMarketplace.approveFailed'));
-      console.error('Failed to approve purchase:', error);
-    }
-  };
-
-  const handleRejectPurchase = async () => {
-    if (!selectedPurchase || !rejectionReason.trim()) {
-      message.error(t('packageMarketplace.rejectionReason'));
-      return;
-    }
-
-    try {
-      await purchasesApi.reject(selectedPurchase.id, rejectionReason);
-      message.success(t('packageMarketplace.rejectSuccess'));
-      setRejectModalVisible(false);
-      setSelectedPurchase(null);
-      setRejectionReason('');
-      await loadData();
-    } catch (error) {
-      message.error(t('packageMarketplace.rejectFailed'));
-      console.error('Failed to reject purchase:', error);
-    }
-  };
-
   const handleViewPackageDetail = async (pkg: Package) => {
     try {
       setLoadingDetail(true);
@@ -275,6 +224,7 @@ const PackageMarketplace: React.FC = () => {
       package_name: pkg.package_name,
       description: pkg.description,
       version: pkg.version,
+      price: pkg.price,
       price_display: pkg.price_display || '',
     });
     setEditModalVisible(true);
@@ -428,67 +378,6 @@ const PackageMarketplace: React.FC = () => {
     },
   ];
 
-  const purchaseColumns = [
-    {
-      title: t('packageMarketplace.tenantEmail'),
-      dataIndex: 'tenant_email',
-      key: 'tenant_email',
-      width: 200,
-    },
-    {
-      title: t('packageMarketplace.packageName'),
-      dataIndex: 'package_name',
-      key: 'package_name',
-    },
-    {
-      title: t('packageMarketplace.requestEmail'),
-      dataIndex: 'request_email',
-      key: 'request_email',
-      width: 200,
-    },
-    {
-      title: t('packageMarketplace.requestMessage'),
-      dataIndex: 'request_message',
-      key: 'request_message',
-      ellipsis: true,
-    },
-    {
-      title: t('packageMarketplace.requestDate'),
-      dataIndex: 'created_at',
-      key: 'created_at',
-      width: 180,
-      render: (date: string) => date ? new Date(date).toLocaleString() : '-',
-    },
-    {
-      title: t('common.actions'),
-      key: 'actions',
-      width: 200,
-      render: (_: any, record: PendingPurchase) => (
-        <Space>
-          <Button
-            type="primary"
-            size="small"
-            icon={<CheckOutlined />}
-            onClick={() => handleApprovePurchase(record)}
-          >
-            {t('packageMarketplace.approveRequest')}
-          </Button>
-          <Button
-            danger
-            size="small"
-            icon={<CloseOutlined />}
-            onClick={() => {
-              setSelectedPurchase(record);
-              setRejectModalVisible(true);
-            }}
-          >
-            {t('packageMarketplace.rejectRequest')}
-          </Button>
-        </Space>
-      ),
-    },
-  ];
-
   const uploadProps = {
     beforeUpload: (file: UploadFile) => {
       if (file.type !== 'application/json') {
@@ -530,40 +419,12 @@ const PackageMarketplace: React.FC = () => {
             </Space>
           }
         >
-          <Tabs defaultActiveKey="packages">
-            <TabPane
-              tab={`${t('packageMarketplace.packageList')} (${packages.length})`}
-              key="packages"
-            >
-              <Table
-                columns={packageColumns}
-                dataSource={packages}
-                rowKey="id"
-                pagination={{ pageSize: 20 }}
-              />
-            </TabPane>
-            <TabPane
-              tab={
-                <>
-                  {t('packageMarketplace.pendingRequests')}
-                  {pendingPurchases.length > 0 && (
-                    <Tag color="red" style={{ marginLeft: 8 }}>
-                      {pendingPurchases.length}
-                    </Tag>
-                  )}
-                </>
-              }
-              key="pending"
-            >
-              <Table
-                columns={purchaseColumns}
-                dataSource={pendingPurchases}
-                rowKey="id"
-                pagination={{ pageSize: 20 }}
-                locale={{ emptyText: t('packageMarketplace.noPendingRequests') }}
-              />
-            </TabPane>
-          </Tabs>
+          <Table
+            columns={packageColumns}
+            dataSource={packages}
+            rowKey="id"
+            pagination={{ pageSize: 20 }}
+          />
         </Card>
 
         <Modal
@@ -636,6 +497,7 @@ const PackageMarketplace: React.FC = () => {
                 package_name: selectedPackageForEdit.package_name,
                 description: selectedPackageForEdit.description,
                 version: selectedPackageForEdit.version,
+                price: selectedPackageForEdit.price,
                 price_display: selectedPackageForEdit.price_display || '',
               }}
             >
@@ -674,51 +536,29 @@ const PackageMarketplace: React.FC = () => {
               </Form.Item>
 
               <Form.Item
+                name="price"
+                label={t('scannerPackages.price')}
+                tooltip={t('packageMarketplace.priceTooltip')}
+              >
+                <Input
+                  type="number"
+                  placeholder={t('packageMarketplace.pricePlaceholder')}
+                  min={0}
+                  step="0.01"
+                  addonAfter={i18n.language === 'zh' ? '元' : '$'}
+                />
+              </Form.Item>
+
+              <Form.Item
                 name="price_display"
                 label={t('scannerPackages.priceDisplay')}
                 tooltip={t('packageMarketplace.priceDisplayTooltip')}
               >
                 <Input
                   placeholder={t('packageMarketplace.priceDisplayPlaceholder')}
-                  addonBefore={t('scannerPackages.price')}
                 />
               </Form.Item>
             </Form>
-          )}
-        </Modal>
-
-        <Modal
-          title={t('packageMarketplace.rejectRequest')}
-          open={rejectModalVisible}
-          onOk={handleRejectPurchase}
-          onCancel={() => {
-            setRejectModalVisible(false);
-            setSelectedPurchase(null);
-            setRejectionReason('');
-          }}
-          okText={t('common.submit')}
-          cancelText={t('common.cancel')}
-        >
-          {selectedPurchase && (
-            <Space direction="vertical" style={{ width: '100%' }} size="middle">
-              <div>
-                <strong>{t('packageMarketplace.tenantEmail')}:</strong> {selectedPurchase.tenant_email}
-              </div>
-              <div>
-                <strong>{t('packageMarketplace.packageName')}:</strong> {selectedPurchase.package_name}
-              </div>
-              <div>
-                <label>{t('packageMarketplace.rejectionReason')}</label>
-                <TextArea
-                  value={rejectionReason}
-                  onChange={(e) => setRejectionReason(e.target.value)}
-                  placeholder={t('packageMarketplace.rejectionReasonPlaceholder')}
-                  rows={4}
-                  style={{ marginTop: '8px' }}
-                  required
-                />
-              </div>
-            </Space>
           )}
         </Modal>
 

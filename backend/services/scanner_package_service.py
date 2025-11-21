@@ -511,7 +511,7 @@ class ScannerPackageService:
 
         # Update allowed fields
         allowed_fields = [
-            'package_name', 'description', 'version', 'price_display',
+            'package_name', 'description', 'version', 'price', 'price_display',
             'is_active', 'display_order'
         ]
 

@@ -1,7 +1,7 @@
 """Application Management Router - CRUD operations for applications and API keys"""
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
-from database.connection import get_db
+from database.connection import get_admin_db
 from database.models import (
     Application, ApiKey, Tenant, RiskTypeConfig, BanPolicy,
     DataSecurityEntityType, ResponseTemplate, Blacklist, Whitelist, KnowledgeBase,
@@ -194,7 +194,7 @@ def initialize_application_configs(db: Session, application_id: str, tenant_id: 
 @router.get("", response_model=List[ApplicationResponse])
 async def list_applications(
     request: Request,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_admin_db),
     include_summary: bool = True
 ):
     """List all applications for current tenant with optional protection summary"""
@@ -288,7 +288,7 @@ async def list_applications(
 async def create_application(
     data: ApplicationCreate,
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Create new application with default configurations"""
     tenant_id = get_current_tenant_id(request)
@@ -343,7 +343,7 @@ async def update_application(
     app_id: str,
     data: ApplicationUpdate,
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Update application"""
     tenant_id = get_current_tenant_id(request)
@@ -383,7 +383,7 @@ async def update_application(
 async def delete_application(
     app_id: str,
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Delete application (and all its API keys and configs)"""
     tenant_id = get_current_tenant_id(request)
@@ -414,7 +414,7 @@ async def delete_application(
 async def list_api_keys(
     app_id: str,
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """List all API keys for an application"""
     tenant_id = get_current_tenant_id(request)
@@ -445,7 +445,7 @@ async def create_api_key(
     app_id: str,
     data: ApiKeyCreate,
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Create new API key for application"""
     tenant_id = get_current_tenant_id(request)
@@ -490,7 +490,7 @@ async def delete_api_key(
     app_id: str,
     key_id: str,
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Delete API key"""
     tenant_id = get_current_tenant_id(request)
@@ -515,7 +515,7 @@ async def toggle_api_key(
     app_id: str,
     key_id: str,
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Toggle API key active status"""
     tenant_id = get_current_tenant_id(request)

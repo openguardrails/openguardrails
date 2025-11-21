@@ -292,6 +292,7 @@ class PackageUpdateRequest(BaseModel):
     package_name: Optional[str] = Field(None, description="Package name")
     description: Optional[str] = Field(None, description="Package description")
     version: Optional[str] = Field(None, description="Package version")
+    price: Optional[float] = Field(None, description="Package price (numeric value)")
     price_display: Optional[str] = Field(None, description="Price display string")
     is_active: Optional[bool] = Field(None, description="Whether package is active")
     display_order: Optional[int] = Field(None, description="Display order")

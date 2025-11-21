@@ -4,7 +4,7 @@ from pydantic import ConfigDict
 from typing import List, Optional
 import uuid
 from sqlalchemy.orm import Session
-from database.connection import get_db
+from database.connection import get_admin_db
 from database.models import TestModelConfig, Tenant
 from utils.logger import setup_logger
 
@@ -31,7 +31,7 @@ class TestModelResponse(BaseModel):
 @router.get("/test-models", response_model=List[TestModelResponse])
 async def get_test_models(
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Get the user's test model configuration"""
     try:
@@ -65,7 +65,7 @@ async def get_test_models(
 async def create_test_model(
     model_data: TestModelRequest,
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Create the user's test model configuration"""
     try:
@@ -109,7 +109,7 @@ async def update_test_model(
     model_id: int,
     model_data: TestModelRequest,
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Update the user's test model configuration"""
     try:
@@ -157,7 +157,7 @@ async def update_test_model(
 async def delete_test_model(
     model_id: int,
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Delete the user's test model configuration"""
     try:
@@ -192,7 +192,7 @@ async def delete_test_model(
 async def toggle_test_model(
     model_id: int,
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Toggle the user's test model enabled status"""
     try:

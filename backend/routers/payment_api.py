@@ -9,7 +9,7 @@ from typing import Optional
 from pydantic import BaseModel
 import traceback
 
-from database.connection import get_db
+from database.connection import get_admin_db
 from database.models import Tenant, TenantSubscription
 from utils.auth import verify_token
 from services.payment_service import payment_service
@@ -117,7 +117,7 @@ async def get_payment_config():
 @router.post("/subscription/create", response_model=PaymentResponse)
 async def create_subscription_payment(
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Create a subscription payment order
@@ -161,7 +161,7 @@ async def create_subscription_payment(
 async def create_package_payment(
     request: Request,
     payment_request: CreatePackagePaymentRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Create a package purchase payment order
@@ -194,7 +194,7 @@ async def create_package_payment(
 @router.post("/subscription/cancel")
 async def cancel_subscription(
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Cancel the current subscription
@@ -226,7 +226,7 @@ async def get_payment_orders(
     order_type: Optional[str] = None,
     status: Optional[str] = None,
     limit: int = 50,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Get payment order history for the current user
@@ -247,7 +247,7 @@ async def get_payment_orders(
 @router.get("/subscription/status")
 async def get_subscription_status(
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Get current subscription status
@@ -289,7 +289,7 @@ async def get_subscription_status(
 async def verify_payment_session(
     session_id: str,
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Verify payment status by session ID
@@ -419,7 +419,7 @@ async def verify_payment_session(
 # Webhook endpoints (no authentication required)
 
 @router.post("/webhook/alipay")
-async def alipay_webhook(request: Request, db: Session = Depends(get_db)):
+async def alipay_webhook(request: Request, db: Session = Depends(get_admin_db)):
     """
     Handle Alipay payment callback notification
     """
@@ -481,7 +481,7 @@ async def alipay_webhook(request: Request, db: Session = Depends(get_db)):
 async def stripe_webhook(
     request: Request,
     stripe_signature: str = Header(None, alias="Stripe-Signature"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Handle Stripe webhook events

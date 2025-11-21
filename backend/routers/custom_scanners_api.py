@@ -8,7 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status, Header, Request
 from sqlalchemy.orm import Session
 
-from database.connection import get_db
+from database.connection import get_admin_db
 from services.custom_scanner_service import CustomScannerService
 from models.requests import CustomScannerCreateRequest, CustomScannerUpdateRequest
 from models.responses import CustomScannerResponse, ApiResponse
@@ -78,7 +78,7 @@ def get_application_id(
 async def get_custom_scanners(
     request: Request,
     application_id: UUID = Depends(get_application_id),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Get all custom scanners for application.
@@ -105,7 +105,7 @@ async def get_custom_scanner(
     request: Request,
     scanner_id: str,
     application_id: UUID = Depends(get_application_id),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Get custom scanner details by ID.
@@ -144,7 +144,7 @@ async def create_custom_scanner(
     request: Request,
     scanner_data: CustomScannerCreateRequest,
     application_id: UUID = Depends(get_application_id),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Create a new custom scanner.
@@ -194,7 +194,7 @@ async def update_custom_scanner(
     scanner_id: str,
     updates: CustomScannerUpdateRequest,
     application_id: UUID = Depends(get_application_id),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Update custom scanner.
@@ -240,7 +240,7 @@ async def delete_custom_scanner(
     request: Request,
     scanner_id: str,
     application_id: UUID = Depends(get_application_id),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Delete custom scanner (soft delete).

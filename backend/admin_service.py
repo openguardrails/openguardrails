@@ -16,7 +16,7 @@ from pathlib import Path
 
 from config import settings
 from database.connection import init_db, create_admin_engine
-from routers import dashboard, config_api, results, auth, user, sync, admin, online_test, test_models, proxy_management, concurrent_stats, media, data_security, billing, applications, scanner_packages_api, scanner_configs_api, custom_scanners_api, purchase_api, risk_config_api, payment_api
+from routers import dashboard, config_api, results, auth, user, sync, admin, online_test, test_models, proxy_management, concurrent_stats, media, billing, applications, scanner_packages_api, scanner_configs_api, custom_scanners_api, purchase_api, risk_config_api, payment_api
 from utils.logger import setup_logger
 from services.admin_service import admin_service
 
@@ -390,7 +390,9 @@ app.include_router(online_test.router, prefix="/api/v1", dependencies=[Depends(v
 app.include_router(test_models.router, prefix="/api/v1", dependencies=[Depends(verify_user_auth)])
 app.include_router(proxy_management.router, prefix="/api/v1", dependencies=[Depends(verify_user_auth)])
 app.include_router(concurrent_stats.router, dependencies=[Depends(verify_user_auth)])
-app.include_router(data_security.router, dependencies=[Depends(verify_user_auth)])
+# Data Security entity types management
+from routers import data_security
+app.include_router(data_security.router, prefix="/api/v1", dependencies=[Depends(verify_user_auth)])
 app.include_router(billing.router, dependencies=[Depends(verify_user_auth)])  # Billing APIs
 app.include_router(applications.router, prefix="/api/v1/applications", dependencies=[Depends(verify_user_auth)])  # Application Management
 

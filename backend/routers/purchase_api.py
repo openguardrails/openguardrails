@@ -8,7 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 
-from database.connection import get_db
+from database.connection import get_admin_db
 from services.purchase_service import PurchaseService
 from models.requests import PurchaseRequestCreate, PurchaseApprovalRequest
 from models.responses import (
@@ -54,7 +54,7 @@ def require_super_admin(request: Request) -> dict:
 async def direct_purchase_free_package(
     request: Request,
     request_data: PurchaseRequestCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Directly purchase a free package (auto-approved, no admin review needed).
@@ -114,7 +114,7 @@ async def direct_purchase_free_package(
 async def request_purchase(
     request: Request,
     request_data: PurchaseRequestCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Request to purchase a package (DEPRECATED - use payment API or direct purchase instead).
@@ -182,7 +182,7 @@ async def request_purchase(
 async def get_my_purchases(
     request: Request,
     status_filter: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Get current user's purchase requests.
@@ -220,7 +220,7 @@ async def get_my_purchases(
 async def cancel_purchase_request(
     request: Request,
     purchase_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Cancel own purchase request (only pending requests).
@@ -265,7 +265,7 @@ async def cancel_purchase_request(
 @router.get("/admin/pending", response_model=List[PurchasePendingResponse])
 async def get_pending_purchases(
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Get all pending purchase requests (admin only).
@@ -290,7 +290,7 @@ async def get_pending_purchases(
 async def approve_purchase(
     request: Request,
     purchase_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Approve purchase request (admin only).
@@ -357,7 +357,7 @@ async def reject_purchase(
     request: Request,
     purchase_id: str,
     rejection_data: PurchaseApprovalRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Reject purchase request (admin only).
@@ -428,7 +428,7 @@ async def reject_purchase(
 async def get_purchase_statistics(
     request: Request,
     package_id: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Get purchase statistics (admin only).

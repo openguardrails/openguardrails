@@ -5,13 +5,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from typing import Optional, List
 from services.ban_policy_service import BanPolicyService
-from database.connection import get_db
+from database.connection import get_admin_db
 from database.models import Application
 from sqlalchemy.orm import Session
 import uuid
 import logging
 
-def get_current_application_id(request: Request, db: Session = Depends(get_db)) -> str:
+def get_current_application_id(request: Request, db: Session = Depends(get_admin_db)) -> str:
     """Get current application ID from request context"""
     # 0) Check for X-Application-ID header (highest priority - from frontend selector)
     header_app_id = request.headers.get('x-application-id') or request.headers.get('X-Application-ID')

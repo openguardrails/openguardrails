@@ -6,7 +6,7 @@ import asyncio
 import uuid
 import httpx
 from sqlalchemy.orm import Session
-from database.connection import get_db, get_admin_db_session
+from database.connection import get_admin_db, get_admin_db_session
 from services.guardrail_service import GuardrailService
 from models.requests import GuardrailRequest, Message
 from database.models import Tenant
@@ -68,7 +68,7 @@ class UpdateModelSelectionRequest(BaseModel):
 @router.get("/test/models", response_model=List[OnlineTestModelInfo])
 async def get_online_test_models(
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Get available proxy models for online test"""
     try:
@@ -136,7 +136,7 @@ async def get_online_test_models(
 async def update_model_selection(
     request_data: UpdateModelSelectionRequest,
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Update online test model selection"""
     try:
@@ -217,7 +217,7 @@ async def update_model_selection(
 async def online_test(
     request_data: OnlineTestRequest,
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Online test API

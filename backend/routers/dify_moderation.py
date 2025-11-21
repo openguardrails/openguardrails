@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Request, HTTPException
 from sqlalchemy.orm import Session
-from database.connection import get_db
+from database.connection import get_admin_db
 from services.guardrail_service import GuardrailService
 from models.requests import DifyModerationRequest, GuardrailRequest, Message
 from models.responses import DifyModerationResponse
@@ -14,7 +14,7 @@ router = APIRouter(tags=["Dify Moderation"])
 async def dify_moderation(
     request_data: DifyModerationRequest,
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Dify API-based Extension Moderation Endpoint

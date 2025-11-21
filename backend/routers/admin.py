@@ -3,7 +3,7 @@ from typing import Optional, List
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
-from database.connection import get_db
+from database.connection import get_admin_db
 import uuid
 from database.models import (
     Tenant, DetectionResult, TenantRateLimitCounter, TenantRateLimit,
@@ -30,7 +30,7 @@ def get_current_user(request: Request) -> Tenant:
         raise HTTPException(status_code=401, detail="Invalid tenant context")
 
     # Get tenant information from database
-    db = next(get_db())
+    db = next(get_admin_db())
     try:
         # Convert string ID to UUID for query
         try:
@@ -48,7 +48,7 @@ def get_current_user(request: Request) -> Tenant:
 @router.get("/admin/stats")
 async def get_admin_stats(
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Get admin stats (only super admin can access)
@@ -97,7 +97,7 @@ async def get_admin_stats(
 @router.get("/admin/users")
 async def get_all_users(
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Get all tenants list (only super admin can access)
@@ -129,7 +129,7 @@ async def get_all_users(
 async def switch_to_user(
     target_tenant_id: str,
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Super admin switch to specified tenant view
@@ -172,7 +172,7 @@ async def switch_to_user(
 @router.post("/admin/exit-switch")
 async def exit_user_switch(
     x_switch_session: Optional[str] = Header(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Exit user switch, back to admin view
@@ -198,7 +198,7 @@ async def exit_user_switch(
 @router.get("/admin/current-switch")
 async def get_current_switch_info(
     x_switch_session: Optional[str] = Header(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     获取当前租户切换状态信息
@@ -262,7 +262,7 @@ async def get_all_rate_limits(
     search: str = None,
     sort_by: str = 'requests_per_second',
     sort_order: str = 'desc',
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Get all tenants with their rate limit configurations (only super admin can access)
@@ -312,7 +312,7 @@ async def get_all_rate_limits(
 async def set_user_rate_limit(
     request_data: SetRateLimitRequest,
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Set tenant rate limit (only super admin can access)
@@ -353,7 +353,7 @@ async def set_user_rate_limit(
 async def remove_user_rate_limit(
     tenant_id: str,
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Remove tenant rate limit (only super admin can access)
@@ -398,7 +398,7 @@ class UpdateUserRequest(BaseModel):
 async def create_user(
     request_data: CreateUserRequest,
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Create tenant (only super admin can access)
@@ -452,7 +452,7 @@ async def update_user(
     tenant_id: str,
     request_data: UpdateUserRequest,
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Update tenant information (only super admin can access)
@@ -502,7 +502,7 @@ async def update_user(
 async def delete_user(
     tenant_id: str,
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Delete tenant (only super admin can access)
@@ -596,7 +596,7 @@ async def delete_user(
 async def reset_user_api_key(
     tenant_id: str,
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Reset tenant API Key (only super admin can access)

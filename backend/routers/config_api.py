@@ -3,7 +3,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
-from database.connection import get_db
+from database.connection import get_admin_db
 from database.models import (
     Blacklist, Whitelist, ResponseTemplate, KnowledgeBase, Tenant,
     TenantKnowledgeBaseDisable, Application, Scanner, ScannerPackage, CustomScanner,
@@ -140,7 +140,7 @@ def get_current_user_and_application_from_request(request: Request, db: Session)
 
 # 黑名单管理
 @router.get("/config/blacklist", response_model=List[BlacklistResponse])
-async def get_blacklist(request: Request, db: Session = Depends(get_db)):
+async def get_blacklist(request: Request, db: Session = Depends(get_admin_db)):
     """Get blacklist configuration"""
     try:
         current_user, application_id = get_current_user_and_application_from_request(request, db)
@@ -161,7 +161,7 @@ async def get_blacklist(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail="Failed to get blacklist")
 
 @router.post("/config/blacklist", response_model=ApiResponse)
-async def create_blacklist(blacklist_request: BlacklistRequest, request: Request, db: Session = Depends(get_db)):
+async def create_blacklist(blacklist_request: BlacklistRequest, request: Request, db: Session = Depends(get_admin_db)):
     """Create blacklist"""
     try:
         current_user, application_id = get_current_user_and_application_from_request(request, db)
@@ -200,7 +200,7 @@ async def create_blacklist(blacklist_request: BlacklistRequest, request: Request
         raise HTTPException(status_code=500, detail="Failed to create blacklist")
 
 @router.put("/config/blacklist/{blacklist_id}", response_model=ApiResponse)
-async def update_blacklist(blacklist_id: int, blacklist_request: BlacklistRequest, request: Request, db: Session = Depends(get_db)):
+async def update_blacklist(blacklist_id: int, blacklist_request: BlacklistRequest, request: Request, db: Session = Depends(get_admin_db)):
     """Update blacklist"""
     try:
         current_user, application_id = get_current_user_and_application_from_request(request, db)
@@ -227,7 +227,7 @@ async def update_blacklist(blacklist_id: int, blacklist_request: BlacklistReques
         raise HTTPException(status_code=500, detail="Failed to update blacklist")
 
 @router.delete("/config/blacklist/{blacklist_id}", response_model=ApiResponse)
-async def delete_blacklist(blacklist_id: int, request: Request, db: Session = Depends(get_db)):
+async def delete_blacklist(blacklist_id: int, request: Request, db: Session = Depends(get_admin_db)):
     """Delete blacklist"""
     try:
         current_user, application_id = get_current_user_and_application_from_request(request, db)
@@ -264,7 +264,7 @@ async def delete_blacklist(blacklist_id: int, request: Request, db: Session = De
 
 # 白名单管理
 @router.get("/config/whitelist", response_model=List[WhitelistResponse])
-async def get_whitelist(request: Request, db: Session = Depends(get_db)):
+async def get_whitelist(request: Request, db: Session = Depends(get_admin_db)):
     """Get whitelist configuration"""
     try:
         current_user, application_id = get_current_user_and_application_from_request(request, db)
@@ -285,7 +285,7 @@ async def get_whitelist(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail="Failed to get whitelist")
 
 @router.post("/config/whitelist", response_model=ApiResponse)
-async def create_whitelist(whitelist_request: WhitelistRequest, request: Request, db: Session = Depends(get_db)):
+async def create_whitelist(whitelist_request: WhitelistRequest, request: Request, db: Session = Depends(get_admin_db)):
     """Create whitelist"""
     try:
         current_user, application_id = get_current_user_and_application_from_request(request, db)
@@ -312,7 +312,7 @@ async def create_whitelist(whitelist_request: WhitelistRequest, request: Request
         raise HTTPException(status_code=500, detail="Failed to create whitelist")
 
 @router.put("/config/whitelist/{whitelist_id}", response_model=ApiResponse)
-async def update_whitelist(whitelist_id: int, whitelist_request: WhitelistRequest, request: Request, db: Session = Depends(get_db)):
+async def update_whitelist(whitelist_id: int, whitelist_request: WhitelistRequest, request: Request, db: Session = Depends(get_admin_db)):
     """Update whitelist"""
     try:
         current_user, application_id = get_current_user_and_application_from_request(request, db)
@@ -339,7 +339,7 @@ async def update_whitelist(whitelist_id: int, whitelist_request: WhitelistReques
         raise HTTPException(status_code=500, detail="Failed to update whitelist")
 
 @router.delete("/config/whitelist/{whitelist_id}", response_model=ApiResponse)
-async def delete_whitelist(whitelist_id: int, request: Request, db: Session = Depends(get_db)):
+async def delete_whitelist(whitelist_id: int, request: Request, db: Session = Depends(get_admin_db)):
     """Delete whitelist"""
     try:
         current_user, application_id = get_current_user_and_application_from_request(request, db)
@@ -365,7 +365,7 @@ async def delete_whitelist(whitelist_id: int, request: Request, db: Session = De
 @router.get("/config/responses", response_model=List[ResponseTemplateResponse])
 async def get_response_templates(
     request: Request,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_admin_db),
     scanner_type: Optional[str] = None,
     scanner_identifier: Optional[str] = None
 ):
@@ -409,7 +409,7 @@ async def get_response_templates(
         raise HTTPException(status_code=500, detail="Failed to get response templates")
 
 @router.post("/config/responses", response_model=ApiResponse)
-async def create_response_template(template_request: ResponseTemplateRequest, request: Request, db: Session = Depends(get_db)):
+async def create_response_template(template_request: ResponseTemplateRequest, request: Request, db: Session = Depends(get_admin_db)):
     """Create response template - supports all scanner types"""
     try:
         current_user, application_id = get_current_user_and_application_from_request(request, db)
@@ -466,7 +466,7 @@ async def create_response_template(template_request: ResponseTemplateRequest, re
         raise HTTPException(status_code=500, detail="Failed to create response template")
 
 @router.put("/config/responses/{template_id}", response_model=ApiResponse)
-async def update_response_template(template_id: int, template_request: ResponseTemplateRequest, request: Request, db: Session = Depends(get_db)):
+async def update_response_template(template_id: int, template_request: ResponseTemplateRequest, request: Request, db: Session = Depends(get_admin_db)):
     """Update response template - supports all scanner types"""
     try:
         current_user, application_id = get_current_user_and_application_from_request(request, db)
@@ -498,7 +498,7 @@ async def update_response_template(template_id: int, template_request: ResponseT
         raise HTTPException(status_code=500, detail="Failed to update response template")
 
 @router.delete("/config/responses/{template_id}", response_model=ApiResponse)
-async def delete_response_template(template_id: int, request: Request, db: Session = Depends(get_db)):
+async def delete_response_template(template_id: int, request: Request, db: Session = Depends(get_admin_db)):
     """Delete response template"""
     try:
         current_user, application_id = get_current_user_and_application_from_request(request, db)
@@ -581,7 +581,7 @@ async def refresh_cache():
 async def get_knowledge_bases(
     category: Optional[str] = None,
     request: Request = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Get knowledge base list"""
     try:
@@ -642,7 +642,7 @@ async def create_knowledge_base(
     is_active: bool = Form(True),
     is_global: bool = Form(False),
     request: Request = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Create knowledge base - supports all scanner types (official, blacklist, custom, marketplace)"""
     try:
@@ -797,7 +797,7 @@ async def create_knowledge_base(
 @router.get("/config/knowledge-bases/available-scanners", response_model=dict)
 async def get_available_scanners_for_knowledge_base(
     request: Request = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Get all available scanners for knowledge base creation (blacklists, official, custom, marketplace)"""
     try:
@@ -896,7 +896,7 @@ async def update_knowledge_base(
     kb_id: int,
     kb_request: KnowledgeBaseRequest,
     request: Request = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Update knowledge base (only basic information, not including file)"""
     try:
@@ -963,7 +963,7 @@ async def update_knowledge_base(
 async def delete_knowledge_base(
     kb_id: int,
     request: Request = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Delete knowledge base"""
     try:
@@ -1013,7 +1013,7 @@ async def replace_knowledge_base_file(
     kb_id: int,
     file: UploadFile = File(...),
     request: Request = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Replace knowledge base file"""
     try:
@@ -1070,7 +1070,7 @@ async def replace_knowledge_base_file(
 async def get_knowledge_base_info(
     kb_id: int,
     request: Request = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Get knowledge base file info"""
     try:
@@ -1100,7 +1100,7 @@ async def search_similar_questions(
     query: str,
     top_k: Optional[int] = 5,
     request: Request = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Search similar questions"""
     try:
@@ -1140,7 +1140,7 @@ async def search_similar_questions(
 async def get_knowledge_bases_by_category(
     category: str,
     request: Request = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Get knowledge base list by category"""
     try:
@@ -1181,7 +1181,7 @@ async def get_knowledge_bases_by_category(
 async def toggle_global_knowledge_base_disable(
     kb_id: int,
     request: Request = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """
     Toggle global knowledge base disable status for current tenant
@@ -1245,7 +1245,7 @@ async def toggle_global_knowledge_base_disable(
 async def check_global_knowledge_base_disabled(
     kb_id: int,
     request: Request = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_admin_db)
 ):
     """Check if a global knowledge base is disabled for current tenant"""
     try:

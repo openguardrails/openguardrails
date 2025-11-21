@@ -11,7 +11,7 @@ from sqlalchemy import and_, or_, text, cast
 from sqlalchemy.dialects.postgresql import JSONB
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill
-from database.connection import get_db
+from database.connection import get_admin_db
 from database.models import DetectionResult, Tenant, Application
 from models.responses import DetectionResultResponse, PaginatedResponse
 from utils.logger import setup_logger
@@ -92,7 +92,7 @@ def get_current_user_and_application_from_request(request: Request, db: Session)
 @router.get("/results")
 async def get_detection_results(
     request: Request,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_admin_db),
     page: int = Query(1, ge=1, description="页码"),
     per_page: int = Query(20, ge=1, le=100, description="每页数量"),
     risk_level: Optional[str] = Query(None, description="整体风险等级过滤"),
@@ -230,7 +230,7 @@ async def get_detection_results(
 @router.get("/results/export")
 async def export_detection_results(
     request: Request,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_admin_db),
     risk_level: Optional[str] = Query(None, description="整体风险等级过滤"),
     security_risk_level: Optional[str] = Query(None, description="提示词攻击风险等级过滤"),
     compliance_risk_level: Optional[str] = Query(None, description="内容合规风险等级过滤"),
@@ -374,7 +374,7 @@ async def export_detection_results(
         raise HTTPException(status_code=500, detail="Failed to export detection results")
 
 @router.get("/results/{result_id}", response_model=DetectionResultResponse)
-async def get_detection_result(result_id: int, request: Request, db: Session = Depends(get_db)):
+async def get_detection_result(result_id: int, request: Request, db: Session = Depends(get_admin_db)):
     """Get single detection result detail (ensure current application can only view their own results)"""
     try:
         # Get user and application context
