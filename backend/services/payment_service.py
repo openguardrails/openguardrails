@@ -124,8 +124,8 @@ class PaymentService:
                         db.commit()
 
                 # Create checkout session
-                success_url = f"{settings.frontend_url}/platform/billing/subscription?payment=success&session_id={{CHECKOUT_SESSION_ID}}"
-                cancel_url = f"{settings.frontend_url}/platform/billing/subscription?payment=cancelled"
+                success_url = f"{settings.frontend_url}/platform/subscription?payment=success&session_id={{CHECKOUT_SESSION_ID}}"
+                cancel_url = f"{settings.frontend_url}/platform/subscription?payment=cancelled"
 
                 result = await stripe_service.create_subscription_checkout(
                     customer_id=customer_id,

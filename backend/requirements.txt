@@ -28,7 +28,7 @@ openguardrails>=3.0.0
 numpy==1.26.4
 faiss-cpu==1.8.0
 openpyxl==3.1.2
-stripe==7.0.0
+stripe>=7.0.0
 alipay-sdk-python==3.7.868
 pycryptodome==3.23.0
 rsa==4.7.2
