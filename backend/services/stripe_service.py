@@ -6,6 +6,7 @@ Uses Stripe SDK for payment processing
 import stripe
 from datetime import datetime
 from typing import Optional, Dict, Any
+from urllib.parse import quote
 
 from config import settings
 from utils.logger import get_logger
@@ -82,6 +83,21 @@ class StripeService:
         if not self.price_id_monthly:
             raise ValueError("Stripe price ID not configured")
 
+        # Strip any surrounding quotes from URLs (in case .env file has quoted values)
+        success_url = success_url.strip('\'"')
+        cancel_url = cancel_url.strip('\'"')
+
+        # Ensure URLs are ASCII-encoded (Stripe requirement)
+        # encode('ascii') will fail if there are non-ASCII chars, so we encode to UTF-8 bytes then decode
+        try:
+            success_url_encoded = success_url.encode('ascii').decode('ascii')
+            cancel_url_encoded = cancel_url.encode('ascii').decode('ascii')
+        except UnicodeEncodeError:
+            # If URLs contain non-ASCII, encode them properly
+            logger.warning(f"URLs contain non-ASCII characters, encoding them")
+            success_url_encoded = quote(success_url, safe=':/?#[]@!$&\'()*+,;=')
+            cancel_url_encoded = quote(cancel_url, safe=':/?#[]@!$&\'()*+,;=')
+
         session = stripe.checkout.Session.create(
             customer=customer_id,
             payment_method_types=['card'],
@@ -90,8 +106,8 @@ class StripeService:
                 'quantity': 1,
             }],
             mode='subscription',
-            success_url=success_url,
-            cancel_url=cancel_url,
+            success_url=success_url_encoded,
+            cancel_url=cancel_url_encoded,
             metadata={
                 "tenant_id": str(tenant_id),
                 "order_type": "subscription"
@@ -134,6 +150,30 @@ class StripeService:
         if not self.secret_key:
             raise ValueError("Stripe is not configured")
 
+        # Strip any surrounding quotes from URLs (in case .env file has quoted values)
+        success_url = success_url.strip('\'"')
+        cancel_url = cancel_url.strip('\'"')
+
+        # Ensure URLs are ASCII-encoded (Stripe requirement)
+        try:
+            success_url_encoded = success_url.encode('ascii').decode('ascii')
+            cancel_url_encoded = cancel_url.encode('ascii').decode('ascii')
+        except UnicodeEncodeError:
+            # If URLs contain non-ASCII, encode them properly
+            logger.warning(f"URLs contain non-ASCII characters, encoding them")
+            success_url_encoded = quote(success_url, safe=':/?#[]@!$&\'()*+,;=')
+            cancel_url_encoded = quote(cancel_url, safe=':/?#[]@!$&\'()*+,;=')
+
+        # Ensure package name is ASCII-safe (Stripe doesn't accept non-ASCII in product names)
+        # If package name contains non-ASCII, we'll use a sanitized version for Stripe
+        # but keep the original in metadata for our records
+        try:
+            package_name_safe = package_name.encode('ascii').decode('ascii')
+        except UnicodeEncodeError:
+            # Package name has non-ASCII characters - use generic name for Stripe display
+            logger.warning(f"Package name contains non-ASCII characters: {package_name}")
+            package_name_safe = f"Scanner Package (ID: {package_id[:8]})"
+
         session = stripe.checkout.Session.create(
             customer=customer_id,
             payment_method_types=['card'],
@@ -141,19 +181,20 @@ class StripeService:
                 'price_data': {
                     'currency': 'usd',
                     'product_data': {
-                        'name': package_name,
-                        'description': f'OpenGuardrails Scanner Package: {package_name}',
+                        'name': package_name_safe,
+                        'description': 'OpenGuardrails Scanner Package',
                     },
                     'unit_amount': amount,
                 },
                 'quantity': 1,
             }],
             mode='payment',
-            success_url=success_url,
-            cancel_url=cancel_url,
+            success_url=success_url_encoded,
+            cancel_url=cancel_url_encoded,
             metadata={
                 "tenant_id": str(tenant_id),
                 "package_id": str(package_id),
+                "package_name": package_name,  # Store original name in metadata
                 "order_type": "package"
             }
         )
@@ -165,6 +206,40 @@ class StripeService:
             "checkout_url": session.url,
             "customer_id": customer_id
         }
+
+    async def get_checkout_session(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve a Stripe Checkout session by ID
+        Used as fallback to check payment status when webhook hasn't arrived
+
+        Args:
+            session_id: Stripe checkout session ID
+
+        Returns:
+            Session details including payment_status
+        """
+        if not self.secret_key:
+            raise ValueError("Stripe is not configured")
+
+        try:
+            session = stripe.checkout.Session.retrieve(session_id)
+
+            logger.info(f"Retrieved Stripe session {session_id}: status={session.status}, payment_status={session.payment_status}")
+
+            return {
+                "id": session.id,
+                "status": session.status,
+                "payment_status": session.payment_status,
+                "customer": session.customer,
+                "subscription": session.subscription,
+                "payment_intent": session.payment_intent,
+                "amount_total": session.amount_total,
+                "currency": session.currency,
+                "metadata": session.metadata
+            }
+        except stripe.error.StripeError as e:
+            logger.error(f"Failed to retrieve Stripe session {session_id}: {e}")
+            return None
 
     async def create_payment_intent(
         self,

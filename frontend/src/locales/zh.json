@@ -1716,6 +1716,10 @@
   "payment": {
     "success": "支付成功！",
     "cancelled": "支付已取消",
+    "failed": "支付失败",
+    "verifying": "正在验证支付...",
+    "verificationTimeout": "支付验证超时。请检查您的支付历史记录。",
+    "verificationError": "验证支付状态失败",
     "error": {
       "createFailed": "创建支付失败",
       "unknown": "发生未知错误"

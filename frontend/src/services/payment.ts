@@ -44,6 +44,19 @@ export interface SubscriptionStatus {
   next_payment_date: string | null;
 }
 
+export interface PaymentVerificationResult {
+  status: 'pending' | 'completed' | 'failed' | 'not_found';
+  order_type?: 'subscription' | 'package';
+  order_id?: string;
+  payment_status?: string;
+  details?: {
+    package_id?: string;
+    purchase_status?: string;
+  };
+  paid_at?: string | null;
+  message?: string;
+}
+
 export const paymentService = {
   /**
    * Get payment configuration for frontend
@@ -96,6 +109,15 @@ export const paymentService = {
    */
   async getSubscriptionStatus(): Promise<SubscriptionStatus> {
     const response = await api.get(`${API_BASE}/subscription/status`);
+    return response.data;
+  },
+
+  /**
+   * Verify payment session status
+   * Used to poll payment completion after redirect from payment provider
+   */
+  async verifyPaymentSession(sessionId: string): Promise<PaymentVerificationResult> {
+    const response = await api.get(`${API_BASE}/verify-session/${sessionId}`);
     return response.data;
   },
 

@@ -158,6 +158,10 @@ class Settings(BaseSettings):
     stripe_publishable_key: str = ""
     stripe_webhook_secret: str = ""
     stripe_price_id_monthly: str = ""  # Stripe Price ID for monthly subscription ($19/month)
+    stripe_subscription_success_url: str = ""  # e.g., http://localhost:3000/platform/subscription?payment=success&session_id={CHECKOUT_SESSION_ID}
+    stripe_subscription_cancel_url: str = ""   # e.g., http://localhost:3000/platform/subscription?payment=cancelled
+    stripe_package_success_url: str = ""       # e.g., http://localhost:3000/platform/config/scanner-packages?payment=success&session_id={CHECKOUT_SESSION_ID}
+    stripe_package_cancel_url: str = ""        # e.g., http://localhost:3000/platform/config/scanner-packages?payment=cancelled
 
     # Subscription pricing
     subscription_price_cny: float = 19.0  # Monthly price in CNY

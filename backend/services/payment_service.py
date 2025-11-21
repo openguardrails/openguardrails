@@ -6,6 +6,7 @@ Automatically selects payment provider based on DEFAULT_LANGUAGE configuration
 import uuid
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
+from urllib.parse import quote
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 
@@ -124,8 +125,16 @@ class PaymentService:
                         db.commit()
 
                 # Create checkout session
-                success_url = f"{settings.frontend_url}/platform/subscription?payment=success&session_id={{CHECKOUT_SESSION_ID}}"
-                cancel_url = f"{settings.frontend_url}/platform/subscription?payment=cancelled"
+                # Use configured URLs if available, otherwise use frontend_url
+                if settings.stripe_subscription_success_url:
+                    success_url = settings.stripe_subscription_success_url
+                else:
+                    success_url = f"{settings.frontend_url}/platform/subscription?payment=success&session_id={{CHECKOUT_SESSION_ID}}"
+
+                if settings.stripe_subscription_cancel_url:
+                    cancel_url = settings.stripe_subscription_cancel_url
+                else:
+                    cancel_url = f"{settings.frontend_url}/platform/subscription?payment=cancelled"
 
                 result = await stripe_service.create_subscription_checkout(
                     customer_id=customer_id,
@@ -250,8 +259,16 @@ class PaymentService:
                         db.commit()
 
                 # Create checkout session
-                success_url = f"{settings.frontend_url}/platform/config/scanner-packages?payment=success&session_id={{CHECKOUT_SESSION_ID}}"
-                cancel_url = f"{settings.frontend_url}/platform/config/scanner-packages?payment=cancelled"
+                # Use configured URLs if available, otherwise use frontend_url
+                if settings.stripe_package_success_url:
+                    success_url = settings.stripe_package_success_url
+                else:
+                    success_url = f"{settings.frontend_url}/platform/config/scanner-packages?payment=success&session_id={{CHECKOUT_SESSION_ID}}"
+
+                if settings.stripe_package_cancel_url:
+                    cancel_url = settings.stripe_package_cancel_url
+                else:
+                    cancel_url = f"{settings.frontend_url}/platform/config/scanner-packages?payment=cancelled"
 
                 # Amount in cents for Stripe
                 amount_cents = int(amount * 100)

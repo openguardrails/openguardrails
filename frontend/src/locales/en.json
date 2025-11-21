@@ -1719,6 +1719,10 @@
   "payment": {
     "success": "Payment completed successfully!",
     "cancelled": "Payment was cancelled",
+    "failed": "Payment failed",
+    "verifying": "Verifying payment...",
+    "verificationTimeout": "Payment verification timeout. Please check your payment history.",
+    "verificationError": "Failed to verify payment status",
     "error": {
       "createFailed": "Failed to create payment",
       "unknown": "An unknown error occurred"

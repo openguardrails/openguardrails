@@ -285,6 +285,137 @@ async def get_subscription_status(
     }
 
 
+@router.get("/verify-session/{session_id}")
+async def verify_payment_session(
+    session_id: str,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    Verify payment status by session ID
+    Used by frontend to poll payment completion after redirect
+
+    Returns:
+    - status: 'pending' | 'completed' | 'failed' | 'not_found'
+    - order_type: 'subscription' | 'package'
+    - order_id: Payment order ID
+    - details: Additional order details (package_id for packages, etc.)
+
+    NOTE: This endpoint has a fallback mechanism:
+    1. First check database for webhook-updated status
+    2. If still pending AND provider is Stripe, query Stripe API directly
+    3. If Stripe says payment is complete, process it immediately
+
+    This solves the issue where webhooks may not arrive in test environments.
+    """
+    try:
+        current_user = get_current_user(request, db)
+
+        from database.models import PaymentOrder, PackagePurchase
+        from sqlalchemy import text
+
+        # Find order by session ID in metadata
+        # Use PostgreSQL JSON operator ->> to extract text value
+        order = db.query(PaymentOrder).filter(
+            PaymentOrder.tenant_id == current_user.id,
+            text("order_metadata->>'stripe_session_id' = :session_id")
+        ).params(session_id=session_id).first()
+
+        if not order:
+            # Also check Alipay trade_no (if using Alipay)
+            order = db.query(PaymentOrder).filter(
+                PaymentOrder.tenant_id == current_user.id,
+                text("order_metadata->>'trade_no' = :session_id")
+            ).params(session_id=session_id).first()
+
+        if not order:
+            return {
+                "status": "not_found",
+                "message": "Payment session not found"
+            }
+
+        # Determine order type from order_id prefix
+        order_type = None
+        details = {}
+
+        if order.provider_order_id.startswith('sub_'):
+            order_type = 'subscription'
+        elif order.provider_order_id.startswith('pkg_'):
+            order_type = 'package'
+            # Get package details from order metadata
+            if order.package_id:
+                details['package_id'] = str(order.package_id)
+                # Find package purchase record by tenant_id and package_id
+                package_purchase = db.query(PackagePurchase).filter(
+                    PackagePurchase.tenant_id == current_user.id,
+                    PackagePurchase.package_id == order.package_id
+                ).first()
+                if package_purchase:
+                    details['purchase_status'] = package_purchase.status
+
+        # FALLBACK MECHANISM: If order is still pending and provider is Stripe, check Stripe API
+        if order.status == 'pending' and order.payment_provider == 'stripe':
+            logger.info(f"Order {order.provider_order_id} still pending, checking Stripe API for session {session_id}")
+            try:
+                # Query Stripe API to check if payment is actually complete
+                stripe_session = await stripe_service.get_checkout_session(session_id)
+
+                if stripe_session:
+                    payment_status = stripe_session.get('payment_status')
+                    logger.info(f"Stripe session {session_id} payment_status: {payment_status}")
+
+                    if payment_status == 'paid':
+                        logger.info(f"Stripe payment confirmed as paid, processing order {order.provider_order_id}")
+                        # Payment is confirmed by Stripe - process it now
+                        if order_type == 'subscription':
+                            await payment_service.handle_subscription_paid(
+                                db=db,
+                                order_id=order.provider_order_id,
+                                transaction_id=stripe_session.get('payment_intent') or session_id
+                            )
+                        elif order_type == 'package':
+                            await payment_service.handle_package_paid(
+                                db=db,
+                                order_id=order.provider_order_id,
+                                transaction_id=stripe_session.get('payment_intent') or session_id
+                            )
+
+                        # Refresh order from database
+                        db.refresh(order)
+                        logger.info(f"Order {order.provider_order_id} status after processing: {order.status}")
+                    elif payment_status in ['unpaid', 'no_payment_required']:
+                        # Still not paid
+                        logger.info(f"Stripe session {session_id} not yet paid: {payment_status}")
+                    else:
+                        logger.warning(f"Unknown Stripe payment_status: {payment_status}")
+            except Exception as e:
+                logger.error(f"Failed to check Stripe API for session {session_id}: {e}")
+                # Continue with database status - don't fail the request
+
+        # Map payment order status
+        status_map = {
+            'pending': 'pending',
+            'paid': 'completed',
+            'failed': 'failed',
+            'cancelled': 'failed'
+        }
+
+        return {
+            "status": status_map.get(order.status, 'pending'),
+            "order_type": order_type,
+            "order_id": order.provider_order_id,
+            "payment_status": order.status,
+            "details": details,
+            "paid_at": order.paid_at.isoformat() if order.paid_at else None
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Payment verification error: {e}")
+        raise HTTPException(status_code=500, detail="Verification failed")
+
+
 # Webhook endpoints (no authentication required)
 
 @router.post("/webhook/alipay")
@@ -374,9 +505,10 @@ async def stripe_webhook(
             if order_type == 'subscription':
                 # Find order by session ID
                 from database.models import PaymentOrder
+                from sqlalchemy import text
                 order = db.query(PaymentOrder).filter(
-                    PaymentOrder.metadata['stripe_session_id'].astext == session_data['session_id']
-                ).first()
+                    text("order_metadata->>'stripe_session_id' = :session_id")
+                ).params(session_id=session_data['session_id']).first()
 
                 if order:
                     # Update with subscription ID
@@ -398,9 +530,10 @@ async def stripe_webhook(
 
             elif order_type == 'package':
                 from database.models import PaymentOrder
+                from sqlalchemy import text
                 order = db.query(PaymentOrder).filter(
-                    PaymentOrder.metadata['stripe_session_id'].astext == session_data['session_id']
-                ).first()
+                    text("order_metadata->>'stripe_session_id' = :session_id")
+                ).params(session_id=session_data['session_id']).first()
 
                 if order:
                     await payment_service.handle_package_paid(

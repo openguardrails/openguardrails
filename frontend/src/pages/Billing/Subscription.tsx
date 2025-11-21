@@ -7,6 +7,7 @@ import { billingService } from '../../services/billing';
 import { configApi } from '../../services/api';
 import paymentService, { PaymentConfig, SubscriptionStatus } from '../../services/payment';
 import { PaymentButton } from '../../components/Payment';
+import { usePaymentSuccess } from '../../hooks/usePaymentSuccess';
 import type { Subscription as SubscriptionType, UsageInfo } from '../../types/billing';
 
 const { Title, Text } = Typography;
@@ -102,6 +103,20 @@ const Subscription: React.FC = () => {
     });
   };
 
+  // Handle payment success with polling verification
+  const handlePaymentSuccess = React.useCallback((result: any) => {
+    // Only refresh if this is a subscription payment
+    if (result.order_type === 'subscription') {
+      fetchSubscription();
+      fetchSubscriptionStatus();
+      fetchUsageInfo();
+    }
+  }, []);  // Empty deps because fetch functions don't change
+
+  usePaymentSuccess({
+    onSuccess: handlePaymentSuccess
+  });
+
   useEffect(() => {
     fetchSubscription();
     fetchUsageInfo();
@@ -109,18 +124,9 @@ const Subscription: React.FC = () => {
     fetchPaymentConfig();
     fetchSubscriptionStatus();
 
-    // Handle payment callback
+    // Handle payment cancellation (no verification needed)
     const paymentStatus = searchParams.get('payment');
-    if (paymentStatus === 'success') {
-      message.success(t('payment.success'));
-      // Clear the URL params
-      setSearchParams({});
-      // Refresh data
-      setTimeout(() => {
-        fetchSubscription();
-        fetchSubscriptionStatus();
-      }, 1000);
-    } else if (paymentStatus === 'cancelled') {
+    if (paymentStatus === 'cancelled') {
       message.info(t('payment.cancelled'));
       setSearchParams({});
     }

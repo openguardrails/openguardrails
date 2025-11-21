@@ -8,6 +8,7 @@ import { useApplication } from '../../contexts/ApplicationContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { eventBus, EVENTS } from '../../utils/eventBus';
 import paymentService, { PaymentConfig } from '../../services/payment';
+import { usePaymentSuccess } from '../../hooks/usePaymentSuccess';
 
 interface ScannerConfig {
   id: string;
@@ -114,20 +115,29 @@ const OfficialScannersManagement: React.FC = () => {
     };
     loadPaymentConfig();
 
-    // Handle payment callback
+    // Handle payment cancellation (no verification needed)
     const paymentStatus = searchParams.get('payment');
-    if (paymentStatus === 'success') {
-      message.success(t('payment.success'));
-      setSearchParams({});
-      // Reload packages
-      setTimeout(() => {
-        loadPackagesOnly();
-      }, 1000);
-    } else if (paymentStatus === 'cancelled') {
+    if (paymentStatus === 'cancelled') {
       message.info(t('payment.cancelled'));
       setSearchParams({});
     }
   }, [currentApplicationId]);
+
+  // Handle payment success with polling verification
+  const handlePaymentSuccess = React.useCallback((result: any) => {
+    // Only refresh if this is a package payment
+    if (result.order_type === 'package') {
+      loadPackagesOnly();
+      // Also reload scanner configs if application is selected
+      if (currentApplicationId) {
+        loadScannerConfigs();
+      }
+    }
+  }, [currentApplicationId]);  // Only depend on currentApplicationId
+
+  usePaymentSuccess({
+    onSuccess: handlePaymentSuccess
+  });
 
   const loadPackagesOnly = async () => {
     try {
