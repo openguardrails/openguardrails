@@ -815,7 +815,7 @@ If you find our work helpful, feel free to give us a cite.
 
 ```bibtex
 @misc{openguardrails,
-      title={OpenGuardrails: An Open-Source Context-Aware AI Guardrails Platform}, 
+      title={OpenGuardrails: A Configurable, Unified, and Scalable Guardrails Platform for Large Language Models}, 
       author={Thomas Wang and Haowen Li},
       year={2025},
       url={https://arxiv.org/abs/2510.19169}, 
