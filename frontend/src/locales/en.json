@@ -327,7 +327,9 @@
     "fileSizeExceeded": "Image size cannot exceed {{size}}MB!",
     "supportedFormats": "Supported formats: JPEG, PNG, GIF, BMP, WEBP, TIFF",
     "maxSizePerImage": "Max {{size}}MB per image",
-    "maxImageCount": "Max {{count}} images"
+    "maxImageCount": "Max {{count}} images",
+    "subscriptionRequired": "Image detection is only available for subscribed users. Please upgrade your plan to access this feature.",
+    "subscriptionFeature": "Premium Feature - Upgrade to Enable"
   },
   "results": {
     "title": "Detection Results",
@@ -1703,10 +1705,11 @@
     "upgradeDescription": "Upgrade to a paid plan for higher quota limits and priority support.",
     "contactSupport": "Contact support to upgrade: {{email}}",
     "upgradeToUnlockMore": "Upgrade to Unlock More Features",
-    "feature1": "Higher monthly API call quota (1,000,000+ calls)",
-    "feature2": "Priority technical support",
-    "feature3": "Custom model training and optimization",
-    "feature4": "Dedicated account manager",
+    "feature1": "Image detection and analysis",
+    "feature2": "Higher monthly API call quota (1,000,000+ calls)",
+    "feature3": "Priority technical support",
+    "feature4": "Custom model training and optimization",
+    "feature5": "Dedicated account manager",
     "subscriptionNotFound": "Subscription Not Found",
     "subscriptionNotFoundDesc": "We could not find a subscription for your account. This may happen for accounts created before the billing system was implemented. Please contact support for assistance: {{email}}",
     "price": "Price",

@@ -11,6 +11,7 @@ from services.enhanced_template_service import enhanced_template_service
 from services.async_logger import async_detection_logger
 from services.risk_config_service import RiskConfigService
 from services.data_security_service import DataSecurityService
+from services.billing_service import billing_service
 from models.requests import GuardrailRequest, Message
 from models.responses import GuardrailResponse, GuardrailResult, ComplianceResult, SecurityResult, DataSecurityResult
 from utils.logger import setup_logger
@@ -192,6 +193,21 @@ class GuardrailService:
                     messages_dict.append({"role": msg.role, "content": content_parts})
                 else:
                     messages_dict.append({"role": msg.role, "content": content})
+
+            # Check subscription for image detection if images are present
+            if has_image and tenant_id:
+                subscription = billing_service.get_subscription(tenant_id, self.db)
+                if not subscription:
+                    logger.warning(f"Image detection attempted without subscription for tenant {tenant_id}")
+                    # Create error that will be caught by the calling endpoint
+                    from fastapi import HTTPException
+                    raise HTTPException(status_code=403, detail="Subscription not found. Please contact support to enable image detection.")
+
+                if subscription.subscription_type != 'subscribed':
+                    logger.warning(f"Image detection attempted by free user for tenant {tenant_id}")
+                    # Create error that will be caught by the calling endpoint
+                    from fastapi import HTTPException
+                    raise HTTPException(status_code=403, detail="Image detection is only available for subscribed users. Please upgrade your plan to access this feature.")
 
             # 4. Execute scanner-based detection (new system) or fall back to legacy detection
             matched_scanners = []  # Initialize for answer matching

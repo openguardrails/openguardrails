@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Request, HTTPException
 from pydantic import BaseModel
 from pydantic import ConfigDict
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 import asyncio
 import uuid
 import httpx
@@ -14,9 +14,33 @@ from utils.logger import setup_logger
 from openai import AsyncOpenAI
 from config import settings
 from services.proxy_service import proxy_service
+from services.billing_service import billing_service
 
 logger = setup_logger()
 router = APIRouter(tags=["Online Test"])
+
+def check_image_detection_subscription(tenant_uuid: uuid.UUID, db: Session) -> Tuple[bool, Optional[str]]:
+    """
+    Check if tenant has subscription for image detection
+
+    Image detection is only available for subscribed users
+
+    Returns:
+        (is_allowed, error_message)
+    """
+    try:
+        subscription = billing_service.get_subscription(str(tenant_uuid), db)
+        if not subscription:
+            return False, "Subscription not found. Please contact support to enable image detection."
+
+        if subscription.subscription_type != 'subscribed':
+            return False, "Image detection is only available for subscribed users. Please upgrade your plan to access this feature."
+
+        return True, None
+    except Exception as e:
+        logger.error(f"Error checking image detection subscription for tenant {tenant_uuid}: {e}")
+        # Default to allow if subscription check fails to avoid service disruption
+        return True, None
 
 class ModelConfig(BaseModel):
     id: str
@@ -324,18 +348,24 @@ async def online_test(
         except ValueError:
             logger.error(f"Invalid tenant_id format: {tenant_id}")
             raise HTTPException(status_code=400, detail="Invalid user ID format")
-        
+
+        # Check for image detection subscription if images are present
+        has_images = request_data.images and len(request_data.images) > 0
+        if has_images:
+            is_allowed, error_message = check_image_detection_subscription(tenant_uuid, db)
+            if not is_allowed:
+                raise HTTPException(status_code=403, detail=error_message)
+
         if not user_api_key:
             # If JWT login, need to get tenant's API key from database
             tenant = db.query(Tenant).filter(Tenant.id == tenant_uuid).first()
             if tenant:
                 user_api_key = tenant.api_key
-        
+
         if not user_api_key:
             raise HTTPException(status_code=400, detail="User API key not found")
-        
+
         # Use user API key to call guardrail API (with application_id)
-        has_images = request_data.images and len(request_data.images) > 0
         guardrail_dict = await call_guardrail_api(user_api_key, messages, tenant_uuid, db, has_images, application_id)
         
         # If question type, get user selected proxy model for test

@@ -426,6 +426,7 @@ const Subscription: React.FC = () => {
                     <li>{t('billing.feature2')}</li>
                     <li>{t('billing.feature3')}</li>
                     <li>{t('billing.feature4')}</li>
+                    <li>{t('billing.feature5')}</li>
                   </ul>
                   <PaymentButton
                     type="subscription"

@@ -17,6 +17,7 @@ from models.responses import ProxyCompletionResponse, ProxyModelListResponse
 from services.proxy_service import proxy_service
 from services.detection_guardrail_service import detection_guardrail_service
 from services.ban_policy_service import BanPolicyService
+from services.billing_service import billing_service
 from utils.i18n import get_language_from_request
 from utils.logger import setup_logger
 from enum import Enum
@@ -1222,6 +1223,44 @@ async def create_gateway_chat_completion(
         # Check if user is banned
         await check_user_ban_status_proxy(tenant_id, user_id)
 
+        # Check for image detection subscription if images are present
+        has_images = False
+        for msg in request_data.messages:
+            content = msg.content
+            if isinstance(content, list):
+                # Check for image content in multimodal messages
+                for part in content:
+                    if hasattr(part, 'type') and part.type == 'image_url':
+                        has_images = True
+                        break
+
+        if has_images:
+            # Check subscription for image detection
+            subscription = billing_service.get_subscription(tenant_id, None)
+            if not subscription:
+                logger.warning(f"Image detection attempted without subscription for tenant {tenant_id}")
+                return JSONResponse(
+                    status_code=403,
+                    content={
+                        "error": {
+                            "message": "Subscription not found. Please contact support to enable image detection.",
+                            "type": "subscription_required"
+                        }
+                    }
+                )
+
+            if subscription.subscription_type != 'subscribed':
+                logger.warning(f"Image detection attempted by free user for tenant {tenant_id}")
+                return JSONResponse(
+                    status_code=403,
+                    content={
+                        "error": {
+                            "message": "Image detection is only available for subscribed users. Please upgrade your plan to access this feature.",
+                            "type": "subscription_required"
+                        }
+                    }
+                )
+
         # Get upstream API configuration by ID
         api_config = await proxy_service.get_upstream_api_config(upstream_api_id, tenant_id)
         if not api_config:
@@ -1468,6 +1507,44 @@ async def create_chat_completion(
 
         # Check if user is banned
         await check_user_ban_status_proxy(tenant_id, user_id)
+
+        # Check for image detection subscription if images are present
+        has_images = False
+        for msg in request_data.messages:
+            content = msg.content
+            if isinstance(content, list):
+                # Check for image content in multimodal messages
+                for part in content:
+                    if hasattr(part, 'type') and part.type == 'image_url':
+                        has_images = True
+                        break
+
+        if has_images:
+            # Check subscription for image detection
+            subscription = billing_service.get_subscription(tenant_id, None)
+            if not subscription:
+                logger.warning(f"Image detection attempted without subscription for tenant {tenant_id}")
+                return JSONResponse(
+                    status_code=403,
+                    content={
+                        "error": {
+                            "message": "Subscription not found. Please contact support to enable image detection.",
+                            "type": "subscription_required"
+                        }
+                    }
+                )
+
+            if subscription.subscription_type != 'subscribed':
+                logger.warning(f"Image detection attempted by free user for tenant {tenant_id}")
+                return JSONResponse(
+                    status_code=403,
+                    content={
+                        "error": {
+                            "message": "Image detection is only available for subscribed users. Please upgrade your plan to access this feature.",
+                            "type": "subscription_required"
+                        }
+                    }
+                )
 
         # Get tenant's model configuration
         model_config = await proxy_service.get_user_model_config(tenant_id, request_data.model)

@@ -324,7 +324,9 @@
     "fileSizeExceeded": "图片大小不能超过{{size}}MB！",
     "supportedFormats": "支持格式：JPEG, PNG, GIF, BMP, WEBP, TIFF",
     "maxSizePerImage": "单张最大{{size}}MB",
-    "maxImageCount": "最多{{count}}张"
+    "maxImageCount": "最多{{count}}张",
+    "subscriptionRequired": "图片检测功能仅对订阅用户开放。请升级您的计划以使用此功能。",
+    "subscriptionFeature": "高级功能 - 请升级启用"
   },
   "results": {
     "title": "检测结果",
@@ -1700,10 +1702,11 @@
     "upgradeDescription": "升级到付费套餐以获得更高的配额限制和优先支持。",
     "contactSupport": "联系支持以升级: {{email}}",
     "upgradeToUnlockMore": "升级解锁更多功能",
-    "feature1": "更高的月度API调用配额（100万+次调用）",
-    "feature2": "优先技术支持",
-    "feature3": "定制模型训练和优化",
-    "feature4": "专属客户经理",
+    "feature1": "图片检测与分析功能",
+    "feature2": "更高的月度API调用配额（100万+次调用）",
+    "feature3": "优先技术支持",
+    "feature4": "定制模型训练和优化",
+    "feature5": "专属客户经理",
     "subscriptionNotFound": "未找到订阅",
     "subscriptionNotFoundDesc": "我们无法找到您账户的订阅信息。这可能发生在计费系统实施之前创建的账户。请联系支持寻求帮助: {{email}}",
     "price": "价格",
