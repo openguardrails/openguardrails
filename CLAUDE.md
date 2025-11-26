@@ -788,33 +788,67 @@ Authorization: Bearer sk-xxai-{proxy-key}
 ## Deployment
 
 ### Quick Start (Docker Compose)
+
+**Method 1: Quick Deployment with Pre-built Images (Recommended)** ⚡
+
+Best for production deployment and end-users. Uses official pre-built images from Docker Hub.
+
+```bash
+# 1. Download production docker-compose file
+curl -O https://raw.githubusercontent.com/openguardrails/openguardrails/main/docker-compose.prod.yml
+
+# 2. Set your Hugging Face token (required for downloading models)
+export HF_TOKEN=your-hf-token
+# Or create .env file: echo "HF_TOKEN=your-hf-token" > .env
+
+# 3. Start ALL services with one command
+docker compose -f docker-compose.prod.yml up -d
+
+# ✨ Everything runs automatically (using pre-built images):
+# - OpenGuardrails Platform (latest from Docker Hub)
+# - OpenGuardrails Text Model (port 58002) - GPU vLLM service
+# - Embedding Model (port 58004) - GPU vLLM service
+# - PostgreSQL Database (port 54321)
+# - All services: Admin (5000), Detection (5001), Proxy (5002), Frontend (3000)
+# - Database migrations run automatically!
+
+# 4. Monitor startup (first time may take 5-10 minutes to download models)
+docker compose -f docker-compose.prod.yml logs -f
+
+# 5. Access platform
+# Frontend: http://localhost:3000/platform/
+# Default credentials: admin@yourdomain.com / CHANGE-THIS-PASSWORD-IN-PRODUCTION
+```
+
+**Method 2: Build from Source (Development)** 🛠️
+
+Best for developers and contributors who want to modify the code.
+
 ```bash
 # 1. Clone repository
 git clone https://github.com/openguardrails/openguardrails
 cd openguardrails
 
-# 2. Set up environment variables
-cp .env.example .env
-# Edit .env and set your HF_TOKEN from https://huggingface.co/settings/tokens
+# 2. Set your Hugging Face token
+export HF_TOKEN=your-hf-token
+# Or create .env file: echo "HF_TOKEN=your-hf-token" > .env
 
-# 3. Start ALL services with one command (including models!)
-docker compose up -d
+# 3. Build and start ALL services with one command
+docker compose up -d --build
 
-# ✨ Everything runs automatically:
-# - OpenGuardrails Text Model (port 58002) - includes GPU vLLM service
-# - Embedding Model (port 58004) - includes GPU vLLM service
+# ✨ Everything runs automatically (builds from source):
+# - Builds platform image from local Dockerfile
+# - OpenGuardrails Text Model (port 58002) - GPU vLLM service
+# - Embedding Model (port 58004) - GPU vLLM service
 # - PostgreSQL Database (port 54321)
-# - Admin Service (port 5000)
-# - Detection Service (port 5001)
-# - Proxy Service (port 5002)
-# - Frontend Web UI (port 3000)
+# - All services: Admin (5000), Detection (5001), Proxy (5002), Frontend (3000)
 # - Database migrations run automatically!
 
-# 4. Monitor startup (first time may take 5-10 minutes to download models)
+# 4. Monitor startup
 docker compose logs -f
 
 # Watch specific services:
-docker logs -f openguardrails-admin          # Admin service + migrations
+docker logs -f openguardrails-platform       # Platform service (all backends + frontend)
 docker logs -f openguardrails-text-model     # Text model loading
 docker logs -f openguardrails-embedding      # Embedding model loading
 
@@ -825,6 +859,10 @@ docker ps  # All containers should show "Up" or "healthy" status
 # Frontend: http://localhost:3000/platform/
 # Default credentials: admin@yourdomain.com / CHANGE-THIS-PASSWORD-IN-PRODUCTION
 ```
+
+**Key Differences:**
+- **Method 1**: Uses `docker-compose.prod.yml` + pre-built images from Docker Hub (faster, production-ready)
+- **Method 2**: Uses `docker-compose.yml` + builds from local source (for development and customization)
 
 ### 🔄 Automatic Database Migration System
 

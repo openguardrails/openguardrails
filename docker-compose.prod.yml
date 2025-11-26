@@ -1,6 +1,6 @@
-# Development Docker Compose Configuration
-# Builds platform image from local source code
-# For production deployment using pre-built images, use: docker-compose.prod.yml
+# Production Docker Compose Configuration
+# Uses pre-built images from Docker Hub for faster deployment
+# Recommended for production and end-users
 
 services:
   # PostgreSQL Database
@@ -102,14 +102,9 @@ services:
       - openguardrails-network
 
   # Unified Platform Service (Frontend + Backend Services)
-  # 🛠️ DEVELOPMENT MODE: Builds from local source code
-  # For production with pre-built images, use docker-compose.prod.yml
+  # 🚀 PRODUCTION MODE: Uses pre-built image from Docker Hub
   platform:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        VITE_BASE: "/platform/"
+    image: openguardrails/openguardrails-platform:latest
     container_name: openguardrails-platform
     restart: unless-stopped
     ports:
@@ -190,7 +185,6 @@ services:
 
     volumes:
       - openguardrails-platform-data:/mnt/data/openguardrails-data
-      - ./backend/config:/app/config:ro
     depends_on:
       postgres:
         condition: service_healthy
