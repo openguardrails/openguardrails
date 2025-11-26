@@ -11,21 +11,21 @@ services:
       POSTGRES_HOST_AUTH_METHOD: md5
     command: [
       "postgres",
-      "-c", "max_connections=600",           # 增加最大连接数以支持多Worker架构
-      "-c", "shared_buffers=256MB",          # 增加共享缓冲区
-      "-c", "effective_cache_size=1GB",      # 设置有效缓存大小
-      "-c", "maintenance_work_mem=64MB",     # 维护操作内存
+      "-c", "max_connections=600",           # Increased for multi-worker architecture
+      "-c", "shared_buffers=256MB",
+      "-c", "effective_cache_size=1GB",
+      "-c", "maintenance_work_mem=64MB",
       "-c", "checkpoint_completion_target=0.9",
       "-c", "wal_buffers=16MB",
       "-c", "default_statistics_target=100",
       "-c", "random_page_cost=1.1",
       "-c", "effective_io_concurrency=200",
-      "-c", "work_mem=4MB"                   # 每个操作的工作内存
+      "-c", "work_mem=4MB"
     ]
     ports:
       - "54321:5432"
     volumes:
-      - /mnt/data/openguardrails-data/db:/var/lib/postgresql/data
+      - openguardrails-db-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U openguardrails -d openguardrails"]
       interval: 5s
@@ -34,35 +34,103 @@ services:
     networks:
       - openguardrails-network
 
-  # Backend Management Service (Handles Management Platform APIs)
-  admin-service:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: openguardrails-admin
+  # OpenGuardrails Text Model (vLLM)
+  text-model:
+    image: vllm/vllm-openai:latest
+    container_name: openguardrails-text-model
     restart: unless-stopped
     ports:
-      - "5000:5000"
+      - "58002:8000"
     environment:
-      # Service identification (for entrypoint script)
-      - SERVICE_NAME=admin
+      - HF_TOKEN=${HF_TOKEN}
+    command: >
+      --model openguardrails/OpenGuardrails-Text-2510
+      --port 8000
+      --served-model-name OpenGuardrails-Text
+      --trust-remote-code
+      --max-model-len 8192
+    volumes:
+      - openguardrails-model-cache:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - openguardrails-network
 
+  # Embedding Model (bge-m3)
+  embedding-model:
+    image: vllm/vllm-openai:latest
+    container_name: openguardrails-embedding
+    restart: unless-stopped
+    ports:
+      - "58004:8000"
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+    command: >
+      --model BAAI/bge-m3
+      --port 8000
+      --served-model-name bge-m3
+      --trust-remote-code
+    volumes:
+      - openguardrails-embedding-cache:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - openguardrails-network
+
+  # Unified Platform Service (Frontend + Backend Services)
+  platform:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VITE_BASE: "/platform/"
+    container_name: openguardrails-platform
+    restart: unless-stopped
+    ports:
+      - "3000:80"      # Frontend (Nginx)
+      - "5000:5000"    # Admin Service
+      - "5001:5001"    # Detection Service
+      - "5002:5002"    # Proxy Service
+    environment:
       # Database configuration
+      - DATABASE_HOST=postgres
+      - DATABASE_USER=openguardrails
+      - DATABASE_NAME=openguardrails
       - DATABASE_URL=postgresql://openguardrails:your_password@postgres:5432/openguardrails
       - RESET_DATABASE_ON_STARTUP=false
-      
+
       # Application configuration
       - DEBUG=false
       - JWT_SECRET_KEY=your-secret-key-change-in-production
-      - DEPLOYMENT_MODE=locals
-      
+      - DEPLOYMENT_MODE=local
+
       # Data directory configuration
       - DATA_DIR=/app/data
       - LOG_LEVEL=INFO
-      
+
       # CORS configuration
       - CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
-      
+
       # Administrator configuration
       - SUPER_ADMIN_USERNAME=admin@yourdomain.com
       - SUPER_ADMIN_PASSWORD=CHANGE-THIS-PASSWORD-IN-PRODUCTION
@@ -71,8 +139,18 @@ services:
       # Options: 'en' (English) or 'zh' (Chinese)
       - DEFAULT_LANGUAGE=en
 
+      # Model API configuration
+      - GUARDRAILS_MODEL_API_URL=http://text-model:8000/v1
+      - GUARDRAILS_MODEL_API_KEY=EMPTY
+      - GUARDRAILS_MODEL_NAME=OpenGuardrails-Text
+
+      # Multimodal model API configuration (Vision-Language)
+      - GUARDRAILS_VL_MODEL_API_URL=http://host.docker.internal:58003/v1
+      - GUARDRAILS_VL_MODEL_API_KEY=EMPTY
+      - GUARDRAILS_VL_MODEL_NAME=OpenGuardrails-VL
+
       # Embedding model API configuration
-      - EMBEDDING_API_BASE_URL=http://host.docker.internal:58004/v1
+      - EMBEDDING_API_BASE_URL=http://embedding-model:8000/v1
       - EMBEDDING_API_KEY=EMPTY
       - EMBEDDING_MODEL_NAME=bge-m3
       - EMBEDDING_MODEL_DIMENSION=1024
@@ -87,184 +165,53 @@ services:
       - SMTP_USE_TLS=false
       - SMTP_USE_SSL=true
 
+      # Service configuration
       - ADMIN_PORT=5000
       - ADMIN_UVICORN_WORKERS=2
       - ADMIN_MAX_CONCURRENT_REQUESTS=50
-      
-      # Detection service host configuration (use service name in Docker environment)
-      - DETECTION_HOST=detection-service
-      
-    command: ["python3", "start_admin_service.py"]
-    volumes:
-      - ./data:/app/data
-      - ./backend/config:/app/config:ro
-      - /mnt/data/openguardrails-data/media:/mnt/data/openguardrails-data/media
-    depends_on:
-      postgres:
-        condition: service_healthy
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    networks:
-      - openguardrails-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      
-  # Backend Detection Service (Handles high-concurrency detection APIs)
-  detection-service:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: openguardrails-detection
-    restart: unless-stopped
-    ports:
-      - "5001:5001"
-    environment:
-      # Service identification (for entrypoint script)
-      - SERVICE_NAME=detection
 
-      # Database configuration
-      - DATABASE_URL=postgresql://openguardrails:your_password@postgres:5432/openguardrails
-
-      # Application configuration
-      - DEBUG=false
-      - JWT_SECRET_KEY=your-secret-key-change-in-production
-      - DEPLOYMENT_MODE=local
-
-      # Model API configuration (please modify according to actual situation)
-      - GUARDRAILS_MODEL_API_URL=http://host.docker.internal:58002/v1
-      - GUARDRAILS_MODEL_API_KEY=your-openguardrails-text-model-api-key
-      - GUARDRAILS_MODEL_NAME=OpenGuardrails-Text
-
-      # Multimodal model API configuration
-      - GUARDRAILS_VL_MODEL_API_URL=http://host.docker.internal:58003/v1
-      - GUARDRAILS_VL_MODEL_API_KEY=your-openguardrails-vl-model-api-key
-      - GUARDRAILS_VL_MODEL_NAME=OpenGuardrails-VL
-
-      # Data directory configuration
-      - DATA_DIR=/app/data
-      - LOG_LEVEL=INFO
-
-      # CORS configuration
-      - CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
-
-      # Default language configuration (for offline deployments)
-      # Options: 'en' (English) or 'zh' (Chinese)
-      - DEFAULT_LANGUAGE=en
-
-      # Dual service configuration
       - DETECTION_PORT=5001
       - DETECTION_UVICORN_WORKERS=32
       - DETECTION_MAX_CONCURRENT_REQUESTS=400
-      
-    command: ["python3", "start_detection_service.py"]
-    volumes:
-      - ./data:/app/data
-      - ./backend/config:/app/config:ro
-      - /mnt/data/openguardrails-data/media:/mnt/data/openguardrails-data/media
-    depends_on:
-      postgres:
-        condition: service_healthy
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    networks:
-      - openguardrails-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      - DETECTION_HOST=localhost
 
-  # Backend Proxy Service (OpenAI compatible reverse proxy)
-  proxy-service:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: openguardrails-proxy
-    restart: unless-stopped
-    ports:
-      - "5002:5002"
-    environment:
-      # Service identification (for entrypoint script)
-      - SERVICE_NAME=proxy
-
-      # Database configuration
-      - DATABASE_URL=postgresql://openguardrails:your_password@postgres:5432/openguardrails
-
-      # Application configuration
-      - DEBUG=false
-      - JWT_SECRET_KEY=your-secret-key-change-in-production
-      - DEPLOYMENT_MODE=local
-
-      # Model API configuration (please modify according to actual situation)
-      - GUARDRAILS_MODEL_API_URL=http://host.docker.internal:58002/v1
-      - GUARDRAILS_MODEL_API_KEY=your-openguardrails-text-model-api-key
-      - GUARDRAILS_MODEL_NAME=OpenGuardrails-Text
-
-      # Multimodal model API configuration
-      - GUARDRAILS_VL_MODEL_API_URL=http://host.docker.internal:58003/v1
-      - GUARDRAILS_VL_MODEL_API_KEY=your-openguardrails-vl-model-api-key
-      - GUARDRAILS_VL_MODEL_NAME=OpenGuardrails-VL
-
-      # Data directory configuration
-      - DATA_DIR=/app/data
-      - LOG_LEVEL=INFO
-
-      # CORS configuration
-      - CORS_ORIGINS=*
-
-      # Default language configuration (for offline deployments)
-      # Options: 'en' (English) or 'zh' (Chinese)
-      - DEFAULT_LANGUAGE=en
-
-      # Proxy service configuration (high concurrency)
       - PROXY_PORT=5002
       - PROXY_UVICORN_WORKERS=24
       - PROXY_MAX_CONCURRENT_REQUESTS=300
-      
-      # Detection service host configuration (use service name in Docker environment)
-      - DETECTION_HOST=detection-service
-      
-    command: ["python3", "start_proxy_service.py"]
+
+      # Frontend configuration
+      - VITE_BASE=/platform/
+
     volumes:
-      - ./data:/app/data
+      - openguardrails-platform-data:/mnt/data/openguardrails-data
       - ./backend/config:/app/config:ro
-      - /mnt/data/openguardrails-data/media:/mnt/data/openguardrails-data/media
     depends_on:
       postgres:
+        condition: service_healthy
+      text-model:
+        condition: service_healthy
+      embedding-model:
         condition: service_healthy
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
       - openguardrails-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5002/health"]
+      test: ["CMD", "sh", "-c", "curl -f http://localhost:5000/health && curl -f http://localhost:5001/health && curl -f http://localhost:5002/health && curl -f http://localhost:80"]
       interval: 30s
       timeout: 10s
       retries: 3
-
-  # Frontend Web Interface
-  frontend:
-    build:
-      context: .
-      dockerfile: ./frontend/Dockerfile
-      args:
-        VITE_BASE: "/platform/"
-    container_name: openguardrails-frontend
-    restart: unless-stopped
-    ports:
-      - "3000:80"
-    environment:
-      - VITE_BASE=/platform/
-    depends_on:
-      - detection-service
-      - admin-service
-      - proxy-service
-    networks:
-      - openguardrails-network
 
 networks:
   openguardrails-network:
     driver: bridge
+
+volumes:
+  openguardrails-db-data:
+    driver: local
+  openguardrails-model-cache:
+    driver: local
+  openguardrails-embedding-cache:
+    driver: local
+  openguardrails-platform-data:
+    driver: local

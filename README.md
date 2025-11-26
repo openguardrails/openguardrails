@@ -355,86 +355,7 @@ Access the visual scanner management interface:
 
 ---
 
-### 🧱 2. Run the OpenGuardrails Model Service
-
-Download and launch the OpenGuardrails main model service using **vLLM**.
-
-First, set your Hugging Face token:
-
-```bash
-export HF_TOKEN=your-hf-token
-```
-
-Then start the OpenGuardrails-Text model:
-
-```bash
-docker run --runtime nvidia --gpus all \
-    -v ~/.cache/huggingface:/root/.cache/huggingface \
-    --env "HF_TOKEN=$HF_TOKEN" \
-    -p 58002:8000 \
-    --ipc=host \
-    vllm/vllm-openai:v0.10.1 \
-    --model openguardrails/OpenGuardrails-Text-2510 \
-    --served-model-name OpenGuardrails-Text
-```
-
-Once the container starts, the model API will be available at:
-
-```
-http://localhost:58002/v1
-```
-
-Quick test of OpenGuardrails-Text model
-
-```bash
-curl -X POST "http://localhost:58002/v1/chat/completions" \
-    -H "Authorization: Bearer $YOUR_API_KEY" \
-    -H "Content-Type: application/json" \
-    -d '{
-       "model": "OpenGuardrails-Text",
-       "messages": [
-         {"role": "user", "content": "How to make a bomb?"}
-       ]
-     }'
-```
-
----
-
-### 🧠 3. Run the Embedding Model Service
-
-This service provides vector embeddings for the knowledge base.
-
-```bash
-docker run --runtime nvidia --gpus all \
-    -v ~/.cache/huggingface:/root/.cache/huggingface \
-    --env "HF_TOKEN=$HF_TOKEN" \
-    -p 58004:8000 \
-    --ipc=host \
-    vllm/vllm-openai:v0.10.1 \
-    --model BAAI/bge-m3 \
-    --served-model-name bge-m3
-```
-
-Once started, the embedding API will be available at:
-
-```
-http://localhost:58004/v1
-```
-
-Quick test of embedding model
-
-```bash
-curl http://localhost:58004/v1/embeddings \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $YOUR_API_KEY" \
-  -d '{
-    "model": "bge-m3",
-    "input": "How to make a bomb?"
-  }'
-```
----
-
-### 📦 4. Download the OpenGuardrails Platform Code
+### 🧱 2. Download the OpenGuardrails Platform Code
 
 ```bash
 git clone https://github.com/openguardrails/openguardrails
@@ -443,42 +364,75 @@ cd openguardrails
 
 ---
 
-### ⚙️ 5. Configure and Launch the Platform
+### ⚙️ 3. Set Your Hugging Face Token
 
-Start all services:
+First, set your Hugging Face token (required for downloading models):
+
+```bash
+export HF_TOKEN=your-hf-token
+```
+
+You can also add it to a `.env` file:
+
+```bash
+echo "HF_TOKEN=your-hf-token" > .env
+```
+
+---
+
+### 🚀 4. Launch All Services (One Command!)
+
+Start all services with a single command:
 
 ```bash
 docker compose up -d
 ```
 
+**This will automatically start 4 Docker containers:**
+
+1. **PostgreSQL Database** (`openguardrails-postgres`) - Port 54321
+2. **OpenGuardrails Text Model** (`openguardrails-text-model`) - Port 58002
+3. **Embedding Model** (`openguardrails-embedding`) - Port 58004
+4. **Platform Service** (`openguardrails-platform`) - All services in one container:
+   - Frontend (Nginx) - Port 3000
+   - Admin Service - Port 5000
+   - Detection Service - Port 5001
+   - Proxy Service - Port 5002
+
 **✨ Database migrations run automatically on first deployment!**
 
-The admin service will automatically:
+The platform container will automatically:
 1. Wait for PostgreSQL to be ready
 2. Run all pending database migrations
-3. Start the service
+3. Start all services (Frontend + Admin + Detection + Proxy)
 
-You can monitor the migration progress:
+You can monitor the startup progress:
 
 ```bash
-# Watch admin service logs for migration output
-docker logs -f openguardrails-admin
+# Watch platform service logs
+docker logs -f openguardrails-platform
 
 # Expected output includes:
-# - "Running database migrations (admin service)..."
+# - "Running database migrations..."
 # - "Successfully executed X migration(s)" or "Database schema is up to date"
-# - "Starting OpenGuardrails Admin Service..."
+# - "Starting services via supervisord..."
 ```
 
-You can check running containers with:
+You can check all running containers:
 
 ```bash
 docker ps
+
+# Expected output:
+# - openguardrails-postgres (healthy)
+# - openguardrails-text-model (healthy)
+# - openguardrails-embedding (healthy)
+# - openguardrails-platform (healthy)
 ```
 
 ---
 
-### 🔐 6. Access the Admin Platform
+### 🔐 5. Access the Admin Platform
 
 After the services start, open your browser and visit:
 
@@ -491,7 +445,7 @@ After the services start, open your browser and visit:
 
 ---
 
-### 🛡️ 7. Production Environment Recommendations
+### 🛡️ 6. Production Environment Recommendations
 
 For production deployments, you **must** update the following for security:
 
@@ -514,9 +468,14 @@ Example:
 
 ### ✅ You now have:
 
-1. A GPU-based **OpenGuardrails model service** running on port **58002**
-2. A **An embedding model service** running on port **58004**
-3. The **OpenGuardrails web platform** accessible at **[http://localhost:3000/platform/](http://localhost:3000/platform/)**
+1. A GPU-based **OpenGuardrails text model service** running on port **58002**
+2. An **embedding model service** running on port **58004**
+3. A **PostgreSQL database** running on port **54321**
+4. The **unified OpenGuardrails platform** with:
+   - Web interface accessible at **[http://localhost:3000/platform/](http://localhost:3000/platform/)**
+   - Admin API on port **5000**
+   - Detection API on port **5001**
+   - Proxy API on port **5002**
 
 ![Dashboard Overview](frontend/public//dashboard.png)
 

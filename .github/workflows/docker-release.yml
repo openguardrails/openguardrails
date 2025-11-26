@@ -12,25 +12,6 @@ env:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - service: admin
-            dockerfile: backend/Dockerfile
-            context: backend
-            image: openguardrails-admin
-          - service: detection
-            dockerfile: backend/Dockerfile
-            context: backend
-            image: openguardrails-detection
-          - service: proxy
-            dockerfile: backend/Dockerfile
-            context: backend
-            image: openguardrails-proxy
-          - service: frontend
-            dockerfile: frontend/Dockerfile
-            context: .
-            image: openguardrails-frontend
 
     steps:
       - name: Checkout code
@@ -53,43 +34,41 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Version: $VERSION"
 
-      - name: Build and push Docker image
+      - name: Build and push OpenGuardrails Platform image
         uses: docker/build-push-action@v5
         with:
-          context: ${{ matrix.context }}
-          file: ${{ matrix.dockerfile }}
+          context: .
+          file: Dockerfile
           push: true
           tags: |
-            ${{ env.DOCKER_HUB_USERNAME }}/${{ matrix.image }}:latest
-            ${{ env.DOCKER_HUB_USERNAME }}/${{ matrix.image }}:${{ steps.version.outputs.version }}
+            ${{ env.DOCKER_HUB_USERNAME }}/openguardrails-platform:latest
+            ${{ env.DOCKER_HUB_USERNAME }}/openguardrails-platform:${{ steps.version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64,linux/arm64
           build-args: |
-            SERVICE_TYPE=${{ matrix.service }}
-
-      - name: Image digest
-        run: echo "Image pushed successfully for ${{ matrix.service }}"
-
-  create-release-summary:
-    needs: build-and-push
-    runs-on: ubuntu-latest
-    steps:
-      - name: Extract version from tag
-        id: version
-        run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+            VITE_BASE=/platform/
 
       - name: Create release summary
         run: |
           echo "## Docker Images Published" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "The following Docker images have been built and pushed to Docker Hub:" >> $GITHUB_STEP_SUMMARY
+          echo "The following Docker image has been built and pushed to Docker Hub:" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- \`openguardrails/openguardrails-admin:${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`openguardrails/openguardrails-detection:${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`openguardrails/openguardrails-proxy:${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`openguardrails/openguardrails-frontend:${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "### OpenGuardrails Platform (Unified Frontend + Backend)" >> $GITHUB_STEP_SUMMARY
+          echo "- \`openguardrails/openguardrails-platform:${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`openguardrails/openguardrails-platform:latest\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Also tagged as \`:latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "This single image contains:" >> $GITHUB_STEP_SUMMARY
+          echo "- Frontend (React + Nginx) on port 80" >> $GITHUB_STEP_SUMMARY
+          echo "- Admin Service on port 5000" >> $GITHUB_STEP_SUMMARY
+          echo "- Detection Service on port 5001" >> $GITHUB_STEP_SUMMARY
+          echo "- Proxy Service on port 5002" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Required Additional Services" >> $GITHUB_STEP_SUMMARY
+          echo "The platform requires these additional Docker containers:" >> $GITHUB_STEP_SUMMARY
+          echo "- PostgreSQL database (\`postgres:16-alpine\`)" >> $GITHUB_STEP_SUMMARY
+          echo "- vLLM Text Model (\`vllm/vllm-openai:latest\`)" >> $GITHUB_STEP_SUMMARY
+          echo "- vLLM Embedding Model (\`vllm/vllm-openai:latest\`)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Use \`docker compose up -d\` for complete deployment." >> $GITHUB_STEP_SUMMARY

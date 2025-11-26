@@ -52,7 +52,7 @@ docker compose up -d
 docker compose down -v
 docker volume ls | grep openguardrails  # Should be empty
 docker compose up -d
-docker logs -f openguardrails-admin  # Watch for errors
+docker logs -f openguardrails-platform  # Watch for errors
 docker ps  # All services should be healthy
 
 # 2. Verify services are accessible
@@ -101,7 +101,7 @@ docker exec openguardrails-postgres psql -U openguardrails -d openguardrails -c 
 
 ## Architecture
 
-### Three-Service Architecture
+### Four-Container Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -115,56 +115,72 @@ docker exec openguardrails-postgres psql -U openguardrails -d openguardrails -c 
    └────────┬───────┘ └──┬───────────┘ │  Proxy)         │
             │            │              └──┬──────────────┘
             │            │                 │
-   ┌────────▼────────┐ ┌▼─────────────┐ ┌─▼──────────────┐
-   │ Admin Service   │ │ Detection    │ │ Proxy Service  │
-   │   Port 5000     │ │   Service    │ │   Port 5002    │
-   │  (2 workers)    │ │  Port 5001   │ │  (24 workers)  │
-   │  Low Conc.      │ │ (32 workers) │ │  High Conc.    │
-   └────────┬────────┘ └──┬───────────┘ └─┬──────────────┘
-            │             │                │
-            └─────────────┴────────────────┴───────────────┐
-                                                            │
-                    ┌───────────────────────────────────────▼──┐
-                    │        PostgreSQL Database               │
-                    │  Users | Results | Blacklist/Whitelist  │
-                    │  Proxy Config | Upstream Models         │
-                    └──────────────────────────────────────────┘
-                                        │
-                    ┌───────────────────▼──────────────────────┐
-                    │     OpenGuardrails Model (vLLM)          │
-                    │   OpenGuardrails-Text-2510 (3.3B)        │
-                    │        Port 58002 (Text)                 │
-                    │        Port 58003 (Vision-Language)      │
-                    └──────────────────────────────────────────┘
-                                        │
-                    ┌───────────────────▼──────────────────────┐
-                    │     Embedding Model (bge-m3)             │
-                    │        Port 58004                        │
-                    └──────────────────────────────────────────┘
-                                        │
-                    ┌───────────────────▼──────────────────────┐
-                    │      Upstream AI Models (Proxy Only)     │
-                    │  OpenAI | Anthropic | Local | Others    │
-                    └──────────────────────────────────────────┘
+            └────────────┴─────────────────┘
+                         │
+    ┌────────────────────▼───────────────────────┐
+    │     Unified Platform Container             │
+    │  ┌──────────────────────────────────────┐  │
+    │  │  Nginx (Frontend)    │ Port 80/3000  │  │
+    │  ├──────────────────────────────────────┤  │
+    │  │  Admin Service       │ Port 5000     │  │
+    │  │  (2 workers)         │ Low Conc.     │  │
+    │  ├──────────────────────────────────────┤  │
+    │  │  Detection Service   │ Port 5001     │  │
+    │  │  (32 workers)        │ High Conc.    │  │
+    │  ├──────────────────────────────────────┤  │
+    │  │  Proxy Service       │ Port 5002     │  │
+    │  │  (24 workers)        │ High Conc.    │  │
+    │  └──────────────────────────────────────┘  │
+    │  Data: /mnt/data/openguardrails-data       │
+    └────────────────┬───────────────────────────┘
+                     │
+    ┌────────────────▼───────────────────────────┐
+    │        PostgreSQL Database (Container)     │
+    │  Users | Results | Blacklist/Whitelist    │
+    │  Proxy Config | Upstream Models            │
+    │  Port 54321                                │
+    └────────────────┬───────────────────────────┘
+                     │
+    ┌────────────────▼───────────────────────────┐
+    │  OpenGuardrails Text Model (Container)     │
+    │  OpenGuardrails-Text-2510 (3.3B, vLLM)     │
+    │  Port 58002                                │
+    └────────────────┬───────────────────────────┘
+                     │
+    ┌────────────────▼───────────────────────────┐
+    │  Embedding Model (Container)               │
+    │  BAAI/bge-m3 (vLLM)                        │
+    │  Port 58004                                │
+    └────────────────┬───────────────────────────┘
+                     │
+    ┌────────────────▼───────────────────────────┐
+    │  Upstream AI Models (Proxy Only)           │
+    │  OpenAI | Anthropic | Local | Others       │
+    └────────────────────────────────────────────┘
 ```
 
 ### Service Details
 
-| Service | Port | Workers | Purpose | Key Routes | Deployment |
-|---------|------|---------|---------|-----------|------------|
-| **Text Model** | 58002 | GPU | AI safety detection model (vLLM) | `/v1/chat/completions` | 🆕 **Included in docker-compose** |
-| **Embedding Model** | 58004 | GPU | Vector embeddings (vLLM) | `/v1/embeddings` | 🆕 **Included in docker-compose** |
-| **Admin Service** | 5000 | 2 | User & config management | `/api/v1/auth`, `/api/v1/users`, `/api/v1/config` | Docker Compose |
-| **Detection Service** | 5001 | 32 | High-concurrency safety detection | `/v1/guardrails`, `/api/v1/dashboard` | Docker Compose |
-| **Proxy Service** | 5002 | 24 | OpenAI-compatible security gateway | `/v1/chat/completions` | Docker Compose |
-| **Frontend** | 3000 | - | React management interface | `/platform/` | Docker Compose |
-| **PostgreSQL** | 54321 | - | Primary database | - | Docker Compose |
+| Service | Container | Port | Workers | Purpose | Key Routes |
+|---------|-----------|------|---------|---------|-----------|
+| **Text Model** | `openguardrails-text-model` | 58002 | GPU | AI safety detection model (vLLM) | `/v1/chat/completions` |
+| **Embedding Model** | `openguardrails-embedding` | 58004 | GPU | Vector embeddings (vLLM) | `/v1/embeddings` |
+| **PostgreSQL** | `openguardrails-postgres` | 54321 | - | Primary database | - |
+| **Platform** | `openguardrails-platform` | Multiple | - | Unified frontend + backend container | All routes below |
+| ↳ Frontend | (in platform) | 3000 | Nginx | React management interface | `/platform/` |
+| ↳ Admin Service | (in platform) | 5000 | 2 | User & config management | `/api/v1/auth`, `/api/v1/users`, `/api/v1/config` |
+| ↳ Detection Service | (in platform) | 5001 | 32 | High-concurrency safety detection | `/v1/guardrails`, `/api/v1/dashboard` |
+| ↳ Proxy Service | (in platform) | 5002 | 24 | OpenAI-compatible security gateway | `/v1/chat/completions` |
 
-**🚀 NEW: One-Command Deployment**
-- All services (including GPU models) now start with single `docker compose up -d` command
+**🚀 Four-Container Deployment Architecture**
+- All services start with single `docker compose up -d` command
+- **Container 1**: PostgreSQL database
+- **Container 2**: OpenGuardrails text model (vLLM)
+- **Container 3**: Embedding model (vLLM)
+- **Container 4**: Unified platform (Frontend + Admin + Detection + Proxy)
 - Models automatically download from HuggingFace on first run
-- No need to manually start model services separately
-- Internal Docker networking for optimal performance
+- All data stored in `/mnt/data/openguardrails-data` inside platform container
+- Managed by Supervisor for process orchestration
 
 ## Project Structure
 
