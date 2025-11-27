@@ -487,7 +487,14 @@ const OfficialScannersManagement: React.FC = () => {
   ];
 
   const getPackageScanners = (packageId: string) => {
-    return scannerConfigs.filter(s => s.package_id === packageId);
+    return scannerConfigs
+      .filter(s => s.package_id === packageId)
+      .sort((a, b) => {
+        // Extract numeric part from scanner tag (e.g., S1 -> 1, S10 -> 10)
+        const aNum = parseInt(a.tag.replace('S', ''));
+        const bNum = parseInt(b.tag.replace('S', ''));
+        return aNum - bNum;
+      });
   };
 
   const handleOpenDrawer = (pkg: Package) => {

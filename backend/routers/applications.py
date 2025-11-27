@@ -7,6 +7,7 @@ from database.models import (
     DataSecurityEntityType, ResponseTemplate, Blacklist, Whitelist, KnowledgeBase,
     ApplicationScannerConfig, Scanner
 )
+from services.scanner_config_service import ScannerConfigService
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 from datetime import datetime
@@ -89,6 +90,7 @@ def initialize_application_configs(db: Session, application_id: str, tenant_id: 
     - RiskTypeConfig (all risk types enabled by default)
     - BanPolicy (disabled by default)
     - DataSecurityEntityTypes (system entity types enabled)
+    - ApplicationScannerConfig (scanner configurations for new scanner system)
     """
     try:
         # 1. Create RiskTypeConfig with all risk types enabled by default
@@ -173,6 +175,18 @@ def initialize_application_configs(db: Session, application_id: str, tenant_id: 
                 logger.info(f"Created {len(system_templates)} DataSecurityEntityTypes for application {application_id}")
             else:
                 logger.warning(f"No system templates found for DataSecurityEntityTypes")
+
+        # 4. Initialize scanner configurations for the new scanner system
+        scanner_service = ScannerConfigService(db)
+        try:
+            scanner_configs_count = scanner_service.initialize_default_configs(
+                application_id=uuid.UUID(application_id),
+                tenant_id=uuid.UUID(tenant_id)
+            )
+            logger.info(f"Initialized {scanner_configs_count} scanner configs for application {application_id}")
+        except Exception as scanner_error:
+            logger.error(f"Failed to initialize scanner configs for application {application_id}: {scanner_error}")
+            # Continue with other configs - scanner system can be fixed later
 
         db.commit()
         logger.info(f"Successfully initialized all configurations for application {application_id}")

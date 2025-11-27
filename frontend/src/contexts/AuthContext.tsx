@@ -151,6 +151,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const switchToUser = async (userId: string) => {
     try {
+      // Save current application ID before switching
+      const currentAppId = localStorage.getItem('current_application_id');
+      if (currentAppId) {
+        localStorage.setItem('admin_saved_application_id', currentAppId);
+      }
+      
       const response = await adminApi.switchToUser(userId);
       localStorage.setItem('switch_session_token', response.switch_session_token);
       await refreshSwitchStatus();
@@ -166,6 +172,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       await adminApi.exitSwitch();
       localStorage.removeItem('switch_session_token');
+      
+      // Restore admin's application ID
+      const savedAppId = localStorage.getItem('admin_saved_application_id');
+      if (savedAppId) {
+        localStorage.setItem('current_application_id', savedAppId);
+        localStorage.removeItem('admin_saved_application_id');
+      }
+      
       await refreshSwitchStatus();
       // Notify all listeners that user exited switch
       switchCallbacks.forEach(callback => callback());

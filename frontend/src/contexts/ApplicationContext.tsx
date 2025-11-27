@@ -13,7 +13,7 @@ export const ApplicationProvider: React.FC<{ children: ReactNode }> = ({ childre
   const [currentApplicationId, setCurrentApplicationId] = useState<string | null>(() => {
     return localStorage.getItem('current_application_id');
   });
-  
+
   // Refresh trigger for ApplicationSelector
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
@@ -33,14 +33,15 @@ export const ApplicationProvider: React.FC<{ children: ReactNode }> = ({ childre
   }, []);
 
   return (
-    <ApplicationContext.Provider 
-      value={{ 
-        currentApplicationId, 
+    <ApplicationContext.Provider
+      value={{
+        currentApplicationId,
         setCurrentApplicationId: handleSetApplicationId,
         refreshApplications,
         // Internal: expose refreshTrigger for ApplicationSelector
         _refreshTrigger: refreshTrigger,
-      } as ApplicationContextType & { _refreshTrigger: number }}>
+      } as ApplicationContextType & { _refreshTrigger: number }}
+    >
       {children}
     </ApplicationContext.Provider>
   );

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Card, Table, Button, message, Tag, Space, Modal, Select, Input, Progress, Popconfirm } from 'antd';
+import type { SortOrder } from 'antd/es/table/interface';
 import { ReloadOutlined, EditOutlined, SyncOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { billingService } from '../../services/billing';
@@ -100,7 +101,7 @@ const SubscriptionManagement: React.FC = () => {
       key: 'usage',
       width: 300,
       sorter: true,
-      sortOrder: sortBy === 'current_month_usage' ? (sortOrder === 'asc' ? 'ascend' : 'descend') : null,
+      sortOrder: (sortBy === 'current_month_usage' ? (sortOrder === 'asc' ? 'ascend' : 'descend') : undefined) as SortOrder,
       render: (_: any, record: SubscriptionListItem) => (
         <Space direction="vertical" size="small" style={{ width: '100%' }}>
           <div>
@@ -122,7 +123,7 @@ const SubscriptionManagement: React.FC = () => {
       key: 'usage_reset_at',
       width: 150,
       sorter: true,
-      sortOrder: sortBy === 'usage_reset_at' ? (sortOrder === 'asc' ? 'ascend' : 'descend') : null,
+      sortOrder: (sortBy === 'usage_reset_at' ? (sortOrder === 'asc' ? 'ascend' : 'descend') : undefined) as SortOrder,
       render: (date: string) => new Date(date).toLocaleDateString(),
     },
     {
@@ -195,23 +196,42 @@ const SubscriptionManagement: React.FC = () => {
           dataSource={subscriptions}
           rowKey="id"
           loading={loading}
-          onChange={(pagination, filters, sorter: any) => {
-            if (sorter && sorter.columnKey) {
-              const newSortBy = sorter.columnKey === 'usage' ? 'current_month_usage' : sorter.columnKey;
-              const newSortOrder = sorter.order === 'ascend' ? 'asc' : 'desc';
-              setSortBy(newSortBy);
-              setSortOrder(newSortOrder);
+          onChange={(pagination, _filters, sorter: any) => {
+            // Check if sorting actually changed (not just present)
+            const currentSortBy = sorter?.columnKey === 'usage' ? 'current_month_usage' : sorter?.columnKey;
+            const currentSortOrder: 'asc' | 'desc' | undefined = 
+              sorter?.order === 'ascend' ? 'asc' : 
+              sorter?.order === 'descend' ? 'desc' : 
+              undefined;
+            const sortingChanged = sorter?.columnKey && currentSortOrder && (
+              currentSortBy !== sortBy || 
+              currentSortOrder !== sortOrder
+            );
+
+            // Handle sorting changes first
+            if (sortingChanged && currentSortOrder) {
+              setSortBy(currentSortBy);
+              setSortOrder(currentSortOrder);
               setCurrentPage(1); // Reset to first page when sorting changes
+              return;
+            }
+
+            // Handle page size changes
+            if (pagination?.pageSize && pagination.pageSize !== pageSize) {
+              setPageSize(pagination.pageSize);
+              setCurrentPage(1); // Reset to first page when page size changes
+              return;
+            }
+
+            // Handle pagination changes
+            if (pagination?.current && pagination.current !== currentPage) {
+              setCurrentPage(pagination.current);
             }
           }}
           pagination={{
             current: currentPage,
             pageSize: pageSize,
             total: total,
-            onChange: (page, size) => {
-              setCurrentPage(page);
-              setPageSize(size || 20);
-            },
             showSizeChanger: true,
             showTotal: (total) => t('admin.subscriptions.total', { count: total }),
           }}

@@ -346,6 +346,11 @@ class CustomScannerService:
         except Exception as e:
             logger.error(f"Failed to delete knowledge bases for custom scanner {tag}: {e}")
 
+        # Clean up application scanner configs first
+        deleted_configs = self.db.query(ApplicationScannerConfig).filter(
+            ApplicationScannerConfig.scanner_id == scanner_id
+        ).delete(synchronize_session=False)
+
         # Soft delete by marking as inactive and modifying tag to avoid unique constraint
         # This allows the same tag to be reused for new scanners
         import time
@@ -355,7 +360,8 @@ class CustomScannerService:
         self.db.commit()
 
         logger.warning(
-            f"Deleted custom scanner: {tag} ({name}) from app={application_id}, renamed tag to {deleted_tag}"
+            f"Deleted custom scanner: {tag} ({name}) from app={application_id}, "
+            f"renamed tag to {deleted_tag}, removed {deleted_configs} config records"
         )
 
         return True
