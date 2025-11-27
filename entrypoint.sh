@@ -13,9 +13,24 @@ done
 
 echo "PostgreSQL is ready!"
 
-# Run database migrations (only once for the platform container)
-echo "Running database migrations..."
+# Initialize database schema first (creates all tables)
+echo "Initializing database schema..."
 cd /app
+python3 -c "
+import asyncio
+from database.connection import init_db
+async def main():
+    try:
+        await init_db(minimal=False)
+        print('Database initialization completed successfully')
+    except Exception as e:
+        print(f'Database initialization failed: {e}')
+        raise
+asyncio.run(main())
+"
+
+# Then run database migrations (only once for the platform container)
+echo "Running database migrations..."
 python3 migrations/run_migrations.py
 
 # Create necessary directories if they don't exist

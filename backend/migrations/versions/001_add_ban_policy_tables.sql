@@ -62,8 +62,14 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Drop trigger if it exists, then recreate it
-DROP TRIGGER IF EXISTS ban_policies_updated_at ON ban_policies;
+-- Drop trigger if it exists, then recreate it using safer syntax
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'ban_policies_updated_at') THEN
+        DROP TRIGGER ban_policies_updated_at ON ban_policies;
+    END IF;
+END $$;
+
 CREATE TRIGGER ban_policies_updated_at
     BEFORE UPDATE ON ban_policies
     FOR EACH ROW
@@ -77,8 +83,14 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Drop trigger if it exists, then recreate it
-DROP TRIGGER IF EXISTS user_ban_records_updated_at ON user_ban_records;
+-- Drop trigger if it exists, then recreate it using safer syntax
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'user_ban_records_updated_at') THEN
+        DROP TRIGGER user_ban_records_updated_at ON user_ban_records;
+    END IF;
+END $$;
+
 CREATE TRIGGER user_ban_records_updated_at
     BEFORE UPDATE ON user_ban_records
     FOR EACH ROW
