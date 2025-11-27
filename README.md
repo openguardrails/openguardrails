@@ -430,13 +430,13 @@ curl http://YOUR_GPU_SERVER_IP:58004/v1/models
 
 #### **Method 1: Quick Deployment with Pre-built Images (Recommended)** ⚡
 
-**Best for**: Production deployment, end-users
+**Best for**: Production deployment, end-users, no source code needed
 
 ```bash
-# 1. Download docker-compose file
-curl -O https://raw.githubusercontent.com/openguardrails/openguardrails/main/docker-compose.yml
+# 1. Download production docker-compose file
+curl -O https://raw.githubusercontent.com/openguardrails/openguardrails/main/docker-compose.prod.yml
 
-# 2. Create .env file with your model endpoints
+# 2. Create .env file with your configuration
 cat > .env << EOF
 # Model API endpoints (replace with your GPU server IPs)
 GUARDRAILS_MODEL_API_URL=http://YOUR_GPU_SERVER_IP:58002/v1
@@ -458,12 +458,13 @@ SUPER_ADMIN_PASSWORD=CHANGE-THIS-PASSWORD-IN-PRODUCTION
 JWT_SECRET_KEY=your-secret-key-change-in-production
 POSTGRES_PASSWORD=your_password
 
-# Use pre-built image from Docker Hub
+# Specify pre-built image from Docker Hub (or your private registry)
 PLATFORM_IMAGE=openguardrails/openguardrails-platform:latest
+# For private registry: PLATFORM_IMAGE=your-registry.com/openguardrails-platform:version
 EOF
 
-# 3. Launch the platform
-docker compose up -d
+# 3. Launch the platform (uses pre-built image, no build required)
+docker compose -f docker-compose.prod.yml up -d
 ```
 
 #### **Method 2: Build from Source (Development)** 🛠️
