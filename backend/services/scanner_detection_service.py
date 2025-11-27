@@ -191,6 +191,20 @@ class ScannerDetectionService:
                 scanner_definitions.append(scanner_def)
                 scanner_map[tag] = scanner
 
+            # Sort scanner definitions by tag number (e.g., S1, S2, ..., S19, S20, S21)
+            # Extract numeric part from tag like "S1", "S2", "S100" for proper ordering
+            def extract_tag_number(scanner_def: str) -> int:
+                """Extract numeric part from scanner definition (e.g., 'S19: ...' -> 19)"""
+                try:
+                    tag_part = scanner_def.split(':')[0].strip()
+                    if tag_part.startswith('S'):
+                        return int(tag_part[1:])
+                    return 999999  # Put non-S tags at the end
+                except (ValueError, IndexError):
+                    return 999999  # Put malformed tags at the end
+            
+            scanner_definitions.sort(key=extract_tag_number)
+
             # Use messages if provided, otherwise wrap content as message
             if messages is None:
                 messages = [{"role": "user", "content": content}]
