@@ -1,6 +1,9 @@
 -- Create ban policy tables
 -- Run this script if ban policy tables are missing from the database
 
+-- Enable UUID extension
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
 -- Ban policies table
 CREATE TABLE IF NOT EXISTS ban_policies (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -59,6 +62,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Drop trigger if it exists, then recreate it
+DROP TRIGGER IF EXISTS ban_policies_updated_at ON ban_policies;
 CREATE TRIGGER ban_policies_updated_at
     BEFORE UPDATE ON ban_policies
     FOR EACH ROW
@@ -72,6 +77,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Drop trigger if it exists, then recreate it
+DROP TRIGGER IF EXISTS user_ban_records_updated_at ON user_ban_records;
 CREATE TRIGGER user_ban_records_updated_at
     BEFORE UPDATE ON user_ban_records
     FOR EACH ROW

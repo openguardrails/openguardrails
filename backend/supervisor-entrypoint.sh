@@ -2,7 +2,7 @@
 set -e
 
 echo "=================================================="
-echo "OpenGuardrails Service Starting..."
+echo "OpenGuardrails Service Starting via Supervisor..."
 echo "Service: $SERVICE_NAME"
 echo "PID: $$"
 echo "=================================================="
@@ -17,12 +17,8 @@ done
 echo "PostgreSQL is ready!"
 
 # Only run database initialization and migrations from admin service to avoid race conditions
-# NOTE: This runs ONCE per container, BEFORE uvicorn starts workers
-# Even if uvicorn spawns multiple workers (e.g., ADMIN_UVICORN_WORKERS=2),
-# migrations run only once here, before the workers are forked.
 if [ "$SERVICE_NAME" = "admin" ]; then
   echo "Initializing database and running migrations (admin service)..."
-  echo "NOTE: Database init and migrations run ONCE before uvicorn workers start"
 
   # First initialize database schema (creates all tables)
   python3 -c "
@@ -37,16 +33,16 @@ async def main():
         raise
 asyncio.run(main())
 " || {
-    echo "Warning: Database initialization failed, continuing anyway..."
+      echo "Warning: Database initialization failed, continuing anyway..."
   }
 
   # Then run migrations
   python3 migrations/run_migrations.py || {
-    echo "Warning: Migration check failed, continuing anyway..."
+      echo "Warning: Migration check failed, continuing anyway..."
   }
-  echo "Database initialization and migrations completed. Now starting uvicorn..."
+  echo "Database initialization and migrations completed. Now starting service..."
 fi
 
-# Execute the main command (replaces this process with uvicorn)
-echo "Starting $SERVICE_NAME service (PID will be replaced)..."
+# Execute the main command (replaces this process with the actual service)
+echo "Starting $SERVICE_NAME service..."
 exec "$@"

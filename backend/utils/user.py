@@ -183,12 +183,14 @@ def verify_user_email(db: Session, email: str, verification_code: str) -> bool:
             print(f"Failed to create subscription for tenant {tenant.email}: {e}")
             # Not affect tenant activation process, just record error
 
-        # Create default rate limit for new tenant (10 RPS)
+        # Create default rate limit for new tenant (use configured default)
         try:
+            from config import settings
             from services.rate_limiter import RateLimitService
             rate_limit_service = RateLimitService(db)
-            rate_limit_service.set_user_rate_limit(str(tenant.id), 10)
-            print(f"Created rate limit (10 RPS) for tenant {tenant.email}")
+            default_rps = settings.default_rate_limit_rps
+            rate_limit_service.set_user_rate_limit(str(tenant.id), default_rps)
+            print(f"Created rate limit ({default_rps} RPS) for tenant {tenant.email}")
         except Exception as e:
             print(f"Failed to create rate limit for tenant {tenant.email}: {e}")
             # Not affect tenant activation process, just record error

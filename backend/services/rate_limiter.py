@@ -168,10 +168,73 @@ rate_limiter = PostgreSQLRateLimiter()
 
 class RateLimitService:
     """Rate limit service"""
-    
+
     def __init__(self, db: Session):
         self.db = db
-    
+
+    def check_and_increment_monthly_usage(self, tenant_id: str) -> tuple[bool, Optional[int], Optional[int]]:
+        """Check monthly scan limit and increment usage counter
+
+        Args:
+            tenant_id: Tenant UUID string
+
+        Returns:
+            tuple: (is_allowed, current_usage, monthly_limit)
+                - is_allowed: True if request is allowed, False if limit exceeded
+                - current_usage: Current month usage count (None if no limit configured)
+                - monthly_limit: Monthly limit (None if no limit configured or unlimited)
+        """
+        try:
+            from uuid import UUID
+            from dateutil.relativedelta import relativedelta
+            tenant_uuid = UUID(tenant_id)
+            current_time = datetime.now()
+
+            # Get rate limit config
+            rate_limit_config = self.db.query(TenantRateLimit).filter(
+                TenantRateLimit.tenant_id == tenant_uuid,
+                TenantRateLimit.is_active == True
+            ).first()
+
+            if not rate_limit_config:
+                # No config found, allow by default
+                return True, None, None
+
+            # Check if monthly limit is set (0 means unlimited)
+            if rate_limit_config.monthly_scan_limit == 0:
+                return True, None, 0
+
+            # Check if we need to reset the counter (new month)
+            if rate_limit_config.usage_reset_at:
+                # Calculate the start of current month
+                current_month_start = current_time.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                reset_month_start = rate_limit_config.usage_reset_at.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+                if current_month_start > reset_month_start:
+                    # New month, reset counter
+                    rate_limit_config.current_month_usage = 0
+                    rate_limit_config.usage_reset_at = current_time
+
+            # Check if limit exceeded
+            if rate_limit_config.current_month_usage >= rate_limit_config.monthly_scan_limit:
+                self.db.commit()  # Commit the reset if it happened
+                logger.warning(f"Monthly scan limit exceeded for tenant {tenant_id}: {rate_limit_config.current_month_usage}/{rate_limit_config.monthly_scan_limit}")
+                return False, rate_limit_config.current_month_usage, rate_limit_config.monthly_scan_limit
+
+            # Increment counter
+            rate_limit_config.current_month_usage += 1
+            rate_limit_config.updated_at = current_time
+            self.db.commit()
+
+            logger.debug(f"Monthly usage incremented for tenant {tenant_id}: {rate_limit_config.current_month_usage}/{rate_limit_config.monthly_scan_limit}")
+            return True, rate_limit_config.current_month_usage, rate_limit_config.monthly_scan_limit
+
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"Failed to check monthly scan limit for tenant {tenant_id}: {e}")
+            # Allow through on error to avoid blocking service
+            return True, None, None
+
     def get_user_rate_limit(self, tenant_id: str) -> Optional[TenantRateLimit]:
         """Get tenant rate limit configuration
 
@@ -186,15 +249,25 @@ class RateLimitService:
             logger.error(f"Failed to get tenant rate limit for {tenant_id}: {e}")
             return None
     
-    def set_user_rate_limit(self, tenant_id: str, requests_per_second: int) -> TenantRateLimit:
+    def set_user_rate_limit(self, tenant_id: str, requests_per_second: int, monthly_scan_limit: int = None) -> TenantRateLimit:
         """Set tenant rate limit
 
         Note: For backward compatibility, function name remains set_user_rate_limit, parameter name remains tenant_id, but tenant_id is actually processed
+
+        Args:
+            tenant_id: Tenant UUID string
+            requests_per_second: Requests per second limit
+            monthly_scan_limit: Monthly scan limit (optional, uses config default if not provided)
         """
         tenant_id = tenant_id  # For backward compatibility, internally use tenant_id
         try:
             from uuid import UUID
+            from config import settings
             tenant_uuid = UUID(tenant_id)
+
+            # Use config default if monthly_scan_limit not provided
+            if monthly_scan_limit is None:
+                monthly_scan_limit = settings.default_monthly_scan_limit
 
             # Check if tenant exists
             tenant = self.db.query(Tenant).filter(Tenant.id == tenant_uuid).first()
@@ -207,6 +280,7 @@ class RateLimitService:
             if rate_limit_config:
             # Update existing configuration
                 rate_limit_config.requests_per_second = requests_per_second
+                rate_limit_config.monthly_scan_limit = monthly_scan_limit
                 rate_limit_config.is_active = True
                 rate_limit_config.updated_at = datetime.now()
             else:
@@ -214,6 +288,9 @@ class RateLimitService:
                 rate_limit_config = TenantRateLimit(
                     tenant_id=tenant_uuid,
                     requests_per_second=requests_per_second,
+                    monthly_scan_limit=monthly_scan_limit,
+                    current_month_usage=0,
+                    usage_reset_at=datetime.now(),
                     is_active=True
                 )
                 self.db.add(rate_limit_config)
@@ -223,7 +300,7 @@ class RateLimitService:
             # Clear tenant cache, force reload
             rate_limiter.clear_user_cache(tenant_id)
 
-            logger.info(f"Set rate limit for tenant {tenant_id}: {requests_per_second} rps")
+            logger.info(f"Set rate limit for tenant {tenant_id}: {requests_per_second} rps, {monthly_scan_limit} monthly scans")
             return rate_limit_config
 
         except Exception as e:

@@ -67,7 +67,8 @@ COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
 
 # Copy and set entrypoint script permissions
 COPY entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+COPY backend/supervisor-entrypoint.sh /app/supervisor-entrypoint.sh
+RUN chmod +x /app/entrypoint.sh /app/supervisor-entrypoint.sh
 
 # Create data, log, and media directories
 RUN mkdir -p /app/data /app/logs /mnt/data/openguardrails-data/media /mnt/data/openguardrails-data/logs

@@ -143,6 +143,13 @@ class Settings(BaseSettings):
     # Options: 'en' (English) or 'zh' (Chinese)
     default_language: str = "en"
 
+    # Default tenant limits
+    # Default monthly scan limit for new tenants (detections per month)
+    default_monthly_scan_limit: int = 10000
+
+    # Default rate limit for new tenants (requests per second)
+    default_rate_limit_rps: int = 10
+
     # Payment configuration
     # Alipay configuration (used when default_language is 'zh')
     alipay_app_id: str = ""

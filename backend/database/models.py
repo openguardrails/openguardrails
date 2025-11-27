@@ -289,6 +289,9 @@ class TenantRateLimit(Base):
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)  # Kept for backward compatibility
     application_id = Column(UUID(as_uuid=True), ForeignKey("applications.id", ondelete="CASCADE"), nullable=True, index=True)  # Associated application
     requests_per_second = Column(Integer, default=10, nullable=False)  # Requests per second, 0 means no limit
+    monthly_scan_limit = Column(Integer, default=10000, nullable=False)  # Monthly scan limit, 0 means no limit
+    current_month_usage = Column(Integer, default=0, nullable=False)  # Current month usage count
+    usage_reset_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)  # Usage counter reset time (start of current month)
     is_active = Column(Boolean, default=True, index=True)  # Whether to enable rate limiting
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

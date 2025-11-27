@@ -347,168 +347,267 @@ Access the visual scanner management interface:
 
 ## 🚀 OpenGuardrails Quick Deployment Guide
 
-### 🧩 1. Prepare Your Environment
+OpenGuardrails uses a **separation of concerns** architecture where AI models and the platform run independently. This design provides:
+- ✅ Flexibility to deploy models on different servers (GPU requirements)
+- ✅ Freedom to use any compatible model API (OpenAI-compatible)
+- ✅ Simplified platform deployment (no GPU dependency)
 
-- Use a **GPU server** (Ubuntu is recommended).
-- Ensure that **CUDA drivers** are correctly installed.
-- Install **Docker** (see [Docker installation instructions](https://docs.docker.com/engine/install/ubuntu/)).
+### 📋 Prerequisites
+
+- **Docker** and **Docker Compose** installed ([installation guide](https://docs.docker.com/engine/install/ubuntu/))
+- **GPU server** (for model deployment) - Ubuntu recommended with CUDA drivers
+- **Hugging Face account** for model access token
 
 ---
 
-### 🎯 2. Choose Your Deployment Method
+### Step 1️⃣: Deploy AI Models (vLLM Services)
 
-OpenGuardrails supports **two deployment methods**:
+**⚠️ Deploy these on a GPU server first**
+
+The platform requires two AI model services running via vLLM:
+
+#### 🧠 Text Model (OpenGuardrails-Text-2510)
+
+```bash
+# Install vLLM (if not already installed)
+pip install vllm
+
+# Set your Hugging Face token
+export HF_TOKEN=your-hf-token
+
+# Start the text model service
+vllm serve openguardrails/OpenGuardrails-Text-2510 \
+  --port 58002 \
+  --served-model-name OpenGuardrails-Text \
+  --trust-remote-code \
+  --max-model-len 8192
+
+# Or use Docker:
+docker run --gpus all -p 58002:8000 \
+  -e HF_TOKEN=your-hf-token \
+  vllm/vllm-openai:latest \
+  --model openguardrails/OpenGuardrails-Text-2510 \
+  --port 8000 \
+  --served-model-name OpenGuardrails-Text \
+  --trust-remote-code \
+  --max-model-len 8192
+```
+
+**Verify it's running:**
+```bash
+curl http://YOUR_GPU_SERVER_IP:58002/v1/models
+```
+
+#### 🔍 Embedding Model (bge-m3)
+
+```bash
+# Start the embedding model service
+vllm serve BAAI/bge-m3 \
+  --port 58004 \
+  --served-model-name bge-m3 \
+  --trust-remote-code
+
+# Or use Docker:
+docker run --gpus all -p 58004:8000 \
+  -e HF_TOKEN=your-hf-token \
+  vllm/vllm-openai:latest \
+  --model BAAI/bge-m3 \
+  --port 8000 \
+  --served-model-name bge-m3 \
+  --trust-remote-code
+```
+
+**Verify it's running:**
+```bash
+curl http://YOUR_GPU_SERVER_IP:58004/v1/models
+```
+
+---
+
+### Step 2️⃣: Deploy OpenGuardrails Platform
+
+**Choose your deployment method:**
 
 #### **Method 1: Quick Deployment with Pre-built Images (Recommended)** ⚡
 
-**Best for**: Production deployment, end-users, quick setup
-
-**Advantages**:
-- ✅ No need to clone the entire repository
-- ✅ No local build process (saves time and resources)
-- ✅ Uses official pre-built images from Docker Hub
-- ✅ Faster deployment (only download docker-compose file)
-
-**Steps**:
+**Best for**: Production deployment, end-users
 
 ```bash
-# 1. Download the production docker-compose file
-curl -O https://raw.githubusercontent.com/openguardrails/openguardrails/main/docker-compose.prod.yml
+# 1. Download docker-compose file
+curl -O https://raw.githubusercontent.com/openguardrails/openguardrails/main/docker-compose.yml
 
-# 2. Set your Hugging Face token (required for downloading models)
-export HF_TOKEN=your-hf-token
+# 2. Create .env file with your model endpoints
+cat > .env << EOF
+# Model API endpoints (replace with your GPU server IPs)
+GUARDRAILS_MODEL_API_URL=http://YOUR_GPU_SERVER_IP:58002/v1
+GUARDRAILS_MODEL_API_KEY=EMPTY
+GUARDRAILS_MODEL_NAME=OpenGuardrails-Text
 
-# Or create a .env file:
-echo "HF_TOKEN=your-hf-token" > .env
+EMBEDDING_API_BASE_URL=http://YOUR_GPU_SERVER_IP:58004/v1
+EMBEDDING_API_KEY=EMPTY
+EMBEDDING_MODEL_NAME=bge-m3
 
-# 3. Launch all services with one command
-docker compose -f docker-compose.prod.yml up -d
+# Optional: Vision-Language model (if you have it deployed)
+# GUARDRAILS_VL_MODEL_API_URL=http://YOUR_GPU_SERVER_IP:58003/v1
+# GUARDRAILS_VL_MODEL_API_KEY=EMPTY
+# GUARDRAILS_VL_MODEL_NAME=OpenGuardrails-VL
+
+# Security (CHANGE THESE IN PRODUCTION!)
+SUPER_ADMIN_USERNAME=admin@yourdomain.com
+SUPER_ADMIN_PASSWORD=CHANGE-THIS-PASSWORD-IN-PRODUCTION
+JWT_SECRET_KEY=your-secret-key-change-in-production
+POSTGRES_PASSWORD=your_password
+
+# Use pre-built image from Docker Hub
+PLATFORM_IMAGE=openguardrails/openguardrails-platform:latest
+EOF
+
+# 3. Launch the platform
+docker compose up -d
 ```
-
-That's it! The platform will automatically download pre-built images and start all services.
 
 #### **Method 2: Build from Source (Development)** 🛠️
 
-**Best for**: Developers, customization, contributing to the project
-
-**Advantages**:
-- ✅ Full source code access
-- ✅ Ability to modify and customize
-- ✅ Latest development changes
-- ✅ Contribute to the project
-
-**Steps**:
+**Best for**: Developers, customization
 
 ```bash
 # 1. Clone the repository
 git clone https://github.com/openguardrails/openguardrails
 cd openguardrails
 
-# 2. Set your Hugging Face token (required for downloading models)
-export HF_TOKEN=your-hf-token
+# 2. Create .env file with your model endpoints
+cat > .env << EOF
+# Model API endpoints (replace with your GPU server IPs)
+GUARDRAILS_MODEL_API_URL=http://YOUR_GPU_SERVER_IP:58002/v1
+GUARDRAILS_MODEL_API_KEY=EMPTY
+GUARDRAILS_MODEL_NAME=OpenGuardrails-Text
 
-# Or create a .env file:
-echo "HF_TOKEN=your-hf-token" > .env
+EMBEDDING_API_BASE_URL=http://YOUR_GPU_SERVER_IP:58004/v1
+EMBEDDING_API_KEY=EMPTY
+EMBEDDING_MODEL_NAME=bge-m3
 
-# 3. Build and launch all services
+# Security (CHANGE THESE IN PRODUCTION!)
+SUPER_ADMIN_USERNAME=admin@yourdomain.com
+SUPER_ADMIN_PASSWORD=CHANGE-THIS-PASSWORD-IN-PRODUCTION
+JWT_SECRET_KEY=your-secret-key-change-in-production
+POSTGRES_PASSWORD=your_password
+EOF
+
+# 3. Build and launch
 docker compose up -d --build
 ```
 
 ---
 
-### 🚀 3. What Happens Next?
-
-**This will automatically start 4 Docker containers:**
-
-1. **PostgreSQL Database** (`openguardrails-postgres`) - Port 54321
-2. **OpenGuardrails Text Model** (`openguardrails-text-model`) - Port 58002
-3. **Embedding Model** (`openguardrails-embedding`) - Port 58004
-4. **Platform Service** (`openguardrails-platform`) - All services in one container:
-   - Frontend (Nginx) - Port 3000
-   - Admin Service - Port 5000
-   - Detection Service - Port 5001
-   - Proxy Service - Port 5002
-
-**✨ Database migrations run automatically on first deployment!**
-
-The platform container will automatically:
-1. Wait for PostgreSQL to be ready
-2. Run all pending database migrations
-3. Start all services (Frontend + Admin + Detection + Proxy)
-
-You can monitor the startup progress:
+### Step 3️⃣: Monitor Deployment
 
 ```bash
-# Watch platform service logs
+# Watch platform startup
 docker logs -f openguardrails-platform
 
-# Expected output includes:
+# Expected output:
 # - "Running database migrations..."
-# - "Successfully executed X migration(s)" or "Database schema is up to date"
+# - "Successfully executed X migration(s)"
 # - "Starting services via supervisord..."
-```
 
-You can check all running containers:
-
-```bash
+# Check all containers
 docker ps
 
 # Expected output:
 # - openguardrails-postgres (healthy)
-# - openguardrails-text-model (healthy)
-# - openguardrails-embedding (healthy)
 # - openguardrails-platform (healthy)
 ```
 
 ---
 
-### 🔐 4. Access the Admin Platform
+### Step 4️⃣: Access the Platform
 
-After the services start, open your browser and visit:
+👉 **Web Interface**: [http://localhost:3000/platform/](http://localhost:3000/platform/)
 
-👉 [http://localhost:3000/platform/](http://localhost:3000/platform/)
+**Default credentials:**
+- **Username**: `admin@yourdomain.com`
+- **Password**: `CHANGE-THIS-PASSWORD-IN-PRODUCTION`
 
-**Default login credentials:**
-
-* **Username:** `admin@yourdomain.com`
-* **Password:** `CHANGE-THIS-PASSWORD-IN-PRODUCTION`
+**API Endpoints:**
+- Admin API: `http://localhost:5000`
+- Detection API: `http://localhost:5001`
+- Proxy API: `http://localhost:5002`
 
 ---
 
-### 🛡️ 5. Production Environment Recommendations
+### 🎯 Alternative: Use Any OpenAI-Compatible Model
 
-For production deployments, you **must** update the following for security:
+OpenGuardrails is **model-agnostic**! You can use any OpenAI-compatible API:
 
-* `SUPER_ADMIN_USERNAME` and `SUPER_ADMIN_PASSWORD`
-* `JWT_SECRET_KEY`
-* Database credentials (`DATABASE_URL`)
-* SMTP credentials (if email notifications are enabled)
-* Model URLs and ports (if running on multiple servers)
+```bash
+# Example: Using OpenAI directly
+GUARDRAILS_MODEL_API_URL=https://api.openai.com/v1
+GUARDRAILS_MODEL_API_KEY=sk-your-openai-key
+GUARDRAILS_MODEL_NAME=gpt-4
 
-Edit the `docker-compose.prod.yml` file and update these values before starting:
+# Example: Using local Ollama
+GUARDRAILS_MODEL_API_URL=http://localhost:11434/v1
+GUARDRAILS_MODEL_API_KEY=ollama
+GUARDRAILS_MODEL_NAME=llama2
 
-```yaml
-# In docker-compose.prod.yml
-environment:
-  - SUPER_ADMIN_USERNAME=admin@secure-domain.com
-  - SUPER_ADMIN_PASSWORD=StrongSecurePassword123!
-  - JWT_SECRET_KEY=your-secure-random-key
-  - POSTGRES_PASSWORD=your-secure-db-password
-  - DATABASE_URL=postgresql://openguardrails:your-secure-db-password@postgres:5432/openguardrails
+# Example: Using Anthropic Claude via proxy
+GUARDRAILS_MODEL_API_URL=https://api.anthropic.com/v1
+GUARDRAILS_MODEL_API_KEY=sk-ant-your-key
+GUARDRAILS_MODEL_NAME=claude-3-sonnet
 ```
 
 ---
 
-### ✅ You now have:
+### 🛡️ Production Security Checklist
 
-1. A GPU-based **OpenGuardrails text model service** running on port **58002**
-2. An **embedding model service** running on port **58004**
-3. A **PostgreSQL database** running on port **54321**
-4. The **unified OpenGuardrails platform** with:
-   - Web interface accessible at **[http://localhost:3000/platform/](http://localhost:3000/platform/)**
-   - Admin API on port **5000**
-   - Detection API on port **5001**
-   - Proxy API on port **5002**
+Before deploying to production, update these in your `.env` file:
+
+```bash
+# ✅ Change default credentials
+SUPER_ADMIN_USERNAME=admin@your-company.com
+SUPER_ADMIN_PASSWORD=YourSecurePassword123!
+
+# ✅ Generate secure JWT secret
+JWT_SECRET_KEY=$(openssl rand -hex 32)
+
+# ✅ Secure database password
+POSTGRES_PASSWORD=$(openssl rand -hex 16)
+
+# ✅ Configure model API keys (if using commercial APIs)
+GUARDRAILS_MODEL_API_KEY=sk-your-actual-api-key
+EMBEDDING_API_KEY=sk-your-actual-embedding-key
+
+# ✅ Update CORS origins for your domain
+CORS_ORIGINS=https://yourdomain.com,https://app.yourdomain.com
+
+# ✅ Configure SMTP for email notifications
+SMTP_SERVER=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USERNAME=notifications@yourdomain.com
+SMTP_PASSWORD=your-smtp-password
+SMTP_USE_TLS=true
+SMTP_USE_SSL=false
+```
+
+---
+
+### ✅ What You Have Now
+
+1. **AI Models** (on GPU server):
+   - Text model service on port **58002**
+   - Embedding model service on port **58004**
+
+2. **OpenGuardrails Platform** (can run on any server):
+   - PostgreSQL database - Port **54321**
+   - Web interface - Port **3000**
+   - Admin API - Port **5000**
+   - Detection API - Port **5001**
+   - Proxy API - Port **5002**
+
+3. **Automatic Features**:
+   - ✅ Database migrations run automatically
+   - ✅ Admin user created on first startup
+   - ✅ All services managed by Supervisor
 
 ![Dashboard Overview](frontend/public//dashboard.png)
 

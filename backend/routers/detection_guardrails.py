@@ -64,6 +64,26 @@ async def check_guardrails(
         # Check if the user is banned
         await check_user_ban_status(tenant_id, user_id)
 
+        # Check monthly scan limit (before processing)
+        from database.connection import get_admin_db
+        db = next(get_admin_db())
+        try:
+            from services.rate_limiter import RateLimitService
+            rate_limit_service = RateLimitService(db)
+            is_allowed, current_usage, monthly_limit = rate_limit_service.check_and_increment_monthly_usage(tenant_id)
+
+            if not is_allowed:
+                logger.warning(f"Monthly scan limit exceeded for tenant {tenant_id}: {current_usage}/{monthly_limit}")
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Monthly scan limit exceeded. Used {current_usage}/{monthly_limit} scans this month."
+                )
+
+            if current_usage and monthly_limit:
+                logger.info(f"Monthly usage for tenant {tenant_id}: {current_usage}/{monthly_limit}")
+        finally:
+            db.close()
+
         # Create detection service (no database connection)
         guardrail_service = DetectionGuardrailService()
 
@@ -164,20 +184,40 @@ async def check_input_guardrails(
         
         if not tenant_id:
             raise HTTPException(status_code=401, detail="User ID not found in auth context")
-        
+
+        # Check monthly scan limit (before processing)
+        from database.connection import get_admin_db
+        db = next(get_admin_db())
+        try:
+            from services.rate_limiter import RateLimitService
+            rate_limit_service = RateLimitService(db)
+            is_allowed, current_usage, monthly_limit = rate_limit_service.check_and_increment_monthly_usage(tenant_id)
+
+            if not is_allowed:
+                logger.warning(f"Monthly scan limit exceeded for tenant {tenant_id}: {current_usage}/{monthly_limit}")
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Monthly scan limit exceeded. Used {current_usage}/{monthly_limit} scans this month."
+                )
+
+            if current_usage and monthly_limit:
+                logger.info(f"Monthly usage for tenant {tenant_id}: {current_usage}/{monthly_limit}")
+        finally:
+            db.close()
+
         # Create detection service (no database connection)
         guardrail_service = DetectionGuardrailService()
-        
+
         # Execute detection (only write log file)
         result = await guardrail_service.check_guardrails(
-            guardrail_request, 
+            guardrail_request,
             ip_address=ip_address,
             user_agent=user_agent,
             tenant_id=tenant_id
         )
-        
+
         logger.info(f"Input detection completed: {result.id}, action: {result.suggest_action}")
-        
+
         return result
         
     except Exception as e:
@@ -217,7 +257,27 @@ async def check_output_guardrails(
         
         if not tenant_id:
             raise HTTPException(status_code=401, detail="User ID not found in auth context")
-        
+
+        # Check monthly scan limit (before processing)
+        from database.connection import get_admin_db
+        db = next(get_admin_db())
+        try:
+            from services.rate_limiter import RateLimitService
+            rate_limit_service = RateLimitService(db)
+            is_allowed, current_usage, monthly_limit = rate_limit_service.check_and_increment_monthly_usage(tenant_id)
+
+            if not is_allowed:
+                logger.warning(f"Monthly scan limit exceeded for tenant {tenant_id}: {current_usage}/{monthly_limit}")
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Monthly scan limit exceeded. Used {current_usage}/{monthly_limit} scans this month."
+                )
+
+            if current_usage and monthly_limit:
+                logger.info(f"Monthly usage for tenant {tenant_id}: {current_usage}/{monthly_limit}")
+        finally:
+            db.close()
+
         # Create detection service (no database connection)
         guardrail_service = DetectionGuardrailService()
         

@@ -1,6 +1,5 @@
-# Development Docker Compose Configuration
-# Builds platform image from local source code
-# For production deployment using pre-built images, use: docker-compose.prod.yml
+# OpenGuardrails Docker Compose Configuration
+# Supports both production (pre-built images) and development (local build)
 
 services:
   # PostgreSQL Database
@@ -11,7 +10,7 @@ services:
     environment:
       POSTGRES_DB: openguardrails
       POSTGRES_USER: openguardrails
-      POSTGRES_PASSWORD: your_password
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-your_password}
       POSTGRES_HOST_AUTH_METHOD: md5
     command: [
       "postgres",
@@ -27,7 +26,7 @@ services:
       "-c", "work_mem=4MB"
     ]
     ports:
-      - "54321:5432"
+      - "${POSTGRES_PORT:-54321}:5432"
     volumes:
       - openguardrails-db-data:/var/lib/postgresql/data
     healthcheck:
@@ -38,73 +37,12 @@ services:
     networks:
       - openguardrails-network
 
-  # OpenGuardrails Text Model (vLLM)
-  text-model:
-    image: vllm/vllm-openai:latest
-    container_name: openguardrails-text-model
-    restart: unless-stopped
-    ports:
-      - "58002:8000"
-    environment:
-      - HF_TOKEN=${HF_TOKEN}
-    command: >
-      --model openguardrails/OpenGuardrails-Text-2510
-      --port 8000
-      --served-model-name OpenGuardrails-Text
-      --trust-remote-code
-      --max-model-len 8192
-    volumes:
-      - openguardrails-model-cache:/root/.cache/huggingface
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    networks:
-      - openguardrails-network
-
-  # Embedding Model (bge-m3)
-  embedding-model:
-    image: vllm/vllm-openai:latest
-    container_name: openguardrails-embedding
-    restart: unless-stopped
-    ports:
-      - "58004:8000"
-    environment:
-      - HF_TOKEN=${HF_TOKEN}
-    command: >
-      --model BAAI/bge-m3
-      --port 8000
-      --served-model-name bge-m3
-      --trust-remote-code
-    volumes:
-      - openguardrails-embedding-cache:/root/.cache/huggingface
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    networks:
-      - openguardrails-network
-
   # Unified Platform Service (Frontend + Backend Services)
-  # 🛠️ DEVELOPMENT MODE: Builds from local source code
-  # For production with pre-built images, use docker-compose.prod.yml
+  # Two deployment modes:
+  # - Production: Uses pre-built image from Docker Hub (set USE_PREBUILT_IMAGE=true)
+  # - Development: Builds from local source code (default)
   platform:
+    image: ${PLATFORM_IMAGE:-openguardrails/openguardrails-platform:latest}
     build:
       context: .
       dockerfile: Dockerfile
@@ -113,90 +51,88 @@ services:
     container_name: openguardrails-platform
     restart: unless-stopped
     ports:
-      - "3000:80"      # Frontend (Nginx)
-      - "5000:5000"    # Admin Service
-      - "5001:5001"    # Detection Service
-      - "5002:5002"    # Proxy Service
+      - "${FRONTEND_PORT:-3000}:80"      # Frontend (Nginx)
+      - "${ADMIN_PORT:-5000}:5000"       # Admin Service
+      - "${DETECTION_PORT:-5001}:5001"   # Detection Service
+      - "${PROXY_PORT:-5002}:5002"       # Proxy Service
     environment:
       # Database configuration
-      - DATABASE_HOST=postgres
-      - DATABASE_USER=openguardrails
-      - DATABASE_NAME=openguardrails
-      - DATABASE_URL=postgresql://openguardrails:your_password@postgres:5432/openguardrails
+      - DATABASE_HOST=${DATABASE_HOST:-postgres}
+      - DATABASE_USER=${DATABASE_USER:-openguardrails}
+      - DATABASE_NAME=${DATABASE_NAME:-openguardrails}
+      - DATABASE_URL=postgresql://${DATABASE_USER:-openguardrails}:${POSTGRES_PASSWORD:-your_password}@${DATABASE_HOST:-postgres}:5432/${DATABASE_NAME:-openguardrails}
       - RESET_DATABASE_ON_STARTUP=false
 
       # Application configuration
-      - DEBUG=false
-      - JWT_SECRET_KEY=your-secret-key-change-in-production
-      - DEPLOYMENT_MODE=local
+      - DEBUG=${DEBUG:-false}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-your-secret-key-change-in-production}
+      - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-local}
 
       # Data directory configuration
       - DATA_DIR=/app/data
-      - LOG_LEVEL=INFO
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
 
       # CORS configuration
-      - CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
 
       # Administrator configuration
-      - SUPER_ADMIN_USERNAME=admin@yourdomain.com
-      - SUPER_ADMIN_PASSWORD=CHANGE-THIS-PASSWORD-IN-PRODUCTION
+      - SUPER_ADMIN_USERNAME=${SUPER_ADMIN_USERNAME:-admin@yourdomain.com}
+      - SUPER_ADMIN_PASSWORD=${SUPER_ADMIN_PASSWORD:-CHANGE-THIS-PASSWORD-IN-PRODUCTION}
 
       # Default language configuration (for offline deployments)
       # Options: 'en' (English) or 'zh' (Chinese)
-      - DEFAULT_LANGUAGE=en
+      - DEFAULT_LANGUAGE=${DEFAULT_LANGUAGE:-en}
 
-      # Model API configuration
-      - GUARDRAILS_MODEL_API_URL=http://text-model:8000/v1
-      - GUARDRAILS_MODEL_API_KEY=EMPTY
-      - GUARDRAILS_MODEL_NAME=OpenGuardrails-Text
+      # Model API configuration (OpenGuardrails Text Model)
+      # Configure to point to your deployed vLLM text model service
+      - GUARDRAILS_MODEL_API_URL=${GUARDRAILS_MODEL_API_URL:-http://localhost:58002/v1}
+      - GUARDRAILS_MODEL_API_KEY=${GUARDRAILS_MODEL_API_KEY:-EMPTY}
+      - GUARDRAILS_MODEL_NAME=${GUARDRAILS_MODEL_NAME:-OpenGuardrails-Text}
 
       # Multimodal model API configuration (Vision-Language)
-      - GUARDRAILS_VL_MODEL_API_URL=http://host.docker.internal:58003/v1
-      - GUARDRAILS_VL_MODEL_API_KEY=EMPTY
-      - GUARDRAILS_VL_MODEL_NAME=OpenGuardrails-VL
+      # Configure to point to your deployed vLLM vision-language model service
+      - GUARDRAILS_VL_MODEL_API_URL=${GUARDRAILS_VL_MODEL_API_URL:-http://localhost:58003/v1}
+      - GUARDRAILS_VL_MODEL_API_KEY=${GUARDRAILS_VL_MODEL_API_KEY:-EMPTY}
+      - GUARDRAILS_VL_MODEL_NAME=${GUARDRAILS_VL_MODEL_NAME:-OpenGuardrails-VL}
 
       # Embedding model API configuration
-      - EMBEDDING_API_BASE_URL=http://embedding-model:8000/v1
-      - EMBEDDING_API_KEY=EMPTY
-      - EMBEDDING_MODEL_NAME=bge-m3
-      - EMBEDDING_MODEL_DIMENSION=1024
-      - EMBEDDING_SIMILARITY_THRESHOLD=0.7
-      - EMBEDDING_MAX_RESULTS=5
+      # Configure to point to your deployed vLLM embedding model service
+      - EMBEDDING_API_BASE_URL=${EMBEDDING_API_BASE_URL:-http://localhost:58004/v1}
+      - EMBEDDING_API_KEY=${EMBEDDING_API_KEY:-EMPTY}
+      - EMBEDDING_MODEL_NAME=${EMBEDDING_MODEL_NAME:-bge-m3}
+      - EMBEDDING_MODEL_DIMENSION=${EMBEDDING_MODEL_DIMENSION:-1024}
+      - EMBEDDING_SIMILARITY_THRESHOLD=${EMBEDDING_SIMILARITY_THRESHOLD:-0.7}
+      - EMBEDDING_MAX_RESULTS=${EMBEDDING_MAX_RESULTS:-5}
 
       # SMTP email configuration
-      - SMTP_SERVER=smtp.yourdomain.com
-      - SMTP_PORT=465
-      - SMTP_USERNAME=your-email@yourdomain.com
-      - SMTP_PASSWORD=your-password
-      - SMTP_USE_TLS=false
-      - SMTP_USE_SSL=true
+      - SMTP_SERVER=${SMTP_SERVER:-smtp.yourdomain.com}
+      - SMTP_PORT=${SMTP_PORT:-465}
+      - SMTP_USERNAME=${SMTP_USERNAME:-your-email@yourdomain.com}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-your-password}
+      - SMTP_USE_TLS=${SMTP_USE_TLS:-false}
+      - SMTP_USE_SSL=${SMTP_USE_SSL:-true}
 
       # Service configuration
       - ADMIN_PORT=5000
-      - ADMIN_UVICORN_WORKERS=2
-      - ADMIN_MAX_CONCURRENT_REQUESTS=50
+      - ADMIN_UVICORN_WORKERS=${ADMIN_UVICORN_WORKERS:-2}
+      - ADMIN_MAX_CONCURRENT_REQUESTS=${ADMIN_MAX_CONCURRENT_REQUESTS:-50}
 
       - DETECTION_PORT=5001
-      - DETECTION_UVICORN_WORKERS=32
-      - DETECTION_MAX_CONCURRENT_REQUESTS=400
-      - DETECTION_HOST=localhost
+      - DETECTION_UVICORN_WORKERS=${DETECTION_UVICORN_WORKERS:-32}
+      - DETECTION_MAX_CONCURRENT_REQUESTS=${DETECTION_MAX_CONCURRENT_REQUESTS:-400}
+      - DETECTION_HOST=${DETECTION_HOST:-localhost}
 
       - PROXY_PORT=5002
-      - PROXY_UVICORN_WORKERS=24
-      - PROXY_MAX_CONCURRENT_REQUESTS=300
+      - PROXY_UVICORN_WORKERS=${PROXY_UVICORN_WORKERS:-24}
+      - PROXY_MAX_CONCURRENT_REQUESTS=${PROXY_MAX_CONCURRENT_REQUESTS:-300}
 
       # Frontend configuration
       - VITE_BASE=/platform/
 
     volumes:
       - openguardrails-platform-data:/mnt/data/openguardrails-data
-      - ./backend/config:/app/config:ro
     depends_on:
       postgres:
-        condition: service_healthy
-      text-model:
-        condition: service_healthy
-      embedding-model:
         condition: service_healthy
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -214,10 +150,6 @@ networks:
 
 volumes:
   openguardrails-db-data:
-    driver: local
-  openguardrails-model-cache:
-    driver: local
-  openguardrails-embedding-cache:
     driver: local
   openguardrails-platform-data:
     driver: local
