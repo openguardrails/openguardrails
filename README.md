@@ -355,38 +355,68 @@ Access the visual scanner management interface:
 
 ---
 
-### 🧱 2. Download the OpenGuardrails Platform Code
+### 🎯 2. Choose Your Deployment Method
+
+OpenGuardrails supports **two deployment methods**:
+
+#### **Method 1: Quick Deployment with Pre-built Images (Recommended)** ⚡
+
+**Best for**: Production deployment, end-users, quick setup
+
+**Advantages**:
+- ✅ No need to clone the entire repository
+- ✅ No local build process (saves time and resources)
+- ✅ Uses official pre-built images from Docker Hub
+- ✅ Faster deployment (only download docker-compose file)
+
+**Steps**:
 
 ```bash
+# 1. Download the production docker-compose file
+curl -O https://raw.githubusercontent.com/openguardrails/openguardrails/main/docker-compose.prod.yml
+
+# 2. Set your Hugging Face token (required for downloading models)
+export HF_TOKEN=your-hf-token
+
+# Or create a .env file:
+echo "HF_TOKEN=your-hf-token" > .env
+
+# 3. Launch all services with one command
+docker compose -f docker-compose.prod.yml up -d
+```
+
+That's it! The platform will automatically download pre-built images and start all services.
+
+#### **Method 2: Build from Source (Development)** 🛠️
+
+**Best for**: Developers, customization, contributing to the project
+
+**Advantages**:
+- ✅ Full source code access
+- ✅ Ability to modify and customize
+- ✅ Latest development changes
+- ✅ Contribute to the project
+
+**Steps**:
+
+```bash
+# 1. Clone the repository
 git clone https://github.com/openguardrails/openguardrails
 cd openguardrails
-```
 
----
-
-### ⚙️ 3. Set Your Hugging Face Token
-
-First, set your Hugging Face token (required for downloading models):
-
-```bash
+# 2. Set your Hugging Face token (required for downloading models)
 export HF_TOKEN=your-hf-token
-```
 
-You can also add it to a `.env` file:
-
-```bash
+# Or create a .env file:
 echo "HF_TOKEN=your-hf-token" > .env
+
+# 3. Build and launch all services
+docker compose up -d --build
 ```
 
 ---
 
-### 🚀 4. Launch All Services (One Command!)
-
-Start all services with a single command:
-
-```bash
-docker compose up -d
-```
+### 🚀 3. What Happens Next?
 
 **This will automatically start 4 Docker containers:**
 
@@ -432,7 +462,7 @@ docker ps
 
 ---
 
-### 🔐 5. Access the Admin Platform
+### 🔐 4. Access the Admin Platform
 
 After the services start, open your browser and visit:
 
@@ -445,7 +475,7 @@ After the services start, open your browser and visit:
 
 ---
 
-### 🛡️ 6. Production Environment Recommendations
+### 🛡️ 5. Production Environment Recommendations
 
 For production deployments, you **must** update the following for security:
 
@@ -455,13 +485,16 @@ For production deployments, you **must** update the following for security:
 * SMTP credentials (if email notifications are enabled)
 * Model URLs and ports (if running on multiple servers)
 
-Example:
+Edit the `docker-compose.prod.yml` file and update these values before starting:
 
 ```yaml
-- SUPER_ADMIN_USERNAME=admin@secure-domain.com
-- SUPER_ADMIN_PASSWORD=StrongSecurePassword123!
-- JWT_SECRET_KEY=your-secure-random-key
-- DATABASE_URL=postgresql://user:password@postgres:5432/openguardrails
+# In docker-compose.prod.yml
+environment:
+  - SUPER_ADMIN_USERNAME=admin@secure-domain.com
+  - SUPER_ADMIN_PASSWORD=StrongSecurePassword123!
+  - JWT_SECRET_KEY=your-secure-random-key
+  - POSTGRES_PASSWORD=your-secure-db-password
+  - DATABASE_URL=postgresql://openguardrails:your-secure-db-password@postgres:5432/openguardrails
 ```
 
 ---
