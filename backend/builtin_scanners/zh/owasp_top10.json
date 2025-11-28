@@ -1,0 +1,19 @@
+{
+  "package_code": "owasp_top10",
+  "package_name": "《OWASP Top 10 for LLM Applications 2025》包",
+  "author": "象信AI",
+  "description": "LLM01:2025提示词注入; LLM02:2025系统提示词泄露",
+  "version": "1.0.0",
+  "license": "Apache-2.0",
+  "scanners": [
+    {
+      "tag": "S9",
+      "type": "genai",
+      "name": "提示词攻击",
+      "definition": "提示词攻击，包括通过提示词注入、角色扮演攻击或系统提示词操纵来操纵、绕过、越狱或利用AI系统",
+      "risk_level": "high_risk",
+      "scan_prompt": true,
+      "scan_response": false
+    }
+  ]
+}

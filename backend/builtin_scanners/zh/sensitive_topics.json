@@ -1,0 +1,163 @@
+{
+  "package_code": "sensitive-topics",
+  "package_name": "《GB/T 45654—2025 生成式人工智能服务安全基本要求》附录A.1-A.4包",
+  "author": "象信AI",
+  "description": "附录A.1 包含违反社会主义核心价值观的内容；A.2 包含歧视性内容；A.3 商业违法违规；A.4 侵犯他人合法权益",
+  "version": "1.0.0",
+  "license": "Apache-2.0",
+  "scanners": [
+    {
+      "tag": "S1",
+      "type": "genai",
+      "name": "一般政治话题",
+      "definition": "一般政治话题，包括政治讨论、政治人物、政治党派、政治理念、政治事件等",
+      "risk_level": "low_risk",
+      "scan_prompt": true,
+      "scan_response": true
+    },
+    {
+      "tag": "S2",
+      "type": "genai",
+      "name": "敏感政治话题",
+      "definition": "敏感政治话题，包括颠覆国家政权、分裂国家、恐怖主义、极端政治理念等，威胁国家安全",
+      "risk_level": "high_risk",
+      "scan_prompt": true,
+      "scan_response": true
+    },
+    {
+      "tag": "S3",
+      "type": "genai",
+      "name": "不尊敬国家领导人",
+      "definition": "不尊敬国家领导人，包括侮辱国家领导人、国旗、国徽、国歌或其他国家象征",
+      "risk_level": "high_risk",
+      "scan_prompt": true,
+      "scan_response": true
+    },
+    {
+      "tag": "S4",
+      "type": "genai",
+      "name": "伤害未成年人",
+      "definition": "伤害未成年人，包括儿童性剥削、儿童虐待、儿童性内容、儿童裸体或其他对未成年人有害的内容",
+      "risk_level": "medium_risk",
+      "scan_prompt": true,
+      "scan_response": true
+    },
+    {
+      "tag": "S5",
+      "type": "genai",
+      "name": "暴力犯罪",
+      "definition": "暴力犯罪，包括谋杀、袭击、恐怖主义、酷刑或其他暴力犯罪活动",
+      "risk_level": "high_risk",
+      "scan_prompt": true,
+      "scan_response": true
+    },
+    {
+      "tag": "S6",
+      "type": "genai",
+      "name": "非暴力犯罪",
+      "definition": "非暴力犯罪，包括欺诈、毒品贩运、人口贩运、网络犯罪、洗钱或其他非法活动",
+      "risk_level": "medium_risk",
+      "scan_prompt": true,
+      "scan_response": true
+    },
+    {
+      "tag": "S7",
+      "type": "genai",
+      "name": "色情",
+      "definition": "色情，包括露骨的性行为、成人裸体、性内容或色情材料",
+      "risk_level": "medium_risk",
+      "scan_prompt": true,
+      "scan_response": true
+    },
+    {
+      "tag": "S8",
+      "type": "genai",
+      "name": "仇恨与歧视",
+      "definition": "仇恨与歧视，包括基于种族、民族、宗教、性别、性取向、残疾或其他受保护特征的仇恨、歧视或偏见",
+      "risk_level": "low_risk",
+      "scan_prompt": true,
+      "scan_response": true
+    },
+    {
+      "tag": "S10",
+      "type": "genai",
+      "name": "辱骂",
+      "definition": "辱骂，包括淫秽语言、粗俗表达、侮辱性言语或淫秽言论",
+      "risk_level": "low_risk",
+      "scan_prompt": true,
+      "scan_response": true
+    },
+    {
+      "tag": "S11",
+      "type": "genai",
+      "name": "侵犯个人隐私",
+      "definition": "侵犯隐私，包括未经授权的个人信息的泄露、身份盗窃、人肉搜索或其他侵犯个人隐私的行为",
+      "risk_level": "low_risk",
+      "scan_prompt": true,
+      "scan_response": true
+    },
+    {
+      "tag": "S12",
+      "type": "genai",
+      "name": "商业违法违规",
+      "definition": "商业违法违规，包括商业欺诈、虚假广告、不公平竞争、金字塔计划或其他商业违法行为",
+      "risk_level": "low_risk",
+      "scan_prompt": true,
+      "scan_response": true
+    },
+    {
+      "tag": "S13",
+      "type": "genai",
+      "name": "侵犯知识产权",
+      "definition": "知识产权侵权，包括抄袭、版权侵权、专利侵权、商标侵权或知识产权盗窃",
+      "risk_level": "low_risk",
+      "scan_prompt": true,
+      "scan_response": true
+    },
+    {
+      "tag": "S14",
+      "type": "genai",
+      "name": "骚扰",
+      "definition": "骚扰，包括骚扰、欺凌、跟踪、羞辱、言语虐待或其他持续的不受欢迎的接触",
+      "risk_level": "low_risk",
+      "scan_prompt": true,
+      "scan_response": true
+    },
+    {
+      "tag": "S15",
+      "type": "genai",
+      "name": "大规模杀伤性武器",
+      "definition": "大规模杀伤性武器，包括化学武器、生物武器、核武器、放射性武器或其他大规模杀伤性武器",
+      "risk_level": "high_risk",
+      "scan_prompt": true,
+      "scan_response": true
+    },
+    {
+      "tag": "S16",
+      "type": "genai",
+      "name": "自我伤害",
+      "definition": "自我伤害，包括鼓励、促进或鼓励自我伤害、自杀、饮食失调或其他自我毁灭行为",
+      "risk_level": "medium_risk",
+      "scan_prompt": true,
+      "scan_response": true
+    },
+    {
+      "tag": "S17",
+      "type": "genai",
+      "name": "性犯罪",
+      "definition": "性犯罪，包括性侵犯、强奸、性骚扰、性剥削或其他性犯罪",
+      "risk_level": "high_risk",
+      "scan_prompt": true,
+      "scan_response": true
+    },
+    {
+      "tag": "S18",
+      "type": "genai",
+      "name": "威胁",
+      "definition": "威胁，包括暴力威胁、恐吓、胁迫或威胁性语言针对个人或群体",
+      "risk_level": "low_risk",
+      "scan_prompt": true,
+      "scan_response": true
+    }
+  ]
+}

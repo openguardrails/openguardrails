@@ -209,7 +209,11 @@ class ModelService:
         try:
             # Combine scanner definitions into unsafe_categories string
             # Format expected by OpenGuardrails-Text model
-            unsafe_categories = ". \n".join(scanner_definitions)
+            # Each definition ends with " \n" (including the last one)
+            if scanner_definitions:
+                unsafe_categories = " \n".join(scanner_definitions) + " \n"
+            else:
+                unsafe_categories = ""
 
             payload = {
                 "model": settings.guardrails_vl_model_name if use_vl_model else settings.guardrails_model_name,

@@ -19,16 +19,20 @@ logger = setup_logger()
 
 
 def load_builtin_packages() -> bool:
-    """Load or update all built-in scanner packages."""
+    """Load or update all built-in scanner packages for the configured language."""
+    from config import settings
+
     logger.info("=" * 80)
     logger.info("Loading Built-in Scanner Packages")
+    logger.info("Language: %s", settings.default_language)
     logger.info("=" * 80)
 
     db = get_admin_db_session()
     try:
-        summary = load_builtin_scanner_packages(db)
+        summary = load_builtin_scanner_packages(db, language=settings.default_language)
         logger.info("\n" + "=" * 80)
         logger.info("✅ Successfully loaded all built-in scanner packages!")
+        logger.info("   Language: %s", settings.default_language)
         logger.info("   Total packages: %d", summary["packages"])
         logger.info("   Total scanners: %d", summary["scanners"])
         logger.info("=" * 80)

@@ -234,23 +234,49 @@ def load_builtin_scanner_packages(
     builtin_dir: Optional[Path] = None,
     initialize_configs: bool = True,
     auto_commit: bool = True,
+    language: Optional[str] = None,
 ) -> Dict[str, int]:
     """
-    Load all built-in scanner packages from disk.
+    Load all built-in scanner packages from disk for a specific language.
+
+    Args:
+        db: Database session
+        builtin_dir: Optional custom builtin scanners directory
+        initialize_configs: Whether to initialize scanner configs for applications
+        auto_commit: Whether to commit changes automatically
+        language: Language code (e.g., 'en', 'zh'). If None, uses DEFAULT_LANGUAGE from config.
 
     Returns a summary dict with package and scanner counts.
     """
-    directory = (
+    # Determine language
+    if language is None:
+        from config import settings
+        language = settings.default_language
+
+    # Determine base directory
+    base_directory = (
         builtin_dir
         if builtin_dir
         else Path(__file__).resolve().parent.parent / "builtin_scanners"
     )
 
+    if not base_directory.exists():
+        raise FileNotFoundError(f"Built-in scanners directory not found: {base_directory}")
+
+    # Use language-specific subdirectory
+    directory = base_directory / language
+
     if not directory.exists():
-        raise FileNotFoundError(f"Built-in scanners directory not found: {directory}")
+        raise FileNotFoundError(
+            f"Built-in scanners directory for language '{language}' not found: {directory}"
+        )
 
     package_files = sorted(directory.glob("*.json"))
-    logger.info("Found %d built-in package file(s)", len(package_files))
+    logger.info(
+        "Found %d built-in package file(s) for language '%s'",
+        len(package_files),
+        language
+    )
 
     all_scanners: List[Scanner] = []
     for package_file in package_files:

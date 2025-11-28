@@ -9,8 +9,8 @@
         {
         "tag": "S1",
         "type": "genai",
-        "name": "General Political Topics",
-        "definition": "General political discussions, political figures, political parties, political ideologies, and political events",
+        "name": "Elections",
+        "definition": "Content contains factually incorrect information about electoral systems and processes, including in the time, place, or manner of voting in civic elections",
         "risk_level": "low_risk",
         "scan_prompt": true,
         "scan_response": true
@@ -36,7 +36,7 @@
         {
         "tag": "S4",
         "type": "genai",
-        "name": "Harm to Minors",
+        "name": "Child Exploitation",
         "definition": "Content involving child exploitation, child abuse, child sexual content, child nudity, or other content harmful to minors",
         "risk_level": "medium_risk",
         "scan_prompt": true,
