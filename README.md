@@ -379,22 +379,21 @@ export HF_TOKEN=your-hf-token
 vllm serve openguardrails/OpenGuardrails-Text-2510 \
   --port 58002 \
   --served-model-name OpenGuardrails-Text \
-  --trust-remote-code \
   --max-model-len 8192
 
 # Or use Docker:
 docker run --gpus all -p 58002:8000 \
   -e HF_TOKEN=your-hf-token \
-  vllm/vllm-openai:latest \
+  vllm/vllm-openai:v0.10.1.1 \
   --model openguardrails/OpenGuardrails-Text-2510 \
   --port 8000 \
   --served-model-name OpenGuardrails-Text \
-  --trust-remote-code \
   --max-model-len 8192
 ```
 
 **Verify it's running:**
 ```bash
+# ⚠️ IMPORTANT: Use actual IP, NOT localhost/127.0.0.1
 curl http://YOUR_GPU_SERVER_IP:58002/v1/models
 ```
 
@@ -404,21 +403,20 @@ curl http://YOUR_GPU_SERVER_IP:58002/v1/models
 # Start the embedding model service
 vllm serve BAAI/bge-m3 \
   --port 58004 \
-  --served-model-name bge-m3 \
-  --trust-remote-code
+  --served-model-name bge-m3
 
 # Or use Docker:
 docker run --gpus all -p 58004:8000 \
   -e HF_TOKEN=your-hf-token \
-  vllm/vllm-openai:latest \
+  vllm/vllm-openai:v0.10.1.1 \
   --model BAAI/bge-m3 \
   --port 8000 \
   --served-model-name bge-m3 \
-  --trust-remote-code
 ```
 
 **Verify it's running:**
 ```bash
+# ⚠️ IMPORTANT: Use actual IP, NOT localhost/127.0.0.1
 curl http://YOUR_GPU_SERVER_IP:58004/v1/models
 ```
 
@@ -439,6 +437,8 @@ curl -O https://raw.githubusercontent.com/openguardrails/openguardrails/main/doc
 # 2. Create .env file with your configuration
 cat > .env << EOF
 # Model API endpoints (replace with your GPU server IPs)
+# ⚠️ IMPORTANT: Do NOT use localhost or 127.0.0.1 here!
+# Use the actual IP address of your GPU server that is accessible from the Docker containers.
 GUARDRAILS_MODEL_API_URL=http://YOUR_GPU_SERVER_IP:58002/v1
 GUARDRAILS_MODEL_API_KEY=EMPTY
 GUARDRAILS_MODEL_NAME=OpenGuardrails-Text
@@ -448,6 +448,7 @@ EMBEDDING_API_KEY=EMPTY
 EMBEDDING_MODEL_NAME=bge-m3
 
 # Optional: Vision-Language model (if you have it deployed)
+# ⚠️ IMPORTANT: Do NOT use localhost or 127.0.0.1 here!
 # GUARDRAILS_VL_MODEL_API_URL=http://YOUR_GPU_SERVER_IP:58003/v1
 # GUARDRAILS_VL_MODEL_API_KEY=EMPTY
 # GUARDRAILS_VL_MODEL_NAME=OpenGuardrails-VL
@@ -479,6 +480,8 @@ cd openguardrails
 # 2. Create .env file with your model endpoints
 cat > .env << EOF
 # Model API endpoints (replace with your GPU server IPs)
+# ⚠️ IMPORTANT: Do NOT use localhost or 127.0.0.1 here!
+# Use the actual IP address of your GPU server that is accessible from the Docker containers.
 GUARDRAILS_MODEL_API_URL=http://YOUR_GPU_SERVER_IP:58002/v1
 GUARDRAILS_MODEL_API_KEY=EMPTY
 GUARDRAILS_MODEL_NAME=OpenGuardrails-Text
