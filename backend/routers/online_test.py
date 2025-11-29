@@ -468,8 +468,8 @@ async def online_test(
             
             # Generate guardrail protected response based on guardrail result
             for model_id in original_responses:
-                if (guardrail_dict.get('suggest_action', '') == '通过' or 
-                    guardrail_dict.get('overall_risk_level', '') in ['无风险', 'safe']):
+                if (guardrail_dict.get('suggest_action', '') == 'pass' or 
+                    guardrail_dict.get('overall_risk_level', '') in ['no_risk', 'safe']):
                     # If guardrail passed, guardrail protected response directly use original response
                     model_results[model_id] = original_responses[model_id]
                 else:
