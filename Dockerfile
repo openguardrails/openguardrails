@@ -62,8 +62,9 @@ COPY --from=frontend-builder /app/frontend/dist /usr/share/nginx/html/platform
 # Copy landing page
 COPY landing /usr/share/nginx/html/landing
 
-# Copy nginx configuration
+# Copy nginx configuration and remove default site
 COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
+RUN rm -f /etc/nginx/sites-enabled/default
 
 # Copy and set entrypoint script permissions
 COPY entrypoint.sh /app/entrypoint.sh
