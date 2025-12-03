@@ -92,7 +92,7 @@ class BillingService:
                     logger.error(f"Failed to auto-create subscription for tenant {tenant_id}: {create_error}")
                     return False, "Subscription not found. Please contact support."
 
-            # Check if we need to reset the quota
+            # Check if we need to reset the quota (BEFORE checking quota availability)
             needs_reset = current_time >= subscription.usage_reset_at
 
             if needs_reset:
@@ -100,7 +100,7 @@ class BillingService:
                 next_reset = self._calculate_next_reset_date(current_time, subscription.created_at)
 
                 # Reset usage and update reset date
-                subscription.current_month_usage = 1  # Count this request
+                subscription.current_month_usage = 0  # Reset to 0 first
                 subscription.usage_reset_at = next_reset
                 subscription.updated_at = current_time
 
@@ -110,9 +110,10 @@ class BillingService:
                 self._subscription_cache.pop(tenant_id, None)
 
                 logger.info(f"Quota reset for tenant {tenant_id}, next reset: {next_reset}")
-                return True, None
 
-            # Check if quota is available
+                # After reset, continue to check quota availability for this request
+
+            # Check if quota is available (AFTER potential reset)
             if subscription.current_month_usage >= subscription.monthly_quota:
                 reset_date = subscription.usage_reset_at.strftime('%Y-%m-%d')
                 error_msg = (
