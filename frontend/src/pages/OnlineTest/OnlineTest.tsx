@@ -531,8 +531,8 @@ const OnlineTest: React.FC = () => {
                 />
               </div>
 
-              {/* Image upload area - only shown for single question type */}
-              {inputType === 'question' && (
+              {/* Image upload area - temporarily hidden */}
+              {false && inputType === 'question' && (
                 <Card
                   title={
                     <Space>
