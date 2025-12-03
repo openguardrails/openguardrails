@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/higress-group/proxy-wasm-go-sdk/proxywasm"
@@ -39,14 +40,14 @@ const (
 
 // OpenGuardrails API Response structures
 type OpenGuardrailsResponse struct {
-	ID                string                      `json:"id"`
-	OverallRiskLevel  string                      `json:"overall_risk_level"`
-	SuggestAction     string                      `json:"suggest_action"`
-	SuggestAnswer     string                      `json:"suggest_answer"`
-	Score             float64                     `json:"score"`
-	Result            OpenGuardrailsResultDetails `json:"result"`
-	RequestID         string                      `json:"request_id"`
-	ProcessingTimeMs  int                         `json:"processing_time_ms"`
+	ID               string                      `json:"id"`
+	OverallRiskLevel string                      `json:"overall_risk_level"`
+	SuggestAction    string                      `json:"suggest_action"`
+	SuggestAnswer    string                      `json:"suggest_answer"`
+	Score            float64                     `json:"score"`
+	Result           OpenGuardrailsResultDetails `json:"result"`
+	RequestID        string                      `json:"request_id"`
+	ProcessingTimeMs int                         `json:"processing_time_ms"`
 }
 
 type OpenGuardrailsResultDetails struct {
@@ -65,6 +66,9 @@ type OpenGuardrailsConfig struct {
 	client                  wrapper.HttpClient
 	apiKey                  string
 	baseURL                 string
+	serviceName             string
+	servicePort             int64
+	serviceHost             string
 	checkRequest            bool
 	checkResponse           bool
 	requestContentJsonPath  string
@@ -76,27 +80,62 @@ type OpenGuardrailsConfig struct {
 }
 
 func parseConfig(json gjson.Result, config *OpenGuardrailsConfig) error {
-	// Parse service configuration
-	serviceName := json.Get("serviceName").String()
-	servicePort := json.Get("servicePort").Int()
-	serviceHost := json.Get("serviceHost").String()
-	if serviceName == "" || servicePort == 0 || serviceHost == "" {
-		return errors.New("invalid service config: serviceName, servicePort, and serviceHost are required")
-	}
-
-	// Parse API key
+	// Parse API key first
 	config.apiKey = json.Get("apiKey").String()
 	if config.apiKey == "" {
 		return errors.New("invalid apiKey: apiKey is required")
 	}
 
-	// Parse base URL (optional, default to public API)
-	// Users can override this for private deployments (e.g., http://localhost:5001/v1/guardrails)
+	// Parse base URL first to check if it's a direct URL
 	if obj := json.Get("baseURL"); obj.Exists() {
 		config.baseURL = obj.String()
 	} else {
 		// Default base URL for public OpenGuardrails API
 		config.baseURL = "/v1/guardrails"
+	}
+
+	// Check if baseURL is a complete URL (direct mode)
+	if strings.HasPrefix(config.baseURL, "http://") || strings.HasPrefix(config.baseURL, "https://") {
+		// Direct mode: Use full URL, extract host/port if needed
+		// For direct mode, we'll use a special cluster client with the host extracted from baseURL
+		// Initialize with default values
+		config.serviceHost = ""
+		config.servicePort = 0
+		config.serviceName = "openguardrails-direct.dns"
+
+		parts := strings.Split(config.baseURL, "/")
+		if len(parts) >= 3 && parts[0] != "" {
+			hostPort := parts[2]
+			config.serviceHost = hostPort
+			if strings.Contains(hostPort, ":") {
+				hostPortParts := strings.Split(hostPort, ":")
+				if len(hostPortParts) == 2 {
+					config.serviceHost = hostPortParts[0]
+					port, err := strconv.ParseInt(hostPortParts[1], 10, 64)
+					if err == nil {
+						config.servicePort = port
+					}
+				}
+			} else {
+				// Default ports based on protocol
+				if strings.HasPrefix(config.baseURL, "https://") {
+					config.servicePort = 443
+				} else {
+					config.servicePort = 80
+				}
+			}
+		}
+	} else {
+		// Service discovery mode: require serviceName, servicePort, and serviceHost
+		serviceName := json.Get("serviceName").String()
+		servicePort := json.Get("servicePort").Int()
+		serviceHost := json.Get("serviceHost").String()
+		if serviceName == "" || servicePort == 0 || serviceHost == "" {
+			return errors.New("invalid service config: serviceName, servicePort, and serviceHost are required for service discovery mode. For direct mode, use full URL starting with http:// or https:// in baseURL")
+		}
+		config.serviceName = serviceName
+		config.servicePort = servicePort
+		config.serviceHost = serviceHost
 	}
 
 	// Parse check flags
@@ -137,10 +176,12 @@ func parseConfig(json gjson.Result, config *OpenGuardrailsConfig) error {
 	}
 
 	// Create HTTP client
+	// For both direct mode and service discovery mode, we use NewClusterClient
+	// The difference is that in direct mode, we parse the hostname from baseURL
 	config.client = wrapper.NewClusterClient(wrapper.FQDNCluster{
-		FQDN: serviceName,
-		Port: servicePort,
-		Host: serviceHost,
+		FQDN: config.serviceName,
+		Port: config.servicePort,
+		Host: config.serviceHost,
 	})
 
 	return nil

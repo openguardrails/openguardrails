@@ -90,6 +90,40 @@ func TestParseConfig(t *testing.T) {
 				assert.Equal(t, true, cfg.protocolOriginal)
 			},
 		},
+		{
+			name: "direct mode with full HTTP URL",
+			json: `{
+			"baseURL": "http://192.168.1.100:5001/v1/guardrails",
+			"apiKey": "sk-xxai-test-key",
+			"checkRequest": true,
+			"checkResponse": true
+		}`,
+			expectErr: false,
+			validate: func(t *testing.T, cfg *OpenGuardrailsConfig) {
+				assert.Equal(t, "http://192.168.1.100:5001/v1/guardrails", cfg.baseURL)
+				assert.Equal(t, "192.168.1.100", cfg.serviceHost)
+				assert.Equal(t, int64(5001), cfg.servicePort)
+				assert.Equal(t, "openguardrails-direct.dns", cfg.serviceName)
+				assert.Equal(t, true, cfg.checkRequest)
+				assert.Equal(t, true, cfg.checkResponse)
+			},
+		},
+		{
+			name: "direct mode with HTTPS URL",
+			json: `{
+			"baseURL": "https://openguardrails.internal.company.com/v1/guardrails",
+			"apiKey": "sk-xxai-test-key",
+			"checkRequest": true
+		}`,
+			expectErr: false,
+			validate: func(t *testing.T, cfg *OpenGuardrailsConfig) {
+				assert.Equal(t, "https://openguardrails.internal.company.com/v1/guardrails", cfg.baseURL)
+				assert.Equal(t, "openguardrails.internal.company.com", cfg.serviceHost)
+				assert.Equal(t, int64(443), cfg.servicePort)
+				assert.Equal(t, "openguardrails-direct.dns", cfg.serviceName)
+				assert.Equal(t, true, cfg.checkRequest)
+			},
+		},
 	}
 
 	for _, tt := range tests {

@@ -64,6 +64,24 @@ make build
 
 ### Step 4: Configure Plugin
 
+#### 🎯 Direct Mode (Recommended - No DNS Service Needed!)
+
+```yaml
+# For internal IP deployment (no DNS service required)
+baseURL: "http://192.168.1.100:5001/v1/guardrails"
+apiKey: "sk-xxai-your-api-key-here"
+checkRequest: true
+checkResponse: true
+```
+
+```yaml
+# For HTTPS private deployment
+baseURL: "https://openguardrails.internal.company.com:5001/v1/guardrails"
+apiKey: "sk-xxai-your-private-key"
+checkRequest: true
+checkResponse: true
+```
+
 #### Basic Configuration (Check Request Only)
 
 ```yaml

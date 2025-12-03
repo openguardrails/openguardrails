@@ -22,11 +22,11 @@ Plugin execution priority: `300`
 
 | Name | Type | Requirement | Default | Description |
 | ------------ | ------------ | ------------ | ------------ | ------------ |
-| `serviceName` | string | required | - | OpenGuardrails service name (Public API: api.openguardrails.com.dns, Private: custom) |
-| `servicePort` | int | required | - | OpenGuardrails service port (Public API: 443, Private: 5001) |
-| `serviceHost` | string | required | - | OpenGuardrails service domain (Public API: api.openguardrails.com, Private: custom) |
 | `apiKey` | string | required | - | OpenGuardrails API key (format: sk-xxai-xxx, obtain from platform) |
-| `baseURL` | string | optional | /v1/guardrails | OpenGuardrails API path (default is fine unless API version changes) |
+| `baseURL` | string | optional | /v1/guardrails | **For Direct Mode**: Full URL like `http://192.168.1.100:5001/v1/guardrails` (no DNS service needed). **For Service Discovery**: API path like `/v1/guardrails` |
+| `serviceName` | string | conditional | - | **Service Discovery Mode**: Required. OpenGuardrails service name (Public API: api.openguardrails.com.dns, Private: custom) |
+| `servicePort` | int | conditional | - | **Service Discovery Mode**: Required. OpenGuardrails service port (Public API: 443, Private: 5001) |
+| `serviceHost` | string | conditional | - | **Service Discovery Mode**: Required. OpenGuardrails service domain (Public API: api.openguardrails.com, Private: custom) |
 | `checkRequest` | bool | optional | false | Check if user input is compliant |
 | `checkResponse` | bool | optional | false | Check if model response is compliant |
 | `requestContentJsonPath` | string | optional | `messages.@reverse.0.content` | JSONPath to extract content from request body |
@@ -74,6 +74,37 @@ Suggested actions (suggest_action):
 | Threats | S18 | Low | Violent threats, intimidation |
 
 ## Configuration Examples
+
+### 🎯 Direct Mode (Recommended for Local/Private Deployment)
+
+**No DNS service required in Higress!** Use this for the simplest setup.
+
+```yaml
+# Internal IP deployment
+baseURL: "http://192.168.1.100:5001/v1/guardrails"
+apiKey: "sk-xxai-your-api-key"
+checkRequest: true
+checkResponse: true
+timeout: 5000
+```
+
+```yaml
+# HTTPS private deployment
+baseURL: "https://openguardrails.internal.company.com:5001/v1/guardrails"
+apiKey: "sk-xxai-your-private-key"
+checkRequest: true
+checkResponse: true
+timeout: 3000
+```
+
+```yaml
+# Local testing
+baseURL: "http://localhost:5001/v1/guardrails"
+apiKey: "sk-xxai-test-key"
+checkRequest: true
+checkResponse: false  # Faster for testing
+timeout: 10000
+```
 
 ### Prerequisites
 
