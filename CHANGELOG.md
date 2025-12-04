@@ -11,6 +11,269 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.3.5] - 2025-12-03
+
+### 🚀 Deployment Mode Enhancement - Enterprise vs SaaS
+
+This release introduces a comprehensive deployment mode system that clearly separates **Enterprise (Private Deployment)** and **SaaS (Cloud Service)** modes, ensuring local deployments have no subscription limitations while enabling full commercial features for SaaS providers.
+
+#### 🎯 What's New
+
+**Two Distinct Deployment Modes:**
+
+**🏢 Enterprise Mode (Default for Local Deployment)**
+- **No Subscription System**: All features available without limits
+- **No Package Marketplace**: Built-in scanners only (no third-party purchases)
+- **Full Functionality**: Complete access to all safety features and configurations
+- **Privacy First**: No external dependencies or commercial restrictions
+- **Ideal for**: Private deployments, on-premise installations, government/enterprise use
+
+**☁️ SaaS Mode (For Commercial Providers)**
+- **Subscription System**: Tiered pricing with quotas and limits
+- **Package Marketplace**: Third-party scanner package sales and purchases
+- **Payment Integration**: Full billing and payment processing
+- **Multi-tenant Commercial**: Designed for commercial SaaS platforms
+
+### Added
+
+#### 🔧 **Deployment Mode Configuration**
+
+**Environment Variable**:
+```bash
+# Enterprise mode (default) - Private deployment with no limits
+DEPLOYMENT_MODE=enterprise
+
+# SaaS mode - Commercial deployment with subscriptions
+DEPLOYMENT_MODE=saas
+```
+
+**Updated Configuration Files**:
+- `.env.example` and `backend/.env.example` now default to `enterprise` mode
+- Docker Compose files use `enterprise` as default deployment mode
+- All code documentation updated to clarify deployment modes
+
+#### 🖥️ **Frontend Feature Gating**
+
+**Conditional Feature Display**:
+- **Subscription/Billing Pages**: Only visible in SaaS mode
+- **Package Marketplace**: Only shown in SaaS deployments
+- **Payment Interface**: Hidden in enterprise mode
+- **Usage Limits UI**: Not displayed in enterprise deployments
+
+**New Frontend Configuration** (`frontend/src/config/index.ts`):
+```typescript
+// Feature flags based on deployment mode
+export const features = {
+  showSubscription: () => isSaasMode(),
+  showMarketplace: () => isSaasMode(),
+  showPayment: () => isSaasMode(),
+  showThirdPartyPackages: () => isSaasMode()
+};
+```
+
+#### 🌐 **Public API for System Information**
+
+**New Unauthenticated Endpoint**:
+```bash
+GET /api/v1/config/system-info
+```
+
+**Response**:
+```json
+{
+  "deployment_mode": "enterprise",
+  "is_saas_mode": false,
+  "is_enterprise_mode": true,
+  "version": "4.3.5",
+  "app_name": "OpenGuardrails"
+}
+```
+
+This allows frontend and client applications to detect deployment mode without authentication.
+
+#### 🛡️ **Backend Service Adaptations**
+
+**Conditional Route Registration**:
+- Billing routes only registered in SaaS mode
+- Package purchase workflows disabled in enterprise mode
+- Marketplace management hidden in private deployments
+
+**Middleware Updates**:
+- `billing_middleware` now checks deployment mode
+- Quota and limits enforcement only in SaaS mode
+- Usage tracking optional in enterprise mode
+
+### Changed
+
+#### 🔄 **Enterprise Mode Benefits**
+
+**For Local/Private Deployments**:
+- ✅ **No Subscription Required**: All 21 built-in risk types available
+- ✅ **No Usage Limits**: Unlimited API calls and detections
+- ✅ **No Feature Restrictions**: Full access to ban policies, DLP, knowledge bases
+- ✅ **No Payment Processing**: Clean deployment without payment dependencies
+- ✅ **Complete Privacy**: All data stays within your infrastructure
+- ✅ **Full Customization**: Unlimited custom scanners (S100+)
+
+#### 🔄 **SaaS Mode Features**
+
+**For Commercial Providers**:
+- 💰 **Subscription Management**: Tier-based pricing with overage protection
+- 🏪 **Package Marketplace**: Sell third-party scanner packages
+- 💳 **Payment Processing**: Integrated billing and payment workflows
+- 📊 **Usage Analytics**: Detailed quota tracking for customer billing
+- 🔒 **Multi-tenant Security**: Customer isolation and billing separation
+
+#### 🐳 **Docker Configuration Updates**
+
+**Default to Enterprise Mode**:
+- Both `docker-compose.yml` and `docker-compose.prod.yml` now default to `DEPLOYMENT_MODE=enterprise`
+- Enterprise deployments require no additional configuration
+- SaaS providers must explicitly set `DEPLOYMENT_MODE=saas`
+
+**Streamlined Deployment**:
+```bash
+# Enterprise (default) - Full features, no limits
+docker compose up -d
+
+# SaaS mode - Must be explicitly enabled
+DEPLOYMENT_MODE=saas docker compose up -d
+```
+
+### Enterprise Mode Configuration Guide
+
+#### Quick Start (Enterprise Mode)
+```bash
+# 1. Clone repository
+git clone https://github.com/openguardrails/openguardrails
+cd openguardrails
+
+# 2. Default configuration is enterprise mode
+# Edit .env if needed, but DEPLOYMENT_MODE defaults to 'enterprise'
+
+# 3. Deploy
+docker compose up -d
+
+# 4. Access full features without limitations
+# URL: http://localhost:3000/platform/
+# Admin: admin@yourdomain.com / CHANGE-THIS-PASSWORD-IN-PRODUCTION
+```
+
+#### Enterprise Mode Guarantees
+- **No Subscription System**: Completely removed from UI and backend
+- **No Usage Limits**: Unlimited API calls, custom scanners, applications
+- **No Package Marketplace**: Streamlined interface without commercial features
+- **No Payment Processing**: No billing, invoices, or payment gateways
+- **Full Feature Access**: All safety features, configurations, and integrations
+
+### SaaS Mode Configuration
+
+#### For SaaS Providers
+```bash
+# 1. Enable SaaS mode
+export DEPLOYMENT_MODE=saas
+
+# 2. Configure additional SaaS settings
+# (Payment gateways, subscription tiers, etc.)
+
+# 3. Deploy with SaaS features
+docker compose up -d
+
+# 4. Configure subscription plans and marketplace
+# via admin interface at /platform/admin/billing
+```
+
+### Impact on Existing Deployments
+
+#### Existing Users (v4.3.4 and earlier)
+- **Automatic Enterprise Mode**: Existing deployments default to enterprise mode
+- **No Breaking Changes**: All existing functionality preserved
+- **No New Limitations**: Existing access to all features maintained
+- **Optional SaaS Migration**: Can switch to SaaS mode by changing `DEPLOYMENT_MODE`
+
+#### Migration Path
+```bash
+# Update to v4.3.5 (automatically enterprise mode)
+git pull
+docker compose down && docker compose up -d
+
+# Continue using all features without any new limitations
+```
+
+### Technical Implementation
+
+#### Backend Changes
+- **Settings Class**: New `deployment_mode` property with `is_saas_mode` and `is_enterprise_mode` helpers
+- **Conditional Routing**: Admin service conditionally registers billing/marketplace routes
+- **Feature Flags**: Middleware checks deployment mode before enforcing quotas/limits
+
+#### Frontend Changes
+- **Dynamic Configuration**: Fetches deployment mode from `/api/v1/config/system-info`
+- **Feature Gating**: Components conditionally render based on deployment mode
+- **User Experience**: Enterprise mode shows streamlined interface without commercial features
+
+#### Database Changes
+- **No Schema Changes**: Existing database schema compatible
+- **Backward Compatibility**: All existing configurations preserved
+- **Optional Features**: Billing tables unused in enterprise mode (no impact)
+
+### Benefits by Stakeholder
+
+#### 🏢 Enterprise Users
+- **Simplified Deployment**: No need to configure payment systems
+- **Unlimited Usage**: No quota management or limits
+- **Full Control**: Complete feature access without commercial restrictions
+- **Privacy Assurance**: No external dependencies for billing/subscriptions
+
+#### ☁️ SaaS Providers
+- **Commercial Platform**: Full subscription and marketplace capabilities
+- **Flexible Pricing**: Tier-based pricing with custom tiers
+- **Revenue Streams**: Package marketplace for third-party scanners
+- **Customer Management**: Billing, usage tracking, and customer lifecycle
+
+#### 🔧 Developers
+- **Clear Separation**: Obvious distinction between deployment types
+- **Clean Codebase**: Feature flags make mode-specific code obvious
+- **Easy Testing**: Can test both modes with simple environment variable change
+- **Documentation**: Clear guidance on deployment mode selection
+
+### Breaking Changes
+
+None. Existing deployments automatically get enterprise mode with full feature access.
+
+### Security Considerations
+
+#### Enterprise Mode
+- ✅ **Reduced Attack Surface**: No payment processing or billing endpoints
+- ✅ **Simplified Security**: No third-party payment integrations
+- ✅ **Complete Isolation**: No external service dependencies for billing
+
+#### SaaS Mode
+- ⚠️ **Payment Security**: Must secure payment processing endpoints
+- ⚠️ **Customer Data**: Proper isolation of customer billing information
+- ⚠️ **Marketplace Security**: Validation of third-party package content
+
+### Documentation Updates
+
+- Updated deployment documentation with enterprise vs SaaS guidance
+- Added feature matrix for each deployment mode
+- Updated README with deployment mode selection guide
+- Enhanced developer documentation for feature gating
+
+### Future Roadmap
+
+**Enterprise Mode Enhancements**:
+- Advanced air-gapped deployment support
+- Enhanced offline capabilities
+- Extended enterprise security features
+
+**SaaS Mode Enhancements**:
+- Advanced analytics and reporting
+- Customer self-service portal
+- Extended marketplace with revenue sharing
+
+---
+
 ## [4.1.0] - 2025-11-10
 
 ### 🚀 Major Architecture Update - Scanner Package System
