@@ -9,6 +9,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { eventBus, EVENTS } from '../../utils/eventBus';
 import paymentService, { PaymentConfig } from '../../services/payment';
 import { usePaymentSuccess } from '../../hooks/usePaymentSuccess';
+import { features } from '../../config';
 
 interface ScannerConfig {
   id: string;
@@ -90,9 +91,12 @@ const OfficialScannersManagement: React.FC = () => {
 
   // Active tab key - support URL hash for direct navigation
   const [activeTabKey, setActiveTabKey] = useState<string>(() => {
-    // Get initial tab from URL hash (e.g., #marketplace)
+    // Initialize from URL hash on mount
     const hash = window.location.hash.replace('#', '');
-    return ['builtin', 'purchased', 'marketplace'].includes(hash) ? hash : 'builtin';
+    if (hash && ['builtin', 'purchased', 'marketplace'].includes(hash)) {
+      return hash;
+    }
+    return 'builtin';
   });
 
   useEffect(() => {
@@ -104,16 +108,18 @@ const OfficialScannersManagement: React.FC = () => {
       loadScannerConfigs();
     }
 
-    // Load payment config
-    const loadPaymentConfig = async () => {
-      try {
-        const config = await paymentService.getConfig();
-        setPaymentConfig(config);
-      } catch (e) {
-        console.error('Failed to load payment config:', e);
-      }
-    };
-    loadPaymentConfig();
+    // Load payment config (only in SaaS mode)
+    if (features.showPayment()) {
+      const loadPaymentConfig = async () => {
+        try {
+          const config = await paymentService.getConfig();
+          setPaymentConfig(config);
+        } catch (e) {
+          console.error('Failed to load payment config:', e);
+        }
+      };
+      loadPaymentConfig();
+    }
 
     // Handle payment cancellation (no verification needed)
     const paymentStatus = searchParams.get('payment');
@@ -145,14 +151,16 @@ const OfficialScannersManagement: React.FC = () => {
       const allBuiltin = await scannerPackagesApi.getAll('builtin');
       setBuiltinPackages(allBuiltin);
 
-      // Load marketplace packages to get purchase status information
-      const marketplace = await scannerPackagesApi.getMarketplace();
+      // Only load marketplace packages in SaaS mode
+      if (features.showMarketplace()) {
+        const marketplace = await scannerPackagesApi.getMarketplace();
 
-      // Filter purchased packages (those with purchased=true)
-      setPurchasedPackages(marketplace.filter((p: Package) => p.purchased));
+        // Filter purchased packages (those with purchased=true)
+        setPurchasedPackages(marketplace.filter((p: Package) => p.purchased));
 
-      // Filter marketplace packages (available for purchase, not yet purchased)
-      setMarketplacePackages(marketplace.filter((p: Package) => !p.purchased));
+        // Filter marketplace packages (available for purchase, not yet purchased)
+        setMarketplacePackages(marketplace.filter((p: Package) => !p.purchased));
+      }
     } catch (error) {
       message.error(t('scannerPackages.loadFailed'));
       console.error('Failed to load packages:', error);
@@ -233,7 +241,7 @@ const OfficialScannersManagement: React.FC = () => {
       setSaving(true);
       await scannerConfigsApi.reset(scannerId);
       message.success(t('scannerPackages.resetSuccess'));
-      await loadData();
+      loadData();
     } catch (error) {
       message.error(t('scannerPackages.updateFailed'));
     } finally {
@@ -250,7 +258,7 @@ const OfficialScannersManagement: React.FC = () => {
           setSaving(true);
           await scannerConfigsApi.resetAll();
           message.success(t('scannerPackages.resetAllSuccess'));
-          await loadData();
+          loadData();
         } catch (error) {
           message.error(t('scannerPackages.updateFailed'));
         } finally {
@@ -274,8 +282,8 @@ const OfficialScannersManagement: React.FC = () => {
     try {
       if (!purchasePackage) return;
 
-      // Check if package has a price (requires payment)
-      if (purchasePackage.price && purchasePackage.price > 0) {
+      // In enterprise mode, all packages are free
+      if (features.showPayment() && purchasePackage.price && purchasePackage.price > 0) {
         // Paid package - redirect to payment
         setPaymentLoading(true);
         
@@ -326,9 +334,11 @@ const OfficialScannersManagement: React.FC = () => {
     setDetailsDrawerVisible(true);
     setLoadingDetails(true);
     try {
-      // Use marketplace detail endpoint for previewing packages (including unpurchased ones)
-      // This endpoint hides sensitive scanner definitions for unpurchased packages
-      const details = await scannerPackagesApi.getMarketplaceDetail(pkg.id);
+      // In enterprise mode or for built-in packages, use regular detail endpoint
+      // In SaaS mode for marketplace packages, use marketplace detail endpoint
+      const details = features.showMarketplace() && pkg.package_type === 'purchasable'
+        ? await scannerPackagesApi.getMarketplaceDetail(pkg.id)
+        : await scannerPackagesApi.getDetail(pkg.id);
       setPackageDetails(details);
     } catch (error) {
       message.error(t('scannerPackages.loadDetailsFailed'));
@@ -538,58 +548,71 @@ const OfficialScannersManagement: React.FC = () => {
               // Update URL hash for shareable links
               window.location.hash = key;
             }}
-            items={[
-              {
-                key: 'builtin',
-                label: t('scannerPackages.builtinPackages'),
-                children: (
-                  <Table
-                    columns={packageColumns}
-                    dataSource={builtinPackages}
-                    rowKey="id"
-                    pagination={false}
-                  />
-                ),
-              },
-              {
-                key: 'purchased',
-                label: `${t('scannerPackages.purchasedPackages')} (${purchasedPackages.length})`,
-                children: (
-                  <Table
-                    columns={packageColumns}
-                    dataSource={purchasedPackages}
-                    rowKey="id"
-                    pagination={false}
-                    locale={{ emptyText: t('scannerPackages.noPurchasedPackages') }}
-                  />
-                ),
-              },
-              {
-                key: 'marketplace',
-                label: `${t('scannerPackages.marketplace')} (${marketplacePackages.length})`,
-                children: (
-                  <Table
-                    columns={marketplaceColumns}
-                    dataSource={marketplacePackages}
-                    rowKey="id"
-                    pagination={false}
-                    locale={{ emptyText: t('scannerPackages.noMarketplacePackages') }}
-                  />
-                ),
-              },
-            ]}
+            items={(() => {
+              const showMarketplace = features.showMarketplace();
+              const items = [
+                {
+                  key: 'builtin',
+                  label: t('scannerPackages.builtinPackages'),
+                  children: (
+                    <Table
+                      columns={packageColumns}
+                      dataSource={builtinPackages}
+                      rowKey="id"
+                      pagination={false}
+                    />
+                  ),
+                },
+              ];
+
+              // Add purchased tab in SaaS mode (always show, even if empty)
+              if (showMarketplace) {
+                items.push({
+                  key: 'purchased',
+                  label: `${t('scannerPackages.purchasedPackages')} (${purchasedPackages.length})`,
+                  children: (
+                    <Table
+                      columns={packageColumns}
+                      dataSource={purchasedPackages}
+                      rowKey="id"
+                      pagination={false}
+                      locale={{ emptyText: t('scannerPackages.noPurchasedPackages') }}
+                    />
+                  ),
+                });
+              }
+
+              // Add marketplace tab in SaaS mode
+              if (showMarketplace) {
+                items.push({
+                  key: 'marketplace',
+                  label: `${t('scannerPackages.marketplace')} (${marketplacePackages.length})`,
+                  children: (
+                    <Table
+                      columns={marketplaceColumns}
+                      dataSource={marketplacePackages}
+                      rowKey="id"
+                      pagination={false}
+                      locale={{ emptyText: t('scannerPackages.noMarketplacePackages') }}
+                    />
+                  ),
+                });
+              }
+
+              return items;
+            })()}
           />
         </Card>
 
         <Modal
-          title={paymentLoading ? null : (purchasePackage?.price && purchasePackage.price > 0
+          title={paymentLoading ? null : (features.showPayment() && purchasePackage?.price && purchasePackage.price > 0
             ? t('payment.confirm.packageTitle')
             : t('scannerPackages.submitPurchaseRequest')
           )}
           open={purchaseModalVisible}
           onOk={handleSubmitPurchase}
           onCancel={handleClosePurchaseModal}
-          okText={purchasePackage?.price && purchasePackage.price > 0
+          okText={features.showPayment() && purchasePackage?.price && purchasePackage.price > 0
             ? t('payment.button.payNow')
             : t('common.submit')
           }

@@ -1,5 +1,6 @@
 """
 Billing Middleware - Check monthly quota limits before processing requests
+Only active in SaaS mode; disabled in enterprise mode.
 """
 
 from fastapi import Request, Response
@@ -8,12 +9,13 @@ from starlette.responses import JSONResponse
 from database.connection import get_db_session
 from services.billing_service import billing_service
 from utils.logger import setup_logger
+from config import settings
 
 logger = setup_logger()
 
 
 class BillingMiddleware(BaseHTTPMiddleware):
-    """Middleware to check monthly quota limits"""
+    """Middleware to check monthly quota limits (SaaS mode only)"""
 
     def __init__(self, app):
         super().__init__(app)
@@ -24,6 +26,10 @@ class BillingMiddleware(BaseHTTPMiddleware):
         ]
 
     async def dispatch(self, request: Request, call_next):
+        # Skip billing checks in enterprise mode
+        if settings.is_enterprise_mode:
+            return await call_next(request)
+
         # Check if this path requires billing check
         if not any(request.url.path.startswith(path) for path in self.protected_paths):
             return await call_next(request)

@@ -17,6 +17,7 @@ from models.responses import (
     PackageStatisticsResponse, ApiResponse
 )
 from utils.logger import setup_logger
+from config import settings
 
 logger = setup_logger()
 
@@ -61,13 +62,19 @@ async def get_all_packages(
     Get all packages visible to current user.
 
     - Builtin packages: Always visible
-    - Purchasable packages: Only if purchased
+    - Purchasable packages: Only if purchased (SaaS mode only)
 
     Query params:
     - package_type: Filter by 'builtin' or 'purchasable'
+
+    Note: In enterprise mode, only builtin packages are available.
     """
     service = ScannerPackageService(db)
     tenant_id = UUID(current_user['tenant_id'])
+
+    # In enterprise mode, force package_type to 'builtin'
+    if settings.is_enterprise_mode:
+        package_type = 'builtin'
 
     packages = service.get_all_packages(
         tenant_id=tenant_id,
@@ -150,13 +157,21 @@ async def get_marketplace_packages(
     request: Request,
     db: Session = Depends(get_admin_db)
 ):
-    current_user = get_current_user(request)
     """
     Get all purchasable packages (marketplace view).
 
     Returns metadata only (no scanner definitions until purchased).
     Includes purchase status for current user.
+
+    Note: Only available in SaaS mode.
     """
+    if settings.is_enterprise_mode:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Marketplace is not available in enterprise deployment mode"
+        )
+
+    current_user = get_current_user(request)
     service = ScannerPackageService(db)
     tenant_id = UUID(current_user['tenant_id'])
 
@@ -178,7 +193,6 @@ async def get_marketplace_package_detail(
     request: Request,
     db: Session = Depends(get_admin_db)
 ):
-    current_user = get_current_user(request)
     """
     Get package preview for marketplace (no purchase required).
 
@@ -188,7 +202,16 @@ async def get_marketplace_package_detail(
     - NO sensitive scanner definitions (for unpurchased packages)
 
     For purchased packages, returns full details.
+
+    Note: Only available in SaaS mode.
     """
+    if settings.is_enterprise_mode:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Marketplace is not available in enterprise deployment mode"
+        )
+
+    current_user = get_current_user(request)
     service = ScannerPackageService(db)
     tenant_id = UUID(current_user['tenant_id'])
 

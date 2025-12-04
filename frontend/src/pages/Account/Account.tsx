@@ -7,6 +7,7 @@ import { authService, UserInfo } from '../../services/auth';
 import { configApi } from '../../services/api';
 import { billingService } from '../../services/billing';
 import type { Subscription } from '../../types/billing';
+import { features } from '../../config';
 
 const { Title, Text } = Typography;
 
@@ -47,6 +48,11 @@ const Account: React.FC = () => {
   };
 
   const fetchSubscription = async () => {
+    // Skip subscription fetch in enterprise mode
+    if (!features.showSubscription()) {
+      return;
+    }
+
     try {
       const sub = await billingService.getCurrentSubscription();
       setSubscription(sub);
@@ -202,63 +208,66 @@ const Account: React.FC = () => {
             </div>
           </div>
 
-          <div>
-            <Text type="secondary">{t('account.subscription')}</Text>
-            <div style={{ marginTop: 8 }}>
-              {subscription ? (
-                <Space direction="vertical" size="small" style={{ width: '100%' }}>
-                  <div>
-                    <Tag color={subscription.subscription_type === 'subscribed' ? 'blue' : 'default'}>
-                      {subscription.plan_name}
-                    </Tag>
-                  </div>
-                  <div>
-                    <Text>{t('account.monthlyQuota')}: </Text>
-                    <Text strong>
-                      {subscription.current_month_usage.toLocaleString()} / {subscription.monthly_quota.toLocaleString()}
-                    </Text>
-                    <Text type="secondary"> {t('account.calls')}</Text>
-                  </div>
-                  <Progress
-                    percent={Math.min(subscription.usage_percentage, 100)}
-                    status={subscription.usage_percentage >= 90 ? 'exception' : 'active'}
-                    strokeColor={subscription.usage_percentage >= 90 ? '#ff4d4f' : '#1890ff'}
-                  />
-                  <div>
-                    <Text type="secondary" style={{ fontSize: 12 }}>
-                      {t('account.quotaResetsOn', { date: new Date(subscription.usage_reset_at).toLocaleDateString() })}
-                    </Text>
-                  </div>
-                  {subscription.subscription_type === 'free' && subscription.usage_percentage >= 80 && (
-                    <div style={{
-                      padding: '8px 12px',
-                      background: '#fff7e6',
-                      border: '1px solid #ffd591',
-                      borderRadius: '4px',
-                      marginTop: 8
-                    }}>
-                      <Text type="warning" style={{ fontSize: 12 }}>
-                        {t('account.upgradePrompt', { email: systemInfo?.support_email || '' })}
+          {/* Subscription info only in SaaS mode */}
+          {features.showSubscription() && (
+            <div>
+              <Text type="secondary">{t('account.subscription')}</Text>
+              <div style={{ marginTop: 8 }}>
+                {subscription ? (
+                  <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                    <div>
+                      <Tag color={subscription.subscription_type === 'subscribed' ? 'blue' : 'default'}>
+                        {subscription.plan_name}
+                      </Tag>
+                    </div>
+                    <div>
+                      <Text>{t('account.monthlyQuota')}: </Text>
+                      <Text strong>
+                        {subscription.current_month_usage.toLocaleString()} / {subscription.monthly_quota.toLocaleString()}
+                      </Text>
+                      <Text type="secondary"> {t('account.calls')}</Text>
+                    </div>
+                    <Progress
+                      percent={Math.min(subscription.usage_percentage, 100)}
+                      status={subscription.usage_percentage >= 90 ? 'exception' : 'active'}
+                      strokeColor={subscription.usage_percentage >= 90 ? '#ff4d4f' : '#1890ff'}
+                    />
+                    <div>
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        {t('account.quotaResetsOn', { date: new Date(subscription.usage_reset_at).toLocaleDateString() })}
                       </Text>
                     </div>
-                  )}
-                </Space>
-              ) : subscription === null ? (
-                <div style={{
-                  padding: '12px',
-                  background: '#fff7e6',
-                  border: '1px solid #ffd591',
-                  borderRadius: '4px'
-                }}>
-                  <Text type="warning">
-                    {t('account.subscriptionNotFound', { email: systemInfo?.support_email || 'support@openguardrails.com' })}
-                  </Text>
-                </div>
-              ) : (
-                <Text type="secondary">{t('common.loading')}</Text>
-              )}
+                    {subscription.subscription_type === 'free' && subscription.usage_percentage >= 80 && (
+                      <div style={{
+                        padding: '8px 12px',
+                        background: '#fff7e6',
+                        border: '1px solid #ffd591',
+                        borderRadius: '4px',
+                        marginTop: 8
+                      }}>
+                        <Text type="warning" style={{ fontSize: 12 }}>
+                          {t('account.upgradePrompt', { email: systemInfo?.support_email || '' })}
+                        </Text>
+                      </div>
+                    )}
+                  </Space>
+                ) : subscription === null ? (
+                  <div style={{
+                    padding: '12px',
+                    background: '#fff7e6',
+                    border: '1px solid #ffd591',
+                    borderRadius: '4px'
+                  }}>
+                    <Text type="warning">
+                      {t('account.subscriptionNotFound', { email: systemInfo?.support_email || 'support@openguardrails.com' })}
+                    </Text>
+                  </div>
+                ) : (
+                  <Text type="secondary">{t('common.loading')}</Text>
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
           <div>
             <Text type="secondary">{t('account.apiRateLimit')}</Text>

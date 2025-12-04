@@ -29,6 +29,9 @@ logger = setup_logger()
 router = APIRouter(tags=["Configuration"])
 security = HTTPBearer()
 
+# Public router for endpoints that don't require authentication
+public_router = APIRouter(tags=["Configuration - Public"])
+
 def get_current_user_and_application_from_request(request: Request, db: Session) -> Tuple[Tenant, uuid.UUID]:
     """
     Get current tenant and application_id from request
@@ -521,21 +524,22 @@ async def delete_response_template(template_id: int, request: Request, db: Sessi
         logger.error(f"Delete response template error: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete response template")
 
-# System info
-@router.get("/config/system-info")
-async def get_system_info():
-    """Get system info"""
-    try:
-        return {
-            "support_email": settings.support_email if settings.support_email else None,
-            "app_name": settings.app_name,
-            "app_version": settings.app_version
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Get system info error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get system info")
+# System info - DEPRECATED (duplicate route below at line 1280)
+# This route is kept for backward compatibility but is outdated
+# @router.get("/config/system-info")
+# async def get_system_info():
+#     """Get system info"""
+#     try:
+#         return {
+#             "support_email": settings.support_email if settings.support_email else None,
+#             "app_name": settings.app_name,
+#             "app_version": settings.app_version
+#         }
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Get system info error: {e}")
+#         raise HTTPException(status_code=500, detail="Failed to get system info")
 
 # Cache management
 @router.get("/config/cache-info")
@@ -1276,3 +1280,25 @@ async def check_global_knowledge_base_disabled(
     except Exception as e:
         logger.error(f"Check global knowledge base disabled error: {e}")
         raise HTTPException(status_code=500, detail="Failed to check knowledge base disabled status")
+
+# Public endpoint - System configuration (no authentication required)
+# This is accessed by frontend before login to determine deployment mode
+@public_router.get("/config/system-info")
+async def get_system_info():
+    """
+    Get system configuration information (public endpoint)
+
+    Returns:
+    - deployment_mode: 'enterprise' or 'saas'
+    - is_saas_mode: boolean
+    - is_enterprise_mode: boolean
+    - version: application version
+    - app_name: application name
+    """
+    return {
+        "deployment_mode": settings.deployment_mode,
+        "is_saas_mode": settings.is_saas_mode,
+        "is_enterprise_mode": settings.is_enterprise_mode,
+        "version": settings.app_version,
+        "app_name": settings.app_name
+    }

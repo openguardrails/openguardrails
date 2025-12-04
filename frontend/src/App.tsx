@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import Layout from './components/Layout/Layout';
@@ -20,14 +20,31 @@ import SecurityGateway from './pages/SecurityGateway/SecurityGateway';
 import Documentation from './pages/Documentation/Documentation';
 import Subscription from './pages/Billing/Subscription';
 import ApplicationManagement from './pages/Config/ApplicationManagement';
+import { initSystemConfig, features } from './config';
 
 function App() {
   const { t, i18n } = useTranslation();
+  const [configLoaded, setConfigLoaded] = useState(false);
+
+  // Initialize system configuration
+  useEffect(() => {
+    const loadConfig = async () => {
+      await initSystemConfig();
+      setConfigLoaded(true);
+    };
+    loadConfig();
+  }, []);
 
   // Update document title based on current language
   useEffect(() => {
     document.title = t('common.appName');
   }, [t, i18n.language]);
+
+  // Don't render until config is loaded
+  if (!configLoaded) {
+    return null;
+  }
+
   return (
     <ApplicationProvider>
       <Routes>
@@ -50,7 +67,9 @@ function App() {
               <Route path="/config/*" element={<Config />} />
               <Route path="/admin/*" element={<AdminPanel />} />
               <Route path="/account" element={<Account />} />
-              <Route path="/subscription" element={<Subscription />} />
+              {features.showSubscription() && (
+                <Route path="/subscription" element={<Subscription />} />
+              )}
               <Route path="/documentation" element={<Documentation />} />
             </Routes>
           </Layout>

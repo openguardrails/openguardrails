@@ -20,6 +20,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { adminApi, configApi } from '../../services/api';
 import LanguageSwitcher from '../LanguageSwitcher/LanguageSwitcher';
 import ApplicationSelector from '../ApplicationSelector';
+import { features } from '../../config';
 
 const { Header, Sider, Content } = AntLayout;
 
@@ -156,14 +157,16 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           key: '/admin/rate-limits',
           label: t('nav.rateLimiting'),
         },
-        {
+        // Subscription management only in SaaS mode
+        ...(features.showSubscription() ? [{
           key: '/admin/subscriptions',
           label: t('nav.subscriptionManagement'),
-        },
-        {
+        }] : []),
+        // Package marketplace only in SaaS mode
+        ...(features.showMarketplace() ? [{
           key: '/admin/package-marketplace',
           label: t('nav.packageMarketplace'),
-        },
+        }] : []),
       ],
     }] : []),
     {
@@ -171,11 +174,12 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       icon: <UserOutlined />,
       label: t('nav.account'),
     },
-    {
+    // Subscription menu only in SaaS mode
+    ...(features.showSubscription() ? [{
       key: '/subscription',
       icon: <CreditCardOutlined />,
       label: t('nav.subscription'),
-    },
+    }] : []),
   ];
 
   const handleMenuClick = ({ key }: { key: string }) => {

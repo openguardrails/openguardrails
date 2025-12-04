@@ -63,7 +63,11 @@ services:
       # Application configuration
       - DEBUG=${DEBUG:-false}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-your-secret-key-change-in-production}
-      - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-local}
+
+      # Deployment mode configuration
+      # 'enterprise': Private enterprise deployment (default) - no subscription, no third-party package marketplace
+      # 'saas': SaaS deployment - with subscription system and third-party package marketplace
+      - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-enterprise}
 
       # Data directory configuration
       - DATA_DIR=/app/data

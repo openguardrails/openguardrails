@@ -143,6 +143,21 @@ class Settings(BaseSettings):
     # Options: 'en' (English) or 'zh' (Chinese)
     default_language: str = "en"
 
+    # Deployment mode configuration
+    # 'enterprise': Private enterprise deployment (default) - no subscription, no third-party package marketplace
+    # 'saas': SaaS deployment - with subscription system and third-party package marketplace
+    deployment_mode: str = "enterprise"
+
+    @property
+    def is_saas_mode(self) -> bool:
+        """Check if running in SaaS mode"""
+        return self.deployment_mode.lower() == "saas"
+
+    @property
+    def is_enterprise_mode(self) -> bool:
+        """Check if running in enterprise mode (private deployment)"""
+        return self.deployment_mode.lower() == "enterprise"
+
     # Default tenant limits
     # Default monthly scan limit for new tenants (detections per month)
     default_monthly_scan_limit: int = 10000

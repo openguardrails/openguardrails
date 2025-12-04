@@ -382,6 +382,9 @@ async def verify_user_auth(
 app.include_router(auth.router, prefix="/api/v1/auth")
 app.include_router(user.router, prefix="/api/v1/users")
 app.include_router(dashboard.router, prefix="/api/v1", dependencies=[Depends(verify_user_auth)])
+# Register public config routes (no auth required - e.g., system-info for deployment mode)
+app.include_router(config_api.public_router, prefix="/api/v1")
+# Register protected config routes (auth required)
 app.include_router(config_api.router, prefix="/api/v1", dependencies=[Depends(verify_user_auth)])
 app.include_router(results.router, prefix="/api/v1", dependencies=[Depends(verify_user_auth)])
 app.include_router(sync.router, prefix="/api/v1", dependencies=[Depends(verify_user_auth)])
@@ -393,17 +396,28 @@ app.include_router(concurrent_stats.router, dependencies=[Depends(verify_user_au
 # Data Security entity types management
 from routers import data_security
 app.include_router(data_security.router, prefix="/api/v1", dependencies=[Depends(verify_user_auth)])
-app.include_router(billing.router, dependencies=[Depends(verify_user_auth)])  # Billing APIs
+
+# Billing and Payment routes (only in SaaS mode)
+if settings.is_saas_mode:
+    app.include_router(billing.router, dependencies=[Depends(verify_user_auth)])  # Billing APIs
+    app.include_router(payment_api.router)  # Payment API (webhook endpoints don't require auth)
+    logger.info("Billing and payment routes enabled (SaaS mode)")
+else:
+    logger.info("Billing and payment routes disabled (enterprise mode)")
+
 app.include_router(applications.router, prefix="/api/v1/applications", dependencies=[Depends(verify_user_auth)])  # Application Management
 
 # Scanner Package System routes
 app.include_router(scanner_packages_api.router, dependencies=[Depends(verify_user_auth)])  # Scanner Packages
 app.include_router(scanner_configs_api.router, dependencies=[Depends(verify_user_auth)])  # Scanner Configs
 app.include_router(custom_scanners_api.router, dependencies=[Depends(verify_user_auth)])  # Custom Scanners
-app.include_router(purchase_api.router, dependencies=[Depends(verify_user_auth)])  # Package Purchases
 
-# Payment routes (webhook endpoints don't require auth, others do)
-app.include_router(payment_api.router)  # Payment API
+# Package purchase routes (only in SaaS mode for third-party packages)
+if settings.is_saas_mode:
+    app.include_router(purchase_api.router, dependencies=[Depends(verify_user_auth)])  # Package Purchases
+    logger.info("Package purchase routes enabled (SaaS mode)")
+else:
+    logger.info("Package purchase routes disabled (enterprise mode)")
 
 # Import and register ban policy routes
 from routers import ban_policy_api
