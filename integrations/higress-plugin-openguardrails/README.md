@@ -28,13 +28,76 @@ Plugin execution priority: `300`
 | `servicePort` | int | conditional | - | **Service Discovery Mode**: Required. OpenGuardrails service port (Public API: 443, Private: 5001) |
 | `serviceHost` | string | conditional | - | **Service Discovery Mode**: Required. OpenGuardrails service domain (Public API: api.openguardrails.com, Private: custom) |
 | `checkRequest` | bool | optional | false | Check if user input is compliant |
-| `checkResponse` | bool | optional | false | Check if model response is compliant |
+| `checkResponse` | bool | optional | false | Check if model response is compliant (requires `checkRequest: true` for context-aware detection) |
 | `requestContentJsonPath` | string | optional | `messages.@reverse.0.content` | JSONPath to extract content from request body |
 | `responseContentJsonPath` | string | optional | `choices.0.message.content` | JSONPath to extract content from response body |
 | `denyCode` | int | optional | 200 | HTTP status code when content is blocked |
 | `denyMessage` | string | optional | "I'm sorry, I cannot answer your question" | Response message when content is blocked |
 | `protocol` | string | optional | openai | Protocol format, use `original` for non-OpenAI protocols |
 | `timeout` | int | optional | 5000 | Timeout for calling OpenGuardrails service (milliseconds) |
+
+## Important Notes
+
+### Response Checking Requirements
+
+⚠️ **Response checking (`checkResponse: true`) requires request checking (`checkRequest: true`)** to be enabled.
+
+This is because response detection is **context-aware** - OpenGuardrails needs both the user prompt and AI response to accurately detect:
+- Data leakage in responses (PII, business secrets)
+- Harmful content that depends on context
+- Compliance violations based on the conversation
+
+**Supported Configurations:**
+- ✅ `checkRequest: true, checkResponse: false` - Check user input only
+- ✅ `checkRequest: true, checkResponse: true` - Check both input and response (recommended)
+- ❌ `checkRequest: false, checkResponse: true` - **Invalid** (will be rejected)
+
+### Request-Response Pairing Guarantee
+
+Each user request and AI response are **guaranteed to be paired correctly**, even under high concurrency:
+- Each HTTP request gets its own isolated context (Higress HttpContext lifecycle)
+- No data leakage between concurrent requests
+- The prompt stored during request phase is always matched with its corresponding response
+
+### Multimodal Content Support
+
+✅ **The plugin supports multimodal models** (Gemini, GPT-4V, Claude 3, etc.) that handle images, PDFs, and other non-text content.
+
+**How it works:**
+- For **multimodal requests** (text + images/PDFs), only the text parts are extracted and sent to OpenGuardrails for detection
+- For **multimodal responses** (text + generated images), only the text parts are checked
+- If a message contains **no text content** (e.g., only images), detection is automatically skipped and the request proceeds normally
+- **Non-text content is never sent to OpenGuardrails** - it passes through transparently
+
+**Example: Image analysis request**
+```json
+{
+  "messages": [{
+    "role": "user",
+    "content": [
+      {"type": "text", "text": "What's in this image?"},
+      {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}}
+    ]
+  }]
+}
+```
+- ✅ Text part ("What's in this image?") is checked by OpenGuardrails
+- ✅ Image data passes through without interference
+- ✅ User can use multimodal models normally
+
+**Example: Pure image request (no text)**
+```json
+{
+  "messages": [{
+    "role": "user",
+    "content": [
+      {"type": "image_url", "image_url": {"url": "..."}}
+    ]
+  }]
+}
+```
+- ✅ No text to check, detection is skipped
+- ✅ Request proceeds to the model without blocking
 
 ## Risk Levels
 

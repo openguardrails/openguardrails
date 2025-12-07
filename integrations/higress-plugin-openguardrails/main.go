@@ -142,6 +142,11 @@ func parseConfig(json gjson.Result, config *OpenGuardrailsConfig) error {
 	config.checkRequest = json.Get("checkRequest").Bool()
 	config.checkResponse = json.Get("checkResponse").Bool()
 
+	// Validate check flags: response checking requires request checking (for context)
+	if config.checkResponse && !config.checkRequest {
+		return errors.New("invalid config: checkResponse requires checkRequest to be true (response detection needs request context)")
+	}
+
 	// Parse protocol
 	config.protocolOriginal = json.Get("protocol").String() == "original"
 
@@ -190,6 +195,8 @@ func parseConfig(json gjson.Result, config *OpenGuardrailsConfig) error {
 func onHttpRequestHeaders(ctx wrapper.HttpContext, config OpenGuardrailsConfig) types.Action {
 	ctx.DisableReroute()
 	if !config.checkRequest {
+		// Skip reading request body if request checking is disabled
+		// (Note: checkResponse requires checkRequest, validated in parseConfig)
 		log.Debugf("request checking is disabled")
 		ctx.DontReadRequestBody()
 	}
@@ -200,16 +207,48 @@ func onHttpRequestBody(ctx wrapper.HttpContext, config OpenGuardrailsConfig, bod
 	log.Debugf("checking request body...")
 
 	// Extract content from request body
-	content := gjson.GetBytes(body, config.requestContentJsonPath).String()
-	log.Debugf("Raw request content is: %s", content)
+	contentResult := gjson.GetBytes(body, config.requestContentJsonPath)
+
+	// Check if content is multimodal (array) or pure text (string)
+	var content string
+	if contentResult.IsArray() {
+		// Multimodal content (images, PDFs, etc.) - extract only text parts
+		log.Infof("Detected multimodal content, extracting text parts only")
+		var textParts []string
+		for _, part := range contentResult.Array() {
+			if part.Get("type").String() == "text" {
+				textParts = append(textParts, part.Get("text").String())
+			}
+		}
+		if len(textParts) == 0 {
+			log.Infof("No text content found in multimodal message, skipping detection")
+			return types.ActionContinue
+		}
+		// Concatenate all text parts
+		content = strings.Join(textParts, " ")
+	} else {
+		// Pure text content
+		content = contentResult.String()
+	}
+
+	log.Debugf("Extracted text content: %s", content)
 
 	if len(content) == 0 {
-		log.Info("request content is empty. skip")
+		log.Infof("Text content is empty, skipping detection")
 		return types.ActionContinue
 	}
 
 	// Extract user_id if present (optional)
 	userID := gjson.GetBytes(body, "xxai_app_user_id").String()
+
+	// Store prompt and user_id in context for response checking
+	if config.checkResponse {
+		ctx.SetContext("request_prompt", content)
+		if userID != "" {
+			ctx.SetContext("user_id", userID)
+		}
+		log.Debugf("Stored request_prompt and user_id in context for response checking")
+	}
 
 	// Prepare request to OpenGuardrails
 	requestBody := map[string]interface{}{
@@ -325,11 +364,34 @@ func onHttpResponseBody(ctx wrapper.HttpContext, config OpenGuardrailsConfig, bo
 	}
 
 	// Extract response content
-	responseContent := gjson.GetBytes(body, config.responseContentJsonPath).String()
-	log.Debugf("Raw response content is: %s", responseContent)
+	responseResult := gjson.GetBytes(body, config.responseContentJsonPath)
+
+	// Check if response is multimodal (array) or pure text (string)
+	var responseContent string
+	if responseResult.IsArray() {
+		// Multimodal response (images, etc.) - extract only text parts
+		log.Infof("Detected multimodal response, extracting text parts only")
+		var textParts []string
+		for _, part := range responseResult.Array() {
+			if part.Get("type").String() == "text" {
+				textParts = append(textParts, part.Get("text").String())
+			}
+		}
+		if len(textParts) == 0 {
+			log.Infof("No text content found in multimodal response, skipping detection")
+			return types.ActionContinue
+		}
+		// Concatenate all text parts
+		responseContent = strings.Join(textParts, " ")
+	} else {
+		// Pure text response
+		responseContent = responseResult.String()
+	}
+
+	log.Debugf("Extracted response text content: %s", responseContent)
 
 	if len(responseContent) == 0 {
-		log.Info("response content is empty. skip")
+		log.Infof("Response text content is empty, skipping detection")
 		return types.ActionContinue
 	}
 

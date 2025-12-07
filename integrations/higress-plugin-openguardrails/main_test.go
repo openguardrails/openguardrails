@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -123,6 +124,16 @@ func TestParseConfig(t *testing.T) {
 				assert.Equal(t, "openguardrails-direct.dns", cfg.serviceName)
 				assert.Equal(t, true, cfg.checkRequest)
 			},
+		},
+		{
+			name: "invalid: checkResponse without checkRequest",
+			json: `{
+			"baseURL": "http://localhost:5001/v1/guardrails",
+			"apiKey": "sk-xxai-test-key",
+			"checkRequest": false,
+			"checkResponse": true
+		}`,
+			expectErr: true, // Should fail validation
 		},
 	}
 
@@ -289,6 +300,123 @@ func TestJSONPathExtraction(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := gjson.Get(tt.body, tt.path)
 			assert.Equal(t, tt.expected, result.String())
+		})
+	}
+}
+
+func TestMultimodalContentHandling(t *testing.T) {
+	tests := []struct {
+		name         string
+		body         string
+		path         string
+		expectedText string
+		isArray      bool
+	}{
+		{
+			name: "pure text content",
+			body: `{
+				"messages": [
+					{"role": "user", "content": "Hello, how are you?"}
+				]
+			}`,
+			path:         "messages.0.content",
+			expectedText: "Hello, how are you?",
+			isArray:      false,
+		},
+		{
+			name: "multimodal content with text and image",
+			body: `{
+				"messages": [
+					{
+						"role": "user",
+						"content": [
+							{"type": "text", "text": "What's in this image?"},
+							{"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}}
+						]
+					}
+				]
+			}`,
+			path:         "messages.0.content",
+			expectedText: "What's in this image?",
+			isArray:      true,
+		},
+		{
+			name: "multimodal content with multiple text parts",
+			body: `{
+				"messages": [
+					{
+						"role": "user",
+						"content": [
+							{"type": "text", "text": "First part"},
+							{"type": "image_url", "image_url": {"url": "..."}},
+							{"type": "text", "text": "Second part"}
+						]
+					}
+				]
+			}`,
+			path:         "messages.0.content",
+			expectedText: "First part Second part",
+			isArray:      true,
+		},
+		{
+			name: "multimodal content with only image (no text)",
+			body: `{
+				"messages": [
+					{
+						"role": "user",
+						"content": [
+							{"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}}
+						]
+					}
+				]
+			}`,
+			path:         "messages.0.content",
+			expectedText: "",
+			isArray:      true,
+		},
+		{
+			name: "multimodal response from AI",
+			body: `{
+				"choices": [
+					{
+						"message": {
+							"role": "assistant",
+							"content": [
+								{"type": "text", "text": "Here's the generated image:"},
+								{"type": "image_url", "image_url": {"url": "https://..."}}
+							]
+						}
+					}
+				]
+			}`,
+			path:         "choices.0.message.content",
+			expectedText: "Here's the generated image:",
+			isArray:      true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			contentResult := gjson.Get(tt.body, tt.path)
+
+			// Test if it's correctly detected as array
+			assert.Equal(t, tt.isArray, contentResult.IsArray())
+
+			// Extract text content
+			var extractedText string
+			if contentResult.IsArray() {
+				var textParts []string
+				for _, part := range contentResult.Array() {
+					if part.Get("type").String() == "text" {
+						textParts = append(textParts, part.Get("text").String())
+					}
+				}
+				extractedText = strings.Join(textParts, " ")
+			} else {
+				extractedText = contentResult.String()
+			}
+
+			assert.Equal(t, tt.expectedText, extractedText)
 		})
 	}
 }
