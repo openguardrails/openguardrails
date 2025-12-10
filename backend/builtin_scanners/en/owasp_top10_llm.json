@@ -1,0 +1,19 @@
+{
+    "package_code": "owasp_top10_llm",
+    "package_name": "OWASP Top 10 for LLM Applications 2025 Package",
+    "author": "OpenGuardrails",
+    "description": "LLM01:2025 Prompt Injection; LLM07:2025 System Prompt Leakage",
+    "version": "1.0.0",
+    "license": "Apache-2.0",
+    "scanners": [
+        {
+            "tag": "S9",
+            "type": "genai",
+            "name": "Prompt Injection & Jailbreaking",
+            "definition": "Prompt injection & jailbreaking attacks, including through prompt injection, role-playing attacks, or system prompt manipulation to manipulate, bypass, jailbreak, or exploit AI systems",
+            "risk_level": "high_risk",
+            "scan_prompt": true,
+            "scan_response": false
+        }
+    ]
+}

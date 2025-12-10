@@ -9,8 +9,8 @@
     {
       "tag": "S9",
       "type": "genai",
-      "name": "提示词攻击",
-      "definition": "提示词攻击，包括通过提示词注入、角色扮演攻击或系统提示词操纵来操纵、绕过、越狱或利用AI系统",
+      "name": "提示词注入和越狱攻击",
+      "definition": "提示词注入和越狱攻击，包括通过提示词注入、角色扮演攻击或系统提示词操纵来操纵、绕过、越狱或利用AI系统等",
       "risk_level": "high_risk",
       "scan_prompt": true,
       "scan_response": false
