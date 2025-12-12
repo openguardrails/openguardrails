@@ -841,34 +841,48 @@ async def get_available_scanners_for_knowledge_base(
             ScannerPackage, Scanner.package_id == ScannerPackage.id
         ).filter(
             ScannerPackage.is_official == True,
-            ScannerPackage.package_type == 'builtin'
+            ScannerPackage.package_type == 'builtin'  # Basic packages
         ).order_by(Scanner.tag).all()
         result["official_scanners"] = [
             {"value": s.tag, "label": f"{s.tag} - {s.name}"}
             for s in official_scanners
         ]
 
-        # Get marketplace scanners (purchased packages only)
-        # Only return scanners from packages that the user has purchased and approved
+        # Get marketplace scanners (purchased premium packages only)
+        # Only return scanners from premium packages that the user has purchased and approved
+        # Super admins get access to all marketplace scanners
         tenant_id = current_user.id
         
-        # Get approved purchases for this tenant
-        approved_package_ids = db.query(PackagePurchase.package_id).filter(
-            PackagePurchase.tenant_id == tenant_id,
-            PackagePurchase.status == 'approved'
-        ).all()
-        approved_package_ids = [pkg_id[0] for pkg_id in approved_package_ids]
+        # Check if user is super admin
+        is_super_admin = hasattr(current_user, 'is_super_admin') and current_user.is_super_admin
         
-        # Get scanners from purchased packages
         marketplace_scanners = []
-        if approved_package_ids:
+        if is_super_admin:
+            # Super admin gets all marketplace scanners
             marketplace_scanners = db.query(Scanner).join(
                 ScannerPackage, Scanner.package_id == ScannerPackage.id
             ).filter(
-                ScannerPackage.package_type == 'purchasable',
-                Scanner.package_id.in_(approved_package_ids),
+                ScannerPackage.package_type == 'purchasable',  # Premium packages
                 Scanner.is_active == True
             ).order_by(Scanner.tag).all()
+        else:
+            # Regular users only get scanners from purchased packages
+            # Get approved purchases for this tenant
+            approved_package_ids = db.query(PackagePurchase.package_id).filter(
+                PackagePurchase.tenant_id == tenant_id,
+                PackagePurchase.status == 'approved'
+            ).all()
+            approved_package_ids = [pkg_id[0] for pkg_id in approved_package_ids]
+            
+            # Get scanners from purchased premium packages
+            if approved_package_ids:
+                marketplace_scanners = db.query(Scanner).join(
+                    ScannerPackage, Scanner.package_id == ScannerPackage.id
+                ).filter(
+                    ScannerPackage.package_type == 'purchasable',  # Premium packages
+                    Scanner.package_id.in_(approved_package_ids),
+                    Scanner.is_active == True
+                ).order_by(Scanner.tag).all()
         
         result["marketplace_scanners"] = [
             {"value": s.tag, "label": f"{s.tag} - {s.name}"}

@@ -1,12 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Table, Button, message, Spin, Space, Modal, Form, Input, Select, Tag, Alert, Collapse, Switch } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Card, Table, Button, message, Spin, Space, Modal, Form, Input, Select, Tag, Alert, Collapse, Switch, Result, Typography } from 'antd';
+import { PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined, CrownOutlined, LockOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import { customScannersApi } from '../../services/api';
 import { useApplication } from '../../contexts/ApplicationContext';
 import { eventBus, EVENTS } from '../../utils/eventBus';
+import { billingService } from '../../services/billing';
 
 const { TextArea } = Input;
+const { Text } = Typography;
 const { Option } = Select;
 const { Panel } = Collapse;
 
@@ -31,36 +34,93 @@ interface CustomScanner {
 const CustomScannersManagement: React.FC = () => {
   const { t } = useTranslation();
   const [form] = Form.useForm();
+  const navigate = useNavigate();
   const { currentApplicationId } = useApplication();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [scanners, setScanners] = useState<CustomScanner[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingScanner, setEditingScanner] = useState<CustomScanner | null>(null);
+  const [isSubscribed, setIsSubscribed] = useState<boolean | null>(null);
+  const [subscriptionLoading, setSubscriptionLoading] = useState(true);
 
   useEffect(() => {
+    checkSubscription();
     if (currentApplicationId) {
       loadData();
     }
   }, [currentApplicationId]);
+
+  const checkSubscription = async () => {
+    try {
+      setSubscriptionLoading(true);
+      const subscription = await billingService.getCurrentSubscription();
+      setIsSubscribed(subscription?.subscription_type === 'subscribed');
+    } catch (error) {
+      console.error('Failed to check subscription:', error);
+      setIsSubscribed(false);
+    } finally {
+      setSubscriptionLoading(false);
+    }
+  };
 
   const loadData = async () => {
     try {
       setLoading(true);
       const scannersData = await customScannersApi.getAll();
       setScanners(scannersData);
-    } catch (error) {
-      message.error(t('customScanners.loadFailed'));
-      console.error('Failed to load custom scanners:', error);
+    } catch (error: any) {
+      // Handle 403 subscription error gracefully
+      if (error.response?.status === 403) {
+        setScanners([]);
+        // Don't show error message, the UI will show the upgrade prompt
+      } else {
+        message.error(t('customScanners.loadFailed'));
+        console.error('Failed to load custom scanners:', error);
+      }
     } finally {
       setLoading(false);
     }
   };
 
   const handleCreate = () => {
+    if (!isSubscribed) {
+      showUpgradeModal();
+      return;
+    }
     setEditingScanner(null);
     form.resetFields();
     setModalVisible(true);
+  };
+
+  const showUpgradeModal = () => {
+    Modal.info({
+      title: (
+        <Space>
+          <CrownOutlined style={{ color: '#faad14' }} />
+          {t('customScanners.premiumFeature')}
+        </Space>
+      ),
+      content: (
+        <Space direction="vertical" size="middle" style={{ width: '100%', marginTop: 16 }}>
+          <div>
+            <p style={{ fontSize: 15, marginBottom: 12 }}>{t('customScanners.premiumFeatureDesc')}</p>
+            <ul style={{ paddingLeft: 20, marginBottom: 16 }}>
+              <li>{t('customScanners.feature1')}</li>
+              <li>{t('customScanners.feature2')}</li>
+              <li>{t('customScanners.feature3')}</li>
+              <li>{t('customScanners.feature4')}</li>
+            </ul>
+          </div>
+        </Space>
+      ),
+      okText: t('customScanners.upgradeNow'),
+      onOk: () => {
+        navigate('/subscription');
+      },
+      width: 520,
+      icon: null,
+    });
   };
 
   const handleEdit = (scanner: CustomScanner) => {
@@ -269,9 +329,93 @@ const CustomScannersManagement: React.FC = () => {
 
   const selectedScannerType = Form.useWatch('scanner_type', form);
 
+  // Show loading state while checking subscription
+  if (subscriptionLoading) {
+    return <Spin spinning={true} />;
+  }
+
+  // Show upgrade prompt if not subscribed
+  if (isSubscribed === false) {
+    return (
+      <Space direction="vertical" size="large" style={{ width: '100%' }}>
+        <Card>
+          <Result
+            icon={<CrownOutlined style={{ color: '#faad14', fontSize: 72 }} />}
+            title={
+              <Space>
+                <LockOutlined />
+                {t('customScanners.premiumFeatureTitle')}
+              </Space>
+            }
+            subTitle={t('customScanners.premiumFeatureSubtitle')}
+            extra={[
+              <Button 
+                type="primary" 
+                size="large" 
+                key="upgrade"
+                icon={<CrownOutlined />}
+                onClick={() => navigate('/subscription')}
+              >
+                {t('customScanners.upgradeNow')}
+              </Button>,
+            ]}
+          >
+            <div style={{ 
+              textAlign: 'left', 
+              maxWidth: 600, 
+              margin: '0 auto',
+              padding: '24px',
+              background: '#fafafa',
+              borderRadius: 8
+            }}>
+              <h3 style={{ marginBottom: 16 }}>
+                <CrownOutlined style={{ color: '#faad14', marginRight: 8 }} />
+                {t('customScanners.benefitsTitle')}
+              </h3>
+              <ul style={{ paddingLeft: 20, fontSize: 15, lineHeight: 2 }}>
+                <li>{t('customScanners.feature1')}</li>
+                <li>{t('customScanners.feature2')}</li>
+                <li>{t('customScanners.feature3')}</li>
+                <li>{t('customScanners.feature4')}</li>
+                <li>{t('customScanners.feature5')}</li>
+              </ul>
+              <div style={{ 
+                marginTop: 24, 
+                padding: 16, 
+                background: '#fff', 
+                borderRadius: 6,
+                border: '1px solid #d9d9d9'
+              }}>
+                <Text strong style={{ fontSize: 16 }}>
+                  {t('customScanners.pricingInfo')}
+                </Text>
+                <div style={{ marginTop: 8, fontSize: 14, color: '#666' }}>
+                  {t('customScanners.pricingDetails')}
+                </div>
+              </div>
+            </div>
+          </Result>
+        </Card>
+      </Space>
+    );
+  }
+
   return (
     <Spin spinning={loading}>
       <Space direction="vertical" size="large" style={{ width: '100%' }}>
+        <Alert
+          message={
+            <Space>
+              <CrownOutlined style={{ color: '#faad14' }} />
+              <span>{t('customScanners.premiumActiveMessage')}</span>
+            </Space>
+          }
+          description={t('customScanners.premiumActiveDesc')}
+          type="success"
+          showIcon={false}
+          closable
+        />
+        
         <Collapse style={{ backgroundColor: '#f8f9fa' }}>
           <Collapse.Panel header={t('customScanners.usageGuideTitle')} key="1">
             <div style={{ marginBottom: 16 }}>

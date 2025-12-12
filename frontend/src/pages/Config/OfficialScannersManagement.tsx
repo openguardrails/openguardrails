@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Table, Switch, Button, message, Spin, Tabs, Tag, Space, Modal, Descriptions, Tooltip, Drawer } from 'antd';
-import { InfoCircleOutlined, ReloadOutlined, ShoppingOutlined, EyeOutlined, LoadingOutlined } from '@ant-design/icons';
+import { InfoCircleOutlined, ReloadOutlined, ShoppingOutlined, LoadingOutlined, EyeOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
 import { scannerPackagesApi, scannerConfigsApi, purchasesApi } from '../../services/api';
@@ -82,10 +82,6 @@ const OfficialScannersManagement: React.FC = () => {
   const [selectedPackage, setSelectedPackage] = useState<Package | null>(null);
   const [purchaseModalVisible, setPurchaseModalVisible] = useState(false);
   const [purchasePackage, setPurchasePackage] = useState<Package | null>(null);
-  const [detailsDrawerVisible, setDetailsDrawerVisible] = useState(false);
-  const [detailsPackage, setDetailsPackage] = useState<Package | null>(null);
-  const [packageDetails, setPackageDetails] = useState<any>(null);
-  const [loadingDetails, setLoadingDetails] = useState(false);
   const [paymentConfig, setPaymentConfig] = useState<PaymentConfig | null>(null);
   const [paymentLoading, setPaymentLoading] = useState(false);
 
@@ -100,7 +96,7 @@ const OfficialScannersManagement: React.FC = () => {
   });
 
   useEffect(() => {
-    // Load packages regardless of application selection (built-in packages are global)
+    // Load packages regardless of application selection (basic packages are global)
     loadPackagesOnly();
 
     // Load scanner configs only if application is selected
@@ -147,7 +143,7 @@ const OfficialScannersManagement: React.FC = () => {
 
   const loadPackagesOnly = async () => {
     try {
-      // Load built-in packages (no application needed)
+      // Load basic packages (no application needed)
       const allBuiltin = await scannerPackagesApi.getAll('builtin');
       setBuiltinPackages(allBuiltin);
 
@@ -329,31 +325,7 @@ const OfficialScannersManagement: React.FC = () => {
     }
   };
 
-  const handleViewDetails = async (pkg: Package) => {
-    setDetailsPackage(pkg);
-    setDetailsDrawerVisible(true);
-    setLoadingDetails(true);
-    try {
-      // In enterprise mode or for built-in packages, use regular detail endpoint
-      // In SaaS mode for marketplace packages, use marketplace detail endpoint
-      const details = features.showMarketplace() && pkg.package_type === 'purchasable'
-        ? await scannerPackagesApi.getMarketplaceDetail(pkg.id)
-        : await scannerPackagesApi.getDetail(pkg.id);
-      setPackageDetails(details);
-    } catch (error) {
-      message.error(t('scannerPackages.loadDetailsFailed'));
-      console.error('Failed to load package details:', error);
-    } finally {
-      setLoadingDetails(false);
-    }
-  };
-
-  const handleCloseDetailsDrawer = () => {
-    setDetailsDrawerVisible(false);
-    setDetailsPackage(null);
-    setPackageDetails(null);
-  };
-
+  
   const getRiskLevelColor = (level: string) => {
     const colors: { [key: string]: string } = {
       'high_risk': 'red',
@@ -473,16 +445,9 @@ const OfficialScannersManagement: React.FC = () => {
     {
       title: t('common.actions'),
       key: 'actions',
-      width: 200,
+      width: 120,
       render: (_: any, record: Package) => (
         <Space>
-          <Button
-            size="small"
-            icon={<EyeOutlined />}
-            onClick={() => handleViewDetails(record)}
-          >
-            {t('scannerPackages.viewDetails')}
-          </Button>
           <Button
             type="primary"
             size="small"
@@ -834,110 +799,7 @@ const OfficialScannersManagement: React.FC = () => {
           )}
         </Drawer>
 
-        {/* Marketplace Package Details Drawer */}
-        <Drawer
-          title={detailsPackage ? `${detailsPackage.package_name} - ${t('scannerPackages.packageDetails')}` : ''}
-          placement="right"
-          width={900}
-          onClose={handleCloseDetailsDrawer}
-          open={detailsDrawerVisible}
-        >
-          <Spin spinning={loadingDetails}>
-            {detailsPackage && (
-              <Space direction="vertical" size="large" style={{ width: '100%' }}>
-                <Descriptions column={1} bordered size="small">
-                  <Descriptions.Item label={t('scannerPackages.packageName')}>
-                    {detailsPackage.package_name}
-                  </Descriptions.Item>
-                  <Descriptions.Item label={t('scannerPackages.description')}>
-                    {detailsPackage.description || '-'}
-                  </Descriptions.Item>
-                  <Descriptions.Item label={t('scannerPackages.author')}>
-                    {detailsPackage.author}
-                  </Descriptions.Item>
-                  <Descriptions.Item label={t('scannerPackages.version')}>
-                    {detailsPackage.version}
-                  </Descriptions.Item>
-                  <Descriptions.Item label={t('scannerPackages.scannerCount')}>
-                    {detailsPackage.scanner_count}
-                  </Descriptions.Item>
-                  <Descriptions.Item label={t('scannerPackages.priceDisplay')}>
-                    {formatPriceDisplay(detailsPackage.price, detailsPackage.price_display)}
-                  </Descriptions.Item>
-                </Descriptions>
-
-                {packageDetails && packageDetails.scanners && packageDetails.scanners.length > 0 && (
-                  <>
-                    <div style={{ fontWeight: 'bold', fontSize: '16px' }}>
-                      {t('scannerPackages.scannersIncluded')}
-                    </div>
-                    <Table
-                      columns={[
-                        {
-                          title: t('scannerPackages.scannerTag'),
-                          dataIndex: 'tag',
-                          key: 'tag',
-                          width: 80,
-                          render: (tag: string) => <Tag color="blue">{tag}</Tag>,
-                        },
-                        {
-                          title: t('scannerPackages.scannerName'),
-                          dataIndex: 'name',
-                          key: 'name',
-                          width: 200,
-                        },
-                        {
-                          title: t('scannerPackages.scannerType'),
-                          dataIndex: 'scanner_type',
-                          key: 'scanner_type',
-                          width: 100,
-                          render: (type: string) => getScannerTypeLabel(type),
-                        },
-                        {
-                          title: t('scannerPackages.riskLevel'),
-                          dataIndex: 'default_risk_level',
-                          key: 'default_risk_level',
-                          width: 120,
-                          render: (level: string) => (
-                            <Tag color={getRiskLevelColor(level)}>
-                              {t(`risk.level.${level}`)}
-                            </Tag>
-                          ),
-                        },
-                      ]}
-                      dataSource={packageDetails.scanners}
-                      rowKey="tag"
-                      pagination={false}
-                      size="small"
-                    />
-                  </>
-                )}
-
-                <div style={{
-                  padding: '16px',
-                  backgroundColor: '#f0f2f5',
-                  borderRadius: '4px',
-                  textAlign: 'center'
-                }}>
-                  <p style={{ marginBottom: '8px', fontSize: '14px', fontWeight: 'bold' }}>
-                    {t('scannerPackages.interestedInPurchase')}
-                  </p>
-                  <Button
-                    type="primary"
-                    icon={<ShoppingOutlined />}
-                    onClick={() => {
-                      handleCloseDetailsDrawer();
-                      handleRequestPurchase(detailsPackage);
-                    }}
-                  >
-                    {t('scannerPackages.requestPurchase')}
-                  </Button>
-                </div>
               </Space>
-            )}
-          </Spin>
-        </Drawer>
-      </Space>
     </Spin>
   );
 };

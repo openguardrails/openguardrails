@@ -87,6 +87,11 @@ api.interceptors.response.use(
       return Promise.reject(error);
     }
     
+    // For 403 errors on custom scanners, let the component handle it (show upgrade prompt)
+    if (status === 403 && url && url.includes('/custom-scanners')) {
+      return Promise.reject(error);
+    }
+    
     const errorMessage = error.response?.data?.detail || error.message || 'Request failed';
     message.error(errorMessage);
     return Promise.reject(error);

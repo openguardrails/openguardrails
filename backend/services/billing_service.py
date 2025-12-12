@@ -42,6 +42,23 @@ class BillingService:
     def get_subscription(self, tenant_id: str, db: Session) -> Optional[TenantSubscription]:
         """Get tenant subscription with caching"""
         try:
+            # Check if tenant is super admin - they get automatic 'subscribed' access
+            tenant_uuid = UUID(tenant_id)
+            tenant = db.query(Tenant).filter(Tenant.id == tenant_uuid).first()
+            
+            if tenant and hasattr(tenant, 'is_super_admin') and tenant.is_super_admin:
+                # Create a virtual subscription for super admin (not saved to DB)
+                virtual_subscription = TenantSubscription(
+                    id=tenant_uuid,
+                    tenant_id=tenant_uuid,
+                    subscription_type='subscribed',
+                    monthly_quota=999999999,  # Unlimited quota for super admin
+                    current_month_usage=0,
+                    usage_reset_at=datetime(2099, 12, 31, tzinfo=timezone.utc)
+                )
+                logger.debug(f"Super admin {tenant.email} granted automatic subscription access")
+                return virtual_subscription
+            
             # Check cache
             cache_entry = self._subscription_cache.get(tenant_id)
             current_time = time.time()
@@ -52,7 +69,6 @@ class BillingService:
                     return subscription
 
             # Query from database
-            tenant_uuid = UUID(tenant_id)
             subscription = db.query(TenantSubscription).filter(
                 TenantSubscription.tenant_id == tenant_uuid
             ).first()
@@ -77,6 +93,12 @@ class BillingService:
         try:
             tenant_uuid = UUID(tenant_id)
             current_time = get_current_utc_time()
+
+            # Check if tenant is super admin - they have unlimited quota
+            tenant = db.query(Tenant).filter(Tenant.id == tenant_uuid).first()
+            if tenant and hasattr(tenant, 'is_super_admin') and tenant.is_super_admin:
+                logger.debug(f"Super admin {tenant.email} bypassed quota check (unlimited access)")
+                return True, None
 
             # First, get the subscription to check if reset is needed
             subscription = db.query(TenantSubscription).filter(

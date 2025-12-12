@@ -31,7 +31,7 @@ class PurchaseService:
         message: Optional[str] = None
     ) -> PackagePurchase:
         """
-        Request to purchase a package.
+        Request to purchase a premium package.
 
         Args:
             tenant_id: Tenant UUID
@@ -43,9 +43,18 @@ class PurchaseService:
             Purchase request
 
         Raises:
-            ValueError: If package not found, not purchasable, or already purchased
+            ValueError: If package not found, not premium (purchasable), or already purchased
         """
-        # Verify package exists and is purchasable
+        # Check if tenant is super admin - they don't need to purchase
+        tenant = self.db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        is_super_admin = tenant and hasattr(tenant, 'is_super_admin') and tenant.is_super_admin
+        
+        if is_super_admin:
+            raise ValueError(
+                "Super admins have automatic access to all packages and do not need to purchase them."
+            )
+        
+        # Verify package exists and is premium (purchasable)
         package = self.db.query(ScannerPackage).filter(
             ScannerPackage.id == package_id,
             ScannerPackage.is_active == True
@@ -365,8 +374,8 @@ class PurchaseService:
         email: str
     ) -> PackagePurchase:
         """
-        Directly purchase a free package without approval (auto-approved).
-        Used for packages with price = 0 or None.
+        Directly purchase a free premium package without approval (auto-approved).
+        Used for premium packages with price = 0 or None.
 
         Args:
             tenant_id: Tenant UUID

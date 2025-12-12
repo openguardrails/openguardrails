@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Upload, Image, message, Alert, Button } from 'antd';
 import { PlusOutlined, LockOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import type { UploadFile } from 'antd/es/upload/interface';
 import { billingService } from '../../services/billing';
 
@@ -23,6 +24,7 @@ const ImageUpload: React.FC<ImageUploadProps> = ({
   showSubscriptionPrompt = true
 }) => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [previewImage, setPreviewImage] = useState('');
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -177,7 +179,7 @@ const ImageUpload: React.FC<ImageUploadProps> = ({
           showIcon
           style={{ marginBottom: 16 }}
           action={
-            <Button type="primary" size="small" href="/platform/subscription">
+            <Button type="primary" size="small" onClick={() => navigate('/subscription')}>
               Upgrade Plan
             </Button>
           }

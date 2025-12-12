@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Header, Request
 from sqlalchemy.orm import Session
 
 from database.connection import get_admin_db
+from database.models import TenantSubscription
 from services.custom_scanner_service import CustomScannerService
 from models.requests import CustomScannerCreateRequest, CustomScannerUpdateRequest
 from models.responses import CustomScannerResponse, ApiResponse
@@ -39,6 +40,34 @@ def require_super_admin(request: Request) -> dict:
     user = get_current_user(request)
     if not user.get('is_super_admin'):
         raise HTTPException(status_code=403, detail="Super admin access required")
+    return user
+
+
+def require_subscription(request: Request, db: Session) -> dict:
+    """
+    Require subscribed user access for custom scanner features.
+    Custom scanners are a premium feature only available to subscribed users.
+    Super admins automatically have subscription access.
+    """
+    user = get_current_user(request)
+    tenant_id = UUID(user['tenant_id'])
+    
+    # Check if user is super admin - they automatically have subscription access
+    if user.get('is_super_admin'):
+        return user
+    
+    # Check subscription status
+    subscription = db.query(TenantSubscription).filter(
+        TenantSubscription.tenant_id == tenant_id
+    ).first()
+    
+    # If no subscription found or not subscribed, deny access
+    if not subscription or subscription.subscription_type != 'subscribed':
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Custom scanners are a premium feature. Please upgrade to a subscribed plan to access this feature."
+        )
+    
     return user
 
 
@@ -84,8 +113,10 @@ async def get_custom_scanners(
     Get all custom scanners for application.
 
     Returns only active custom scanners (S100+) created by this application.
+    
+    **Premium Feature**: Requires subscribed plan.
     """
-    current_user = get_current_user(request)
+    current_user = require_subscription(request, db)
     service = CustomScannerService(db)
 
     scanners = service.get_custom_scanners(application_id)
@@ -109,8 +140,10 @@ async def get_custom_scanner(
 ):
     """
     Get custom scanner details by ID.
+    
+    **Premium Feature**: Requires subscribed plan.
     """
-    current_user = get_current_user(request)
+    current_user = require_subscription(request, db)
     service = CustomScannerService(db)
 
     try:
@@ -159,8 +192,10 @@ async def create_custom_scanner(
     - genai: Calls OpenGuardrails-Text model
     - regex: Python regex pattern matching
     - keyword: Case-insensitive keyword matching
+    
+    **Premium Feature**: Requires subscribed plan.
     """
-    current_user = get_current_user(request)
+    current_user = require_subscription(request, db)
     service = CustomScannerService(db)
     tenant_id = UUID(current_user['tenant_id'])
 
@@ -201,8 +236,10 @@ async def update_custom_scanner(
 
     Note: Cannot update scanner_type or tag (would break detection logic).
     Can update: name, description, definition, risk_level, scan_prompt, scan_response, notes
+    
+    **Premium Feature**: Requires subscribed plan.
     """
-    current_user = get_current_user(request)
+    current_user = require_subscription(request, db)
     service = CustomScannerService(db)
 
     try:
@@ -247,8 +284,10 @@ async def delete_custom_scanner(
 
     This will mark the scanner as inactive and cascade disable
     in all scanner configurations.
+    
+    **Premium Feature**: Requires subscribed plan.
     """
-    current_user = get_current_user(request)
+    current_user = require_subscription(request, db)
     service = CustomScannerService(db)
 
     try:

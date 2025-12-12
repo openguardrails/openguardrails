@@ -645,11 +645,11 @@ class ScannerPackage(Base):
     license = Column(String(100), default='proprietary')
 
     # Package type
-    package_type = Column(String(50), nullable=False)  # 'builtin', 'purchasable'
+    package_type = Column(String(50), nullable=False)  # 'basic', 'premium' (formerly 'builtin', 'purchasable')
     is_official = Column(Boolean, nullable=False, default=True)
     requires_purchase = Column(Boolean, nullable=False, default=False)
 
-    # Purchase settings (for purchasable packages)
+    # Purchase settings (for premium packages)
     price = Column(Float, nullable=True)  # Original price as number for dynamic display
     price_display = Column(String(100))   # Fallback display text
     file_path = Column(String(512))

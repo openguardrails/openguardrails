@@ -61,13 +61,13 @@ async def get_all_packages(
     """
     Get all packages visible to current user.
 
-    - Builtin packages: Always visible
-    - Purchasable packages: Only if purchased (SaaS mode only)
+    - Basic packages: Always visible (system-provided)
+    - Premium packages: Only if purchased (SaaS mode only)
 
     Query params:
-    - package_type: Filter by 'builtin' or 'purchasable'
+    - package_type: Filter by 'builtin' or 'purchasable' (basic/premium)
 
-    Note: In enterprise mode, only builtin packages are available.
+    Note: In enterprise mode, only basic packages are available.
     """
     service = ScannerPackageService(db)
     tenant_id = UUID(current_user['tenant_id'])
@@ -158,7 +158,7 @@ async def get_marketplace_packages(
     db: Session = Depends(get_admin_db)
 ):
     """
-    Get all purchasable packages (marketplace view).
+    Get all premium packages (marketplace view).
 
     Returns metadata only (no scanner definitions until purchased).
     Includes purchase status for current user.
@@ -257,7 +257,7 @@ async def get_all_packages_admin(
     Get all packages (admin only) - no purchase filtering.
 
     Query params:
-    - package_type: Filter by 'builtin' or 'purchasable'
+    - package_type: Filter by 'builtin' or 'purchasable' (basic/premium)
     - include_archived: Whether to include archived packages (default: False)
     """
     service = ScannerPackageService(db)
@@ -292,14 +292,14 @@ async def get_all_packages_admin(
 
 
 @router.post("/admin/upload", response_model=PackageResponse)
-async def upload_purchasable_package(
+async def upload_premium_package(
     upload_request: PackageUploadRequest,
     request: Request,
     db: Session = Depends(get_admin_db),
     current_user: dict = Depends(require_super_admin)
 ):
     """
-    Upload a new purchasable package (admin only).
+    Upload a new premium package (admin only).
 
     Request body:
     {

@@ -386,17 +386,27 @@ class DataSecurityService:
             entity_type.display_name = kwargs['display_name']
         if 'risk_level' in kwargs:
             entity_type.category = kwargs['risk_level']
-        if 'pattern' in kwargs:
-            recognition_config = entity_type.recognition_config or {}
-            recognition_config['pattern'] = kwargs['pattern']
-            entity_type.recognition_config = recognition_config
-        if 'check_input' in kwargs or 'check_output' in kwargs:
-            recognition_config = entity_type.recognition_config or {}
+        
+        # Update recognition_config fields
+        recognition_config_updated = False
+        if 'pattern' in kwargs or 'check_input' in kwargs or 'check_output' in kwargs:
+            # Get current recognition_config
+            recognition_config = dict(entity_type.recognition_config or {})
+            
+            if 'pattern' in kwargs:
+                recognition_config['pattern'] = kwargs['pattern']
+                recognition_config_updated = True
             if 'check_input' in kwargs:
                 recognition_config['check_input'] = kwargs['check_input']
+                recognition_config_updated = True
             if 'check_output' in kwargs:
                 recognition_config['check_output'] = kwargs['check_output']
-            entity_type.recognition_config = recognition_config
+                recognition_config_updated = True
+            
+            # Force SQLAlchemy to detect the change by reassigning the entire dict
+            if recognition_config_updated:
+                entity_type.recognition_config = recognition_config
+        
         if 'anonymization_method' in kwargs:
             entity_type.anonymization_method = kwargs['anonymization_method']
         if 'anonymization_config' in kwargs:

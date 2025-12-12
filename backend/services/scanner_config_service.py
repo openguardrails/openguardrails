@@ -10,7 +10,7 @@ from sqlalchemy import and_
 
 from database.models import (
     ApplicationScannerConfig, Scanner, ScannerPackage,
-    PackagePurchase, CustomScanner, Application
+    PackagePurchase, CustomScanner, Application, Tenant
 )
 from utils.logger import setup_logger
 
@@ -96,7 +96,7 @@ class ScannerConfigService:
                 'scanner_type': scanner.scanner_type,
                 'package_name': scanner.package.package_name if scanner.package else 'Custom',
                 'package_id': str(scanner.package_id) if scanner.package_id else None,
-                'package_type': scanner.package.package_type if scanner.package else 'custom',  # 'builtin', 'purchasable', or 'custom'
+                'package_type': scanner.package.package_type if scanner.package else 'custom',  # 'builtin' (basic), 'purchasable' (premium), or 'custom'
                 'is_custom': is_custom,
 
                 # Effective settings (with overrides applied)
@@ -349,7 +349,8 @@ class ScannerConfigService:
 
     def _get_available_scanners(self, tenant_id: UUID) -> List[Scanner]:
         """
-        Get scanners from builtin and purchased packages.
+        Get scanners from basic and purchased premium packages.
+        Super admins get access to all scanners (including unpurchased premium packages).
 
         Args:
             tenant_id: Tenant UUID
@@ -357,27 +358,40 @@ class ScannerConfigService:
         Returns:
             List of scanners
         """
-        # Builtin packages
+        # Check if tenant is super admin - they get access to all scanners
+        tenant = self.db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        is_super_admin = tenant and hasattr(tenant, 'is_super_admin') and tenant.is_super_admin
+        
+        # Basic packages (builtin)
         builtin = self.db.query(Scanner).join(ScannerPackage).filter(
-            ScannerPackage.package_type == 'builtin',
+            ScannerPackage.package_type == 'builtin',  # Basic packages
             ScannerPackage.is_active == True,
             Scanner.is_active == True
         ).all()
 
-        # Purchased packages
-        purchased_package_ids = [
-            p[0] for p in self.db.query(PackagePurchase.package_id).filter(
-                PackagePurchase.tenant_id == tenant_id,
-                PackagePurchase.status == 'approved'
-            ).all()
-        ]
-
         purchased = []
-        if purchased_package_ids:
-            purchased = self.db.query(Scanner).filter(
-                Scanner.package_id.in_(purchased_package_ids),
+        if is_super_admin:
+            # Super admin gets all premium scanners
+            purchased = self.db.query(Scanner).join(ScannerPackage).filter(
+                ScannerPackage.package_type == 'purchasable',  # Premium packages
+                ScannerPackage.is_active == True,
                 Scanner.is_active == True
             ).all()
+            logger.debug(f"Super admin granted access to all {len(purchased)} premium scanners")
+        else:
+            # Regular users only get purchased premium packages
+            purchased_package_ids = [
+                p[0] for p in self.db.query(PackagePurchase.package_id).filter(
+                    PackagePurchase.tenant_id == tenant_id,
+                    PackagePurchase.status == 'approved'
+                ).all()
+            ]
+
+            if purchased_package_ids:
+                purchased = self.db.query(Scanner).filter(
+                    Scanner.package_id.in_(purchased_package_ids),
+                    Scanner.is_active == True
+                ).all()
 
         return builtin + purchased
 

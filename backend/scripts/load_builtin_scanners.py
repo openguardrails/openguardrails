@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Load built-in scanner packages from backend/builtin_scanners into the database.
+Load basic scanner packages from backend/builtin_scanners into the database.
 
 This script now reuses the shared loader module so it stays in sync with the
 automatic initialization path that runs during service startup.

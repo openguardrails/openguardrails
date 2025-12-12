@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS scanner_packages (
     is_official BOOLEAN NOT NULL DEFAULT TRUE,
     requires_purchase BOOLEAN NOT NULL DEFAULT FALSE,
 
-    -- Purchase settings (for purchasable packages)
+    -- Purchase settings (for premium packages)
     price_display VARCHAR(100),
     file_path VARCHAR(512),
 
@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS scanner_packages (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
 
     -- Constraints
-    CONSTRAINT chk_package_type CHECK (package_type IN ('builtin', 'purchasable'))
+    CONSTRAINT chk_package_type CHECK (package_type IN ('builtin', 'purchasable'))  -- 'builtin' = basic, 'purchasable' = premium
 );
 
 CREATE INDEX IF NOT EXISTS idx_scanner_packages_type ON scanner_packages(package_type);

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Table, Button, message, Spin, Space, Modal, Upload, Tag, Input, Drawer, Descriptions, Badge, Form } from 'antd';
-import { UploadOutlined, ReloadOutlined, DeleteOutlined, EyeOutlined, EditOutlined } from '@ant-design/icons';
+import { Card, Table, Button, message, Spin, Space, Modal, Upload, Tag, Input, Form } from 'antd';
+import { UploadOutlined, ReloadOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import i18n from 'i18next';
 import { useAuth } from '../../contexts/AuthContext';
@@ -25,21 +25,7 @@ interface Package {
   archive_reason?: string;
 }
 
-interface Scanner {
-  id: string;
-  scanner_tag: string;
-  scanner_name: string;
-  scanner_type: 'genai' | 'regex' | 'keyword';
-  risk_level: 'high' | 'medium' | 'low';
-  scan_target: 'prompt' | 'response' | 'both';
-  is_active: boolean;
-  description?: string;
-  // definition is excluded for security reasons
-}
 
-interface PackageDetail extends Package {
-  scanners: Scanner[];
-}
 
 const PackageMarketplace: React.FC = () => {
   const { t, i18n } = useTranslation();
@@ -68,9 +54,6 @@ const PackageMarketplace: React.FC = () => {
   const [selectedPackageForArchive, setSelectedPackageForArchive] = useState<Package | null>(null);
   const [archiveReason, setArchiveReason] = useState('');
   const [fileList, setFileList] = useState<UploadFile[]>([]);
-  const [drawerVisible, setDrawerVisible] = useState(false);
-  const [selectedPackage, setSelectedPackage] = useState<PackageDetail | null>(null);
-  const [loadingDetail, setLoadingDetail] = useState(false);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [selectedPackageForEdit, setSelectedPackageForEdit] = useState<Package | null>(null);
   const [editForm] = Form.useForm();
@@ -178,45 +161,8 @@ const PackageMarketplace: React.FC = () => {
     });
   };
 
-  const handleDeletePackage = (pkg: Package) => {
-    Modal.confirm({
-      title: t('packageMarketplace.deletePackage'),
-      content: (
-        <div>
-          <p>{t('packageMarketplace.confirmDelete')}</p>
-          <p style={{ color: '#ff4d4f', fontSize: '12px' }}>
-            {t('packageMarketplace.deleteWarning')}
-          </p>
-        </div>
-      ),
-      onOk: async () => {
-        try {
-          await scannerPackagesApi.deletePackage(pkg.id);
-          message.success(t('packageMarketplace.deleteSuccess'));
-          await loadData();
-        } catch (error) {
-          message.error(t('packageMarketplace.deleteFailed'));
-        }
-      },
-    });
-  };
-
-  const handleViewPackageDetail = async (pkg: Package) => {
-    try {
-      setLoadingDetail(true);
-      setDrawerVisible(true);
-      // Use marketplace detail endpoint for previewing packages (including unpurchased ones)
-      const detail = await scannerPackagesApi.getMarketplaceDetail(pkg.id);
-      setSelectedPackage(detail);
-    } catch (error) {
-      message.error(t('packageMarketplace.loadDetailFailed'));
-      console.error('Failed to load package detail:', error);
-      setDrawerVisible(false);
-    } finally {
-      setLoadingDetail(false);
-    }
-  };
-
+  
+  
   const handleEditPackage = (pkg: Package) => {
     setSelectedPackageForEdit(pkg);
     editForm.setFieldsValue({
@@ -247,45 +193,7 @@ const PackageMarketplace: React.FC = () => {
     }
   };
 
-  const getRiskLevelColor = (level: string) => {
-    switch (level) {
-      case 'high':
-        return 'red';
-      case 'medium':
-        return 'orange';
-      case 'low':
-        return 'blue';
-      default:
-        return 'default';
-    }
-  };
-
-  const getScannerTypeLabel = (type: string) => {
-    switch (type) {
-      case 'genai':
-        return t('scannerPackages.typeGenai');
-      case 'regex':
-        return t('scannerPackages.typeRegex');
-      case 'keyword':
-        return t('scannerPackages.typeKeyword');
-      default:
-        return type;
-    }
-  };
-
-  const getScanTargetLabel = (target: string) => {
-    switch (target) {
-      case 'prompt':
-        return t('scannerPackages.targetPrompt');
-      case 'response':
-        return t('scannerPackages.targetResponse');
-      case 'both':
-        return t('scannerPackages.targetBoth');
-      default:
-        return target;
-    }
-  };
-
+  
   const packageColumns = [
     {
       title: t('packageMarketplace.packageName'),
@@ -309,7 +217,7 @@ const PackageMarketplace: React.FC = () => {
       dataIndex: 'archived',
       key: 'archived',
       width: 100,
-      render: (archived: boolean, record: Package) => (
+      render: (archived: boolean) => (
         <Tag color={archived ? 'default' : 'green'}>
           {archived ? t('packageMarketplace.archived') : t('packageMarketplace.active')}
         </Tag>
@@ -334,17 +242,9 @@ const PackageMarketplace: React.FC = () => {
     {
       title: t('common.actions'),
       key: 'actions',
-      width: isSuperAdmin ? 320 : 150,
+      width: isSuperAdmin ? 240 : 0,
       render: (_: any, record: Package) => (
         <Space>
-          <Button
-            type="primary"
-            size="small"
-            icon={<EyeOutlined />}
-            onClick={() => handleViewPackageDetail(record)}
-          >
-            {t('packageMarketplace.viewDetails')}
-          </Button>
           {isSuperAdmin && (
             <>
               <Button
@@ -596,105 +496,7 @@ const PackageMarketplace: React.FC = () => {
           )}
         </Modal>
 
-        <Drawer
-          title={t('packageMarketplace.packageDetails')}
-          placement="right"
-          width={720}
-          open={drawerVisible}
-          onClose={() => {
-            setDrawerVisible(false);
-            setSelectedPackage(null);
-          }}
-        >
-          {loadingDetail ? (
-            <Spin style={{ display: 'flex', justifyContent: 'center', padding: '40px 0' }} />
-          ) : selectedPackage ? (
-            <Space direction="vertical" size="large" style={{ width: '100%' }}>
-              {/* Package Basic Info */}
-              <Card size="small" title={t('packageMarketplace.basicInfo')}>
-                <Descriptions column={1} size="small">
-                  <Descriptions.Item label={t('packageMarketplace.packageName')}>
-                    {selectedPackage.package_name}
-                  </Descriptions.Item>
-                  <Descriptions.Item label={t('scannerPackages.packageCode')}>
-                    <Tag color="blue">{selectedPackage.package_code}</Tag>
-                  </Descriptions.Item>
-                  <Descriptions.Item label={t('scannerPackages.author')}>
-                    {selectedPackage.author}
-                  </Descriptions.Item>
-                  <Descriptions.Item label={t('scannerPackages.version')}>
-                    {selectedPackage.version}
-                  </Descriptions.Item>
-                  <Descriptions.Item label={t('scannerPackages.scannerCount')}>
-                    <Badge count={selectedPackage.scanner_count} showZero color="blue" />
-                  </Descriptions.Item>
-                  <Descriptions.Item label={t('scannerPackages.priceDisplay')}>
-                    {formatPriceDisplay(selectedPackage.price, selectedPackage.price_display)}
-                  </Descriptions.Item>
-                  {selectedPackage.description && (
-                    <Descriptions.Item label={t('scannerPackages.description')}>
-                      {selectedPackage.description}
-                    </Descriptions.Item>
-                  )}
-                </Descriptions>
-              </Card>
-
-              {/* Scanners List */}
-              <Card
-                size="small"
-                title={
-                  <Space>
-                    {t('packageMarketplace.scannersList')}
-                    <Badge count={selectedPackage.scanners?.length || 0} showZero />
-                  </Space>
-                }
-              >
-                {selectedPackage.scanners && selectedPackage.scanners.length > 0 ? (
-                  <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-                    {selectedPackage.scanners.map((scanner) => (
-                      <Card
-                        key={scanner.id}
-                        type="inner"
-                        size="small"
-                        title={
-                          <Space>
-                            <Tag color="purple">{scanner.scanner_tag}</Tag>
-                            <span>{scanner.scanner_name}</span>
-                          </Space>
-                        }
-                        extra={
-                          <Badge
-                            status={scanner.is_active ? 'success' : 'default'}
-                            text={scanner.is_active ? t('common.active') : t('common.inactive')}
-                          />
-                        }
-                      >
-                        <Descriptions column={1} size="small">
-                          <Descriptions.Item label={t('scannerPackages.scannerType')}>
-                            <Tag color="cyan">{getScannerTypeLabel(scanner.scanner_type)}</Tag>
-                          </Descriptions.Item>
-                          <Descriptions.Item label={t('scannerPackages.riskLevel')}>
-                            <Tag color={getRiskLevelColor(scanner.risk_level)}>
-                              {t(`scannerPackages.riskLevel${scanner.risk_level.charAt(0).toUpperCase() + scanner.risk_level.slice(1)}`)}
-                            </Tag>
-                          </Descriptions.Item>
-                          <Descriptions.Item label={t('scannerPackages.scanTarget')}>
-                            <Tag color="geekblue">{getScanTargetLabel(scanner.scan_target)}</Tag>
-                          </Descriptions.Item>
-                        </Descriptions>
-                      </Card>
-                    ))}
-                  </Space>
-                ) : (
-                  <div style={{ textAlign: 'center', padding: '20px', color: '#999' }}>
-                    {t('packageMarketplace.noScannersFound')}
-                  </div>
-                )}
-              </Card>
-            </Space>
-          ) : null}
-        </Drawer>
-      </Space>
+              </Space>
     </Spin>
   );
 };

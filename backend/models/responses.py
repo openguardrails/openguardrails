@@ -275,6 +275,7 @@ class MarketplacePackageResponse(BaseModel):
     author: str
     description: Optional[str]
     version: str
+    package_type: str
     scanner_count: int
     price: Optional[float] = None
     price_display: Optional[str]

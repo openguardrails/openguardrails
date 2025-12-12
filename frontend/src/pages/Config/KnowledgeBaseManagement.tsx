@@ -480,7 +480,7 @@ const KnowledgeBaseManagement: React.FC = () => {
           if (kb.scanner_identifier && kb.scanner_name) {
             return `${kb.scanner_identifier} - ${kb.scanner_name}`;
           }
-          return kb.scanner_identifier || (t('scannerPackages.purchasedPackages') || 'Third-Party Scanner');
+          return kb.scanner_identifier || (t('scannerPackages.purchasedPackages') || 'Premium Scanner');
         case 'custom_scanner':
           // For custom scanners, show "tag - name" format
           if (kb.scanner_identifier && kb.scanner_name) {
@@ -800,8 +800,8 @@ const KnowledgeBaseManagement: React.FC = () => {
               }}
               disabled={!!editingItem}
             >
-              <Option value="official_scanner">{t('scannerPackages.builtinPackages') || 'Built-in Scanners'}</Option>
-              <Option value="marketplace_scanner">{t('scannerPackages.purchasedPackages') || 'Third-Party Scanners'}</Option>
+              <Option value="official_scanner">{t('scannerPackages.builtinPackages') || 'Basic Package'}</Option>
+              <Option value="marketplace_scanner">{t('scannerPackages.purchasedPackages') || 'Premium Package'}</Option>
               <Option value="custom_scanner">{t('customScanners.title') || 'Custom Scanners'}</Option>
               <Option value="blacklist">{t('config.blacklist') || 'Blacklist'}</Option>
             </Select>
@@ -850,10 +850,10 @@ const KnowledgeBaseManagement: React.FC = () => {
           {/* Show alert when marketplace scanner type is selected but no scanners available */}
           {selectedScannerType === 'marketplace_scanner' && availableScanners.marketplace_scanners.length === 0 && (
             <Alert
-              message={t('knowledge.noPurchasedScannersTitle') || 'No Purchased Third-Party Scanners'}
+              message={t('knowledge.noPurchasedScannersTitle') || 'No Purchased Premium Scanners'}
               description={
                 <span>
-                  {t('knowledge.noPurchasedScannersDescription') || 'You haven\'t purchased any third-party scanner packages yet. '}
+                  {t('knowledge.noPurchasedScannersDescription') || 'You haven\'t purchased any premium scanner packages yet. '}
                   <a href="/platform/config/official-scanners#marketplace" target="_blank" rel="noopener noreferrer">
                     {t('knowledge.goToMarketplace') || 'Go to Marketplace'}
                   </a>

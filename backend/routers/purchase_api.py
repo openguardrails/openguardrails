@@ -117,12 +117,12 @@ async def request_purchase(
     db: Session = Depends(get_admin_db)
 ):
     """
-    Request to purchase a package (DEPRECATED - use payment API or direct purchase instead).
+    Request to purchase a premium package (DEPRECATED - use payment API or direct purchase instead).
 
     Requirements:
     - Must be a subscribed user (free tier cannot purchase)
-    - Package must exist and be purchasable
-    - Cannot purchase same package twice
+    - Package must exist and be premium (purchasable)
+    - Cannot purchase same premium package twice
 
     Process:
     1. Submit purchase request with contact email and message

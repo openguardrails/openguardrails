@@ -170,8 +170,8 @@ class ScannerDetectionService:
 
         try:
             # Prepare scanner definitions for model - send ALL scanners
-            # Format for builtin scanners: "S2: Sensitive Political Topics"
-            # Format for custom/purchasable scanners: "S100: Custom Scanner Name. [definition]"
+            # Format for basic scanners: "S2: Sensitive Political Topics"
+            # Format for custom/premium scanners: "S100: Custom Scanner Name. [definition]"
             scanner_definitions = []
             scanner_map = {}  # tag -> scanner config
 
@@ -181,9 +181,9 @@ class ScannerDetectionService:
                 definition = scanner['definition']
                 package_type = scanner.get('package_type', 'custom')
 
-                # For builtin scanners: only send tag and name (model already knows the definition)
-                # For custom/purchasable scanners: send full definition
-                if package_type == 'builtin':
+                # For basic (builtin) scanners: only send tag and name (model already knows the definition)
+                # For custom/premium (purchasable) scanners: send full definition
+                if package_type == 'builtin':  # Basic packages
                     scanner_def = f"{tag}: {name}"
                 else:
                     scanner_def = f"{tag}: {name}. {definition}"

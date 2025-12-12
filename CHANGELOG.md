@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Super Admin Login Issue**: Fixed missing `Tenant` import in `scanner_config_service.py` that caused "name 'Tenant' is not defined" error when super admin logged in
+
 ---
 
 ## [4.3.5] - 2025-12-03

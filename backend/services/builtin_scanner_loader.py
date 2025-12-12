@@ -237,11 +237,11 @@ def load_builtin_scanner_packages(
     language: Optional[str] = None,
 ) -> Dict[str, int]:
     """
-    Load all built-in scanner packages from disk for a specific language.
+    Load all basic scanner packages from disk for a specific language.
 
     Args:
         db: Database session
-        builtin_dir: Optional custom builtin scanners directory
+        builtin_dir: Optional custom basic scanners directory
         initialize_configs: Whether to initialize scanner configs for applications
         auto_commit: Whether to commit changes automatically
         language: Language code (e.g., 'en', 'zh'). If None, uses DEFAULT_LANGUAGE from config.

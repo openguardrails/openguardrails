@@ -74,7 +74,7 @@ export const features = {
   },
 
   /**
-   * Show package marketplace
+   * Show premium package marketplace
    */
   showMarketplace: (): boolean => {
     return isSaasMode();
@@ -88,7 +88,7 @@ export const features = {
   },
 
   /**
-   * Show third-party scanner packages
+   * Show premium scanner packages
    */
   showThirdPartyPackages: (): boolean => {
     return isSaasMode();

@@ -63,12 +63,16 @@ class ScannerPackageService:
 
         Args:
             tenant_id: Tenant UUID
-            package_type: Filter by type ('builtin', 'purchasable')
+            package_type: Filter by type ('builtin', 'purchasable') - basic/premium packages
             include_scanners: Whether to eagerly load scanners
 
         Returns:
             List of visible packages
         """
+        # Check if tenant is super admin - they get access to all packages
+        tenant = self.db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        is_super_admin = tenant and hasattr(tenant, 'is_super_admin') and tenant.is_super_admin
+        
         query = self.db.query(ScannerPackage).filter(
             ScannerPackage.is_active == True,
             ScannerPackage.archived == False
@@ -82,20 +86,25 @@ class ScannerPackageService:
             ScannerPackage.package_name
         ).all()
 
-        # Filter purchasable packages (only show purchased ones)
+        # Filter premium packages (only show purchased ones, unless super admin)
         visible_packages = []
         for package in packages:
-            if package.package_type == 'builtin':
+            if package.package_type == 'builtin':  # Basic packages
                 visible_packages.append(package)
-            elif package.package_type == 'purchasable':
-                # Check if tenant has purchased
-                purchase = self.db.query(PackagePurchase).filter(
-                    PackagePurchase.tenant_id == tenant_id,
-                    PackagePurchase.package_id == package.id,
-                    PackagePurchase.status == 'approved'
-                ).first()
-                if purchase:
+            elif package.package_type == 'purchasable':  # Premium packages
+                if is_super_admin:
+                    # Super admin gets access to all packages
                     visible_packages.append(package)
+                    logger.debug(f"Super admin granted access to premium package: {package.package_name}")
+                else:
+                    # Check if tenant has purchased
+                    purchase = self.db.query(PackagePurchase).filter(
+                        PackagePurchase.tenant_id == tenant_id,
+                        PackagePurchase.package_id == package.id,
+                        PackagePurchase.status == 'approved'
+                    ).first()
+                    if purchase:
+                        visible_packages.append(package)
 
         return visible_packages
 
@@ -104,7 +113,7 @@ class ScannerPackageService:
         tenant_id: UUID
     ) -> List[Dict[str, Any]]:
         """
-        Get purchasable packages with metadata (no scanner definitions).
+        Get premium packages with metadata (no scanner definitions).
 
         This prevents leaking paid package content before purchase.
 
@@ -114,6 +123,10 @@ class ScannerPackageService:
         Returns:
             List of package metadata dicts
         """
+        # Check if tenant is super admin - they automatically have access to all packages
+        tenant = self.db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        is_super_admin = tenant and hasattr(tenant, 'is_super_admin') and tenant.is_super_admin
+        
         packages = self.db.query(ScannerPackage).filter(
             ScannerPackage.package_type == 'purchasable',
             ScannerPackage.is_active == True,
@@ -125,7 +138,28 @@ class ScannerPackageService:
 
         result = []
         for package in packages:
-            # Check purchase status
+            # Super admins automatically have all packages "purchased"
+            if is_super_admin:
+                package_info = {
+                    'id': str(package.id),
+                    'package_code': package.package_code,
+                    'package_name': package.package_name,
+                    'author': package.author,
+                    'description': package.description,
+                    'version': package.version,
+                    'package_type': package.package_type,
+                    'scanner_count': package.scanner_count,
+                    'price': package.price,
+                    'price_display': package.price_display,
+                    'purchase_status': 'approved',  # Super admin treated as approved
+                    'purchased': True,  # Super admin has access to all packages
+                    'purchase_requested': False,
+                    'created_at': package.created_at.isoformat() if package.created_at else None
+                }
+                result.append(package_info)
+                continue
+            
+            # Check purchase status for regular users
             purchase = self.db.query(PackagePurchase).filter(
                 PackagePurchase.tenant_id == tenant_id,
                 PackagePurchase.package_id == package.id
@@ -138,6 +172,7 @@ class ScannerPackageService:
                 'author': package.author,
                 'description': package.description,
                 'version': package.version,
+                'package_type': package.package_type,
                 'scanner_count': package.scanner_count,
                 'price': package.price,
                 'price_display': package.price_display,
@@ -176,8 +211,17 @@ class ScannerPackageService:
         if not package:
             return None
 
-        # Check access for purchasable packages
-        if check_access and tenant_id and package.package_type == 'purchasable':
+        # Check access for premium packages
+        if check_access and tenant_id and package.package_type == 'purchasable':  # Premium packages
+            # Check if tenant is super admin - they get access to all packages
+            tenant = self.db.query(Tenant).filter(Tenant.id == tenant_id).first()
+            is_super_admin = tenant and hasattr(tenant, 'is_super_admin') and tenant.is_super_admin
+            
+            if is_super_admin:
+                logger.debug(f"Super admin granted access to premium package: {package.package_name}")
+                return package
+            
+            # Regular users need to have purchased the package
             purchase = self.db.query(PackagePurchase).filter(
                 PackagePurchase.tenant_id == tenant_id,
                 PackagePurchase.package_id == package_id,
@@ -197,8 +241,8 @@ class ScannerPackageService:
         Get package details including scanners.
 
         Only returns scanner definitions if:
-        - Package is builtin, OR
-        - Tenant has purchased the package
+        - Package is basic (builtin), OR
+        - Tenant has purchased the premium package
 
         Args:
             package_id: Package UUID
@@ -273,8 +317,8 @@ class ScannerPackageService:
         """
         Get package details for marketplace preview.
 
-        - If package is builtin OR user has purchased: return full details
-        - If package is purchasable and NOT purchased: return metadata + basic scanner info (no definitions)
+        - If package is basic (builtin) OR user has purchased: return full details
+        - If package is premium (purchasable) and NOT purchased: return metadata + basic scanner info (no definitions)
 
         Args:
             package_id: Package UUID
@@ -292,15 +336,23 @@ class ScannerPackageService:
         if not package:
             return None
 
-        # Check if user has purchased (for purchasable packages)
+        # Check if tenant is super admin - they get full access to all packages
+        tenant = self.db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        is_super_admin = tenant and hasattr(tenant, 'is_super_admin') and tenant.is_super_admin
+
+        # Check if user has purchased (for premium packages)
         has_purchased = False
-        if package.package_type == 'purchasable':
-            purchase = self.db.query(PackagePurchase).filter(
-                PackagePurchase.tenant_id == tenant_id,
-                PackagePurchase.package_id == package_id,
-                PackagePurchase.status == 'approved'
-            ).first()
-            has_purchased = bool(purchase)
+        if package.package_type == 'purchasable':  # Premium packages
+            if is_super_admin:
+                has_purchased = True
+                logger.debug(f"Super admin granted full access to premium package: {package.package_name}")
+            else:
+                purchase = self.db.query(PackagePurchase).filter(
+                    PackagePurchase.tenant_id == tenant_id,
+                    PackagePurchase.package_id == package_id,
+                    PackagePurchase.status == 'approved'
+                ).first()
+                has_purchased = bool(purchase)
 
         # Get scanners
         scanners = self.db.query(Scanner).filter(
@@ -340,8 +392,8 @@ class ScannerPackageService:
                 'is_active': scanner.is_active
             }
 
-            # Only include definition if builtin or purchased
-            if package.package_type == 'builtin' or has_purchased:
+            # Only include definition if basic package or purchased premium package
+            if package.package_type == 'builtin' or has_purchased:  # Basic or purchased premium
                 scanner_info['definition'] = scanner.definition
             else:
                 # For unpurchased packages, hide the definition
@@ -372,7 +424,7 @@ class ScannerPackageService:
         created_by: UUID
     ) -> ScannerPackage:
         """
-        Create a new purchasable package or update existing version (admin only).
+        Create a new premium package or update existing version (admin only).
 
         Version update logic:
         - Same package_code + same version: raise error (duplicate)
@@ -624,7 +676,7 @@ class ScannerPackageService:
         Get all packages for admin with optional archive inclusion.
 
         Args:
-            package_type: Filter by type ('builtin', 'purchasable')
+            package_type: Filter by type ('builtin', 'purchasable') - basic/premium packages
             include_archived: Whether to include archived packages
 
         Returns:

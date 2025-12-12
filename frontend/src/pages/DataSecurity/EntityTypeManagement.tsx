@@ -29,7 +29,8 @@ interface EntityType {
   id: string;
   entity_type: string;
   display_name: string;
-  risk_level: string;
+  risk_level?: string; // Frontend field name
+  category?: string; // Backend field name (alias for risk_level)
   pattern: string;
   anonymization_method: string;
   anonymization_config: any;
@@ -113,7 +114,12 @@ const EntityTypeManagement: React.FC = () => {
     setEditingEntity(record);
     form.setFieldsValue({
       ...record,
+      // Map backend 'category' field to frontend 'risk_level' field
+      risk_level: record.category || record.risk_level,
       anonymization_config_text: JSON.stringify(record.anonymization_config || {}, null, 2),
+      // Explicitly set check_input and check_output to ensure they are properly bound
+      check_input: record.check_input,
+      check_output: record.check_output,
     });
     setModalVisible(true);
   };
@@ -193,7 +199,8 @@ const EntityTypeManagement: React.FC = () => {
       dataIndex: 'risk_level',
       key: 'risk_level',
       width: 100,
-      render: (risk_level: string) => {
+      render: (_: any, record: EntityType) => {
+        const risk_level = record.category || record.risk_level;
         const level = RISK_LEVELS.find((l) => l.value === risk_level);
         return <Tag color={level?.color}>{level?.label || risk_level}</Tag>;
       },
@@ -321,7 +328,8 @@ const EntityTypeManagement: React.FC = () => {
       item.display_name.toLowerCase().includes(searchText.toLowerCase()) ||
       item.pattern.toLowerCase().includes(searchText.toLowerCase());
 
-    const matchesRiskLevel = !riskLevelFilter || item.risk_level === riskLevelFilter;
+    const risk_level = item.category || item.risk_level;
+    const matchesRiskLevel = !riskLevelFilter || risk_level === riskLevelFilter;
 
     return matchesSearch && matchesRiskLevel;
   });
