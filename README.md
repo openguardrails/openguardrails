@@ -48,8 +48,7 @@
 
 #### 🔧 **Built-in Official Packages**
 System packages that come pre-installed with OpenGuardrails:
-- **Sensitive Topics Package**: S1-S18 (covers political content, violence, hate speech, etc.)
-- **Restricted Topics Package**: S19-S21 (professional advice categories)
+- Built-in packages are managed through the scanner package system
 - Ready to use out of the box with configurable risk levels
 
 #### 🛒 **Purchasable Official Packages**

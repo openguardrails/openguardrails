@@ -336,7 +336,7 @@ OpenGuardrails v4.1.0 introduces the **Scanner Package System** - a revolutionar
 
 **New Scanner Management Pages**:
 - **Official Scanners** (`/platform/config/official-scanners`)
-  - View built-in packages (Sensitive Topics, Restricted Topics)
+  - View built-in packages
   - Browse marketplace for purchasable packages
   - Configure individual scanners (enable/disable, risk levels)
   - Scanner type indicators (GenAI/Regex/Keyword)
@@ -455,8 +455,7 @@ docker compose restart
 5. ✅ Detection history (with backward compatibility)
 
 **Built-in Package Mapping**:
-- **Sensitive Topics Package**: S1-S18 (General political, violent content, etc.)
-- **Restricted Topics Package**: S19-S21 (Professional advice categories)
+Built-in packages are now managed through the scanner package system.
 
 #### For Developers
 

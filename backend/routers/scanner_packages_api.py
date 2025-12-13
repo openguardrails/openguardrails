@@ -97,6 +97,7 @@ async def get_all_packages(
             scanner_count=package.scanner_count,
             price=package.price,
             price_display=package.price_display,
+            bundle=package.bundle,
             created_at=package.created_at.isoformat() if package.created_at else None,
             updated_at=package.updated_at.isoformat() if package.updated_at else None
         ))
@@ -280,6 +281,7 @@ async def get_all_packages_admin(
             scanner_count=package.scanner_count,
             price=package.price,
             price_display=package.price_display,
+            bundle=package.bundle,
             created_at=package.created_at.isoformat() if package.created_at else None,
             updated_at=package.updated_at.isoformat() if package.updated_at else None,
             archived=package.archived,
@@ -325,6 +327,10 @@ async def upload_premium_package(
 
     # Store the original price as a number
     package_data['price'] = upload_request.price
+
+    # Store bundle
+    if upload_request.bundle:
+        package_data['bundle'] = upload_request.bundle
 
     if upload_request.price is not None:
         # Format price based on language
@@ -388,6 +394,7 @@ async def upload_premium_package(
         scanner_count=package.scanner_count,
         price=package.price,
         price_display=package.price_display,
+        bundle=package.bundle,
         created_at=package.created_at.isoformat() if package.created_at else None,
         updated_at=package.updated_at.isoformat() if package.updated_at else None
     )
@@ -446,6 +453,7 @@ async def update_package(
         scanner_count=package.scanner_count,
         price=package.price,
         price_display=package.price_display,
+        bundle=package.bundle,
         created_at=package.created_at.isoformat() if package.created_at else None,
         updated_at=package.updated_at.isoformat() if package.updated_at else None
     )

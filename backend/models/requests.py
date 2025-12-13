@@ -284,6 +284,7 @@ class PackageUploadRequest(BaseModel):
     """Package upload request with JSON data and price"""
     package_data: dict = Field(..., description="Package JSON data")
     price: Optional[float] = Field(None, description="Package price as number", ge=0)
+    bundle: Optional[str] = Field(None, description="Bundle name for grouping (e.g., Enterprise, Security)")
     language: Optional[str] = Field("en", description="User language for price formatting")
 
 
@@ -294,6 +295,7 @@ class PackageUpdateRequest(BaseModel):
     version: Optional[str] = Field(None, description="Package version")
     price: Optional[float] = Field(None, description="Package price (numeric value)")
     price_display: Optional[str] = Field(None, description="Price display string")
+    bundle: Optional[str] = Field(None, description="Bundle name for grouping (e.g., Enterprise, Security)")
     is_active: Optional[bool] = Field(None, description="Whether package is active")
     display_order: Optional[int] = Field(None, description="Display order")
 

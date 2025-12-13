@@ -19,6 +19,7 @@ interface Package {
   scanner_count: number;
   price?: number;
   price_display?: string;
+  bundle?: string;
   created_at?: string;
   archived?: boolean;
   archived_at?: string;
@@ -58,6 +59,7 @@ const PackageMarketplace: React.FC = () => {
   const [selectedPackageForEdit, setSelectedPackageForEdit] = useState<Package | null>(null);
   const [editForm] = Form.useForm();
   const [uploadPrice, setUploadPrice] = useState<number | null>(null);
+  const [uploadBundle, setUploadBundle] = useState<string | null>(null);
 
   const isSuperAdmin = user?.is_super_admin || false;
 
@@ -96,10 +98,11 @@ const PackageMarketplace: React.FC = () => {
         // Get current language for price formatting
         const currentLanguage = localStorage.getItem('language') || 'en';
 
-        // Upload with price
+        // Upload with price and bundle
         await scannerPackagesApi.uploadPackage({
           package_data: jsonContent,
           price: uploadPrice,
+          bundle: uploadBundle,
           language: currentLanguage
         });
 
@@ -107,6 +110,7 @@ const PackageMarketplace: React.FC = () => {
         setUploadModalVisible(false);
         setFileList([]);
         setUploadPrice(null);
+        setUploadBundle(null);
         await loadData();
       } catch (error) {
         message.error(t('packageMarketplace.uploadFailed'));
@@ -240,6 +244,17 @@ const PackageMarketplace: React.FC = () => {
       },
     },
     {
+      title: 'Bundle',
+      dataIndex: 'bundle',
+      key: 'bundle',
+      width: 150,
+      render: (bundle: string) => (
+        <Tag color="blue" style={{ fontSize: '12px' }}>
+          {bundle || '-'}
+        </Tag>
+      ),
+    },
+    {
       title: t('common.actions'),
       key: 'actions',
       width: isSuperAdmin ? 240 : 0,
@@ -335,6 +350,7 @@ const PackageMarketplace: React.FC = () => {
             setUploadModalVisible(false);
             setFileList([]);
             setUploadPrice(null);
+            setUploadBundle(null);
           }}
           okText={t('common.upload')}
           cancelText={t('common.cancel')}
@@ -364,6 +380,18 @@ const PackageMarketplace: React.FC = () => {
               />
               <p style={{ fontSize: '12px', color: '#999', marginTop: '4px' }}>
                 {t('packageMarketplace.priceHelp')}
+              </p>
+            </div>
+
+            <div>
+              <label>Bundle</label>
+              <Input
+                placeholder="e.g., Enterprise, Security, Compliance"
+                value={uploadBundle || ''}
+                onChange={(e) => setUploadBundle(e.target.value || null)}
+              />
+              <p style={{ fontSize: '12px', color: '#999', marginTop: '4px' }}>
+                Bundle name for grouping related packages
               </p>
             </div>
 
@@ -399,6 +427,7 @@ const PackageMarketplace: React.FC = () => {
                 version: selectedPackageForEdit.version,
                 price: selectedPackageForEdit.price,
                 price_display: selectedPackageForEdit.price_display || '',
+                bundle: selectedPackageForEdit.bundle || '',
               }}
             >
               <Form.Item
@@ -456,6 +485,16 @@ const PackageMarketplace: React.FC = () => {
               >
                 <Input
                   placeholder={t('packageMarketplace.priceDisplayPlaceholder')}
+                />
+              </Form.Item>
+
+              <Form.Item
+                name="bundle"
+                label="Bundle"
+                tooltip="Bundle name for grouping related packages"
+              >
+                <Input
+                  placeholder="e.g., Enterprise, Security, Compliance"
                 />
               </Form.Item>
             </Form>

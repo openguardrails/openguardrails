@@ -652,6 +652,7 @@ class ScannerPackage(Base):
     # Purchase settings (for premium packages)
     price = Column(Float, nullable=True)  # Original price as number for dynamic display
     price_display = Column(String(100))   # Fallback display text
+    bundle = Column(String(100))          # Bundle name for grouping (e.g., Enterprise, Security)
     file_path = Column(String(512))
 
     # Metadata

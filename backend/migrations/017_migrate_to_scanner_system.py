@@ -74,10 +74,7 @@ def load_builtin_packages(db: Session):
         logger.error(f"Built-in scanners directory not found in any of: {possible_dirs}")
         raise FileNotFoundError("Built-in scanner packages not found")
 
-    package_files = [
-        builtin_dir / 'restricted_topics.json',
-        builtin_dir / 'sensitive_topics.json'
-    ]
+    package_files = []
 
     loaded_packages = []
 

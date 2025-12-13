@@ -41,6 +41,7 @@ interface Package {
   version: string;
   scanner_count: number;
   package_type: string;
+  bundle?: string;
   created_at?: string;
   // Marketplace specific fields
   price?: number;
@@ -377,6 +378,22 @@ const OfficialScannersManagement: React.FC = () => {
       width: 100,
     },
     {
+      title: 'Bundle',
+      dataIndex: 'bundle',
+      key: 'bundle',
+      width: 120,
+      sorter: (a: Package, b: Package) => {
+        const aBundle = a.bundle || '';
+        const bBundle = b.bundle || '';
+        return aBundle.localeCompare(bBundle);
+      },
+      render: (bundle: string) => (
+        <Tag color="blue" style={{ fontSize: '12px' }}>
+          {bundle || '-'}
+        </Tag>
+      ),
+    },
+    {
       title: t('scannerPackages.enabled'),
       dataIndex: 'scanner_count',
       key: 'enabled',
@@ -441,6 +458,22 @@ const OfficialScannersManagement: React.FC = () => {
         // Use dynamic price formatting based on current language
         return formatPriceDisplay(record.price, record.price_display);
       },
+    },
+    {
+      title: 'Bundle',
+      dataIndex: 'bundle',
+      key: 'bundle',
+      width: 120,
+      sorter: (a: Package, b: Package) => {
+        const aBundle = a.bundle || '';
+        const bBundle = b.bundle || '';
+        return aBundle.localeCompare(bBundle);
+      },
+      render: (bundle: string) => (
+        <Tag color="blue" style={{ fontSize: '12px' }}>
+          {bundle || '-'}
+        </Tag>
+      ),
     },
     {
       title: t('common.actions'),
@@ -542,6 +575,10 @@ const OfficialScannersManagement: React.FC = () => {
                       rowKey="id"
                       pagination={false}
                       locale={{ emptyText: t('scannerPackages.noPurchasedPackages') }}
+                      defaultSort={{
+                        field: 'bundle',
+                        order: 'ascend'
+                      }}
                     />
                   ),
                 });
@@ -559,6 +596,10 @@ const OfficialScannersManagement: React.FC = () => {
                       rowKey="id"
                       pagination={false}
                       locale={{ emptyText: t('scannerPackages.noMarketplacePackages') }}
+                      defaultSort={{
+                        field: 'bundle',
+                        order: 'ascend'
+                      }}
                     />
                   ),
                 });
@@ -636,6 +677,9 @@ const OfficialScannersManagement: React.FC = () => {
                   <Descriptions.Item label={t('scannerPackages.scannerCount')}>
                     {purchasePackage.scanner_count}
                   </Descriptions.Item>
+                  <Descriptions.Item label="Bundle">
+                    {purchasePackage.bundle || '-'}
+                  </Descriptions.Item>
                   <Descriptions.Item label={t('scannerPackages.priceDisplay')}>
                     {formatPriceDisplay(purchasePackage.price, purchasePackage.price_display)}
                   </Descriptions.Item>
@@ -670,7 +714,10 @@ const OfficialScannersManagement: React.FC = () => {
                 <Descriptions.Item label={t('scannerPackages.version')}>
                   {selectedPackage.version}
                 </Descriptions.Item>
-                                <Descriptions.Item label={t('scannerPackages.enabled')}>
+                <Descriptions.Item label="Bundle">
+                  {selectedPackage.bundle || '-'}
+                </Descriptions.Item>
+                <Descriptions.Item label={t('scannerPackages.enabled')}>
                   {getEnabledCount(selectedPackage.id)}
                 </Descriptions.Item>
               </Descriptions>

@@ -242,6 +242,7 @@ class PackageResponse(BaseModel):
     scanner_count: int
     price: Optional[float] = None
     price_display: Optional[str] = None
+    bundle: Optional[str] = None
     created_at: Optional[str]
     updated_at: Optional[str]
     archived: bool = False
@@ -262,6 +263,7 @@ class PackageDetailResponse(BaseModel):
     scanner_count: int
     price: Optional[float] = None
     price_display: Optional[str] = None
+    bundle: Optional[str] = None
     scanners: List[Dict[str, Any]]
     created_at: Optional[str]
     updated_at: Optional[str]
@@ -279,6 +281,7 @@ class MarketplacePackageResponse(BaseModel):
     scanner_count: int
     price: Optional[float] = None
     price_display: Optional[str]
+    bundle: Optional[str] = None
     purchase_status: Optional[str]  # None, 'pending', 'approved', 'rejected'
     purchased: bool
     purchase_requested: bool

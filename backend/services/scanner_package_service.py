@@ -132,6 +132,7 @@ class ScannerPackageService:
             ScannerPackage.is_active == True,
             ScannerPackage.archived == False
         ).order_by(
+            ScannerPackage.bundle.asc().nullslast(),
             ScannerPackage.display_order,
             ScannerPackage.package_name
         ).all()
@@ -151,6 +152,7 @@ class ScannerPackageService:
                     'scanner_count': package.scanner_count,
                     'price': package.price,
                     'price_display': package.price_display,
+                    'bundle': package.bundle,
                     'purchase_status': 'approved',  # Super admin treated as approved
                     'purchased': True,  # Super admin has access to all packages
                     'purchase_requested': False,
@@ -176,6 +178,7 @@ class ScannerPackageService:
                 'scanner_count': package.scanner_count,
                 'price': package.price,
                 'price_display': package.price_display,
+                'bundle': package.bundle,
                 'purchase_status': purchase.status if purchase else None,
                 'purchased': bool(purchase and purchase.status == 'approved'),
                 'purchase_requested': bool(purchase is not None),
@@ -484,6 +487,7 @@ class ScannerPackageService:
             requires_purchase=True,
             price=package_data.get('price'),
             price_display=package_data.get('price_display'),
+            bundle=package_data.get('bundle'),
             scanner_count=len(package_data.get('scanners', []))
         )
         self.db.add(package)
@@ -564,7 +568,7 @@ class ScannerPackageService:
         # Update allowed fields
         allowed_fields = [
             'package_name', 'description', 'version', 'price', 'price_display',
-            'is_active', 'display_order'
+            'bundle', 'is_active', 'display_order'
         ]
 
         for field in allowed_fields:
