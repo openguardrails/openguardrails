@@ -414,6 +414,7 @@ class CustomScannerService:
             Next tag (e.g., 'S100', 'S101', ...)
         """
         # Query highest tag number globally (Scanner.tag has unique constraint)
+        # Only consider S-prefixed tags for numeric parsing
         result = self.db.query(
             func.max(
                 func.cast(
@@ -423,6 +424,7 @@ class CustomScannerService:
             )
         ).filter(
             Scanner.tag.like('S%'),
+            Scanner.tag.op('~')('^[S][0-9]+$'),  # Ensure S followed by digits only using regex operator
             Scanner.is_active == True
         ).scalar()
 

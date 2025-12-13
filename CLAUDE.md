@@ -14,6 +14,13 @@ cd backend; python start_detection_service.py
 cd backend; python start_proxy_service.py
 ```
 
+**Production Environment Notes:**
+- Current environment uses systemctl to start Python services (not Docker)
+- Backend service ports:
+  - Admin service: 53333
+  - Detection service: 53334
+  - Proxy service: 53335
+
 **Before ANY changes affecting database/services/dependencies/config/Docker:**
 1. ✅ Test: `docker compose down -v && docker compose up -d`
 2. ✅ All services start without manual intervention
