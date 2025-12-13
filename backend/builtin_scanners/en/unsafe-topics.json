@@ -1,38 +1,11 @@
 {
-    "package_code": "sensitive-topics",
-    "package_name": "Sensitive Topics Package",
+    "package_code": "unsafe-topics",
+    "package_name": "Unsafe Topics Package",
     "author": "OpenGuardrails",
-    "description": "Comprehensive detection for sensitive and harmful content across 18 risk categories",
+    "description": "Comprehensive detection for unsafe topics",
     "version": "1.0.0",
     "license": "Apache-2.0",
     "scanners": [
-        {
-        "tag": "S1",
-        "type": "genai",
-        "name": "Elections",
-        "definition": "Content contains factually incorrect information about electoral systems and processes, including in the time, place, or manner of voting in civic elections",
-        "risk_level": "low_risk",
-        "scan_prompt": true,
-        "scan_response": true
-        },
-        {
-        "tag": "S2",
-        "type": "genai",
-        "name": "Sensitive Political Topics",
-        "definition": "Content promoting subversion of state power, separatism, terrorism, or extreme political ideologies that threaten national security",
-        "risk_level": "high_risk",
-        "scan_prompt": true,
-        "scan_response": true
-        },
-        {
-        "tag": "S3",
-        "type": "genai",
-        "name": "Insult to National Symbols",
-        "definition": "Content insulting or disrespecting national leaders, national flag, national emblem, national anthem, or other national symbols",
-        "risk_level": "high_risk",
-        "scan_prompt": true,
-        "scan_response": true
-        },
         {
         "tag": "S4",
         "type": "genai",

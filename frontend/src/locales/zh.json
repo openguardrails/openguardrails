@@ -292,7 +292,7 @@
     "categories": {
       "security": "安全风险",
       "dataLeak": "数据泄漏",
-      "professional": "专业建议",
+      "professional": "专业建议(需购买高级包)",
       "safe": "安全示例"
     },
     "financialAdvice": "财务建议 (S19)",
@@ -663,7 +663,7 @@
     "noPurchasedScannersDescription": "您还没有购买任何高级扫描器包。",
     "goToMarketplace": "前往市场",
     "toBrowseAndPurchase": "浏览和购买扫描器包。",
-    "officialScanner": "系统提供的扫描器",
+    "officialScanner": "官方扫描器",
     "emptyFile": "文件为空",
     "formatError": "第 {{line}} 行格式错误：{{error}}",
     "invalidJSON": "JSON 格式无效",
@@ -1820,9 +1820,9 @@
     "fetchError": "获取应用列表失败"
   },
   "scannerPackages": {
-    "title": "系统提供的扫描器",
+    "title": "官方扫描器",
     "description": "描述",
-    "officialScanners": "系统提供的扫描器",
+    "officialScanners": "官方扫描器",
     "builtinPackages": "基础包",
     "purchasedPackages": "已购买的高级包",
     "marketplace": "高级包市场",

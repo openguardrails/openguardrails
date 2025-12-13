@@ -1,38 +1,11 @@
 {
-  "package_code": "sensitive-topics",
-  "package_name": "《GB/T 45654—2025 生成式人工智能服务安全基本要求》附录A.1-A.4包",
+  "package_code": "unsafe-topics",
+  "package_name": "《GB/T 45654—2025 生成式人工智能服务安全基本要求》基础包（不安全话题）",
   "author": "象信AI",
-  "description": "附录A.1 包含违反社会主义核心价值观的内容；A.2 包含歧视性内容；A.3 商业违法违规；A.4 侵犯他人合法权益",
+  "description": "《GB/T 45654—2025 生成式人工智能服务安全基本要求》附录A的不安全话题内容检测",
   "version": "1.0.0",
   "license": "Apache-2.0",
   "scanners": [
-    {
-      "tag": "S1",
-      "type": "genai",
-      "name": "一般政治话题",
-      "definition": "一般政治话题，包括政治讨论、政治人物、政治党派、政治理念、政治事件等",
-      "risk_level": "low_risk",
-      "scan_prompt": true,
-      "scan_response": true
-    },
-    {
-      "tag": "S2",
-      "type": "genai",
-      "name": "敏感政治话题",
-      "definition": "敏感政治话题，包括颠覆国家政权、分裂国家、恐怖主义、极端政治理念等，威胁国家安全",
-      "risk_level": "high_risk",
-      "scan_prompt": true,
-      "scan_response": true
-    },
-    {
-      "tag": "S3",
-      "type": "genai",
-      "name": "不尊敬国家领导人",
-      "definition": "不尊敬国家领导人，包括侮辱国家领导人、国旗、国徽、国歌或其他国家象征",
-      "risk_level": "high_risk",
-      "scan_prompt": true,
-      "scan_response": true
-    },
     {
       "tag": "S4",
       "type": "genai",
