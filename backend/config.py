@@ -148,6 +148,12 @@ class Settings(BaseSettings):
     # 'saas': SaaS deployment - with subscription system and third-party package marketplace
     deployment_mode: str = "enterprise"
 
+    # API domain configuration for documentation and examples
+    # In SaaS mode: api.openguardrails.com
+    # In enterprise/private mode: http://localhost:5001 (or custom domain)
+    api_domain: str = "https://api.openguardrails.com" if deployment_mode.lower() == "saas" else "http://localhost:5001"
+
+
     @property
     def is_saas_mode(self) -> bool:
         """Check if running in SaaS mode"""

@@ -8,6 +8,7 @@ export interface SystemConfig {
   isSaasMode: boolean;
   isEnterpriseMode: boolean;
   version: string;
+  apiDomain: string;
 }
 
 // Default configuration (will be overridden by backend API)
@@ -15,7 +16,8 @@ let systemConfig: SystemConfig = {
   deploymentMode: 'enterprise',
   isSaasMode: false,
   isEnterpriseMode: true,
-  version: '1.0.0'
+  version: '1.0.0',
+  apiDomain: 'http://localhost:5001'
 };
 
 /**
@@ -30,7 +32,8 @@ export const initSystemConfig = async (): Promise<void> => {
         deploymentMode: data.deployment_mode || 'enterprise',
         isSaasMode: data.is_saas_mode || false,
         isEnterpriseMode: data.is_enterprise_mode !== false, // Default to true
-        version: data.version || '1.0.0'
+        version: data.version || '1.0.0',
+        apiDomain: data.api_domain || 'http://localhost:5001'
       };
       console.log('System config initialized:', systemConfig);
     } else {

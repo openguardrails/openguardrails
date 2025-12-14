@@ -1308,11 +1308,13 @@ async def get_system_info():
     - is_enterprise_mode: boolean
     - version: application version
     - app_name: application name
+    - api_domain: API domain for documentation and examples
     """
     return {
         "deployment_mode": settings.deployment_mode,
         "is_saas_mode": settings.is_saas_mode,
         "is_enterprise_mode": settings.is_enterprise_mode,
         "version": settings.app_version,
-        "app_name": settings.app_name
+        "app_name": settings.app_name,
+        "api_domain": settings.api_domain
     }

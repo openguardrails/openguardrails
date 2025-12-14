@@ -3,6 +3,7 @@ import { Card, Typography, Space, Button, Divider, Collapse, Tag, Alert, Anchor 
 import { BookOutlined, ApiOutlined, RocketOutlined, SettingOutlined, SafetyCertificateOutlined, CodeOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { authService, UserInfo } from '../../services/auth';
+import { getSystemConfig } from '../../config';
 
 const { Title, Text, Paragraph } = Typography;
 const { Panel } = Collapse;
@@ -13,6 +14,7 @@ const BASE_URL = import.meta.env.BASE_URL || '/platform/';
 const Documentation: React.FC = () => {
   const { t } = useTranslation();
   const [user, setUser] = useState<UserInfo | null>(null);
+  const [apiDomain, setApiDomain] = useState<string>('http://localhost:5001');
 
   useEffect(() => {
     const fetchMe = async () => {
@@ -24,6 +26,14 @@ const Documentation: React.FC = () => {
       }
     };
     fetchMe();
+
+    // Get API domain from system config
+    try {
+      const config = getSystemConfig();
+      setApiDomain(config.apiDomain);
+    } catch (e) {
+      console.error('Failed to get system config', e);
+    }
   }, []);
 
   return (
@@ -159,7 +169,7 @@ const Documentation: React.FC = () => {
                   lineHeight: 1.5,
                   marginTop: 8
                 }}>
-{`curl -X POST "https://api.openguardrails.com/v1/guardrails" \\
+{`curl -X POST "${apiDomain}/v1/guardrails" \\
   -H "Authorization: Bearer ${user?.api_key || 'your-api-key'}" \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -182,7 +192,7 @@ const Documentation: React.FC = () => {
                   lineHeight: 1.5,
                   marginTop: 8
                 }}>
-{`curl.exe -X POST "https://api.openguardrails.com/v1/guardrails" \`
+{`curl.exe -X POST "${apiDomain}/v1/guardrails" \`
   -H "Authorization: Bearer ${user?.api_key || 'your-api-key'}" \`
   -H "Content-Type: application/json" \`
   -d '{"model": "OpenGuardrails-Text", "messages": [{"role": "user", "content": "How to make a bomb?"}]}'`}
@@ -260,7 +270,7 @@ else:
 
 # Just change base_url and api_key
 client = OpenAI(
-    base_url="https://api.openguardrails.com/v1/gateway/<upstream_api_id>/",
+    base_url="${apiDomain}/v1/gateway/<upstream_api_id>/",
     api_key="${user?.api_key || 'your-api-key'}"
 )
 
@@ -271,7 +281,7 @@ response = client.chat.completions.create(
     messages=[{"role": "user", "content": "Hello"}]
 )
 
-# Note: For private deployment, replace api.openguardrails.com with your server address
+# Note: For private deployment, the API domain is automatically configured
 `}
               </pre>
 
@@ -296,7 +306,7 @@ response = client.chat.completions.create(
 {`from openai import OpenAI
 
 client = OpenAI(
-    base_url="https://api.openguardrails.com/v1/gateway/<upstream_api_id>/",
+    base_url="${apiDomain}/v1/gateway/<upstream_api_id>/",
     api_key="${user?.api_key || 'your-api-key'}"
 )
 
@@ -327,7 +337,7 @@ print("Thinking:", thinking)
 print("Result:", result)
 # Output: Result: "I'm sorry, I can't answer questions involving violent crime."
 
-# Note: For private deployment, replace api.openguardrails.com with your server address
+# Note: For private deployment, the API domain is automatically configured
 `}
               </pre>
             </div>
@@ -402,7 +412,7 @@ print("Result:", result)
                       marginTop: 8,
                       fontSize: 13
                     }}>
-{`https://api.openguardrails.com/v1/dify/moderation`}
+{`${apiDomain}/v1/dify/moderation`}
                     </pre>
                   </li>
                   <li style={{ marginTop: 12 }}>
@@ -761,7 +771,7 @@ print("Result:", result)
                 marginTop: 8
               }}>
 {`# Using cURL
-curl -X POST "https://api.openguardrails.com/v1/guardrails" \\
+curl -X POST "${apiDomain}/v1/guardrails" \\
   -H "Authorization: Bearer ${user?.api_key || 'your-api-key'}" \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -780,7 +790,7 @@ headers = {
 }
 
 response = requests.post(
-    "https://api.openguardrails.com/v1/guardrails",
+    "${apiDomain}/v1/guardrails",
     headers=headers,
     json={
         "model": "OpenGuardrails-Text",
@@ -788,7 +798,7 @@ response = requests.post(
     }
 )
 
-# Note: For private deployment, replace api.openguardrails.com with your server address
+# Note: For private deployment, the API domain is automatically configured
 `}
               </pre>
             </div>
