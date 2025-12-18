@@ -15,7 +15,7 @@ from datetime import date
 from config import settings
 from utils.logger import setup_logger
 from database.connection import get_admin_db
-from database.models import Tenant, ModelUsage
+from database.models import Tenant, DetectionResult
 from sqlalchemy import func
 
 logger = setup_logger()
@@ -85,77 +85,107 @@ async def verify_model_api_key(request: Request) -> dict:
         db.close()
 
 
-async def track_model_usage(
+async def track_direct_model_access(
     tenant_id: str,
     model_name: str,
-    input_tokens: int = 0,
-    output_tokens: int = 0
+    request_content: str,
+    ip_address: str = None,
+    user_agent: str = None
 ):
     """
-    Track model usage for billing (count only, no content).
-    Uses daily aggregation: one record per tenant per model per day.
+    Track direct model access by creating a DetectionResult record with is_direct_model_access=True.
+    This merges counting with regular guardrail calls to check against monthly subscription limits.
+
+    For privacy: stores minimal information, primarily for counting usage.
     """
+    import uuid
+
     db = next(get_admin_db())
     try:
-        today = date.today()
-        total_tokens = input_tokens + output_tokens
+        # Create a detection result record for direct model access
+        # Note: application_id is nullable since direct model access uses model_api_key (tenant-level)
+        detection_result = DetectionResult(
+            request_id=str(uuid.uuid4()),
+            tenant_id=tenant_id,
+            application_id=None,  # Direct model access is tenant-level, not application-specific
+            content=f"[Direct Model Access: {model_name}]",  # Minimal placeholder, not actual content for privacy
+            is_direct_model_access=True,  # Mark as direct model access
+            suggest_action='pass',  # Not a guardrail check, always "pass"
+            suggest_answer=None,
+            hit_keywords=None,
+            model_response=None,
+            security_risk_level='no_risk',
+            security_categories=[],
+            compliance_risk_level='no_risk',
+            compliance_categories=[],
+            data_risk_level='no_risk',
+            data_categories=[],
+            has_image=False,
+            image_count=0,
+            image_paths=[],
+            ip_address=ip_address,
+            user_agent=user_agent
+        )
 
-        # Try to find existing record for today
-        usage_record = db.query(ModelUsage).filter(
-            ModelUsage.tenant_id == tenant_id,
-            ModelUsage.model_name == model_name,
-            ModelUsage.usage_date == today
-        ).first()
-
-        if usage_record:
-            # Update existing record
-            usage_record.request_count += 1
-            usage_record.input_tokens += input_tokens
-            usage_record.output_tokens += output_tokens
-            usage_record.total_tokens += total_tokens
-        else:
-            # Create new record
-            usage_record = ModelUsage(
-                tenant_id=tenant_id,
-                model_name=model_name,
-                request_count=1,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                total_tokens=total_tokens,
-                usage_date=today
-            )
-            db.add(usage_record)
-
+        db.add(detection_result)
         db.commit()
-        logger.info(f"Tracked model usage: tenant={tenant_id}, model={model_name}, requests={usage_record.request_count}")
+        logger.info(f"Tracked direct model access: tenant={tenant_id}, model={model_name}")
 
     except Exception as e:
         db.rollback()
-        logger.error(f"Failed to track model usage: {e}")
+        logger.error(f"Failed to track direct model access: {e}")
         # Don't fail the request if tracking fails
     finally:
         db.close()
 
 
-def get_model_api_url(model_name: str) -> str:
+def get_model_config(model_name: str) -> dict:
     """
-    Get the API URL for a specific model.
-    Maps model names to actual API endpoints.
+    Get the complete model configuration (URL, API Key, Model Name) based on the requested model.
+    Maps tenant-requested model names to actual backend model configurations.
+
+    The three backend models are:
+    1. GUARDRAILS_MODEL_NAME - OpenGuardrails-Text (text detection model)
+    2. GUARDRAILS_VL_MODEL_NAME - OpenGuardrails-VL (vision-language model)
+    3. EMBEDDING_MODEL_NAME - OpenGuardrails-Embedding (embedding model)
+
+    Returns:
+        dict with keys: api_url, api_key, model_name
     """
     model_name_lower = model_name.lower()
 
     # OpenGuardrails-Text model (guardrails detection model)
     if 'openguardrails-text' in model_name_lower or 'guardrails-text' in model_name_lower:
-        return settings.guardrails_model_api_url
+        return {
+            'api_url': settings.guardrails_model_api_url,
+            'api_key': settings.guardrails_model_api_key,
+            'model_name': settings.guardrails_model_name
+        }
 
-    # bge-m3 model (embedding model)
-    elif 'bge-m3' in model_name_lower or 'bge' in model_name_lower:
-        return settings.embedding_api_base_url
+    # OpenGuardrails-VL model (vision-language model)
+    elif 'openguardrails-vl' in model_name_lower or 'guardrails-vl' in model_name_lower:
+        return {
+            'api_url': settings.guardrails_vl_model_api_url,
+            'api_key': settings.guardrails_vl_model_api_key,
+            'model_name': settings.guardrails_vl_model_name
+        }
 
-    # Default to guardrails model
+    # Embedding model (bge-m3 or similar)
+    elif 'bge-m3' in model_name_lower or 'bge' in model_name_lower or 'embedding' in model_name_lower:
+        return {
+            'api_url': settings.embedding_api_base_url,
+            'api_key': settings.embedding_api_key,
+            'model_name': settings.embedding_model_name
+        }
+
+    # Default to guardrails text model
     else:
-        logger.warning(f"Unknown model '{model_name}', defaulting to guardrails model")
-        return settings.guardrails_model_api_url
+        logger.warning(f"Unknown model '{model_name}', defaulting to guardrails text model")
+        return {
+            'api_url': settings.guardrails_model_api_url,
+            'api_key': settings.guardrails_model_api_key,
+            'model_name': settings.guardrails_model_name
+        }
 
 
 @router.post("/model/chat/completions")
@@ -191,22 +221,29 @@ async def model_chat_completions(
     ```
     """
     tenant_id = auth_context["tenant_id"]
-    model_name = request_data.model
+    requested_model_name = request_data.model
 
-    logger.info(f"Direct model access: tenant={tenant_id}, model={model_name}, stream={request_data.stream}")
+    # Extract IP address and user agent for tracking
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get('user-agent')
 
-    # Get model API URL
-    model_api_url = get_model_api_url(model_name)
+    logger.info(f"Direct model access: tenant={tenant_id}, model={requested_model_name}, stream={request_data.stream}")
 
-    # Prepare auth header for upstream model
+    # Get complete model configuration (URL, API Key, Model Name)
+    model_config = get_model_config(requested_model_name)
+    model_api_url = model_config['api_url']
+    model_api_key = model_config['api_key']
+    backend_model_name = model_config['model_name']
+
+    # Prepare auth header for upstream model (use the correct API key for this model)
     upstream_headers = {
-        "Authorization": f"Bearer {settings.guardrails_model_api_key}",
+        "Authorization": f"Bearer {model_api_key}",
         "Content-Type": "application/json"
     }
 
-    # Prepare request for upstream model
+    # Prepare request for upstream model (use the backend model name)
     upstream_request = {
-        "model": model_name,
+        "model": backend_model_name,
         "messages": [
             {"role": msg.role, "content": msg.content}
             for msg in request_data.messages
@@ -260,12 +297,14 @@ async def model_chat_completions(
                                 except:
                                     pass
 
-                # Track usage after streaming completes (best effort)
-                if input_tokens or output_tokens:
-                    await track_model_usage(tenant_id, model_name, input_tokens, output_tokens)
-                else:
-                    # No token info available, just track request count
-                    await track_model_usage(tenant_id, model_name, 0, 0)
+                # Track direct model access after streaming completes
+                await track_direct_model_access(
+                    tenant_id=tenant_id,
+                    model_name=requested_model_name,
+                    request_content="[streaming]",
+                    ip_address=ip_address,
+                    user_agent=user_agent
+                )
 
             return StreamingResponse(
                 stream_response(),
@@ -282,15 +321,14 @@ async def model_chat_completions(
                 response.raise_for_status()
                 response_data = response.json()
 
-                # Extract token usage for tracking
-                input_tokens = 0
-                output_tokens = 0
-                if "usage" in response_data:
-                    input_tokens = response_data["usage"].get("prompt_tokens", 0)
-                    output_tokens = response_data["usage"].get("completion_tokens", 0)
-
-                # Track usage (async, don't wait)
-                await track_model_usage(tenant_id, model_name, input_tokens, output_tokens)
+                # Track direct model access
+                await track_direct_model_access(
+                    tenant_id=tenant_id,
+                    model_name=requested_model_name,
+                    request_content="[non-streaming]",
+                    ip_address=ip_address,
+                    user_agent=user_agent
+                )
 
                 return JSONResponse(content=response_data)
 
@@ -328,55 +366,61 @@ async def get_model_usage(
     - start_date: Start date (YYYY-MM-DD format, optional)
     - end_date: End date (YYYY-MM-DD format, optional)
 
-    Returns daily usage statistics aggregated by model.
+    Returns usage count for direct model access calls.
+    Note: Direct model access calls are now tracked in detection_results with is_direct_model_access=True
     """
+    from datetime import datetime
+    from sqlalchemy import cast, Date
+
     tenant_id = auth_context["tenant_id"]
 
     db = next(get_admin_db())
     try:
-        # Build query
-        query = db.query(ModelUsage).filter(ModelUsage.tenant_id == tenant_id)
+        # Build query for direct model access records
+        query = db.query(DetectionResult).filter(
+            DetectionResult.tenant_id == tenant_id,
+            DetectionResult.is_direct_model_access == True
+        )
 
         # Apply date filters
         if start_date:
             try:
-                start = date.fromisoformat(start_date)
-                query = query.filter(ModelUsage.usage_date >= start)
+                start = datetime.fromisoformat(start_date)
+                query = query.filter(DetectionResult.created_at >= start)
             except ValueError:
                 raise HTTPException(status_code=400, detail="Invalid start_date format. Use YYYY-MM-DD")
 
         if end_date:
             try:
-                end = date.fromisoformat(end_date)
-                query = query.filter(ModelUsage.usage_date <= end)
+                end = datetime.fromisoformat(end_date)
+                # Add one day to include the end date
+                from datetime import timedelta
+                end = end + timedelta(days=1)
+                query = query.filter(DetectionResult.created_at < end)
             except ValueError:
                 raise HTTPException(status_code=400, detail="Invalid end_date format. Use YYYY-MM-DD")
 
-        # Get usage records
-        usage_records = query.order_by(ModelUsage.usage_date.desc()).all()
+        # Get all direct model access records
+        usage_records = query.order_by(DetectionResult.created_at.desc()).all()
+
+        # Group by date
+        from collections import defaultdict
+        usage_by_date = defaultdict(int)
+        for record in usage_records:
+            record_date = record.created_at.date().isoformat()
+            usage_by_date[record_date] += 1
 
         # Format response
-        usage_data = []
-        for record in usage_records:
-            usage_data.append({
-                "date": record.usage_date.isoformat(),
-                "model_name": record.model_name,
-                "request_count": record.request_count,
-                "input_tokens": record.input_tokens,
-                "output_tokens": record.output_tokens,
-                "total_tokens": record.total_tokens
-            })
-
-        # Calculate totals
-        total_requests = sum(r.request_count for r in usage_records)
-        total_tokens = sum(r.total_tokens for r in usage_records)
+        usage_data = [
+            {"date": date_str, "request_count": count}
+            for date_str, count in sorted(usage_by_date.items(), reverse=True)
+        ]
 
         return {
             "tenant_id": tenant_id,
             "start_date": start_date,
             "end_date": end_date,
-            "total_requests": total_requests,
-            "total_tokens": total_tokens,
+            "total_requests": len(usage_records),
             "usage_by_day": usage_data
         }
 

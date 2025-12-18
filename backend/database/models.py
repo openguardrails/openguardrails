@@ -133,6 +133,8 @@ class DetectionResult(Base):
     has_image = Column(Boolean, default=False, index=True)  # Whether contains image
     image_count = Column(Integer, default=0)  # Image count
     image_paths = Column(JSON, default=list)  # Saved image file path list
+    # Direct model access flag
+    is_direct_model_access = Column(Boolean, default=False, index=True)  # Whether this is a direct model access call (not a guardrail check)
 
     # Association relationships
     tenant = relationship("Tenant", back_populates="detection_results")
@@ -877,30 +879,3 @@ class SubscriptionPayment(Base):
     payment_order = relationship("PaymentOrder")
 
 
-class ModelUsage(Base):
-    """Model usage tracking table for direct model access (privacy-preserving, no content stored)"""
-    __tablename__ = "model_usage"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
-    model_name = Column(String(100), nullable=False, index=True)
-
-    # Usage metrics (no content stored for privacy)
-    request_count = Column(Integer, default=1, nullable=False)
-    input_tokens = Column(Integer, default=0)
-    output_tokens = Column(Integer, default=0)
-    total_tokens = Column(Integer, default=0)
-
-    # Daily aggregation
-    usage_date = Column(DateTime(timezone=True), nullable=False, index=True)
-
-    # Timestamps
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
-    # Relationships
-    tenant = relationship("Tenant")
-
-    __table_args__ = (
-        UniqueConstraint('tenant_id', 'model_name', 'usage_date', name='uq_model_usage_tenant_model_date'),
-    )
