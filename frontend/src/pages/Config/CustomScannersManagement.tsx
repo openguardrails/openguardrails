@@ -7,6 +7,7 @@ import { customScannersApi } from '../../services/api';
 import { useApplication } from '../../contexts/ApplicationContext';
 import { eventBus, EVENTS } from '../../utils/eventBus';
 import { billingService } from '../../services/billing';
+import { features } from '../../config';
 
 const { TextArea } = Input;
 const { Text } = Typography;
@@ -45,7 +46,14 @@ const CustomScannersManagement: React.FC = () => {
   const [subscriptionLoading, setSubscriptionLoading] = useState(true);
 
   useEffect(() => {
-    checkSubscription();
+    // In enterprise mode, all features are available
+    if (features.showSubscription()) {
+      checkSubscription();
+    } else {
+      setIsSubscribed(true); // Enterprise mode has all features
+      setSubscriptionLoading(false);
+    }
+
     if (currentApplicationId) {
       loadData();
     }
@@ -403,18 +411,20 @@ const CustomScannersManagement: React.FC = () => {
   return (
     <Spin spinning={loading}>
       <Space direction="vertical" size="large" style={{ width: '100%' }}>
-        <Alert
-          message={
-            <Space>
-              <CrownOutlined style={{ color: '#faad14' }} />
-              <span>{t('customScanners.premiumActiveMessage')}</span>
-            </Space>
-          }
-          description={t('customScanners.premiumActiveDesc')}
-          type="success"
-          showIcon={false}
-          closable
-        />
+        {features.showSubscription() && (
+          <Alert
+            message={
+              <Space>
+                <CrownOutlined style={{ color: '#faad14' }} />
+                <span>{t('customScanners.premiumActiveMessage')}</span>
+              </Space>
+            }
+            description={t('customScanners.premiumActiveDesc')}
+            type="success"
+            showIcon={false}
+            closable
+          />
+        )}
         
         <Collapse style={{ backgroundColor: '#f8f9fa' }}>
           <Collapse.Panel header={t('customScanners.usageGuideTitle')} key="1">

@@ -48,6 +48,7 @@ class UserInfo(BaseModel):
     id: str  # Changed to string UUID
     email: str
     api_key: str
+    model_api_key: Optional[str] = None  # Direct Model Access API Key (for private deployment)
     is_active: bool
     is_verified: bool
     is_super_admin: bool
@@ -56,6 +57,9 @@ class UserInfo(BaseModel):
 
 class ApiKeyResponse(BaseModel):
     api_key: str
+
+class ModelApiKeyResponse(BaseModel):
+    model_api_key: str
 
 def get_current_user_from_token(credentials: HTTPAuthorizationCredentials, db: Session) -> Tenant:
     """Get current tenant from JWT token"""
@@ -294,6 +298,7 @@ async def get_current_user_info(
         id=str(tenant.id),  # Convert to string format
         email=tenant.email,
         api_key=tenant.api_key,
+        model_api_key=tenant.model_api_key,  # Include Model API Key
         is_active=tenant.is_active,
         is_verified=tenant.is_verified,
         is_super_admin=admin_service.is_super_admin(tenant),
@@ -317,6 +322,26 @@ async def regenerate_user_api_key(
         )
 
     return ApiKeyResponse(api_key=new_api_key)
+
+@router.post("/regenerate-model-api-key", response_model=ModelApiKeyResponse)
+async def regenerate_model_api_key(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_admin_db)
+):
+    """Regenerate Model API Key for Direct Model Access"""
+    tenant = get_current_user_from_token(credentials, db)
+
+    # Generate new model API key with format: sk-xxai-model-{49 random chars}
+    # Total: 15 (prefix) + 49 (random) = 64 chars (matches DB VARCHAR(64))
+    import secrets
+    random_part = secrets.token_hex(24)[:49]  # Generate 48 hex chars, take first 49
+    new_model_api_key = f"sk-xxai-model-{random_part}"
+
+    # Update tenant's model API key
+    tenant.model_api_key = new_model_api_key
+    db.commit()
+
+    return ModelApiKeyResponse(model_api_key=new_model_api_key)
 
 @router.post("/logout")
 async def logout_user():

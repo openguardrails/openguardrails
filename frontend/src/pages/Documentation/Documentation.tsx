@@ -51,6 +51,7 @@ const Documentation: React.FC = () => {
                 { key: 'application-management', href: '#application-management', title: t('docs.applicationManagement') },
                 { key: 'quick-test', href: '#quick-test', title: t('docs.quickTest') },
                 { key: 'api-usage', href: '#api-usage', title: t('docs.apiUsage') },
+                { key: 'model-direct-access', href: '#model-direct-access', title: t('docs.directModelAccess') },
                 { key: 'gateway-usage', href: '#gateway-usage', title: t('docs.gatewayUsage') },
                 { key: 'dify-integration', href: '#dify-integration', title: t('docs.difyIntegration') },
                 { key: 'n8n-integration', href: '#n8n-integration', title: t('docs.n8nIntegration') },
@@ -240,6 +241,101 @@ else:
     print(f"Unsafe: {response.suggest_answer}")
 `}
               </pre>
+            </div>
+
+            {/* Direct Model Access */}
+            <div id="model-direct-access" style={{ marginTop: 32 }}>
+              <Title level={4}>{t('docs.directModelAccess')}</Title>
+              <Paragraph>
+                {t('docs.directModelAccessDesc')}
+              </Paragraph>
+
+              <Alert
+                message={t('docs.privacyGuarantee')}
+                description={t('docs.privacyGuaranteeDesc')}
+                type="success"
+                showIcon
+                style={{ marginBottom: 16 }}
+              />
+
+              {user?.model_api_key && (
+                <div style={{ marginTop: 16, marginBottom: 16 }}>
+                  <Text strong>{t('docs.yourModelApiKey')}:</Text>
+                  <div style={{
+                    marginTop: 8,
+                    padding: '8px 12px',
+                    border: '1px solid #d9d9d9',
+                    borderRadius: '6px',
+                    backgroundColor: '#fafafa',
+                    fontFamily: 'monospace',
+                    fontSize: '14px'
+                  }}>
+                    <Text code style={{ backgroundColor: 'transparent', border: 'none', padding: 0 }}>
+                      {user.model_api_key}
+                    </Text>
+                  </div>
+                </div>
+              )}
+
+              <div style={{ marginTop: 16 }}>
+                <Text strong>{t('docs.supportedModels')}:</Text>
+                <ul style={{ marginTop: 8 }}>
+                  <li><Text code>OpenGuardrails-Text</Text> - {t('docs.guardrailsTextModel')}</li>
+                  <li><Text code>bge-m3</Text> - {t('docs.bgeM3Model')}</li>
+                  <li>{t('docs.futureModels')}</li>
+                </ul>
+              </div>
+
+              <div style={{ marginTop: 16 }}>
+                <Text strong>{t('docs.pythonExample')}:</Text>
+                <pre style={{
+                  backgroundColor: '#f6f8fa',
+                  padding: 16,
+                  borderRadius: 6,
+                  overflow: 'auto',
+                  fontSize: 13,
+                  lineHeight: 1.5,
+                  marginTop: 8
+                }}>
+{`from openai import OpenAI
+
+# Configure client with direct model access
+client = OpenAI(
+    base_url="${apiDomain}/v1/",
+    api_key="${user?.model_api_key || 'your-model-api-key'}"
+)
+
+# Call OpenGuardrails-Text model directly
+response = client.chat.completions.create(
+    model="OpenGuardrails-Text",
+    messages=[
+        {"role": "user", "content": "Analyze this text for safety"}
+    ]
+)
+
+print(response.choices[0].message.content)
+
+# Privacy Note: Content is NOT logged, only usage count is tracked`}
+                </pre>
+              </div>
+
+              <div style={{ marginTop: 16 }}>
+                <Text strong>{t('docs.useCases')}:</Text>
+                <ul style={{ marginTop: 8 }}>
+                  <li>{t('docs.useCase1')}</li>
+                  <li>{t('docs.useCase2')}</li>
+                  <li>{t('docs.useCase3')}</li>
+                  <li>{t('docs.useCase4')}</li>
+                </ul>
+              </div>
+
+              <Alert
+                message={t('docs.defaultConfiguration')}
+                description={t('docs.defaultConfigurationDesc')}
+                type="info"
+                showIcon
+                style={{ marginTop: 16 }}
+              />
             </div>
 
             {/* Gateway Usage */}

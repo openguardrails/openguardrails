@@ -16,7 +16,7 @@ from pathlib import Path
 
 from config import settings
 from database.connection import init_db, create_detection_engine
-from routers import detection_guardrails, dify_moderation, billing
+from routers import detection_guardrails, dify_moderation, billing, model_direct_access
 from services.async_logger import async_detection_logger
 from utils.logger import setup_logger
 
@@ -249,6 +249,9 @@ async def verify_user_auth(
 app.include_router(detection_guardrails.router, prefix="/v1", dependencies=[Depends(verify_user_auth)])
 app.include_router(dify_moderation.router, prefix="/v1", dependencies=[Depends(verify_user_auth)])  # Dify API-based Extension
 app.include_router(billing.router, dependencies=[Depends(verify_user_auth)])  # Billing APIs
+
+# Register direct model access routes (no dependency on verify_user_auth, uses its own auth)
+app.include_router(model_direct_access.router, prefix="/v1")  # Direct Model Access (auth handled internally)
 
 # Global exception handling
 @app.exception_handler(Exception)

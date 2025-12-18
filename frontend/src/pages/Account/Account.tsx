@@ -7,7 +7,7 @@ import { authService, UserInfo } from '../../services/auth';
 import { configApi } from '../../services/api';
 import { billingService } from '../../services/billing';
 import type { Subscription } from '../../types/billing';
-import { features } from '../../config';
+import { features, getSystemConfig } from '../../config';
 
 const { Title, Text } = Typography;
 
@@ -25,6 +25,7 @@ const Account: React.FC = () => {
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [passwordForm] = Form.useForm();
   const [passwordLoading, setPasswordLoading] = useState(false);
+  const [apiDomain, setApiDomain] = useState<string>('http://localhost:5001');
 
   // Get active tab from URL query params
   const [activeTab, setActiveTab] = useState(() => searchParams.get('tab') || 'general');
@@ -67,6 +68,14 @@ const Account: React.FC = () => {
     fetchMe();
     fetchSystemInfo();
     fetchSubscription();
+
+    // Get API domain from system config
+    try {
+      const config = getSystemConfig();
+      setApiDomain(config.apiDomain);
+    } catch (e) {
+      console.error('Failed to get system config', e);
+    }
   }, []);
 
   // Sync activeTab with URL search params
@@ -207,6 +216,106 @@ const Account: React.FC = () => {
               <Text type="secondary">{t('account.difyModerationEndpointNote')}</Text>
             </div>
           </div>
+
+          {/* Direct Model Access API Key */}
+          {user?.model_api_key && (
+            <div>
+              <Divider />
+              <div style={{ marginBottom: 16 }}>
+                <Title level={5}>{t('docs.directModelAccess') || 'Direct Model Access'}</Title>
+                <Text type="secondary">{t('docs.directModelAccessDesc') || 'Use this API key to directly access models (OpenGuardrails-Text, bge-m3, etc.) without guardrails detection. For privacy, we only track usage count, not content.'}</Text>
+              </div>
+
+              <div>
+                <Text type="secondary">{t('docs.modelApiKey') || 'Model API Key'}</Text>
+                <Space style={{ width: '100%', marginTop: 8, alignItems: 'center' }}>
+                  <div style={{
+                    flex: 1,
+                    padding: '8px 12px',
+                    border: '1px solid #d9d9d9',
+                    borderRadius: '6px',
+                    backgroundColor: '#fafafa',
+                    fontFamily: 'monospace',
+                    fontSize: '14px',
+                    wordBreak: 'break-all'
+                  }}>
+                    <Text code style={{ backgroundColor: 'transparent', border: 'none', padding: 0 }}>
+                      {user.model_api_key}
+                    </Text>
+                  </div>
+                  <Button
+                    icon={<CopyOutlined />}
+                    onClick={() => {
+                      if (user.model_api_key) {
+                        navigator.clipboard.writeText(user.model_api_key);
+                        message.success(t('account.copied'));
+                      }
+                    }}
+                  >
+                    {t('account.copy')}
+                  </Button>
+                  <Button
+                    danger
+                    onClick={async () => {
+                      try {
+                        const newKey = await authService.regenerateModelApiKey();
+                        setUser(user ? { ...user, model_api_key: newKey.model_api_key } : null);
+                        message.success(t('account.modelApiKeyRegenerated') || 'Model API Key regenerated successfully');
+                      } catch (error) {
+                        message.error(t('account.regenerateFailed') || 'Failed to regenerate Model API Key');
+                      }
+                    }}
+                  >
+                    {t('account.regenerate') || 'Regenerate'}
+                  </Button>
+                </Space>
+              </div>
+
+              <div style={{ marginTop: 16 }}>
+                <Text strong>{t('account.usageExample') || 'Usage Example'}:</Text>
+                <pre style={{
+                  backgroundColor: '#f6f8fa',
+                  padding: 16,
+                  borderRadius: 6,
+                  overflow: 'auto',
+                  fontSize: 13,
+                  lineHeight: 1.5,
+                  marginTop: 8
+                }}>
+{`from openai import OpenAI
+
+# Just change base_url and api_key
+client = OpenAI(
+    base_url="${apiDomain}/v1/model/",
+    api_key="${user.model_api_key}"
+)
+
+# Use as normal - direct model access!
+response = client.chat.completions.create(
+    model="OpenGuardrails-Text",  # or bge-m3
+    messages=[{"role": "user", "content": "Hello"}]
+)
+
+# Privacy Notice: Content is NOT logged, only usage count`}
+                </pre>
+              </div>
+
+              <div style={{
+                marginTop: 16,
+                padding: '12px 16px',
+                backgroundColor: '#e6f7ff',
+                border: '1px solid #91d5ff',
+                borderRadius: 6
+              }}>
+                <Text strong style={{ color: '#1890ff' }}>{t('account.privacyNotice') || 'Privacy Notice'}:</Text>
+                <ul style={{ marginTop: 8, marginBottom: 0, paddingLeft: 20 }}>
+                  <li>{t('account.privacyNotice1') || 'Message content is NEVER stored in our database'}</li>
+                  <li>{t('account.privacyNotice2') || 'Only usage statistics (request count, tokens) are tracked for billing'}</li>
+                  <li>{t('account.privacyNotice3') || 'Ideal for private deployment where you self-host the platform'}</li>
+                </ul>
+              </div>
+            </div>
+          )}
 
           {/* Subscription info only in SaaS mode */}
           {features.showSubscription() && (

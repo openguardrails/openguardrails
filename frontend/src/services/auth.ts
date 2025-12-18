@@ -31,6 +31,7 @@ export interface UserInfo {
   id: string;
   email: string;
   api_key: string;
+  model_api_key?: string;  // Direct Model Access API Key (for private deployment)
   is_active: boolean;
   is_verified: boolean;
   is_super_admin: boolean;
@@ -81,6 +82,24 @@ class AuthService {
         Authorization: `Bearer ${token}`,
       },
     });
+    return response.data;
+  }
+
+  async regenerateModelApiKey(): Promise<{ model_api_key: string }> {
+    const token = this.getToken();
+    if (!token) {
+      throw new Error('No authentication token found');
+    }
+
+    const response = await axios.post<{ model_api_key: string }>(
+      `${this.baseURL}/api/v1/users/regenerate-model-api-key`,
+      {},
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
     return response.data;
   }
 

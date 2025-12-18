@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import type { UploadFile } from 'antd/es/upload/interface';
 import { billingService } from '../../services/billing';
+import { features } from '../../config';
 
 interface Subscription {
   subscription_type: 'free' | 'subscribed';
@@ -35,8 +36,13 @@ const ImageUpload: React.FC<ImageUploadProps> = ({
   useEffect(() => {
     const fetchSubscription = async () => {
       try {
-        const sub = await billingService.getCurrentSubscription();
-        setSubscription(sub);
+        if (features.showSubscription()) {
+          const sub = await billingService.getCurrentSubscription();
+          setSubscription(sub);
+        } else {
+          // Enterprise mode has all features
+          setSubscription({ subscription_type: 'subscribed' });
+        }
       } catch (e: any) {
         console.error('Failed to fetch subscription:', e);
         // 默认为免费用户以避免服务中断

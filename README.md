@@ -10,6 +10,7 @@
 # OpenGuardrails
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Version](https://img.shields.io/badge/Version-4.5.0-green.svg)](https://github.com/openguardrails/openguardrails/releases)
 [![Python](https://img.shields.io/badge/Python-3.8%2B-blue)](https://www.python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.104%2B-green)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/React-18.0%2B-blue)](https://reactjs.org)
@@ -23,9 +24,10 @@
 
 ## ✨ Core Features
 
-- 🏗️ **Scanner Package System** 🆕 - Flexible detection architecture with official, purchasable, and custom scanners
+- 🏗️ **Scanner Package System** - Flexible detection architecture with official, purchasable, and custom scanners
 - 📱 **Multi-Application Management** - Manage multiple applications within one tenant account, each with isolated configurations
 - 🪄 **Two Usage Modes** - Detection API + Security Gateway
+- 🔑 **Direct Model Access** 🆕 v4.5.0 - Privacy-first direct model API (no content logging, OpenAI-compatible)
 - 🛡️ **Triple Protection** - Prompt attack detection + Content compliance detection + Data leak detection
 - 🧠 **Context Awareness** - Intelligent safety detection based on conversation context
 - 📋 **Content Safety** - Support custom training for content safety of different cultures and regions.
@@ -239,6 +241,62 @@ Example output:
     "score": 0.95
 }
 ```
+
+#### **Direct Model Access (Private Deployment)** 🆕
+
+For private deployment scenarios where you self-host the platform but want to use cloud-hosted models, OpenGuardrails v4.5.0+ provides Direct Model Access API with maximum privacy protection:
+
+```python
+from openai import OpenAI
+
+# Configure client with direct model access
+client = OpenAI(
+    base_url="https://api.openguardrails.com/v1/model/",  # Note: /v1/model/ not /v1/
+    api_key="your-model-api-key"  # Get from Account page (starts with sk-xxai-model-)
+)
+
+# Call OpenGuardrails-Text model directly
+response = client.chat.completions.create(
+    model="OpenGuardrails-Text",  # or bge-m3
+    messages=[
+        {"role": "user", "content": "Analyze this text for safety"}
+    ],
+    stream=True  # Streaming also supported
+)
+
+print(response.choices[0].message.content)
+```
+
+**Privacy Guarantee:**
+- ✅ Message content is **NEVER** stored in database
+- ✅ Only usage statistics (request count, tokens) tracked for billing
+- ✅ Separate Model API Key (different from application keys)
+- ✅ No IP address or User-Agent logging
+- ✅ Daily aggregated usage data only
+
+**Key Features:**
+- **OpenAI-Compatible**: Drop-in replacement for OpenAI SDK
+- **Streaming Support**: Full streaming response support
+- **Usage Analytics**: Query usage by date range via `/v1/model/usage` endpoint
+- **Key Management**: Regenerate keys anytime from Account page
+
+**Supported Models:**
+- `OpenGuardrails-Text` - Guardrails detection model (3.3B parameters, 119 languages)
+- `bge-m3` - Multilingual embedding model (1024 dimensions)
+- Future: Vision understanding models
+
+**Use Cases:**
+- Private deployment with cloud model access
+- Custom guardrails logic implementation
+- Research and experimentation without content logging
+- Data sovereignty and compliance requirements
+- Direct model inference for non-safety tasks
+
+**API Key Types:**
+- **Application API Key** (`sk-xxai-xxx`): For guardrails detection, logs full content
+- **Model API Key** (`sk-xxai-model-xxx`): For direct access, no content logging
+
+See [Model API Key Management Guide](docs/MODEL_API_KEY_MANAGEMENT.md) for complete documentation.
 
 ### 🚦 Use as Dify API-Base Extension — Moderation
 

@@ -9,8 +9,106 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [4.5.0] - 2025-12-17
+
+### 🔑 Major Feature: Direct Model Access
+
+This release introduces **Direct Model Access**, a privacy-first feature that allows users to directly access backend models (OpenGuardrails-Text, bge-m3, etc.) without guardrails detection, ideal for private deployments and scenarios requiring maximum privacy.
+
+#### 🎯 What's New
+
+**Direct Model Access Benefits:**
+- ✅ **Privacy Guarantee**: Message content is NEVER stored in database
+- ✅ **Usage-Only Tracking**: Only request count and token usage are recorded for billing
+- ✅ **Independent Authentication**: Uses dedicated Model API Key (separate from application keys)
+- ✅ **OpenAI-Compatible**: Full OpenAI SDK compatibility for seamless integration
+- ✅ **Streaming Support**: Both streaming and non-streaming responses
+- ✅ **Usage Analytics**: Query detailed usage statistics by date range
+
+### Added
+
+#### 🔐 **Model API Key Management**
+
+**New Database Schema:**
+- `tenants.model_api_key` - Dedicated API key for direct model access (format: `sk-xxai-model-{49 chars}`)
+- `model_usage` table - Privacy-preserving usage tracking (no content storage)
+
+**New API Endpoints:**
+- `GET /api/v1/users/me` - Now returns `model_api_key` field
+- `POST /api/v1/users/regenerate-model-api-key` - Regenerate Model API Key
+
+**Frontend Features:**
+- Account page now displays Model API Key with copy and regenerate functionality
+- Complete usage example code with auto-filled base_url and api_key
+- Privacy protection notice explaining data handling
+- One-click key regeneration with instant invalidation of old keys
+
+#### 🚀 **Direct Model Access Endpoints**
+
+**New Endpoints:**
+- `POST /v1/model/chat/completions` - OpenAI-compatible chat completions (streaming & non-streaming)
+- `GET /v1/model/usage` - Query usage statistics with date filters
+
+**Supported Models:**
+- `OpenGuardrails-Text` - Safety detection model
+- `bge-m3` - Text embedding model
+
+**Usage Example:**
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:5001/v1/model/",
+    api_key="sk-xxai-model-YOUR_KEY"
+)
+
+response = client.chat.completions.create(
+    model="OpenGuardrails-Text",
+    messages=[{"role": "user", "content": "Hello"}]
+)
+```
+
+#### 📊 **Privacy-Preserving Usage Tracking**
+
+**What's Tracked:**
+- Request count per model per day
+- Input/output token counts
+- Usage date (daily aggregation)
+
+**What's NOT Tracked:**
+- ❌ Message content (prompts and responses)
+- ❌ IP addresses
+- ❌ User-Agent strings
+- ❌ Any personally identifiable information
+
 ### Fixed
-- **Super Admin Login Issue**: Fixed missing `Tenant` import in `scanner_config_service.py` that caused "name 'Tenant' is not defined" error when super admin logged in
+
+- **Model API Key Length**: Fixed key generation to respect 64-character database limit
+- **Streaming Response**: Fixed httpx AsyncClient lifecycle in streaming responses
+- **Upstream Authentication**: Added missing Authorization header for backend model API calls
+- **ORM Model**: Added `model_api_key` field to Tenant model
+- **Super Admin Login Issue**: Fixed missing `Tenant` import in `scanner_config_service.py`
+
+### Changed
+
+- **Database Migration**: Auto-generates Model API Keys for all existing tenants
+- **Frontend UI**: Enhanced Account page with Model API Key management section
+- **Base URL**: Corrected Direct Model Access base_url from `/v1/` to `/v1/model/`
+
+### Documentation
+
+- Added comprehensive `docs/MODEL_API_KEY_MANAGEMENT.md` guide
+- Updated `tests/DIRECT_MODEL_ACCESS_GUIDE.md` with complete examples
+- Added usage examples for Python, cURL, and streaming scenarios
+
+### Security
+
+- **Key Format**: Model API Keys use cryptographically secure random generation (`secrets` module)
+- **Unique Constraint**: Database-level uniqueness for all Model API Keys
+- **Immediate Invalidation**: Old keys become invalid instantly upon regeneration
+- **Isolated Permissions**: Model API Keys cannot access other platform APIs
 
 ---
 
