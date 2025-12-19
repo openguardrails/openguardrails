@@ -17,9 +17,11 @@ from utils.logger import setup_logger
 from database.connection import get_admin_db
 from database.models import Tenant, DetectionResult
 from sqlalchemy import func
+from services.billing_service import BillingService
 
 logger = setup_logger()
 router = APIRouter(tags=["Direct Model Access"])
+billing_service = BillingService()
 
 
 class ChatMessage(BaseModel):
@@ -75,6 +77,34 @@ async def verify_model_api_key(request: Request) -> dict:
                 status_code=401,
                 detail="Invalid model API key"
             )
+
+        # Check subscription status for SaaS mode
+        # In enterprise mode (private deployment), subscription check is skipped
+        if settings.is_saas_mode:
+            # Super admins always have access
+            if not tenant.is_super_admin:
+                # Check if user has an active subscription
+                subscription = billing_service.get_subscription(str(tenant.id), db)
+
+                # Verify subscription is active
+                if not subscription or subscription.subscription_type != 'subscribed':
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Direct model access requires an active subscription. Please subscribe at the platform."
+                    )
+
+                # Check if subscription has expired
+                from datetime import datetime, timezone
+                current_time = datetime.now(timezone.utc)
+                if subscription.subscription_expires_at and subscription.subscription_expires_at < current_time:
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Your subscription has expired. Please renew your subscription to continue using direct model access."
+                    )
+
+                logger.info(f"Subscription verified for tenant {tenant.email} (SaaS mode)")
+        else:
+            logger.debug(f"Subscription check skipped for tenant {tenant.email} (Enterprise mode)")
 
         return {
             "tenant_id": str(tenant.id),

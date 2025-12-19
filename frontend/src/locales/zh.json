@@ -1659,6 +1659,8 @@
     "errorResponseFormat": "错误响应格式",
     "directModelAccess": "直接模型访问",
     "directModelAccessDesc": "使用OpenAI兼容API直接访问防护模型。适用于私有部署，在您自托管平台的同时使用云托管模型。",
+    "subscriptionActive": "订阅已激活 - 直接模型访问已启用",
+    "subscriptionRequired": "使用直接模型访问需要有效订阅。请订阅以继续使用。",
     "privacyGuarantee": "隐私保证",
     "privacyGuaranteeDesc": "使用直接模型访问时，您的消息内容永远不会存储在我们的数据库中。我们只跟踪使用次数和令牌数用于计费目的。这确保了您的应用程序具有最大的数据隐私。",
     "modelApiKey": "模型API密钥",

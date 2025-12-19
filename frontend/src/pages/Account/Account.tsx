@@ -7,7 +7,7 @@ import { authService, UserInfo } from '../../services/auth';
 import { configApi } from '../../services/api';
 import { billingService } from '../../services/billing';
 import type { Subscription } from '../../types/billing';
-import { features, getSystemConfig } from '../../config';
+import { features, getSystemConfig, isSaasMode } from '../../config';
 
 const { Title, Text } = Typography;
 
@@ -224,6 +224,21 @@ const Account: React.FC = () => {
               <div style={{ marginBottom: 16 }}>
                 <Title level={5}>{t('docs.directModelAccess') || 'Direct Model Access'}</Title>
                 <Text type="secondary">{t('docs.directModelAccessDesc') || 'Use this API key to directly access models (OpenGuardrails-Text, bge-m3, etc.) without guardrails detection. For privacy, we only track usage count, not content.'}</Text>
+
+                {/* Subscription requirement notice (SaaS mode only) */}
+                {isSaasMode() && !user?.is_super_admin && (
+                  <div style={{ marginTop: 12 }}>
+                    {subscription?.subscription_type === 'subscribed' ? (
+                      <Text type="success" style={{ fontSize: 13 }}>
+                        ✓ {t('docs.subscriptionActive') || 'Subscription active - Direct model access enabled'}
+                      </Text>
+                    ) : (
+                      <Text type="warning" style={{ fontSize: 13 }}>
+                        ⚠️ {t('docs.subscriptionRequired') || 'Active subscription required to use direct model access. Please subscribe to continue.'}
+                      </Text>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div>

@@ -1662,6 +1662,8 @@
     "errorResponseFormat": "Error Response Format",
     "directModelAccess": "Direct Model Access",
     "directModelAccessDesc": "Access guardrails models directly using OpenAI-compatible API. Ideal for private deployment where you self-host the platform but use cloud-hosted models.",
+    "subscriptionActive": "Subscription active - Direct model access enabled",
+    "subscriptionRequired": "Active subscription required to use direct model access. Please subscribe to continue.",
     "privacyGuarantee": "Privacy Guarantee",
     "privacyGuaranteeDesc": "When using direct model access, your message content is NEVER stored in our database. We only track usage count and tokens for billing purposes. This ensures maximum data privacy for your applications.",
     "modelApiKey": "Model API Key",
