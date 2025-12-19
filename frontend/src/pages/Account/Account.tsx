@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Card, Typography, Space, Button, message, Divider, Progress, Tag, Tabs, Form, Input } from 'antd';
+import { Card, Typography, Space, Button, message, Divider, Progress, Tag, Tabs, Form, Input, Alert } from 'antd';
 import { CopyOutlined, SafetyCertificateOutlined, LockOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
@@ -8,6 +8,8 @@ import { configApi } from '../../services/api';
 import { billingService } from '../../services/billing';
 import type { Subscription } from '../../types/billing';
 import { features, getSystemConfig, isSaasMode } from '../../config';
+import { PaymentButton } from '../../components/Payment';
+import paymentService, { PaymentConfig } from '../../services/payment';
 
 const { Title, Text } = Typography;
 
@@ -23,6 +25,7 @@ const Account: React.FC = () => {
   const [user, setUser] = useState<UserInfo | null>(null);
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
   const [subscription, setSubscription] = useState<Subscription | null>(null);
+  const [paymentConfig, setPaymentConfig] = useState<PaymentConfig | null>(null);
   const [passwordForm] = Form.useForm();
   const [passwordLoading, setPasswordLoading] = useState(false);
   const [apiDomain, setApiDomain] = useState<string>('http://localhost:5001');
@@ -64,10 +67,25 @@ const Account: React.FC = () => {
     }
   };
 
+  const fetchPaymentConfig = async () => {
+    // Skip payment config fetch in enterprise mode
+    if (!features.showPayment()) {
+      return;
+    }
+
+    try {
+      const config = await paymentService.getConfig();
+      setPaymentConfig(config);
+    } catch (e) {
+      console.error('Fetch payment config failed', e);
+    }
+  };
+
   useEffect(() => {
     fetchMe();
     fetchSystemInfo();
     fetchSubscription();
+    fetchPaymentConfig();
 
     // Get API domain from system config
     try {
@@ -218,91 +236,140 @@ const Account: React.FC = () => {
           </div>
 
           {/* Direct Model Access API Key */}
-          {user?.model_api_key && (
-            <div>
-              <Divider />
-              <div style={{ marginBottom: 16 }}>
-                <Title level={5}>{t('docs.directModelAccess') || 'Direct Model Access'}</Title>
-                <Text type="secondary">{t('docs.directModelAccessDesc') || 'Use this API key to directly access models (OpenGuardrails-Text, bge-m3, etc.) without guardrails detection. For privacy, we only track usage count, not content.'}</Text>
+          <div>
+            <Divider />
+            <div style={{ marginBottom: 16 }}>
+              <Title level={5}>{t('docs.directModelAccess') || 'Direct Model Access'}</Title>
+              <Text type="secondary">{t('docs.directModelAccessDesc') || 'Use this API key to directly access models (OpenGuardrails-Text, bge-m3, etc.) without guardrails detection. For privacy, we only track usage count, not content.'}</Text>
 
-                {/* Subscription requirement notice (SaaS mode only) */}
-                {isSaasMode() && !user?.is_super_admin && (
-                  <div style={{ marginTop: 12 }}>
-                    {subscription?.subscription_type === 'subscribed' ? (
-                      <Text type="success" style={{ fontSize: 13 }}>
-                        ✓ {t('docs.subscriptionActive') || 'Subscription active - Direct model access enabled'}
-                      </Text>
-                    ) : (
-                      <Text type="warning" style={{ fontSize: 13 }}>
-                        ⚠️ {t('docs.subscriptionRequired') || 'Active subscription required to use direct model access. Please subscribe to continue.'}
-                      </Text>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <Text type="secondary">{t('docs.modelApiKey') || 'Model API Key'}</Text>
-                <Space style={{ width: '100%', marginTop: 8, alignItems: 'center' }}>
-                  <div style={{
-                    flex: 1,
-                    padding: '8px 12px',
-                    border: '1px solid #d9d9d9',
-                    borderRadius: '6px',
-                    backgroundColor: '#fafafa',
-                    fontFamily: 'monospace',
-                    fontSize: '14px',
-                    wordBreak: 'break-all'
-                  }}>
-                    <Text code style={{ backgroundColor: 'transparent', border: 'none', padding: 0 }}>
-                      {user.model_api_key}
+              {/* Subscription requirement notice (SaaS mode only) */}
+              {isSaasMode() && !user?.is_super_admin && (
+                <div style={{ marginTop: 12 }}>
+                  {subscription?.subscription_type === 'subscribed' ? (
+                    <Text type="success" style={{ fontSize: 13 }}>
+                      ✓ {t('docs.subscriptionActive') || 'Subscription active - Direct model access enabled'}
                     </Text>
-                  </div>
-                  <Button
-                    icon={<CopyOutlined />}
-                    onClick={() => {
-                      if (user.model_api_key) {
-                        navigator.clipboard.writeText(user.model_api_key);
-                        message.success(t('account.copied'));
+                  ) : (
+                    <Alert
+                      message={t('docs.subscriptionRequired') || 'Active subscription required to use direct model access'}
+                      description={
+                        <Space direction="vertical" size="small" style={{ width: '100%', marginTop: 8 }}>
+                          <Text>{t('billing.upgradeDescription') || 'Upgrade to unlock unlimited access to direct model APIs, custom scanners, and premium features.'}</Text>
+                          {paymentConfig && (
+                            <>
+                              <Text strong>
+                                {t('billing.price')}: {paymentService.formatPrice(paymentConfig.subscription_price, paymentConfig.currency)}/{t('billing.month')}
+                              </Text>
+                              <div style={{ marginTop: 8 }}>
+                                <PaymentButton
+                                  type="subscription"
+                                  amount={paymentConfig.subscription_price}
+                                  currency={paymentConfig.currency}
+                                  provider={paymentConfig.provider}
+                                  buttonText={t('payment.button.upgradeNow')}
+                                  onSuccess={() => {
+                                    fetchSubscription();
+                                    fetchMe();
+                                  }}
+                                />
+                              </div>
+                            </>
+                          )}
+                        </Space>
                       }
-                    }}
-                  >
-                    {t('account.copy')}
-                  </Button>
-                  <Button
-                    danger
-                    onClick={async () => {
-                      try {
-                        const newKey = await authService.regenerateModelApiKey();
-                        setUser(user ? { ...user, model_api_key: newKey.model_api_key } : null);
-                        message.success(t('account.modelApiKeyRegenerated') || 'Model API Key regenerated successfully');
-                      } catch (error) {
-                        message.error(t('account.regenerateFailed') || 'Failed to regenerate Model API Key');
-                      }
-                    }}
-                  >
-                    {t('account.regenerate') || 'Regenerate'}
-                  </Button>
-                </Space>
-              </div>
+                      type="warning"
+                      showIcon
+                      style={{ marginTop: 12 }}
+                    />
+                  )}
+                </div>
+              )}
+            </div>
 
-              <div style={{ marginTop: 16 }}>
-                <Text strong>{t('account.usageExample') || 'Usage Example'}:</Text>
-                <pre style={{
-                  backgroundColor: '#f6f8fa',
-                  padding: 16,
-                  borderRadius: 6,
-                  overflow: 'auto',
-                  fontSize: 13,
-                  lineHeight: 1.5,
-                  marginTop: 8
-                }}>
+            {/* API Key Section - Show for all users but with different states */}
+            {(() => {
+              const hasAccess = user?.model_api_key && (
+                !isSaasMode() ||
+                user?.is_super_admin ||
+                subscription?.subscription_type === 'subscribed'
+              );
+
+              return (
+                <div>
+                  <Text type="secondary">{t('docs.modelApiKey') || 'Model API Key'}</Text>
+                  <Space style={{ width: '100%', marginTop: 8, alignItems: 'center' }}>
+                    <div style={{
+                      flex: 1,
+                      padding: '8px 12px',
+                      border: '1px solid #d9d9d9',
+                      borderRadius: '6px',
+                      backgroundColor: hasAccess ? '#fafafa' : '#f5f5f5',
+                      fontFamily: 'monospace',
+                      fontSize: '14px',
+                      wordBreak: 'break-all',
+                      position: 'relative'
+                    }}>
+                      {hasAccess ? (
+                        <Text code style={{ backgroundColor: 'transparent', border: 'none', padding: 0 }}>
+                          {user?.model_api_key}
+                        </Text>
+                      ) : (
+                        <Text type="secondary" style={{ fontFamily: 'monospace' }}>
+                          <LockOutlined /> {t('account.subscriptionRequiredToViewKey') || '••••••••••••••••••••••••••••••••••• (Subscription Required)'}
+                        </Text>
+                      )}
+                    </div>
+                    <Button
+                      icon={<CopyOutlined />}
+                      disabled={!hasAccess}
+                      onClick={() => {
+                        if (user?.model_api_key && hasAccess) {
+                          navigator.clipboard.writeText(user.model_api_key);
+                          message.success(t('account.copied'));
+                        }
+                      }}
+                    >
+                      {t('account.copy')}
+                    </Button>
+                    <Button
+                      danger
+                      disabled={!hasAccess}
+                      onClick={async () => {
+                        if (!hasAccess) return;
+                        try {
+                          const newKey = await authService.regenerateModelApiKey();
+                          setUser(user ? { ...user, model_api_key: newKey.model_api_key } : null);
+                          message.success(t('account.modelApiKeyRegenerated') || 'Model API Key regenerated successfully');
+                        } catch (error) {
+                          message.error(t('account.regenerateFailed') || 'Failed to regenerate Model API Key');
+                        }
+                      }}
+                    >
+                      {t('account.regenerate') || 'Regenerate'}
+                    </Button>
+                  </Space>
+                </div>
+              );
+            })()}
+
+            <div style={{ marginTop: 16 }}>
+              <Text strong>{t('account.usageExample') || 'Usage Example'}:</Text>
+              <pre style={{
+                backgroundColor: '#f6f8fa',
+                padding: 16,
+                borderRadius: 6,
+                overflow: 'auto',
+                fontSize: 13,
+                lineHeight: 1.5,
+                marginTop: 8,
+                opacity: (user?.model_api_key && (!isSaasMode() || user?.is_super_admin || subscription?.subscription_type === 'subscribed')) ? 1 : 0.5
+              }}>
 {`from openai import OpenAI
 
 # Just change base_url and api_key
 client = OpenAI(
     base_url="${apiDomain}/v1/model/",
-    api_key="${user.model_api_key}"
+    api_key="${user?.model_api_key || 'your-model-api-key-here'}"
 )
 
 # Use as normal - direct model access!
@@ -312,25 +379,24 @@ response = client.chat.completions.create(
 )
 
 # Privacy Notice: Content is NOT logged, only usage count`}
-                </pre>
-              </div>
-
-              <div style={{
-                marginTop: 16,
-                padding: '12px 16px',
-                backgroundColor: '#e6f7ff',
-                border: '1px solid #91d5ff',
-                borderRadius: 6
-              }}>
-                <Text strong style={{ color: '#1890ff' }}>{t('account.privacyNotice') || 'Privacy Notice'}:</Text>
-                <ul style={{ marginTop: 8, marginBottom: 0, paddingLeft: 20 }}>
-                  <li>{t('account.privacyNotice1') || 'Message content is NEVER stored in our database'}</li>
-                  <li>{t('account.privacyNotice2') || 'Only usage statistics (request count, tokens) are tracked for billing'}</li>
-                  <li>{t('account.privacyNotice3') || 'Ideal for private deployment where you self-host the platform'}</li>
-                </ul>
-              </div>
+              </pre>
             </div>
-          )}
+
+            <div style={{
+              marginTop: 16,
+              padding: '12px 16px',
+              backgroundColor: '#e6f7ff',
+              border: '1px solid #91d5ff',
+              borderRadius: 6
+            }}>
+              <Text strong style={{ color: '#1890ff' }}>{t('account.privacyNotice') || 'Privacy Notice'}:</Text>
+              <ul style={{ marginTop: 8, marginBottom: 0, paddingLeft: 20 }}>
+                <li>{t('account.privacyNotice1') || 'Message content is NEVER stored in our database'}</li>
+                <li>{t('account.privacyNotice2') || 'Only usage statistics (request count, tokens) are tracked for billing'}</li>
+                <li>{t('account.privacyNotice3') || 'Ideal for private deployment where you self-host the platform'}</li>
+              </ul>
+            </div>
+          </div>
 
           {/* Subscription info only in SaaS mode */}
           {features.showSubscription() && (

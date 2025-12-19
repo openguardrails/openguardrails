@@ -1,9 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { Card, Typography, Space, Button, Divider, Collapse, Tag, Alert, Anchor } from 'antd';
-import { BookOutlined, ApiOutlined, RocketOutlined, SettingOutlined, SafetyCertificateOutlined, CodeOutlined } from '@ant-design/icons';
+import { BookOutlined, ApiOutlined, RocketOutlined, SettingOutlined, SafetyCertificateOutlined, CodeOutlined, LockOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { authService, UserInfo } from '../../services/auth';
-import { getSystemConfig } from '../../config';
+import { getSystemConfig, isSaasMode } from '../../config';
+import { billingService } from '../../services/billing';
+import type { Subscription } from '../../types/billing';
+import { PaymentButton } from '../../components/Payment';
+import paymentService, { PaymentConfig } from '../../services/payment';
 
 const { Title, Text, Paragraph } = Typography;
 const { Panel } = Collapse;
@@ -15,6 +19,8 @@ const Documentation: React.FC = () => {
   const { t } = useTranslation();
   const [user, setUser] = useState<UserInfo | null>(null);
   const [apiDomain, setApiDomain] = useState<string>('http://localhost:5001');
+  const [subscription, setSubscription] = useState<Subscription | null>(null);
+  const [paymentConfig, setPaymentConfig] = useState<PaymentConfig | null>(null);
 
   useEffect(() => {
     const fetchMe = async () => {
@@ -25,7 +31,31 @@ const Documentation: React.FC = () => {
         console.error('Failed to fetch user info', e);
       }
     };
+
+    const fetchSubscription = async () => {
+      if (!isSaasMode()) return;
+      try {
+        const sub = await billingService.getCurrentSubscription();
+        setSubscription(sub);
+      } catch (e) {
+        console.error('Failed to fetch subscription', e);
+        setSubscription(null);
+      }
+    };
+
+    const fetchPaymentConfig = async () => {
+      if (!isSaasMode()) return;
+      try {
+        const config = await paymentService.getConfig();
+        setPaymentConfig(config);
+      } catch (e) {
+        console.error('Failed to fetch payment config', e);
+      }
+    };
+
     fetchMe();
+    fetchSubscription();
+    fetchPaymentConfig();
 
     // Get API domain from system config
     try {
@@ -258,24 +288,71 @@ else:
                 style={{ marginBottom: 16 }}
               />
 
-              {user?.model_api_key && (
-                <div style={{ marginTop: 16, marginBottom: 16 }}>
-                  <Text strong>{t('docs.yourModelApiKey')}:</Text>
-                  <div style={{
-                    marginTop: 8,
-                    padding: '8px 12px',
-                    border: '1px solid #d9d9d9',
-                    borderRadius: '6px',
-                    backgroundColor: '#fafafa',
-                    fontFamily: 'monospace',
-                    fontSize: '14px'
-                  }}>
-                    <Text code style={{ backgroundColor: 'transparent', border: 'none', padding: 0 }}>
-                      {user.model_api_key}
-                    </Text>
-                  </div>
-                </div>
+              {/* Subscription Check for SaaS Mode */}
+              {isSaasMode() && !user?.is_super_admin && subscription?.subscription_type !== 'subscribed' && (
+                <Alert
+                  message={t('docs.subscriptionRequired') || 'Active subscription required to use direct model access'}
+                  description={
+                    <Space direction="vertical" size="small" style={{ width: '100%', marginTop: 8 }}>
+                      <Text>{t('billing.upgradeDescription') || 'Upgrade to unlock unlimited access to direct model APIs, custom scanners, and premium features.'}</Text>
+                      {paymentConfig && (
+                        <>
+                          <Text strong>
+                            {t('billing.price')}: {paymentService.formatPrice(paymentConfig.subscription_price, paymentConfig.currency)}/{t('billing.month')}
+                          </Text>
+                          <div style={{ marginTop: 8 }}>
+                            <PaymentButton
+                              type="subscription"
+                              amount={paymentConfig.subscription_price}
+                              currency={paymentConfig.currency}
+                              provider={paymentConfig.provider}
+                              buttonText={t('payment.button.upgradeNow')}
+                              size="small"
+                            />
+                          </div>
+                        </>
+                      )}
+                    </Space>
+                  }
+                  type="warning"
+                  showIcon
+                  style={{ marginTop: 16, marginBottom: 16 }}
+                />
               )}
+
+              {/* API Key Display - Show for all users but with different states */}
+              {(() => {
+                const hasAccess = user?.model_api_key && (
+                  !isSaasMode() ||
+                  user?.is_super_admin ||
+                  subscription?.subscription_type === 'subscribed'
+                );
+
+                return (
+                  <div style={{ marginTop: 16, marginBottom: 16 }}>
+                    <Text strong>{t('docs.yourModelApiKey')}:</Text>
+                    <div style={{
+                      marginTop: 8,
+                      padding: '8px 12px',
+                      border: '1px solid #d9d9d9',
+                      borderRadius: '6px',
+                      backgroundColor: hasAccess ? '#fafafa' : '#f5f5f5',
+                      fontFamily: 'monospace',
+                      fontSize: '14px'
+                    }}>
+                      {hasAccess ? (
+                        <Text code style={{ backgroundColor: 'transparent', border: 'none', padding: 0 }}>
+                          {user?.model_api_key}
+                        </Text>
+                      ) : (
+                        <Text type="secondary" style={{ fontFamily: 'monospace' }}>
+                          <LockOutlined /> {t('account.subscriptionRequiredToViewKey') || '••••••••••••••••••••••••••••••••••• (Subscription Required)'}
+                        </Text>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div style={{ marginTop: 16 }}>
                 <Text strong>{t('docs.supportedModels')}:</Text>
@@ -295,7 +372,8 @@ else:
                   overflow: 'auto',
                   fontSize: 13,
                   lineHeight: 1.5,
-                  marginTop: 8
+                  marginTop: 8,
+                  opacity: (user?.model_api_key && (!isSaasMode() || user?.is_super_admin || subscription?.subscription_type === 'subscribed')) ? 1 : 0.5
                 }}>
 {`from openai import OpenAI
 

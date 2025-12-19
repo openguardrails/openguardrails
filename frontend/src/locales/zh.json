@@ -1152,7 +1152,9 @@
     "privacyNotice": "隐私声明",
     "privacyNotice1": "消息内容从不存储在我们的数据库中",
     "privacyNotice2": "仅追踪使用统计（请求次数、token数）用于计费",
-    "privacyNotice3": "适合私有化部署，您可以自主托管平台"
+    "privacyNotice3": "适合私有化部署，您可以自主托管平台",
+    "subscriptionRequiredToViewKey": "需要订阅才能查看密钥",
+    "modelApiKeyRegenerated": "Model API Key 已重新生成"
   },
   "admin": {
     "title": "管理员面板",
