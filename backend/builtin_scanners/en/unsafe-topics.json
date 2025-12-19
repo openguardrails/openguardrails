@@ -3,6 +3,7 @@
     "package_name": "Unsafe Topics Package",
     "author": "OpenGuardrails",
     "description": "Comprehensive detection for unsafe topics",
+    "bundle": "Basic Protection",
     "version": "1.0.0",
     "license": "Apache-2.0",
     "scanners": [

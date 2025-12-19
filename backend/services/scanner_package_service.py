@@ -63,7 +63,7 @@ class ScannerPackageService:
 
         Args:
             tenant_id: Tenant UUID
-            package_type: Filter by type ('builtin', 'purchasable') - basic/premium packages
+            package_type: Filter by type ('basic', 'purchasable') - basic/premium packages
             include_scanners: Whether to eagerly load scanners
 
         Returns:
@@ -680,7 +680,7 @@ class ScannerPackageService:
         Get all packages for admin with optional archive inclusion.
 
         Args:
-            package_type: Filter by type ('builtin', 'purchasable') - basic/premium packages
+            package_type: Filter by type ('basic', 'purchasable') - basic/premium packages
             include_archived: Whether to include archived packages
 
         Returns:

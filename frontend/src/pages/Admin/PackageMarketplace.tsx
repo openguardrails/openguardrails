@@ -95,14 +95,17 @@ const PackageMarketplace: React.FC = () => {
       try {
         const jsonContent = JSON.parse(e.target?.result as string);
 
+        // Extract bundle from uploaded JSON as default, fallback to manual input
+        const defaultBundle = jsonContent.bundle || uploadBundle;
+
         // Get current language for price formatting
         const currentLanguage = localStorage.getItem('language') || 'en';
 
-        // Upload with price and bundle
+        // Upload with price and bundle (use JSON bundle or manual input)
         await scannerPackagesApi.uploadPackage({
           package_data: jsonContent,
           price: uploadPrice,
-          bundle: uploadBundle,
+          bundle: defaultBundle,
           language: currentLanguage
         });
 
@@ -300,11 +303,29 @@ const PackageMarketplace: React.FC = () => {
         return false;
       }
       setFileList([file]);
+
+      // Read JSON to pre-fill bundle field
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const jsonContent = JSON.parse(e.target?.result as string);
+          // Pre-fill bundle field if present in JSON and not already set
+          if (jsonContent.bundle && !uploadBundle) {
+            setUploadBundle(jsonContent.bundle);
+          }
+        } catch (error) {
+          console.error('Invalid JSON file:', error);
+        }
+      };
+      reader.readAsText(file as any);
+
       return false;
     },
     fileList,
     onRemove: () => {
       setFileList([]);
+      // Reset bundle field when file is removed unless manually set
+      setUploadBundle(null);
     },
   };
 

@@ -65,12 +65,16 @@ async def get_all_packages(
     - Premium packages: Only if purchased (SaaS mode only)
 
     Query params:
-    - package_type: Filter by 'builtin' or 'purchasable' (basic/premium)
+    - package_type: Filter by 'basic' or 'purchasable' (basic/premium)
 
     Note: In enterprise mode, only basic packages are available.
     """
     service = ScannerPackageService(db)
     tenant_id = UUID(current_user['tenant_id'])
+
+    # Support legacy 'builtin' parameter for backward compatibility
+    if package_type == 'builtin':
+        package_type = 'basic'
 
     # In enterprise mode, force package_type to 'basic'
     if settings.is_enterprise_mode:
@@ -258,10 +262,15 @@ async def get_all_packages_admin(
     Get all packages (admin only) - no purchase filtering.
 
     Query params:
-    - package_type: Filter by 'builtin' or 'purchasable' (basic/premium)
+    - package_type: Filter by 'basic' or 'purchasable' (basic/premium)
     - include_archived: Whether to include archived packages (default: False)
     """
     service = ScannerPackageService(db)
+
+    # Support legacy 'builtin' parameter for backward compatibility
+    if package_type == 'builtin':
+        package_type = 'basic'
+
     packages = service.get_all_packages_admin(
         package_type=package_type,
         include_archived=include_archived

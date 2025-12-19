@@ -145,7 +145,7 @@ const OfficialScannersManagement: React.FC = () => {
   const loadPackagesOnly = async () => {
     try {
       // Load basic packages (no application needed)
-      const allBuiltin = await scannerPackagesApi.getAll('builtin');
+      const allBuiltin = await scannerPackagesApi.getAll('basic');
       setBuiltinPackages(allBuiltin);
 
       // Only load marketplace packages in SaaS mode

@@ -502,7 +502,7 @@ export const dataSecurityApi = {
 // Scanner Package System API
 export const scannerPackagesApi = {
   // Get all packages visible to current user
-  getAll: (packageType?: 'builtin' | 'purchasable'): Promise<any[]> =>
+  getAll: (packageType?: 'basic' | 'purchasable'): Promise<any[]> =>
     api.get('/api/v1/scanner-packages/', { params: { package_type: packageType } }).then(res => res.data),
 
   // Get package details including scanner definitions
@@ -518,7 +518,7 @@ export const scannerPackagesApi = {
     api.get(`/api/v1/scanner-packages/marketplace/${packageId}`).then(res => res.data),
 
   // Admin: Get all packages (no purchase filtering)
-  getAllAdmin: (packageType?: 'builtin' | 'purchasable', includeArchived?: boolean): Promise<any[]> =>
+  getAllAdmin: (packageType?: 'basic' | 'purchasable', includeArchived?: boolean): Promise<any[]> =>
     api.get('/api/v1/scanner-packages/admin/packages', { params: { package_type: packageType, include_archived: includeArchived } }).then(res => res.data),
 
   // Admin: Upload purchasable package

@@ -3,6 +3,7 @@
   "package_name": "《GB/T 45654—2025 生成式人工智能服务安全基本要求》基础包（不安全话题）",
   "author": "象信AI",
   "description": "《GB/T 45654—2025 生成式人工智能服务安全基本要求》附录A的不安全话题内容检测",
+  "bundle": "基础防护",
   "version": "1.0.0",
   "license": "Apache-2.0",
   "scanners": [
