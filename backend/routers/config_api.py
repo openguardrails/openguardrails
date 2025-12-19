@@ -841,7 +841,7 @@ async def get_available_scanners_for_knowledge_base(
             ScannerPackage, Scanner.package_id == ScannerPackage.id
         ).filter(
             ScannerPackage.is_official == True,
-            ScannerPackage.package_type == 'builtin'  # Basic packages
+            ScannerPackage.package_type == 'basic'  # Basic packages
         ).order_by(Scanner.tag).all()
         result["official_scanners"] = [
             {"value": s.tag, "label": f"{s.tag} - {s.name}"}

@@ -72,9 +72,9 @@ async def get_all_packages(
     service = ScannerPackageService(db)
     tenant_id = UUID(current_user['tenant_id'])
 
-    # In enterprise mode, force package_type to 'builtin'
+    # In enterprise mode, force package_type to 'basic'
     if settings.is_enterprise_mode:
-        package_type = 'builtin'
+        package_type = 'basic'
 
     packages = service.get_all_packages(
         tenant_id=tenant_id,

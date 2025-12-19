@@ -1151,7 +1151,11 @@
     "highPerformanceConcurrent": "High Performance Concurrent Processing",
     "privateDeploymentBaseUrl": "Private Deployment Base URL Configuration",
     "dockerDeploymentConfig": "Docker Deployment: Use http://proxy-service:5001/v1/guardrails",
-    "customDeploymentConfig": "Custom Deployment: Use http://your-server:5001/v1/guardrails"
+    "customDeploymentConfig": "Custom Deployment: Use http://your-server:5001/v1/guardrails",
+    "privacyNotice": "Privacy Notice",
+    "privacyNotice1": "Message content is NEVER stored in our database",
+    "privacyNotice2": "Only usage statistics (request count, tokens) are tracked for billing",
+    "privacyNotice3": "Ideal for private deployment where you self-host the platform"
   },
   "admin": {
     "title": "Admin Panel",

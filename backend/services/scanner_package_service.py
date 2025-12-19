@@ -89,7 +89,7 @@ class ScannerPackageService:
         # Filter premium packages (only show purchased ones, unless super admin)
         visible_packages = []
         for package in packages:
-            if package.package_type == 'builtin':  # Basic packages
+            if package.package_type == 'basic':  # Basic packages
                 visible_packages.append(package)
             elif package.package_type == 'purchasable':  # Premium packages
                 if is_super_admin:
@@ -396,7 +396,7 @@ class ScannerPackageService:
             }
 
             # Only include definition if basic package or purchased premium package
-            if package.package_type == 'builtin' or has_purchased:  # Basic or purchased premium
+            if package.package_type == 'basic' or has_purchased:  # Basic or purchased premium
                 scanner_info['definition'] = scanner.definition
             else:
                 # For unpurchased packages, hide the definition

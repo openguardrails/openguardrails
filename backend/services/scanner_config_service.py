@@ -364,7 +364,7 @@ class ScannerConfigService:
         
         # Basic packages (builtin)
         builtin = self.db.query(Scanner).join(ScannerPackage).filter(
-            ScannerPackage.package_type == 'builtin',  # Basic packages
+            ScannerPackage.package_type == 'basic',  # Basic packages
             ScannerPackage.is_active == True,
             Scanner.is_active == True
         ).all()

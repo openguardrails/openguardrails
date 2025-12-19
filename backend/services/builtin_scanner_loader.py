@@ -48,7 +48,7 @@ def _create_or_update_package(db: Session, package_data: dict) -> ScannerPackage
         package.description = package_data["description"]
         package.version = package_data["version"]
         package.license = package_data.get("license", "Apache-2.0")
-        package.package_type = "builtin"
+        package.package_type = "basic"
         package.is_active = True
     else:
         logger.info("Creating built-in package %s", package_code)
@@ -59,7 +59,7 @@ def _create_or_update_package(db: Session, package_data: dict) -> ScannerPackage
             description=package_data["description"],
             version=package_data["version"],
             license=package_data.get("license", "Apache-2.0"),
-            package_type="builtin",
+            package_type="basic",
             is_active=True,
         )
         db.add(package)
