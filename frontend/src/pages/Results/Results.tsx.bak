@@ -1,8 +1,7 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Table, Card, Select, DatePicker, Space, Tag, Button, Drawer, Typography, Row, Col, Input, Spin, Image, message } from 'antd';
 import { EyeOutlined, ReloadOutlined, SearchOutlined, FileImageOutlined, DownloadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
-import { useLocation } from 'react-router-dom';
 import dayjs from 'dayjs';
 import { resultsApi, dataSecurityApi } from '../../services/api';
 import type { DetectionResult, PaginatedResponse, DataSecurityEntityType } from '../../types';
@@ -13,64 +12,8 @@ const { RangePicker } = DatePicker;
 const { Option } = Select;
 const { Text, Paragraph } = Typography;
 
-// Helper function to extract filters from navigation state
-const extractFiltersFromState = (state: any) => {
-  const filters: any = {
-    risk_level: undefined,
-    security_risk_level: undefined,
-    compliance_risk_level: undefined,
-    data_risk_level: undefined,
-    category: undefined,
-    data_entity_type: undefined,
-    data_leak: undefined,
-    date_range: null,
-    content_search: undefined,
-    request_id_search: undefined,
-  };
-
-  if (!state) return filters;
-
-  // Handle risk_level
-  if (state.risk_level) {
-    filters.risk_level = Array.isArray(state.risk_level) ? state.risk_level[0] : state.risk_level;
-  }
-
-  // Handle security_risk_level
-  if (state.security_risk_level) {
-    filters.security_risk_level = Array.isArray(state.security_risk_level) ? state.security_risk_level[0] : state.security_risk_level;
-  }
-
-  // Handle compliance_risk_level
-  if (state.compliance_risk_level) {
-    filters.compliance_risk_level = Array.isArray(state.compliance_risk_level) ? state.compliance_risk_level[0] : state.compliance_risk_level;
-  }
-
-  // Handle data_risk_level
-  if (state.data_risk_level) {
-    filters.data_risk_level = Array.isArray(state.data_risk_level) ? state.data_risk_level[0] : state.data_risk_level;
-  }
-
-  // Handle data_leak (deprecated)
-  if (state.data_leak) {
-    filters.data_risk_level = 'any_risk';
-  }
-
-  // Handle category
-  if (state.category) {
-    filters.category = state.category;
-  }
-
-  // Handle data_entity_type
-  if (state.data_entity_type) {
-    filters.data_entity_type = state.data_entity_type;
-  }
-
-  return filters;
-};
-
 const Results: React.FC = () => {
   const { t } = useTranslation();
-  const location = useLocation();
   const { currentApplicationId } = useApplication();
   const [data, setData] = useState<PaginatedResponse<DetectionResult> | null>(null);
   const [loading, setLoading] = useState(false);
@@ -78,15 +21,28 @@ const Results: React.FC = () => {
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [dataEntityTypes, setDataEntityTypes] = useState<DataSecurityEntityType[]>([]);
-
-  // Initialize filters from location.state if available
-  const [filters, setFilters] = useState(() => extractFiltersFromState(location.state));
+  const [filters, setFilters] = useState({
+    risk_level: undefined as string | undefined,
+    result_type: undefined as string | undefined,
+    category: undefined as string | undefined,
+    data_entity_type: undefined as string | undefined,
+    date_range: null as [dayjs.Dayjs, dayjs.Dayjs] | null,
+    content_search: undefined as string | undefined,
+    request_id_search: undefined as string | undefined,
+  });
   const [pagination, setPagination] = useState({
     current: 1,
     pageSize: 20,
   });
 
-  // Define functions before useEffect
+  useEffect(() => {
+    fetchResults();
+  }, [pagination.current, pagination.pageSize, filters, currentApplicationId]);
+
+  useEffect(() => {
+    fetchDataEntityTypes();
+  }, []);
+
   const fetchDataEntityTypes = async () => {
     try {
       const response = await dataSecurityApi.list();
@@ -98,7 +54,7 @@ const Results: React.FC = () => {
     }
   };
 
-  const fetchResults = useCallback(async () => {
+  const fetchResults = async () => {
     try {
       setLoading(true);
       const params: any = {
@@ -109,14 +65,8 @@ const Results: React.FC = () => {
       if (filters.risk_level) {
         params.risk_level = filters.risk_level;
       }
-      if (filters.security_risk_level) {
-        params.security_risk_level = filters.security_risk_level;
-      }
-      if (filters.compliance_risk_level) {
-        params.compliance_risk_level = filters.compliance_risk_level;
-      }
-      if (filters.data_risk_level) {
-        params.data_risk_level = filters.data_risk_level;
+      if (filters.result_type) {
+        params.result_type = filters.result_type;
       }
       if (filters.category) {
         params.category = filters.category;
@@ -142,27 +92,7 @@ const Results: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [pagination.current, pagination.pageSize, filters]);
-
-  // Update filters when location.state changes (e.g., navigating from Dashboard again)
-  useEffect(() => {
-    const state = location.state as any;
-    if (state) {
-      // Reset to initial filter values and apply location.state
-      const newFilters = extractFiltersFromState(state);
-      setFilters(newFilters);
-      // Reset pagination to first page when filters change from navigation
-      setPagination(prev => ({ ...prev, current: 1 }));
-    }
-  }, [location.state]);
-
-  useEffect(() => {
-    fetchResults();
-  }, [fetchResults, currentApplicationId]);
-
-  useEffect(() => {
-    fetchDataEntityTypes();
-  }, []);
+  };
 
   const handleTableChange = (paginationParams: any) => {
     setPagination({
@@ -179,7 +109,7 @@ const Results: React.FC = () => {
     setPagination(prev => ({ ...prev, current: 1 })); // Reset page number
   };
 
-  const handleExport = useCallback(async () => {
+  const handleExport = async () => {
     try {
       message.loading({ content: t('results.exporting'), key: 'export' });
 
@@ -187,15 +117,6 @@ const Results: React.FC = () => {
 
       if (filters.risk_level) {
         params.risk_level = filters.risk_level;
-      }
-      if (filters.security_risk_level) {
-        params.security_risk_level = filters.security_risk_level;
-      }
-      if (filters.compliance_risk_level) {
-        params.compliance_risk_level = filters.compliance_risk_level;
-      }
-      if (filters.data_risk_level) {
-        params.data_risk_level = filters.data_risk_level;
       }
       if (filters.category) {
         params.category = filters.category;
@@ -231,7 +152,7 @@ const Results: React.FC = () => {
       console.error('Export error:', error);
       message.error({ content: t('results.exportFailed'), key: 'export' });
     }
-  }, [filters, t]);
+  };
 
   const showDetail = async (record: DetectionResult) => {
     setDetailLoading(true);
@@ -262,7 +183,7 @@ const Results: React.FC = () => {
   const formatRiskDisplay = (riskLevel: string, categories: string[]) => {
     // Use the i18n mapper to translate risk level
     const translatedRiskLevel = translateRiskLevel(riskLevel, t);
-
+    
     if (categories && categories.length > 0) {
       return `${translatedRiskLevel} ${categories[0]}`;
     }
@@ -468,67 +389,22 @@ const Results: React.FC = () => {
             placeholder={t('results.selectRiskLevel')}
             allowClear
             size="middle"
-            style={{ minWidth: 150 }}
+            style={{ width: 120 }}
             value={filters.risk_level}
             onChange={(value) => handleFilterChange('risk_level', value)}
           >
-            <Option value="any_risk">{t('risk.level.any_risk')}</Option>
             <Option value="high_risk">{t('risk.level.high_risk')}</Option>
             <Option value="medium_risk">{t('risk.level.medium_risk')}</Option>
             <Option value="low_risk">{t('risk.level.low_risk')}</Option>
             <Option value="no_risk">{t('risk.level.no_risk')}</Option>
           </Select>
 
-          <Select
-            placeholder={t('results.filterSecurityRisk')}
-            allowClear
-            size="middle"
-            style={{ minWidth: 180 }}
-            value={filters.security_risk_level}
-            onChange={(value) => handleFilterChange('security_risk_level', value)}
-          >
-            <Option value="any_risk">{t('risk.level.any_risk')}</Option>
-            <Option value="high_risk">{t('risk.level.high_risk')}</Option>
-            <Option value="medium_risk">{t('risk.level.medium_risk')}</Option>
-            <Option value="low_risk">{t('risk.level.low_risk')}</Option>
-            <Option value="no_risk">{t('risk.level.no_risk')}</Option>
-          </Select>
-
-          <Select
-            placeholder={t('results.filterComplianceRisk')}
-            allowClear
-            size="middle"
-            style={{ minWidth: 180 }}
-            value={filters.compliance_risk_level}
-            onChange={(value) => handleFilterChange('compliance_risk_level', value)}
-          >
-            <Option value="any_risk">{t('risk.level.any_risk')}</Option>
-            <Option value="high_risk">{t('risk.level.high_risk')}</Option>
-            <Option value="medium_risk">{t('risk.level.medium_risk')}</Option>
-            <Option value="low_risk">{t('risk.level.low_risk')}</Option>
-            <Option value="no_risk">{t('risk.level.no_risk')}</Option>
-          </Select>
-
-          <Select
-            placeholder={t('results.filterDataLeakRisk')}
-            allowClear
-            size="middle"
-            style={{ minWidth: 180 }}
-            value={filters.data_risk_level}
-            onChange={(value) => handleFilterChange('data_risk_level', value)}
-          >
-            <Option value="any_risk">{t('risk.level.any_risk')}</Option>
-            <Option value="high_risk">{t('risk.level.high_risk')}</Option>
-            <Option value="medium_risk">{t('risk.level.medium_risk')}</Option>
-            <Option value="low_risk">{t('risk.level.low_risk')}</Option>
-            <Option value="no_risk">{t('risk.level.no_risk')}</Option>
-          </Select>
 
           <Select
             placeholder={t('results.selectCategory')}
             allowClear
             size="middle"
-            style={{ minWidth: 200 }}
+            style={{ width: 200 }}
             value={filters.category}
             onChange={(value) => handleFilterChange('category', value)}
             showSearch
@@ -545,7 +421,7 @@ const Results: React.FC = () => {
             placeholder={t('results.selectDataEntityType')}
             allowClear
             size="middle"
-            style={{ minWidth: 200 }}
+            style={{ width: 200 }}
             value={filters.data_entity_type}
             onChange={(value) => handleFilterChange('data_entity_type', value)}
             showSearch
@@ -566,7 +442,7 @@ const Results: React.FC = () => {
             placeholder={t('results.contentSearch')}
             allowClear
             size="middle"
-            style={{ minWidth: 200, height: 32 }}
+            style={{ width: 200, height: 32 }}
             prefix={<SearchOutlined />}
             value={filters.content_search}
             onChange={(e) => handleFilterChange('content_search', e.target.value || undefined)}
@@ -576,7 +452,7 @@ const Results: React.FC = () => {
             placeholder={t('results.requestIdSearch')}
             allowClear
             size="middle"
-            style={{ minWidth: 200, height: 32 }}
+            style={{ width: 200, height: 32 }}
             prefix={<SearchOutlined />}
             value={filters.request_id_search}
             onChange={(e) => handleFilterChange('request_id_search', e.target.value || undefined)}

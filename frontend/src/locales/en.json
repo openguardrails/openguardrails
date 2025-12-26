@@ -61,7 +61,8 @@
       "no_risk": "No Risk",
       "low_risk": "Low Risk",
       "medium_risk": "Medium Risk",
-      "high_risk": "High Risk"
+      "high_risk": "High Risk",
+      "any_risk": "Any Risk"
     }
   },
   "action": {
@@ -378,6 +379,9 @@
     "selectCategory": "Select Category",
     "selectDataEntityType": "Select Data Entity Type",
     "dataEntityType": "Data Entity Type",
+    "filterSecurityRisk": "Filter Security Risk",
+    "filterComplianceRisk": "Filter Compliance Risk",
+    "filterDataLeakRisk": "Filter Data Leak Risk",
     "inputDetection": "Input Detection",
     "outputDetection": "Output Detection",
     "sourceIP": "Source IP",

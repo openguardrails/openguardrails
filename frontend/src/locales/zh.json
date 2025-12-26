@@ -61,7 +61,8 @@
       "no_risk": "无风险",
       "low_risk": "低风险",
       "medium_risk": "中风险",
-      "high_risk": "高风险"
+      "high_risk": "高风险",
+      "any_risk": "有风险"
     }
   },
   "action": {
@@ -375,6 +376,9 @@
     "selectCategory": "选择类别",
     "selectDataEntityType": "选择数据实体类型",
     "dataEntityType": "数据实体类型",
+    "filterSecurityRisk": "筛选安全风险",
+    "filterComplianceRisk": "筛选合规风险",
+    "filterDataLeakRisk": "筛选数据泄漏风险",
     "inputDetection": "输入检测",
     "outputDetection": "输出检测",
     "sourceIP": "来源IP",

@@ -98,6 +98,7 @@ async def get_detection_results(
     risk_level: Optional[str] = Query(None, description="整体风险等级过滤"),
     security_risk_level: Optional[str] = Query(None, description="提示词攻击风险等级过滤"),
     compliance_risk_level: Optional[str] = Query(None, description="内容合规风险等级过滤"),
+    data_risk_level: Optional[str] = Query(None, description="数据泄漏风险等级过滤"),
     category: Optional[str] = Query(None, description="风险类别过滤"),
     data_entity_type: Optional[str] = Query(None, description="数据泄漏实体类型过滤"),
     start_date: Optional[str] = Query(None, description="开始日期"),
@@ -118,17 +119,48 @@ async def get_detection_results(
         
         # Risk level filter - support overall risk level or specific type risk level
         if risk_level:
-            # Overall risk level filter: find records that match any type
-            filters.append(or_(
-                DetectionResult.security_risk_level == risk_level,
-                DetectionResult.compliance_risk_level == risk_level
-            ))
-        
+            if risk_level == "no_risk":
+                # For no_risk: all three risk types must be no_risk
+                filters.append(and_(
+                    DetectionResult.security_risk_level == "no_risk",
+                    DetectionResult.compliance_risk_level == "no_risk",
+                    DetectionResult.data_risk_level == "no_risk"
+                ))
+            elif risk_level == "any_risk":
+                # For any_risk: at least one risk type is not no_risk
+                filters.append(or_(
+                    DetectionResult.security_risk_level != "no_risk",
+                    DetectionResult.compliance_risk_level != "no_risk",
+                    DetectionResult.data_risk_level != "no_risk"
+                ))
+            else:
+                # For other risk levels: find records that match any type
+                filters.append(or_(
+                    DetectionResult.security_risk_level == risk_level,
+                    DetectionResult.compliance_risk_level == risk_level,
+                    DetectionResult.data_risk_level == risk_level
+                ))
+
         if security_risk_level:
-            filters.append(DetectionResult.security_risk_level == security_risk_level)
-        
+            if security_risk_level == "any_risk":
+                # Filter for any security risk (not no_risk)
+                filters.append(DetectionResult.security_risk_level != "no_risk")
+            else:
+                filters.append(DetectionResult.security_risk_level == security_risk_level)
+
         if compliance_risk_level:
-            filters.append(DetectionResult.compliance_risk_level == compliance_risk_level)
+            if compliance_risk_level == "any_risk":
+                # Filter for any compliance risk (not no_risk)
+                filters.append(DetectionResult.compliance_risk_level != "no_risk")
+            else:
+                filters.append(DetectionResult.compliance_risk_level == compliance_risk_level)
+
+        if data_risk_level:
+            if data_risk_level == "any_risk":
+                # Filter for any data leak risk (not no_risk)
+                filters.append(DetectionResult.data_risk_level != "no_risk")
+            else:
+                filters.append(DetectionResult.data_risk_level == data_risk_level)
         
         # Category filter - find in security_categories, compliance_categories, or data_categories
         if category:
@@ -234,6 +266,7 @@ async def export_detection_results(
     risk_level: Optional[str] = Query(None, description="整体风险等级过滤"),
     security_risk_level: Optional[str] = Query(None, description="提示词攻击风险等级过滤"),
     compliance_risk_level: Optional[str] = Query(None, description="内容合规风险等级过滤"),
+    data_risk_level: Optional[str] = Query(None, description="数据泄漏风险等级过滤"),
     category: Optional[str] = Query(None, description="风险类别过滤"),
     data_entity_type: Optional[str] = Query(None, description="数据泄漏实体类型过滤"),
     start_date: Optional[str] = Query(None, description="开始日期"),
@@ -253,16 +286,48 @@ async def export_detection_results(
         filters.append(DetectionResult.application_id == application_id)
 
         if risk_level:
-            filters.append(or_(
-                DetectionResult.security_risk_level == risk_level,
-                DetectionResult.compliance_risk_level == risk_level
-            ))
+            if risk_level == "no_risk":
+                # For no_risk: all three risk types must be no_risk
+                filters.append(and_(
+                    DetectionResult.security_risk_level == "no_risk",
+                    DetectionResult.compliance_risk_level == "no_risk",
+                    DetectionResult.data_risk_level == "no_risk"
+                ))
+            elif risk_level == "any_risk":
+                # For any_risk: at least one risk type is not no_risk
+                filters.append(or_(
+                    DetectionResult.security_risk_level != "no_risk",
+                    DetectionResult.compliance_risk_level != "no_risk",
+                    DetectionResult.data_risk_level != "no_risk"
+                ))
+            else:
+                # For other risk levels: find records that match any type
+                filters.append(or_(
+                    DetectionResult.security_risk_level == risk_level,
+                    DetectionResult.compliance_risk_level == risk_level,
+                    DetectionResult.data_risk_level == risk_level
+                ))
 
         if security_risk_level:
-            filters.append(DetectionResult.security_risk_level == security_risk_level)
+            if security_risk_level == "any_risk":
+                # Filter for any security risk (not no_risk)
+                filters.append(DetectionResult.security_risk_level != "no_risk")
+            else:
+                filters.append(DetectionResult.security_risk_level == security_risk_level)
 
         if compliance_risk_level:
-            filters.append(DetectionResult.compliance_risk_level == compliance_risk_level)
+            if compliance_risk_level == "any_risk":
+                # Filter for any compliance risk (not no_risk)
+                filters.append(DetectionResult.compliance_risk_level != "no_risk")
+            else:
+                filters.append(DetectionResult.compliance_risk_level == compliance_risk_level)
+
+        if data_risk_level:
+            if data_risk_level == "any_risk":
+                # Filter for any data leak risk (not no_risk)
+                filters.append(DetectionResult.data_risk_level != "no_risk")
+            else:
+                filters.append(DetectionResult.data_risk_level == data_risk_level)
 
         if category:
             filters.append(or_(
