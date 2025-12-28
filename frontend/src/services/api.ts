@@ -132,11 +132,14 @@ export const resultsApi = {
     page?: number;
     per_page?: number;
     risk_level?: string;
-    result_type?: string;
+    security_risk_level?: string;
+    compliance_risk_level?: string;
     category?: string;
     data_entity_type?: string;
     start_date?: string;
     end_date?: string;
+    content_search?: string;
+    request_id_search?: string;
   }): Promise<PaginatedResponse<DetectionResult>> =>
     api.get('/api/v1/results', { params }).then(res => res.data),
 

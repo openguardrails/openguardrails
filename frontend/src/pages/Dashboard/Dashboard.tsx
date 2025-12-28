@@ -10,12 +10,14 @@ import {
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import { dashboardApi } from '../../services/api';
 import type { DashboardStats } from '../../types';
 import { useApplication } from '../../contexts/ApplicationContext';
 
 const Dashboard: React.FC = () => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const { currentApplicationId } = useApplication();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -154,6 +156,36 @@ const Dashboard: React.FC = () => {
 
   if (!stats) return null;
 
+  const handleSecurityRisksClick = () => {
+    // Filter for records with security risk level not 'no_risk'
+    navigate('/results', { state: { security_risk_level: 'any_risk' } });
+  };
+
+  const handleComplianceRisksClick = () => {
+    // Filter for records with compliance risk level not 'no_risk'
+    navigate('/results', { state: { compliance_risk_level: 'any_risk' } });
+  };
+
+  const handleDataLeaksClick = () => {
+    navigate('/results', { state: { data_risk_level: 'any_risk' } });
+  };
+
+  const handleTotalRisksClick = () => {
+    navigate('/results', { state: { risk_level: 'any_risk' } });
+  };
+
+  const handleRiskLevelClick = (riskLevel: string) => {
+    navigate('/results', { state: { risk_level: [riskLevel] } });
+  };
+
+  const handleSafePassedClick = () => {
+    navigate('/results', { state: { risk_level: ['no_risk'] } });
+  };
+
+  const handleTotalDetectionsClick = () => {
+    navigate('/results');
+  };
+
   return (
     <div>
       <h2 style={{ marginBottom: 24 }}>{t('dashboard.title')}</h2>
@@ -161,7 +193,11 @@ const Dashboard: React.FC = () => {
       {/* Overall statistics */}
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col span={6}>
-          <Card>
+          <Card
+            hoverable
+            onClick={handleTotalDetectionsClick}
+            style={{ cursor: 'pointer', transition: 'all 0.3s' }}
+          >
             <Statistic
               title={t('dashboard.totalRequests')}
               value={stats.total_requests}
@@ -171,7 +207,11 @@ const Dashboard: React.FC = () => {
           </Card>
         </Col>
         <Col span={6}>
-          <Card>
+          <Card
+            hoverable
+            onClick={handleSecurityRisksClick}
+            style={{ cursor: 'pointer', transition: 'all 0.3s' }}
+          >
             <Statistic
               title={t('dashboard.securityRisks')}
               value={stats.security_risks}
@@ -182,7 +222,11 @@ const Dashboard: React.FC = () => {
           </Card>
         </Col>
         <Col span={6}>
-          <Card>
+          <Card
+            hoverable
+            onClick={handleComplianceRisksClick}
+            style={{ cursor: 'pointer', transition: 'all 0.3s' }}
+          >
             <Statistic
               title={t('dashboard.complianceRisks')}
               value={stats.compliance_risks}
@@ -193,7 +237,11 @@ const Dashboard: React.FC = () => {
           </Card>
         </Col>
         <Col span={6}>
-          <Card>
+          <Card
+            hoverable
+            onClick={handleDataLeaksClick}
+            style={{ cursor: 'pointer', transition: 'all 0.3s' }}
+          >
             <Statistic
               title={t('dashboard.dataLeaks')}
               value={stats.data_leaks}
@@ -208,7 +256,11 @@ const Dashboard: React.FC = () => {
       {/* Risk type distribution */}
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col span={8}>
-          <Card>
+          <Card
+            hoverable
+            onClick={handleTotalRisksClick}
+            style={{ cursor: 'pointer', transition: 'all 0.3s' }}
+          >
             <Statistic
               title={t('dashboard.totalRisks')}
               value={stats.high_risk_count + stats.medium_risk_count + stats.low_risk_count}
@@ -219,7 +271,11 @@ const Dashboard: React.FC = () => {
           </Card>
         </Col>
         <Col span={8}>
-          <Card>
+          <Card
+            hoverable
+            onClick={handleSafePassedClick}
+            style={{ cursor: 'pointer', transition: 'all 0.3s' }}
+          >
             <Statistic
               title={t('dashboard.safePassed')}
               value={stats.safe_count}
@@ -247,7 +303,25 @@ const Dashboard: React.FC = () => {
       <Row gutter={16}>
         <Col span={12}>
           <Card>
-            <ReactECharts option={getRiskDistributionOption()} style={{ height: 400 }} />
+            <ReactECharts
+              option={getRiskDistributionOption()}
+              style={{ height: 400 }}
+              onEvents={{
+                click: (params: any) => {
+                  // Create dynamic mapping based on current language
+                  const riskLevelMap: { [key: string]: string } = {
+                    [t('dashboard.highRisk')]: 'high_risk',
+                    [t('dashboard.mediumRisk')]: 'medium_risk',
+                    [t('dashboard.lowRisk')]: 'low_risk',
+                    [t('dashboard.noRisk')]: 'no_risk',
+                  };
+                  const riskLevel = riskLevelMap[params.name];
+                  if (riskLevel) {
+                    handleRiskLevelClick(riskLevel);
+                  }
+                },
+              }}
+            />
           </Card>
         </Col>
         <Col span={12}>
