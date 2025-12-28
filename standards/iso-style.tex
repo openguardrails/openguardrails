@@ -1,0 +1,38 @@
+\documentclass[12pt,a4paper]{article}
+
+% ---------- Packages ----------
+\usepackage[a4paper,margin=2.5cm]{geometry}
+\usepackage{setspace}
+\onehalfspacing
+\usepackage{fontspec}
+\setmainfont{Times New Roman}
+
+\usepackage{titlesec}
+\titleformat{\section}{\bfseries\MakeUppercase}{\thesection}{1em}{}
+\titleformat{\subsection}{\bfseries}{\thesubsection}{1em}{}
+
+\usepackage{longtable,booktabs,array}
+\usepackage{hyperref}
+\usepackage{fancyhdr}
+\usepackage{amssymb}
+
+% ---------- Header / Footer ----------
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[C]{OpenGuardrails AI-RSMS}
+\fancyfoot[C]{\thepage}
+
+% ---------- Pandoc compatibility ----------
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\newcounter{none}
+
+\begin{document}
+
+% ---------- ISO Title Page ----------
+\input{title-page.tex}
+
+% ---------- Main Content ----------
+$body$
+
+\end{document}
