@@ -196,18 +196,6 @@ const Documentation: React.FC = () => {
               <h3 className="text-xl font-semibold mb-3">{t('docs.applicationManagement')}</h3>
               <p className="text-slate-600 mb-4">{t('docs.applicationManagementDesc')}</p>
 
-              <div className="p-4 bg-green-50 border border-green-200 rounded-md mb-4">
-                <div className="flex items-start gap-2">
-                  <div className="flex-shrink-0 mt-0.5">
-                    <div className="h-5 w-5 rounded-full bg-green-500 flex items-center justify-center text-white text-xs">✓</div>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-green-900">{t('docs.applicationManagementFeature')}</p>
-                    <p className="text-sm text-green-700 mt-1">{t('docs.applicationManagementFeatureDesc')}</p>
-                  </div>
-                </div>
-              </div>
-
               <div className="mb-4">
                 <p className="font-semibold text-sm mb-2">{t('docs.applicationUseCases')}:</p>
                 <ul className="list-disc pl-5 space-y-1 text-sm text-slate-600">

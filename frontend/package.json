@@ -1,6 +1,6 @@
 {
   "name": "openguardrails-frontend",
-  "version": "4.5.1",
+  "version": "5.0.0",
   "description": "OpenGuardrails Frontend",
   "private": true,
   "scripts": {

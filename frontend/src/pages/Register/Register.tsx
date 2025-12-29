@@ -324,74 +324,100 @@ const Register: React.FC = () => {
   )
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-500 to-purple-600 p-5">
-      <div className="w-full max-w-md">
-        <Card className="border-none shadow-2xl relative">
-          {/* Language Switcher */}
-          <div className="absolute top-4 right-4 z-10">
-            <LanguageSwitcher />
+    <div className="min-h-screen flex bg-slate-50">
+      {/* Left side - Branding */}
+      <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-blue-600 via-blue-700 to-indigo-800 p-12 flex-col justify-between">
+        <div>
+          <div className="flex items-center gap-3 mb-8">
+            <img src="/platform/logo-dark.png" alt="Logo" className="h-12 w-12 bg-white rounded-lg p-2" />
+            <h1 className="text-2xl font-bold text-white">OpenGuardrails</h1>
           </div>
+          <h2 className="text-4xl font-bold text-white mb-4">
+            {t('register.brandingTitle') || 'AI Safety Platform'}
+          </h2>
+          <p className="text-blue-100 text-lg">
+            {t('register.brandingSubtitle') || 'The only production-ready open-source AI guardrails platform for enterprise AI applications.'}
+          </p>
+        </div>
+        <div className="text-sm text-blue-200">
+          {t('register.copyright')}
+        </div>
+      </div>
 
-          <CardHeader className="text-center space-y-2 pb-6">
-            <h1 className="text-3xl font-bold text-gray-900">
-              {t('register.title')}
-            </h1>
-            <p className="text-muted-foreground text-base">
-              {t('register.subtitle')}
-            </p>
-          </CardHeader>
+      {/* Right side - Register Form */}
+      <div className="flex-1 flex items-center justify-center p-8 relative">
+        <div className="w-full max-w-md">
+          <Card className="border shadow-sm">
+            <CardHeader className="space-y-1 pb-4">
+              <h1 className="text-2xl font-bold text-slate-900">
+                {t('register.title')}
+              </h1>
+              <p className="text-slate-600 text-sm">
+                {t('register.subtitle')}
+              </p>
+            </CardHeader>
 
-          {/* Steps indicator */}
-          <div className="px-6 pb-6">
-            <div className="flex items-center justify-center space-x-4">
-              <div className="flex items-center">
-                <div
-                  className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
-                    currentStep === 0
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-muted text-muted-foreground'
-                  }`}
-                >
-                  1
+            {/* Steps indicator */}
+            <div className="px-6 pb-4">
+              <div className="flex items-center justify-center gap-2">
+                <div className="flex items-center gap-2">
+                  <div
+                    className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold transition-colors ${
+                      currentStep === 0
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-slate-200 text-slate-600'
+                    }`}
+                  >
+                    1
+                  </div>
+                  <span className={`text-xs font-medium ${currentStep === 0 ? 'text-slate-900' : 'text-slate-500'}`}>
+                    {t('register.stepFillInfo')}
+                  </span>
                 </div>
-                <span className="ml-2 text-sm font-medium">
-                  {t('register.stepFillInfo')}
-                </span>
-              </div>
-              <div className="w-12 h-0.5 bg-border" />
-              <div className="flex items-center">
-                <div
-                  className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
-                    currentStep === 1
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-muted text-muted-foreground'
-                  }`}
-                >
-                  2
+                <div className="w-8 h-0.5 bg-slate-300" />
+                <div className="flex items-center gap-2">
+                  <div
+                    className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold transition-colors ${
+                      currentStep === 1
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-slate-200 text-slate-600'
+                    }`}
+                  >
+                    2
+                  </div>
+                  <span className={`text-xs font-medium ${currentStep === 1 ? 'text-slate-900' : 'text-slate-500'}`}>
+                    {t('register.stepVerifyEmail')}
+                  </span>
                 </div>
-                <span className="ml-2 text-sm font-medium">
-                  {t('register.stepVerifyEmail')}
-                </span>
               </div>
             </div>
-          </div>
 
           <CardContent>
             {currentStep === 0 ? renderRegisterForm() : renderVerifyForm()}
           </CardContent>
 
-          <CardFooter className="flex-col space-y-4">
-            <div className="text-center text-sm text-muted-foreground">
-              {t('register.alreadyHaveAccount')}{' '}
-              <Link to="/login" className="text-primary hover:underline font-medium">
-                {t('register.loginNow')}
-              </Link>
-            </div>
-            <p className="text-xs text-muted-foreground text-center">
-              {t('register.copyright')}
-            </p>
-          </CardFooter>
-        </Card>
+            <CardFooter className="flex-col pt-6">
+              <div className="text-center text-sm">
+                <span className="text-slate-600">{t('register.alreadyHaveAccount')} </span>
+                <Link to="/login" className="text-blue-600 hover:text-blue-700 font-medium hover:underline">
+                  {t('register.loginNow')}
+                </Link>
+              </div>
+            </CardFooter>
+          </Card>
+
+          {/* Mobile Copyright */}
+          <p className="text-xs text-slate-500 text-center mt-6 lg:hidden">
+            {t('register.copyright')}
+          </p>
+        </div>
+
+        {/* Language Switcher - Bottom right corner */}
+        <div className="absolute bottom-8 right-8">
+          <div className="scale-75 opacity-60 hover:opacity-100 transition-opacity">
+            <LanguageSwitcher />
+          </div>
+        </div>
       </div>
     </div>
   )

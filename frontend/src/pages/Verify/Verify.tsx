@@ -122,115 +122,138 @@ const Verify: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-500 to-purple-600 p-5">
-      <div className="w-full max-w-md">
-        <Card className="border-none shadow-2xl relative">
-          {/* Language Switcher */}
-          <div className="absolute top-4 right-4 z-10">
+    <div className="min-h-screen flex bg-slate-50">
+      {/* Left side - Branding */}
+      <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-blue-600 via-blue-700 to-indigo-800 p-12 flex-col justify-between">
+        <div>
+          <div className="flex items-center gap-3 mb-8">
+            <img src="/platform/logo-dark.png" alt="Logo" className="h-12 w-12 bg-white rounded-lg p-2" />
+            <h1 className="text-2xl font-bold text-white">OpenGuardrails</h1>
+          </div>
+          <h2 className="text-4xl font-bold text-white mb-4">
+            {t('login.brandingTitle') || 'AI Safety Platform'}
+          </h2>
+          <p className="text-blue-100 text-lg">
+            {t('login.brandingSubtitle') || 'Enterprise-grade content moderation and security for AI applications'}
+          </p>
+        </div>
+        <div className="text-sm text-blue-200">
+          {t('login.copyright')}
+        </div>
+      </div>
+
+      {/* Right side - Verify Form */}
+      <div className="flex-1 flex items-center justify-center p-8 relative">
+        <div className="w-full max-w-md">
+          <Card className="border shadow-sm">
+            <CardHeader className="space-y-1 pb-6">
+              <h1 className="text-2xl font-bold text-slate-900">
+                {t('login.title')}
+              </h1>
+              <p className="text-slate-600 text-sm">
+                {t('verify.title')}
+              </p>
+            </CardHeader>
+
+            <CardContent>
+              <Form {...form}>
+                <form onSubmit={form.handleSubmit(handleVerify)} className="space-y-5">
+                  <FormField
+                    control={form.control}
+                    name="email"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('register.email')}</FormLabel>
+                        <FormControl>
+                          <div className="relative">
+                            <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                            <Input
+                              type="email"
+                              placeholder={t('verify.emailPlaceholder')}
+                              className="pl-10 h-12"
+                              autoComplete="email"
+                              {...field}
+                            />
+                          </div>
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="verificationCode"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('register.verificationCode')}</FormLabel>
+                        <FormControl>
+                          <div className="relative">
+                            <ShieldCheck className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                            <Input
+                              placeholder={t('verify.verificationCodePlaceholder')}
+                              className="pl-10 h-12 text-center text-lg tracking-widest"
+                              maxLength={6}
+                              {...field}
+                            />
+                          </div>
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <Button
+                    type="submit"
+                    className="w-full h-12 text-base font-medium mt-6"
+                    disabled={loading}
+                  >
+                    {loading ? t('verify.verifying') || 'Verifying...' : t('verify.verifyButton')}
+                  </Button>
+
+                  <div className="space-y-3 pt-2">
+                    <div className="text-center text-sm">
+                      <span className="text-slate-600">{t('register.resendCodeQuestion')} </span>
+                      <Button
+                        type="button"
+                        variant="link"
+                        className="h-auto p-0 text-blue-600 hover:text-blue-700"
+                        onClick={handleResendCode}
+                        disabled={countdown > 0 || resendLoading}
+                      >
+                        {countdown > 0
+                          ? t('verify.resendCodeCountdown', { count: countdown })
+                          : t('verify.resendCode')}
+                      </Button>
+                    </div>
+
+                    <div className="flex items-center justify-center gap-2 text-sm">
+                      <Link to="/register" className="text-slate-600 hover:text-slate-900 hover:underline">
+                        {t('register.backToRegister')}
+                      </Link>
+                      <span className="text-slate-400">•</span>
+                      <Link to="/login" className="text-slate-600 hover:text-slate-900 hover:underline">
+                        {t('register.loginNow')}
+                      </Link>
+                    </div>
+                  </div>
+                </form>
+              </Form>
+            </CardContent>
+          </Card>
+
+          {/* Mobile Copyright */}
+          <p className="text-xs text-slate-500 text-center mt-6 lg:hidden">
+            {t('login.copyright')}
+          </p>
+        </div>
+
+        {/* Language Switcher - Bottom right corner */}
+        <div className="absolute bottom-8 right-8">
+          <div className="scale-75 opacity-60 hover:opacity-100 transition-opacity">
             <LanguageSwitcher />
           </div>
-
-          <CardHeader className="text-center space-y-2 pb-8">
-            <h1 className="text-3xl font-bold text-gray-900">
-              {t('login.title')}
-            </h1>
-            <p className="text-muted-foreground text-base">
-              {t('verify.title')}
-            </p>
-          </CardHeader>
-
-          <CardContent>
-            <Form {...form}>
-              <form onSubmit={form.handleSubmit(handleVerify)} className="space-y-5">
-                <FormField
-                  control={form.control}
-                  name="email"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>{t('register.email')}</FormLabel>
-                      <FormControl>
-                        <div className="relative">
-                          <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
-                          <Input
-                            type="email"
-                            placeholder={t('verify.emailPlaceholder')}
-                            className="pl-10 h-12"
-                            autoComplete="email"
-                            {...field}
-                          />
-                        </div>
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="verificationCode"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>{t('register.verificationCode')}</FormLabel>
-                      <FormControl>
-                        <div className="relative">
-                          <ShieldCheck className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
-                          <Input
-                            placeholder={t('verify.verificationCodePlaceholder')}
-                            className="pl-10 h-12 text-center text-lg tracking-widest"
-                            maxLength={6}
-                            {...field}
-                          />
-                        </div>
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <Button
-                  type="submit"
-                  className="w-full h-12 text-base font-medium mt-6"
-                  disabled={loading}
-                >
-                  {loading ? t('verify.verifying') || 'Verifying...' : t('verify.verifyButton')}
-                </Button>
-
-                <div className="space-y-4 pt-2">
-                  <div className="text-center text-sm">
-                    <span className="text-muted-foreground">{t('register.resendCodeQuestion')}</span>{' '}
-                    <Button
-                      type="button"
-                      variant="link"
-                      className="h-auto p-0 text-primary"
-                      onClick={handleResendCode}
-                      disabled={countdown > 0 || resendLoading}
-                    >
-                      {countdown > 0
-                        ? t('verify.resendCodeCountdown', { count: countdown })
-                        : t('verify.resendCode')}
-                    </Button>
-                  </div>
-
-                  <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
-                    <Link to="/register" className="text-primary hover:underline font-medium">
-                      {t('register.backToRegister')}
-                    </Link>
-                    <span>|</span>
-                    <Link to="/login" className="text-primary hover:underline font-medium">
-                      {t('register.alreadyHaveAccount')} {t('register.loginNow')}
-                    </Link>
-                  </div>
-                </div>
-              </form>
-            </Form>
-          </CardContent>
-
-          <CardFooter className="flex-col">
-            <p className="text-xs text-muted-foreground text-center">
-              {t('login.copyright')}
-            </p>
-          </CardFooter>
-        </Card>
+        </div>
       </div>
     </div>
   )

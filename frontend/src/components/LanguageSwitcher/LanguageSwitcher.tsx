@@ -1,9 +1,16 @@
 import React, { useState } from 'react';
-import { GlobalOutlined } from '@ant-design/icons';
-import { Dropdown, MenuProps, message } from 'antd';
+import { Languages } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../contexts/AuthContext';
 import { authService } from '../../services/auth';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../ui/select';
+import { toast } from 'sonner';
 
 const LanguageSwitcher: React.FC = () => {
   const { i18n } = useTranslation();
@@ -11,59 +18,49 @@ const LanguageSwitcher: React.FC = () => {
   const [loading, setLoading] = useState(false);
 
   const handleLanguageChange = async (lang: string) => {
+    if (lang === i18n.language) return;
+
     try {
       setLoading(true);
-      
+
       // Update i18n and localStorage immediately for better UX
       i18n.changeLanguage(lang);
       localStorage.setItem('i18nextLng', lang);
-      
+
       // If user is authenticated, update language preference on server
       if (isAuthenticated) {
         try {
           await authService.updateLanguage(lang);
           // Refresh user info to get updated language preference
           await refreshUserInfo();
-          message.success('Language preference updated successfully');
+          toast.success('Language preference updated successfully');
         } catch (error) {
           console.error('Failed to update language preference:', error);
-          message.warning('Language changed locally, but failed to save preference');
+          toast.warning('Language changed locally, but failed to save preference');
         }
       }
-      
+
       // Reload page to apply language change
       window.location.reload();
     } catch (error) {
       console.error('Language change failed:', error);
-      message.error('Failed to change language');
+      toast.error('Failed to change language');
     } finally {
       setLoading(false);
     }
   };
 
-  const items: MenuProps['items'] = [
-    {
-      key: 'en',
-      label: 'English',
-      onClick: () => handleLanguageChange('en'),
-    },
-    {
-      key: 'zh',
-      label: '中文',
-      onClick: () => handleLanguageChange('zh'),
-    },
-  ];
-
   return (
-    <Dropdown menu={{ items }} placement="bottomRight" disabled={loading}>
-      <div style={{ cursor: loading ? 'not-allowed' : 'pointer', padding: '0 12px', opacity: loading ? 0.6 : 1 }}>
-        <GlobalOutlined style={{ fontSize: '16px' }} />
-        <span style={{ marginLeft: '8px' }}>
-          {i18n.language === 'zh' ? '中文' : 'English'}
-        </span>
-        {loading && <span style={{ marginLeft: '4px' }}>...</span>}
-      </div>
-    </Dropdown>
+    <Select value={i18n.language} onValueChange={handleLanguageChange} disabled={loading}>
+      <SelectTrigger className="w-full h-9 text-sm border-slate-200 focus:ring-blue-500">
+        <Languages className="h-4 w-4 mr-2 text-slate-500" />
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent className="min-w-[140px]">
+        <SelectItem value="en">English</SelectItem>
+        <SelectItem value="zh">中文</SelectItem>
+      </SelectContent>
+    </Select>
   );
 };
 

@@ -1295,11 +1295,14 @@
   "login": {
     "title": "OpenGuardrails",
     "subtitle": "Account Login",
+    "brandingTitle": "AI Security Platform",
+    "brandingSubtitle": "Open-source Enterprise-grade AI Guardrails and Lightweight AI Security Gateway, with support for user-defined scanners and custom model training.",
     "email": "Email Address",
     "emailPlaceholder": "Email Address",
     "password": "Password",
     "passwordPlaceholder": "Password",
     "loginButton": "Login",
+    "loggingIn": "Logging in...",
     "loginSuccess": "Login successful",
     "loginFailed": "Login failed, please check your email and password",
     "emailRequired": "Please enter your email",
@@ -1323,6 +1326,8 @@
   "forgotPassword": {
     "title": "OpenGuardrails",
     "subtitle": "Reset Password",
+    "brandingTitle": "AI Security Platform",
+    "brandingSubtitle": "Open-source Enterprise-grade AI Guardrails and Lightweight AI Security Gateway, with support for user-defined scanners and custom model training.",
     "email": "Email Address",
     "emailPlaceholder": "Enter your registered email address",
     "sendResetLink": "Send Reset Link",
@@ -1358,6 +1363,8 @@
   "register": {
     "title": "OpenGuardrails",
     "subtitle": "User Registration",
+    "brandingTitle": "AI Security Platform",
+    "brandingSubtitle": "Open-source Enterprise-grade AI Guardrails and Lightweight AI Security Gateway, with support for user-defined scanners and custom model training.",
     "email": "Email Address",
     "emailPlaceholder": "Email Address",
     "password": "Password (at least 8 characters)",
@@ -1404,9 +1411,7 @@
     "quickStart": "Quick Start",
     "detailedGuide": "Detailed Guide",
     "applicationManagement": "Application Management",
-    "applicationManagementDesc": "OpenGuardrails v4.0.0 introduces Multi-Application Management - manage multiple applications within one tenant account, each with completely isolated configurations.",
-    "applicationManagementFeature": "🆕 New in v4.0.0: Multi-Application Management",
-    "applicationManagementFeatureDesc": "Each application has its own API keys and protection configurations, enabling better organization and isolation for different projects, environments, or use cases.",
+    "applicationManagementDesc": "Manage multiple applications within one tenant account, each with completely isolated configurations.",
     "applicationUseCases": "Use Cases",
     "applicationUseCase1": "🏢 Enterprise Teams: Manage different products/services with separate guardrail policies",
     "applicationUseCase2": "🧪 Development Workflows: Maintain separate configs for dev, staging, and production environments",
@@ -1846,7 +1851,7 @@
     "knowledgeBaseTooltip": "Number of active knowledge base Q&A pairs for safe responses"
   },
   "applicationSelector": {
-    "label": "Current",
+    "label": "Current Application",
     "placeholder": "Select application",
     "noApplications": "No applications",
     "fetchError": "Failed to fetch applications"

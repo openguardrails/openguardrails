@@ -61,22 +61,38 @@ const ForgotPassword: React.FC = () => {
 
   if (emailSent) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-500 to-purple-600 p-5">
-        <div className="w-full max-w-md">
-          <Card className="border-none shadow-2xl relative">
-            {/* Language Switcher */}
-            <div className="absolute top-4 right-4 z-10">
-              <LanguageSwitcher />
+      <div className="min-h-screen flex bg-slate-50">
+        {/* Left side - Branding */}
+        <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-blue-600 via-blue-700 to-indigo-800 p-12 flex-col justify-between">
+          <div>
+            <div className="flex items-center gap-3 mb-8">
+              <img src="/platform/logo-dark.png" alt="Logo" className="h-12 w-12 bg-white rounded-lg p-2" />
+              <h1 className="text-2xl font-bold text-white">OpenGuardrails</h1>
             </div>
+            <h2 className="text-4xl font-bold text-white mb-4">
+              {t('forgotPassword.brandingTitle') || 'AI Safety Platform'}
+            </h2>
+            <p className="text-blue-100 text-lg">
+              {t('forgotPassword.brandingSubtitle') || 'The only production-ready open-source AI guardrails platform for enterprise AI applications.'}
+            </p>
+          </div>
+          <div className="text-sm text-blue-200">
+            {t('forgotPassword.copyright')}
+          </div>
+        </div>
 
-            <CardHeader className="text-center space-y-2 pb-6">
-              <h1 className="text-3xl font-bold text-gray-900">
-                {t('forgotPassword.title')}
-              </h1>
-              <p className="text-muted-foreground text-base">
-                {t('forgotPassword.emailSent')}
-              </p>
-            </CardHeader>
+        {/* Right side - Success Message */}
+        <div className="flex-1 flex items-center justify-center p-8 relative">
+          <div className="w-full max-w-md">
+            <Card className="border shadow-sm">
+              <CardHeader className="space-y-1 pb-6">
+                <h1 className="text-2xl font-bold text-slate-900">
+                  {t('forgotPassword.title')}
+                </h1>
+                <p className="text-slate-600 text-sm">
+                  {t('forgotPassword.emailSent')}
+                </p>
+              </CardHeader>
 
             <CardContent className="space-y-6">
               <Alert className="border-green-200 bg-green-50">
@@ -99,34 +115,58 @@ const ForgotPassword: React.FC = () => {
               </Link>
             </CardContent>
 
-            <CardFooter className="flex-col">
-              <p className="text-xs text-muted-foreground text-center">
-                {t('forgotPassword.copyright')}
-              </p>
-            </CardFooter>
-          </Card>
+            </Card>
+
+            {/* Mobile Copyright */}
+            <p className="text-xs text-slate-500 text-center mt-6 lg:hidden">
+              {t('forgotPassword.copyright')}
+            </p>
+          </div>
+
+          {/* Language Switcher - Bottom right corner */}
+          <div className="absolute bottom-8 right-8">
+            <div className="scale-75 opacity-60 hover:opacity-100 transition-opacity">
+              <LanguageSwitcher />
+            </div>
+          </div>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-500 to-purple-600 p-5">
-      <div className="w-full max-w-md">
-        <Card className="border-none shadow-2xl relative">
-          {/* Language Switcher */}
-          <div className="absolute top-4 right-4 z-10">
-            <LanguageSwitcher />
+    <div className="min-h-screen flex bg-slate-50">
+      {/* Left side - Branding */}
+      <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-blue-600 via-blue-700 to-indigo-800 p-12 flex-col justify-between">
+        <div>
+          <div className="flex items-center gap-3 mb-8">
+            <img src="/platform/logo-dark.png" alt="Logo" className="h-12 w-12 bg-white rounded-lg p-2" />
+            <h1 className="text-2xl font-bold text-white">OpenGuardrails</h1>
           </div>
+          <h2 className="text-4xl font-bold text-white mb-4">
+            {t('forgotPassword.brandingTitle') || 'AI Safety Platform'}
+          </h2>
+          <p className="text-blue-100 text-lg">
+            {t('forgotPassword.brandingSubtitle') || 'The only production-ready open-source AI guardrails platform for enterprise AI applications.'}
+          </p>
+        </div>
+        <div className="text-sm text-blue-200">
+          {t('forgotPassword.copyright')}
+        </div>
+      </div>
 
-          <CardHeader className="text-center space-y-2 pb-8">
-            <h1 className="text-3xl font-bold text-gray-900">
-              {t('forgotPassword.title')}
-            </h1>
-            <p className="text-muted-foreground text-base">
-              {t('forgotPassword.subtitle')}
-            </p>
-          </CardHeader>
+      {/* Right side - Form */}
+      <div className="flex-1 flex items-center justify-center p-8 relative">
+        <div className="w-full max-w-md">
+          <Card className="border shadow-sm">
+            <CardHeader className="space-y-1 pb-6">
+              <h1 className="text-2xl font-bold text-slate-900">
+                {t('forgotPassword.title')}
+              </h1>
+              <p className="text-slate-600 text-sm">
+                {t('forgotPassword.subtitle')}
+              </p>
+            </CardHeader>
 
           <CardContent>
             <Form {...form}>
@@ -167,17 +207,27 @@ const ForgotPassword: React.FC = () => {
             </Form>
           </CardContent>
 
-          <CardFooter className="flex-col space-y-4">
-            <div className="text-center text-sm text-muted-foreground">
-              <Link to="/login" className="text-primary hover:underline font-medium">
-                {t('forgotPassword.backToLogin')}
-              </Link>
-            </div>
-            <p className="text-xs text-muted-foreground text-center">
-              {t('forgotPassword.copyright')}
-            </p>
-          </CardFooter>
-        </Card>
+            <CardFooter className="flex-col pt-6">
+              <div className="text-center text-sm">
+                <Link to="/login" className="text-blue-600 hover:text-blue-700 font-medium hover:underline">
+                  {t('forgotPassword.backToLogin')}
+                </Link>
+              </div>
+            </CardFooter>
+          </Card>
+
+          {/* Mobile Copyright */}
+          <p className="text-xs text-slate-500 text-center mt-6 lg:hidden">
+            {t('forgotPassword.copyright')}
+          </p>
+        </div>
+
+        {/* Language Switcher - Bottom right corner */}
+        <div className="absolute bottom-8 right-8">
+          <div className="scale-75 opacity-60 hover:opacity-100 transition-opacity">
+            <LanguageSwitcher />
+          </div>
+        </div>
       </div>
     </div>
   )

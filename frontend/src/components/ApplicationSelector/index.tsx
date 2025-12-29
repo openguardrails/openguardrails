@@ -1,11 +1,17 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Select, Spin, message } from 'antd';
+import { Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import api from '../../services/api';
 import { useApplication } from '../../contexts/ApplicationContext';
 import { useAuth } from '../../contexts/AuthContext';
-
-const { Option } = Select;
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../ui/select';
+import { toast } from 'sonner';
 
 interface Application {
   id: string;
@@ -52,7 +58,7 @@ const ApplicationSelector: React.FC = () => {
       }
     } catch (error) {
       console.error('Failed to fetch applications:', error);
-      message.error(t('applicationSelector.fetchError'));
+      toast.error(t('applicationSelector.fetchError'));
     } finally {
       setLoading(false);
     }
@@ -100,21 +106,28 @@ const ApplicationSelector: React.FC = () => {
   );
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <span style={{ fontWeight: 500, fontSize: '14px' }}>{t('applicationSelector.label')}:</span>
-      <Select
-        value={displayValue}
-        onChange={handleChange}
-        style={{ minWidth: 180 }}
-        loading={loading}
-        placeholder={t('applicationSelector.placeholder')}
-        notFoundContent={loading ? <Spin size="small" /> : t('applicationSelector.noApplications')}
-      >
-        {applications.map(app => (
-          <Option key={app.id} value={app.id}>
-            {app.name}
-          </Option>
-        ))}
+    <div className="flex items-center gap-2">
+      <span className="text-sm font-medium text-slate-700">{t('applicationSelector.label')}:</span>
+      <Select value={displayValue} onValueChange={handleChange} disabled={loading}>
+        <SelectTrigger className="w-[180px] h-9 text-sm border-slate-200 focus:ring-blue-500">
+          {loading ? (
+            <div className="flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+              <SelectValue placeholder={t('applicationSelector.placeholder')} />
+            </div>
+          ) : applications.length === 0 ? (
+            <SelectValue placeholder={t('applicationSelector.noApplications')} />
+          ) : (
+            <SelectValue />
+          )}
+        </SelectTrigger>
+        <SelectContent className="min-w-[180px]">
+          {applications.map(app => (
+            <SelectItem key={app.id} value={app.id}>
+              {app.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
       </Select>
     </div>
   );

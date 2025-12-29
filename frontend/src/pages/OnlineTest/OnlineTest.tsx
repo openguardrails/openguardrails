@@ -10,7 +10,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/ca
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
 import { Switch } from '../../components/ui/switch'
 import { Input } from '../../components/ui/input'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/tabs'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../../components/ui/collapsible'
 import { toast } from 'sonner'
 import { Separator } from '../../components/ui/separator'
@@ -85,6 +84,7 @@ const OnlineTest: React.FC = () => {
   const [testResult, setTestResult] = useState<TestResult | null>(null)
   const [models, setModels] = useState<TestModel[]>([])
   const [uploadedImages, setUploadedImages] = useState<string[]>([])
+  const [selectedCategory, setSelectedCategory] = useState('security')
 
   const loadModels = async () => {
     try {
@@ -796,43 +796,36 @@ const OnlineTest: React.FC = () => {
             <CardHeader>
               <CardTitle className="text-base">{t('onlineTest.presetTestCases')}</CardTitle>
             </CardHeader>
-            <CardContent>
-              <Tabs defaultValue="security" className="w-full">
-                <TabsList className="grid w-full grid-cols-4">
-                  <TabsTrigger value="security" className="text-xs">
-                    {t('onlineTest.categories.security')}
-                  </TabsTrigger>
-                  <TabsTrigger value="dataLeak" className="text-xs">
-                    {t('onlineTest.categories.dataLeak')}
-                  </TabsTrigger>
-                  <TabsTrigger value="professional" className="text-xs">
-                    {t('onlineTest.categories.professional')}
-                  </TabsTrigger>
-                  <TabsTrigger value="safe" className="text-xs">
-                    {t('onlineTest.categories.safe')}
-                  </TabsTrigger>
-                </TabsList>
+            <CardContent className="space-y-4">
+              <Select defaultValue="security" onValueChange={(value) => setSelectedCategory(value)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="security">{t('onlineTest.categories.security')}</SelectItem>
+                  <SelectItem value="dataLeak">{t('onlineTest.categories.dataLeak')}</SelectItem>
+                  <SelectItem value="professional">{t('onlineTest.categories.professional')}</SelectItem>
+                  <SelectItem value="safe">{t('onlineTest.categories.safe')}</SelectItem>
+                </SelectContent>
+              </Select>
 
-                {['security', 'dataLeak', 'professional', 'safe'].map((category) => (
-                  <TabsContent key={category} value={category} className="max-h-[600px] overflow-y-auto pr-1 space-y-2">
-                    {testCasesByCategory[category as keyof typeof testCasesByCategory].map((testCase) => (
-                      <Card key={testCase.id} className="cursor-pointer hover:bg-slate-50 transition-colors" onClick={() => useTestCase(testCase)}>
-                        <CardContent className="p-3 space-y-2">
-                          <div className="flex items-center justify-between">
-                            <p className="text-sm font-semibold">{testCase.name}</p>
-                            <span className="px-2 py-0.5 text-xs rounded bg-blue-100 text-blue-800 border border-blue-200">{testCase.category}</span>
-                          </div>
-                          <p className="text-xs text-slate-600">{testCase.description}</p>
-                          <p className="text-xs bg-slate-100 p-2 rounded">{testCase.content.length > 50 ? testCase.content.substring(0, 50) + '...' : testCase.content}</p>
-                          <span className={`inline-block px-2 py-0.5 text-xs rounded border ${getRiskColor(testCase.expectedRisk || '')}`}>
-                            {t('onlineTest.expected')} {testCase.expectedRisk}
-                          </span>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </TabsContent>
+              <div className="max-h-[600px] overflow-y-auto pr-1 space-y-2">
+                {testCasesByCategory[selectedCategory as keyof typeof testCasesByCategory].map((testCase) => (
+                  <Card key={testCase.id} className="cursor-pointer hover:bg-slate-50 transition-colors" onClick={() => useTestCase(testCase)}>
+                    <CardContent className="p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-semibold">{testCase.name}</p>
+                        <span className="px-2 py-0.5 text-xs rounded bg-blue-100 text-blue-800 border border-blue-200">{testCase.category}</span>
+                      </div>
+                      <p className="text-xs text-slate-600">{testCase.description}</p>
+                      <p className="text-xs bg-slate-100 p-2 rounded">{testCase.content.length > 50 ? testCase.content.substring(0, 50) + '...' : testCase.content}</p>
+                      <span className={`inline-block px-2 py-0.5 text-xs rounded border ${getRiskColor(testCase.expectedRisk || '')}`}>
+                        {t('onlineTest.expected')} {testCase.expectedRisk}
+                      </span>
+                    </CardContent>
+                  </Card>
                 ))}
-              </Tabs>
+              </div>
             </CardContent>
           </Card>
         </div>

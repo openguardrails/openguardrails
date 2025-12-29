@@ -11,14 +11,12 @@ import {
   RefreshCw,
   TestTube,
   Book,
-  CreditCard,
   Grid3x3,
   ChevronDown,
   Menu as MenuIcon,
   X,
   Shield,
-  PanelLeftClose,
-  PanelLeft,
+  ChevronLeft,
 } from 'lucide-react'
 import { useAuth } from '../../contexts/AuthContext'
 import { adminApi, configApi } from '../../services/api'
@@ -65,8 +63,13 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     const fetchSystemVersion = async () => {
       try {
         const systemInfo = await configApi.getSystemInfo()
-        if (systemInfo.app_version) {
-          setSystemVersion(`v${systemInfo.app_version}`)
+        console.log('System info:', systemInfo)
+        // Backend returns 'version' field, not 'app_version'
+        const version = (systemInfo as any).version || systemInfo.app_version
+        if (version) {
+          setSystemVersion(`v${version}`)
+        } else {
+          console.log('No version in system info')
         }
       } catch (error) {
         console.error('Failed to fetch system version:', error)
@@ -150,7 +153,22 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         },
       ],
     },
-    // Only super admins can see tenant management
+    // Subscription & Usage (for all users in SaaS mode)
+    ...(features.showSubscription()
+      ? [
+          {
+            key: '/subscription',
+            icon: Grid3x3,
+            label: t('nav.subscription'),
+          },
+        ]
+      : []),
+    {
+      key: '/documentation',
+      icon: Book,
+      label: 'Documentation',
+    },
+    // Admin menu - Only super admins can see (placed at bottom)
     ...(user?.is_super_admin
       ? [
           {
@@ -292,7 +310,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                 <p className="text-sm font-medium text-slate-900 truncate">{user?.email}</p>
                 <div className="flex items-center gap-1 mt-0.5">
                   {user?.is_super_admin && <span className="px-1.5 py-0.5 text-[10px] rounded bg-red-100 text-red-700 border border-red-200">{t('layout.admin')}</span>}
-                  {systemVersion && <span className="text-[10px] text-slate-500">{systemVersion}</span>}
+                  {systemVersion && <span className="px-1.5 py-0.5 text-[10px] rounded bg-slate-100 text-slate-600 border border-slate-200">{systemVersion}</span>}
                 </div>
               </div>
             )}
@@ -309,14 +327,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                 {t('nav.account')}
               </button>
 
-              {/* Subscription */}
-              {features.showSubscription() && (
-                <button onClick={() => navigate('/subscription')} className="w-full px-4 py-2.5 text-left text-sm text-slate-700 hover:text-slate-900 hover:bg-slate-100 transition-colors flex items-center gap-2">
-                  <CreditCard className="h-4 w-4" />
-                  {t('nav.subscription')}
-                </button>
-              )}
-
               {/* Super admin switch user */}
               {user?.is_super_admin && !switchInfo.is_switched && (
                 <button onClick={showSwitchModal} className="w-full px-4 py-2.5 text-left text-sm text-slate-700 hover:text-slate-900 hover:bg-slate-100 transition-colors flex items-center gap-2">
@@ -324,6 +334,13 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                   {t('layout.switchUser')}
                 </button>
               )}
+
+              <div className="border-t border-slate-200" />
+
+              {/* Language Switcher */}
+              <div className="px-4 py-2.5">
+                <LanguageSwitcher />
+              </div>
 
               <div className="border-t border-slate-200" />
 
@@ -351,25 +368,25 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       <aside className={cn('bg-white border-r border-slate-200 transition-all duration-300 flex flex-col', collapsed ? 'w-16' : 'w-64', 'hidden lg:flex')}>
         {/* Logo + Collapse Toggle */}
         <div className="h-16 flex items-center justify-between px-4 border-b border-slate-200">
-          <div className="flex items-center gap-2 cursor-pointer flex-1 min-w-0" onClick={() => navigate('/dashboard')}>
+          <div
+            className="flex items-center gap-2 cursor-pointer flex-1 min-w-0"
+            onClick={() => {
+              if (collapsed) {
+                setCollapsed(false)
+              } else {
+                navigate('/dashboard')
+              }
+            }}
+          >
             <img src="/platform/logo-dark.png" alt="Logo" className="h-8 w-8 flex-shrink-0" />
             {!collapsed && <span className="font-bold text-lg text-slate-900 truncate">OpenGuardrails</span>}
           </div>
           {!collapsed && (
             <Button variant="ghost" size="sm" onClick={() => setCollapsed(true)} className="text-slate-500 hover:text-slate-700 hover:bg-slate-100 h-8 w-8 p-0 flex-shrink-0">
-              <PanelLeftClose className="h-4 w-4" />
+              <ChevronLeft className="h-4 w-4" />
             </Button>
           )}
         </div>
-
-        {/* Collapsed state: show expand button */}
-        {collapsed && (
-          <div className="px-2 py-3 border-b border-slate-200">
-            <Button variant="ghost" size="sm" onClick={() => setCollapsed(false)} className="w-full text-slate-500 hover:text-slate-700 hover:bg-slate-100 h-8 p-0">
-              <PanelLeft className="h-4 w-4" />
-            </Button>
-          </div>
-        )}
 
         {/* Menu */}
         <nav className="flex-1 overflow-y-auto py-4 px-2">
@@ -524,15 +541,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
           {/* Right side - Actions */}
           <div className="flex items-center gap-2 lg:gap-3">
-            {/* Documentation Link */}
-            <Button variant="ghost" size="sm" onClick={() => navigate('/documentation')} className="hidden sm:flex">
-              <Book className="h-4 w-4 mr-2" />
-              {t('nav.documentation')}
-            </Button>
-
-            {/* Language Switcher */}
-            <LanguageSwitcher />
-
             {/* Application Selector */}
             <ApplicationSelector />
           </div>
