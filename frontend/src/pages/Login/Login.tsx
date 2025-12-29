@@ -1,210 +1,270 @@
-import React, { useState } from 'react';
-import { Form, Input, Button, Card, Typography, message, Space, Alert, Modal } from 'antd';
-import { UserOutlined, LockOutlined } from '@ant-design/icons';
-import { useAuth } from '../../contexts/AuthContext';
-import { useNavigate, useLocation, Link } from 'react-router-dom';
-import { useTranslation } from 'react-i18next';
-import LanguageSwitcher from '../../components/LanguageSwitcher/LanguageSwitcher';
-import './Login.css';
+import React, { useState } from 'react'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { useAuth } from '../../contexts/AuthContext'
+import { useNavigate, useLocation, Link } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
+import { Mail, Lock } from 'lucide-react'
+import { toast } from 'sonner'
 
-const { Title, Text } = Typography;
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '@/components/ui/form'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import LanguageSwitcher from '../../components/LanguageSwitcher/LanguageSwitcher'
 
-interface LoginFormData {
-  email: string;
-  password: string;
-}
+import { loginSchema, type LoginFormData } from '@/lib/validators'
 
 const Login: React.FC = () => {
-  const [loading, setLoading] = useState(false);
-  const [showVerificationAlert, setShowVerificationAlert] = useState(false);
-  const [unverifiedEmail, setUnverifiedEmail] = useState('');
-  const [showPasswordChangeModal, setShowPasswordChangeModal] = useState(false);
-  const [passwordMessage, setPasswordMessage] = useState('');
-  const { login } = useAuth();
-  const navigate = useNavigate();
-  const location = useLocation();
-  const { t } = useTranslation();
+  const [loading, setLoading] = useState(false)
+  const [showVerificationAlert, setShowVerificationAlert] = useState(false)
+  const [unverifiedEmail, setUnverifiedEmail] = useState('')
+  const [showPasswordChangeModal, setShowPasswordChangeModal] = useState(false)
+  const [passwordMessage, setPasswordMessage] = useState('')
 
-  const from = (location.state as any)?.from?.pathname || '/dashboard';
+  const { login } = useAuth()
+  const navigate = useNavigate()
+  const location = useLocation()
+  const { t } = useTranslation()
 
-  const handleSubmit = async (values: LoginFormData) => {
+  const from = (location.state as any)?.from?.pathname || '/dashboard'
+
+  const form = useForm<LoginFormData>({
+    resolver: zodResolver(loginSchema),
+    defaultValues: {
+      email: '',
+      password: '',
+    },
+  })
+
+  const onSubmit = async (values: LoginFormData) => {
     try {
-      setLoading(true);
-      setShowVerificationAlert(false);
+      setLoading(true)
+      setShowVerificationAlert(false)
+
       // Get current language from localStorage
-      const currentLanguage = localStorage.getItem('i18nextLng') || 'en';
-      const loginResult = await login(values.email, values.password, currentLanguage);
+      const currentLanguage = localStorage.getItem('i18nextLng') || 'en'
+      const loginResult = await login(values.email, values.password, currentLanguage)
 
       if (loginResult.requiresPasswordChange) {
-        setPasswordMessage(loginResult.passwordMessage || 'Your password does not meet current security requirements. Please update it.');
-        setShowPasswordChangeModal(true);
+        setPasswordMessage(
+          loginResult.passwordMessage ||
+            'Your password does not meet current security requirements. Please update it.'
+        )
+        setShowPasswordChangeModal(true)
       } else {
-        message.success(t('login.loginSuccess'));
-        navigate(from, { replace: true });
+        toast.success(t('login.loginSuccess'))
+        navigate(from, { replace: true })
       }
     } catch (error: any) {
-      console.error('Login error:', error);
+      console.error('Login error:', error)
       console.error('Error details:', {
         status: error.response?.status,
         data: error.response?.data,
-        config: error.config
-      });
+        config: error.config,
+      })
 
-      const errorMessage = error.response?.data?.detail || t('login.loginFailed');
+      const errorMessage = error.response?.data?.detail || t('login.loginFailed')
 
       // Check if account is not activated
       if (error.response?.status === 403 && errorMessage.includes('not activated')) {
-        setUnverifiedEmail(values.email);
-        setShowVerificationAlert(true);
+        setUnverifiedEmail(values.email)
+        setShowVerificationAlert(true)
       } else {
-        message.error(errorMessage);
+        toast.error(errorMessage)
       }
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }
 
   return (
-    <div className="login-container">
-      <div className="login-content">
-        <Card className="login-card">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-500 to-purple-600 p-5">
+      <div className="w-full max-w-md">
+        <Card className="border-none shadow-2xl relative">
           {/* Language Switcher */}
-          <div style={{ position: 'absolute', top: '16px', right: '16px' }}>
+          <div className="absolute top-4 right-4 z-10">
             <LanguageSwitcher />
           </div>
-          
-          <div className="login-header">
-            <Title level={2} className="login-title">
-              {t('login.title')}
-            </Title>
-            <Text type="secondary" className="login-subtitle">
-              {t('login.subtitle')}
-            </Text>
-          </div>
 
-          {showVerificationAlert && (
-            <Alert
-              message={t('login.accountNotActivated')}
-              description={
-                <div>
-                  <p>{t('login.accountNotActivatedDesc', { email: unverifiedEmail })}</p>
-                  <Space>
+          <CardHeader className="text-center space-y-2 pb-8">
+            <h1 className="text-3xl font-bold text-gray-900">
+              {t('login.title')}
+            </h1>
+            <p className="text-muted-foreground text-base">
+              {t('login.subtitle')}
+            </p>
+          </CardHeader>
+
+          <CardContent>
+            {/* Verification Alert */}
+            {showVerificationAlert && (
+              <Alert variant="destructive" className="mb-6">
+                <AlertDescription className="space-y-3">
+                  <div>
+                    <p className="font-medium mb-1">{t('login.accountNotActivated')}</p>
+                    <p className="text-sm">
+                      {t('login.accountNotActivatedDesc', { email: unverifiedEmail })}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3 text-sm">
                     <Button
-                      type="link"
-                      size="small"
-                      onClick={() => navigate(`/verify?email=${encodeURIComponent(unverifiedEmail)}`)}
+                      variant="link"
+                      size="sm"
+                      className="h-auto p-0 text-destructive-foreground underline"
+                      onClick={() =>
+                        navigate(`/verify?email=${encodeURIComponent(unverifiedEmail)}`)
+                      }
                     >
                       {t('login.goToVerifyPage')}
                     </Button>
-                    <span>|</span>
+                    <span className="text-destructive-foreground/60">|</span>
                     <Button
-                      type="link"
-                      size="small"
+                      variant="link"
+                      size="sm"
+                      className="h-auto p-0 text-destructive-foreground underline"
                       onClick={() => setShowVerificationAlert(false)}
                     >
                       {t('login.closeReminder')}
                     </Button>
-                  </Space>
-                </div>
-              }
-              type="warning"
-              showIcon
-              style={{ marginBottom: 24 }}
-            />
-          )}
+                  </div>
+                </AlertDescription>
+              </Alert>
+            )}
 
-          <Form
-            name="login"
-            onFinish={handleSubmit}
-            autoComplete="off"
-            layout="vertical"
-            size="large"
-          >
-            <Form.Item
-              name="email"
-              rules={[
-                { required: true, message: t('login.emailRequired') },
-                { type: 'email', message: t('login.emailInvalid') },
-              ]}
-            >
-              <Input
-                prefix={<UserOutlined />}
-                placeholder={t('login.emailPlaceholder')}
-                autoComplete="email"
-              />
-            </Form.Item>
+            {/* Login Form */}
+            <Form {...form}>
+              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5">
+                <FormField
+                  control={form.control}
+                  name="email"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('login.emailPlaceholder')}</FormLabel>
+                      <FormControl>
+                        <div className="relative">
+                          <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                          <Input
+                            type="email"
+                            placeholder={t('login.emailPlaceholder')}
+                            className="pl-10 h-12"
+                            autoComplete="email"
+                            {...field}
+                          />
+                        </div>
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
 
-            <Form.Item
-              name="password"
-              rules={[
-                { required: true, message: t('login.passwordRequired') },
-              ]}
-            >
-              <Input.Password
-                prefix={<LockOutlined />}
-                placeholder={t('login.passwordPlaceholder')}
-                autoComplete="current-password"
-              />
-            </Form.Item>
+                <FormField
+                  control={form.control}
+                  name="password"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('login.passwordPlaceholder')}</FormLabel>
+                      <FormControl>
+                        <div className="relative">
+                          <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                          <Input
+                            type="password"
+                            placeholder={t('login.passwordPlaceholder')}
+                            className="pl-10 h-12"
+                            autoComplete="current-password"
+                            {...field}
+                          />
+                        </div>
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
 
-            <Form.Item>
-              <Button
-                type="primary"
-                htmlType="submit"
-                loading={loading}
-                block
-                className="login-button"
-              >
-                {t('login.loginButton')}
-              </Button>
-            </Form.Item>
-          </Form>
+                <Button
+                  type="submit"
+                  className="w-full h-12 text-base font-medium mt-6"
+                  disabled={loading}
+                >
+                  {loading ? t('login.loggingIn') || 'Logging in...' : t('login.loginButton')}
+                </Button>
+              </form>
+            </Form>
+          </CardContent>
 
-          <div className="login-footer">
-            <Space direction="vertical" align="center" style={{ width: '100%' }}>
-              <Space wrap>
-                <Text type="secondary">
-                  {t('login.noAccount')} <Link to="/register">{t('login.registerNow')}</Link>
-                </Text>
-                <Text type="secondary">|</Text>
-                <Text type="secondary">
-                  {t('login.needVerifyEmail')} <Link to="/verify">{t('login.verifyPage')}</Link>
-                </Text>
-                <Text type="secondary">|</Text>
-                <Text type="secondary">
-                  <Link to="/forgot-password">{t('login.forgotPassword')}</Link>
-                </Text>
-              </Space>
-              <Text type="secondary" style={{ fontSize: '12px' }}>
-                {t('login.copyright')}
-              </Text>
-            </Space>
-          </div>
+          <CardFooter className="flex-col space-y-4">
+            <div className="flex flex-wrap items-center justify-center gap-2 text-sm text-muted-foreground">
+              <span>
+                {t('login.noAccount')}{' '}
+                <Link to="/register" className="text-primary hover:underline font-medium">
+                  {t('login.registerNow')}
+                </Link>
+              </span>
+              <span className="text-gray-300">|</span>
+              <span>
+                {t('login.needVerifyEmail')}{' '}
+                <Link to="/verify" className="text-primary hover:underline font-medium">
+                  {t('login.verifyPage')}
+                </Link>
+              </span>
+              <span className="text-gray-300">|</span>
+              <Link to="/forgot-password" className="text-primary hover:underline font-medium">
+                {t('login.forgotPassword')}
+              </Link>
+            </div>
+            <p className="text-xs text-muted-foreground text-center">
+              {t('login.copyright')}
+            </p>
+          </CardFooter>
         </Card>
 
         {/* Password Change Modal */}
-        <Modal
-          title={t('login.passwordChangeRequired')}
-          open={showPasswordChangeModal}
-          onCancel={() => setShowPasswordChangeModal(false)}
-          footer={[
-            <Button key="later" onClick={() => setShowPasswordChangeModal(false)}>
-              {t('login.changeLater')}
-            </Button>,
-            <Button key="change" type="primary" onClick={() => {
-              setShowPasswordChangeModal(false);
-              navigate('/account?tab=password');
-            }}>
-              {t('login.changeNow')}
-            </Button>
-          ]}
-        >
-          <p>{passwordMessage}</p>
-          <p>{t('login.passwordChangeDescription')}</p>
-        </Modal>
+        <Dialog open={showPasswordChangeModal} onOpenChange={setShowPasswordChangeModal}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{t('login.passwordChangeRequired')}</DialogTitle>
+              <DialogDescription className="space-y-2 pt-2">
+                <p>{passwordMessage}</p>
+                <p>{t('login.passwordChangeDescription')}</p>
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setShowPasswordChangeModal(false)}
+              >
+                {t('login.changeLater')}
+              </Button>
+              <Button
+                onClick={() => {
+                  setShowPasswordChangeModal(false)
+                  navigate('/account?tab=password')
+                }}
+              >
+                {t('login.changeNow')}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
-  );
-};
+  )
+}
 
-export default Login;
+export default Login

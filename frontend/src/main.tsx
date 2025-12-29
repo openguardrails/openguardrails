@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom'
 import { ConfigProvider } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import enUS from 'antd/locale/en_US'
+import { Toaster } from 'sonner'
 import { AuthProvider } from './contexts/AuthContext'
 import App from './App'
 import './i18n' // Initialize i18n
@@ -45,6 +46,7 @@ getInitialLanguage().then((userLanguage) => {
         <BrowserRouter basename="/platform">
           <AuthProvider>
             <App />
+            <Toaster position="top-right" richColors />
           </AuthProvider>
         </BrowserRouter>
       </ConfigProvider>
