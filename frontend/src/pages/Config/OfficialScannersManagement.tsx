@@ -1,854 +1,768 @@
-import React, { useState, useEffect } from 'react';
-import { Card, Table, Switch, Button, message, Spin, Tabs, Tag, Space, Modal, Descriptions, Tooltip, Drawer } from 'antd';
-import { InfoCircleOutlined, ReloadOutlined, ShoppingOutlined, LoadingOutlined, EyeOutlined } from '@ant-design/icons';
-import { useTranslation } from 'react-i18next';
-import { useSearchParams } from 'react-router-dom';
-import { scannerPackagesApi, scannerConfigsApi, purchasesApi } from '../../services/api';
-import { useApplication } from '../../contexts/ApplicationContext';
-import { useAuth } from '../../contexts/AuthContext';
-import { eventBus, EVENTS } from '../../utils/eventBus';
-import paymentService, { PaymentConfig } from '../../services/payment';
-import { usePaymentSuccess } from '../../hooks/usePaymentSuccess';
-import { features } from '../../config';
+import React, { useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
+import { Info, RefreshCw, ShoppingCart, Eye, Loader2 } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
+import { scannerPackagesApi, scannerConfigsApi, purchasesApi } from '../../services/api'
+import { useApplication } from '../../contexts/ApplicationContext'
+import { useAuth } from '../../contexts/AuthContext'
+import { eventBus, EVENTS } from '../../utils/eventBus'
+import paymentService, { PaymentConfig } from '../../services/payment'
+import { usePaymentSuccess } from '../../hooks/usePaymentSuccess'
+import { features } from '../../config'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { DataTable } from '@/components/ui/data-table'
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Switch } from '@/components/ui/switch'
+import { Badge } from '@/components/ui/badge'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { toast } from 'sonner'
+import { confirmDialog } from '@/lib/confirm-dialog'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { ColumnDef } from '@tanstack/react-table'
 
 interface ScannerConfig {
-  id: string;
-  tag: string;
-  name: string;
-  description?: string;
-  scanner_type: string;
-  package_name: string;
-  package_id?: string;
-  is_custom: boolean;
-  is_enabled: boolean;
-  risk_level: string;
-  scan_prompt: boolean;
-  scan_response: boolean;
-  default_risk_level: string;
-  default_scan_prompt: boolean;
-  default_scan_response: boolean;
-  has_risk_level_override: boolean;
-  has_scan_prompt_override: boolean;
-  has_scan_response_override: boolean;
+  id: string
+  tag: string
+  name: string
+  description?: string
+  scanner_type: string
+  package_name: string
+  package_id?: string
+  is_custom: boolean
+  is_enabled: boolean
+  risk_level: string
+  scan_prompt: boolean
+  scan_response: boolean
+  default_risk_level: string
+  default_scan_prompt: boolean
+  default_scan_response: boolean
+  has_risk_level_override: boolean
+  has_scan_prompt_override: boolean
+  has_scan_response_override: boolean
 }
 
 interface Package {
-  id: string;
-  package_code: string;
-  package_name: string;
-  author: string;
-  description?: string;
-  version: string;
-  scanner_count: number;
-  package_type: string;
-  bundle?: string;
-  created_at?: string;
+  id: string
+  package_code: string
+  package_name: string
+  author: string
+  description?: string
+  version: string
+  scanner_count: number
+  package_type: string
+  bundle?: string
+  created_at?: string
   // Marketplace specific fields
-  price?: number;
-  price_display?: string;
-  purchase_status?: string;
-  purchased?: boolean;
-  purchase_requested?: boolean;
+  price?: number
+  price_display?: string
+  purchase_status?: string
+  purchased?: boolean
+  purchase_requested?: boolean
 }
 
 const OfficialScannersManagement: React.FC = () => {
-  const { t, i18n } = useTranslation();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const { user } = useAuth();
-  const { currentApplicationId } = useApplication();
+  const { t, i18n } = useTranslation()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const { user } = useAuth()
+  const { currentApplicationId } = useApplication()
 
   // Dynamic price display function based on current language
   const formatPriceDisplay = (price: number | undefined, priceDisplay: string | undefined): string => {
     if (price === undefined || price === null) {
-      return priceDisplay || t('scannerPackages.free');
+      return priceDisplay || t('scannerPackages.free')
     }
 
     // Format the price based on current language
-    const currentLang = i18n.language;
+    const currentLang = i18n.language
     if (currentLang === 'zh') {
-      // For Chinese: remove any existing formatting and apply Yuan symbol
-      return `￥${price}元`;
+      return `￥${price}元`
     } else {
-      // For English and others: use Dollar symbol
-      return `$${price}`;
+      return `$${price}`
     }
-  };
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [scannerConfigs, setScannerConfigs] = useState<ScannerConfig[]>([]);
-  const [builtinPackages, setBuiltinPackages] = useState<Package[]>([]);
-  const [purchasedPackages, setPurchasedPackages] = useState<Package[]>([]);
-  const [marketplacePackages, setMarketplacePackages] = useState<Package[]>([]);
-  const [drawerVisible, setDrawerVisible] = useState(false);
-  const [selectedPackage, setSelectedPackage] = useState<Package | null>(null);
-  const [purchaseModalVisible, setPurchaseModalVisible] = useState(false);
-  const [purchasePackage, setPurchasePackage] = useState<Package | null>(null);
-  const [paymentConfig, setPaymentConfig] = useState<PaymentConfig | null>(null);
-  const [paymentLoading, setPaymentLoading] = useState(false);
+  }
+
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [scannerConfigs, setScannerConfigs] = useState<ScannerConfig[]>([])
+  const [builtinPackages, setBuiltinPackages] = useState<Package[]>([])
+  const [purchasedPackages, setPurchasedPackages] = useState<Package[]>([])
+  const [marketplacePackages, setMarketplacePackages] = useState<Package[]>([])
+  const [drawerVisible, setDrawerVisible] = useState(false)
+  const [selectedPackage, setSelectedPackage] = useState<Package | null>(null)
+  const [purchaseModalVisible, setPurchaseModalVisible] = useState(false)
+  const [purchasePackage, setPurchasePackage] = useState<Package | null>(null)
+  const [paymentConfig, setPaymentConfig] = useState<PaymentConfig | null>(null)
+  const [paymentLoading, setPaymentLoading] = useState(false)
 
   // Active tab key - support URL hash for direct navigation
   const [activeTabKey, setActiveTabKey] = useState<string>(() => {
-    // Initialize from URL hash on mount
-    const hash = window.location.hash.replace('#', '');
+    const hash = window.location.hash.replace('#', '')
     if (hash && ['builtin', 'purchased', 'marketplace'].includes(hash)) {
-      return hash;
+      return hash
     }
-    return 'builtin';
-  });
+    return 'builtin'
+  })
 
   useEffect(() => {
-    // Load packages regardless of application selection (basic packages are global)
-    loadPackagesOnly();
+    loadPackagesOnly()
 
-    // Load scanner configs only if application is selected
     if (currentApplicationId) {
-      loadScannerConfigs();
+      loadScannerConfigs()
     }
 
     // Load payment config (only in SaaS mode)
     if (features.showPayment()) {
       const loadPaymentConfig = async () => {
         try {
-          const config = await paymentService.getConfig();
-          setPaymentConfig(config);
+          const config = await paymentService.getConfig()
+          setPaymentConfig(config)
         } catch (e) {
-          console.error('Failed to load payment config:', e);
+          console.error('Failed to load payment config:', e)
         }
-      };
-      loadPaymentConfig();
+      }
+      loadPaymentConfig()
     }
 
     // Handle payment cancellation (no verification needed)
-    const paymentStatus = searchParams.get('payment');
+    const paymentStatus = searchParams.get('payment')
     if (paymentStatus === 'cancelled') {
-      message.info(t('payment.cancelled'));
-      setSearchParams({});
+      toast.info(t('payment.cancelled'))
+      setSearchParams({})
     }
-  }, [currentApplicationId]);
+  }, [currentApplicationId])
 
   // Handle payment success with polling verification
-  const handlePaymentSuccess = React.useCallback((result: any) => {
-    // Only refresh if this is a package payment
-    if (result.order_type === 'package') {
-      loadPackagesOnly();
-      // Also reload scanner configs if application is selected
-      if (currentApplicationId) {
-        loadScannerConfigs();
+  const handlePaymentSuccess = React.useCallback(
+    (result: any) => {
+      // Only refresh if this is a package payment
+      if (result.order_type === 'package') {
+        loadPackagesOnly()
+        // Also reload scanner configs if application is selected
+        if (currentApplicationId) {
+          loadScannerConfigs()
+        }
       }
-    }
-  }, [currentApplicationId]);  // Only depend on currentApplicationId
+    },
+    [currentApplicationId]
+  )
 
   usePaymentSuccess({
-    onSuccess: handlePaymentSuccess
-  });
+    onSuccess: handlePaymentSuccess,
+  })
 
   const loadPackagesOnly = async () => {
     try {
       // Load basic packages (no application needed)
-      const allBuiltin = await scannerPackagesApi.getAll('basic');
-      setBuiltinPackages(allBuiltin);
+      const allBuiltin = await scannerPackagesApi.getAll('basic')
+      setBuiltinPackages(allBuiltin)
 
       // Only load marketplace packages in SaaS mode
       if (features.showMarketplace()) {
-        const marketplace = await scannerPackagesApi.getMarketplace();
+        const marketplace = await scannerPackagesApi.getMarketplace()
 
         // Filter purchased packages (those with purchased=true)
-        setPurchasedPackages(marketplace.filter((p: Package) => p.purchased));
+        setPurchasedPackages(marketplace.filter((p: Package) => p.purchased))
 
         // Filter marketplace packages (available for purchase, not yet purchased)
-        setMarketplacePackages(marketplace.filter((p: Package) => !p.purchased));
+        setMarketplacePackages(marketplace.filter((p: Package) => !p.purchased))
       }
     } catch (error) {
-      message.error(t('scannerPackages.loadFailed'));
-      console.error('Failed to load packages:', error);
+      toast.error(t('scannerPackages.loadFailed'))
+      console.error('Failed to load packages:', error)
     }
-  };
+  }
 
   const loadScannerConfigs = async () => {
     try {
-      setLoading(true);
+      setLoading(true)
       // Load scanner configs (requires application)
-      const configs = await scannerConfigsApi.getAll(true);
-      setScannerConfigs(configs.filter((c: ScannerConfig) => !c.is_custom));
+      const configs = await scannerConfigsApi.getAll(true)
+      setScannerConfigs(configs.filter((c: ScannerConfig) => !c.is_custom))
     } catch (error) {
-      message.error(t('scannerPackages.loadFailed'));
-      console.error('Failed to load scanner configs:', error);
+      toast.error(t('scannerPackages.loadFailed'))
+      console.error('Failed to load scanner configs:', error)
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }
 
   const loadData = () => {
-    loadScannerConfigs();
-  };
+    loadScannerConfigs()
+  }
 
   const handleToggleScanner = async (scannerId: string, enabled: boolean) => {
     try {
-      setSaving(true);
-      await scannerConfigsApi.update(scannerId, { is_enabled: enabled });
-      message.success(t('scannerPackages.configurationSaved'));
+      setSaving(true)
+      await scannerConfigsApi.update(scannerId, { is_enabled: enabled })
+      toast.success(t('scannerPackages.configurationSaved'))
       // Update local state
-      setScannerConfigs(prev => prev.map(s =>
-        s.id === scannerId ? { ...s, is_enabled: enabled } : s
-      ));
+      setScannerConfigs((prev) => prev.map((s) => (s.id === scannerId ? { ...s, is_enabled: enabled } : s)))
     } catch (error) {
-      message.error(t('scannerPackages.updateFailed'));
-      console.error('Failed to update scanner:', error);
+      toast.error(t('scannerPackages.updateFailed'))
+      console.error('Failed to update scanner:', error)
     } finally {
-      setSaving(false);
+      setSaving(false)
     }
-  };
+  }
 
   const handleToggleScanPrompt = async (scannerId: string, enabled: boolean) => {
     try {
-      setSaving(true);
-      await scannerConfigsApi.update(scannerId, { scan_prompt: enabled });
-      message.success(t('scannerPackages.configurationSaved'));
+      setSaving(true)
+      await scannerConfigsApi.update(scannerId, { scan_prompt: enabled })
+      toast.success(t('scannerPackages.configurationSaved'))
       // Update local state - once user modifies, has_override becomes true
-      setScannerConfigs(prev => prev.map(s =>
-        s.id === scannerId ? { ...s, scan_prompt: enabled, has_scan_prompt_override: true } : s
-      ));
+      setScannerConfigs((prev) =>
+        prev.map((s) => (s.id === scannerId ? { ...s, scan_prompt: enabled, has_scan_prompt_override: true } : s))
+      )
     } catch (error) {
-      message.error(t('scannerPackages.updateFailed'));
-      console.error('Failed to update scanner:', error);
+      toast.error(t('scannerPackages.updateFailed'))
+      console.error('Failed to update scanner:', error)
     } finally {
-      setSaving(false);
+      setSaving(false)
     }
-  };
+  }
 
   const handleToggleScanResponse = async (scannerId: string, enabled: boolean) => {
     try {
-      setSaving(true);
-      await scannerConfigsApi.update(scannerId, { scan_response: enabled });
-      message.success(t('scannerPackages.configurationSaved'));
+      setSaving(true)
+      await scannerConfigsApi.update(scannerId, { scan_response: enabled })
+      toast.success(t('scannerPackages.configurationSaved'))
       // Update local state - once user modifies, has_override becomes true
-      setScannerConfigs(prev => prev.map(s =>
-        s.id === scannerId ? { ...s, scan_response: enabled, has_scan_response_override: true } : s
-      ));
+      setScannerConfigs((prev) =>
+        prev.map((s) => (s.id === scannerId ? { ...s, scan_response: enabled, has_scan_response_override: true } : s))
+      )
     } catch (error) {
-      message.error(t('scannerPackages.updateFailed'));
-      console.error('Failed to update scanner:', error);
+      toast.error(t('scannerPackages.updateFailed'))
+      console.error('Failed to update scanner:', error)
     } finally {
-      setSaving(false);
+      setSaving(false)
     }
-  };
+  }
 
   const handleReset = async (scannerId: string) => {
     try {
-      setSaving(true);
-      await scannerConfigsApi.reset(scannerId);
-      message.success(t('scannerPackages.resetSuccess'));
-      loadData();
+      setSaving(true)
+      await scannerConfigsApi.reset(scannerId)
+      toast.success(t('scannerPackages.resetSuccess'))
+      loadData()
     } catch (error) {
-      message.error(t('scannerPackages.updateFailed'));
+      toast.error(t('scannerPackages.updateFailed'))
     } finally {
-      setSaving(false);
+      setSaving(false)
     }
-  };
+  }
 
-  const handleResetAll = () => {
-    Modal.confirm({
+  const handleResetAll = async () => {
+    const confirmed = await confirmDialog({
       title: t('scannerPackages.resetAllToDefault'),
-      content: t('scannerPackages.confirmResetAll'),
-      onOk: async () => {
-        try {
-          setSaving(true);
-          await scannerConfigsApi.resetAll();
-          message.success(t('scannerPackages.resetAllSuccess'));
-          loadData();
-        } catch (error) {
-          message.error(t('scannerPackages.updateFailed'));
-        } finally {
-          setSaving(false);
-        }
-      },
-    });
-  };
+      description: t('scannerPackages.confirmResetAll'),
+    })
+
+    if (!confirmed) return
+
+    try {
+      setSaving(true)
+      await scannerConfigsApi.resetAll()
+      toast.success(t('scannerPackages.resetAllSuccess'))
+      loadData()
+    } catch (error) {
+      toast.error(t('scannerPackages.updateFailed'))
+    } finally {
+      setSaving(false)
+    }
+  }
 
   const handleRequestPurchase = (pkg: Package) => {
-    setPurchasePackage(pkg);
-    setPurchaseModalVisible(true);
-  };
+    setPurchasePackage(pkg)
+    setPurchaseModalVisible(true)
+  }
 
   const handleClosePurchaseModal = () => {
-    setPurchaseModalVisible(false);
-    setPurchasePackage(null);
-  };
+    setPurchaseModalVisible(false)
+    setPurchasePackage(null)
+  }
 
   const handleSubmitPurchase = async () => {
     try {
-      if (!purchasePackage) return;
+      if (!purchasePackage) return
 
       // In enterprise mode, all packages are free
       if (features.showPayment() && purchasePackage.price && purchasePackage.price > 0) {
         // Paid package - redirect to payment
-        setPaymentLoading(true);
-        
-        const response = await paymentService.createPackagePayment(purchasePackage.id);
+        setPaymentLoading(true)
+
+        const response = await paymentService.createPackagePayment(purchasePackage.id)
 
         if (response.success) {
           // Keep the modal open while redirecting
           setTimeout(() => {
-            paymentService.redirectToPayment(response);
-          }, 500);
+            paymentService.redirectToPayment(response)
+          }, 500)
         } else {
-          message.error(response.error || t('payment.error.createFailed'));
-          setPaymentLoading(false);
-          setPurchaseModalVisible(false);
+          toast.error(response.error || t('payment.error.createFailed'))
+          setPaymentLoading(false)
+          setPurchaseModalVisible(false)
         }
       } else {
         // Free package - direct purchase (auto-approved, no admin review needed)
-        setPaymentLoading(true);
-        
-        await purchasesApi.directPurchase(
-          purchasePackage.id,
-          user?.email || ''
-        );
+        setPaymentLoading(true)
 
-        message.success(t('scannerPackages.purchaseCompleted'));
-        handleClosePurchaseModal();
-        setPaymentLoading(false);
-        
+        await purchasesApi.directPurchase(purchasePackage.id, user?.email || '')
+
+        toast.success(t('scannerPackages.purchaseCompleted'))
+        handleClosePurchaseModal()
+        setPaymentLoading(false)
+
         // Reload data to refresh marketplace packages
-        await loadPackagesOnly();
-        
+        await loadPackagesOnly()
+
         // Emit event to notify other components
-        eventBus.emit(EVENTS.MARKETPLACE_SCANNER_PURCHASED, { 
-          packageId: purchasePackage.id, 
-          packageName: purchasePackage.package_name 
-        });
+        eventBus.emit(EVENTS.MARKETPLACE_SCANNER_PURCHASED, {
+          packageId: purchasePackage.id,
+          packageName: purchasePackage.package_name,
+        })
       }
     } catch (error: any) {
-      console.error('Failed to purchase package:', error);
-      message.error(error.response?.data?.detail || t('scannerPackages.purchaseFailed'));
-      setPaymentLoading(false);
-      setPurchaseModalVisible(false);
+      console.error('Failed to purchase package:', error)
+      toast.error(error.response?.data?.detail || t('scannerPackages.purchaseFailed'))
+      setPaymentLoading(false)
+      setPurchaseModalVisible(false)
     }
-  };
+  }
 
-  
   const getRiskLevelColor = (level: string) => {
     const colors: { [key: string]: string } = {
-      'high_risk': 'red',
-      'medium_risk': 'orange',
-      'low_risk': 'green',
-    };
-    return colors[level] || 'default';
-  };
+      high_risk: 'destructive',
+      medium_risk: 'secondary',
+      low_risk: 'secondary',
+    }
+    return colors[level] || 'default'
+  }
+
+  const getRiskLevelClassName = (level: string) => {
+    const classNames: { [key: string]: string } = {
+      high_risk: '',
+      medium_risk: 'bg-orange-100 text-orange-800 border-orange-200',
+      low_risk: 'bg-green-100 text-green-800 border-green-200',
+    }
+    return classNames[level] || ''
+  }
 
   const getScannerTypeLabel = (type: string) => {
     const types: { [key: string]: string } = {
-      'genai': t('scannerPackages.scannerTypeGenai'),
-      'regex': t('scannerPackages.scannerTypeRegex'),
-      'keyword': t('scannerPackages.scannerTypeKeyword'),
-    };
-    return types[type] || type;
-  };
+      genai: t('scannerPackages.scannerTypeGenai'),
+      regex: t('scannerPackages.scannerTypeRegex'),
+      keyword: t('scannerPackages.scannerTypeKeyword'),
+    }
+    return types[type] || type
+  }
 
   const getEnabledCount = (packageId: string) => {
-    const packageScanners = scannerConfigs.filter(s => s.package_id === packageId);
-    const enabledCount = packageScanners.filter(s => s.is_enabled).length;
-    const totalCount = packageScanners.length;
-    return `${enabledCount}/${totalCount}`;
-  };
+    const packageScanners = scannerConfigs.filter((s) => s.package_id === packageId)
+    const enabledCount = packageScanners.filter((s) => s.is_enabled).length
+    const totalCount = packageScanners.length
+    return `${enabledCount}/${totalCount}`
+  }
 
   // Columns for built-in and purchased packages (with configuration)
-  const packageColumns = [
+  const packageColumns: ColumnDef<Package>[] = [
     {
-      title: t('scannerPackages.packageName'),
-      dataIndex: 'package_name',
-      key: 'package_name',
-      width: 250,
+      accessorKey: 'package_name',
+      header: t('scannerPackages.packageName'),
     },
     {
-      title: t('scannerPackages.description'),
-      dataIndex: 'description',
-      key: 'description',
+      accessorKey: 'description',
+      header: t('scannerPackages.description'),
     },
     {
-      title: t('scannerPackages.author'),
-      dataIndex: 'author',
-      key: 'author',
-      width: 150,
+      accessorKey: 'author',
+      header: t('scannerPackages.author'),
     },
     {
-      title: t('scannerPackages.version'),
-      dataIndex: 'version',
-      key: 'version',
-      width: 100,
+      accessorKey: 'version',
+      header: t('scannerPackages.version'),
     },
     {
-      title: 'Bundle',
-      dataIndex: 'bundle',
-      key: 'bundle',
-      width: 120,
-      sorter: (a: Package, b: Package) => {
-        const aBundle = a.bundle || '';
-        const bBundle = b.bundle || '';
-        return aBundle.localeCompare(bBundle);
-      },
-      render: (bundle: string) => (
-        <Tag color="blue" style={{ fontSize: '12px' }}>
-          {bundle || '-'}
-        </Tag>
+      accessorKey: 'bundle',
+      header: 'Bundle',
+      cell: ({ row }) => (
+        <Badge variant="secondary" className="bg-blue-100 text-blue-800 border-blue-200 text-xs">
+          {row.original.bundle || '-'}
+        </Badge>
       ),
     },
     {
-      title: t('scannerPackages.enabled'),
-      dataIndex: 'scanner_count',
-      key: 'enabled',
-      width: 120,
-      render: (_: any, record: Package) => getEnabledCount(record.id),
+      accessorKey: 'scanner_count',
+      header: t('scannerPackages.enabled'),
+      cell: ({ row }) => getEnabledCount(row.original.id),
     },
     {
-      title: t('common.actions'),
-      key: 'actions',
-      width: 150,
-      render: (_: any, record: Package) => (
+      id: 'actions',
+      header: t('common.actions'),
+      cell: ({ row }) => (
         <Button
-          type="link"
-          size="small"
-          icon={<EyeOutlined />}
-          onClick={() => handleOpenDrawer(record)}
+          variant="ghost"
+          size="sm"
+          onClick={() => handleOpenDrawer(row.original)}
           disabled={!currentApplicationId}
         >
+          <Eye className="h-4 w-4 mr-1" />
           {t('scannerPackages.viewScanners')}
         </Button>
       ),
     },
-  ];
+  ]
 
   // Columns for marketplace packages (no configuration, show purchase info)
-  const marketplaceColumns = [
+  const marketplaceColumns: ColumnDef<Package>[] = [
     {
-      title: t('scannerPackages.packageName'),
-      dataIndex: 'package_name',
-      key: 'package_name',
-      width: 250,
+      accessorKey: 'package_name',
+      header: t('scannerPackages.packageName'),
     },
     {
-      title: t('scannerPackages.description'),
-      dataIndex: 'description',
-      key: 'description',
+      accessorKey: 'description',
+      header: t('scannerPackages.description'),
     },
     {
-      title: t('scannerPackages.author'),
-      dataIndex: 'author',
-      key: 'author',
-      width: 150,
+      accessorKey: 'author',
+      header: t('scannerPackages.author'),
     },
     {
-      title: t('scannerPackages.version'),
-      dataIndex: 'version',
-      key: 'version',
-      width: 100,
+      accessorKey: 'version',
+      header: t('scannerPackages.version'),
     },
     {
-      title: t('scannerPackages.scannerCount'),
-      dataIndex: 'scanner_count',
-      key: 'scanner_count',
-      width: 120,
+      accessorKey: 'scanner_count',
+      header: t('scannerPackages.scannerCount'),
     },
     {
-      title: t('scannerPackages.priceDisplay'),
-      dataIndex: 'price',
-      key: 'price_display',
-      width: 120,
-      render: (_: any, record: Package) => {
-        // Use dynamic price formatting based on current language
-        return formatPriceDisplay(record.price, record.price_display);
-      },
+      accessorKey: 'price',
+      header: t('scannerPackages.priceDisplay'),
+      cell: ({ row }) => formatPriceDisplay(row.original.price, row.original.price_display),
     },
     {
-      title: 'Bundle',
-      dataIndex: 'bundle',
-      key: 'bundle',
-      width: 120,
-      sorter: (a: Package, b: Package) => {
-        const aBundle = a.bundle || '';
-        const bBundle = b.bundle || '';
-        return aBundle.localeCompare(bBundle);
-      },
-      render: (bundle: string) => (
-        <Tag color="blue" style={{ fontSize: '12px' }}>
-          {bundle || '-'}
-        </Tag>
+      accessorKey: 'bundle',
+      header: 'Bundle',
+      cell: ({ row }) => (
+        <Badge variant="secondary" className="bg-blue-100 text-blue-800 border-blue-200 text-xs">
+          {row.original.bundle || '-'}
+        </Badge>
       ),
     },
     {
-      title: t('common.actions'),
-      key: 'actions',
-      width: 120,
-      render: (_: any, record: Package) => (
-        <Space>
-          <Button
-            type="primary"
-            size="small"
-            icon={<ShoppingOutlined />}
-            onClick={() => handleRequestPurchase(record)}
-          >
-            {t('scannerPackages.requestPurchase')}
-          </Button>
-        </Space>
+      id: 'actions',
+      header: t('common.actions'),
+      cell: ({ row }) => (
+        <Button size="sm" onClick={() => handleRequestPurchase(row.original)}>
+          <ShoppingCart className="h-4 w-4 mr-1" />
+          {t('scannerPackages.requestPurchase')}
+        </Button>
       ),
     },
-  ];
+  ]
 
   const getPackageScanners = (packageId: string) => {
     return scannerConfigs
-      .filter(s => s.package_id === packageId)
+      .filter((s) => s.package_id === packageId)
       .sort((a, b) => {
         // Extract numeric part from scanner tag (e.g., S1 -> 1, S10 -> 10)
-        const aNum = parseInt(a.tag.replace('S', ''));
-        const bNum = parseInt(b.tag.replace('S', ''));
-        return aNum - bNum;
-      });
-  };
+        const aNum = parseInt(a.tag.replace('S', ''))
+        const bNum = parseInt(b.tag.replace('S', ''))
+        return aNum - bNum
+      })
+  }
 
   const handleOpenDrawer = (pkg: Package) => {
-    setSelectedPackage(pkg);
-    setDrawerVisible(true);
-  };
+    setSelectedPackage(pkg)
+    setDrawerVisible(true)
+  }
 
   const handleCloseDrawer = () => {
-    setDrawerVisible(false);
-    setSelectedPackage(null);
-  };
+    setDrawerVisible(false)
+    setSelectedPackage(null)
+  }
+
+  const scannerColumns: ColumnDef<ScannerConfig>[] = [
+    {
+      accessorKey: 'tag',
+      header: t('scannerPackages.scannerTag'),
+      cell: ({ row }) => (
+        <Badge variant="secondary" className="bg-blue-100 text-blue-800 border-blue-200">
+          {row.original.tag}
+        </Badge>
+      ),
+    },
+    {
+      accessorKey: 'name',
+      header: t('scannerPackages.scannerName'),
+      cell: ({ row }) => <div className="truncate max-w-xs">{row.original.name}</div>,
+    },
+    {
+      accessorKey: 'scanner_type',
+      header: t('scannerPackages.scannerType'),
+      cell: ({ row }) => getScannerTypeLabel(row.original.scanner_type),
+    },
+    {
+      accessorKey: 'risk_level',
+      header: t('scannerPackages.riskLevel'),
+      cell: ({ row }) => (
+        <div className="flex items-center gap-2">
+          <Badge variant={getRiskLevelColor(row.original.risk_level) as any} className={getRiskLevelClassName(row.original.risk_level)}>
+            {t(`risk.level.${row.original.risk_level}`)}
+          </Badge>
+          {row.original.has_risk_level_override && (
+            <Tooltip>
+              <TooltipTrigger>
+                <Info className="h-4 w-4 text-blue-600" />
+              </TooltipTrigger>
+              <TooltipContent>{t('scannerPackages.hasOverrides')}</TooltipContent>
+            </Tooltip>
+          )}
+        </div>
+      ),
+    },
+    {
+      accessorKey: 'is_enabled',
+      header: t('scannerPackages.isEnabled'),
+      cell: ({ row }) => (
+        <Switch checked={row.original.is_enabled} onCheckedChange={(checked) => handleToggleScanner(row.original.id, checked)} disabled={saving} />
+      ),
+    },
+    {
+      accessorKey: 'scan_prompt',
+      header: t('scannerPackages.scanPrompt'),
+      cell: ({ row }) => (
+        <div className="flex flex-col items-center gap-1">
+          <Switch
+            checked={row.original.scan_prompt}
+            onCheckedChange={(checked) => handleToggleScanPrompt(row.original.id, checked)}
+            disabled={saving}
+          />
+          {row.original.has_scan_prompt_override && (
+            <Tooltip>
+              <TooltipTrigger>
+                <Info className="h-3 w-3 text-blue-600" />
+              </TooltipTrigger>
+              <TooltipContent>{t('scannerPackages.hasOverrides')}</TooltipContent>
+            </Tooltip>
+          )}
+        </div>
+      ),
+    },
+    {
+      accessorKey: 'scan_response',
+      header: t('scannerPackages.scanResponse'),
+      cell: ({ row }) => (
+        <div className="flex flex-col items-center gap-1">
+          <Switch
+            checked={row.original.scan_response}
+            onCheckedChange={(checked) => handleToggleScanResponse(row.original.id, checked)}
+            disabled={saving}
+          />
+          {row.original.has_scan_response_override && (
+            <Tooltip>
+              <TooltipTrigger>
+                <Info className="h-3 w-3 text-blue-600" />
+              </TooltipTrigger>
+              <TooltipContent>{t('scannerPackages.hasOverrides')}</TooltipContent>
+            </Tooltip>
+          )}
+        </div>
+      ),
+    },
+    {
+      id: 'actions',
+      header: t('common.actions'),
+      cell: ({ row }) => (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => handleReset(row.original.id)}
+          disabled={
+            !row.original.has_risk_level_override && !row.original.has_scan_prompt_override && !row.original.has_scan_response_override
+          }
+        >
+          {t('scannerPackages.resetToDefault')}
+        </Button>
+      ),
+    },
+  ]
 
   return (
-    <Spin spinning={loading}>
-      <Space direction="vertical" size="large" style={{ width: '100%' }}>
-        <Card
-          title={t('scannerPackages.title')}
-          extra={
-            <Space>
-              <Button
-                icon={<ReloadOutlined />}
-                onClick={loadData}
-                loading={loading}
-              >
+    <div className="space-y-4">
+      {loading && (
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+        </div>
+      )}
+
+      {!loading && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0">
+            <CardTitle>{t('scannerPackages.title')}</CardTitle>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" onClick={loadData} disabled={loading}>
+                <RefreshCw className={`h-4 w-4 mr-1 ${loading ? 'animate-spin' : ''}`} />
                 {t('common.refresh')}
               </Button>
-              <Button
-                danger
-                onClick={handleResetAll}
-                disabled={saving}
-              >
+              <Button variant="destructive" onClick={handleResetAll} disabled={saving}>
                 {t('scannerPackages.resetAllToDefault')}
               </Button>
-            </Space>
-          }
-        >
-          <Tabs
-            activeKey={activeTabKey}
-            onChange={(key) => {
-              setActiveTabKey(key);
-              // Update URL hash for shareable links
-              window.location.hash = key;
-            }}
-            items={(() => {
-              const showMarketplace = features.showMarketplace();
-              const items = [
-                {
-                  key: 'builtin',
-                  label: t('scannerPackages.builtinPackages'),
-                  children: (
-                    <Table
-                      columns={packageColumns}
-                      dataSource={builtinPackages}
-                      rowKey="id"
-                      pagination={false}
-                    />
-                  ),
-                },
-              ];
+            </div>
+          </CardHeader>
+          <CardContent>
+            <Tabs
+              value={activeTabKey}
+              onValueChange={(key) => {
+                setActiveTabKey(key)
+                window.location.hash = key
+              }}
+            >
+              <TabsList className="w-full justify-start">
+                <TabsTrigger value="builtin">{t('scannerPackages.builtinPackages')}</TabsTrigger>
+                {features.showMarketplace() && (
+                  <TabsTrigger value="purchased">
+                    {t('scannerPackages.purchasedPackages')} ({purchasedPackages.length})
+                  </TabsTrigger>
+                )}
+                {features.showMarketplace() && (
+                  <TabsTrigger value="marketplace">
+                    {t('scannerPackages.marketplace')} ({marketplacePackages.length})
+                  </TabsTrigger>
+                )}
+              </TabsList>
 
-              // Add purchased tab in SaaS mode (always show, even if empty)
-              if (showMarketplace) {
-                items.push({
-                  key: 'purchased',
-                  label: `${t('scannerPackages.purchasedPackages')} (${purchasedPackages.length})`,
-                  children: (
-                    <Table
-                      columns={packageColumns}
-                      dataSource={purchasedPackages}
-                      rowKey="id"
-                      pagination={false}
-                      locale={{ emptyText: t('scannerPackages.noPurchasedPackages') }}
-                      defaultSort={{
-                        field: 'bundle',
-                        order: 'ascend'
-                      }}
-                    />
-                  ),
-                });
-              }
+              <TabsContent value="builtin" className="mt-4">
+                <DataTable columns={packageColumns} data={builtinPackages} />
+              </TabsContent>
 
-              // Add marketplace tab in SaaS mode
-              if (showMarketplace) {
-                items.push({
-                  key: 'marketplace',
-                  label: `${t('scannerPackages.marketplace')} (${marketplacePackages.length})`,
-                  children: (
-                    <Table
-                      columns={marketplaceColumns}
-                      dataSource={marketplacePackages}
-                      rowKey="id"
-                      pagination={false}
-                      locale={{ emptyText: t('scannerPackages.noMarketplacePackages') }}
-                      defaultSort={{
-                        field: 'bundle',
-                        order: 'ascend'
-                      }}
-                    />
-                  ),
-                });
-              }
+              {features.showMarketplace() && (
+                <TabsContent value="purchased" className="mt-4">
+                  <DataTable columns={packageColumns} data={purchasedPackages} emptyMessage={t('scannerPackages.noPurchasedPackages')} />
+                </TabsContent>
+              )}
 
-              return items;
-            })()}
-          />
+              {features.showMarketplace() && (
+                <TabsContent value="marketplace" className="mt-4">
+                  <DataTable columns={marketplaceColumns} data={marketplacePackages} emptyMessage={t('scannerPackages.noMarketplacePackages')} />
+                </TabsContent>
+              )}
+            </Tabs>
+          </CardContent>
         </Card>
+      )}
 
-        <Modal
-          title={paymentLoading ? null : (features.showPayment() && purchasePackage?.price && purchasePackage.price > 0
-            ? t('payment.confirm.packageTitle')
-            : t('scannerPackages.submitPurchaseRequest')
-          )}
-          open={purchaseModalVisible}
-          onOk={handleSubmitPurchase}
-          onCancel={handleClosePurchaseModal}
-          okText={features.showPayment() && purchasePackage?.price && purchasePackage.price > 0
-            ? t('payment.button.payNow')
-            : t('common.submit')
-          }
-          cancelText={t('common.cancel')}
-          width={paymentLoading ? 400 : 600}
-          confirmLoading={paymentLoading || saving}
-          closable={!paymentLoading}
-          maskClosable={!paymentLoading}
-          keyboard={!paymentLoading}
-          centered
-          zIndex={2000}
-        >
+      {/* Purchase Modal */}
+      <Dialog open={purchaseModalVisible} onOpenChange={setPurchaseModalVisible}>
+        <DialogContent className={paymentLoading ? 'max-w-md' : 'max-w-2xl'}>
           {paymentLoading ? (
-            // Show loading state during payment redirect
-            <div style={{ 
-              padding: '40px 20px',
-              textAlign: 'center'
-            }}>
-              <Spin
-                indicator={<LoadingOutlined style={{ fontSize: 48, color: '#1890ff' }} spin />}
-                size="large"
-              />
-              <div style={{ 
-                marginTop: 24, 
-                fontSize: 16, 
-                fontWeight: 500,
-                color: '#262626'
-              }}>
-                {paymentConfig?.provider === 'alipay' 
-                  ? t('payment.redirecting.alipay', '正在跳转到支付宝...') 
-                  : t('payment.redirecting.stripe', '正在跳转到支付页面...')
-                }
-              </div>
-              <div style={{ 
-                marginTop: 12, 
-                fontSize: 14, 
-                color: '#8c8c8c'
-              }}>
-                {t('payment.processing.pleaseWait', '请稍候，请勿关闭页面或刷新')}
+            <div className="py-10 text-center space-y-6">
+              <Loader2 className="h-12 w-12 animate-spin text-blue-600 mx-auto" />
+              <div className="space-y-3">
+                <p className="text-base font-medium">
+                  {paymentConfig?.provider === 'alipay' ? t('payment.redirecting.alipay', '正在跳转到支付宝...') : t('payment.redirecting.stripe', '正在跳转到支付页面...')}
+                </p>
+                <p className="text-sm text-gray-600">{t('payment.processing.pleaseWait', '请稍候，请勿关闭页面或刷新')}</p>
               </div>
             </div>
           ) : (
-            // Show package details for confirmation
-            purchasePackage && (
-              <Space direction="vertical" style={{ width: '100%' }} size="large">
-                <Descriptions column={1} bordered size="small">
-                  <Descriptions.Item label={t('scannerPackages.packageName')}>
-                    {purchasePackage.package_name}
-                  </Descriptions.Item>
-                  <Descriptions.Item label={t('scannerPackages.author')}>
-                    {purchasePackage.author}
-                  </Descriptions.Item>
-                  <Descriptions.Item label={t('scannerPackages.version')}>
-                    {purchasePackage.version}
-                  </Descriptions.Item>
-                  <Descriptions.Item label={t('scannerPackages.scannerCount')}>
-                    {purchasePackage.scanner_count}
-                  </Descriptions.Item>
-                  <Descriptions.Item label="Bundle">
-                    {purchasePackage.bundle || '-'}
-                  </Descriptions.Item>
-                  <Descriptions.Item label={t('scannerPackages.priceDisplay')}>
-                    {formatPriceDisplay(purchasePackage.price, purchasePackage.price_display)}
-                  </Descriptions.Item>
+            <>
+              <DialogHeader>
+                <DialogTitle>
+                  {features.showPayment() && purchasePackage?.price && purchasePackage.price > 0
+                    ? t('payment.confirm.packageTitle')
+                    : t('scannerPackages.submitPurchaseRequest')}
+                </DialogTitle>
+              </DialogHeader>
+              {purchasePackage && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-3 gap-2 py-2 border-b">
+                    <span className="font-medium text-gray-700">{t('scannerPackages.packageName')}</span>
+                    <span className="col-span-2">{purchasePackage.package_name}</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 py-2 border-b">
+                    <span className="font-medium text-gray-700">{t('scannerPackages.author')}</span>
+                    <span className="col-span-2">{purchasePackage.author}</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 py-2 border-b">
+                    <span className="font-medium text-gray-700">{t('scannerPackages.version')}</span>
+                    <span className="col-span-2">{purchasePackage.version}</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 py-2 border-b">
+                    <span className="font-medium text-gray-700">{t('scannerPackages.scannerCount')}</span>
+                    <span className="col-span-2">{purchasePackage.scanner_count}</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 py-2 border-b">
+                    <span className="font-medium text-gray-700">Bundle</span>
+                    <span className="col-span-2">{purchasePackage.bundle || '-'}</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 py-2 border-b">
+                    <span className="font-medium text-gray-700">{t('scannerPackages.priceDisplay')}</span>
+                    <span className="col-span-2">{formatPriceDisplay(purchasePackage.price, purchasePackage.price_display)}</span>
+                  </div>
                   {purchasePackage.description && (
-                    <Descriptions.Item label={t('scannerPackages.description')}>
-                      {purchasePackage.description}
-                    </Descriptions.Item>
+                    <div className="grid grid-cols-3 gap-2 py-2">
+                      <span className="font-medium text-gray-700">{t('scannerPackages.description')}</span>
+                      <span className="col-span-2">{purchasePackage.description}</span>
+                    </div>
                   )}
-                </Descriptions>
-
-              </Space>
-            )
+                </div>
+              )}
+              <DialogFooter>
+                <Button variant="outline" onClick={handleClosePurchaseModal}>
+                  {t('common.cancel')}
+                </Button>
+                <Button onClick={handleSubmitPurchase} disabled={paymentLoading || saving}>
+                  {features.showPayment() && purchasePackage?.price && purchasePackage.price > 0 ? t('payment.button.payNow') : t('common.submit')}
+                </Button>
+              </DialogFooter>
+            </>
           )}
-        </Modal>
+        </DialogContent>
+      </Dialog>
 
-        <Drawer
-          title={selectedPackage ? `${selectedPackage.package_name} - ${t('scannerPackages.scannersList')}` : ''}
-          placement="right"
-          width={1000}
-          onClose={handleCloseDrawer}
-          open={drawerVisible}
-        >
+      {/* Scanner Details Sheet */}
+      <Sheet open={drawerVisible} onOpenChange={setDrawerVisible}>
+        <SheetContent className="w-full sm:max-w-4xl overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle>
+              {selectedPackage ? `${selectedPackage.package_name} - ${t('scannerPackages.scannersList')}` : ''}
+            </SheetTitle>
+          </SheetHeader>
           {selectedPackage && (
-            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-              <Descriptions column={1} bordered size="small">
-                <Descriptions.Item label={t('scannerPackages.description')}>
-                  {selectedPackage.description || '-'}
-                </Descriptions.Item>
-                <Descriptions.Item label={t('scannerPackages.author')}>
-                  {selectedPackage.author}
-                </Descriptions.Item>
-                <Descriptions.Item label={t('scannerPackages.version')}>
-                  {selectedPackage.version}
-                </Descriptions.Item>
-                <Descriptions.Item label="Bundle">
-                  {selectedPackage.bundle || '-'}
-                </Descriptions.Item>
-                <Descriptions.Item label={t('scannerPackages.enabled')}>
-                  {getEnabledCount(selectedPackage.id)}
-                </Descriptions.Item>
-              </Descriptions>
+            <div className="mt-6 space-y-6">
+              <div className="space-y-4">
+                <div className="grid grid-cols-3 gap-2 py-2 border-b">
+                  <span className="font-medium text-gray-700">{t('scannerPackages.description')}</span>
+                  <span className="col-span-2">{selectedPackage.description || '-'}</span>
+                </div>
+                <div className="grid grid-cols-3 gap-2 py-2 border-b">
+                  <span className="font-medium text-gray-700">{t('scannerPackages.author')}</span>
+                  <span className="col-span-2">{selectedPackage.author}</span>
+                </div>
+                <div className="grid grid-cols-3 gap-2 py-2 border-b">
+                  <span className="font-medium text-gray-700">{t('scannerPackages.version')}</span>
+                  <span className="col-span-2">{selectedPackage.version}</span>
+                </div>
+                <div className="grid grid-cols-3 gap-2 py-2 border-b">
+                  <span className="font-medium text-gray-700">Bundle</span>
+                  <span className="col-span-2">{selectedPackage.bundle || '-'}</span>
+                </div>
+                <div className="grid grid-cols-3 gap-2 py-2">
+                  <span className="font-medium text-gray-700">{t('scannerPackages.enabled')}</span>
+                  <span className="col-span-2">{getEnabledCount(selectedPackage.id)}</span>
+                </div>
+              </div>
 
-              <Table
-                columns={[
-                  {
-                    title: t('scannerPackages.scannerTag'),
-                    dataIndex: 'tag',
-                    key: 'tag',
-                    width: 80,
-                    fixed: 'left',
-                    render: (tag: string) => <Tag color="blue">{tag}</Tag>,
-                  },
-                  {
-                    title: t('scannerPackages.scannerName'),
-                    dataIndex: 'name',
-                    key: 'name',
-                    width: 200,
-                    ellipsis: true,
-                  },
-                  {
-                    title: t('scannerPackages.scannerType'),
-                    dataIndex: 'scanner_type',
-                    key: 'scanner_type',
-                    width: 100,
-                    render: (type: string) => getScannerTypeLabel(type),
-                  },
-                  {
-                    title: t('scannerPackages.riskLevel'),
-                    dataIndex: 'risk_level',
-                    key: 'risk_level',
-                    width: 150,
-                    render: (level: string, record: ScannerConfig) => (
-                      <Space>
-                        <Tag color={getRiskLevelColor(level)}>
-                          {t(`risk.level.${level}`)}
-                        </Tag>
-                        {record.has_risk_level_override && (
-                          <Tooltip title={t('scannerPackages.hasOverrides')}>
-                            <InfoCircleOutlined style={{ color: '#1890ff' }} />
-                          </Tooltip>
-                        )}
-                      </Space>
-                    ),
-                  },
-                  {
-                    title: t('scannerPackages.isEnabled'),
-                    dataIndex: 'is_enabled',
-                    key: 'is_enabled',
-                    width: 80,
-                    render: (enabled: boolean, record: ScannerConfig) => (
-                      <Switch
-                        checked={enabled}
-                        onChange={(checked) => handleToggleScanner(record.id, checked)}
-                        loading={saving}
-                      />
-                    ),
-                  },
-                  {
-                    title: t('scannerPackages.scanPrompt'),
-                    dataIndex: 'scan_prompt',
-                    key: 'scan_prompt',
-                    width: 100,
-                    render: (enabled: boolean, record: ScannerConfig) => (
-                      <Space direction="vertical" size={0} align="center">
-                        <Switch
-                          checked={enabled}
-                          onChange={(checked) => handleToggleScanPrompt(record.id, checked)}
-                          loading={saving}
-                          size="small"
-                        />
-                        {record.has_scan_prompt_override && (
-                          <Tooltip title={t('scannerPackages.hasOverrides')}>
-                            <InfoCircleOutlined style={{ color: '#1890ff', fontSize: '12px' }} />
-                          </Tooltip>
-                        )}
-                      </Space>
-                    ),
-                  },
-                  {
-                    title: t('scannerPackages.scanResponse'),
-                    dataIndex: 'scan_response',
-                    key: 'scan_response',
-                    width: 100,
-                    render: (enabled: boolean, record: ScannerConfig) => (
-                      <Space direction="vertical" size={0} align="center">
-                        <Switch
-                          checked={enabled}
-                          onChange={(checked) => handleToggleScanResponse(record.id, checked)}
-                          loading={saving}
-                          size="small"
-                        />
-                        {record.has_scan_response_override && (
-                          <Tooltip title={t('scannerPackages.hasOverrides')}>
-                            <InfoCircleOutlined style={{ color: '#1890ff', fontSize: '12px' }} />
-                          </Tooltip>
-                        )}
-                      </Space>
-                    ),
-                  },
-                  {
-                    title: t('common.actions'),
-                    key: 'actions',
-                    width: 120,
-                    fixed: 'right',
-                    render: (_: any, record: ScannerConfig) => (
-                      <Button
-                        type="link"
-                        size="small"
-                        onClick={() => handleReset(record.id)}
-                        disabled={!record.has_risk_level_override && !record.has_scan_prompt_override && !record.has_scan_response_override}
-                      >
-                        {t('scannerPackages.resetToDefault')}
-                      </Button>
-                    ),
-                  },
-                ]}
-                dataSource={getPackageScanners(selectedPackage.id)}
-                rowKey="id"
-                pagination={false}
-                size="small"
-                scroll={{ x: 'max-content' }}
-              />
-            </Space>
+              <DataTable columns={scannerColumns} data={getPackageScanners(selectedPackage.id)} pagination={false} />
+            </div>
           )}
-        </Drawer>
+        </SheetContent>
+      </Sheet>
+    </div>
+  )
+}
 
-              </Space>
-    </Spin>
-  );
-};
-
-export default OfficialScannersManagement;
+export default OfficialScannersManagement
