@@ -1,457 +1,520 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react'
+import { User, Edit, Trash2, Plus, RefreshCw, Mail, Key, Copy } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import * as z from 'zod'
+
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
-  Table,
-  Card,
-  Button,
-  Space,
-  Tag,
-  message,
-  Typography,
-  Modal,
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
   Form,
-  Input,
-  Switch,
-  Tooltip,
-  Popconfirm
-} from 'antd';
-import {
-  UserOutlined,
-  EditOutlined,
-  DeleteOutlined,
-  PlusOutlined,
-  ReloadOutlined,
-  MailOutlined,
-  KeyOutlined
-} from '@ant-design/icons';
-import { useTranslation } from 'react-i18next';
-import { useAuth } from '../../contexts/AuthContext';
-import { adminApi } from '../../services/api';
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '@/components/ui/form'
+import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
+import { Badge } from '@/components/ui/badge'
+import { DataTable } from '@/components/data-table/DataTable'
+import { confirmDialog } from '@/lib/confirm-dialog'
+import { useAuth } from '../../contexts/AuthContext'
+import { adminApi } from '../../services/api'
+import type { ColumnDef } from '@tanstack/react-table'
 
-const { Title, Text } = Typography;
-
-interface User {
-  id: string;
-  email: string;
-  is_active: boolean;
-  is_verified: boolean;
-  is_super_admin: boolean;
-  api_key: string;
-  detection_count: number;
-  created_at: string;
-  updated_at: string;
+interface UserType {
+  id: string
+  email: string
+  is_active: boolean
+  is_verified: boolean
+  is_super_admin: boolean
+  api_key: string
+  detection_count: number
+  created_at: string
+  updated_at: string
 }
 
 interface AdminStats {
-  total_users: number;
-  total_detections: number;
+  total_users: number
+  total_detections: number
   user_detection_counts: Array<{
-    tenant_id: string;
-    email: string;
-    detection_count: number;
-  }>;
+    tenant_id: string
+    email: string
+    detection_count: number
+  }>
 }
 
 const UserManagement: React.FC = () => {
-  const { t } = useTranslation();
-  const [users, setUsers] = useState<User[]>([]);
-  const [adminStats, setAdminStats] = useState<AdminStats | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [modalVisible, setModalVisible] = useState(false);
-  const [editingUser, setEditingUser] = useState<User | null>(null);
-  const [searchText, setSearchText] = useState('');
+  const { t } = useTranslation()
+  const [users, setUsers] = useState<UserType[]>([])
+  const [adminStats, setAdminStats] = useState<AdminStats | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [modalVisible, setModalVisible] = useState(false)
+  const [editingUser, setEditingUser] = useState<UserType | null>(null)
+  const [searchText, setSearchText] = useState('')
 
-  const [form] = Form.useForm();
-  const { user: currentUser, switchToUser, switchInfo } = useAuth();
+  const { user: currentUser, switchToUser, switchInfo } = useAuth()
+
+  const formSchema = z.object({
+    email: z.string().email(t('admin.validEmailRequired')),
+    password: z.string().min(6, t('admin.passwordMinLength')).optional(),
+    is_active: z.boolean().default(true),
+    is_verified: z.boolean().default(false),
+  })
+
+  const form = useForm<z.infer<typeof formSchema>>({
+    resolver: zodResolver(formSchema),
+    defaultValues: {
+      is_active: true,
+      is_verified: false,
+    },
+  })
 
   const loadAdminStats = async () => {
     try {
-      const response = await adminApi.getAdminStats();
-      setAdminStats(response.data);
+      const response = await adminApi.getAdminStats()
+      setAdminStats(response.data)
     } catch (error) {
-      console.error('Failed to load admin stats:', error);
-      message.error(t('admin.loadStatsFailed'));
+      console.error('Failed to load admin stats:', error)
+      toast.error(t('admin.loadStatsFailed'))
     }
-  };
+  }
 
   const loadUsers = async () => {
-    setLoading(true);
+    setLoading(true)
     try {
-      const response = await adminApi.getUsers();
-      setUsers(response.users || []);
+      const response = await adminApi.getUsers()
+      setUsers(response.users || [])
     } catch (error) {
-      console.error('Failed to load users:', error);
-      message.error(t('admin.loadTenantsFailed'));
+      console.error('Failed to load users:', error)
+      toast.error(t('admin.loadTenantsFailed'))
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }
 
   const loadData = async () => {
-    await Promise.all([loadUsers(), loadAdminStats()]);
-  };
+    await Promise.all([loadUsers(), loadAdminStats()])
+  }
 
   useEffect(() => {
-    loadData();
-  }, []);
+    loadData()
+  }, [])
 
-  const handleEdit = (user: User) => {
-    setEditingUser(user);
-    form.setFieldsValue({
+  const handleEdit = (user: UserType) => {
+    setEditingUser(user)
+    form.reset({
       email: user.email,
       is_active: user.is_active,
       is_verified: user.is_verified,
-      is_super_admin: user.is_super_admin,
-    });
-    setModalVisible(true);
-  };
+    })
+    setModalVisible(true)
+  }
 
   const handleAdd = () => {
-    setEditingUser(null);
-    form.resetFields();
-    setModalVisible(true);
-  };
+    setEditingUser(null)
+    form.reset({
+      email: '',
+      password: '',
+      is_active: true,
+      is_verified: false,
+    })
+    setModalVisible(true)
+  }
 
-  const handleSave = async (values: any) => {
+  const handleSave = async (values: z.infer<typeof formSchema>) => {
     try {
       if (editingUser) {
         // Update tenant
-        await adminApi.updateUser(editingUser.id, values);
-        message.success(t('admin.tenantUpdated'));
+        await adminApi.updateUser(editingUser.id, values)
+        toast.success(t('admin.tenantUpdated'))
       } else {
         // Create new tenant
-        await adminApi.createUser(values);
-        message.success(t('admin.tenantCreated'));
+        await adminApi.createUser(values)
+        toast.success(t('admin.tenantCreated'))
       }
 
-      setModalVisible(false);
-      // Delay reset form, avoid user seeing button state change
-      setTimeout(() => {
-        form.resetFields();
-      }, 300);
-      loadUsers();
+      setModalVisible(false)
+      loadUsers()
     } catch (error: any) {
-      console.error('Save user failed:', error);
-      message.error(error.response?.data?.detail || t('admin.saveFailed'));
+      console.error('Save user failed:', error)
+      toast.error(error.response?.data?.detail || t('admin.saveFailed'))
     }
-  };
+  }
 
   const handleDelete = async (tenantId: string) => {
+    const confirmed = await confirmDialog({
+      title: t('admin.confirmDeleteTenant'),
+      description: t('admin.cannotRecover'),
+    })
+
+    if (!confirmed) return
+
     try {
-      await adminApi.deleteUser(tenantId);
-      message.success(t('admin.tenantDeleted'));
-      loadUsers();
+      await adminApi.deleteUser(tenantId)
+      toast.success(t('admin.tenantDeleted'))
+      loadUsers()
     } catch (error: any) {
-      console.error('Delete user failed:', error);
-      message.error(error.response?.data?.detail || t('admin.deleteFailed'));
+      console.error('Delete user failed:', error)
+      toast.error(error.response?.data?.detail || t('admin.deleteFailed'))
     }
-  };
+  }
 
   const handleResetApiKey = async (tenantId: string) => {
+    const confirmed = await confirmDialog({
+      title: t('admin.resetApiKey'),
+      description: t('admin.resetApiKeyConfirm'),
+    })
+
+    if (!confirmed) return
+
     try {
-      await adminApi.resetUserApiKey(tenantId);
-      message.success(t('admin.apiKeyReset'));
-      loadUsers();
+      await adminApi.resetUserApiKey(tenantId)
+      toast.success(t('admin.apiKeyReset'))
+      loadUsers()
     } catch (error: any) {
-      console.error('Reset API key failed:', error);
-      message.error(error.response?.data?.detail || t('admin.resetApiFailed'));
+      console.error('Reset API key failed:', error)
+      toast.error(error.response?.data?.detail || t('admin.resetApiFailed'))
     }
-  };
+  }
 
   const handleSwitchToUser = async (tenantId: string, email: string) => {
     try {
-      await switchToUser(tenantId);
-      message.success(t('admin.switchedToTenant', { email }));
+      await switchToUser(tenantId)
+      toast.success(t('admin.switchedToTenant', { email }))
       // Refresh current page to update status
-      window.location.reload();
+      window.location.reload()
     } catch (error: any) {
-      console.error('Switch user failed:', error);
-      message.error(error.response?.data?.detail || t('admin.switchTenantFailed'));
+      console.error('Switch user failed:', error)
+      toast.error(error.response?.data?.detail || t('admin.switchTenantFailed'))
     }
-  };
+  }
 
-  const columns = [
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text)
+    toast.success(t('common.copied'))
+  }
+
+  const columns: ColumnDef<UserType>[] = [
     {
-      title: t('admin.tenantEmail'),
-      dataIndex: 'email',
-      key: 'email',
-      render: (email: string, record: User) => (
-        <Space>
-          <UserOutlined />
-          {/* Only super admin and not current tenant and not in switching state can click switch */}
-          {currentUser?.is_super_admin && record.id !== currentUser?.id && !switchInfo.is_switched ? (
-            <Text
-              style={{ cursor: 'pointer', color: '#1890ff' }}
-              onClick={() => handleSwitchToUser(record.id, record.email)}
-              title={t('admin.clickToSwitch')}
+      accessorKey: 'email',
+      header: t('admin.tenantEmail'),
+      cell: ({ row }) => {
+        const record = row.original
+        const canSwitch =
+          currentUser?.is_super_admin &&
+          record.id !== currentUser?.id &&
+          !switchInfo.is_switched
+
+        return (
+          <div className="flex items-center gap-2">
+            <User className="h-4 w-4 text-gray-400" />
+            {canSwitch ? (
+              <span
+                className="cursor-pointer text-blue-600 hover:underline"
+                onClick={() => handleSwitchToUser(record.id, record.email)}
+                title={t('admin.clickToSwitch')}
+              >
+                {record.email}
+              </span>
+            ) : (
+              <span>{record.email}</span>
+            )}
+            {record.id === currentUser?.id && (
+              <Badge variant="default">{t('admin.currentTenant')}</Badge>
+            )}
+            {switchInfo.is_switched && switchInfo.target_user?.id === record.id && (
+              <Badge variant="secondary">{t('admin.switching')}</Badge>
+            )}
+          </div>
+        )
+      },
+    },
+    {
+      id: 'status',
+      header: t('common.status'),
+      cell: ({ row }) => {
+        const record = row.original
+        return (
+          <div className="flex flex-col gap-1">
+            <Badge variant={record.is_active ? 'default' : 'destructive'}>
+              {record.is_active ? t('admin.active') : t('admin.inactive')}
+            </Badge>
+            <Badge variant={record.is_verified ? 'default' : 'secondary'}>
+              {record.is_verified ? t('admin.verified') : t('admin.unverified')}
+            </Badge>
+            {record.is_super_admin && <Badge variant="destructive">{t('admin.admin')}</Badge>}
+          </div>
+        )
+      },
+    },
+    {
+      accessorKey: 'api_key',
+      header: 'API Key',
+      cell: ({ row }) => {
+        const apiKey = row.getValue('api_key') as string
+        return (
+          <div className="flex items-center gap-2">
+            <code className="text-xs bg-gray-100 px-2 py-1 rounded">
+              {apiKey ? `${apiKey.substring(0, 20)}...` : t('admin.notGenerated')}
+            </code>
+            {apiKey && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => copyToClipboard(apiKey)}
+                title={t('common.copy')}
+              >
+                <Copy className="h-3 w-3" />
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => handleResetApiKey(row.original.id)}
+              title={t('admin.resetApiKey')}
             >
-              {email}
-            </Text>
-          ) : (
-            <Text>{email}</Text>
-          )}
-          {record.id === currentUser?.id && <Tag color="blue">{t('admin.currentTenant')}</Tag>}
-          {switchInfo.is_switched && switchInfo.target_user?.id === record.id && (
-            <Tag color="orange">{t('admin.switching')}</Tag>
-          )}
-        </Space>
-      ),
+              <Key className="h-4 w-4" />
+            </Button>
+          </div>
+        )
+      },
     },
     {
-      title: t('common.status'),
-      key: 'status',
-      width: 120,
-      render: (_: any, record: User) => (
-        <Space size={2} direction="vertical" style={{ display: 'flex' }}>
-          <Tag color={record.is_active ? 'green' : 'red'}>
-            {record.is_active ? t('admin.active') : t('admin.inactive')}
-          </Tag>
-          <Tag color={record.is_verified ? 'green' : 'orange'}>
-            {record.is_verified ? t('admin.verified') : t('admin.unverified')}
-          </Tag>
-          {record.is_super_admin && (
-            <Tag color="red">{t('admin.admin')}</Tag>
-          )}
-        </Space>
-      ),
-    },
-    {
-      title: 'API Key',
-      dataIndex: 'api_key',
-      key: 'api_key',
-      render: (apiKey: string, record: User) => (
-        <Space>
-          <Text code copyable={{ text: apiKey }}>
-            {apiKey ? `${apiKey.substring(0, 20)}...` : t('admin.notGenerated')}
-          </Text>
-          <Tooltip title={t('admin.resetApiKey')}>
+      accessorKey: 'id',
+      header: 'UUID',
+      cell: ({ row }) => {
+        const id = row.getValue('id') as string
+        return (
+          <div className="flex items-center gap-2">
+            <code className="text-xs bg-gray-100 px-2 py-1 rounded">{id.substring(0, 8)}...</code>
             <Button
-              type="link"
-              size="small"
-              icon={<KeyOutlined />}
-              onClick={() => handleResetApiKey(record.id)}
-            />
-          </Tooltip>
-        </Space>
-      ),
+              variant="ghost"
+              size="sm"
+              onClick={() => copyToClipboard(id)}
+              title={t('common.copy')}
+            >
+              <Copy className="h-3 w-3" />
+            </Button>
+          </div>
+        )
+      },
     },
     {
-      title: 'UUID',
-      dataIndex: 'id',
-      key: 'id',
-      render: (id: string) => (
-        <Text code copyable={{ text: id }}>
-          {id.substring(0, 8)}...
-        </Text>
-      ),
+      accessorKey: 'detection_count',
+      header: t('admin.detectionCount'),
+      cell: ({ row }) => {
+        const count = row.getValue('detection_count') as number
+        return <Badge variant={count > 0 ? 'default' : 'outline'}>{count}</Badge>
+      },
     },
     {
-      title: t('admin.detectionCount'),
-      dataIndex: 'detection_count',
-      key: 'detection_count',
-      sorter: (a: User, b: User) => a.detection_count - b.detection_count,
-      render: (count: number) => (
-        <Tag color={count > 0 ? 'blue' : 'default'}>
-          {count}
-        </Tag>
-      ),
+      accessorKey: 'created_at',
+      header: t('common.createdAt'),
+      cell: ({ row }) => {
+        const date = row.getValue('created_at') as string
+        return <span className="text-sm text-gray-600">{new Date(date).toLocaleString()}</span>
+      },
     },
     {
-      title: t('common.createdAt'),
-      dataIndex: 'created_at',
-      key: 'created_at',
-      sorter: (a: User, b: User) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
-      defaultSortOrder: 'descend' as const,
-      render: (date: string) => new Date(date).toLocaleString(),
-    },
-    {
-      title: t('common.operation'),
-      key: 'actions',
-      render: (_: any, record: User) => (
-        <Space>
-          <Tooltip title={t('admin.editTenant')}>
+      id: 'actions',
+      header: t('common.operation'),
+      cell: ({ row }) => {
+        const record = row.original
+        return (
+          <div className="flex gap-2">
             <Button
-              type="link"
-              size="small"
-              icon={<EditOutlined />}
+              variant="ghost"
+              size="sm"
               onClick={() => handleEdit(record)}
-            />
-          </Tooltip>
-          {record.id !== currentUser?.id && (
-            <Popconfirm
-              title={t('admin.confirmDeleteTenant')}
-              description={t('admin.cannotRecover')}
-              onConfirm={() => handleDelete(record.id)}
-              okText={t('common.confirm')}
-              cancelText={t('common.cancel')}
+              title={t('admin.editTenant')}
             >
-              <Tooltip title={t('admin.deleteTenant')}>
-                <Button
-                  type="link"
-                  size="small"
-                  danger
-                  icon={<DeleteOutlined />}
-                />
-              </Tooltip>
-            </Popconfirm>
-          )}
-        </Space>
-      ),
+              <Edit className="h-4 w-4" />
+            </Button>
+            {record.id !== currentUser?.id && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => handleDelete(record.id)}
+                title={t('admin.deleteTenant')}
+              >
+                <Trash2 className="h-4 w-4 text-red-500" />
+              </Button>
+            )}
+          </div>
+        )
+      },
     },
-  ];
+  ]
+
+  const filteredUsers = users.filter(
+    (user) =>
+      !searchText ||
+      user.email.toLowerCase().includes(searchText.toLowerCase()) ||
+      user.id.toLowerCase().includes(searchText.toLowerCase())
+  )
 
   return (
     <div>
       <Card>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <div>
-            <Title level={4} style={{ margin: 0 }}>
-              <UserOutlined style={{ marginRight: 8 }} />
-              {t('admin.tenantManagement')}
-            </Title>
-            <Text type="secondary">{t('admin.manageTenants')}</Text>
-            {adminStats && (
-              <div style={{ marginTop: 8 }}>
-                <Space split={<Text type="secondary">|</Text>}>
-                  <Text>
+        <CardHeader>
+          <div className="flex justify-between items-start">
+            <div className="space-y-2">
+              <CardTitle className="flex items-center gap-2">
+                <User className="h-5 w-5" />
+                {t('admin.tenantManagement')}
+              </CardTitle>
+              <p className="text-sm text-gray-600">{t('admin.manageTenants')}</p>
+              {adminStats && (
+                <div className="flex gap-4 text-sm">
+                  <span>
                     <strong>{adminStats.total_users}</strong> {t('admin.totalTenants')}
-                  </Text>
-                  <Text>
+                  </span>
+                  <span className="text-gray-400">|</span>
+                  <span>
                     {t('admin.totalDetections')}: <strong>{adminStats.total_detections}</strong>
-                  </Text>
-                </Space>
-              </div>
-            )}
+                  </span>
+                </div>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={loadData} disabled={loading}>
+                <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                {t('common.refresh')}
+              </Button>
+              <Button onClick={handleAdd}>
+                <Plus className="mr-2 h-4 w-4" />
+                {t('admin.addTenant')}
+              </Button>
+            </div>
           </div>
-          <Space>
-            <Button
-              icon={<ReloadOutlined />}
-              onClick={loadData}
-              loading={loading}
-            >
-              {t('common.refresh')}
-            </Button>
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={handleAdd}
-            >
-              {t('admin.addTenant')}
-            </Button>
-          </Space>
-        </div>
+        </CardHeader>
+        <CardContent>
+          {/* Search box */}
+          <div className="mb-4">
+            <Input
+              placeholder={t('admin.searchTenantPlaceholder')}
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              className="max-w-xs"
+            />
+          </div>
 
-        {/* Search box */}
-        <div style={{ marginBottom: 16 }}>
-          <Input.Search
-            placeholder={t('admin.searchTenantPlaceholder')}
-            value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
-            style={{ width: 300 }}
-            allowClear
-          />
-        </div>
-
-        <Table
-          columns={columns}
-          dataSource={users.filter(user =>
-            !searchText ||
-            user.email.toLowerCase().includes(searchText.toLowerCase()) ||
-            user.id.toLowerCase().includes(searchText.toLowerCase())
-          )}
-          rowKey="id"
-          loading={loading}
-          pagination={{
-            showSizeChanger: true,
-            showQuickJumper: true,
-            showTotal: (total) => `${t('common.total')} ${total} ${t('admin.totalTenants')}`,
-          }}
-        />
+          <DataTable columns={columns} data={filteredUsers} loading={loading} />
+        </CardContent>
       </Card>
 
-      <Modal
-        title={editingUser ? t('admin.editTenantTitle') : t('admin.addTenantTitle')}
-        open={modalVisible}
-        onCancel={() => {
-          setModalVisible(false);
-          // Delay reset form, avoid user seeing button state change
-          setTimeout(() => {
-            form.resetFields();
-          }, 300);
-        }}
-        onOk={() => form.submit()}
-        okText={t('common.save')}
-        cancelText={t('common.cancel')}
-      >
-        <Form
-          form={form}
-          layout="vertical"
-          onFinish={handleSave}
-        >
-          <Form.Item
-            name="email"
-            label={t('admin.tenantEmailLabel')}
-            rules={[
-              { required: true, message: t('admin.tenantEmailRequired') },
-              { type: 'email', message: t('admin.validEmailRequired') }
-            ]}
-          >
-            <Input
-              prefix={<MailOutlined />}
-              placeholder={t('admin.tenantEmailPlaceholder')}
-              disabled={!!editingUser}
-            />
-          </Form.Item>
+      <Dialog open={modalVisible} onOpenChange={setModalVisible}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>
+              {editingUser ? t('admin.editTenantTitle') : t('admin.addTenantTitle')}
+            </DialogTitle>
+          </DialogHeader>
 
-          {!editingUser && (
-            <Form.Item
-              name="password"
-              label={t('admin.initialPassword')}
-              rules={[
-                { required: true, message: t('admin.initialPasswordRequired') },
-                { min: 6, message: t('admin.passwordMinLength') }
-              ]}
-            >
-              <Input.Password placeholder={t('admin.initialPasswordPlaceholder')} />
-            </Form.Item>
-          )}
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(handleSave)} className="space-y-4">
+              <FormField
+                control={form.control}
+                name="email"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('admin.tenantEmailLabel')}</FormLabel>
+                    <FormControl>
+                      <div className="relative">
+                        <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                        <Input
+                          {...field}
+                          placeholder={t('admin.tenantEmailPlaceholder')}
+                          disabled={!!editingUser}
+                          className="pl-10"
+                        />
+                      </div>
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
-          <Form.Item
-            name="is_active"
-            label={t('admin.accountStatus')}
-            valuePropName="checked"
-            initialValue={true}
-          >
-            <Switch
-              checkedChildren={t('admin.active')}
-              unCheckedChildren={t('admin.inactive')}
-            />
-          </Form.Item>
+              {!editingUser && (
+                <FormField
+                  control={form.control}
+                  name="password"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('admin.initialPassword')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          type="password"
+                          placeholder={t('admin.initialPasswordPlaceholder')}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
 
-          <Form.Item
-            name="is_verified"
-            label={t('admin.emailVerification')}
-            valuePropName="checked"
-            initialValue={false}
-          >
-            <Switch
-              checkedChildren={t('admin.verified')}
-              unCheckedChildren={t('admin.unverified')}
-            />
-          </Form.Item>
+              <FormField
+                control={form.control}
+                name="is_active"
+                render={({ field }) => (
+                  <FormItem className="flex items-center justify-between border rounded-lg p-3">
+                    <div>
+                      <FormLabel>{t('admin.accountStatus')}</FormLabel>
+                    </div>
+                    <FormControl>
+                      <Switch checked={field.value} onCheckedChange={field.onChange} />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
 
-          {/* {t('admin.superAdminNote')} */}
-          <Form.Item label={t('admin.superAdmin')}>
-            <Switch
-              checked={!!editingUser?.is_super_admin}
-              checkedChildren={t('common.yes')}
-              unCheckedChildren={t('common.no')}
-              disabled
-            />
-          </Form.Item>
-        </Form>
-      </Modal>
+              <FormField
+                control={form.control}
+                name="is_verified"
+                render={({ field }) => (
+                  <FormItem className="flex items-center justify-between border rounded-lg p-3">
+                    <div>
+                      <FormLabel>{t('admin.emailVerification')}</FormLabel>
+                    </div>
+                    <FormControl>
+                      <Switch checked={field.value} onCheckedChange={field.onChange} />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+
+              {editingUser && (
+                <div className="flex items-center justify-between border rounded-lg p-3 bg-gray-50">
+                  <FormLabel>{t('admin.superAdmin')}</FormLabel>
+                  <Switch checked={!!editingUser?.is_super_admin} disabled />
+                </div>
+              )}
+
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setModalVisible(false)}>
+                  {t('common.cancel')}
+                </Button>
+                <Button type="submit">{t('common.save')}</Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
     </div>
-  );
-};
+  )
+}
 
-export default UserManagement;
+export default UserManagement
