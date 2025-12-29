@@ -49,3 +49,11 @@ export const verificationCodeSchema = z.object({
 })
 
 export type VerificationCodeFormData = z.infer<typeof verificationCodeSchema>
+
+// Email verification schema (for Verify page - includes email + code)
+export const emailVerificationSchema = z.object({
+  email: z.string().email("Please enter a valid email address"),
+  verificationCode: z.string().length(6, "Verification code must be 6 digits"),
+})
+
+export type EmailVerificationFormData = z.infer<typeof emailVerificationSchema>
