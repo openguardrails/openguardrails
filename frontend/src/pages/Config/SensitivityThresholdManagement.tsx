@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { InfoCircleOutlined, Edit, Check } from 'lucide-react'
+import { Info, Edit, Check } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -292,7 +292,7 @@ const SensitivityThresholdManagement: React.FC = () => {
           <div className="space-y-6">
             <div>
               <h3 className="text-lg font-semibold flex items-center gap-2">
-                <InfoCircleOutlined className="h-5 w-5" />
+                <Info className="h-5 w-5" />
                 {t('sensitivity.title')}
               </h3>
               <p className="text-gray-600 mt-2">{t('sensitivity.description')}</p>
