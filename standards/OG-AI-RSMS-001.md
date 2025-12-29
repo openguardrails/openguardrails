@@ -23,7 +23,7 @@ models, agents, tools, and outputs.
 This document is intended to be compatible with ISO/IEC 27001, ISO/IEC 27701,
 the EU Artificial Intelligence Act, and related frameworks.
 
-# 1 Scope
+# Scope
 
 This International Standard applies to organizations that design, develop, deploy, operate,
 or manage:
@@ -36,7 +36,7 @@ The scope includes AI behavior during runtime, including prompts, retrieved cont
 inference, tool invocation, and outputs.
 
 
-# 2 Normative references
+# Normative references
 
 The following referenced documents are indispensable for the application of this document.
 For dated references, only the edition cited applies. For undated references, the latest
@@ -49,64 +49,64 @@ edition of the referenced document applies.
 - Regulation (EU) 2024/… *Artificial Intelligence Act*
 
 
-# 3 Terms and definitions
+# Terms and definitions
 
 For the purposes of this document, the following terms and definitions apply.
 
-## 3.1 AI runtime
+## AI runtime
 
 phase during which an AI system processes input, performs inference, invokes tools or functions,
 and produces output
 
-## 3.2 AI control
+## AI control
 
 measure implemented to modify or mitigate risks arising from AI runtime behavior
 
-## 3.3 policy
+## policy
 
 formalized rule defining organizational, regulatory, or ethical constraints applicable to AI behavior
 
-## 3.4 enforcement action
+## enforcement action
 
 action taken when a control condition is met, including blocking, masking, rewriting,
 escalation, or model switching
 
 
-# 4 Context of the organization
+# Context of the organization
 
-## 4.1 Understanding the organization and its context
+## Understanding the organization and its context
 
 The organization shall determine internal and external issues relevant to AI runtime security.
 
-## 4.2 Understanding the needs and expectations of interested parties
+## Understanding the needs and expectations of interested parties
 
 The organization shall identify interested parties and their requirements related to
 AI behavior, safety, and compliance.
 
-## 4.3 Determining the scope of the AI-RSMS
+## Determining the scope of the AI-RSMS
 
 The organization shall define and document the scope of the AI-RSMS.
 
 
-# 5 Leadership
+# Leadership
 
-## 5.1 Leadership and commitment
+## Leadership and commitment
 
 Top management shall demonstrate leadership and commitment to AI runtime security.
 
-## 5.2 AI runtime security policy
+## AI runtime security policy
 
 The organization shall establish, maintain, and communicate an AI runtime security policy.
 
-## 5.3 Organizational roles, responsibilities and authorities
+## Organizational roles, responsibilities and authorities
 
 Roles and responsibilities for AI governance, policy approval, and runtime enforcement
 shall be assigned and communicated.
 
 
-# 6 Planning
+# Planning
 
-## 6.1 Actions to address risks and opportunities
+## Actions to address risks and opportunities
 
 The organization shall identify and assess AI runtime risks considering:
 
@@ -114,73 +114,73 @@ The organization shall identify and assess AI runtime risks considering:
 - model autonomy and agency;
 - potential impact on individuals, organizations, or systems.
 
-## 6.2 AI runtime risk treatment
+## AI runtime risk treatment
 
 The organization shall determine and implement risk treatment options using AI runtime controls.
 
-## 6.3 AI runtime security objectives and planning
+## AI runtime security objectives and planning
 
 Measurable AI runtime security objectives shall be established and monitored.
 
 
-# 7 Support
+# Support
 
-## 7.1 Resources
+## Resources
 
 The organization shall provide adequate resources to implement and operate AI runtime controls.
 
-## 7.2 Competence
+## Competence
 
 Personnel involved in AI governance and operations shall be competent.
 
-## 7.3 Awareness
+## Awareness
 
 Relevant personnel shall be aware of AI runtime security policies and controls.
 
-## 7.4 Documented information
+## Documented information
 
 Documented information required by the AI-RSMS shall be controlled and maintained.
 
 
-# 8 Operation
+# Operation
 
-## 8.1 Operational planning and control
+## Operational planning and control
 
 The organization shall implement AI runtime controls as defined in Annex A.
 
-## 8.2 Policy-driven runtime enforcement
+## Policy-driven runtime enforcement
 
 AI behavior shall be monitored and enforced in real time according to defined policies.
 
-## 8.3 AI security incident handling
+## AI security incident handling
 
 Procedures shall be established for identifying, responding to, and learning from
 AI runtime security incidents.
 
 
-# 9 Performance evaluation
+# Performance evaluation
 
-## 9.1 Monitoring, measurement, analysis and evaluation
+## Monitoring, measurement, analysis and evaluation
 
 The organization shall monitor and measure the effectiveness of AI runtime controls.
 
-## 9.2 Internal audit
+## Internal audit
 
 The organization shall conduct internal audits of the AI-RSMS at planned intervals.
 
-## 9.3 Management review
+## Management review
 
 Top management shall review the AI-RSMS to ensure its continuing suitability,
 adequacy and effectiveness.
 
 
-# 10 Improvement
+# Improvement
 
-## 10.1 Nonconformity and corrective action
+## Nonconformity and corrective action
 
 The organization shall address nonconformities and take corrective actions.
 
-## 10.2 Continual improvement
+## Continual improvement
 
 The organization shall continually improve the AI-RSMS.
 

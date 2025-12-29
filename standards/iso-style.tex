@@ -1,32 +1,89 @@
 \documentclass[12pt,a4paper]{article}
 
-% ---------- Packages ----------
+% ===============================
+% Page layout
+% ===============================
 \usepackage[a4paper,margin=2.5cm]{geometry}
+
+% ===============================
+% Line spacing
+% ===============================
 \usepackage{setspace}
 \onehalfspacing
+
+% ===============================
+% Font (XeLaTeX)
+% ===============================
 \usepackage{fontspec}
 \setmainfont{Times New Roman}
 
+% ===============================
+% Section formatting (ISO-like)
+% ===============================
 \usepackage{titlesec}
-\titleformat{\section}{\bfseries\MakeUppercase}{\thesection}{1em}{}
-\titleformat{\subsection}{\bfseries}{\thesubsection}{1em}{}
 
+% Section (Clause)
+\titleformat{\section}
+  {\bfseries\fontsize{14pt}{16pt}\selectfont}
+  {\thesection}
+  {1em}
+  {}
+
+% Subsection (Subclause)
+\titleformat{\subsection}
+  {\bfseries\fontsize{12pt}{14pt}\selectfont}
+  {\thesubsection}
+  {1em}
+  {}
+
+% ===============================
+% Tables
+% ===============================
 \usepackage{longtable,booktabs,array}
-\usepackage{hyperref}
-\usepackage{fancyhdr}
-\usepackage{amssymb}
 
-% ---------- Header / Footer ----------
+% ===============================
+% Hyperlinks (ISO-friendly)
+% ===============================
+\usepackage[hidelinks]{hyperref}
+
+% ===============================
+% Header / Footer
+% ===============================
+\usepackage{fancyhdr}
 \pagestyle{fancy}
 \fancyhf{}
-\fancyhead[C]{OpenGuardrails AI-RSMS}
+\fancyhead[C]{OpenGuardrails AI Runtime Security Management System (AI-RSMS)}
 \fancyfoot[C]{\thepage}
 
-% ---------- Pandoc compatibility ----------
+% ===============================
+% Symbols
+% ===============================
+\usepackage{amssymb}
+
+% ===============================
+% Pandoc compatibility
+% ===============================
 \providecommand{\tightlist}{%
   \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+
+% ===============================
+% Section numbering depth
+%   - section: numbered (1,2,3…)
+%   - subsection: numbered (1.1, 1.2…)
+% ===============================
+\setcounter{secnumdepth}{2}
+
+% ===============================
+% Pandoc compatibility
+% ===============================
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+
 \newcounter{none}
 
+% ===============================
+% Document start
+% ===============================
 \begin{document}
 
 % ---------- ISO Title Page ----------

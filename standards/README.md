@@ -13,7 +13,7 @@ The following files are required to build the PDF:
 
 | File | Description |
 |------|-------------|
-| `ISO-OG-AI-RSMS-001.md` | Normative specification content (Markdown, ISO structure) |
+| `OG-AI-RSMS-001.md` | Normative specification content (Markdown, ISO structure) |
 | `iso-style.tex` | ISO-style LaTeX template (layout, fonts, headers, pagination) |
 | `title-page.tex` | ISO-style title page (included by the template) |
 
@@ -46,12 +46,12 @@ pandoc --version
 Run the following command from the repository root to generate the ISO-style PDF:
 
 ```bash
-pandoc ISO-OG-AI-RSMS-001.md \
+pandoc OG-AI-RSMS-001.md \
   --from=markdown+simple_tables-pipe_tables \
   --pdf-engine=xelatex \
   --template=iso-style.tex \
-  --number-sections=false \
-  -o ISO-OG-AI-RSMS-001.pdf
+  --number-sections \
+  -o OG-AI-RSMS-001.pdf
 ```
 
 ---
@@ -60,7 +60,7 @@ pandoc ISO-OG-AI-RSMS-001.md \
 
 | Option                                      | Description                                                        |
 | ------------------------------------------- | ------------------------------------------------------------------ |
-| `ISO-OG-AI-RSMS-001.md`                     | Source specification in Markdown                                   |
+| `OG-AI-RSMS-001.md`                     | Source specification in Markdown                                   |
 | `--from=markdown+simple_tables-pipe_tables` | Enables stable ISO-style tables and disables pipe tables           |
 | `--pdf-engine=xelatex`                      | Uses XeLaTeX for fonts and Unicode support                         |
 | `--template=iso-style.tex`                  | Applies ISO-aligned layout and formatting                          |
