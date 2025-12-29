@@ -1,183 +1,148 @@
-import React, { useState, useEffect } from 'react';
-import {
-  Card,
-  Input,
-  Button,
-  Space,
-  Typography,
-  Alert,
-  Spin,
-  Divider,
-  Row,
-  Col,
-  Tag,
-  Select,
-  Switch,
-  message,
-  Tabs,
-  Collapse
-} from 'antd';
-import { useNavigate } from 'react-router-dom';
-import { useTranslation } from 'react-i18next';
-import api, { testModelsApi } from '../../services/api';
-import {
-  PlayCircleOutlined,
-  ClearOutlined,
-  SettingOutlined,
-  PictureOutlined
-} from '@ant-design/icons';
-import ImageUpload from '../../components/ImageUpload/ImageUpload';
-
-const { TextArea } = Input;
-const { Title, Text, Paragraph } = Typography;
-const { Option } = Select;
+import React, { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
+import api, { testModelsApi } from '../../services/api'
+import { PlayCircle, X, Settings, Image as ImageIcon } from 'lucide-react'
+import ImageUpload from '../../components/ImageUpload/ImageUpload'
+import { Button } from '../../components/ui/button'
+import { Textarea } from '../../components/ui/textarea'
+import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
+import { Switch } from '../../components/ui/switch'
+import { Input } from '../../components/ui/input'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/tabs'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../../components/ui/collapsible'
+import { toast } from 'sonner'
+import { Separator } from '../../components/ui/separator'
 
 interface TestModel {
-  id: string;
-  config_name: string;
-  api_base_url: string;
-  model_name: string;
-  enabled: boolean;
-  selected: boolean;  // Whether it has been selected for online testing
-  user_model_name?: string;  // User-specified model name for testing
+  id: string
+  config_name: string
+  api_base_url: string
+  model_name: string
+  enabled: boolean
+  selected: boolean
+  user_model_name?: string
 }
 
 interface TestCase {
-  id: string;
-  name: string;
-  type: 'question' | 'qa_pair';
-  content: string;
-  expectedRisk?: string;
-  description?: string;
-  category?: string;
+  id: string
+  name: string
+  type: 'question' | 'qa_pair'
+  content: string
+  expectedRisk?: string
+  description?: string
+  category?: string
 }
 
 interface GuardrailResult {
   compliance: {
-    risk_level: string;
-    categories: string[];
-  };
+    risk_level: string
+    categories: string[]
+  }
   security: {
-    risk_level: string;
-    categories: string[];
-  };
+    risk_level: string
+    categories: string[]
+  }
   data?: {
-    risk_level: string;
-    categories: string[];
-  };
-  overall_risk_level: string;
-  suggest_action: string;
-  suggest_answer: string;
-  error?: string; // Add error information field
+    risk_level: string
+    categories: string[]
+  }
+  overall_risk_level: string
+  suggest_action: string
+  suggest_answer: string
+  error?: string
 }
 
 interface ModelResponse {
-  content: string;
-  error?: string;
+  content: string
+  error?: string
 }
 
 interface TestResult {
-  guardrail: GuardrailResult;
-  models: Record<string, ModelResponse>;
-  original_responses: Record<string, ModelResponse>;
+  guardrail: GuardrailResult
+  models: Record<string, ModelResponse>
+  original_responses: Record<string, ModelResponse>
 }
 
 const OnlineTest: React.FC = () => {
-  const { t } = useTranslation();
-  const navigate = useNavigate();
+  const { t } = useTranslation()
+  const navigate = useNavigate()
 
-  // Helper function to translate risk level
   const translateRiskLevel = (riskLevel: string) => {
     const riskLevelMap: { [key: string]: string } = {
-      'high_risk': t('risk.level.high_risk'),
-      'medium_risk': t('risk.level.medium_risk'),
-      'low_risk': t('risk.level.low_risk'),
-      'no_risk': t('risk.level.no_risk'),
-    };
-    return riskLevelMap[riskLevel] || riskLevel;
-  };
-  const [loading, setLoading] = useState(false);
-  const [testInput, setTestInput] = useState('');
-  const [inputType, setInputType] = useState<'question' | 'qa_pair'>('question');
-  const [testResult, setTestResult] = useState<TestResult | null>(null);
-  const [models, setModels] = useState<TestModel[]>([]);
-  const [modelSelectionChanged, setModelSelectionChanged] = useState(false);
-  const [uploadedImages, setUploadedImages] = useState<string[]>([]);
+      high_risk: t('risk.level.high_risk'),
+      medium_risk: t('risk.level.medium_risk'),
+      low_risk: t('risk.level.low_risk'),
+      no_risk: t('risk.level.no_risk'),
+    }
+    return riskLevelMap[riskLevel] || riskLevel
+  }
 
-  // 加载模型配置
+  const [loading, setLoading] = useState(false)
+  const [testInput, setTestInput] = useState('')
+  const [inputType, setInputType] = useState<'question' | 'qa_pair'>('question')
+  const [testResult, setTestResult] = useState<TestResult | null>(null)
+  const [models, setModels] = useState<TestModel[]>([])
+  const [uploadedImages, setUploadedImages] = useState<string[]>([])
+
   const loadModels = async () => {
     try {
-      const modelsData = await testModelsApi.getModels();
-      // Map model_name from backend to user_model_name in frontend
+      const modelsData = await testModelsApi.getModels()
       const mappedModels = modelsData.map((model: any) => ({
         ...model,
-        user_model_name: model.model_name || ''
-      }));
-      setModels(mappedModels);
+        user_model_name: model.model_name || '',
+      }))
+      setModels(mappedModels)
     } catch (error) {
-      console.error('Failed to load models:', error);
-      message.error(t('onlineTest.loadModelsFailed'));
+      console.error('Failed to load models:', error)
+      toast.error(t('onlineTest.loadModelsFailed'))
     }
-  };
+  }
 
-  // 更新模型选择
   const updateModelSelection = async (modelId: string, selected: boolean) => {
     try {
-      const newModels = models.map(model =>
-        model.id === modelId ? { ...model, selected } : model
-      );
-      setModels(newModels);
-      setModelSelectionChanged(true);
+      const newModels = models.map((model) => (model.id === modelId ? { ...model, selected } : model))
+      setModels(newModels)
 
-      // Save to backend with model_name
-      const selections = newModels.map(model => ({
+      const selections = newModels.map((model) => ({
         id: model.id,
         selected: model.selected,
-        model_name: model.user_model_name || null
-      }));
+        model_name: model.user_model_name || null,
+      }))
 
-      await testModelsApi.updateSelection(selections);
-      message.success(t('onlineTest.modelSelectionUpdated'));
-      setModelSelectionChanged(false);
+      await testModelsApi.updateSelection(selections)
+      toast.success(t('onlineTest.modelSelectionUpdated'))
     } catch (error) {
-      console.error('Failed to update model selection:', error);
-      message.error(t('onlineTest.loadModelsFailed'));
-      // Roll back local state
-      loadModels();
+      console.error('Failed to update model selection:', error)
+      toast.error(t('onlineTest.loadModelsFailed'))
+      loadModels()
     }
-  };
+  }
 
-  // 更新模型名称
   const updateModelName = async (modelId: string, modelName: string) => {
     try {
-      const newModels = models.map(model =>
-        model.id === modelId ? { ...model, user_model_name: modelName } : model
-      );
-      setModels(newModels);
+      const newModels = models.map((model) => (model.id === modelId ? { ...model, user_model_name: modelName } : model))
+      setModels(newModels)
 
-      // Save to backend
-      const selections = newModels.map(model => ({
+      const selections = newModels.map((model) => ({
         id: model.id,
         selected: model.selected,
-        model_name: model.user_model_name || null
-      }));
+        model_name: model.user_model_name || null,
+      }))
 
-      await testModelsApi.updateSelection(selections);
+      await testModelsApi.updateSelection(selections)
     } catch (error) {
-      console.error('Failed to update model name:', error);
-      message.error(t('onlineTest.updateModelNameFailed'));
-      // Roll back local state
-      loadModels();
+      console.error('Failed to update model name:', error)
+      toast.error(t('onlineTest.updateModelNameFailed'))
+      loadModels()
     }
-  };
+  }
 
-  // 组件挂载时加载模型配置
   useEffect(() => {
-    loadModels();
-  }, []);
+    loadModels()
+  }, [])
 
-  // Preset test cases
-  // Organized test cases by category
   const testCasesByCategory = {
     security: [
       {
@@ -187,7 +152,7 @@ const OnlineTest: React.FC = () => {
         content: t('onlineTest.testCases.promptAttackContent'),
         expectedRisk: t('risk.level.high_risk'),
         description: t('onlineTest.promptAttackExampleDesc'),
-        category: 'S9'
+        category: 'S9',
       },
       {
         id: 's5-1',
@@ -196,7 +161,7 @@ const OnlineTest: React.FC = () => {
         content: t('onlineTest.testCases.violentCrimeContent'),
         expectedRisk: t('risk.level.high_risk'),
         description: t('onlineTest.violentCrimeContentDesc'),
-        category: 'S5'
+        category: 'S5',
       },
       {
         id: 's7-1',
@@ -205,7 +170,7 @@ const OnlineTest: React.FC = () => {
         content: t('onlineTest.testCases.pornographicContent'),
         expectedRisk: t('risk.level.medium_risk'),
         description: t('onlineTest.pornographicContentDesc'),
-        category: 'S7'
+        category: 'S7',
       },
       {
         id: 's8-1',
@@ -214,8 +179,8 @@ const OnlineTest: React.FC = () => {
         content: t('onlineTest.testCases.discriminatoryContent'),
         expectedRisk: t('risk.level.low_risk'),
         description: t('onlineTest.discriminatoryContentDesc'),
-        category: 'S8'
-      }
+        category: 'S8',
+      },
     ],
     dataLeak: [
       {
@@ -225,7 +190,7 @@ const OnlineTest: React.FC = () => {
         content: t('onlineTest.testCases.dataLeakIdentityContent'),
         expectedRisk: t('risk.level.high_risk'),
         description: t('onlineTest.dataLeakIdentityDesc'),
-        category: 'Data'
+        category: 'Data',
       },
       {
         id: 'd-2',
@@ -234,7 +199,7 @@ const OnlineTest: React.FC = () => {
         content: t('onlineTest.testCases.dataLeakBankingContent'),
         expectedRisk: t('risk.level.high_risk'),
         description: t('onlineTest.dataLeakBankingDesc'),
-        category: 'Data'
+        category: 'Data',
       },
       {
         id: 'd-3',
@@ -243,8 +208,8 @@ const OnlineTest: React.FC = () => {
         content: t('onlineTest.testCases.dataLeakEmailContent'),
         expectedRisk: t('risk.level.low_risk'),
         description: t('onlineTest.dataLeakEmailDesc'),
-        category: 'Data'
-      }
+        category: 'Data',
+      },
     ],
     professional: [
       {
@@ -254,7 +219,7 @@ const OnlineTest: React.FC = () => {
         content: t('onlineTest.testCases.financialAdviceContent'),
         expectedRisk: t('risk.level.low_risk'),
         description: t('onlineTest.financialAdviceDesc'),
-        category: 'S19'
+        category: 'S19',
       },
       {
         id: 's20-1',
@@ -263,7 +228,7 @@ const OnlineTest: React.FC = () => {
         content: t('onlineTest.testCases.medicalAdviceContent'),
         expectedRisk: t('risk.level.low_risk'),
         description: t('onlineTest.medicalAdviceDesc'),
-        category: 'S20'
+        category: 'S20',
       },
       {
         id: 's21-1',
@@ -272,8 +237,8 @@ const OnlineTest: React.FC = () => {
         content: t('onlineTest.testCases.legalAdviceContent'),
         expectedRisk: t('risk.level.low_risk'),
         description: t('onlineTest.legalAdviceDesc'),
-        category: 'S21'
-      }
+        category: 'S21',
+      },
     ],
     safe: [
       {
@@ -283,131 +248,109 @@ const OnlineTest: React.FC = () => {
         content: t('onlineTest.testCases.safeQaPairContent'),
         expectedRisk: t('risk.level.no_risk'),
         description: t('onlineTest.safeQaPairDesc'),
-        category: 'Safe'
-      }
-    ]
-  };
+        category: 'Safe',
+      },
+    ],
+  }
 
-  // Flatten all test cases for backward compatibility
-  const testCases: TestCase[] = [
-    ...testCasesByCategory.security,
-    ...testCasesByCategory.dataLeak,
-    ...testCasesByCategory.professional,
-    ...testCasesByCategory.safe
-  ];
+  const testCases: TestCase[] = [...testCasesByCategory.security, ...testCasesByCategory.dataLeak, ...testCasesByCategory.professional, ...testCasesByCategory.safe]
 
-  // Execute test
   const runTest = async () => {
     if (!testInput.trim() && uploadedImages.length === 0) {
-      message.warning(t('onlineTest.pleaseEnterTestContent'));
-      return;
+      toast.warning(t('onlineTest.pleaseEnterTestContent'))
+      return
     }
 
-    setLoading(true);
+    setLoading(true)
     try {
-      // Construct message format
-      let messages;
-      let content: any[] = []; // Promote scope to function top
+      let messages
+      let content: any[] = []
 
       if (inputType === 'question') {
-        // Construct multi-modal content
-        // Add text content (if any)
         if (testInput.trim()) {
-          content.push({ type: 'text', text: testInput });
+          content.push({ type: 'text', text: testInput })
         }
 
-        // Add image content
-        uploadedImages.forEach(base64Image => {
+        uploadedImages.forEach((base64Image) => {
           content.push({
             type: 'image_url',
-            image_url: { url: base64Image }
-          });
-        });
+            image_url: { url: base64Image },
+          })
+        })
 
-        // If there is only text, use simple format; if there are images, use multi-modal format
         if (uploadedImages.length > 0) {
-          messages = [{ role: 'user', content }];
+          messages = [{ role: 'user', content }]
         } else {
-          messages = [{ role: 'user', content: testInput }];
+          messages = [{ role: 'user', content: testInput }]
         }
       } else {
-        // Q&A pair mode (images not supported yet)
-        const lines = testInput.split('\n');
-        const question = lines.find(line => line.startsWith('Q:'))?.substring(2).trim();
-        const answer = lines.find(line => line.startsWith('A:'))?.substring(2).trim();
+        const lines = testInput.split('\n')
+        const question = lines.find((line) => line.startsWith('Q:'))?.substring(2).trim()
+        const answer = lines.find((line) => line.startsWith('A:'))?.substring(2).trim()
 
         if (!question || !answer) {
-          message.error(t('onlineTest.qaPairFormatError'));
-          return;
+          toast.error(t('onlineTest.qaPairFormatError'))
+          return
         }
 
         messages = [
           { role: 'user', content: question },
-          { role: 'assistant', content: answer }
-        ];
+          { role: 'assistant', content: answer },
+        ]
       }
 
-      // Check if there are images, decide which API and model to use
-      const hasImages = uploadedImages.length > 0;
-      let response;
+      const hasImages = uploadedImages.length > 0
+      let response
 
       if (hasImages) {
-        // With images: Call guardrail detection via online test API, using VL model
         const requestData = {
           content: testInput,
           input_type: inputType,
-          images: uploadedImages // Add image data
-        };
+          images: uploadedImages,
+        }
 
-        response = await api.post('/api/v1/test/online', requestData);
+        response = await api.post('/api/v1/test/online', requestData)
 
-        // Use unified online test result format
         setTestResult({
           guardrail: response.data.guardrail,
           models: response.data.models || {},
-          original_responses: response.data.original_responses || {}
-        });
+          original_responses: response.data.original_responses || {},
+        })
       } else {
-        // Pure text: Use original online test API
-        const selectedModels = models.filter(m => m.selected);
+        const selectedModels = models.filter((m) => m.selected)
         if (inputType === 'question' && selectedModels.length === 0) {
-          message.info(t('onlineTest.proxyModelHint'));
+          toast.info(t('onlineTest.proxyModelHint'))
         }
 
         const requestData = {
           content: testInput,
-          input_type: inputType
-        };
+          input_type: inputType,
+        }
 
-        response = await api.post('/api/v1/test/online', requestData);
+        response = await api.post('/api/v1/test/online', requestData)
 
         setTestResult({
           guardrail: response.data.guardrail,
           models: response.data.models || {},
-          original_responses: response.data.original_responses || {}
-        });
+          original_responses: response.data.original_responses || {},
+        })
       }
-
     } catch (error: any) {
-      console.error('Test failed:', error);
-      const errorMessage = error?.response?.data?.detail || error?.message || t('onlineTest.testExecutionFailed');
-      const status = error?.response?.status;
+      console.error('Test failed:', error)
+      const errorMessage = error?.response?.data?.detail || error?.message || t('onlineTest.testExecutionFailed')
+      const status = error?.response?.status
 
-      // For specific HTTP errors, display in guardrail results
       if (status === 408 || status === 429 || status === 401 || status === 500) {
-        let displayMessage = errorMessage;
+        let displayMessage = errorMessage
 
-        // Add more friendly descriptions for specific error statuses
         if (status === 401) {
-          displayMessage = t('onlineTest.apiAuthFailed');
+          displayMessage = t('onlineTest.apiAuthFailed')
         } else if (status === 408) {
-          // 408 is timeout error, display specific timeout info
-          displayMessage = errorMessage;
+          displayMessage = errorMessage
         } else if (status === 429) {
-          // 429 is rate limit error, don't override backend's specific rate limit info
-          displayMessage = errorMessage;
+          displayMessage = errorMessage
         } else if (status === 500) {
-          displayMessage = t('onlineTest.serverError');
+          displayMessage = t('onlineTest.serverError')
         }
 
         setTestResult({
@@ -417,669 +360,485 @@ const OnlineTest: React.FC = () => {
             overall_risk_level: t('onlineTest.testFailed'),
             suggest_action: t('onlineTest.testFailed'),
             suggest_answer: '',
-            error: displayMessage
+            error: displayMessage,
           },
           models: {},
-          original_responses: {}
-        });
+          original_responses: {},
+        })
       } else {
-        // Other errors (like network errors) still use popup notifications
-        // Check if it's an axios timeout error
         if (error.code === 'ECONNABORTED' || errorMessage.includes('timeout')) {
-          message.error(t('onlineTest.requestTimeout'));
+          toast.error(t('onlineTest.requestTimeout'))
         } else {
-          message.error(`${t('onlineTest.testExecutionFailed')}: ${errorMessage}`);
+          toast.error(`${t('onlineTest.testExecutionFailed')}: ${errorMessage}`)
         }
       }
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }
 
-  // Clear input
   const clearInput = () => {
-    setTestInput('');
-    setTestResult(null);
-    setUploadedImages([]);
-  };
+    setTestInput('')
+    setTestResult(null)
+    setUploadedImages([])
+  }
 
-  // Handle image upload
   const handleImageChange = (base64Images: string[]) => {
-    setUploadedImages(base64Images);
-  };
+    setUploadedImages(base64Images)
+  }
 
-  // Use preset test case
   const useTestCase = (testCase: TestCase) => {
-    setTestInput(testCase.content);
-    setInputType(testCase.type);
-    message.success(t('onlineTest.testCaseLoaded', { name: testCase.name }));
-  };
-
+    setTestInput(testCase.content)
+    setInputType(testCase.type)
+    toast.success(t('onlineTest.testCaseLoaded', { name: testCase.name }))
+  }
 
   const getRiskColor = (level: string) => {
-    // The backend returns standardized English values, directly match
     switch (level) {
       case 'high_risk':
-        return 'red';
+        return 'bg-red-100 text-red-800 border-red-200'
       case 'medium_risk':
-        return 'orange';
+        return 'bg-orange-100 text-orange-800 border-orange-200'
       case 'low_risk':
-        return 'yellow';
+        return 'bg-yellow-100 text-yellow-800 border-yellow-200'
       case 'no_risk':
       case 'safe':
-        return 'green';
+        return 'bg-green-100 text-green-800 border-green-200'
       case 'test_failed':
       case 'detection_failed':
       case 'error':
-        return 'red';
-      default: 
-        return 'default';
+        return 'bg-red-100 text-red-800 border-red-200'
+      default:
+        return 'bg-gray-100 text-gray-800 border-gray-200'
     }
-  };
+  }
 
   const getActionColor = (action: string) => {
-    // The backend returns standardized English values, directly match
     switch (action) {
       case 'reject':
-        return 'red';
+        return 'bg-red-100 text-red-800 border-red-200'
       case 'replace':
-        return 'orange';
+        return 'bg-orange-100 text-orange-800 border-orange-200'
       case 'pass':
-        return 'green';
+        return 'bg-green-100 text-green-800 border-green-200'
       case 'test_failed':
       case 'error':
       case 'system_error':
-        return 'red';
-      default: 
-        return 'default';
+        return 'bg-red-100 text-red-800 border-red-200'
+      default:
+        return 'bg-gray-100 text-gray-800 border-gray-200'
     }
-  };
+  }
 
   return (
     <div>
-      <Title level={2}>{t('onlineTest.title')}</Title>
-      <Paragraph>{t('onlineTest.description')}</Paragraph>
+      <h1 className="text-2xl font-bold mb-2">{t('onlineTest.title')}</h1>
+      <p className="text-slate-600 mb-6">{t('onlineTest.description')}</p>
 
-      <Row gutter={[24, 24]}>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left side: Test input area */}
-        <Col span={16}>
-          <Card title={t('onlineTest.testInput')} extra={
-            <Space>
-              <Select value={inputType} onChange={setInputType} style={{ width: 120 }}>
-                <Option value="question">{t('onlineTest.singleQuestion')}</Option>
-                <Option value="qa_pair">{t('onlineTest.qaPair')}</Option>
-              </Select>
-              <Button
-                icon={<SettingOutlined />}
-                onClick={() => navigate('/security-gateway')}
-              >
-                {t('onlineTest.manageProxyModels')}
-              </Button>
-            </Space>
-          }>
-            <Space direction="vertical" style={{ width: '100%' }} size="large">
-              <div>
-                <TextArea
-                  value={testInput}
-                  onChange={(e) => setTestInput(e.target.value)}
-                  placeholder={
-                    inputType === 'question'
-                      ? t('onlineTest.questionPlaceholder')
-                      : t('onlineTest.qaPairPlaceholder')
-                  }
-                  rows={6}
-                />
+        <div className="lg:col-span-2 space-y-6">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle>{t('onlineTest.testInput')}</CardTitle>
+                <div className="flex items-center gap-2">
+                  <Select value={inputType} onValueChange={(value: 'question' | 'qa_pair') => setInputType(value)}>
+                    <SelectTrigger className="w-32">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="question">{t('onlineTest.singleQuestion')}</SelectItem>
+                      <SelectItem value="qa_pair">{t('onlineTest.qaPair')}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button variant="outline" size="sm" onClick={() => navigate('/security-gateway')}>
+                    <Settings className="h-4 w-4 mr-2" />
+                    {t('onlineTest.manageProxyModels')}
+                  </Button>
+                </div>
               </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <Textarea
+                value={testInput}
+                onChange={(e) => setTestInput(e.target.value)}
+                placeholder={inputType === 'question' ? t('onlineTest.questionPlaceholder') : t('onlineTest.qaPairPlaceholder')}
+                rows={6}
+                className="font-mono text-sm"
+              />
 
-              {/* Image upload area - temporarily hidden */}
+              {/* Image upload - temporarily hidden */}
               {false && inputType === 'question' && (
-                <Card
-                  title={
-                    <Space>
-                      <PictureOutlined />
+                <Card className="bg-slate-50">
+                  <CardHeader>
+                    <CardTitle className="text-sm flex items-center gap-2">
+                      <ImageIcon className="h-4 w-4" />
                       {t('onlineTest.imageDetectionOptional')}
-                    </Space>
-                  }
-                  size="small"
-                >
-                  <ImageUpload
-                    onChange={handleImageChange}
-                    maxCount={5}
-                    maxSize={10}
-                  />
-                  {uploadedImages.length > 0 && (
-                    <Alert
-                      message={t('onlineTest.imagesSelected', { count: uploadedImages.length })}
-                      type="success"
-                      showIcon
-                      style={{ marginTop: 12 }}
-                    />
-                  )}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <ImageUpload onChange={handleImageChange} maxCount={5} maxSize={10} />
+                    {uploadedImages.length > 0 && (
+                      <div className="mt-3 p-2 bg-green-50 border border-green-200 rounded-md text-sm text-green-800">{t('onlineTest.imagesSelected', { count: uploadedImages.length })}</div>
+                    )}
+                  </CardContent>
                 </Card>
               )}
 
-              {/* Proxy model selection - only shown for single question type */}
+              {/* Proxy model selection */}
               {inputType === 'question' && (
                 <div>
-                  <Title level={5} style={{ marginBottom: 12 }}>{t('onlineTest.selectTestModels')}</Title>
+                  <h4 className="text-sm font-medium mb-3">{t('onlineTest.selectTestModels')}</h4>
                   {models.length === 0 ? (
-                    <Alert
-                      message={t('onlineTest.noProxyModels')}
-                      description={
-                        <span>
-                          {t('onlineTest.noProxyModelsDesc').split(t('onlineTest.securityGateway'))[0]}
-                          <Button
-                            type="link"
-                            size="small"
-                            onClick={() => navigate('/security-gateway')}
-                            style={{ padding: 0, margin: '0 4px' }}
-                          >
-                            {t('onlineTest.securityGateway')}
-                          </Button>
-                          {t('onlineTest.noProxyModelsDesc').split(t('onlineTest.securityGateway'))[1]}
-                        </span>
-                      }
-                      type="info"
-                      showIcon
-                      style={{ marginBottom: 16 }}
-                    />
+                    <div className="p-4 bg-blue-50 border border-blue-200 rounded-md">
+                      <div className="flex items-start gap-2">
+                        <div className="flex-shrink-0 mt-0.5">
+                          <div className="h-5 w-5 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs">i</div>
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-blue-900">{t('onlineTest.noProxyModels')}</p>
+                          <p className="text-sm text-blue-700 mt-1">
+                            {t('onlineTest.noProxyModelsDesc').split(t('onlineTest.securityGateway'))[0]}
+                            <Button variant="link" size="sm" className="h-auto p-0 text-blue-600" onClick={() => navigate('/security-gateway')}>
+                              {t('onlineTest.securityGateway')}
+                            </Button>
+                            {t('onlineTest.noProxyModelsDesc').split(t('onlineTest.securityGateway'))[1]}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
                   ) : (
-                    <Collapse
-                      defaultActiveKey={models.filter(m => m.selected).map(m => m.id)}
-                      style={{ backgroundColor: '#fafafa' }}
-                    >
+                    <div className="space-y-2">
                       {models.map((model) => (
-                        <Collapse.Panel
-                          key={model.id}
-                          header={
-                            <div style={{ 
-                              display: 'flex', 
-                              justifyContent: 'space-between',
-                              alignItems: 'center',
-                              width: '100%'
-                            }}>
-                              <div style={{ flex: 1, marginRight: 12 }}>
-                                <Space>
-                                  <span style={{ fontWeight: 500 }}>{model.config_name}</span>
-                                  {model.selected && (
-                                    <Tag color="blue" style={{ margin: 0 }}>
-                                      {t('onlineTest.selected')}
-                                    </Tag>
-                                  )}
-                                </Space>
-                              </div>
-                              <Switch
-                                checked={model.selected}
-                                onChange={(checked) => {
-                                  updateModelSelection(model.id, checked);
-                                }}
-                                onClick={(checked, e) => {
-                                  e.stopPropagation(); // 防止触发折叠面板的展开/收起
-                                }}
-                                size="small"
-                              />
-                            </div>
-                          }
-                        >
-                          <div style={{ padding: '12px 0' }}>
-                            <Space direction="vertical" style={{ width: '100%' }} size="middle">
-                              <div>
-                                <Text type="secondary" style={{ fontSize: '12px', display: 'block', marginBottom: 4 }}>
-                                  {t('onlineTest.apiBaseUrl')}
-                                </Text>
-                                <Text style={{ fontSize: '13px' }}>{model.api_base_url}</Text>
-                              </div>
-                              
-                              {model.selected && (
-                                <div>
-                                  <Text type="secondary" style={{ fontSize: '12px', display: 'block', marginBottom: 4 }}>
-                                    {t('onlineTest.modelNameLabel')}
-                                  </Text>
-                                  <Input
-                                    size="small"
-                                    placeholder={t('onlineTest.modelNamePlaceholder')}
-                                    value={model.user_model_name}
-                                    onChange={(e) => updateModelName(model.id, e.target.value)}
-                                    onBlur={(e) => updateModelName(model.id, e.target.value)}
-                                    style={{ width: '100%' }}
+                        <Collapsible key={model.id} defaultOpen={model.selected}>
+                          <Card className="bg-slate-50">
+                            <CollapsibleTrigger className="w-full">
+                              <CardHeader className="py-3">
+                                <div className="flex items-center justify-between w-full">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-medium text-sm">{model.config_name}</span>
+                                    {model.selected && <span className="px-2 py-0.5 text-xs rounded bg-blue-100 text-blue-800 border border-blue-200">{t('onlineTest.selected')}</span>}
+                                  </div>
+                                  <Switch
+                                    checked={model.selected}
+                                    onCheckedChange={(checked) => {
+                                      updateModelSelection(model.id, checked)
+                                    }}
+                                    onClick={(e) => e.stopPropagation()}
                                   />
                                 </div>
-                              )}
-                            </Space>
-                          </div>
-                        </Collapse.Panel>
+                              </CardHeader>
+                            </CollapsibleTrigger>
+                            <CollapsibleContent>
+                              <CardContent className="pt-0 pb-3 space-y-3">
+                                <div>
+                                  <p className="text-xs text-slate-500 mb-1">{t('onlineTest.apiBaseUrl')}</p>
+                                  <p className="text-xs text-slate-700">{model.api_base_url}</p>
+                                </div>
+
+                                {model.selected && (
+                                  <div>
+                                    <p className="text-xs text-slate-500 mb-1">{t('onlineTest.modelNameLabel')}</p>
+                                    <Input
+                                      size={1}
+                                      placeholder={t('onlineTest.modelNamePlaceholder')}
+                                      value={model.user_model_name}
+                                      onChange={(e) => updateModelName(model.id, e.target.value)}
+                                      onBlur={(e) => updateModelName(model.id, e.target.value)}
+                                      className="h-8 text-xs"
+                                    />
+                                  </div>
+                                )}
+                              </CardContent>
+                            </CollapsibleContent>
+                          </Card>
+                        </Collapsible>
                       ))}
-                    </Collapse>
+                    </div>
                   )}
-                  {models.filter(m => m.selected).length > 0 && (
-                    <Text style={{ fontSize: '12px', color: '#1890ff' }}>
-                      {t('onlineTest.selectedModels', { count: models.filter(m => m.selected).length })}
-                    </Text>
+                  {models.filter((m) => m.selected).length > 0 && (
+                    <p className="text-xs text-blue-600 mt-2">{t('onlineTest.selectedModels', { count: models.filter((m) => m.selected).length })}</p>
                   )}
                 </div>
               )}
 
-              <Space>
-                <Button
-                  type="primary"
-                  icon={<PlayCircleOutlined />}
-                  onClick={runTest}
-                  loading={loading}
-                  size="large"
-                >
-                  {t('onlineTest.runTest')}
+              <div className="flex gap-2">
+                <Button onClick={runTest} disabled={loading} size="lg" className="bg-blue-600 hover:bg-blue-700">
+                  {loading ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
+                      {t('onlineTest.runTest')}
+                    </>
+                  ) : (
+                    <>
+                      <PlayCircle className="h-4 w-4 mr-2" />
+                      {t('onlineTest.runTest')}
+                    </>
+                  )}
                 </Button>
-                <Button
-                  icon={<ClearOutlined />}
-                  onClick={clearInput}
-                  size="large"
-                >
+                <Button variant="outline" onClick={clearInput} size="lg">
+                  <X className="h-4 w-4 mr-2" />
                   {t('onlineTest.clear')}
                 </Button>
-              </Space>
-            </Space>
+              </div>
+            </CardContent>
           </Card>
 
           {/* Test Result */}
           {testResult && (
-            <Card title={t('onlineTest.testResult')} style={{ marginTop: 24 }}>
-              <Spin spinning={loading}>
-                <Space direction="vertical" style={{ width: '100%' }} size="large">
-                  {/* Guardrail detection result */}
-                  <div>
-                    <Title level={4}>{t('onlineTest.guardrailResult')}</Title>
+            <Card>
+              <CardHeader>
+                <CardTitle>{t('onlineTest.testResult')}</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {/* Guardrail detection result */}
+                <div>
+                  <h4 className="text-base font-semibold mb-4">{t('onlineTest.guardrailResult')}</h4>
 
-                    {/* If there's an error message, display error first */}
-                    {testResult.guardrail.error ? (
-                      <Alert
-                        message={t('onlineTest.detectionFailed')}
-                        description={
-                          <div>
-                            <Text strong>{t('onlineTest.failureReason')}</Text>
-                            <br />
-                            <Text>{testResult.guardrail.error}</Text>
+                  {testResult.guardrail.error ? (
+                    <div className="p-4 bg-red-50 border border-red-200 rounded-md">
+                      <div className="flex items-start gap-2">
+                        <div className="flex-shrink-0 mt-0.5">
+                          <div className="h-5 w-5 rounded-full bg-red-500 flex items-center justify-center text-white text-xs">!</div>
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-red-900">{t('onlineTest.detectionFailed')}</p>
+                          <div className="text-sm text-red-700 mt-2">
+                            <p className="font-semibold">{t('onlineTest.failureReason')}</p>
+                            <p>{testResult.guardrail.error}</p>
                           </div>
-                        }
-                        type="error"
-                        showIcon
-                        style={{ marginBottom: 16 }}
-                      />
-                    ) : (
-                      <>
-                        <Row gutter={16}>
-                          <Col span={8}>
-                            <Card size="small" title={t('onlineTest.securityRisk')}>
-                              <Space direction="vertical">
-                                <div>
-                                  <Text>{t('onlineTest.riskLevel')} </Text>
-                                  <Tag color={getRiskColor(testResult.guardrail.security?.risk_level)}>
-                                    {translateRiskLevel(testResult.guardrail.security?.risk_level || 'no_risk')}
-                                  </Tag>
-                                </div>
-                                {testResult.guardrail.security?.categories?.length > 0 && (
-                                  <div>
-                                    <Text>{t('onlineTest.riskCategory')} </Text>
-                                    {testResult.guardrail.security.categories.map((cat, idx) => (
-                                      <Tag key={idx} color="red">{cat}</Tag>
-                                    ))}
-                                  </div>
-                                )}
-                              </Space>
-                            </Card>
-                          </Col>
-                          <Col span={8}>
-                            <Card size="small" title={t('onlineTest.complianceRisk')}>
-                              <Space direction="vertical">
-                                <div>
-                                  <Text>{t('onlineTest.riskLevel')} </Text>
-                                  <Tag color={getRiskColor(testResult.guardrail.compliance?.risk_level)}>
-                                    {translateRiskLevel(testResult.guardrail.compliance?.risk_level || 'no_risk')}
-                                  </Tag>
-                                </div>
-                                {testResult.guardrail.compliance?.categories?.length > 0 && (
-                                  <div>
-                                    <Text>{t('onlineTest.riskCategory')} </Text>
-                                    {testResult.guardrail.compliance.categories.map((cat, idx) => (
-                                      <Tag key={idx} color="orange">{cat}</Tag>
-                                    ))}
-                                  </div>
-                                )}
-                              </Space>
-                            </Card>
-                          </Col>
-                          <Col span={8}>
-                            <Card size="small" title={t('onlineTest.dataLeak')}>
-                              <Space direction="vertical">
-                                <div>
-                                  <Text>{t('onlineTest.riskLevel')} </Text>
-                                  <Tag color={getRiskColor(testResult.guardrail.data?.risk_level || 'no_risk')}>
-                                    {translateRiskLevel(testResult.guardrail.data?.risk_level || 'no_risk')}
-                                  </Tag>
-                                </div>
-                                {testResult.guardrail.data?.categories && testResult.guardrail.data.categories.length > 0 && (
-                                  <div>
-                                    <Text>{t('onlineTest.riskCategory')} </Text>
-                                    {testResult.guardrail.data.categories.map((cat, idx) => (
-                                      <Tag key={idx} color="purple">{cat}</Tag>
-                                    ))}
-                                  </div>
-                                )}
-                              </Space>
-                            </Card>
-                          </Col>
-                        </Row>
-
-                        <Divider />
-
-                        <Row gutter={16}>
-                          <Col span={8}>
-                            <Text>{t('onlineTest.overallRiskLevel')} </Text>
-                            <Tag color={getRiskColor(testResult.guardrail.overall_risk_level)}>
-                              <strong>{translateRiskLevel(testResult.guardrail.overall_risk_level)}</strong>
-                            </Tag>
-                          </Col>
-                          <Col span={8}>
-                            <Text>{t('onlineTest.suggestedAction')} </Text>
-                            <Tag color={getActionColor(testResult.guardrail.suggest_action)}>
-                              <strong>{testResult.guardrail.suggest_action}</strong>
-                            </Tag>
-                          </Col>
-                          <Col span={8}>
-                            {testResult.guardrail.suggest_answer && (
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                        <Card>
+                          <CardHeader>
+                            <CardTitle className="text-sm">{t('onlineTest.securityRisk')}</CardTitle>
+                          </CardHeader>
+                          <CardContent className="space-y-2">
+                            <div>
+                              <span className="text-xs text-slate-600">{t('onlineTest.riskLevel')}: </span>
+                              <span className={`inline-block px-2 py-0.5 text-xs rounded border ${getRiskColor(testResult.guardrail.security?.risk_level)}`}>
+                                {translateRiskLevel(testResult.guardrail.security?.risk_level || 'no_risk')}
+                              </span>
+                            </div>
+                            {testResult.guardrail.security?.categories?.length > 0 && (
                               <div>
-                                <Text>{t('onlineTest.suggestedAnswer')} </Text>
-                                <Text code>{testResult.guardrail.suggest_answer}</Text>
+                                <span className="text-xs text-slate-600">{t('onlineTest.riskCategory')}: </span>
+                                <div className="flex flex-wrap gap-1 mt-1">
+                                  {testResult.guardrail.security.categories.map((cat, idx) => (
+                                    <span key={idx} className="px-2 py-0.5 text-xs rounded bg-red-100 text-red-800 border border-red-200">
+                                      {cat}
+                                    </span>
+                                  ))}
+                                </div>
                               </div>
                             )}
-                          </Col>
-                        </Row>
-                      </>
-                    )}
-                  </div>
+                          </CardContent>
+                        </Card>
 
-                  {/* Proxy model original response results - only shown for single question type */}
-                  {inputType === 'question' && Object.keys(testResult.original_responses).length > 0 && (
-                    <div>
-                      <Title level={4}>{t('onlineTest.proxyModelOriginalResponse')}</Title>
-                      <Alert
-                        message={t('onlineTest.proxyModelOriginalResponseDesc')}
-                        type="info"
-                        style={{ marginBottom: 16 }}
-                        showIcon
-                      />
+                        <Card>
+                          <CardHeader>
+                            <CardTitle className="text-sm">{t('onlineTest.complianceRisk')}</CardTitle>
+                          </CardHeader>
+                          <CardContent className="space-y-2">
+                            <div>
+                              <span className="text-xs text-slate-600">{t('onlineTest.riskLevel')}: </span>
+                              <span className={`inline-block px-2 py-0.5 text-xs rounded border ${getRiskColor(testResult.guardrail.compliance?.risk_level)}`}>
+                                {translateRiskLevel(testResult.guardrail.compliance?.risk_level || 'no_risk')}
+                              </span>
+                            </div>
+                            {testResult.guardrail.compliance?.categories?.length > 0 && (
+                              <div>
+                                <span className="text-xs text-slate-600">{t('onlineTest.riskCategory')}: </span>
+                                <div className="flex flex-wrap gap-1 mt-1">
+                                  {testResult.guardrail.compliance.categories.map((cat, idx) => (
+                                    <span key={idx} className="px-2 py-0.5 text-xs rounded bg-orange-100 text-orange-800 border border-orange-200">
+                                      {cat}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </CardContent>
+                        </Card>
+
+                        <Card>
+                          <CardHeader>
+                            <CardTitle className="text-sm">{t('onlineTest.dataLeak')}</CardTitle>
+                          </CardHeader>
+                          <CardContent className="space-y-2">
+                            <div>
+                              <span className="text-xs text-slate-600">{t('onlineTest.riskLevel')}: </span>
+                              <span className={`inline-block px-2 py-0.5 text-xs rounded border ${getRiskColor(testResult.guardrail.data?.risk_level || 'no_risk')}`}>
+                                {translateRiskLevel(testResult.guardrail.data?.risk_level || 'no_risk')}
+                              </span>
+                            </div>
+                            {testResult.guardrail.data?.categories && testResult.guardrail.data.categories.length > 0 && (
+                              <div>
+                                <span className="text-xs text-slate-600">{t('onlineTest.riskCategory')}: </span>
+                                <div className="flex flex-wrap gap-1 mt-1">
+                                  {testResult.guardrail.data.categories.map((cat, idx) => (
+                                    <span key={idx} className="px-2 py-0.5 text-xs rounded bg-purple-100 text-purple-800 border border-purple-200">
+                                      {cat}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </CardContent>
+                        </Card>
+                      </div>
+
+                      <Separator />
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                          <span className="text-sm text-slate-600">{t('onlineTest.overallRiskLevel')}: </span>
+                          <span className={`inline-block px-2 py-1 text-sm font-semibold rounded border ${getRiskColor(testResult.guardrail.overall_risk_level)}`}>
+                            {translateRiskLevel(testResult.guardrail.overall_risk_level)}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-sm text-slate-600">{t('onlineTest.suggestedAction')}: </span>
+                          <span className={`inline-block px-2 py-1 text-sm font-semibold rounded border ${getActionColor(testResult.guardrail.suggest_action)}`}>{testResult.guardrail.suggest_action}</span>
+                        </div>
+                        <div>
+                          {testResult.guardrail.suggest_answer && (
+                            <div>
+                              <span className="text-sm text-slate-600">{t('onlineTest.suggestedAnswer')}: </span>
+                              <code className="text-xs bg-slate-100 px-2 py-1 rounded">{testResult.guardrail.suggest_answer}</code>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Proxy model original responses */}
+                {inputType === 'question' && Object.keys(testResult.original_responses).length > 0 && (
+                  <div>
+                    <h4 className="text-base font-semibold mb-3">{t('onlineTest.proxyModelOriginalResponse')}</h4>
+                    <div className="p-3 bg-blue-50 border border-blue-200 rounded-md mb-4 text-sm text-blue-800">{t('onlineTest.proxyModelOriginalResponseDesc')}</div>
+                    <div className="space-y-3">
                       {Object.entries(testResult.original_responses).map(([modelId, response]) => {
-                        const model = models.find(m => m.id === modelId);
+                        const model = models.find((m) => m.id === modelId)
                         return (
-                          <Card key={modelId} size="small" title={model?.config_name || `Model ${modelId}`} style={{ marginBottom: 8 }}>
-                            {response.error ? (
-                              <Alert message={response.error} type="error" />
-                            ) : response.content ? (
-                              <div>
-                                <Text strong>{t('onlineTest.originalResponse')}</Text>
-                                <br />
-                                <div style={{
-                                  backgroundColor: '#f8f9fa',
-                                  padding: '12px',
-                                  borderRadius: '6px',
-                                  marginTop: '8px',
-                                  border: '1px solid #e9ecef',
-                                  whiteSpace: 'pre-wrap'
-                                }}>
-                                  <Text>{response.content}</Text>
+                          <Card key={modelId}>
+                            <CardHeader>
+                              <CardTitle className="text-sm">{model?.config_name || `Model ${modelId}`}</CardTitle>
+                            </CardHeader>
+                            <CardContent>
+                              {response.error ? (
+                                <div className="p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-800">{response.error}</div>
+                              ) : response.content ? (
+                                <div>
+                                  <p className="text-xs font-semibold text-slate-700 mb-2">{t('onlineTest.originalResponse')}</p>
+                                  <div className="bg-slate-50 p-3 rounded-md border border-slate-200">
+                                    <p className="text-sm whitespace-pre-wrap">{response.content}</p>
+                                  </div>
                                 </div>
-                              </div>
-                            ) : (
-                              <Text type="secondary">{t('onlineTest.emptyResponse')}</Text>
-                            )}
+                              ) : (
+                                <p className="text-sm text-slate-500">{t('onlineTest.emptyResponse')}</p>
+                              )}
+                            </CardContent>
                           </Card>
-                        );
+                        )
                       })}
                     </div>
-                  )}
+                  </div>
+                )}
 
-                  {/* Model response results */}
-                  {Object.keys(testResult.models).length > 0 && (
-                    <div>
-                      <Title level={4}>{t('onlineTest.proxyModelProtectedResponse')}</Title>
+                {/* Model protected responses */}
+                {Object.keys(testResult.models).length > 0 && (
+                  <div>
+                    <h4 className="text-base font-semibold mb-3">{t('onlineTest.proxyModelProtectedResponse')}</h4>
+                    <div className="space-y-3">
                       {Object.entries(testResult.models).map(([modelId, response]) => {
-                        const model = models.find(m => m.id === modelId);
+                        const model = models.find((m) => m.id === modelId)
                         return (
-                          <Card key={modelId} size="small" title={model?.config_name || `Model ${modelId}`} style={{ marginBottom: 8 }}>
-                            {response.error ? (
-                              <Alert message={response.error} type="error" />
-                            ) : response.content ? (
-                              <div>
-                                <Text strong>{t('onlineTest.modelResponse')}</Text>
-                                <br />
-                                <div style={{
-                                  backgroundColor: '#f8f9fa',
-                                  padding: '12px',
-                                  borderRadius: '6px',
-                                  marginTop: '8px',
-                                  border: '1px solid #e9ecef',
-                                  whiteSpace: 'pre-wrap'
-                                }}>
-                                  <Text>{response.content}</Text>
+                          <Card key={modelId}>
+                            <CardHeader>
+                              <CardTitle className="text-sm">{model?.config_name || `Model ${modelId}`}</CardTitle>
+                            </CardHeader>
+                            <CardContent>
+                              {response.error ? (
+                                <div className="p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-800">{response.error}</div>
+                              ) : response.content ? (
+                                <div>
+                                  <p className="text-xs font-semibold text-slate-700 mb-2">{t('onlineTest.modelResponse')}</p>
+                                  <div className="bg-slate-50 p-3 rounded-md border border-slate-200">
+                                    <p className="text-sm whitespace-pre-wrap">{response.content}</p>
+                                  </div>
                                 </div>
-                              </div>
-                            ) : (
-                              <Text type="secondary">{t('onlineTest.emptyResponse')}</Text>
-                            )}
+                              ) : (
+                                <p className="text-sm text-slate-500">{t('onlineTest.emptyResponse')}</p>
+                              )}
+                            </CardContent>
                           </Card>
-                        );
+                        )
                       })}
                     </div>
-                  )}
-                </Space>
-              </Spin>
+                  </div>
+                )}
+              </CardContent>
             </Card>
           )}
-        </Col>
+        </div>
 
         {/* Right side: Preset test cases */}
-        <Col span={8}>
-          <Card title={t('onlineTest.presetTestCases')} size="small">
-            <Tabs
-              defaultActiveKey="security"
-              tabPosition="top"
-              size="small"
-              items={[
-                {
-                  key: 'security',
-                  label: t('onlineTest.categories.security'),
-                  children: (
-                    <div style={{ maxHeight: '600px', overflowY: 'auto', paddingRight: '4px' }}>
-                      <Space direction="vertical" style={{ width: '100%' }} size="small">
-                        {testCasesByCategory.security.map((testCase) => (
-                          <Card
-                            key={testCase.id}
-                            size="small"
-                            hoverable
-                            onClick={() => useTestCase(testCase)}
-                            style={{ cursor: 'pointer' }}
-                            styles={{ body: { padding: 12 } }}
-                          >
-                            <Space direction="vertical" size="small" style={{ width: '100%' }}>
-                              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                <Text strong>{testCase.name}</Text>
-                                <Tag color="blue">{testCase.category}</Tag>
-                              </div>
-                              <Text type="secondary" style={{ fontSize: '12px' }}>
-                                {testCase.description}
-                              </Text>
-                              <Text
-                                style={{
-                                  fontSize: '12px',
-                                  backgroundColor: '#f5f5f5',
-                                  padding: '4px 8px',
-                                  borderRadius: '4px',
-                                  display: 'block'
-                                }}
-                              >
-                                {testCase.content.length > 50
-                                  ? testCase.content.substring(0, 50) + '...'
-                                  : testCase.content
-                                }
-                              </Text>
-                              <Tag color={getRiskColor(testCase.expectedRisk || '')}>
-                                {t('onlineTest.expected')} {testCase.expectedRisk}
-                              </Tag>
-                            </Space>
-                          </Card>
-                        ))}
-                      </Space>
-                    </div>
-                  )
-                },
-                {
-                  key: 'dataLeak',
-                  label: t('onlineTest.categories.dataLeak'),
-                  children: (
-                    <div style={{ maxHeight: '600px', overflowY: 'auto', paddingRight: '4px' }}>
-                      <Space direction="vertical" style={{ width: '100%' }} size="small">
-                        {testCasesByCategory.dataLeak.map((testCase) => (
-                          <Card
-                            key={testCase.id}
-                            size="small"
-                            hoverable
-                            onClick={() => useTestCase(testCase)}
-                            style={{ cursor: 'pointer' }}
-                            styles={{ body: { padding: 12 } }}
-                          >
-                            <Space direction="vertical" size="small" style={{ width: '100%' }}>
-                              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                <Text strong>{testCase.name}</Text>
-                                <Tag color="purple">{t('onlineTest.qaPair')}</Tag>
-                              </div>
-                              <Text type="secondary" style={{ fontSize: '12px' }}>
-                                {testCase.description}
-                              </Text>
-                              <Text
-                                style={{
-                                  fontSize: '12px',
-                                  backgroundColor: '#f5f5f5',
-                                  padding: '4px 8px',
-                                  borderRadius: '4px',
-                                  display: 'block'
-                                }}
-                              >
-                                {testCase.content.length > 50
-                                  ? testCase.content.substring(0, 50) + '...'
-                                  : testCase.content
-                                }
-                              </Text>
-                              <Tag color={getRiskColor(testCase.expectedRisk || '')}>
-                                {t('onlineTest.expected')} {testCase.expectedRisk}
-                              </Tag>
-                            </Space>
-                          </Card>
-                        ))}
-                      </Space>
-                    </div>
-                  )
-                },
-                {
-                  key: 'professional',
-                  label: t('onlineTest.categories.professional'),
-                  children: (
-                    <div style={{ maxHeight: '600px', overflowY: 'auto', paddingRight: '4px' }}>
-                      <Space direction="vertical" style={{ width: '100%' }} size="small">
-                        {testCasesByCategory.professional.map((testCase) => (
-                          <Card
-                            key={testCase.id}
-                            size="small"
-                            hoverable
-                            onClick={() => useTestCase(testCase)}
-                            style={{ cursor: 'pointer' }}
-                            styles={{ body: { padding: 12 } }}
-                          >
-                            <Space direction="vertical" size="small" style={{ width: '100%' }}>
-                              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                <Text strong>{testCase.name}</Text>
-                                <Tag color="purple">{t('onlineTest.qaPair')}</Tag>
-                              </div>
-                              <Text type="secondary" style={{ fontSize: '12px' }}>
-                                {testCase.description}
-                              </Text>
-                              <Text
-                                style={{
-                                  fontSize: '12px',
-                                  backgroundColor: '#f5f5f5',
-                                  padding: '4px 8px',
-                                  borderRadius: '4px',
-                                  display: 'block'
-                                }}
-                              >
-                                {testCase.content.length > 50
-                                  ? testCase.content.substring(0, 50) + '...'
-                                  : testCase.content
-                                }
-                              </Text>
-                              <Tag color={getRiskColor(testCase.expectedRisk || '')}>
-                                {t('onlineTest.expected')} {testCase.expectedRisk}
-                              </Tag>
-                            </Space>
-                          </Card>
-                        ))}
-                      </Space>
-                    </div>
-                  )
-                },
-                {
-                  key: 'safe',
-                  label: t('onlineTest.categories.safe'),
-                  children: (
-                    <div style={{ maxHeight: '600px', overflowY: 'auto', paddingRight: '4px' }}>
-                      <Space direction="vertical" style={{ width: '100%' }} size="small">
-                        {testCasesByCategory.safe.map((testCase) => (
-                          <Card
-                            key={testCase.id}
-                            size="small"
-                            hoverable
-                            onClick={() => useTestCase(testCase)}
-                            style={{ cursor: 'pointer' }}
-                            styles={{ body: { padding: 12 } }}
-                          >
-                            <Space direction="vertical" size="small" style={{ width: '100%' }}>
-                              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                <Text strong>{testCase.name}</Text>
-                                <Tag color="purple">{t('onlineTest.qaPair')}</Tag>
-                              </div>
-                              <Text type="secondary" style={{ fontSize: '12px' }}>
-                                {testCase.description}
-                              </Text>
-                              <Text
-                                style={{
-                                  fontSize: '12px',
-                                  backgroundColor: '#f5f5f5',
-                                  padding: '4px 8px',
-                                  borderRadius: '4px',
-                                  display: 'block'
-                                }}
-                              >
-                                {testCase.content.length > 50
-                                  ? testCase.content.substring(0, 50) + '...'
-                                  : testCase.content
-                                }
-                              </Text>
-                              <Tag color={getRiskColor(testCase.expectedRisk || '')}>
-                                {t('onlineTest.expected')} {testCase.expectedRisk}
-                              </Tag>
-                            </Space>
-                          </Card>
-                        ))}
-                      </Space>
-                    </div>
-                  )
-                }
-              ]}
-            />
+        <div>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">{t('onlineTest.presetTestCases')}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Tabs defaultValue="security" className="w-full">
+                <TabsList className="grid w-full grid-cols-4">
+                  <TabsTrigger value="security" className="text-xs">
+                    {t('onlineTest.categories.security')}
+                  </TabsTrigger>
+                  <TabsTrigger value="dataLeak" className="text-xs">
+                    {t('onlineTest.categories.dataLeak')}
+                  </TabsTrigger>
+                  <TabsTrigger value="professional" className="text-xs">
+                    {t('onlineTest.categories.professional')}
+                  </TabsTrigger>
+                  <TabsTrigger value="safe" className="text-xs">
+                    {t('onlineTest.categories.safe')}
+                  </TabsTrigger>
+                </TabsList>
+
+                {['security', 'dataLeak', 'professional', 'safe'].map((category) => (
+                  <TabsContent key={category} value={category} className="max-h-[600px] overflow-y-auto pr-1 space-y-2">
+                    {testCasesByCategory[category as keyof typeof testCasesByCategory].map((testCase) => (
+                      <Card key={testCase.id} className="cursor-pointer hover:bg-slate-50 transition-colors" onClick={() => useTestCase(testCase)}>
+                        <CardContent className="p-3 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <p className="text-sm font-semibold">{testCase.name}</p>
+                            <span className="px-2 py-0.5 text-xs rounded bg-blue-100 text-blue-800 border border-blue-200">{testCase.category}</span>
+                          </div>
+                          <p className="text-xs text-slate-600">{testCase.description}</p>
+                          <p className="text-xs bg-slate-100 p-2 rounded">{testCase.content.length > 50 ? testCase.content.substring(0, 50) + '...' : testCase.content}</p>
+                          <span className={`inline-block px-2 py-0.5 text-xs rounded border ${getRiskColor(testCase.expectedRisk || '')}`}>
+                            {t('onlineTest.expected')} {testCase.expectedRisk}
+                          </span>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </TabsContent>
+                ))}
+              </Tabs>
+            </CardContent>
           </Card>
-        </Col>
-      </Row>
-
+        </div>
+      </div>
     </div>
-  );
-};
+  )
+}
 
-export default OnlineTest;
+export default OnlineTest
