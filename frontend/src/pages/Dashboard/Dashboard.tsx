@@ -7,7 +7,7 @@ import {
   AlertTriangle,
   CheckCircle,
   TrendingUp,
-  FileProtect,
+  FileCheck,
   Lock,
   AlertCircle,
 } from 'lucide-react'
@@ -219,7 +219,7 @@ const Dashboard: React.FC = () => {
             <CardTitle className="text-sm font-medium text-gray-600">
               {t('dashboard.totalRequests')}
             </CardTitle>
-            <FileProtect className="h-5 w-5 text-gray-400" />
+            <FileCheck className="h-5 w-5 text-gray-400" />
           </CardHeader>
           <CardContent>
             <div className="text-3xl font-bold text-blue-600">{stats.total_requests}</div>
