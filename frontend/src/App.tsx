@@ -20,6 +20,7 @@ import SecurityGateway from './pages/SecurityGateway/SecurityGateway';
 import Documentation from './pages/Documentation/Documentation';
 import Subscription from './pages/Billing/Subscription';
 import ApplicationManagement from './pages/Config/ApplicationManagement';
+import TailwindDemo from './pages/TailwindDemo';
 import { initSystemConfig, features } from './config';
 
 function App() {
@@ -48,6 +49,7 @@ function App() {
   return (
     <ApplicationProvider>
       <Routes>
+        <Route path="/tailwind-demo" element={<TailwindDemo />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
         <Route path="/verify" element={<Verify />} />
