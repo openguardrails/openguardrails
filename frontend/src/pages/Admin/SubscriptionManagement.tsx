@@ -1,282 +1,291 @@
-import React, { useEffect, useState } from 'react';
-import { Card, Table, Button, message, Tag, Space, Modal, Select, Input, Progress, Popconfirm } from 'antd';
-import type { SortOrder } from 'antd/es/table/interface';
-import { ReloadOutlined, EditOutlined, SyncOutlined } from '@ant-design/icons';
-import { useTranslation } from 'react-i18next';
-import { billingService } from '../../services/billing';
-import type { SubscriptionListItem } from '../../types/billing';
+import React, { useEffect, useState } from 'react'
+import { RefreshCw, Edit, RotateCw } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
-const { Search } = Input;
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Badge } from '@/components/ui/badge'
+import { Progress } from '@/components/ui/progress'
+import { DataTable } from '@/components/data-table/DataTable'
+import { confirmDialog } from '@/lib/confirm-dialog'
+import { billingService } from '../../services/billing'
+import type { SubscriptionListItem } from '../../types/billing'
+import type { ColumnDef } from '@tanstack/react-table'
 
 const SubscriptionManagement: React.FC = () => {
-  const { t } = useTranslation();
-  const [subscriptions, setSubscriptions] = useState<SubscriptionListItem[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [total, setTotal] = useState(0);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
-  const [search, setSearch] = useState('');
-  const [filterType, setFilterType] = useState<'free' | 'subscribed' | undefined>(undefined);
-  const [sortBy, setSortBy] = useState<'current_month_usage' | 'usage_reset_at'>('current_month_usage');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
-  const [editModalVisible, setEditModalVisible] = useState(false);
-  const [selectedSubscription, setSelectedSubscription] = useState<SubscriptionListItem | null>(null);
-  const [newSubscriptionType, setNewSubscriptionType] = useState<'free' | 'subscribed'>('free');
+  const { t } = useTranslation()
+  const [subscriptions, setSubscriptions] = useState<SubscriptionListItem[]>([])
+  const [loading, setLoading] = useState(false)
+  const [total, setTotal] = useState(0)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
+  const [search, setSearch] = useState('')
+  const [filterType, setFilterType] = useState<'free' | 'subscribed' | undefined>(undefined)
+  const [sortBy, setSortBy] = useState<'current_month_usage' | 'usage_reset_at'>(
+    'current_month_usage'
+  )
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
+  const [editModalVisible, setEditModalVisible] = useState(false)
+  const [selectedSubscription, setSelectedSubscription] = useState<SubscriptionListItem | null>(
+    null
+  )
+  const [newSubscriptionType, setNewSubscriptionType] = useState<'free' | 'subscribed'>('free')
 
   const fetchSubscriptions = async () => {
     try {
-      setLoading(true);
+      setLoading(true)
       const { data, total: totalCount } = await billingService.listAllSubscriptions({
         skip: (currentPage - 1) * pageSize,
         limit: pageSize,
         search: search || undefined,
         subscription_type: filterType,
         sort_by: sortBy,
-        sort_order: sortOrder
-      });
-      setSubscriptions(data);
-      setTotal(totalCount);
+        sort_order: sortOrder,
+      })
+      setSubscriptions(data)
+      setTotal(totalCount)
     } catch (error: any) {
-      message.error(error.message || t('admin.subscriptions.fetchFailed'));
+      toast.error(error.message || t('admin.subscriptions.fetchFailed'))
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }
 
   useEffect(() => {
-    fetchSubscriptions();
-  }, [currentPage, pageSize, search, filterType, sortBy, sortOrder]);
+    fetchSubscriptions()
+  }, [currentPage, pageSize, search, filterType, sortBy, sortOrder])
 
   const handleEditSubscription = (subscription: SubscriptionListItem) => {
-    setSelectedSubscription(subscription);
-    setNewSubscriptionType(subscription.subscription_type);
-    setEditModalVisible(true);
-  };
+    setSelectedSubscription(subscription)
+    setNewSubscriptionType(subscription.subscription_type)
+    setEditModalVisible(true)
+  }
 
   const handleUpdateSubscription = async () => {
-    if (!selectedSubscription) return;
+    if (!selectedSubscription) return
 
     try {
       await billingService.updateSubscription(selectedSubscription.tenant_id, {
-        subscription_type: newSubscriptionType
-      });
-      message.success(t('admin.subscriptions.updateSuccess'));
-      setEditModalVisible(false);
-      fetchSubscriptions();
+        subscription_type: newSubscriptionType,
+      })
+      toast.success(t('admin.subscriptions.updateSuccess'))
+      setEditModalVisible(false)
+      fetchSubscriptions()
     } catch (error: any) {
-      message.error(error.message || t('admin.subscriptions.updateFailed'));
+      toast.error(error.message || t('admin.subscriptions.updateFailed'))
     }
-  };
+  }
 
   const handleResetQuota = async (tenantId: string) => {
-    try {
-      await billingService.resetTenantQuota(tenantId);
-      message.success(t('admin.subscriptions.resetSuccess'));
-      fetchSubscriptions();
-    } catch (error: any) {
-      message.error(error.message || t('admin.subscriptions.resetFailed'));
-    }
-  };
+    const confirmed = await confirmDialog({
+      title: t('admin.subscriptions.resetConfirm'),
+      description: t('admin.subscriptions.resetWarning'),
+    })
 
-  const columns = [
+    if (!confirmed) return
+
+    try {
+      await billingService.resetTenantQuota(tenantId)
+      toast.success(t('admin.subscriptions.resetSuccess'))
+      fetchSubscriptions()
+    } catch (error: any) {
+      toast.error(error.message || t('admin.subscriptions.resetFailed'))
+    }
+  }
+
+  const columns: ColumnDef<SubscriptionListItem>[] = [
     {
-      title: t('admin.subscriptions.email'),
-      dataIndex: 'email',
-      key: 'email',
-      width: 250,
+      accessorKey: 'email',
+      header: t('admin.subscriptions.email'),
+      size: 250,
     },
     {
-      title: t('admin.subscriptions.plan'),
-      dataIndex: 'subscription_type',
-      key: 'subscription_type',
-      width: 150,
-      render: (type: string, record: SubscriptionListItem) => (
-        <Tag color={type === 'subscribed' ? 'blue' : 'default'}>
-          {record.plan_name}
-        </Tag>
-      ),
+      accessorKey: 'subscription_type',
+      header: t('admin.subscriptions.plan'),
+      size: 150,
+      cell: ({ row }) => {
+        const type = row.getValue('subscription_type') as string
+        const record = row.original
+        return (
+          <Badge variant={type === 'subscribed' ? 'default' : 'outline'}>
+            {record.plan_name}
+          </Badge>
+        )
+      },
     },
     {
-      title: t('admin.subscriptions.usage'),
-      key: 'usage',
-      width: 300,
-      sorter: true,
-      sortOrder: (sortBy === 'current_month_usage' ? (sortOrder === 'asc' ? 'ascend' : 'descend') : undefined) as SortOrder,
-      render: (_: any, record: SubscriptionListItem) => (
-        <Space direction="vertical" size="small" style={{ width: '100%' }}>
-          <div>
-            {record.current_month_usage.toLocaleString()} / {record.monthly_quota.toLocaleString()}
-            {' '}({record.usage_percentage.toFixed(1)}%)
+      id: 'usage',
+      header: t('admin.subscriptions.usage'),
+      size: 300,
+      cell: ({ row }) => {
+        const record = row.original
+        const percentage = Math.min(record.usage_percentage, 100)
+        return (
+          <div className="space-y-2">
+            <div className="text-sm">
+              {record.current_month_usage.toLocaleString()} /{' '}
+              {record.monthly_quota.toLocaleString()} ({record.usage_percentage.toFixed(1)}%)
+            </div>
+            <Progress
+              value={percentage}
+              className={`h-2 ${record.usage_percentage >= 90 ? '[&>div]:bg-red-500' : '[&>div]:bg-blue-500'}`}
+            />
           </div>
-          <Progress
-            percent={Math.min(record.usage_percentage, 100)}
-            status={record.usage_percentage >= 90 ? 'exception' : 'active'}
-            strokeColor={record.usage_percentage >= 90 ? '#ff4d4f' : '#1890ff'}
-            size="small"
-          />
-        </Space>
-      ),
+        )
+      },
     },
     {
-      title: t('admin.subscriptions.resetDate'),
-      dataIndex: 'usage_reset_at',
-      key: 'usage_reset_at',
-      width: 150,
-      sorter: true,
-      sortOrder: (sortBy === 'usage_reset_at' ? (sortOrder === 'asc' ? 'ascend' : 'descend') : undefined) as SortOrder,
-      render: (date: string) => new Date(date).toLocaleDateString(),
+      accessorKey: 'usage_reset_at',
+      header: t('admin.subscriptions.resetDate'),
+      size: 150,
+      cell: ({ row }) => {
+        const date = row.getValue('usage_reset_at') as string
+        return <span className="text-sm">{new Date(date).toLocaleDateString()}</span>
+      },
     },
     {
-      title: t('common.actions'),
-      key: 'actions',
-      width: 180,
-      render: (_: any, record: SubscriptionListItem) => (
-        <Space>
-          <Button
-            icon={<EditOutlined />}
-            size="small"
-            onClick={() => handleEditSubscription(record)}
-          >
-            {t('common.edit')}
-          </Button>
-          <Popconfirm
-            title={t('admin.subscriptions.resetConfirm')}
-            onConfirm={() => handleResetQuota(record.tenant_id)}
-            okText={t('common.confirm')}
-            cancelText={t('common.cancel')}
-          >
+      id: 'actions',
+      header: t('common.actions'),
+      size: 180,
+      cell: ({ row }) => {
+        const record = row.original
+        return (
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => handleEditSubscription(record)}>
+              <Edit className="mr-2 h-4 w-4" />
+              {t('common.edit')}
+            </Button>
             <Button
-              icon={<SyncOutlined />}
-              size="small"
-              danger
+              variant="outline"
+              size="sm"
+              onClick={() => handleResetQuota(record.tenant_id)}
+              className="text-red-600 hover:text-red-700"
             >
+              <RotateCw className="mr-2 h-4 w-4" />
               {t('admin.subscriptions.reset')}
             </Button>
-          </Popconfirm>
-        </Space>
-      ),
+          </div>
+        )
+      },
     },
-  ];
+  ]
 
   return (
-    <Card
-      title={t('admin.subscriptions.title')}
-      extra={
-        <Button
-          icon={<ReloadOutlined />}
-          onClick={fetchSubscriptions}
-          loading={loading}
-        >
-          {t('common.refresh')}
-        </Button>
-      }
-    >
-      <Space direction="vertical" size="large" style={{ width: '100%' }}>
-        <Space>
-          <Search
-            placeholder={t('admin.subscriptions.searchPlaceholder')}
-            onSearch={setSearch}
-            style={{ width: 300 }}
-            allowClear
-          />
-          <Select
-            style={{ width: 200 }}
-            placeholder={t('admin.subscriptions.filterByType')}
-            allowClear
-            value={filterType}
-            onChange={setFilterType}
-          >
-            <Select.Option value="free">{t('admin.subscriptions.freePlan')}</Select.Option>
-            <Select.Option value="subscribed">{t('admin.subscriptions.subscribedPlan')}</Select.Option>
-          </Select>
-        </Space>
-
-        <Table
-          columns={columns}
-          dataSource={subscriptions}
-          rowKey="id"
-          loading={loading}
-          onChange={(pagination, _filters, sorter: any) => {
-            // Check if sorting actually changed (not just present)
-            const currentSortBy = sorter?.columnKey === 'usage' ? 'current_month_usage' : sorter?.columnKey;
-            const currentSortOrder: 'asc' | 'desc' | undefined = 
-              sorter?.order === 'ascend' ? 'asc' : 
-              sorter?.order === 'descend' ? 'desc' : 
-              undefined;
-            const sortingChanged = sorter?.columnKey && currentSortOrder && (
-              currentSortBy !== sortBy || 
-              currentSortOrder !== sortOrder
-            );
-
-            // Handle sorting changes first
-            if (sortingChanged && currentSortOrder) {
-              setSortBy(currentSortBy);
-              setSortOrder(currentSortOrder);
-              setCurrentPage(1); // Reset to first page when sorting changes
-              return;
-            }
-
-            // Handle page size changes
-            if (pagination?.pageSize && pagination.pageSize !== pageSize) {
-              setPageSize(pagination.pageSize);
-              setCurrentPage(1); // Reset to first page when page size changes
-              return;
-            }
-
-            // Handle pagination changes
-            if (pagination?.current && pagination.current !== currentPage) {
-              setCurrentPage(pagination.current);
-            }
-          }}
-          pagination={{
-            current: currentPage,
-            pageSize: pageSize,
-            total: total,
-            showSizeChanger: true,
-            showTotal: (total) => t('admin.subscriptions.total', { count: total }),
-          }}
-        />
-      </Space>
-
-      <Modal
-        title={t('admin.subscriptions.editSubscription')}
-        open={editModalVisible}
-        onOk={handleUpdateSubscription}
-        onCancel={() => setEditModalVisible(false)}
-        okText={t('common.confirm')}
-        cancelText={t('common.cancel')}
-      >
-        {selectedSubscription && (
-          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-            <div>
-              <strong>{t('admin.subscriptions.tenant')}:</strong> {selectedSubscription.email}
-            </div>
-            <div>
-              <strong>{t('admin.subscriptions.currentPlan')}:</strong>{' '}
-              <Tag color={selectedSubscription.subscription_type === 'subscribed' ? 'blue' : 'default'}>
-                {selectedSubscription.plan_name}
-              </Tag>
-            </div>
-            <div>
-              <strong>{t('admin.subscriptions.newPlan')}:</strong>
-              <Select
-                style={{ width: '100%', marginTop: 8 }}
-                value={newSubscriptionType}
-                onChange={setNewSubscriptionType}
+    <Card>
+      <CardHeader>
+        <div className="flex justify-between items-center">
+          <CardTitle>{t('admin.subscriptions.title')}</CardTitle>
+          <Button variant="outline" onClick={fetchSubscriptions} disabled={loading}>
+            <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            {t('common.refresh')}
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-4">
+          <div className="flex gap-4">
+            <Input
+              placeholder={t('admin.subscriptions.searchPlaceholder')}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="max-w-xs"
+            />
+            <Select value={filterType} onValueChange={(value) => setFilterType(value as any)}>
+              <SelectTrigger className="w-[200px]">
+                <SelectValue placeholder={t('admin.subscriptions.filterByType')} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="free">{t('admin.subscriptions.freePlan')}</SelectItem>
+                <SelectItem value="subscribed">
+                  {t('admin.subscriptions.subscribedPlan')}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            {(search || filterType) && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setSearch('')
+                  setFilterType(undefined)
+                }}
               >
-                <Select.Option value="free">
-                  {t('admin.subscriptions.freePlan')} (10,000 {t('account.calls')}/month)
-                </Select.Option>
-                <Select.Option value="subscribed">
-                  {t('admin.subscriptions.subscribedPlan')} (1,000,000 {t('account.calls')}/month)
-                </Select.Option>
-              </Select>
-            </div>
-          </Space>
-        )}
-      </Modal>
-    </Card>
-  );
-};
+                {t('common.reset')}
+              </Button>
+            )}
+          </div>
 
-export default SubscriptionManagement;
+          <DataTable columns={columns} data={subscriptions} loading={loading} />
+        </div>
+      </CardContent>
+
+      <Dialog open={editModalVisible} onOpenChange={setEditModalVisible}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>{t('admin.subscriptions.editSubscription')}</DialogTitle>
+          </DialogHeader>
+
+          {selectedSubscription && (
+            <div className="space-y-4">
+              <div>
+                <span className="font-semibold">{t('admin.subscriptions.tenant')}:</span>{' '}
+                {selectedSubscription.email}
+              </div>
+              <div>
+                <span className="font-semibold">{t('admin.subscriptions.currentPlan')}:</span>{' '}
+                <Badge
+                  variant={
+                    selectedSubscription.subscription_type === 'subscribed' ? 'default' : 'outline'
+                  }
+                >
+                  {selectedSubscription.plan_name}
+                </Badge>
+              </div>
+              <div className="space-y-2">
+                <label className="font-semibold">{t('admin.subscriptions.newPlan')}:</label>
+                <Select value={newSubscriptionType} onValueChange={setNewSubscriptionType as any}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="free">
+                      {t('admin.subscriptions.freePlan')} (10,000 {t('account.calls')}/month)
+                    </SelectItem>
+                    <SelectItem value="subscribed">
+                      {t('admin.subscriptions.subscribedPlan')} (1,000,000 {t('account.calls')}
+                      /month)
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditModalVisible(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button onClick={handleUpdateSubscription}>{t('common.confirm')}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Card>
+  )
+}
+
+export default SubscriptionManagement
