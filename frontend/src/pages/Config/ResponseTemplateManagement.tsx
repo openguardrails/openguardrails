@@ -1,58 +1,96 @@
-import React, { useEffect, useState, useMemo } from 'react';
-import { Table, Button, Modal, Form, Input, message, Tag, Select } from 'antd';
-import { EditOutlined, ReloadOutlined } from '@ant-design/icons';
-import { useTranslation } from 'react-i18next';
-import { configApi, knowledgeBaseApi } from '../../services/api';
-import { useAuth } from '../../contexts/AuthContext';
-import { useApplication } from '../../contexts/ApplicationContext';
-import type { ResponseTemplate } from '../../types';
-import { eventBus, EVENTS } from '../../utils/eventBus';
+import React, { useEffect, useState, useMemo } from 'react'
+import { Edit, RefreshCw } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { z } from 'zod'
+import { toast } from 'sonner'
 
-const { TextArea } = Input;
-const { Option } = Select;
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '@/components/ui/form'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Badge } from '@/components/ui/badge'
+import { DataTable } from '@/components/data-table/DataTable'
+import { configApi, knowledgeBaseApi } from '../../services/api'
+import { useAuth } from '../../contexts/AuthContext'
+import { useApplication } from '../../contexts/ApplicationContext'
+import type { ResponseTemplate } from '../../types'
+import { eventBus, EVENTS } from '../../utils/eventBus'
+import type { ColumnDef } from '@tanstack/react-table'
+import { format } from 'date-fns'
+
+const responseTemplateSchema = z.object({
+  category: z.string(),
+  template_content: z.string().min(1, 'Content is required').max(500),
+})
+
+type ResponseTemplateFormData = z.infer<typeof responseTemplateSchema>
 
 const ResponseTemplateManagement: React.FC = () => {
-  const { t, i18n } = useTranslation();
-  const [data, setData] = useState<ResponseTemplate[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [modalVisible, setModalVisible] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [editingItem, setEditingItem] = useState<ResponseTemplate | null>(null);
-  const [form] = Form.useForm();
-  const { onUserSwitch } = useAuth();
-  const { currentApplicationId } = useApplication();
-  const [currentLang, setCurrentLang] = useState(i18n.language || 'en');
+  const { t, i18n } = useTranslation()
+  const [data, setData] = useState<ResponseTemplate[]>([])
+  const [loading, setLoading] = useState(false)
+  const [modalVisible, setModalVisible] = useState(false)
+  const [editingItem, setEditingItem] = useState<ResponseTemplate | null>(null)
+  const { onUserSwitch } = useAuth()
+  const { currentApplicationId } = useApplication()
+  const [currentLang, setCurrentLang] = useState(i18n.language || 'en')
 
   // Available scanners for template creation
   const [availableScanners, setAvailableScanners] = useState<{
-    blacklists: Array<{ value: string; label: string }>;
-    whitelists: Array<{ value: string; label: string }>;
-    official_scanners: Array<{ value: string; label: string }>;
-    marketplace_scanners: Array<{ value: string; label: string }>;
-    custom_scanners: Array<{ value: string; label: string }>;
+    blacklists: Array<{ value: string; label: string }>
+    whitelists: Array<{ value: string; label: string }>
+    official_scanners: Array<{ value: string; label: string }>
+    marketplace_scanners: Array<{ value: string; label: string }>
+    custom_scanners: Array<{ value: string; label: string }>
   }>({
     blacklists: [],
     whitelists: [],
     official_scanners: [],
     marketplace_scanners: [],
-    custom_scanners: []
-  });
+    custom_scanners: [],
+  })
+
+  const form = useForm<ResponseTemplateFormData>({
+    resolver: zodResolver(responseTemplateSchema),
+    defaultValues: {
+      category: '',
+      template_content: '',
+    },
+  })
 
   const getRiskLevelLabel = (riskLevel: string) => {
     const riskLevelMap: { [key: string]: string } = {
       // English values (current format)
-      'high_risk': t('risk.level.high_risk'),
-      'medium_risk': t('risk.level.medium_risk'),
-      'low_risk': t('risk.level.low_risk'),
-      'no_risk': t('risk.level.no_risk'),
+      high_risk: t('risk.level.high_risk'),
+      medium_risk: t('risk.level.medium_risk'),
+      low_risk: t('risk.level.low_risk'),
+      no_risk: t('risk.level.no_risk'),
       // Chinese values (legacy format)
-      '高风险': t('risk.level.high_risk'),
-      '中风险': t('risk.level.medium_risk'),
-      '低风险': t('risk.level.low_risk'),
-      '无风险': t('risk.level.no_risk'),
-    };
-    return riskLevelMap[riskLevel] || riskLevel;
-  };
+      高风险: t('risk.level.high_risk'),
+      中风险: t('risk.level.medium_risk'),
+      低风险: t('risk.level.low_risk'),
+      无风险: t('risk.level.no_risk'),
+    }
+    return riskLevelMap[riskLevel] || riskLevel
+  }
 
   const categories = [
     { value: 'S2', label: `S2 - ${t('category.S2')}`, riskLevel: 'high_risk' },
@@ -77,207 +115,198 @@ const ResponseTemplateManagement: React.FC = () => {
     { value: 'S20', label: `S20 - ${t('category.S20')}`, riskLevel: 'low_risk' },
     { value: 'S21', label: `S21 - ${t('category.S21')}`, riskLevel: 'low_risk' },
     { value: 'default', label: t('template.defaultReject'), riskLevel: 'no_risk' },
-  ];
+  ]
 
   useEffect(() => {
     if (currentApplicationId) {
-      loadAllData();
+      loadAllData()
     }
-  }, [currentApplicationId]);
+  }, [currentApplicationId])
 
   // Listen to user switch event, automatically refresh data
   useEffect(() => {
     const unsubscribe = onUserSwitch(() => {
-      loadAllData();
-    });
-    return unsubscribe;
-  }, [onUserSwitch]);
+      loadAllData()
+    })
+    return unsubscribe
+  }, [onUserSwitch])
 
   // Listen to scanner events from other components
   useEffect(() => {
     const handleScannerDeleted = (payload: { scannerId: string; scannerTag: string }) => {
-      console.log('Scanner deleted event received in ResponseTemplateManagement:', payload);
-      // Refresh both available scanners and response templates list
-      loadAllData();
-    };
+      console.log('Scanner deleted event received in ResponseTemplateManagement:', payload)
+      loadAllData()
+    }
 
     const handleScannerCreated = () => {
-      console.log('Scanner created event received in ResponseTemplateManagement');
-      // Refresh available scanners list
-      loadAllData();
-    };
+      console.log('Scanner created event received in ResponseTemplateManagement')
+      loadAllData()
+    }
 
     const handleScannerUpdated = () => {
-      console.log('Scanner updated event received in ResponseTemplateManagement');
-      // Refresh available scanners list
-      loadAllData();
-    };
+      console.log('Scanner updated event received in ResponseTemplateManagement')
+      loadAllData()
+    }
 
     const handleBlacklistDeleted = (payload: { blacklistId: string; blacklistName: string }) => {
-      console.log('Blacklist deleted event received in ResponseTemplateManagement:', payload);
-      // Refresh both available scanners and response templates list
-      loadAllData();
-    };
+      console.log('Blacklist deleted event received in ResponseTemplateManagement:', payload)
+      loadAllData()
+    }
 
     const handleBlacklistCreated = () => {
-      console.log('Blacklist created event received in ResponseTemplateManagement');
-      // Refresh available scanners list
-      loadAllData();
-    };
+      console.log('Blacklist created event received in ResponseTemplateManagement')
+      loadAllData()
+    }
 
     const handleWhitelistDeleted = (payload: { whitelistId: string; whitelistName: string }) => {
-      console.log('Whitelist deleted event received in ResponseTemplateManagement:', payload);
-      // Refresh both available scanners and response templates list
-      loadAllData();
-    };
+      console.log('Whitelist deleted event received in ResponseTemplateManagement:', payload)
+      loadAllData()
+    }
 
     const handleWhitelistCreated = () => {
-      console.log('Whitelist created event received in ResponseTemplateManagement');
-      // Refresh available scanners list
-      loadAllData();
-    };
+      console.log('Whitelist created event received in ResponseTemplateManagement')
+      loadAllData()
+    }
 
-    const handleMarketplaceScannerPurchased = (payload: { packageId: string; packageName: string }) => {
-      console.log('Marketplace scanner purchased event received in ResponseTemplateManagement:', payload);
-      // Refresh available scanners list
-      loadAllData();
-    };
+    const handleMarketplaceScannerPurchased = (payload: {
+      packageId: string
+      packageName: string
+    }) => {
+      console.log('Marketplace scanner purchased event received in ResponseTemplateManagement:', payload)
+      loadAllData()
+    }
 
     // Subscribe to all relevant events
-    const unsubscribeScannerDeleted = eventBus.on(EVENTS.SCANNER_DELETED, handleScannerDeleted);
-    const unsubscribeScannerCreated = eventBus.on(EVENTS.SCANNER_CREATED, handleScannerCreated);
-    const unsubscribeScannerUpdated = eventBus.on(EVENTS.SCANNER_UPDATED, handleScannerUpdated);
-    const unsubscribeBlacklistDeleted = eventBus.on(EVENTS.BLACKLIST_DELETED, handleBlacklistDeleted);
-    const unsubscribeBlacklistCreated = eventBus.on(EVENTS.BLACKLIST_CREATED, handleBlacklistCreated);
-    const unsubscribeWhitelistDeleted = eventBus.on(EVENTS.WHITELIST_DELETED, handleWhitelistDeleted);
-    const unsubscribeWhitelistCreated = eventBus.on(EVENTS.WHITELIST_CREATED, handleWhitelistCreated);
-    const unsubscribeMarketplaceScannerPurchased = eventBus.on(EVENTS.MARKETPLACE_SCANNER_PURCHASED, handleMarketplaceScannerPurchased);
+    const unsubscribeScannerDeleted = eventBus.on(EVENTS.SCANNER_DELETED, handleScannerDeleted)
+    const unsubscribeScannerCreated = eventBus.on(EVENTS.SCANNER_CREATED, handleScannerCreated)
+    const unsubscribeScannerUpdated = eventBus.on(EVENTS.SCANNER_UPDATED, handleScannerUpdated)
+    const unsubscribeBlacklistDeleted = eventBus.on(EVENTS.BLACKLIST_DELETED, handleBlacklistDeleted)
+    const unsubscribeBlacklistCreated = eventBus.on(EVENTS.BLACKLIST_CREATED, handleBlacklistCreated)
+    const unsubscribeWhitelistDeleted = eventBus.on(EVENTS.WHITELIST_DELETED, handleWhitelistDeleted)
+    const unsubscribeWhitelistCreated = eventBus.on(EVENTS.WHITELIST_CREATED, handleWhitelistCreated)
+    const unsubscribeMarketplaceScannerPurchased = eventBus.on(
+      EVENTS.MARKETPLACE_SCANNER_PURCHASED,
+      handleMarketplaceScannerPurchased
+    )
 
     // Cleanup subscriptions on unmount
     return () => {
-      unsubscribeScannerDeleted();
-      unsubscribeScannerCreated();
-      unsubscribeScannerUpdated();
-      unsubscribeBlacklistDeleted();
-      unsubscribeBlacklistCreated();
-      unsubscribeWhitelistDeleted();
-      unsubscribeWhitelistCreated();
-      unsubscribeMarketplaceScannerPurchased();
-    };
-  }, []);
+      unsubscribeScannerDeleted()
+      unsubscribeScannerCreated()
+      unsubscribeScannerUpdated()
+      unsubscribeBlacklistDeleted()
+      unsubscribeBlacklistCreated()
+      unsubscribeWhitelistDeleted()
+      unsubscribeWhitelistCreated()
+      unsubscribeMarketplaceScannerPurchased()
+    }
+  }, [])
 
   const loadAllData = async () => {
-    // First fetch available scanners, then fetch and create templates
-    await fetchAvailableScanners();
-    await fetchData();
-  };
+    await fetchAvailableScanners()
+    await fetchData()
+  }
 
   const fetchAvailableScanners = async () => {
     try {
-      const result = await knowledgeBaseApi.getAvailableScanners();
-      setAvailableScanners(result);
+      const result = await knowledgeBaseApi.getAvailableScanners()
+      setAvailableScanners(result)
     } catch (error) {
-      console.error('Error fetching available scanners:', error);
+      console.error('Error fetching available scanners:', error)
     }
-  };
+  }
 
   // Listen to language change events to update currentLang state
   useEffect(() => {
     const handleLanguageChange = (lng: string) => {
-      setCurrentLang(lng);
-    };
+      setCurrentLang(lng)
+    }
 
-    i18n.on('languageChanged', handleLanguageChange);
+    i18n.on('languageChanged', handleLanguageChange)
 
     return () => {
-      i18n.off('languageChanged', handleLanguageChange);
-    };
-  }, [i18n]);
+      i18n.off('languageChanged', handleLanguageChange)
+    }
+  }, [i18n])
 
   const fetchData = async () => {
     try {
-      setLoading(true);
-      // Simply fetch and display existing templates
-      // No automatic creation - templates are created when scanners/blacklists are created
-      const result = await configApi.responses.list();
-      setData(result);
+      setLoading(true)
+      const result = await configApi.responses.list()
+      setData(result)
     } catch (error) {
-      console.error('Error fetching response templates:', error);
+      console.error('Error fetching response templates:', error)
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }
 
   const handleEdit = (record: ResponseTemplate) => {
-    setEditingItem(record);
+    setEditingItem(record)
 
     // Get current language
-    const currentLang = i18n.language || 'en';
-    let currentContent = '';
+    const currentLang = i18n.language || 'en'
+    let currentContent = ''
 
     if (typeof record.template_content === 'string') {
       // Old format: single string
-      currentContent = record.template_content;
+      currentContent = record.template_content
     } else if (typeof record.template_content === 'object') {
       // New format: JSON object with language keys
-      currentContent = record.template_content[currentLang] || '';
+      currentContent = record.template_content[currentLang] || ''
     }
 
     // Prepare the display label for category field based on scanner type
-    let categoryDisplayValue = record.category;
-    
-    // For special scanner types (blacklist, custom_scanner, marketplace_scanner), 
+    let categoryDisplayValue = record.category
+
+    // For special scanner types (blacklist, custom_scanner, marketplace_scanner),
     // we need to set a display value since they don't use standard S1-S21 categories
     if (record.scanner_type === 'blacklist' && record.scanner_identifier) {
-      categoryDisplayValue = `${t('config.blacklist')} - ${record.scanner_identifier}`;
+      categoryDisplayValue = `${t('config.blacklist')} - ${record.scanner_identifier}`
     } else if (record.scanner_type === 'custom_scanner' && record.scanner_identifier) {
       const displayText = record.scanner_name
         ? `${record.scanner_identifier} - ${record.scanner_name}`
-        : record.scanner_identifier;
-      categoryDisplayValue = displayText;
+        : record.scanner_identifier
+      categoryDisplayValue = displayText
     } else if (record.scanner_type === 'marketplace_scanner' && record.scanner_identifier) {
       const displayText = record.scanner_name
         ? `${record.scanner_identifier} - ${record.scanner_name}`
-        : record.scanner_identifier;
-      categoryDisplayValue = displayText;
+        : record.scanner_identifier
+      categoryDisplayValue = displayText
     }
 
-    form.setFieldsValue({
+    form.reset({
       category: categoryDisplayValue,
-      template_content: currentContent
-    });
-    setModalVisible(true);
-  };
+      template_content: currentContent,
+    })
+    setModalVisible(true)
+  }
 
-
-  const handleSubmit = async (values: any) => {
+  const handleSubmit = async (values: ResponseTemplateFormData) => {
     try {
       if (!editingItem) {
-        message.error(t('template.invalidOperation'));
-        return;
+        toast.error(t('template.invalidOperation'))
+        return
       }
 
       // Get current language
-      const currentLang = i18n.language || 'en';
+      const currentLang = i18n.language || 'en'
 
       // Preserve existing content from other languages
-      const existingContent = typeof editingItem.template_content === 'object'
-        ? { ...editingItem.template_content }
-        : {};
+      const existingContent =
+        typeof editingItem.template_content === 'object' ? { ...editingItem.template_content } : {}
 
       // Update only the current language content
       const multilingualContent: Record<string, string> = {
         ...existingContent,
-        [currentLang]: values.template_content
-      };
+        [currentLang]: values.template_content,
+      }
 
       // Validate that content is provided
       if (!values.template_content || !values.template_content.trim()) {
-        message.error(t('template.contentRequired'));
-        return;
+        toast.error(t('template.contentRequired'))
+        return
       }
-
-      setSubmitting(true);
 
       // Update reject content, keep the original category and risk level
       const submissionData = {
@@ -287,266 +316,272 @@ const ResponseTemplateManagement: React.FC = () => {
         risk_level: editingItem.risk_level,
         template_content: multilingualContent,
         is_default: editingItem.is_default,
-        is_active: editingItem.is_active
-      };
+        is_active: editingItem.is_active,
+      }
 
-      await configApi.responses.update(editingItem.id, submissionData);
-      message.success(t('template.updateSuccess'));
+      await configApi.responses.update(editingItem.id, submissionData)
+      toast.success(t('template.updateSuccess'))
 
-      setModalVisible(false);
-      form.resetFields();
-      await fetchData();
+      setModalVisible(false)
+      form.reset()
+      await fetchData()
     } catch (error) {
-      console.error('Error updating reject response:', error);
-      message.error(t('common.saveFailed'));
-    } finally {
-      setSubmitting(false);
+      console.error('Error updating reject response:', error)
+      toast.error(t('common.saveFailed'))
     }
-  };
+  }
 
   const getCategoryLabel = (category: string) => {
-    const item = categories.find(c => c.value === category);
-    return item?.label || category;
-  };
+    const item = categories.find((c) => c.value === category)
+    return item?.label || category
+  }
+
+  const getRiskBadgeVariant = (
+    riskLevel: string
+  ): 'default' | 'secondary' | 'destructive' | 'outline' => {
+    if (riskLevel === 'high_risk' || riskLevel === '高风险') return 'destructive'
+    if (riskLevel === 'medium_risk' || riskLevel === '中风险') return 'default'
+    if (riskLevel === 'low_risk' || riskLevel === '低风险') return 'secondary'
+    return 'outline'
+  }
+
+  const getScannerBadgeVariant = (
+    scannerType: string
+  ): 'default' | 'secondary' | 'destructive' | 'outline' => {
+    if (scannerType === 'blacklist') return 'destructive'
+    if (scannerType === 'whitelist') return 'outline'
+    if (scannerType === 'custom_scanner') return 'secondary'
+    if (scannerType === 'official_scanner' || scannerType === 'marketplace_scanner') return 'default'
+    return 'secondary'
+  }
 
   // Use useMemo to ensure columns re-render when language changes
-  const columns = useMemo(() => [
-    {
-      title: t('template.riskCategory'),
-      dataIndex: 'category',
-      key: 'category',
-      render: (category: string, record: ResponseTemplate) => {
-        // If scanner_type is blacklist, show blacklist name
-        if (record.scanner_type === 'blacklist' && record.scanner_identifier) {
+  const columns: ColumnDef<ResponseTemplate>[] = useMemo(
+    () => [
+      {
+        accessorKey: 'category',
+        header: t('template.riskCategory'),
+        cell: ({ row }) => {
+          const record = row.original
+          const category = row.getValue('category') as string
+
+          // If scanner_type is blacklist, show blacklist name
+          if (record.scanner_type === 'blacklist' && record.scanner_identifier) {
+            return (
+              <Badge variant="destructive">
+                {t('config.blacklist')} - {record.scanner_identifier}
+              </Badge>
+            )
+          }
+          // If scanner_type is whitelist, show whitelist name
+          if (record.scanner_type === 'whitelist' && record.scanner_identifier) {
+            return (
+              <Badge variant="outline">
+                {t('config.whitelist')} - {record.scanner_identifier}
+              </Badge>
+            )
+          }
+          // If scanner_type is custom_scanner, show "tag - name"
+          if (record.scanner_type === 'custom_scanner' && record.scanner_identifier) {
+            const displayText = record.scanner_name
+              ? `${record.scanner_identifier} - ${record.scanner_name}`
+              : record.scanner_identifier
+            return <Badge variant="secondary">{displayText}</Badge>
+          }
+          // If scanner_type is official_scanner or marketplace_scanner, show "tag - name"
+          if (
+            (record.scanner_type === 'official_scanner' ||
+              record.scanner_type === 'marketplace_scanner') &&
+            record.scanner_identifier
+          ) {
+            const displayText = record.scanner_name
+              ? `${record.scanner_identifier} - ${record.scanner_name}`
+              : record.scanner_identifier
+            return <Badge variant="default">{displayText}</Badge>
+          }
+          // Otherwise show standard category
           return (
-            <Tag color="purple">
-              {t('config.blacklist')} - {record.scanner_identifier}
-            </Tag>
-          );
-        }
-        // If scanner_type is whitelist, show whitelist name
-        if (record.scanner_type === 'whitelist' && record.scanner_identifier) {
-          return (
-            <Tag color="green">
-              {t('config.whitelist')} - {record.scanner_identifier}
-            </Tag>
-          );
-        }
-        // If scanner_type is custom_scanner, show "tag - name"
-        if (record.scanner_type === 'custom_scanner' && record.scanner_identifier) {
-          const displayText = record.scanner_name
-            ? `${record.scanner_identifier} - ${record.scanner_name}`
-            : record.scanner_identifier;
-          return (
-            <Tag color="cyan">
-              {displayText}
-            </Tag>
-          );
-        }
-        // If scanner_type is official_scanner or marketplace_scanner, show "tag - name"
-        if ((record.scanner_type === 'official_scanner' || record.scanner_type === 'marketplace_scanner') && record.scanner_identifier) {
-          const displayText = record.scanner_name
-            ? `${record.scanner_identifier} - ${record.scanner_name}`
-            : record.scanner_identifier;
-          return (
-            <Tag color="blue">
-              {displayText}
-            </Tag>
-          );
-        }
-        // Otherwise show standard category
-        return (
-          <Tag color={category === 'default' ? 'blue' : 'orange'}>
-            {getCategoryLabel(category)}
-          </Tag>
-        );
+            <Badge variant={category === 'default' ? 'default' : 'secondary'}>
+              {getCategoryLabel(category)}
+            </Badge>
+          )
+        },
       },
-    },
-    {
-      title: t('results.riskLevel'),
-      dataIndex: 'risk_level',
-      key: 'risk_level',
-      render: (riskLevel: string) => {
-        // Use the risk_level directly from the record instead of looking up by category
-        // This ensures blacklist and custom scanners show correct risk level
-        const actualRiskLevel = riskLevel || 'no_risk';
+      {
+        accessorKey: 'risk_level',
+        header: t('results.riskLevel'),
+        cell: ({ row }) => {
+          const riskLevel = row.getValue('risk_level') as string
+          const actualRiskLevel = riskLevel || 'no_risk'
 
-        const getColor = (riskLevel: string) => {
-          if (riskLevel === 'high_risk' || riskLevel === '高风险') return 'red';
-          if (riskLevel === 'medium_risk' || riskLevel === '中风险') return 'orange';
-          if (riskLevel === 'low_risk' || riskLevel === '低风险') return 'yellow';
-          return 'green';
-        };
-
-        return (
-          <Tag color={getColor(actualRiskLevel)}>
-            {getRiskLevelLabel(actualRiskLevel)}
-          </Tag>
-        );
+          return (
+            <Badge variant={getRiskBadgeVariant(actualRiskLevel)}>
+              {getRiskLevelLabel(actualRiskLevel)}
+            </Badge>
+          )
+        },
       },
-    },
-    {
-      title: t('template.rejectContent'),
-      dataIndex: 'template_content',
-      key: 'template_content',
-      ellipsis: true,
-      width: 400,
-      render: (content: any, record: ResponseTemplate) => {
-        let displayText = '';
+      {
+        accessorKey: 'template_content',
+        header: t('template.rejectContent'),
+        cell: ({ row }) => {
+          const content = row.getValue('template_content') as any
+          const record = row.original
+          let displayText = ''
 
-        if (typeof content === 'string') {
-          displayText = content;
-        } else if (typeof content === 'object') {
-          // Display only the current language content
-          // Use currentLang from component scope to ensure reactivity
-          const displayContent = content[currentLang];
+          if (typeof content === 'string') {
+            displayText = content
+          } else if (typeof content === 'object') {
+            const displayContent = content[currentLang]
 
-          if (displayContent) {
-            displayText = displayContent;
-          } else {
-            // Show placeholder when content doesn't exist for current language
-            const availableLangs = Object.keys(content);
-            if (availableLangs.length > 0) {
-              return (
-                <span style={{ color: '#999', fontStyle: 'italic' }}>
-                  {t('template.noContentForLanguage', {
-                    language: currentLang === 'zh' ? '中文' : 'English'
-                  })} ({t('template.clickEditToAdd')})
-                </span>
-              );
+            if (displayContent) {
+              displayText = displayContent
+            } else {
+              const availableLangs = Object.keys(content)
+              if (availableLangs.length > 0) {
+                return (
+                  <span className="text-gray-400 italic">
+                    {t('template.noContentForLanguage', {
+                      language: currentLang === 'zh' ? '中文' : 'English',
+                    })}{' '}
+                    ({t('template.clickEditToAdd')})
+                  </span>
+                )
+              }
+              return ''
             }
-            return '';
           }
-        }
 
-        // Replace {scanner_name} placeholder with actual scanner name (not tag)
-        if (displayText) {
-          if (record.scanner_type === 'blacklist' || record.scanner_type === 'whitelist') {
-            // For blacklist/whitelist, use scanner_identifier (which is the list name)
-            displayText = displayText.replace(/{scanner_name}/g, record.scanner_identifier || '');
-          } else if (record.scanner_name) {
-            // For custom/marketplace scanners, use scanner_name (not tag)
-            displayText = displayText.replace(/{scanner_name}/g, record.scanner_name);
-          } else if (record.scanner_identifier) {
-            // Fallback to scanner_identifier if scanner_name is not available
-            displayText = displayText.replace(/{scanner_name}/g, record.scanner_identifier);
+          // Replace {scanner_name} placeholder with actual scanner name (not tag)
+          if (displayText) {
+            if (record.scanner_type === 'blacklist' || record.scanner_type === 'whitelist') {
+              displayText = displayText.replace(/{scanner_name}/g, record.scanner_identifier || '')
+            } else if (record.scanner_name) {
+              displayText = displayText.replace(/{scanner_name}/g, record.scanner_name)
+            } else if (record.scanner_identifier) {
+              displayText = displayText.replace(/{scanner_name}/g, record.scanner_identifier)
+            }
           }
-        }
 
-        return displayText || '';
-      }
-    },
-    {
-      title: t('common.updatedAt'),
-      dataIndex: 'updated_at',
-      key: 'updated_at',
-      render: (time: string) => new Date(time).toLocaleString(),
-    },
-    {
-      title: t('common.operation'),
-      key: 'action',
-      render: (_: any, record: ResponseTemplate) => (
-        <Button
-          type="link"
-          icon={<EditOutlined />}
-          onClick={() => handleEdit(record)}
-        >
-          {t('template.editRejectContent')}
-        </Button>
-      ),
-    },
-  ], [currentLang, t]);
+          return (
+            <span className="truncate max-w-[400px] block" title={displayText}>
+              {displayText || ''}
+            </span>
+          )
+        },
+      },
+      {
+        accessorKey: 'updated_at',
+        header: t('common.updatedAt'),
+        cell: ({ row }) => {
+          const time = row.getValue('updated_at') as string
+          return format(new Date(time), 'yyyy-MM-dd HH:mm:ss')
+        },
+      },
+      {
+        id: 'actions',
+        header: t('common.operation'),
+        cell: ({ row }) => {
+          const record = row.original
+          return (
+            <Button variant="link" size="sm" onClick={() => handleEdit(record)} className="h-auto p-0">
+              <Edit className="mr-1 h-4 w-4" />
+              {t('template.editRejectContent')}
+            </Button>
+          )
+        },
+      },
+    ],
+    [currentLang, t]
+  )
 
   return (
-    <div>
-      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+    <div className="space-y-6">
+      <div className="flex justify-between items-start">
         <div>
-          <h3>{t('template.rejectAnswerLibrary')}</h3>
-          <p style={{ color: '#666', marginBottom: 16 }}>
-            {t('template.rejectAnswerDescription')}
-          </p>
+          <h2 className="text-3xl font-bold tracking-tight">{t('template.rejectAnswerLibrary')}</h2>
+          <p className="text-gray-600 mt-2">{t('template.rejectAnswerDescription')}</p>
         </div>
-        <Button
-          icon={<ReloadOutlined />}
-          onClick={loadAllData}
-          loading={loading}
-        >
+        <Button onClick={loadAllData} disabled={loading}>
+          <RefreshCw className="mr-2 h-4 w-4" />
           {t('common.refresh')}
         </Button>
       </div>
 
-      <Table
-        columns={columns}
-        dataSource={data}
-        rowKey="id"
-        loading={loading}
-        pagination={false}
-      />
+      <Card>
+        <CardContent className="p-0">
+          <DataTable columns={columns} data={data} loading={loading} pagination={false} />
+        </CardContent>
+      </Card>
 
-      <Modal
-        title={t('template.editRejectContent')}
-        open={modalVisible}
-        onCancel={() => {
-          setModalVisible(false);
-          form.resetFields();
-          setSubmitting(false);
-        }}
-        onOk={() => form.submit()}
-        confirmLoading={submitting}
-        width={600}
-      >
-        <Form
-          form={form}
-          layout="vertical"
-          onFinish={handleSubmit}
-        >
-          <Form.Item
-            name="category"
-            label={t('template.riskCategory')}
-          >
-            {/* For special scanner types (blacklist, custom, marketplace), show as plain text input (disabled) */}
-            {editingItem && (editingItem.scanner_type === 'blacklist' || 
-                            editingItem.scanner_type === 'custom_scanner' || 
-                            editingItem.scanner_type === 'marketplace_scanner') ? (
-              <Input disabled />
-            ) : (
-              <Select disabled>
-                {categories.map(category => (
-                  <Option key={category.value} value={category.value}>
-                    {category.label}
-                  </Option>
-                ))}
-              </Select>
-            )}
-          </Form.Item>
+      <Dialog open={modalVisible} onOpenChange={setModalVisible}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle>{t('template.editRejectContent')}</DialogTitle>
+          </DialogHeader>
 
-          <Form.Item
-            name="template_content"
-            label={t('template.rejectContent')}
-            rules={[{ required: true, message: t('template.contentRequired') }]}
-            extra={
-              <div style={{ color: '#666', fontSize: '12px', marginTop: '8px' }}>
-                {t('template.editLanguageHint', {
-                  language: i18n.language === 'zh' ? '中文' : 'English'
-                })}
-              </div>
-            }
-          >
-            <TextArea
-              rows={6}
-              placeholder={
-                i18n.language === 'zh'
-                  ? t('template.rejectContentPlaceholderZh')
-                  : t('template.rejectContentPlaceholderEn')
-              }
-              showCount
-              maxLength={500}
-            />
-          </Form.Item>
-        </Form>
-      </Modal>
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
+              <FormField
+                control={form.control}
+                name="category"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('template.riskCategory')}</FormLabel>
+                    <FormControl>
+                      <Input {...field} disabled />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="template_content"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('template.rejectContent')}</FormLabel>
+                    <FormControl>
+                      <Textarea
+                        rows={6}
+                        placeholder={
+                          i18n.language === 'zh'
+                            ? t('template.rejectContentPlaceholderZh')
+                            : t('template.rejectContentPlaceholderEn')
+                        }
+                        maxLength={500}
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t('template.editLanguageHint', {
+                        language: i18n.language === 'zh' ? '中文' : 'English',
+                      })}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setModalVisible(false)
+                    form.reset()
+                  }}
+                >
+                  {t('common.cancel')}
+                </Button>
+                <Button type="submit">{t('common.save')}</Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
     </div>
-  );
-};
+  )
+}
 
-export default ResponseTemplateManagement;
+export default ResponseTemplateManagement
