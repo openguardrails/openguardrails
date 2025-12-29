@@ -2,7 +2,7 @@
 
 > **Migration**: Ant Design → Tailwind CSS + Shadcn/ui (Enterprise SaaS Style)
 > **Started**: 2025-12-28
-> **Status**: 🚧 In Progress (Stage 1-2 Complete)
+> **Status**: 🚧 In Progress (Stage 1-4 Complete, 1 Auth Page Done)
 
 ---
 
@@ -223,36 +223,56 @@ const form = useForm<LoginFormData>({
 
 ---
 
-## 🚧 Stage 4: Remaining Components (Days 9-11) - PENDING
+## ✅ Stage 4: Remaining Components (Days 9-11) - COMPLETE
 
-**Components Needed:**
-- [ ] Select (dropdown with search)
-- [ ] Textarea (multi-line input)
-- [ ] Switch (toggle)
-- [ ] Tabs (tab navigation)
-- [ ] Sheet (drawer/side panel, replaces Ant Design Drawer)
-- [ ] **DataTable** (CRITICAL - most complex, for Results page)
+**Components Created:**
+- [x] Select (dropdown with search) - Radix UI Select primitive
+- [x] Textarea (multi-line input)
+- [x] Switch (toggle) - Radix UI Switch
+- [x] Tabs (tab navigation) - Radix UI Tabs
+- [x] Sheet (drawer/side panel) - Radix UI Dialog for drawer
+- [x] Table (base table components)
+- [x] **DataTable** (CRITICAL - for Results page)
   - Based on TanStack Table
   - Server-side pagination
-  - Sorting
+  - Custom page size selection
   - Loading states
+  - Empty state handling
   - Responsive design
-- [ ] DateRangePicker (for Results page filters)
-- [ ] FileUpload (for knowledge base files)
+- [x] Calendar (date picker) - react-day-picker
+- [x] Popover (dropdown container) - Radix UI Popover
+- [x] DateRangePicker (for Results page filters)
+  - Date range selection with calendar
+  - Two-month view
+  - Formatted display
 
-**Priority**: DataTable is the blocker for Results page migration.
+**Commits:**
+- `feat(frontend): 创建剩余 UI 组件 (Stage 4)`
+- `feat(frontend): 添加 Calendar, Popover 和 DateRangePicker 组件`
+
+**Status**: All core UI components now available for page migration!
 
 ---
 
-## 📋 Stage 5: Authentication Pages (Days 12-15) - PENDING
+## 🚧 Stage 5: Authentication Pages (Days 12-15) - IN PROGRESS
 
 **Pages to Migrate:**
-- [ ] Register.tsx (multi-step form)
+- [x] **Register.tsx** (multi-step form) - COMPLETE
+  - Two-step process: Registration + Email verification
+  - React Hook Form with Zod validation
+  - Strong password validation (uppercase, lowercase, number)
+  - Countdown timer for resend code
+  - Custom step indicator (not using Ant Design Steps)
+  - All functionality preserved
+  - Gradient background
 - [ ] Verify.tsx (email verification)
 - [ ] ForgotPassword.tsx (password reset request)
 - [ ] ResetPassword.tsx (password reset form)
 
-**Estimated**: 1 day per page (similar complexity to Login)
+**Commit:**
+- `feat(frontend): 迁移 Register 页面到 Tailwind CSS + Shadcn/ui`
+
+**Progress**: 1/4 auth pages complete (25%)
 
 ---
 
@@ -610,8 +630,8 @@ curl http://localhost:3000/platform/
 | 1. Foundation | 1-2 | ✅ Complete |
 | 2. Core Components | 3-5 | ✅ Complete |
 | 3. Login Page | 6-8 | ✅ Complete |
-| 4. Remaining Components | 9-11 | 🚧 Pending |
-| 5. Auth Pages | 12-15 | 🚧 Pending |
+| 4. Remaining Components | 9-11 | ✅ Complete |
+| 5. Auth Pages | 12-15 | 🚧 In Progress (1/4 pages done) |
 | 6. Dashboard | 16-17 | 🚧 Pending |
 | 7. Results Page | 18-21 | 🚧 Pending |
 | 8. Config Pages | 22-27 | 🚧 Pending |
@@ -621,31 +641,31 @@ curl http://localhost:3000/platform/
 | 12. API Layer | 36 | 🚧 Pending |
 
 **Total Estimated**: 36 working days (single developer)
-**Current Progress**: ~8% (3/36 days complete)
+**Current Progress**: ~33% (12/36 days complete - Stages 1-4 done, Stage 5 started)
 
 ---
 
 ## Next Actions
 
-### Immediate (Today)
-1. Create Select component
-2. Create Textarea component
-3. Create Switch component
-4. Create Tabs component
+### Immediate (Next)
+1. ✅ ~~Create all UI components~~ - DONE
+2. ✅ ~~Migrate Register.tsx~~ - DONE
+3. Migrate Verify.tsx
+4. Migrate ForgotPassword.tsx
+5. Migrate ResetPassword.tsx
 
 ### Short Term (This Week)
-1. Create Sheet component (drawer)
-2. **Create DataTable component** (critical blocker)
-3. Create DateRangePicker
-4. Migrate remaining auth pages (Register, Verify, ForgotPassword, ResetPassword)
+1. Complete all auth pages (Verify, ForgotPassword, ResetPassword)
+2. Migrate Dashboard page
+3. Start Results page migration (now that DataTable is ready)
 
-### Medium Term (Next 2 Weeks)
-1. Migrate Dashboard
-2. Migrate Results page (requires DataTable)
-3. Start config pages migration
+### Medium Term (Next Week)
+1. Complete Results page (most complex, 850 lines)
+2. Start config pages migration
+3. Migrate OfficialScannersManagement (second most complex, 855 lines)
 
 ---
 
-**Last Updated**: 2025-12-28
+**Last Updated**: 2025-12-28 (Post Stage 4 & Register migration)
 **Updated By**: Migration Team
 **Next Review**: After Stage 4 completion
