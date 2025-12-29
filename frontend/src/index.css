@@ -4,66 +4,91 @@
 
 @layer base {
   :root {
-    /* Vercel 风格配色 - 黑白灰主色调 */
+    /* 企业级 SaaS 配色 - Stripe/Linear 风格 */
     --background: 0 0% 100%;
-    --foreground: 0 0% 3.9%;
+    --foreground: 222 47% 11%; /* #0f172a Slate 900 - 主要文字 */
 
     --card: 0 0% 100%;
-    --card-foreground: 0 0% 3.9%;
+    --card-foreground: 222 47% 11%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 3.9%;
+    --popover-foreground: 222 47% 11%;
 
-    --primary: 0 0% 9%;
-    --primary-foreground: 0 0% 98%;
+    /* 主色 - Stripe Blue #0070f3 */
+    --primary: 211 100% 48%;
+    --primary-foreground: 0 0% 100%;
 
-    --secondary: 0 0% 96.1%;
-    --secondary-foreground: 0 0% 9%;
+    /* 次要背景 - Slate 50/100 */
+    --secondary: 210 40% 98%;
+    --secondary-foreground: 222 47% 11%;
 
-    --muted: 0 0% 96.1%;
-    --muted-foreground: 0 0% 45.1%;
+    /* 柔和背景 - Slate 100 */
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215 16% 47%; /* #64748b Slate 500 - 次要文字 */
 
-    --accent: 0 0% 96.1%;
-    --accent-foreground: 0 0% 9%;
+    /* 强调色 - 与 primary 一致 */
+    --accent: 211 100% 48%;
+    --accent-foreground: 0 0% 100%;
 
+    /* 危险色 - Red */
     --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
+    --destructive-foreground: 0 0% 100%;
 
-    --border: 0 0% 89.8%;
-    --input: 0 0% 89.8%;
-    --ring: 0 0% 3.9%;
+    /* 成功色 - Green */
+    --success: 142 71% 45%;
+    --success-foreground: 0 0% 100%;
 
-    --radius: 0.5rem;
+    /* 警告色 - Yellow */
+    --warning: 45 93% 47%;
+    --warning-foreground: 0 0% 100%;
+
+    /* 边框 - Slate 200/300 */
+    --border: 214 32% 91%; /* #e2e8f0 Slate 200 */
+    --border-medium: 215 20% 65%; /* #94a3b8 Slate 400 */
+    --input: 214 32% 91%;
+    --ring: 211 100% 48%; /* 与 primary 一致 */
+
+    /* 圆角 - 企业级标准 6-8px */
+    --radius: 0.375rem; /* 6px */
   }
 
   .dark {
-    --background: 0 0% 3.9%;
-    --foreground: 0 0% 98%;
+    /* 深色模式 - 参考 Stripe/Linear */
+    --background: 222 47% 6%; /* #0d111a 深色背景 */
+    --foreground: 210 40% 98%; /* #f8fafc Slate 50 - 主要文字 */
 
-    --card: 0 0% 3.9%;
-    --card-foreground: 0 0% 98%;
+    --card: 222 47% 8%;
+    --card-foreground: 210 40% 98%;
 
-    --popover: 0 0% 3.9%;
-    --popover-foreground: 0 0% 98%;
+    --popover: 222 47% 8%;
+    --popover-foreground: 210 40% 98%;
 
-    --primary: 0 0% 98%;
-    --primary-foreground: 0 0% 9%;
+    /* 主色 - 深色模式下稍微提亮 */
+    --primary: 211 100% 55%;
+    --primary-foreground: 0 0% 100%;
 
-    --secondary: 0 0% 14.9%;
-    --secondary-foreground: 0 0% 98%;
+    --secondary: 217 33% 12%;
+    --secondary-foreground: 210 40% 98%;
 
-    --muted: 0 0% 14.9%;
-    --muted-foreground: 0 0% 63.9%;
+    --muted: 217 33% 12%;
+    --muted-foreground: 215 16% 65%; /* #94a3b8 Slate 400 */
 
-    --accent: 0 0% 14.9%;
-    --accent-foreground: 0 0% 98%;
+    --accent: 211 100% 55%;
+    --accent-foreground: 0 0% 100%;
 
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 100%;
 
-    --border: 0 0% 14.9%;
-    --input: 0 0% 14.9%;
-    --ring: 0 0% 83.1%;
+    --success: 142 71% 55%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 45 93% 57%;
+    --warning-foreground: 0 0% 100%;
+
+    --border: 217 33% 17%; /* #202938 深色边框 */
+    --border-medium: 215 20% 35%;
+    --input: 217 33% 17%;
+    --ring: 211 100% 55%;
   }
 }
 
