@@ -36,7 +36,7 @@ import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import { InputNumber } from '@/components/ui/input-number'
 import { DataTable } from '@/components/data-table/DataTable'
-import { confirmDialog } from '@/lib/confirm-dialog'
+import { confirmDialog } from '@/utils/confirm-dialog'
 import { adminApi } from '../../services/api'
 import type { ColumnDef } from '@tanstack/react-table'
 

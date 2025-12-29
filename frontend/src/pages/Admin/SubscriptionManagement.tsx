@@ -23,7 +23,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { DataTable } from '@/components/data-table/DataTable'
-import { confirmDialog } from '@/lib/confirm-dialog'
+import { confirmDialog } from '@/utils/confirm-dialog'
 import { billingService } from '../../services/billing'
 import type { SubscriptionListItem } from '../../types/billing'
 import type { ColumnDef } from '@tanstack/react-table'
