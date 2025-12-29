@@ -1,370 +1,416 @@
-import React, { useEffect, useState } from 'react';
-import { Card, Typography, Space, Button, message, Divider, Progress, Tag, Tabs, Form, Input, Alert } from 'antd';
-import { CopyOutlined, SafetyCertificateOutlined, LockOutlined } from '@ant-design/icons';
-import { useTranslation } from 'react-i18next';
-import { useSearchParams } from 'react-router-dom';
-import { authService, UserInfo } from '../../services/auth';
-import { configApi } from '../../services/api';
-import { billingService } from '../../services/billing';
-import type { Subscription } from '../../types/billing';
-import { features, getSystemConfig, isSaasMode } from '../../config';
-import { PaymentButton } from '../../components/Payment';
-import paymentService, { PaymentConfig } from '../../services/payment';
+import React, { useEffect, useState } from 'react'
+import { Copy, ShieldCheck, Lock } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
+import { useSearchParams } from 'react-router-dom'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import * as z from 'zod'
 
-const { Title, Text } = Typography;
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '@/components/ui/form'
+import { Badge } from '@/components/ui/badge'
+import { Progress } from '@/components/ui/progress'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Separator } from '@/components/ui/separator'
+import { authService, UserInfo } from '../../services/auth'
+import { configApi } from '../../services/api'
+import { billingService } from '../../services/billing'
+import type { Subscription } from '../../types/billing'
+import { features, getSystemConfig, isSaasMode } from '../../config'
+import { PaymentButton } from '../../components/Payment'
+import paymentService, { PaymentConfig } from '../../services/payment'
 
 interface SystemInfo {
-  support_email: string | null;
-  app_name: string;
-  app_version: string;
+  support_email: string | null
+  app_name: string
+  app_version: string
 }
 
 const Account: React.FC = () => {
-  const { t } = useTranslation();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const [user, setUser] = useState<UserInfo | null>(null);
-  const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
-  const [subscription, setSubscription] = useState<Subscription | null>(null);
-  const [paymentConfig, setPaymentConfig] = useState<PaymentConfig | null>(null);
-  const [passwordForm] = Form.useForm();
-  const [passwordLoading, setPasswordLoading] = useState(false);
-  const [apiDomain, setApiDomain] = useState<string>('http://localhost:5001');
+  const { t } = useTranslation()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [user, setUser] = useState<UserInfo | null>(null)
+  const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null)
+  const [subscription, setSubscription] = useState<Subscription | null>(null)
+  const [paymentConfig, setPaymentConfig] = useState<PaymentConfig | null>(null)
+  const [passwordLoading, setPasswordLoading] = useState(false)
+  const [apiDomain, setApiDomain] = useState<string>('http://localhost:5001')
 
   // Get active tab from URL query params
-  const [activeTab, setActiveTab] = useState(() => searchParams.get('tab') || 'general');
+  const [activeTab, setActiveTab] = useState(() => searchParams.get('tab') || 'general')
+
+  const passwordFormSchema = z
+    .object({
+      current_password: z.string().min(1, t('account.currentPasswordRequired')),
+      new_password: z.string().min(8, t('account.passwordMinLength')),
+      confirm_password: z.string().min(1, t('account.confirmPasswordRequired')),
+    })
+    .refine((data) => data.new_password === data.confirm_password, {
+      message: t('account.passwordMismatch'),
+      path: ['confirm_password'],
+    })
+
+  const passwordForm = useForm<z.infer<typeof passwordFormSchema>>({
+    resolver: zodResolver(passwordFormSchema),
+  })
 
   const fetchMe = async () => {
     try {
-      const me = await authService.getCurrentUser();
-      setUser(me);
+      const me = await authService.getCurrentUser()
+      setUser(me)
     } catch (e) {
-      message.error(t('account.fetchUserInfoFailed'));
+      toast.error(t('account.fetchUserInfoFailed'))
     }
-  };
+  }
 
   const fetchSystemInfo = async () => {
     try {
-      const info = await configApi.getSystemInfo();
-      setSystemInfo(info);
+      const info = await configApi.getSystemInfo()
+      setSystemInfo(info)
     } catch (e) {
-      console.error('Fetch system info failed', e);
+      console.error('Fetch system info failed', e)
     }
-  };
+  }
 
   const fetchSubscription = async () => {
-    // Skip subscription fetch in enterprise mode
-    if (!features.showSubscription()) {
-      return;
-    }
+    if (!features.showSubscription()) return
 
     try {
-      const sub = await billingService.getCurrentSubscription();
-      setSubscription(sub);
+      const sub = await billingService.getCurrentSubscription()
+      setSubscription(sub)
     } catch (e: any) {
-      console.error('Fetch subscription failed', e);
-      // Set null to indicate subscription not found (for legacy users)
-      setSubscription(null);
+      console.error('Fetch subscription failed', e)
+      setSubscription(null)
     }
-  };
+  }
 
   const fetchPaymentConfig = async () => {
-    // Skip payment config fetch in enterprise mode
-    if (!features.showPayment()) {
-      return;
-    }
+    if (!features.showPayment()) return
 
     try {
-      const config = await paymentService.getConfig();
-      setPaymentConfig(config);
+      const config = await paymentService.getConfig()
+      setPaymentConfig(config)
     } catch (e) {
-      console.error('Fetch payment config failed', e);
+      console.error('Fetch payment config failed', e)
     }
-  };
+  }
 
   useEffect(() => {
-    fetchMe();
-    fetchSystemInfo();
-    fetchSubscription();
-    fetchPaymentConfig();
+    fetchMe()
+    fetchSystemInfo()
+    fetchSubscription()
+    fetchPaymentConfig()
 
-    // Get API domain from system config
     try {
-      const config = getSystemConfig();
-      setApiDomain(config.apiDomain);
+      const config = getSystemConfig()
+      setApiDomain(config.apiDomain)
     } catch (e) {
-      console.error('Failed to get system config', e);
+      console.error('Failed to get system config', e)
     }
-  }, []);
+  }, [])
 
   // Sync activeTab with URL search params
   useEffect(() => {
-    const tab = searchParams.get('tab');
+    const tab = searchParams.get('tab')
     if (tab && tab !== activeTab) {
-      setActiveTab(tab);
+      setActiveTab(tab)
     } else if (!tab && activeTab !== 'general') {
-      setActiveTab('general');
+      setActiveTab('general')
     }
-  }, [searchParams, activeTab]);
+  }, [searchParams, activeTab])
 
   const handleCopyDifyEndpoint = async () => {
-    const endpoint = 'https://api.openguardrails.com/v1/dify/moderation';
+    const endpoint = 'https://api.openguardrails.com/v1/dify/moderation'
     try {
-      await navigator.clipboard.writeText(endpoint);
-      message.success(t('account.copied'));
+      await navigator.clipboard.writeText(endpoint)
+      toast.success(t('account.copied'))
     } catch {
-      message.error(t('account.copyFailed'));
+      toast.error(t('account.copyFailed'))
     }
-  };
+  }
 
-  const handleChangePassword = async (values: { current_password: string; new_password: string; confirm_password: string }) => {
-    if (values.new_password !== values.confirm_password) {
-      message.error(t('account.passwordMismatch') || 'Passwords do not match');
-      return;
-    }
-
+  const handleChangePassword = async (values: z.infer<typeof passwordFormSchema>) => {
     try {
-      setPasswordLoading(true);
-      const response = await authService.changePassword(values.current_password, values.new_password);
+      setPasswordLoading(true)
+      const response = await authService.changePassword(
+        values.current_password,
+        values.new_password
+      )
 
       if (response.status === 'success') {
-        message.success(t('account.changePasswordSuccess'));
-        passwordForm.resetFields();
+        toast.success(t('account.changePasswordSuccess'))
+        passwordForm.reset()
       } else {
-        message.error(t('account.changePasswordFailed'));
+        toast.error(t('account.changePasswordFailed'))
       }
     } catch (error: any) {
-      const errorMessage = error.response?.data?.detail || t('account.changePasswordFailed');
+      const errorMessage = error.response?.data?.detail || t('account.changePasswordFailed')
       if (errorMessage.includes('Current password is incorrect')) {
-        message.error(t('account.currentPasswordIncorrect'));
+        toast.error(t('account.currentPasswordIncorrect'))
       } else {
-        message.error(errorMessage);
+        toast.error(errorMessage)
       }
     } finally {
-      setPasswordLoading(false);
+      setPasswordLoading(false)
     }
-  };
+  }
 
-  const tabItems = [
-    {
-      key: 'general',
-      label: t('account.title') || 'Account Management',
-      children: (
-        <Space direction="vertical" size="large" style={{ width: '100%' }}>
-          <div>
-            <Text type="secondary">{t('account.email')}</Text>
-            <div style={{ fontSize: 16 }}>{user?.email || '-'}</div>
+  return (
+    <Card>
+      <CardContent className="pt-6">
+        <div className="space-y-6">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="h-6 w-6 text-blue-600" />
+            <h2 className="text-2xl font-bold">{t('account.title')}</h2>
           </div>
 
-          <div>
-            <Text type="secondary">{t('account.tenantUuid')}</Text>
-            <Space style={{ width: '100%', marginTop: 8, alignItems: 'center' }}>
-              <div style={{
-                flex: 1,
-                padding: '8px 12px',
-                border: '1px solid #d9d9d9',
-                borderRadius: '6px',
-                backgroundColor: '#fafafa',
-                fontFamily: 'monospace',
-                fontSize: '14px',
-                wordBreak: 'break-all'
-              }}>
-                <Text code style={{ backgroundColor: 'transparent', border: 'none', padding: 0 }}>
-                  {user?.id || '-'}
-                </Text>
+          <Tabs
+            value={activeTab}
+            onValueChange={(key) => {
+              setActiveTab(key)
+              if (key === 'general') {
+                searchParams.delete('tab')
+                setSearchParams(searchParams)
+              } else {
+                searchParams.set('tab', key)
+                setSearchParams(searchParams)
+              }
+            }}
+          >
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="general">{t('account.title')}</TabsTrigger>
+              <TabsTrigger value="password">
+                <Lock className="mr-2 h-4 w-4" />
+                {t('account.passwordChange')}
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="general" className="space-y-6 mt-6">
+              {/* Email */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-600">{t('account.email')}</label>
+                <div className="text-base">{user?.email || '-'}</div>
               </div>
-              <Button
-                icon={<CopyOutlined />}
-                onClick={() => {
-                  if (user?.id) {
-                    navigator.clipboard.writeText(user.id);
-                    message.success(t('account.uuidCopied'));
-                  }
-                }}
-              >
-                {t('account.copy')}
-              </Button>
-            </Space>
-            <div style={{ marginTop: 8 }}>
-              <Text type="secondary">{t('account.uuidNote')}</Text>
-            </div>
-          </div>
 
-          <div>
-            <Text type="secondary">{t('account.apiKeyManagement')}</Text>
-            <div style={{
-              marginTop: 8,
-              padding: '12px 16px',
-              border: '1px solid #d9d9d9',
-              borderRadius: '6px',
-              backgroundColor: '#fafafa'
-            }}>
-              <Text>{t('account.apiKeyMigrationNotice')}</Text>
-              <div style={{ marginTop: 8 }}>
-                <Button
-                  type="link"
-                  onClick={() => window.location.href = '/platform/applications'}
-                  style={{ padding: 0, height: 'auto' }}
-                >
-                  {t('account.goToApplicationManagement')}
-                </Button>
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <Text type="secondary">{t('account.difyModerationEndpoint')}</Text>
-            <Space style={{ width: '100%', marginTop: 8, alignItems: 'center' }}>
-              <div style={{
-                flex: 1,
-                padding: '8px 12px',
-                border: '1px solid #d9d9d9',
-                borderRadius: '6px',
-                backgroundColor: '#fafafa',
-                fontFamily: 'monospace',
-                fontSize: '14px',
-                wordBreak: 'break-all'
-              }}>
-                <Text code style={{ backgroundColor: 'transparent', border: 'none', padding: 0 }}>
-                  https://api.openguardrails.com/v1/dify/moderation
-                </Text>
-              </div>
-              <Button icon={<CopyOutlined />} onClick={handleCopyDifyEndpoint}>{t('account.copy')}</Button>
-            </Space>
-            <div style={{ marginTop: 8 }}>
-              <Text type="secondary">{t('account.difyModerationEndpointNote')}</Text>
-            </div>
-          </div>
-
-          {/* Direct Model Access API Key */}
-          <div>
-            <Divider />
-            <div style={{ marginBottom: 16 }}>
-              <Title level={5}>{t('docs.directModelAccess') || 'Direct Model Access'}</Title>
-              <Text type="secondary">{t('docs.directModelAccessDesc') || 'Use this API key to directly access models (OpenGuardrails-Text, bge-m3, etc.) without guardrails detection. For privacy, we only track usage count, not content.'}</Text>
-
-              {/* Subscription requirement notice (SaaS mode only) */}
-              {isSaasMode() && !user?.is_super_admin && (
-                <div style={{ marginTop: 12 }}>
-                  {subscription?.subscription_type === 'subscribed' ? (
-                    <Text type="success" style={{ fontSize: 13 }}>
-                      ✓ {t('docs.subscriptionActive') || 'Subscription active - Direct model access enabled'}
-                    </Text>
-                  ) : (
-                    <Alert
-                      message={t('docs.subscriptionRequired') || 'Active subscription required to use direct model access'}
-                      description={
-                        <Space direction="vertical" size="small" style={{ width: '100%', marginTop: 8 }}>
-                          <Text>{t('billing.upgradeDescription') || 'Upgrade to unlock unlimited access to direct model APIs, custom scanners, and premium features.'}</Text>
-                          {paymentConfig && (
-                            <>
-                              <Text strong>
-                                {t('billing.price')}: {paymentService.formatPrice(paymentConfig.subscription_price, paymentConfig.currency)}/{t('billing.month')}
-                              </Text>
-                              <div style={{ marginTop: 8 }}>
-                                <PaymentButton
-                                  type="subscription"
-                                  amount={paymentConfig.subscription_price}
-                                  currency={paymentConfig.currency}
-                                  provider={paymentConfig.provider}
-                                  buttonText={t('payment.button.upgradeNow')}
-                                  onSuccess={() => {
-                                    fetchSubscription();
-                                    fetchMe();
-                                  }}
-                                />
-                              </div>
-                            </>
-                          )}
-                        </Space>
+              {/* Tenant UUID */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-600">
+                  {t('account.tenantUuid')}
+                </label>
+                <div className="flex gap-2">
+                  <div className="flex-1 p-3 border rounded-md bg-gray-50 font-mono text-sm break-all">
+                    {user?.id || '-'}
+                  </div>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      if (user?.id) {
+                        navigator.clipboard.writeText(user.id)
+                        toast.success(t('account.uuidCopied'))
                       }
-                      type="warning"
-                      showIcon
-                      style={{ marginTop: 12 }}
-                    />
-                  )}
+                    }}
+                  >
+                    <Copy className="mr-2 h-4 w-4" />
+                    {t('account.copy')}
+                  </Button>
                 </div>
-              )}
-            </div>
+                <p className="text-sm text-gray-600">{t('account.uuidNote')}</p>
+              </div>
 
-            {/* API Key Section - Show for all users but with different states */}
-            {(() => {
-              const hasAccess = user?.model_api_key && (
-                !isSaasMode() ||
-                user?.is_super_admin ||
-                subscription?.subscription_type === 'subscribed'
-              );
+              {/* API Key Management Notice */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-600">
+                  {t('account.apiKeyManagement')}
+                </label>
+                <div className="p-4 border rounded-md bg-gray-50">
+                  <p className="text-sm">{t('account.apiKeyMigrationNotice')}</p>
+                  <Button
+                    variant="link"
+                    className="px-0 h-auto mt-2"
+                    onClick={() => (window.location.href = '/platform/applications')}
+                  >
+                    {t('account.goToApplicationManagement')}
+                  </Button>
+                </div>
+              </div>
 
-              return (
+              {/* Dify Moderation Endpoint */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-600">
+                  {t('account.difyModerationEndpoint')}
+                </label>
+                <div className="flex gap-2">
+                  <div className="flex-1 p-3 border rounded-md bg-gray-50 font-mono text-sm break-all">
+                    https://api.openguardrails.com/v1/dify/moderation
+                  </div>
+                  <Button variant="outline" onClick={handleCopyDifyEndpoint}>
+                    <Copy className="mr-2 h-4 w-4" />
+                    {t('account.copy')}
+                  </Button>
+                </div>
+                <p className="text-sm text-gray-600">{t('account.difyModerationEndpointNote')}</p>
+              </div>
+
+              <Separator />
+
+              {/* Direct Model Access */}
+              <div className="space-y-4">
                 <div>
-                  <Text type="secondary">{t('docs.modelApiKey') || 'Model API Key'}</Text>
-                  <Space style={{ width: '100%', marginTop: 8, alignItems: 'center' }}>
-                    <div style={{
-                      flex: 1,
-                      padding: '8px 12px',
-                      border: '1px solid #d9d9d9',
-                      borderRadius: '6px',
-                      backgroundColor: hasAccess ? '#fafafa' : '#f5f5f5',
-                      fontFamily: 'monospace',
-                      fontSize: '14px',
-                      wordBreak: 'break-all',
-                      position: 'relative'
-                    }}>
-                      {hasAccess ? (
-                        <Text code style={{ backgroundColor: 'transparent', border: 'none', padding: 0 }}>
-                          {user?.model_api_key}
-                        </Text>
+                  <h3 className="text-lg font-semibold">
+                    {t('docs.directModelAccess') || 'Direct Model Access'}
+                  </h3>
+                  <p className="text-sm text-gray-600 mt-1">
+                    {t('docs.directModelAccessDesc') ||
+                      'Use this API key to directly access models (OpenGuardrails-Text, bge-m3, etc.) without guardrails detection. For privacy, we only track usage count, not content.'}
+                  </p>
+
+                  {/* Subscription requirement notice (SaaS mode only) */}
+                  {isSaasMode() && !user?.is_super_admin && (
+                    <div className="mt-3">
+                      {subscription?.subscription_type === 'subscribed' ? (
+                        <p className="text-sm text-green-600">
+                          ✓{' '}
+                          {t('docs.subscriptionActive') ||
+                            'Subscription active - Direct model access enabled'}
+                        </p>
                       ) : (
-                        <Text type="secondary" style={{ fontFamily: 'monospace' }}>
-                          <LockOutlined /> {t('account.subscriptionRequiredToViewKey') || '••••••••••••••••••••••••••••••••••• (Subscription Required)'}
-                        </Text>
+                        <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                          <p className="font-semibold text-yellow-900">
+                            {t('docs.subscriptionRequired') ||
+                              'Active subscription required to use direct model access'}
+                          </p>
+                          <div className="mt-2 space-y-2">
+                            <p className="text-sm text-yellow-800">
+                              {t('billing.upgradeDescription') ||
+                                'Upgrade to unlock unlimited access to direct model APIs, custom scanners, and premium features.'}
+                            </p>
+                            {paymentConfig && (
+                              <>
+                                <p className="font-semibold text-sm">
+                                  {t('billing.price')}:{' '}
+                                  {paymentService.formatPrice(
+                                    paymentConfig.subscription_price,
+                                    paymentConfig.currency
+                                  )}
+                                  /{t('billing.month')}
+                                </p>
+                                <div className="mt-2">
+                                  <PaymentButton
+                                    type="subscription"
+                                    amount={paymentConfig.subscription_price}
+                                    currency={paymentConfig.currency}
+                                    provider={paymentConfig.provider}
+                                    buttonText={t('payment.button.upgradeNow')}
+                                    onSuccess={() => {
+                                      fetchSubscription()
+                                      fetchMe()
+                                    }}
+                                  />
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        </div>
                       )}
                     </div>
-                    <Button
-                      icon={<CopyOutlined />}
-                      disabled={!hasAccess}
-                      onClick={() => {
-                        if (user?.model_api_key && hasAccess) {
-                          navigator.clipboard.writeText(user.model_api_key);
-                          message.success(t('account.copied'));
-                        }
-                      }}
-                    >
-                      {t('account.copy')}
-                    </Button>
-                    <Button
-                      danger
-                      disabled={!hasAccess}
-                      onClick={async () => {
-                        if (!hasAccess) return;
-                        try {
-                          const newKey = await authService.regenerateModelApiKey();
-                          setUser(user ? { ...user, model_api_key: newKey.model_api_key } : null);
-                          message.success(t('account.modelApiKeyRegenerated') || 'Model API Key regenerated successfully');
-                        } catch (error) {
-                          message.error(t('account.regenerateFailed') || 'Failed to regenerate Model API Key');
-                        }
-                      }}
-                    >
-                      {t('account.regenerate') || 'Regenerate'}
-                    </Button>
-                  </Space>
+                  )}
                 </div>
-              );
-            })()}
 
-            <div style={{ marginTop: 16 }}>
-              <Text strong>{t('account.usageExample') || 'Usage Example'}:</Text>
-              <pre style={{
-                backgroundColor: '#f6f8fa',
-                padding: 16,
-                borderRadius: 6,
-                overflow: 'auto',
-                fontSize: 13,
-                lineHeight: 1.5,
-                marginTop: 8,
-                opacity: (user?.model_api_key && (!isSaasMode() || user?.is_super_admin || subscription?.subscription_type === 'subscribed')) ? 1 : 0.5
-              }}>
-{`from openai import OpenAI
+                {/* API Key Section */}
+                {(() => {
+                  const hasAccess =
+                    user?.model_api_key &&
+                    (!isSaasMode() ||
+                      user?.is_super_admin ||
+                      subscription?.subscription_type === 'subscribed')
+
+                  return (
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-gray-600">
+                        {t('docs.modelApiKey') || 'Model API Key'}
+                      </label>
+                      <div className="flex gap-2">
+                        <div
+                          className={`flex-1 p-3 border rounded-md font-mono text-sm break-all ${
+                            hasAccess ? 'bg-gray-50' : 'bg-gray-100'
+                          }`}
+                        >
+                          {hasAccess ? (
+                            user?.model_api_key
+                          ) : (
+                            <span className="text-gray-500 flex items-center gap-2">
+                              <Lock className="h-4 w-4" />
+                              {t('account.subscriptionRequiredToViewKey') ||
+                                '••••••••••••••••••••••••••••••••••• (Subscription Required)'}
+                            </span>
+                          )}
+                        </div>
+                        <Button
+                          variant="outline"
+                          disabled={!hasAccess}
+                          onClick={() => {
+                            if (user?.model_api_key && hasAccess) {
+                              navigator.clipboard.writeText(user.model_api_key)
+                              toast.success(t('account.copied'))
+                            }
+                          }}
+                        >
+                          <Copy className="mr-2 h-4 w-4" />
+                          {t('account.copy')}
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          disabled={!hasAccess}
+                          onClick={async () => {
+                            if (!hasAccess) return
+                            try {
+                              const newKey = await authService.regenerateModelApiKey()
+                              setUser(user ? { ...user, model_api_key: newKey.model_api_key } : null)
+                              toast.success(
+                                t('account.modelApiKeyRegenerated') ||
+                                  'Model API Key regenerated successfully'
+                              )
+                            } catch (error) {
+                              toast.error(
+                                t('account.regenerateFailed') ||
+                                  'Failed to regenerate Model API Key'
+                              )
+                            }
+                          }}
+                        >
+                          {t('account.regenerate') || 'Regenerate'}
+                        </Button>
+                      </div>
+                    </div>
+                  )
+                })()}
+
+                {/* Usage Example */}
+                <div className="space-y-2">
+                  <p className="font-semibold text-sm">
+                    {t('account.usageExample') || 'Usage Example'}:
+                  </p>
+                  <pre
+                    className={`bg-gray-100 p-4 rounded-md overflow-auto text-xs leading-relaxed ${
+                      user?.model_api_key &&
+                      (!isSaasMode() ||
+                        user?.is_super_admin ||
+                        subscription?.subscription_type === 'subscribed')
+                        ? ''
+                        : 'opacity-50'
+                    }`}
+                  >
+                    {`from openai import OpenAI
 
 # Just change base_url and api_key
 client = OpenAI(
@@ -379,246 +425,235 @@ response = client.chat.completions.create(
 )
 
 # Privacy Notice: Content is NOT logged, only usage count`}
-              </pre>
-            </div>
+                  </pre>
+                </div>
 
-            <div style={{
-              marginTop: 16,
-              padding: '12px 16px',
-              backgroundColor: '#e6f7ff',
-              border: '1px solid #91d5ff',
-              borderRadius: 6
-            }}>
-              <Text strong style={{ color: '#1890ff' }}>{t('account.privacyNotice') || 'Privacy Notice'}:</Text>
-              <ul style={{ marginTop: 8, marginBottom: 0, paddingLeft: 20 }}>
-                <li>{t('account.privacyNotice1') || 'Message content is NEVER stored in our database'}</li>
-                <li>{t('account.privacyNotice2') || 'Only usage statistics (request count, tokens) are tracked for billing'}</li>
-                <li>{t('account.privacyNotice3') || 'Ideal for private deployment where you self-host the platform'}</li>
-              </ul>
-            </div>
-          </div>
-
-          {/* Subscription info only in SaaS mode */}
-          {features.showSubscription() && (
-            <div>
-              <Text type="secondary">{t('account.subscription')}</Text>
-              <div style={{ marginTop: 8 }}>
-                {subscription ? (
-                  <Space direction="vertical" size="small" style={{ width: '100%' }}>
-                    <div>
-                      <Tag color={subscription.subscription_type === 'subscribed' ? 'blue' : 'default'}>
-                        {subscription.plan_name}
-                      </Tag>
-                    </div>
-                    <div>
-                      <Text>{t('account.monthlyQuota')}: </Text>
-                      <Text strong>
-                        {subscription.current_month_usage.toLocaleString()} / {subscription.monthly_quota.toLocaleString()}
-                      </Text>
-                      <Text type="secondary"> {t('account.calls')}</Text>
-                    </div>
-                    <Progress
-                      percent={Math.min(subscription.usage_percentage, 100)}
-                      status={subscription.usage_percentage >= 90 ? 'exception' : 'active'}
-                      strokeColor={subscription.usage_percentage >= 90 ? '#ff4d4f' : '#1890ff'}
-                    />
-                    <div>
-                      <Text type="secondary" style={{ fontSize: 12 }}>
-                        {t('account.quotaResetsOn', { date: new Date(subscription.usage_reset_at).toLocaleDateString() })}
-                      </Text>
-                    </div>
-                    {subscription.subscription_type === 'free' && subscription.usage_percentage >= 80 && (
-                      <div style={{
-                        padding: '8px 12px',
-                        background: '#fff7e6',
-                        border: '1px solid #ffd591',
-                        borderRadius: '4px',
-                        marginTop: 8
-                      }}>
-                        <Text type="warning" style={{ fontSize: 12 }}>
-                          {t('account.upgradePrompt', { email: systemInfo?.support_email || '' })}
-                        </Text>
-                      </div>
-                    )}
-                  </Space>
-                ) : subscription === null ? (
-                  <div style={{
-                    padding: '12px',
-                    background: '#fff7e6',
-                    border: '1px solid #ffd591',
-                    borderRadius: '4px'
-                  }}>
-                    <Text type="warning">
-                      {t('account.subscriptionNotFound', { email: systemInfo?.support_email || 'support@openguardrails.com' })}
-                    </Text>
-                  </div>
-                ) : (
-                  <Text type="secondary">{t('common.loading')}</Text>
-                )}
-              </div>
-            </div>
-          )}
-
-          <div>
-            <Text type="secondary">{t('account.apiRateLimit')}</Text>
-            <div style={{ fontSize: 16, marginTop: 4 }}>
-              {(() => {
-                const rateLimit = user?.rate_limit;
-                // Ensure conversion to number
-                const rateLimitNum = typeof rateLimit === 'string' ? parseInt(rateLimit, 10) : Number(rateLimit);
-
-                if (rateLimitNum === 0) {
-                  return <Text style={{ color: '#52c41a' }}>{t('account.unlimited')}</Text>;
-                } else if (rateLimitNum > 0) {
-                  return <Text>{t('account.rateLimitValue', { limit: rateLimitNum })}</Text>;
-                } else {
-                  return <Text type="secondary">{t('common.loading')}</Text>;
-                }
-              })()}
-            </div>
-            <div style={{ marginTop: 4 }}>
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                {t('account.rateLimitNote', { email: systemInfo?.support_email || '' })}
-              </Text>
-            </div>
-          </div>
-
-          {systemInfo?.support_email && (
-            <>
-              <Divider />
-              <div>
-                <Title level={5}>{t('account.contactSupport')}</Title>
-                <div style={{ paddingLeft: 0 }}>
-                  <Text type="secondary">
-                    {t('account.openguardrailsServices')}
-                  </Text>
-                  <div style={{ marginTop: 8, fontSize: 16 }}>
-                    <Text strong style={{ color: '#1890ff' }}>{systemInfo.support_email}</Text>
-                  </div>
+                {/* Privacy Notice */}
+                <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                  <p className="font-semibold text-blue-900 mb-2">
+                    {t('account.privacyNotice') || 'Privacy Notice'}:
+                  </p>
+                  <ul className="space-y-1 text-sm text-blue-800 list-disc pl-5">
+                    <li>
+                      {t('account.privacyNotice1') ||
+                        'Message content is NEVER stored in our database'}
+                    </li>
+                    <li>
+                      {t('account.privacyNotice2') ||
+                        'Only usage statistics (request count, tokens) are tracked for billing'}
+                    </li>
+                    <li>
+                      {t('account.privacyNotice3') ||
+                        'Ideal for private deployment where you self-host the platform'}
+                    </li>
+                  </ul>
                 </div>
               </div>
-            </>
-          )}
-        </Space>
-      )
-    },
-    {
-      key: 'password',
-      label: (
-        <span>
-          <LockOutlined />
-          {t('account.passwordChange')}
-        </span>
-      ),
-      children: (
-        <Card style={{ marginTop: 16 }}>
-          <Space direction="vertical" size="large" style={{ width: '100%' }}>
-            <div>
-              <Title level={4}>{t('account.passwordChange')}</Title>
-              <Text type="secondary">{t('account.newPasswordRequirements')}</Text>
-            </div>
 
-            <Form
-              form={passwordForm}
-              layout="vertical"
-              onFinish={handleChangePassword}
-              autoComplete="off"
-            >
-              <Form.Item
-                name="current_password"
-                label={t('account.currentPassword')}
-                rules={[
-                  { required: true, message: t('account.currentPasswordRequired') || 'Please enter current password' }
-                ]}
-              >
-                <Input.Password
-                  prefix={<LockOutlined />}
-                  placeholder={t('account.currentPasswordPlaceholder')}
-                  autoComplete="current-password"
-                />
-              </Form.Item>
+              {/* Subscription info only in SaaS mode */}
+              {features.showSubscription() && (
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-gray-600">
+                    {t('account.subscription')}
+                  </label>
+                  <div>
+                    {subscription ? (
+                      <div className="space-y-3">
+                        <div>
+                          <Badge
+                            variant={
+                              subscription.subscription_type === 'subscribed' ? 'default' : 'outline'
+                            }
+                          >
+                            {subscription.plan_name}
+                          </Badge>
+                        </div>
+                        <div>
+                          <span className="text-sm">{t('account.monthlyQuota')}: </span>
+                          <span className="font-semibold">
+                            {subscription.current_month_usage.toLocaleString()} /{' '}
+                            {subscription.monthly_quota.toLocaleString()}
+                          </span>
+                          <span className="text-sm text-gray-600"> {t('account.calls')}</span>
+                        </div>
+                        <Progress
+                          value={Math.min(subscription.usage_percentage, 100)}
+                          className={`h-2 ${subscription.usage_percentage >= 90 ? '[&>div]:bg-red-500' : '[&>div]:bg-blue-500'}`}
+                        />
+                        <p className="text-xs text-gray-600">
+                          {t('account.quotaResetsOn', {
+                            date: new Date(subscription.usage_reset_at).toLocaleDateString(),
+                          })}
+                        </p>
+                        {subscription.subscription_type === 'free' &&
+                          subscription.usage_percentage >= 80 && (
+                            <div className="p-3 bg-yellow-50 border border-yellow-200 rounded">
+                              <p className="text-xs text-yellow-900">
+                                {t('account.upgradePrompt', {
+                                  email: systemInfo?.support_email || '',
+                                })}
+                              </p>
+                            </div>
+                          )}
+                      </div>
+                    ) : subscription === null ? (
+                      <div className="p-3 bg-yellow-50 border border-yellow-200 rounded">
+                        <p className="text-sm text-yellow-900">
+                          {t('account.subscriptionNotFound', {
+                            email: systemInfo?.support_email || 'support@openguardrails.com',
+                          })}
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-600">{t('common.loading')}</p>
+                    )}
+                  </div>
+                </div>
+              )}
 
-              <Form.Item
-                name="new_password"
-                label={t('account.newPassword')}
-                rules={[
-                  { required: true, message: t('account.newPasswordRequired') || 'Please enter new password' },
-                  { min: 8, message: t('account.passwordMinLength') || 'Password must be at least 8 characters' }
-                ]}
-              >
-                <Input.Password
-                  prefix={<LockOutlined />}
-                  placeholder={t('account.newPasswordPlaceholder')}
-                  autoComplete="new-password"
-                />
-              </Form.Item>
+              {/* API Rate Limit */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-600">
+                  {t('account.apiRateLimit')}
+                </label>
+                <div className="text-base">
+                  {(() => {
+                    const rateLimit = user?.rate_limit
+                    const rateLimitNum =
+                      typeof rateLimit === 'string' ? parseInt(rateLimit, 10) : Number(rateLimit)
 
-              <Form.Item
-                name="confirm_password"
-                label={t('account.confirmPassword')}
-                dependencies={['new_password']}
-                rules={[
-                  { required: true, message: t('account.confirmPasswordRequired') || 'Please confirm new password' },
-                  ({ getFieldValue }) => ({
-                    validator(_, value) {
-                      if (!value || getFieldValue('new_password') === value) {
-                        return Promise.resolve();
-                      }
-                      return Promise.reject(new Error(t('account.passwordMismatch') || 'Passwords do not match'));
-                    },
-                  }),
-                ]}
-              >
-                <Input.Password
-                  prefix={<LockOutlined />}
-                  placeholder={t('account.confirmPasswordPlaceholder')}
-                  autoComplete="new-password"
-                />
-              </Form.Item>
+                    if (rateLimitNum === 0) {
+                      return (
+                        <span className="text-green-600">{t('account.unlimited')}</span>
+                      )
+                    } else if (rateLimitNum > 0) {
+                      return <span>{t('account.rateLimitValue', { limit: rateLimitNum })}</span>
+                    } else {
+                      return (
+                        <span className="text-gray-600">{t('common.loading')}</span>
+                      )
+                    }
+                  })()}
+                </div>
+                <p className="text-xs text-gray-600">
+                  {t('account.rateLimitNote', { email: systemInfo?.support_email || '' })}
+                </p>
+              </div>
 
-              <Form.Item>
-                <Button
-                  type="primary"
-                  htmlType="submit"
-                  loading={passwordLoading}
-                  block
-                  size="large"
-                >
-                  {t('account.changePassword')}
-                </Button>
-              </Form.Item>
-            </Form>
-          </Space>
-        </Card>
-      )
-    }
-  ];
+              {/* Contact Support */}
+              {systemInfo?.support_email && (
+                <>
+                  <Separator />
+                  <div className="space-y-2">
+                    <h3 className="text-lg font-semibold">{t('account.contactSupport')}</h3>
+                    <p className="text-sm text-gray-600">{t('account.openguardrailsServices')}</p>
+                    <p className="text-base font-semibold text-blue-600">
+                      {systemInfo.support_email}
+                    </p>
+                  </div>
+                </>
+              )}
+            </TabsContent>
 
-  return (
-    <Card>
-      <Space direction="vertical" size="large" style={{ width: '100%' }}>
-        <Space align="center">
-          <SafetyCertificateOutlined style={{ fontSize: 24, color: '#1890ff' }} />
-          <Title level={4} style={{ margin: 0 }}>{t('account.title')}</Title>
-        </Space>
+            <TabsContent value="password" className="mt-6">
+              <Card>
+                <CardContent className="pt-6">
+                  <div className="space-y-6">
+                    <div>
+                      <h3 className="text-xl font-semibold">{t('account.passwordChange')}</h3>
+                      <p className="text-sm text-gray-600 mt-1">
+                        {t('account.newPasswordRequirements')}
+                      </p>
+                    </div>
 
-        <Tabs
-          activeKey={activeTab}
-          items={tabItems}
-          onChange={(key) => {
-            setActiveTab(key);
-            if (key === 'general') {
-              searchParams.delete('tab');
-              setSearchParams(searchParams);
-            } else {
-              searchParams.set('tab', key);
-              setSearchParams(searchParams);
-            }
-          }}
-        />
-      </Space>
+                    <Form {...passwordForm}>
+                      <form
+                        onSubmit={passwordForm.handleSubmit(handleChangePassword)}
+                        className="space-y-4"
+                      >
+                        <FormField
+                          control={passwordForm.control}
+                          name="current_password"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>{t('account.currentPassword')}</FormLabel>
+                              <FormControl>
+                                <div className="relative">
+                                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                                  <Input
+                                    {...field}
+                                    type="password"
+                                    placeholder={t('account.currentPasswordPlaceholder')}
+                                    autoComplete="current-password"
+                                    className="pl-10"
+                                  />
+                                </div>
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+
+                        <FormField
+                          control={passwordForm.control}
+                          name="new_password"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>{t('account.newPassword')}</FormLabel>
+                              <FormControl>
+                                <div className="relative">
+                                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                                  <Input
+                                    {...field}
+                                    type="password"
+                                    placeholder={t('account.newPasswordPlaceholder')}
+                                    autoComplete="new-password"
+                                    className="pl-10"
+                                  />
+                                </div>
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+
+                        <FormField
+                          control={passwordForm.control}
+                          name="confirm_password"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>{t('account.confirmPassword')}</FormLabel>
+                              <FormControl>
+                                <div className="relative">
+                                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                                  <Input
+                                    {...field}
+                                    type="password"
+                                    placeholder={t('account.confirmPasswordPlaceholder')}
+                                    autoComplete="new-password"
+                                    className="pl-10"
+                                  />
+                                </div>
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+
+                        <Button type="submit" className="w-full" size="lg" disabled={passwordLoading}>
+                          {t('account.changePassword')}
+                        </Button>
+                      </form>
+                    </Form>
+                  </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
+          </Tabs>
+        </div>
+      </CardContent>
     </Card>
-  );
-};
+  )
+}
 
-export default Account;
+export default Account
