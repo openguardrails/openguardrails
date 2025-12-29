@@ -1,217 +1,234 @@
-import React, { useEffect, useState } from 'react';
-import { Card, Typography, Space, Progress, Tag, Statistic, Row, Col, Divider, Alert, Button, message, Modal } from 'antd';
-import { CreditCardOutlined, CalendarOutlined, LineChartOutlined, ReloadOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
-import { useTranslation } from 'react-i18next';
-import { useSearchParams } from 'react-router-dom';
-import { billingService } from '../../services/billing';
-import { configApi } from '../../services/api';
-import paymentService, { PaymentConfig, SubscriptionStatus } from '../../services/payment';
-import { PaymentButton } from '../../components/Payment';
-import { usePaymentSuccess } from '../../hooks/usePaymentSuccess';
-import type { Subscription as SubscriptionType, UsageInfo } from '../../types/billing';
+import React, { useEffect, useState } from 'react'
+import { CreditCard, Calendar, TrendingUp, RefreshCw, CheckCircle } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
+import { useSearchParams } from 'react-router-dom'
 
-const { Title, Text } = Typography;
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Progress } from '@/components/ui/progress'
+import { Separator } from '@/components/ui/separator'
+import { confirmDialog } from '@/lib/confirm-dialog'
+import { billingService } from '../../services/billing'
+import { configApi } from '../../services/api'
+import paymentService, { PaymentConfig, SubscriptionStatus } from '../../services/payment'
+import { PaymentButton } from '../../components/Payment'
+import { usePaymentSuccess } from '../../hooks/usePaymentSuccess'
+import type { Subscription as SubscriptionType, UsageInfo } from '../../types/billing'
 
 interface SystemInfo {
-  support_email: string | null;
-  app_name: string;
-  app_version: string;
+  support_email: string | null
+  app_name: string
+  app_version: string
 }
 
 const Subscription: React.FC = () => {
-  const { t } = useTranslation();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const [subscription, setSubscription] = useState<SubscriptionType | null>(undefined);
-  const [usageInfo, setUsageInfo] = useState<UsageInfo | null>(null);
-  const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
-  const [paymentConfig, setPaymentConfig] = useState<PaymentConfig | null>(null);
-  const [subscriptionStatus, setSubscriptionStatus] = useState<SubscriptionStatus | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [cancelLoading, setCancelLoading] = useState(false);
+  const { t } = useTranslation()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [subscription, setSubscription] = useState<SubscriptionType | null>(undefined)
+  const [usageInfo, setUsageInfo] = useState<UsageInfo | null>(null)
+  const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null)
+  const [paymentConfig, setPaymentConfig] = useState<PaymentConfig | null>(null)
+  const [subscriptionStatus, setSubscriptionStatus] = useState<SubscriptionStatus | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [cancelLoading, setCancelLoading] = useState(false)
 
   const fetchSubscription = async () => {
-    setLoading(true);
+    setLoading(true)
     try {
-      const sub = await billingService.getCurrentSubscription();
-      setSubscription(sub);
+      const sub = await billingService.getCurrentSubscription()
+      setSubscription(sub)
     } catch (e: any) {
-      console.error('Fetch subscription failed', e);
-      setSubscription(null);
+      console.error('Fetch subscription failed', e)
+      setSubscription(null)
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }
 
   const fetchUsageInfo = async () => {
     try {
-      const usage = await billingService.getCurrentUsage();
-      setUsageInfo(usage);
+      const usage = await billingService.getCurrentUsage()
+      setUsageInfo(usage)
     } catch (e: any) {
-      console.error('Fetch usage info failed', e);
+      console.error('Fetch usage info failed', e)
     }
-  };
+  }
 
   const fetchSystemInfo = async () => {
     try {
-      const info = await configApi.getSystemInfo();
-      setSystemInfo(info);
+      const info = await configApi.getSystemInfo()
+      setSystemInfo(info)
     } catch (e) {
-      console.error('Fetch system info failed', e);
+      console.error('Fetch system info failed', e)
     }
-  };
+  }
 
   const fetchPaymentConfig = async () => {
     try {
-      const config = await paymentService.getConfig();
-      setPaymentConfig(config);
+      const config = await paymentService.getConfig()
+      setPaymentConfig(config)
     } catch (e) {
-      console.error('Fetch payment config failed', e);
+      console.error('Fetch payment config failed', e)
     }
-  };
+  }
 
   const fetchSubscriptionStatus = async () => {
     try {
-      const status = await paymentService.getSubscriptionStatus();
-      setSubscriptionStatus(status);
+      const status = await paymentService.getSubscriptionStatus()
+      setSubscriptionStatus(status)
     } catch (e) {
-      console.error('Fetch subscription status failed', e);
+      console.error('Fetch subscription status failed', e)
     }
-  };
+  }
 
   const handleCancelSubscription = async () => {
-    Modal.confirm({
+    const confirmed = await confirmDialog({
       title: t('payment.cancel.title'),
-      content: t('payment.cancel.content'),
-      okText: t('payment.cancel.confirm'),
-      cancelText: t('common.cancel'),
-      okButtonProps: { danger: true },
-      onOk: async () => {
-        setCancelLoading(true);
-        try {
-          const result = await paymentService.cancelSubscription();
-          if (result.success) {
-            message.success(t('payment.cancel.success'));
-            fetchSubscriptionStatus();
-            fetchSubscription();
-          }
-        } catch (e: any) {
-          message.error(e.response?.data?.detail || t('payment.cancel.failed'));
-        } finally {
-          setCancelLoading(false);
-        }
+      description: t('payment.cancel.content'),
+    })
+
+    if (!confirmed) return
+
+    setCancelLoading(true)
+    try {
+      const result = await paymentService.cancelSubscription()
+      if (result.success) {
+        toast.success(t('payment.cancel.success'))
+        fetchSubscriptionStatus()
+        fetchSubscription()
       }
-    });
-  };
+    } catch (e: any) {
+      toast.error(e.response?.data?.detail || t('payment.cancel.failed'))
+    } finally {
+      setCancelLoading(false)
+    }
+  }
 
   // Handle payment success with polling verification
   const handlePaymentSuccess = React.useCallback((result: any) => {
-    // Only refresh if this is a subscription payment
     if (result.order_type === 'subscription') {
-      fetchSubscription();
-      fetchSubscriptionStatus();
-      fetchUsageInfo();
+      fetchSubscription()
+      fetchSubscriptionStatus()
+      fetchUsageInfo()
     }
-  }, []);  // Empty deps because fetch functions don't change
+  }, [])
 
   usePaymentSuccess({
-    onSuccess: handlePaymentSuccess
-  });
+    onSuccess: handlePaymentSuccess,
+  })
 
   useEffect(() => {
-    fetchSubscription();
-    fetchUsageInfo();
-    fetchSystemInfo();
-    fetchPaymentConfig();
-    fetchSubscriptionStatus();
+    fetchSubscription()
+    fetchUsageInfo()
+    fetchSystemInfo()
+    fetchPaymentConfig()
+    fetchSubscriptionStatus()
 
-    // Handle payment cancellation (no verification needed)
-    const paymentStatus = searchParams.get('payment');
+    const paymentStatus = searchParams.get('payment')
     if (paymentStatus === 'cancelled') {
-      message.info(t('payment.cancelled'));
-      setSearchParams({});
+      toast.info(t('payment.cancelled'))
+      setSearchParams({})
     }
-  }, []);
+  }, [])
 
   const handleRefresh = () => {
-    fetchSubscription();
-    fetchUsageInfo();
-  };
+    fetchSubscription()
+    fetchUsageInfo()
+  }
 
   if (loading) {
     return (
-      <Card loading={loading}>
-        <Text>{t('common.loading')}</Text>
+      <Card>
+        <CardContent className="pt-6">
+          <div className="flex items-center justify-center p-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+          </div>
+        </CardContent>
       </Card>
-    );
+    )
   }
 
   if (subscription === null) {
     return (
       <Card>
-        <Space direction="vertical" size="large" style={{ width: '100%' }}>
-          <Space align="center">
-            <CreditCardOutlined style={{ fontSize: 24, color: '#1890ff' }} />
-            <Title level={4} style={{ margin: 0 }}>{t('billing.subscriptionManagement')}</Title>
-          </Space>
-          <Alert
-            message={t('billing.subscriptionNotFound')}
-            description={t('billing.subscriptionNotFoundDesc', {
-              email: systemInfo?.support_email || 'support@openguardrails.com'
-            })}
-            type="warning"
-            showIcon
-          />
-        </Space>
+        <CardContent className="pt-6">
+          <div className="space-y-6">
+            <div className="flex items-center gap-2">
+              <CreditCard className="h-6 w-6 text-blue-600" />
+              <h2 className="text-2xl font-bold">{t('billing.subscriptionManagement')}</h2>
+            </div>
+            <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <p className="font-semibold text-yellow-900">{t('billing.subscriptionNotFound')}</p>
+              <p className="text-sm text-yellow-800 mt-2">
+                {t('billing.subscriptionNotFoundDesc', {
+                  email: systemInfo?.support_email || 'support@openguardrails.com',
+                })}
+              </p>
+            </div>
+          </div>
+        </CardContent>
       </Card>
-    );
+    )
   }
 
   if (!subscription) {
-    return null;
+    return null
   }
 
-  const resetDate = new Date(subscription.usage_reset_at);
-  const daysUntilReset = Math.ceil((resetDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
+  const resetDate = new Date(subscription.usage_reset_at)
+  const daysUntilReset = Math.ceil(
+    (resetDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)
+  )
 
   return (
-    <Space direction="vertical" size="large" style={{ width: '100%' }}>
+    <div className="space-y-6">
       {/* Header */}
       <Card>
-        <Space direction="vertical" size="large" style={{ width: '100%' }}>
-          <Space align="center" style={{ justifyContent: 'space-between', width: '100%' }}>
-            <Space align="center">
-              <CreditCardOutlined style={{ fontSize: 24, color: '#1890ff' }} />
-              <Title level={4} style={{ margin: 0 }}>{t('billing.subscriptionManagement')}</Title>
-            </Space>
-            <Button icon={<ReloadOutlined />} onClick={handleRefresh}>
-              {t('common.refresh')}
-            </Button>
-          </Space>
-
-          {/* Current Plan */}
-          <div>
-            <Text type="secondary">{t('billing.currentPlan')}</Text>
-            <div style={{ marginTop: 8 }}>
-              <Tag
-                color={subscription.subscription_type === 'subscribed' ? 'blue' : 'default'}
-                style={{ fontSize: 16, padding: '4px 12px' }}
-              >
-                {subscription.plan_name}
-              </Tag>
+        <CardContent className="pt-6">
+          <div className="space-y-6">
+            <div className="flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <CreditCard className="h-6 w-6 text-blue-600" />
+                <h2 className="text-2xl font-bold">{t('billing.subscriptionManagement')}</h2>
+              </div>
+              <Button variant="outline" onClick={handleRefresh}>
+                <RefreshCw className="mr-2 h-4 w-4" />
+                {t('common.refresh')}
+              </Button>
             </div>
-          </div>
 
-          {/* Upgrade Prompt */}
-          {subscription.subscription_type === 'free' && paymentConfig && (
-            <Alert
-              message={t('billing.upgradeAvailable')}
-              description={
-                <Space direction="vertical" size="small" style={{ width: '100%' }}>
-                  <Text>{t('billing.upgradeDescription')}</Text>
-                  <Text strong>
-                    {t('billing.price')}: {paymentService.formatPrice(paymentConfig.subscription_price, paymentConfig.currency)}/{t('billing.month')}
-                  </Text>
-                  <div style={{ marginTop: 8 }}>
+            {/* Current Plan */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-600">
+                {t('billing.currentPlan')}
+              </label>
+              <div>
+                <Badge
+                  variant={subscription.subscription_type === 'subscribed' ? 'default' : 'outline'}
+                  className="text-base px-3 py-1"
+                >
+                  {subscription.plan_name}
+                </Badge>
+              </div>
+            </div>
+
+            {/* Upgrade Prompt */}
+            {subscription.subscription_type === 'free' && paymentConfig && (
+              <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <p className="font-semibold text-blue-900">{t('billing.upgradeAvailable')}</p>
+                <div className="mt-2 space-y-2">
+                  <p className="text-sm text-blue-800">{t('billing.upgradeDescription')}</p>
+                  <p className="font-semibold text-sm">
+                    {t('billing.price')}:{' '}
+                    {paymentService.formatPrice(
+                      paymentConfig.subscription_price,
+                      paymentConfig.currency
+                    )}
+                    /{t('billing.month')}
+                  </p>
+                  <div className="mt-3">
                     <PaymentButton
                       type="subscription"
                       amount={paymentConfig.subscription_price}
@@ -219,234 +236,251 @@ const Subscription: React.FC = () => {
                       provider={paymentConfig.provider}
                       buttonText={t('payment.button.upgradeNow')}
                       onSuccess={() => {
-                        fetchSubscription();
-                        fetchSubscriptionStatus();
+                        fetchSubscription()
+                        fetchSubscriptionStatus()
                       }}
                     />
                   </div>
-                </Space>
-              }
-              type="info"
-              showIcon
-            />
-          )}
+                </div>
+              </div>
+            )}
 
-          {/* Subscription Active Info */}
-          {subscription.subscription_type === 'subscribed' && subscriptionStatus && (
-            <Alert
-              message={t('billing.subscriptionActive')}
-              description={
-                <Space direction="vertical" size="small">
-                  {subscriptionStatus.expires_at && (
-                    <Text>
-                      {subscriptionStatus.cancel_at_period_end
-                        ? t('billing.expiresOn', { date: new Date(subscriptionStatus.expires_at).toLocaleDateString() })
-                        : t('billing.nextBillingDate', { date: new Date(subscriptionStatus.expires_at).toLocaleDateString() })
-                      }
-                    </Text>
-                  )}
-                  {!subscriptionStatus.cancel_at_period_end && (
-                    <Button
-                      danger
-                      size="small"
-                      loading={cancelLoading}
-                      onClick={handleCancelSubscription}
-                    >
-                      {t('payment.button.cancelSubscription')}
-                    </Button>
-                  )}
-                  {subscriptionStatus.cancel_at_period_end && (
-                    <Tag color="orange">{t('billing.cancelledAtPeriodEnd')}</Tag>
-                  )}
-                </Space>
-              }
-              type="success"
-              showIcon
-              icon={<CheckCircleOutlined />}
-            />
-          )}
-        </Space>
+            {/* Subscription Active Info */}
+            {subscription.subscription_type === 'subscribed' && subscriptionStatus && (
+              <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+                <div className="flex items-start gap-3">
+                  <CheckCircle className="h-5 w-5 text-green-600 mt-0.5" />
+                  <div className="flex-1 space-y-2">
+                    <p className="font-semibold text-green-900">
+                      {t('billing.subscriptionActive')}
+                    </p>
+                    {subscriptionStatus.expires_at && (
+                      <p className="text-sm text-green-800">
+                        {subscriptionStatus.cancel_at_period_end
+                          ? t('billing.expiresOn', {
+                              date: new Date(subscriptionStatus.expires_at).toLocaleDateString(),
+                            })
+                          : t('billing.nextBillingDate', {
+                              date: new Date(subscriptionStatus.expires_at).toLocaleDateString(),
+                            })}
+                      </p>
+                    )}
+                    <div className="flex gap-2">
+                      {!subscriptionStatus.cancel_at_period_end && (
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          disabled={cancelLoading}
+                          onClick={handleCancelSubscription}
+                        >
+                          {t('payment.button.cancelSubscription')}
+                        </Button>
+                      )}
+                      {subscriptionStatus.cancel_at_period_end && (
+                        <Badge variant="secondary">{t('billing.cancelledAtPeriodEnd')}</Badge>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </CardContent>
       </Card>
 
       {/* Usage Statistics */}
-      <Card title={<Space><LineChartOutlined /> {t('billing.usageStatistics')}</Space>}>
-        <Space direction="vertical" size="large" style={{ width: '100%' }}>
-          {/* Statistics Row */}
-          <Row gutter={16}>
-            <Col xs={24} sm={12} md={6}>
-              <Statistic
-                title={t('billing.currentUsage')}
-                value={subscription.current_month_usage.toLocaleString()}
-                suffix={`/ ${subscription.monthly_quota.toLocaleString()}`}
-              />
-            </Col>
-            <Col xs={24} sm={12} md={6}>
-              <Statistic
-                title={t('billing.remaining')}
-                value={Math.max(0, subscription.monthly_quota - subscription.current_month_usage).toLocaleString()}
-                valueStyle={{ color: subscription.usage_percentage >= 90 ? '#cf1322' : '#3f8600' }}
-              />
-            </Col>
-            <Col xs={24} sm={12} md={6}>
-              <Statistic
-                title={t('billing.usagePercentage')}
-                value={subscription.usage_percentage}
-                suffix="%"
-                precision={1}
-                valueStyle={{
-                  color: subscription.usage_percentage >= 90 ? '#cf1322' :
-                         subscription.usage_percentage >= 80 ? '#faad14' : '#3f8600'
-                }}
-              />
-            </Col>
-            <Col xs={24} sm={12} md={6}>
-              <Statistic
-                title={t('billing.daysUntilReset')}
-                value={daysUntilReset}
-                suffix={t('billing.days')}
-                prefix={<CalendarOutlined />}
-              />
-            </Col>
-          </Row>
-
-          <Divider style={{ margin: '12px 0' }} />
-
-          {/* Usage Progress Bar */}
-          <div>
-            <div style={{ marginBottom: 8 }}>
-              <Text strong>{t('billing.monthlyQuotaUsage')}</Text>
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <TrendingUp className="h-5 w-5" />
+            {t('billing.usageStatistics')}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-6">
+            {/* Statistics Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+              <div>
+                <p className="text-sm font-medium text-gray-600">{t('billing.currentUsage')}</p>
+                <p className="text-2xl font-bold mt-1">
+                  {subscription.current_month_usage.toLocaleString()}
+                </p>
+                <p className="text-sm text-gray-500">
+                  / {subscription.monthly_quota.toLocaleString()}
+                </p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-gray-600">{t('billing.remaining')}</p>
+                <p
+                  className={`text-2xl font-bold mt-1 ${subscription.usage_percentage >= 90 ? 'text-red-600' : 'text-green-600'}`}
+                >
+                  {Math.max(
+                    0,
+                    subscription.monthly_quota - subscription.current_month_usage
+                  ).toLocaleString()}
+                </p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-gray-600">
+                  {t('billing.usagePercentage')}
+                </p>
+                <p
+                  className={`text-2xl font-bold mt-1 ${
+                    subscription.usage_percentage >= 90
+                      ? 'text-red-600'
+                      : subscription.usage_percentage >= 80
+                        ? 'text-yellow-600'
+                        : 'text-green-600'
+                  }`}
+                >
+                  {subscription.usage_percentage.toFixed(1)}%
+                </p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-gray-600">
+                  {t('billing.daysUntilReset')}
+                </p>
+                <div className="flex items-center gap-2 mt-1">
+                  <Calendar className="h-5 w-5 text-gray-400" />
+                  <p className="text-2xl font-bold">{daysUntilReset}</p>
+                  <span className="text-sm text-gray-500">{t('billing.days')}</span>
+                </div>
+              </div>
             </div>
-            <Progress
-              percent={Math.min(subscription.usage_percentage, 100)}
-              status={
-                subscription.usage_percentage >= 100 ? 'exception' :
-                subscription.usage_percentage >= 90 ? 'exception' :
-                subscription.usage_percentage >= 80 ? 'normal' : 'active'
-              }
-              strokeColor={
-                subscription.usage_percentage >= 90 ? '#ff4d4f' :
-                subscription.usage_percentage >= 80 ? '#faad14' : '#1890ff'
-              }
-              format={(percent) => `${subscription.current_month_usage.toLocaleString()} / ${subscription.monthly_quota.toLocaleString()} (${percent?.toFixed(1)}%)`}
-            />
+
+            <Separator />
+
+            {/* Usage Progress Bar */}
+            <div className="space-y-3">
+              <p className="font-semibold">{t('billing.monthlyQuotaUsage')}</p>
+              <Progress
+                value={Math.min(subscription.usage_percentage, 100)}
+                className={`h-3 ${
+                  subscription.usage_percentage >= 90
+                    ? '[&>div]:bg-red-500'
+                    : subscription.usage_percentage >= 80
+                      ? '[&>div]:bg-yellow-500'
+                      : '[&>div]:bg-blue-500'
+                }`}
+              />
+              <p className="text-sm text-gray-600">
+                {subscription.current_month_usage.toLocaleString()} /{' '}
+                {subscription.monthly_quota.toLocaleString()} (
+                {subscription.usage_percentage.toFixed(1)}%)
+              </p>
+            </div>
+
+            {/* Quota Reset Info */}
+            <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 font-semibold text-blue-900">
+                  <Calendar className="h-4 w-4" />
+                  {t('billing.quotaResetDate')}
+                </div>
+                <p className="text-sm text-blue-800">
+                  {t('billing.quotaResetsOn', {
+                    date: resetDate.toLocaleDateString(),
+                    time: resetDate.toLocaleTimeString(),
+                  })}
+                </p>
+                <p className="text-xs text-blue-700">{t('billing.quotaResetNote')}</p>
+              </div>
+            </div>
+
+            {/* Warning Messages */}
+            {subscription.usage_percentage >= 100 && (
+              <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+                <p className="font-semibold text-red-900">{t('billing.quotaExceeded')}</p>
+                <p className="text-sm text-red-800 mt-1">
+                  {t('billing.quotaExceededDesc', {
+                    date: resetDate.toLocaleDateString(),
+                  })}
+                </p>
+              </div>
+            )}
+
+            {subscription.usage_percentage >= 80 && subscription.usage_percentage < 100 && (
+              <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                <p className="font-semibold text-yellow-900">{t('billing.quotaWarning')}</p>
+                <p className="text-sm text-yellow-800 mt-1">
+                  {t('billing.quotaWarningDesc', {
+                    percentage: subscription.usage_percentage.toFixed(1),
+                    email: systemInfo?.support_email || 'support@openguardrails.com',
+                  })}
+                </p>
+              </div>
+            )}
           </div>
-
-          {/* Quota Reset Info */}
-          <div style={{
-            padding: '12px',
-            background: '#f0f5ff',
-            border: '1px solid #adc6ff',
-            borderRadius: '4px'
-          }}>
-            <Space direction="vertical" size="small">
-              <Text strong>
-                <CalendarOutlined /> {t('billing.quotaResetDate')}
-              </Text>
-              <Text>
-                {t('billing.quotaResetsOn', {
-                  date: resetDate.toLocaleDateString(),
-                  time: resetDate.toLocaleTimeString()
-                })}
-              </Text>
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                {t('billing.quotaResetNote')}
-              </Text>
-            </Space>
-          </div>
-
-          {/* Warning Messages */}
-          {subscription.usage_percentage >= 100 && (
-            <Alert
-              message={t('billing.quotaExceeded')}
-              description={t('billing.quotaExceededDesc', {
-                date: resetDate.toLocaleDateString()
-              })}
-              type="error"
-              showIcon
-            />
-          )}
-
-          {subscription.usage_percentage >= 80 && subscription.usage_percentage < 100 && (
-            <Alert
-              message={t('billing.quotaWarning')}
-              description={t('billing.quotaWarningDesc', {
-                percentage: subscription.usage_percentage.toFixed(1),
-                email: systemInfo?.support_email || 'support@openguardrails.com'
-              })}
-              type="warning"
-              showIcon
-            />
-          )}
-        </Space>
+        </CardContent>
       </Card>
 
       {/* Plan Details */}
-      <Card title={t('billing.planDetails')}>
-        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-          <Row gutter={[16, 16]}>
-            <Col span={12}>
-              <Text type="secondary">{t('billing.planType')}</Text>
-              <div style={{ marginTop: 4 }}>
-                <Text strong>{subscription.plan_name}</Text>
+      <Card>
+        <CardHeader>
+          <CardTitle>{t('billing.planDetails')}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <p className="text-sm font-medium text-gray-600">{t('billing.planType')}</p>
+                <p className="font-semibold mt-1">{subscription.plan_name}</p>
               </div>
-            </Col>
-            <Col span={12}>
-              <Text type="secondary">{t('billing.monthlyQuota')}</Text>
-              <div style={{ marginTop: 4 }}>
-                <Text strong>{subscription.monthly_quota.toLocaleString()} {t('billing.calls')}</Text>
+              <div>
+                <p className="text-sm font-medium text-gray-600">{t('billing.monthlyQuota')}</p>
+                <p className="font-semibold mt-1">
+                  {subscription.monthly_quota.toLocaleString()} {t('billing.calls')}
+                </p>
               </div>
-            </Col>
-            <Col span={12}>
-              <Text type="secondary">{t('billing.subscriptionId')}</Text>
-              <div style={{ marginTop: 4 }}>
-                <Text code style={{ fontSize: 12 }}>{subscription.id}</Text>
+              <div>
+                <p className="text-sm font-medium text-gray-600">
+                  {t('billing.subscriptionId')}
+                </p>
+                <p className="font-mono text-xs bg-gray-100 px-2 py-1 rounded mt-1 inline-block">
+                  {subscription.id}
+                </p>
               </div>
-            </Col>
-            <Col span={12}>
-              <Text type="secondary">{t('billing.billingCycle')}</Text>
-              <div style={{ marginTop: 4 }}>
-                <Text strong>{t('billing.monthly')}</Text>
+              <div>
+                <p className="text-sm font-medium text-gray-600">{t('billing.billingCycle')}</p>
+                <p className="font-semibold mt-1">{t('billing.monthly')}</p>
               </div>
-            </Col>
-          </Row>
+            </div>
 
-          {subscription.subscription_type === 'free' && paymentConfig && (
-            <>
-              <Divider style={{ margin: '12px 0' }} />
-              <div style={{
-                padding: '12px',
-                background: '#fffbe6',
-                border: '1px solid #ffe58f',
-                borderRadius: '4px'
-              }}>
-                <Space direction="vertical" size="small" style={{ width: '100%' }}>
-                  <Text strong>{t('billing.upgradeToUnlockMore')}</Text>
-                  <ul style={{ margin: '8px 0', paddingLeft: 20 }}>
-                    <li>{t('billing.feature1')}</li>
-                    <li>{t('billing.feature2')}</li>
-                    <li>{t('billing.feature3')}</li>
-                    <li>{t('billing.feature4')}</li>
-                    <li>{t('billing.feature5')}</li>
-                  </ul>
-                  <PaymentButton
-                    type="subscription"
-                    amount={paymentConfig.subscription_price}
-                    currency={paymentConfig.currency}
-                    provider={paymentConfig.provider}
-                    buttonText={`${t('payment.button.upgradeNow')} - ${paymentService.formatPrice(paymentConfig.subscription_price, paymentConfig.currency)}/${t('billing.month')}`}
-                    onSuccess={() => {
-                      fetchSubscription();
-                      fetchSubscriptionStatus();
-                    }}
-                  />
-                </Space>
-              </div>
-            </>
-          )}
-        </Space>
+            {subscription.subscription_type === 'free' && paymentConfig && (
+              <>
+                <Separator />
+                <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                  <div className="space-y-3">
+                    <p className="font-semibold text-yellow-900">
+                      {t('billing.upgradeToUnlockMore')}
+                    </p>
+                    <ul className="space-y-1 text-sm text-yellow-800 list-disc pl-5">
+                      <li>{t('billing.feature1')}</li>
+                      <li>{t('billing.feature2')}</li>
+                      <li>{t('billing.feature3')}</li>
+                      <li>{t('billing.feature4')}</li>
+                      <li>{t('billing.feature5')}</li>
+                    </ul>
+                    <PaymentButton
+                      type="subscription"
+                      amount={paymentConfig.subscription_price}
+                      currency={paymentConfig.currency}
+                      provider={paymentConfig.provider}
+                      buttonText={`${t('payment.button.upgradeNow')} - ${paymentService.formatPrice(paymentConfig.subscription_price, paymentConfig.currency)}/${t('billing.month')}`}
+                      onSuccess={() => {
+                        fetchSubscription()
+                        fetchSubscriptionStatus()
+                      }}
+                    />
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </CardContent>
       </Card>
-    </Space>
-  );
-};
+    </div>
+  )
+}
 
-export default Subscription;
+export default Subscription
