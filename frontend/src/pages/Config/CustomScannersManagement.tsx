@@ -1,139 +1,144 @@
-import React, { useState, useEffect } from 'react';
-import { Card, Table, Button, message, Spin, Space, Modal, Form, Input, Select, Tag, Alert, Collapse, Switch, Result, Typography } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined, CrownOutlined, LockOutlined } from '@ant-design/icons';
-import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
-import { customScannersApi } from '../../services/api';
-import { useApplication } from '../../contexts/ApplicationContext';
-import { eventBus, EVENTS } from '../../utils/eventBus';
-import { billingService } from '../../services/billing';
-import { features } from '../../config';
-
-const { TextArea } = Input;
-const { Text } = Typography;
-const { Option } = Select;
-const { Panel } = Collapse;
+import React, { useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
+import { Plus, Edit2, Trash2, RefreshCw, Crown, Lock, ChevronDown } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { customScannersApi } from '../../services/api'
+import { useApplication } from '../../contexts/ApplicationContext'
+import { eventBus, EVENTS } from '../../utils/eventBus'
+import { billingService } from '../../services/billing'
+import { features } from '../../config'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { DataTable } from '@/components/ui/data-table'
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
+import { Badge } from '@/components/ui/badge'
+import { toast } from 'sonner'
+import { confirmDialog } from '@/lib/confirm-dialog'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import * as z from 'zod'
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import { ColumnDef } from '@tanstack/react-table'
 
 interface CustomScanner {
-  id: string;
-  custom_scanner_id: string;
-  tag: string;
-  name: string;
-  description?: string;
-  scanner_type: string;
-  definition: string;
-  default_risk_level: string;
-  default_scan_prompt: boolean;
-  default_scan_response: boolean;
-  notes?: string;
-  created_by: string;
-  created_at?: string;
-  updated_at?: string;
-  is_enabled?: boolean;
+  id: string
+  custom_scanner_id: string
+  tag: string
+  name: string
+  description?: string
+  scanner_type: string
+  definition: string
+  default_risk_level: string
+  default_scan_prompt: boolean
+  default_scan_response: boolean
+  notes?: string
+  created_by: string
+  created_at?: string
+  updated_at?: string
+  is_enabled?: boolean
 }
 
 const CustomScannersManagement: React.FC = () => {
-  const { t } = useTranslation();
-  const [form] = Form.useForm();
-  const navigate = useNavigate();
-  const { currentApplicationId } = useApplication();
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [scanners, setScanners] = useState<CustomScanner[]>([]);
-  const [modalVisible, setModalVisible] = useState(false);
-  const [editingScanner, setEditingScanner] = useState<CustomScanner | null>(null);
-  const [isSubscribed, setIsSubscribed] = useState<boolean | null>(null);
-  const [subscriptionLoading, setSubscriptionLoading] = useState(true);
+  const { t } = useTranslation()
+  const navigate = useNavigate()
+  const { currentApplicationId } = useApplication()
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [scanners, setScanners] = useState<CustomScanner[]>([])
+  const [modalVisible, setModalVisible] = useState(false)
+  const [editingScanner, setEditingScanner] = useState<CustomScanner | null>(null)
+  const [isSubscribed, setIsSubscribed] = useState<boolean | null>(null)
+  const [subscriptionLoading, setSubscriptionLoading] = useState(true)
+  const [guideOpen, setGuideOpen] = useState(false)
 
   useEffect(() => {
     // In enterprise mode, all features are available
     if (features.showSubscription()) {
-      checkSubscription();
+      checkSubscription()
     } else {
-      setIsSubscribed(true); // Enterprise mode has all features
-      setSubscriptionLoading(false);
+      setIsSubscribed(true) // Enterprise mode has all features
+      setSubscriptionLoading(false)
     }
 
     if (currentApplicationId) {
-      loadData();
+      loadData()
     }
-  }, [currentApplicationId]);
+  }, [currentApplicationId])
 
   const checkSubscription = async () => {
     try {
-      setSubscriptionLoading(true);
-      const subscription = await billingService.getCurrentSubscription();
-      setIsSubscribed(subscription?.subscription_type === 'subscribed');
+      setSubscriptionLoading(true)
+      const subscription = await billingService.getCurrentSubscription()
+      setIsSubscribed(subscription?.subscription_type === 'subscribed')
     } catch (error) {
-      console.error('Failed to check subscription:', error);
-      setIsSubscribed(false);
+      console.error('Failed to check subscription:', error)
+      setIsSubscribed(false)
     } finally {
-      setSubscriptionLoading(false);
+      setSubscriptionLoading(false)
     }
-  };
+  }
 
   const loadData = async () => {
     try {
-      setLoading(true);
-      const scannersData = await customScannersApi.getAll();
-      setScanners(scannersData);
+      setLoading(true)
+      const scannersData = await customScannersApi.getAll()
+      setScanners(scannersData)
     } catch (error: any) {
       // Handle 403 subscription error gracefully
       if (error.response?.status === 403) {
-        setScanners([]);
+        setScanners([])
         // Don't show error message, the UI will show the upgrade prompt
       } else {
-        message.error(t('customScanners.loadFailed'));
-        console.error('Failed to load custom scanners:', error);
+        toast.error(t('customScanners.loadFailed'))
+        console.error('Failed to load custom scanners:', error)
       }
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }
 
   const handleCreate = () => {
     if (!isSubscribed) {
-      showUpgradeModal();
-      return;
+      showUpgradeDialog()
+      return
     }
-    setEditingScanner(null);
-    form.resetFields();
-    setModalVisible(true);
-  };
+    setEditingScanner(null)
+    form.reset()
+    setModalVisible(true)
+  }
 
-  const showUpgradeModal = () => {
-    Modal.info({
-      title: (
-        <Space>
-          <CrownOutlined style={{ color: '#faad14' }} />
-          {t('customScanners.premiumFeature')}
-        </Space>
+  const showUpgradeDialog = async () => {
+    const confirmed = await confirmDialog({
+      title: t('customScanners.premiumFeature'),
+      description: (
+        <div className="space-y-4">
+          <p className="text-base">{t('customScanners.premiumFeatureDesc')}</p>
+          <ul className="list-disc pl-5 space-y-1">
+            <li>{t('customScanners.feature1')}</li>
+            <li>{t('customScanners.feature2')}</li>
+            <li>{t('customScanners.feature3')}</li>
+            <li>{t('customScanners.feature4')}</li>
+          </ul>
+        </div>
       ),
-      content: (
-        <Space direction="vertical" size="middle" style={{ width: '100%', marginTop: 16 }}>
-          <div>
-            <p style={{ fontSize: 15, marginBottom: 12 }}>{t('customScanners.premiumFeatureDesc')}</p>
-            <ul style={{ paddingLeft: 20, marginBottom: 16 }}>
-              <li>{t('customScanners.feature1')}</li>
-              <li>{t('customScanners.feature2')}</li>
-              <li>{t('customScanners.feature3')}</li>
-              <li>{t('customScanners.feature4')}</li>
-            </ul>
-          </div>
-        </Space>
-      ),
-      okText: t('customScanners.upgradeNow'),
-      onOk: () => {
-        navigate('/subscription');
-      },
-      width: 520,
-      icon: null,
-    });
-  };
+      confirmText: t('customScanners.upgradeNow'),
+      icon: <Crown className="h-6 w-6 text-yellow-500" />,
+    })
+
+    if (confirmed) {
+      navigate('/subscription')
+    }
+  }
 
   const handleEdit = (scanner: CustomScanner) => {
-    setEditingScanner(scanner);
-    form.setFieldsValue({
+    setEditingScanner(scanner)
+    form.reset({
       scanner_type: scanner.scanner_type,
       name: scanner.name,
       definition: scanner.definition,
@@ -142,512 +147,546 @@ const CustomScannersManagement: React.FC = () => {
       scan_response: scanner.default_scan_response,
       notes: scanner.notes,
       is_enabled: scanner.is_enabled !== false,
-    });
-    setModalVisible(true);
-  };
+    })
+    setModalVisible(true)
+  }
 
   const handleToggleEnable = async (scanner: CustomScanner, enabled: boolean) => {
     try {
-      await customScannersApi.update(scanner.id, { is_enabled: enabled });
-      message.success(enabled ? t('customScanners.enableSuccess') : t('customScanners.disableSuccess'));
-      await loadData();
+      await customScannersApi.update(scanner.id, { is_enabled: enabled })
+      toast.success(enabled ? t('customScanners.enableSuccess') : t('customScanners.disableSuccess'))
+      await loadData()
     } catch (error) {
-      message.error(t('customScanners.toggleFailed'));
-      console.error('Failed to toggle scanner:', error);
+      toast.error(t('customScanners.toggleFailed'))
+      console.error('Failed to toggle scanner:', error)
     }
-  };
+  }
 
-  const handleDelete = (scanner: CustomScanner) => {
-    Modal.confirm({
+  const handleDelete = async (scanner: CustomScanner) => {
+    const confirmed = await confirmDialog({
       title: t('customScanners.deleteScanner'),
-      content: (
-        <div>
+      description: (
+        <div className="space-y-2">
           <p>{t('customScanners.confirmDelete')}</p>
-          <p style={{ color: '#ff4d4f', fontSize: '12px' }}>
-            {t('customScanners.deleteWarning')}
-          </p>
+          <p className="text-sm text-red-600">{t('customScanners.deleteWarning')}</p>
         </div>
       ),
-      onOk: async () => {
-        try {
-          await customScannersApi.delete(scanner.id);
-          message.success(t('customScanners.deleteSuccess'));
-          await loadData();
-          // Emit event to notify other components
-          eventBus.emit(EVENTS.SCANNER_DELETED, { scannerId: scanner.id, scannerTag: scanner.tag });
-        } catch (error) {
-          message.error(t('customScanners.deleteFailed'));
-        }
-      },
-    });
-  };
+    })
 
-  const handleSubmit = async () => {
+    if (!confirmed) return
+
     try {
-      const values = await form.validateFields();
-      setSaving(true);
+      await customScannersApi.delete(scanner.id)
+      toast.success(t('customScanners.deleteSuccess'))
+      await loadData()
+      // Emit event to notify other components
+      eventBus.emit(EVENTS.SCANNER_DELETED, { scannerId: scanner.id, scannerTag: scanner.tag })
+    } catch (error) {
+      toast.error(t('customScanners.deleteFailed'))
+    }
+  }
+
+  const formSchema = z.object({
+    scanner_type: z.string().min(1, t('customScanners.validationErrors.typeRequired')),
+    name: z
+      .string()
+      .min(1, t('customScanners.validationErrors.nameRequired'))
+      .max(200, t('customScanners.validationErrors.nameTooLong')),
+    definition: z
+      .string()
+      .min(1, t('customScanners.validationErrors.definitionRequired'))
+      .max(2000, t('customScanners.validationErrors.definitionTooLong')),
+    risk_level: z.string().min(1, t('customScanners.validationErrors.riskLevelRequired')),
+    scan_prompt: z.boolean().optional(),
+    scan_response: z.boolean().optional(),
+    notes: z.string().max(1000, t('customScanners.validationErrors.notesTooLong')).optional(),
+    is_enabled: z.boolean().optional(),
+  })
+
+  const form = useForm({
+    resolver: zodResolver(formSchema),
+    defaultValues: {
+      scanner_type: '',
+      name: '',
+      definition: '',
+      risk_level: '',
+      scan_prompt: true,
+      scan_response: true,
+      notes: '',
+      is_enabled: true,
+    },
+  })
+
+  const selectedScannerType = form.watch('scanner_type')
+
+  const handleSubmit = async (values: any) => {
+    try {
+      setSaving(true)
 
       if (editingScanner) {
-        await customScannersApi.update(editingScanner.id, values);
-        message.success(t('customScanners.updateSuccess'));
+        await customScannersApi.update(editingScanner.id, values)
+        toast.success(t('customScanners.updateSuccess'))
         // Emit event to notify other components
-        eventBus.emit(EVENTS.SCANNER_UPDATED, { scannerId: editingScanner.id });
+        eventBus.emit(EVENTS.SCANNER_UPDATED, { scannerId: editingScanner.id })
       } else {
-        await customScannersApi.create(values);
-        message.success(t('customScanners.createSuccess'));
+        await customScannersApi.create(values)
+        toast.success(t('customScanners.createSuccess'))
         // Emit event to notify other components
-        eventBus.emit(EVENTS.SCANNER_CREATED);
+        eventBus.emit(EVENTS.SCANNER_CREATED)
       }
 
-      setModalVisible(false);
-      form.resetFields();
-      await loadData();
+      setModalVisible(false)
+      form.reset()
+      await loadData()
     } catch (error: any) {
-      if (error.errorFields) {
-        // Validation error
-        return;
-      }
-      message.error(editingScanner ? t('customScanners.updateFailed') : t('customScanners.createFailed'));
-      console.error('Failed to save scanner:', error);
+      toast.error(editingScanner ? t('customScanners.updateFailed') : t('customScanners.createFailed'))
+      console.error('Failed to save scanner:', error)
     } finally {
-      setSaving(false);
+      setSaving(false)
     }
-  };
+  }
 
   const getRiskLevelColor = (level: string) => {
     const colors: { [key: string]: string } = {
-      'high_risk': 'red',
-      'medium_risk': 'orange',
-      'low_risk': 'green',
-    };
-    return colors[level] || 'default';
-  };
+      high_risk: 'destructive',
+      medium_risk: 'secondary',
+      low_risk: 'secondary',
+    }
+    return colors[level] || 'default'
+  }
+
+  const getRiskLevelClassName = (level: string) => {
+    const classNames: { [key: string]: string } = {
+      high_risk: '',
+      medium_risk: 'bg-orange-100 text-orange-800 border-orange-200',
+      low_risk: 'bg-green-100 text-green-800 border-green-200',
+    }
+    return classNames[level] || ''
+  }
 
   const getScannerTypeLabel = (type: string) => {
     const types: { [key: string]: string } = {
-      'genai': t('scannerPackages.scannerTypeGenai'),
-      'regex': t('scannerPackages.scannerTypeRegex'),
-      'keyword': t('scannerPackages.scannerTypeKeyword'),
-    };
-    return types[type] || type;
-  };
+      genai: t('scannerPackages.scannerTypeGenai'),
+      regex: t('scannerPackages.scannerTypeRegex'),
+      keyword: t('scannerPackages.scannerTypeKeyword'),
+    }
+    return types[type] || type
+  }
 
   const getDefinitionPlaceholder = (type: string) => {
     if (type === 'keyword') {
-      return t('customScanners.keywordPlaceholder') || '';
+      return t('customScanners.keywordPlaceholder') || ''
     }
-    return t(`customScanners.definitionPlaceholder.${type}` as any) || '';
-  };
+    return t(`customScanners.definitionPlaceholder.${type}` as any) || ''
+  }
 
-  const columns = [
+  const columns: ColumnDef<CustomScanner>[] = [
     {
-      title: t('customScanners.scannerTag'),
-      dataIndex: 'tag',
-      key: 'tag',
-      width: 80,
-      render: (tag: string) => <Tag color="purple">{tag}</Tag>,
+      accessorKey: 'tag',
+      header: t('customScanners.scannerTag'),
+      cell: ({ row }) => (
+        <Badge variant="secondary" className="bg-purple-100 text-purple-800 border-purple-200">
+          {row.original.tag}
+        </Badge>
+      ),
     },
     {
-      title: t('customScanners.scannerName'),
-      dataIndex: 'name',
-      key: 'name',
-      width: 200,
-      render: (text: string) => (
-        <div style={{
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
-          lineHeight: '1.4'
-        }}>
-          {text}
+      accessorKey: 'name',
+      header: t('customScanners.scannerName'),
+      cell: ({ row }) => (
+        <div className="whitespace-pre-wrap break-words leading-relaxed max-w-xs">
+          {row.original.name}
         </div>
       ),
     },
     {
-      title: t('customScanners.scannerType'),
-      dataIndex: 'scanner_type',
-      key: 'scanner_type',
-      width: 120,
-      render: (type: string) => getScannerTypeLabel(type),
+      accessorKey: 'scanner_type',
+      header: t('customScanners.scannerType'),
+      cell: ({ row }) => getScannerTypeLabel(row.original.scanner_type),
     },
     {
-      title: t('customScanners.riskLevel'),
-      dataIndex: 'default_risk_level',
-      key: 'default_risk_level',
-      width: 120,
-      render: (level: string) => (
-        <Tag color={getRiskLevelColor(level)}>
-          {t(`risk.level.${level}`)}
-        </Tag>
+      accessorKey: 'default_risk_level',
+      header: t('customScanners.riskLevel'),
+      cell: ({ row }) => (
+        <Badge
+          variant={getRiskLevelColor(row.original.default_risk_level) as any}
+          className={getRiskLevelClassName(row.original.default_risk_level)}
+        >
+          {t(`risk.level.${row.original.default_risk_level}`)}
+        </Badge>
       ),
     },
     {
-      title: t('customScanners.scannerDefinition'),
-      dataIndex: 'definition',
-      key: 'definition',
-      render: (text: string) => (
-        <div style={{
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
-          lineHeight: '1.4',
-          flex: 1
-        }}>
-          {text}
+      accessorKey: 'definition',
+      header: t('customScanners.scannerDefinition'),
+      cell: ({ row }) => (
+        <div className="whitespace-pre-wrap break-words leading-relaxed flex-1 max-w-md">
+          {row.original.definition}
         </div>
       ),
     },
     {
-      title: t('customScanners.enabled'),
-      dataIndex: 'is_enabled',
-      key: 'is_enabled',
-      width: 100,
-      render: (enabled: boolean, record: CustomScanner) => (
+      accessorKey: 'is_enabled',
+      header: t('customScanners.enabled'),
+      cell: ({ row }) => (
         <Switch
-          checked={enabled !== false}
-          onChange={(checked) => handleToggleEnable(record, checked)}
+          checked={row.original.is_enabled !== false}
+          onCheckedChange={(checked) => handleToggleEnable(row.original, checked)}
         />
       ),
     },
     {
-      title: t('common.actions'),
-      key: 'actions',
-      width: 150,
-      render: (_: any, record: CustomScanner) => (
-        <Space>
+      id: 'actions',
+      header: t('common.actions'),
+      cell: ({ row }) => (
+        <div className="flex items-center gap-2">
           <Button
-            type="link"
-            size="small"
-            icon={<EditOutlined />}
-            onClick={() => handleEdit(record)}
+            variant="ghost"
+            size="sm"
+            onClick={() => handleEdit(row.original)}
           >
+            <Edit2 className="h-4 w-4 mr-1" />
             {t('common.edit')}
           </Button>
           <Button
-            type="link"
-            danger
-            size="small"
-            icon={<DeleteOutlined />}
-            onClick={() => handleDelete(record)}
+            variant="ghost"
+            size="sm"
+            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+            onClick={() => handleDelete(row.original)}
           >
+            <Trash2 className="h-4 w-4 mr-1" />
             {t('common.delete')}
           </Button>
-        </Space>
+        </div>
       ),
     },
-  ];
-
-  const selectedScannerType = Form.useWatch('scanner_type', form);
+  ]
 
   // Show loading state while checking subscription
   if (subscriptionLoading) {
-    return <Spin spinning={true} />;
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+      </div>
+    )
   }
 
   // Show upgrade prompt if not subscribed
   if (isSubscribed === false) {
     return (
-      <Space direction="vertical" size="large" style={{ width: '100%' }}>
+      <div className="space-y-6">
         <Card>
-          <Result
-            icon={<CrownOutlined style={{ color: '#faad14', fontSize: 72 }} />}
-            title={
-              <Space>
-                <LockOutlined />
-                {t('customScanners.premiumFeatureTitle')}
-              </Space>
-            }
-            subTitle={t('customScanners.premiumFeatureSubtitle')}
-            extra={[
-              <Button 
-                type="primary" 
-                size="large" 
-                key="upgrade"
-                icon={<CrownOutlined />}
+          <CardContent className="pt-6">
+            <div className="text-center space-y-6">
+              <Crown className="h-16 w-16 text-yellow-500 mx-auto" />
+              <div className="space-y-2">
+                <h3 className="text-xl font-semibold flex items-center justify-center gap-2">
+                  <Lock className="h-5 w-5" />
+                  {t('customScanners.premiumFeatureTitle')}
+                </h3>
+                <p className="text-gray-600">{t('customScanners.premiumFeatureSubtitle')}</p>
+              </div>
+
+              <Button
+                size="lg"
                 onClick={() => navigate('/subscription')}
+                className="gap-2"
               >
+                <Crown className="h-5 w-5" />
                 {t('customScanners.upgradeNow')}
-              </Button>,
-            ]}
-          >
-            <div style={{ 
-              textAlign: 'left', 
-              maxWidth: 600, 
-              margin: '0 auto',
-              padding: '24px',
-              background: '#fafafa',
-              borderRadius: 8
-            }}>
-              <h3 style={{ marginBottom: 16 }}>
-                <CrownOutlined style={{ color: '#faad14', marginRight: 8 }} />
-                {t('customScanners.benefitsTitle')}
-              </h3>
-              <ul style={{ paddingLeft: 20, fontSize: 15, lineHeight: 2 }}>
-                <li>{t('customScanners.feature1')}</li>
-                <li>{t('customScanners.feature2')}</li>
-                <li>{t('customScanners.feature3')}</li>
-                <li>{t('customScanners.feature4')}</li>
-                <li>{t('customScanners.feature5')}</li>
-              </ul>
-              <div style={{ 
-                marginTop: 24, 
-                padding: 16, 
-                background: '#fff', 
-                borderRadius: 6,
-                border: '1px solid #d9d9d9'
-              }}>
-                <Text strong style={{ fontSize: 16 }}>
-                  {t('customScanners.pricingInfo')}
-                </Text>
-                <div style={{ marginTop: 8, fontSize: 14, color: '#666' }}>
-                  {t('customScanners.pricingDetails')}
+              </Button>
+
+              <div className="max-w-2xl mx-auto p-6 bg-gray-50 rounded-lg text-left">
+                <h4 className="font-semibold mb-4 flex items-center gap-2">
+                  <Crown className="h-5 w-5 text-yellow-500" />
+                  {t('customScanners.benefitsTitle')}
+                </h4>
+                <ul className="space-y-2 text-base">
+                  <li>{t('customScanners.feature1')}</li>
+                  <li>{t('customScanners.feature2')}</li>
+                  <li>{t('customScanners.feature3')}</li>
+                  <li>{t('customScanners.feature4')}</li>
+                  <li>{t('customScanners.feature5')}</li>
+                </ul>
+                <div className="mt-6 p-4 bg-white rounded-lg border">
+                  <p className="font-semibold text-base mb-2">
+                    {t('customScanners.pricingInfo')}
+                  </p>
+                  <p className="text-sm text-gray-600">
+                    {t('customScanners.pricingDetails')}
+                  </p>
                 </div>
               </div>
             </div>
-          </Result>
+          </CardContent>
         </Card>
-      </Space>
-    );
+      </div>
+    )
   }
 
   return (
-    <Spin spinning={loading}>
-      <Space direction="vertical" size="large" style={{ width: '100%' }}>
-        {features.showSubscription() && (
-          <Alert
-            message={
-              <Space>
-                <CrownOutlined style={{ color: '#faad14' }} />
-                <span>{t('customScanners.premiumActiveMessage')}</span>
-              </Space>
-            }
-            description={t('customScanners.premiumActiveDesc')}
-            type="success"
-            showIcon={false}
-            closable
-          />
-        )}
-        
-        <Collapse style={{ backgroundColor: '#f8f9fa' }}>
-          <Collapse.Panel header={t('customScanners.usageGuideTitle')} key="1">
-            <div style={{ marginBottom: 16 }}>
-              <strong>{t('customScanners.whatIsCustomScanner')}</strong>
-              <p style={{ marginBottom: 16 }}>
-                {t('customScanners.whatIsCustomScannerDesc')}
-              </p>
-            </div>
+    <div className="space-y-4">
+      {features.showSubscription() && (
+        <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+          <div className="flex items-center gap-2 text-green-900 font-semibold mb-1">
+            <Crown className="h-5 w-5 text-yellow-500" />
+            <span>{t('customScanners.premiumActiveMessage')}</span>
+          </div>
+          <p className="text-sm text-green-800">{t('customScanners.premiumActiveDesc')}</p>
+        </div>
+      )}
 
-            <div style={{ marginBottom: 20 }}>
-              <strong>{t('customScanners.examplesTitle')}</strong>
+      <Collapsible open={guideOpen} onOpenChange={setGuideOpen} className="bg-gray-50 rounded-lg border">
+        <CollapsibleTrigger asChild>
+          <Button variant="ghost" className="w-full flex justify-between p-4 hover:bg-gray-100">
+            <span className="font-semibold">{t('customScanners.usageGuideTitle')}</span>
+            <ChevronDown className={`h-5 w-5 transition-transform ${guideOpen ? 'rotate-180' : ''}`} />
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="px-4 pb-4 space-y-4">
+          <div>
+            <p className="font-semibold mb-2">{t('customScanners.whatIsCustomScanner')}</p>
+            <p className="text-sm text-gray-700 mb-4">
+              {t('customScanners.whatIsCustomScannerDesc')}
+            </p>
+          </div>
 
-              <div style={{ marginTop: 12, padding: 16, backgroundColor: '#fff', border: '1px solid #d9d9d9', borderRadius: 6 }}>
-                <h4 style={{ margin: '0 0 8px 0', color: '#1890ff' }}>
+          <div>
+            <p className="font-semibold mb-3">{t('customScanners.examplesTitle')}</p>
+
+            <div className="space-y-3">
+              <div className="p-4 bg-white border rounded-lg">
+                <h4 className="font-semibold text-blue-600 mb-2">
                   {t('customScanners.example1Title')}
                 </h4>
-                <p style={{ margin: '0 0 8px 0', fontWeight: 'bold' }}>
-                  {t('customScanners.example1Name')}
-                </p>
-                <p style={{ margin: '0 0 4px 0' }}>
+                <p className="font-semibold mb-2">{t('customScanners.example1Name')}</p>
+                <p className="text-sm mb-1">
                   <strong>{t('customScanners.scannerType')}:</strong> {t('customScanners.exampleTypeGenai')}
                 </p>
-                <p style={{ margin: '0 0 4px 0' }}>
+                <p className="text-sm mb-1">
                   <strong>{t('customScanners.scannerDefinition')}:</strong> {t('customScanners.example1Definition')}
                 </p>
-                <p style={{ margin: '0', color: '#666', fontSize: '13px' }}>
-                  {t('customScanners.example1Desc')}
-                </p>
+                <p className="text-sm text-gray-600">{t('customScanners.example1Desc')}</p>
               </div>
 
-              <div style={{ marginTop: 12, padding: 16, backgroundColor: '#fff', border: '1px solid #d9d9d9', borderRadius: 6 }}>
-                <h4 style={{ margin: '0 0 8px 0', color: '#1890ff' }}>
+              <div className="p-4 bg-white border rounded-lg">
+                <h4 className="font-semibold text-blue-600 mb-2">
                   {t('customScanners.example2Title')}
                 </h4>
-                <p style={{ margin: '0 0 8px 0', fontWeight: 'bold' }}>
-                  {t('customScanners.example2Name')}
-                </p>
-                <p style={{ margin: '0 0 4px 0' }}>
+                <p className="font-semibold mb-2">{t('customScanners.example2Name')}</p>
+                <p className="text-sm mb-1">
                   <strong>{t('customScanners.scannerType')}:</strong> {t('customScanners.exampleTypeGenai')}
                 </p>
-                <p style={{ margin: '0 0 4px 0' }}>
+                <p className="text-sm mb-1">
                   <strong>{t('customScanners.scannerDefinition')}:</strong> {t('customScanners.example2Definition')}
                 </p>
-                <p style={{ margin: '0', color: '#666', fontSize: '13px' }}>
-                  {t('customScanners.example2Desc')}
-                </p>
+                <p className="text-sm text-gray-600">{t('customScanners.example2Desc')}</p>
               </div>
 
-              <div style={{ marginTop: 12, padding: 16, backgroundColor: '#fff', border: '1px solid #d9d9d9', borderRadius: 6 }}>
-                <h4 style={{ margin: '0 0 8px 0', color: '#ff4d4f' }}>
+              <div className="p-4 bg-white border rounded-lg">
+                <h4 className="font-semibold text-red-600 mb-2">
                   {t('customScanners.example3Title')}
                 </h4>
-                <p style={{ margin: '0 0 8px 0', fontWeight: 'bold' }}>
-                  {t('customScanners.example3Name')}
-                </p>
-                <p style={{ margin: '0 0 4px 0' }}>
+                <p className="font-semibold mb-2">{t('customScanners.example3Name')}</p>
+                <p className="text-sm mb-1">
                   <strong>{t('customScanners.scannerType')}:</strong> {t('customScanners.exampleTypeKeyword')}
                 </p>
-                <p style={{ margin: '0 0 4px 0' }}>
+                <p className="text-sm mb-1">
                   <strong>{t('customScanners.scannerDefinition')}:</strong> {t('customScanners.example3Definition')}
                 </p>
-                <p style={{ margin: '0', color: '#666', fontSize: '13px' }}>
-                  {t('customScanners.example3Desc')}
-                </p>
+                <p className="text-sm text-gray-600">{t('customScanners.example3Desc')}</p>
               </div>
             </div>
-          </Collapse.Panel>
-        </Collapse>
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
 
-        <Card
-          title={t('customScanners.title')}
-          extra={
-            <Space>
-              <Button
-                icon={<ReloadOutlined />}
-                onClick={loadData}
-                loading={loading}
-              >
-                {t('common.refresh')}
-              </Button>
-              <Button
-                type="primary"
-                icon={<PlusOutlined />}
-                onClick={handleCreate}
-              >
-                {t('customScanners.createScanner')}
-              </Button>
-            </Space>
-          }
-        >
-          <Table
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0">
+          <CardTitle>{t('customScanners.title')}</CardTitle>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={loadData} disabled={loading}>
+              <RefreshCw className={`h-4 w-4 mr-1 ${loading ? 'animate-spin' : ''}`} />
+              {t('common.refresh')}
+            </Button>
+            <Button onClick={handleCreate}>
+              <Plus className="h-4 w-4 mr-1" />
+              {t('customScanners.createScanner')}
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <DataTable
             columns={columns}
-            dataSource={scanners}
-            rowKey="id"
-            pagination={{ pageSize: 20 }}
-            locale={{ emptyText: t('customScanners.noScannersFound') }}
-            scroll={{ x: 1000 }}
-            size="middle"
+            data={scanners}
+            loading={loading}
+            emptyMessage={t('customScanners.noScannersFound')}
           />
-        </Card>
+        </CardContent>
+      </Card>
 
-        <Modal
-          title={editingScanner ? t('customScanners.editScanner') : t('customScanners.createScanner')}
-          open={modalVisible}
-          onOk={handleSubmit}
-          onCancel={() => {
-            setModalVisible(false);
-            form.resetFields();
-          }}
-          okText={t('common.save')}
-          cancelText={t('common.cancel')}
-          width={700}
-          confirmLoading={saving}
-        >
-          <Form
-            form={form}
-            layout="vertical"
-            initialValues={{
-              scan_prompt: true,
-              scan_response: true,
-              is_enabled: true,
-            }}
-          >
-            <Form.Item
-              label={t('customScanners.scannerType')}
-              name="scanner_type"
-              rules={[{ required: true, message: t('customScanners.validationErrors.typeRequired') }]}
-            >
-              <Select
-                placeholder={t('customScanners.selectType')}
-                disabled={!!editingScanner}
-                optionLabelProp="label"
-              >
-                <Option value="genai" label={t('customScanners.typeGenai')}>
-                  <div>
-                    <div><strong>{t('customScanners.typeGenai')}</strong></div>
-                    <div style={{ fontSize: '12px', color: '#999' }}>{t('customScanners.typeGenaiDesc')}</div>
-                  </div>
-                </Option>
-                <Option value="regex" label={t('customScanners.typeRegex')}>
-                  <div>
-                    <div><strong>{t('customScanners.typeRegex')}</strong></div>
-                    <div style={{ fontSize: '12px', color: '#999' }}>{t('customScanners.typeRegexDesc')}</div>
-                  </div>
-                </Option>
-                <Option value="keyword" label={t('customScanners.typeKeyword')}>
-                  <div>
-                    <div><strong>{t('customScanners.typeKeyword')}</strong></div>
-                    <div style={{ fontSize: '12px', color: '#999' }}>{t('customScanners.typeKeywordDesc')} {t('customScanners.typeKeywordFormat')}</div>
-                  </div>
-                </Option>
-              </Select>
-            </Form.Item>
-
-            
-            <Form.Item
-              label={t('customScanners.scannerName')}
-              name="name"
-              rules={[
-                { required: true, message: t('customScanners.validationErrors.nameRequired') },
-                { max: 200, message: t('customScanners.validationErrors.nameTooLong') },
-              ]}
-            >
-              <Input placeholder={t('customScanners.namePlaceholder')} />
-            </Form.Item>
-
-            <Form.Item
-              label={t('customScanners.scannerDefinition')}
-              name="definition"
-              rules={[
-                { required: true, message: t('customScanners.validationErrors.definitionRequired') },
-                { max: 2000, message: t('customScanners.validationErrors.definitionTooLong') },
-              ]}
-            >
-              <TextArea
-                rows={4}
-                placeholder={selectedScannerType ? getDefinitionPlaceholder(selectedScannerType) : ''}
+      <Dialog open={modalVisible} onOpenChange={setModalVisible}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              {editingScanner ? t('customScanners.editScanner') : t('customScanners.createScanner')}
+            </DialogTitle>
+          </DialogHeader>
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
+              <FormField
+                control={form.control}
+                name="scanner_type"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('customScanners.scannerType')}</FormLabel>
+                    <Select
+                      onValueChange={field.onChange}
+                      value={field.value}
+                      disabled={!!editingScanner}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder={t('customScanners.selectType')} />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="genai">
+                          <div>
+                            <div className="font-semibold">{t('customScanners.typeGenai')}</div>
+                            <div className="text-xs text-gray-500">{t('customScanners.typeGenaiDesc')}</div>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="regex">
+                          <div>
+                            <div className="font-semibold">{t('customScanners.typeRegex')}</div>
+                            <div className="text-xs text-gray-500">{t('customScanners.typeRegexDesc')}</div>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="keyword">
+                          <div>
+                            <div className="font-semibold">{t('customScanners.typeKeyword')}</div>
+                            <div className="text-xs text-gray-500">
+                              {t('customScanners.typeKeywordDesc')} {t('customScanners.typeKeywordFormat')}
+                            </div>
+                          </div>
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
               />
-            </Form.Item>
 
-            <Form.Item
-              label={t('customScanners.riskLevel')}
-              name="risk_level"
-              rules={[{ required: true, message: t('customScanners.validationErrors.riskLevelRequired') }]}
-            >
-              <Select>
-                <Option value="high_risk">{t('risk.level.high_risk')}</Option>
-                <Option value="medium_risk">{t('risk.level.medium_risk')}</Option>
-                <Option value="low_risk">{t('risk.level.low_risk')}</Option>
-              </Select>
-            </Form.Item>
-
-            <Form.Item
-              label={t('customScanners.scannerNotes')}
-              name="notes"
-              rules={[
-                { max: 1000, message: t('customScanners.validationErrors.notesTooLong') },
-              ]}
-            >
-              <TextArea rows={3} placeholder={t('customScanners.notesPlaceholder')} />
-            </Form.Item>
-
-            <Form.Item
-              label={t('customScanners.enabled')}
-              name="is_enabled"
-              valuePropName="checked"
-            >
-              <Switch />
-            </Form.Item>
-
-            {!editingScanner && (
-              <Alert
-                message={t('customScanners.autoTag')}
-                type="info"
-                showIcon
+              <FormField
+                control={form.control}
+                name="name"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('customScanners.scannerName')}</FormLabel>
+                    <FormControl>
+                      <Input placeholder={t('customScanners.namePlaceholder')} {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
               />
-            )}
+
+              <FormField
+                control={form.control}
+                name="definition"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('customScanners.scannerDefinition')}</FormLabel>
+                    <FormControl>
+                      <Textarea
+                        rows={4}
+                        placeholder={selectedScannerType ? getDefinitionPlaceholder(selectedScannerType) : ''}
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="risk_level"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('customScanners.riskLevel')}</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="high_risk">{t('risk.level.high_risk')}</SelectItem>
+                        <SelectItem value="medium_risk">{t('risk.level.medium_risk')}</SelectItem>
+                        <SelectItem value="low_risk">{t('risk.level.low_risk')}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="notes"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('customScanners.scannerNotes')}</FormLabel>
+                    <FormControl>
+                      <Textarea rows={3} placeholder={t('customScanners.notesPlaceholder')} {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="is_enabled"
+                render={({ field }) => (
+                  <FormItem className="flex items-center justify-between p-4 border rounded-lg">
+                    <FormLabel>{t('customScanners.enabled')}</FormLabel>
+                    <FormControl>
+                      <Switch checked={field.value} onCheckedChange={field.onChange} />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+
+              {!editingScanner && (
+                <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                  <p className="text-sm text-blue-900">{t('customScanners.autoTag')}</p>
+                </div>
+              )}
+
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setModalVisible(false)
+                    form.reset()
+                  }}
+                >
+                  {t('common.cancel')}
+                </Button>
+                <Button type="submit" disabled={saving}>
+                  {saving ? t('common.saving') : t('common.save')}
+                </Button>
+              </DialogFooter>
+            </form>
           </Form>
-        </Modal>
-      </Space>
-    </Spin>
-  );
-};
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
 
-export default CustomScannersManagement;
+export default CustomScannersManagement
