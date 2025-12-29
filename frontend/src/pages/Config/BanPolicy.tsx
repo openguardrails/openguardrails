@@ -1,144 +1,188 @@
-import React, { useState, useEffect } from 'react';
-import { Card, Form, Switch, Select, InputNumber, Button, Table, message, Modal, Tag, Space, Descriptions } from 'antd';
-import type { ColumnsType } from 'antd/es/table';
-import { useTranslation } from 'react-i18next';
-import { configApi } from '../../services/api';
-import { translateRiskLevel, getRiskLevelColor } from '../../utils/i18nMapper';
-import { useApplication } from '../../contexts/ApplicationContext';
-import { useAuth } from '../../contexts/AuthContext';
+import React, { useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { z } from 'zod'
+import { toast } from 'sonner'
+import { format } from 'date-fns'
 
-const { Option } = Select;
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+} from '@/components/ui/form'
+import { Switch } from '@/components/ui/switch'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { InputNumber } from '@/components/ui/input-number'
+import { Badge } from '@/components/ui/badge'
+import { DataTable } from '@/components/data-table/DataTable'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { configApi } from '../../services/api'
+import { translateRiskLevel, getRiskLevelColor } from '../../utils/i18nMapper'
+import { useApplication } from '../../contexts/ApplicationContext'
+import { useAuth } from '../../contexts/AuthContext'
+import type { ColumnDef } from '@tanstack/react-table'
+
+const banPolicySchema = z.object({
+  enabled: z.boolean(),
+  risk_level: z.string(),
+  trigger_count: z.number().min(1).max(100),
+  time_window_minutes: z.number().min(1).max(1440),
+  ban_duration_minutes: z.number().min(1).max(10080),
+})
+
+type BanPolicyFormData = z.infer<typeof banPolicySchema>
 
 interface BanPolicy {
-  id: string;
-  tenant_id: string;
-  enabled: boolean;
-  risk_level: string;
-  trigger_count: number;
-  time_window_minutes: number;
-  ban_duration_minutes: number;
-  created_at: string;
-  updated_at: string;
+  id: string
+  tenant_id: string
+  enabled: boolean
+  risk_level: string
+  trigger_count: number
+  time_window_minutes: number
+  ban_duration_minutes: number
+  created_at: string
+  updated_at: string
 }
 
 interface BannedUser {
-  id: string;
-  user_id: string;
-  banned_at: string;
-  ban_until: string;
-  trigger_count: number;
-  risk_level: string;
-  reason: string;
-  is_active: boolean;
-  status: string;
+  id: string
+  user_id: string
+  banned_at: string
+  ban_until: string
+  trigger_count: number
+  risk_level: string
+  reason: string
+  is_active: boolean
+  status: string
 }
 
 interface RiskTrigger {
-  id: string;
-  detection_result_id: string | null;
-  risk_level: string;
-  triggered_at: string;
+  id: string
+  detection_result_id: string | null
+  risk_level: string
+  triggered_at: string
 }
 
 const BanPolicy: React.FC = () => {
-  const { t } = useTranslation();
-  const [form] = Form.useForm();
-  const [policy, setPolicy] = useState<BanPolicy | null>(null);
-  const [bannedUsers, setBannedUsers] = useState<BannedUser[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [tableLoading, setTableLoading] = useState(false);
-  const [historyVisible, setHistoryVisible] = useState(false);
-  const [selectedUserId, setSelectedUserId] = useState<string>('');
-  const [userHistory, setUserHistory] = useState<RiskTrigger[]>([]);
-  const { currentApplicationId } = useApplication();
-  const { onUserSwitch } = useAuth();
+  const { t } = useTranslation()
+  const [policy, setPolicy] = useState<BanPolicy | null>(null)
+  const [bannedUsers, setBannedUsers] = useState<BannedUser[]>([])
+  const [loading, setLoading] = useState(false)
+  const [tableLoading, setTableLoading] = useState(false)
+  const [historyVisible, setHistoryVisible] = useState(false)
+  const [selectedUserId, setSelectedUserId] = useState<string>('')
+  const [userHistory, setUserHistory] = useState<RiskTrigger[]>([])
+  const { currentApplicationId } = useApplication()
+  const { onUserSwitch } = useAuth()
 
-  // Get translated risk level text - use i18nMapper to handle both English and Chinese formats
+  const form = useForm<BanPolicyFormData>({
+    resolver: zodResolver(banPolicySchema),
+    defaultValues: {
+      enabled: false,
+      risk_level: 'high_risk',
+      trigger_count: 5,
+      time_window_minutes: 30,
+      ban_duration_minutes: 60,
+    },
+  })
+
   const getRiskLevelText = (level: string): string => {
-    return translateRiskLevel(level, t);
-  };
+    return translateRiskLevel(level, t)
+  }
 
-  // Get translated status text
   const getStatusText = (status: string): string => {
-    if (status === 'banned') return t('banPolicy.banned');
-    if (status === 'unbanned') return t('banPolicy.unbanned');
-    return status;
-  };
+    if (status === 'banned') return t('banPolicy.banned')
+    if (status === 'unbanned') return t('banPolicy.unbanned')
+    return status
+  }
 
-  // Get status color
-  const getStatusColor = (status: string): string => {
-    if (status === 'banned') return 'red';
-    if (status === 'unbanned') return 'green';
-    return 'default';
-  };
+  const getStatusColor = (status: string): 'default' | 'secondary' | 'destructive' | 'outline' => {
+    if (status === 'banned') return 'destructive'
+    if (status === 'unbanned') return 'outline'
+    return 'secondary'
+  }
 
-  // 获取封禁策略
+  const getRiskBadgeVariant = (level: string): 'default' | 'secondary' | 'destructive' | 'outline' => {
+    const color = getRiskLevelColor(level)
+    if (color === 'red' || color === '#ff4d4f') return 'destructive'
+    if (color === 'orange' || color === '#faad14') return 'default'
+    if (color === 'yellow' || color === '#fadb14') return 'secondary'
+    return 'outline'
+  }
+
   const fetchPolicy = async () => {
     try {
-      setLoading(true);
-      const policyData = await configApi.banPolicy.get();
-      setPolicy(policyData);
-      form.setFieldsValue({
+      setLoading(true)
+      const policyData = await configApi.banPolicy.get()
+      setPolicy(policyData)
+      form.reset({
         enabled: policyData.enabled,
         risk_level: policyData.risk_level,
         trigger_count: policyData.trigger_count,
         time_window_minutes: policyData.time_window_minutes,
         ban_duration_minutes: policyData.ban_duration_minutes,
-      });
+      })
     } catch (error: any) {
-      message.error(t('banPolicy.fetchFailed'));
+      toast.error(t('banPolicy.fetchFailed'))
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }
 
-  // Fetch banned users list
   const fetchBannedUsers = async () => {
     try {
-      setTableLoading(true);
-      const data = await configApi.banPolicy.getBannedUsers();
-      setBannedUsers(data.users);
+      setTableLoading(true)
+      const data = await configApi.banPolicy.getBannedUsers()
+      setBannedUsers(data.users)
     } catch (error: any) {
-      message.error(t('banPolicy.getBannedUsersFailed'));
+      toast.error(t('banPolicy.getBannedUsersFailed'))
     } finally {
-      setTableLoading(false);
+      setTableLoading(false)
     }
-  };
+  }
 
   useEffect(() => {
     if (currentApplicationId) {
-      fetchPolicy();
-      fetchBannedUsers();
+      fetchPolicy()
+      fetchBannedUsers()
     }
-  }, [currentApplicationId]);
+  }, [currentApplicationId])
 
-  // Listen to user switch event, automatically refresh data
   useEffect(() => {
     const unsubscribe = onUserSwitch(() => {
-      fetchPolicy();
-      fetchBannedUsers();
-    });
-    return unsubscribe;
-  }, [onUserSwitch]);
+      fetchPolicy()
+      fetchBannedUsers()
+    })
+    return unsubscribe
+  }, [onUserSwitch])
 
-  // Save policy
-  const handleSave = async () => {
+  const handleSave = async (values: BanPolicyFormData) => {
     try {
-      const values = await form.validateFields();
-      setLoading(true);
-      await configApi.banPolicy.update(values);
-      message.success(t('banPolicy.saveSuccess'));
-      fetchPolicy();
+      setLoading(true)
+      await configApi.banPolicy.update(values)
+      toast.success(t('banPolicy.saveSuccess'))
+      fetchPolicy()
     } catch (error: any) {
-      message.error(t('banPolicy.saveFailed'));
+      toast.error(t('banPolicy.saveFailed'))
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }
 
-  // Apply template
   const applyTemplate = (template: string) => {
-    const templates: { [key: string]: any } = {
+    const templates: { [key: string]: BanPolicyFormData } = {
       strict: {
         enabled: true,
         risk_level: 'high_risk',
@@ -167,231 +211,308 @@ const BanPolicy: React.FC = () => {
         time_window_minutes: 10,
         ban_duration_minutes: 60,
       },
-    };
+    }
 
-    form.setFieldsValue(templates[template]);
-  };
+    form.reset(templates[template])
+  }
 
-  // Unban user
   const handleUnban = async (userId: string) => {
     try {
-      await configApi.banPolicy.unbanUser(userId);
-      message.success(t('banPolicy.unbanSuccess'));
-      fetchBannedUsers();
+      await configApi.banPolicy.unbanUser(userId)
+      toast.success(t('banPolicy.unbanSuccess'))
+      fetchBannedUsers()
     } catch (error: any) {
-      message.error(t('banPolicy.unbanFailed'));
+      toast.error(t('banPolicy.unbanFailed'))
     }
-  };
+  }
 
-  // View user risk history
   const viewUserHistory = async (userId: string) => {
     try {
-      setSelectedUserId(userId);
-      const data = await configApi.banPolicy.getUserHistory(userId);
-      setUserHistory(data.history);
-      setHistoryVisible(true);
+      setSelectedUserId(userId)
+      const data = await configApi.banPolicy.getUserHistory(userId)
+      setUserHistory(data.history)
+      setHistoryVisible(true)
     } catch (error: any) {
-      message.error(t('banPolicy.getUserHistoryFailed'));
+      toast.error(t('banPolicy.getUserHistoryFailed'))
     }
-  };
+  }
 
-  const columns: ColumnsType<BannedUser> = [
+  const bannedUsersColumns: ColumnDef<BannedUser>[] = [
     {
-      title: t('banPolicy.userIdColumn'),
-      dataIndex: 'user_id',
-      key: 'user_id',
-      width: 200,
+      accessorKey: 'user_id',
+      header: t('banPolicy.userIdColumn'),
     },
     {
-      title: t('banPolicy.banTimeColumn'),
-      dataIndex: 'banned_at',
-      key: 'banned_at',
-      width: 180,
-      render: (text) => new Date(text).toLocaleString(),
+      accessorKey: 'banned_at',
+      header: t('banPolicy.banTimeColumn'),
+      cell: ({ row }) => format(new Date(row.getValue('banned_at')), 'yyyy-MM-dd HH:mm:ss'),
     },
     {
-      title: t('banPolicy.unbanTimeColumn'),
-      dataIndex: 'ban_until',
-      key: 'ban_until',
-      width: 180,
-      render: (text) => new Date(text).toLocaleString(),
+      accessorKey: 'ban_until',
+      header: t('banPolicy.unbanTimeColumn'),
+      cell: ({ row }) => format(new Date(row.getValue('ban_until')), 'yyyy-MM-dd HH:mm:ss'),
     },
     {
-      title: t('banPolicy.triggerTimesColumn'),
-      dataIndex: 'trigger_count',
-      key: 'trigger_count',
-      width: 100,
+      accessorKey: 'trigger_count',
+      header: t('banPolicy.triggerTimesColumn'),
     },
     {
-      title: t('banPolicy.riskLevelColumn'),
-      dataIndex: 'risk_level',
-      key: 'risk_level',
-      width: 100,
-      render: (level) => (
-        <Tag color={getRiskLevelColor(level)}>{getRiskLevelText(level)}</Tag>
-      ),
+      accessorKey: 'risk_level',
+      header: t('banPolicy.riskLevelColumn'),
+      cell: ({ row }) => {
+        const level = row.getValue('risk_level') as string
+        return <Badge variant={getRiskBadgeVariant(level)}>{getRiskLevelText(level)}</Badge>
+      },
     },
     {
-      title: t('banPolicy.banReasonColumn'),
-      dataIndex: 'reason',
-      key: 'reason',
-      ellipsis: true,
+      accessorKey: 'reason',
+      header: t('banPolicy.banReasonColumn'),
+      cell: ({ row }) => {
+        const reason = row.getValue('reason') as string
+        return (
+          <span className="truncate max-w-[200px] block" title={reason}>
+            {reason}
+          </span>
+        )
+      },
     },
     {
-      title: t('banPolicy.statusColumn'),
-      dataIndex: 'status',
-      key: 'status',
-      width: 100,
-      render: (status) => (
-        <Tag color={getStatusColor(status)}>{getStatusText(status)}</Tag>
-      ),
+      accessorKey: 'status',
+      header: t('banPolicy.statusColumn'),
+      cell: ({ row }) => {
+        const status = row.getValue('status') as string
+        return <Badge variant={getStatusColor(status)}>{getStatusText(status)}</Badge>
+      },
     },
     {
-      title: t('banPolicy.operationColumn'),
-      key: 'action',
-      width: 150,
-      render: (_, record) => (
-        <Space size="small">
-          {record.status === 'banned' && (
-            <Button type="link" size="small" onClick={() => handleUnban(record.user_id)}>
-              {t('banPolicy.unbanUser')}
+      id: 'actions',
+      header: t('banPolicy.operationColumn'),
+      cell: ({ row }) => {
+        const record = row.original
+        return (
+          <div className="flex items-center gap-2">
+            {record.status === 'banned' && (
+              <Button
+                variant="link"
+                size="sm"
+                onClick={() => handleUnban(record.user_id)}
+                className="h-auto p-0"
+              >
+                {t('banPolicy.unbanUser')}
+              </Button>
+            )}
+            <Button
+              variant="link"
+              size="sm"
+              onClick={() => viewUserHistory(record.user_id)}
+              className="h-auto p-0"
+            >
+              {t('banPolicy.viewHistory')}
             </Button>
-          )}
-          <Button type="link" size="small" onClick={() => viewUserHistory(record.user_id)}>
-            {t('banPolicy.viewHistory')}
-          </Button>
-        </Space>
-      ),
+          </div>
+        )
+      },
     },
-  ];
+  ]
 
-  const historyColumns: ColumnsType<RiskTrigger> = [
+  const historyColumns: ColumnDef<RiskTrigger>[] = [
     {
-      title: t('banPolicy.triggeredAt'),
-      dataIndex: 'triggered_at',
-      key: 'triggered_at',
-      render: (text) => new Date(text).toLocaleString(),
+      accessorKey: 'triggered_at',
+      header: t('banPolicy.triggeredAt'),
+      cell: ({ row }) => format(new Date(row.getValue('triggered_at')), 'yyyy-MM-dd HH:mm:ss'),
     },
     {
-      title: t('banPolicy.riskLevelColumn'),
-      dataIndex: 'risk_level',
-      key: 'risk_level',
-      render: (level) => (
-        <Tag color={getRiskLevelColor(level)}>{getRiskLevelText(level)}</Tag>
-      ),
+      accessorKey: 'risk_level',
+      header: t('banPolicy.riskLevelColumn'),
+      cell: ({ row }) => {
+        const level = row.getValue('risk_level') as string
+        return <Badge variant={getRiskBadgeVariant(level)}>{getRiskLevelText(level)}</Badge>
+      },
     },
     {
-      title: t('banPolicy.detectionResultId'),
-      dataIndex: 'detection_result_id',
-      key: 'detection_result_id',
-      render: (id) => id || '-',
+      accessorKey: 'detection_result_id',
+      header: t('banPolicy.detectionResultId'),
+      cell: ({ row }) => row.getValue('detection_result_id') || '-',
     },
-  ];
+  ]
 
   return (
-    <div>
-      <Card title={t('banPolicy.title')} style={{ marginBottom: 16 }}>
-        <Form form={form} layout="vertical">
-          <Form.Item
-            name="enabled"
-            label={t('banPolicy.enableBanPolicyLabel')}
-            valuePropName="checked"
-            extra={t('banPolicy.enableBanPolicyDesc')}
-          >
-            <Switch />
-          </Form.Item>
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>{t('banPolicy.title')}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(handleSave)} className="space-y-6">
+              <FormField
+                control={form.control}
+                name="enabled"
+                render={({ field }) => (
+                  <FormItem className="flex items-center justify-between rounded-lg border p-4">
+                    <div className="space-y-0.5">
+                      <FormLabel className="text-base">
+                        {t('banPolicy.enableBanPolicyLabel')}
+                      </FormLabel>
+                      <FormDescription>{t('banPolicy.enableBanPolicyDesc')}</FormDescription>
+                    </div>
+                    <FormControl>
+                      <Switch checked={field.value} onCheckedChange={field.onChange} />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
 
-          <Form.Item
-            name="risk_level"
-            label={t('banPolicy.triggerRiskLevelLabel')}
-            extra={t('banPolicy.triggerRiskLevelDesc')}
-          >
-            <Select>
-              <Option value="high_risk">{t('banPolicy.highRisk')}</Option>
-              <Option value="medium_risk">{t('banPolicy.mediumRisk')}</Option>
-              <Option value="low_risk">{t('banPolicy.lowRisk')}</Option>
-            </Select>
-          </Form.Item>
+              <FormField
+                control={form.control}
+                name="risk_level"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('banPolicy.triggerRiskLevelLabel')}</FormLabel>
+                    <Select value={field.value} onValueChange={field.onChange}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="high_risk">{t('banPolicy.highRisk')}</SelectItem>
+                        <SelectItem value="medium_risk">{t('banPolicy.mediumRisk')}</SelectItem>
+                        <SelectItem value="low_risk">{t('banPolicy.lowRisk')}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormDescription>{t('banPolicy.triggerRiskLevelDesc')}</FormDescription>
+                  </FormItem>
+                )}
+              />
 
-          <Form.Item
-            name="trigger_count"
-            label={t('banPolicy.triggerCountThresholdLabel')}
-            extra={t('banPolicy.triggerCountThresholdDesc')}
-          >
-            <InputNumber min={1} max={100} style={{ width: '100%' }} />
-          </Form.Item>
+              <FormField
+                control={form.control}
+                name="trigger_count"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('banPolicy.triggerCountThresholdLabel')}</FormLabel>
+                    <FormControl>
+                      <InputNumber
+                        min={1}
+                        max={100}
+                        value={field.value}
+                        onChange={(val) => field.onChange(val)}
+                      />
+                    </FormControl>
+                    <FormDescription>{t('banPolicy.triggerCountThresholdDesc')}</FormDescription>
+                  </FormItem>
+                )}
+              />
 
-          <Form.Item
-            name="time_window_minutes"
-            label={t('banPolicy.timeWindowLabel')}
-            extra={t('banPolicy.timeWindowMinutesDesc')}
-          >
-            <InputNumber min={1} max={1440} style={{ width: '100%' }} />
-          </Form.Item>
+              <FormField
+                control={form.control}
+                name="time_window_minutes"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('banPolicy.timeWindowLabel')}</FormLabel>
+                    <FormControl>
+                      <InputNumber
+                        min={1}
+                        max={1440}
+                        value={field.value}
+                        onChange={(val) => field.onChange(val)}
+                      />
+                    </FormControl>
+                    <FormDescription>{t('banPolicy.timeWindowMinutesDesc')}</FormDescription>
+                  </FormItem>
+                )}
+              />
 
-          <Form.Item
-            name="ban_duration_minutes"
-            label={t('banPolicy.banDurationLabel')}
-            extra={t('banPolicy.banDurationMinutesDesc')}
-          >
-            <InputNumber min={1} max={10080} style={{ width: '100%' }} />
-          </Form.Item>
+              <FormField
+                control={form.control}
+                name="ban_duration_minutes"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('banPolicy.banDurationLabel')}</FormLabel>
+                    <FormControl>
+                      <InputNumber
+                        min={1}
+                        max={10080}
+                        value={field.value}
+                        onChange={(val) => field.onChange(val)}
+                      />
+                    </FormControl>
+                    <FormDescription>{t('banPolicy.banDurationMinutesDesc')}</FormDescription>
+                  </FormItem>
+                )}
+              />
 
-          <Form.Item>
-            <Button type="primary" onClick={handleSave} loading={loading}>
-              {t('banPolicy.saveConfig')}
+              <Button type="submit" disabled={loading}>
+                {t('banPolicy.saveConfig')}
+              </Button>
+            </form>
+          </Form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{t('banPolicy.presetTemplates')}</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap gap-3">
+            <Button variant="outline" onClick={() => applyTemplate('strict')}>
+              {t('banPolicy.strictModeTemplate')}
             </Button>
-          </Form.Item>
-        </Form>
+            <Button variant="outline" onClick={() => applyTemplate('standard')}>
+              {t('banPolicy.standardModeTemplate')}
+            </Button>
+            <Button variant="outline" onClick={() => applyTemplate('relaxed')}>
+              {t('banPolicy.lenientModeTemplate')}
+            </Button>
+            <Button variant="outline" onClick={() => applyTemplate('disabled')}>
+              {t('common.disabled')}
+            </Button>
+          </div>
+          <div className="space-y-2 text-sm text-muted-foreground">
+            <div>
+              <span className="font-medium">{t('banPolicy.strictModeTemplate')}:</span>{' '}
+              {t('banPolicy.strictModeTemplateDesc')}
+            </div>
+            <div>
+              <span className="font-medium">{t('banPolicy.standardModeTemplate')}:</span>{' '}
+              {t('banPolicy.standardModeTemplateDesc')}
+            </div>
+            <div>
+              <span className="font-medium">{t('banPolicy.lenientModeTemplate')}:</span>{' '}
+              {t('banPolicy.lenientModeTemplateDesc')}
+            </div>
+          </div>
+        </CardContent>
       </Card>
 
-      <Card title={t('banPolicy.presetTemplates')} style={{ marginBottom: 16 }}>
-        <Space size="middle">
-          <Button onClick={() => applyTemplate('strict')}>{t('banPolicy.strictModeTemplate')}</Button>
-          <Button onClick={() => applyTemplate('standard')}>{t('banPolicy.standardModeTemplate')}</Button>
-          <Button onClick={() => applyTemplate('relaxed')}>{t('banPolicy.lenientModeTemplate')}</Button>
-          <Button onClick={() => applyTemplate('disabled')}>{t('common.disabled')}</Button>
-        </Space>
-        <Descriptions column={1} size="small" style={{ marginTop: 16 }}>
-          <Descriptions.Item label={t('banPolicy.strictModeTemplate')}>{t('banPolicy.strictModeTemplateDesc')}</Descriptions.Item>
-          <Descriptions.Item label={t('banPolicy.standardModeTemplate')}>{t('banPolicy.standardModeTemplateDesc')}</Descriptions.Item>
-          <Descriptions.Item label={t('banPolicy.lenientModeTemplate')}>{t('banPolicy.lenientModeTemplateDesc')}</Descriptions.Item>
-        </Descriptions>
+      <Card>
+        <CardHeader>
+          <CardTitle>{t('banPolicy.bannedUsersList')}</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <DataTable
+            columns={bannedUsersColumns}
+            data={bannedUsers}
+            loading={tableLoading}
+            pageSize={10}
+          />
+        </CardContent>
       </Card>
 
-      <Card title={t('banPolicy.bannedUsersList')}>
-        <Table
-          columns={columns}
-          dataSource={bannedUsers}
-          loading={tableLoading}
-          rowKey="id"
-          pagination={{
-            pageSize: 10,
-            showSizeChanger: true,
-            showTotal: (total) => t('banPolicy.totalRecords', { total }),
-          }}
-        />
-      </Card>
-
-      <Modal
-        title={`${t('banPolicy.userRiskHistoryTitle')} - ${selectedUserId}`}
-        open={historyVisible}
-        onCancel={() => setHistoryVisible(false)}
-        footer={null}
-        width={800}
-      >
-        <Table
-          columns={historyColumns}
-          dataSource={userHistory}
-          rowKey="id"
-          pagination={{
-            pageSize: 10,
-            showTotal: (total) => t('banPolicy.totalRecords', { total }),
-          }}
-        />
-      </Modal>
+      <Dialog open={historyVisible} onOpenChange={setHistoryVisible}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>
+              {t('banPolicy.userRiskHistoryTitle')} - {selectedUserId}
+            </DialogTitle>
+          </DialogHeader>
+          <DataTable columns={historyColumns} data={userHistory} pageSize={10} />
+        </DialogContent>
+      </Dialog>
     </div>
-  );
-};
+  )
+}
 
-export default BanPolicy;
+export default BanPolicy
