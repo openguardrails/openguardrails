@@ -17,9 +17,8 @@ import {
   Menu as MenuIcon,
   X,
   Shield,
-  Users,
-  Gauge,
-  ShoppingCart,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react'
 import { useAuth } from '../../contexts/AuthContext'
 import { adminApi, configApi } from '../../services/api'
@@ -45,6 +44,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [loading, setLoading] = useState(false)
   const [systemVersion, setSystemVersion] = useState<string>('')
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [userMenuOpen, setUserMenuOpen] = useState(false)
 
   const navigate = useNavigate()
   const location = useLocation()
@@ -188,21 +188,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           },
         ]
       : []),
-    {
-      key: '/account',
-      icon: User,
-      label: t('nav.account'),
-    },
-    // Subscription menu only in SaaS mode
-    ...(features.showSubscription()
-      ? [
-          {
-            key: '/subscription',
-            icon: CreditCard,
-            label: t('nav.subscription'),
-          },
-        ]
-      : []),
   ]
 
   const handleMenuClick = (key: string) => {
@@ -280,12 +265,92 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const selectedKeys = getSelectedKeys()
   const openKeys = getOpenKeys()
 
+  // User section at bottom of sidebar
+  const UserSection = ({ isMobile = false }: { isMobile?: boolean }) => (
+    <div className="border-t border-slate-700">
+      {/* Tenant switch status */}
+      {switchInfo.is_switched && !collapsed && (
+        <div className="px-3 py-2 bg-orange-900/30 border-b border-slate-700">
+          <p className="text-xs text-orange-300 mb-1">{t('layout.switchedTo')}</p>
+          <p className="text-xs text-orange-100 font-medium truncate">{switchInfo.target_user?.email}</p>
+          <Button variant="ghost" size="sm" onClick={handleExitSwitch} className="w-full mt-2 h-7 text-xs text-orange-200 hover:text-orange-100 hover:bg-orange-900/50">
+            <RefreshCw className="h-3 w-3 mr-1" />
+            {t('layout.exitSwitch')}
+          </Button>
+        </div>
+      )}
+
+      {/* User info section */}
+      <Collapsible open={userMenuOpen} onOpenChange={setUserMenuOpen}>
+        <CollapsibleTrigger className="w-full">
+          <div className={cn('flex items-center gap-3 px-3 py-3 hover:bg-slate-800 transition-colors cursor-pointer', collapsed && 'justify-center')}>
+            <div className="h-9 w-9 rounded-full bg-blue-600 flex items-center justify-center text-white flex-shrink-0">
+              <User className="h-5 w-5" />
+            </div>
+            {!collapsed && (
+              <div className="flex-1 min-w-0 text-left">
+                <p className="text-sm font-medium text-white truncate">{user?.email}</p>
+                <div className="flex items-center gap-1 mt-0.5">
+                  {user?.is_super_admin && <span className="px-1.5 py-0.5 text-[10px] rounded bg-red-500/20 text-red-300 border border-red-500/30">{t('layout.admin')}</span>}
+                  {systemVersion && <span className="text-[10px] text-slate-400">{systemVersion}</span>}
+                </div>
+              </div>
+            )}
+            {!collapsed && <ChevronDown className={cn('h-4 w-4 text-slate-400 transition-transform', userMenuOpen && 'rotate-180')} />}
+          </div>
+        </CollapsibleTrigger>
+
+        {!collapsed && (
+          <CollapsibleContent>
+            <div className="bg-slate-800/50 border-t border-slate-700">
+              {/* Account */}
+              <button onClick={() => navigate('/account')} className="w-full px-4 py-2.5 text-left text-sm text-slate-300 hover:text-white hover:bg-slate-700 transition-colors flex items-center gap-2">
+                <User className="h-4 w-4" />
+                {t('nav.account')}
+              </button>
+
+              {/* Subscription */}
+              {features.showSubscription() && (
+                <button onClick={() => navigate('/subscription')} className="w-full px-4 py-2.5 text-left text-sm text-slate-300 hover:text-white hover:bg-slate-700 transition-colors flex items-center gap-2">
+                  <CreditCard className="h-4 w-4" />
+                  {t('nav.subscription')}
+                </button>
+              )}
+
+              {/* Super admin switch user */}
+              {user?.is_super_admin && !switchInfo.is_switched && (
+                <button onClick={showSwitchModal} className="w-full px-4 py-2.5 text-left text-sm text-slate-300 hover:text-white hover:bg-slate-700 transition-colors flex items-center gap-2">
+                  <RefreshCw className="h-4 w-4" />
+                  {t('layout.switchUser')}
+                </button>
+              )}
+
+              <div className="border-t border-slate-700" />
+
+              {/* Logout */}
+              <button
+                onClick={() => {
+                  logout()
+                  navigate('/login')
+                }}
+                className="w-full px-4 py-2.5 text-left text-sm text-red-400 hover:text-red-300 hover:bg-slate-700 transition-colors flex items-center gap-2"
+              >
+                <LogOut className="h-4 w-4" />
+                {t('nav.logout')}
+              </button>
+            </div>
+          </CollapsibleContent>
+        )}
+      </Collapsible>
+    </div>
+  )
+
   return (
     <div className="flex h-screen bg-slate-50">
-      {/* Sidebar */}
+      {/* Desktop Sidebar */}
       <aside className={cn('bg-slate-900 text-white transition-all duration-300 flex flex-col', collapsed ? 'w-16' : 'w-64', 'hidden lg:flex')}>
         {/* Logo */}
-        <div className="h-16 flex items-center justify-center px-4 cursor-pointer" onClick={() => navigate('/dashboard')}>
+        <div className="h-16 flex items-center justify-center px-4 cursor-pointer border-b border-slate-800" onClick={() => navigate('/dashboard')}>
           <img src="/platform/logo.png" alt="OpenGuardrails logo" className={cn('object-contain transition-all', collapsed ? 'h-8 w-8' : 'h-10 w-full')} />
         </div>
 
@@ -314,7 +379,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                   </CollapsibleTrigger>
                   {!collapsed && (
                     <CollapsibleContent>
-                      <div className="ml-8 space-y-1">
+                      <div className="ml-8 space-y-1 mb-1">
                         {item.children.map((child) => (
                           <div
                             key={child.key}
@@ -351,10 +416,18 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           })}
         </nav>
 
+        {/* User Section at Bottom */}
+        <UserSection />
+
         {/* Collapse Toggle */}
-        <div className="p-4 border-t border-slate-800">
-          <Button variant="ghost" size="sm" onClick={() => setCollapsed(!collapsed)} className="w-full text-slate-300 hover:text-white hover:bg-slate-800">
-            {collapsed ? <MenuIcon className="h-4 w-4" /> : <X className="h-4 w-4" />}
+        <div className="p-3 border-t border-slate-800">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setCollapsed(!collapsed)}
+            className="w-full text-slate-400 hover:text-white hover:bg-slate-800 justify-center"
+          >
+            {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
           </Button>
         </div>
       </aside>
@@ -364,7 +437,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         <div className="fixed inset-0 z-50 lg:hidden">
           <div className="fixed inset-0 bg-black/50" onClick={() => setMobileMenuOpen(false)} />
           <aside className="fixed left-0 top-0 bottom-0 w-64 bg-slate-900 text-white flex flex-col">
-            <div className="h-16 flex items-center justify-between px-4">
+            <div className="h-16 flex items-center justify-between px-4 border-b border-slate-800">
               <img src="/platform/logo.png" alt="OpenGuardrails logo" className="h-10 object-contain" />
               <Button variant="ghost" size="sm" onClick={() => setMobileMenuOpen(false)} className="text-white">
                 <X className="h-5 w-5" />
@@ -389,7 +462,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                         </div>
                       </CollapsibleTrigger>
                       <CollapsibleContent>
-                        <div className="ml-8 space-y-1">
+                        <div className="ml-8 space-y-1 mb-1">
                           {item.children.map((child) => (
                             <div
                               key={child.key}
@@ -424,6 +497,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                 )
               })}
             </nav>
+            <UserSection isMobile />
           </aside>
         </div>
       )}
@@ -431,7 +505,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       {/* Main Content */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Header */}
-        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 lg:px-6">
+        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 lg:px-6 flex-shrink-0">
           {/* Left side - Mobile menu & Title */}
           <div className="flex items-center gap-4">
             <Button variant="ghost" size="sm" className="lg:hidden" onClick={() => setMobileMenuOpen(true)}>
@@ -453,68 +527,12 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
             {/* Application Selector */}
             <ApplicationSelector />
-
-            {/* Tenant switch status display */}
-            {switchInfo.is_switched && (
-              <span className="hidden md:inline-flex px-2 py-1 text-xs rounded bg-orange-100 text-orange-800 border border-orange-200">
-                Switched to: {switchInfo.target_user?.email}
-              </span>
-            )}
-
-            {/* Super admin only: tenant switch button */}
-            {user?.is_super_admin && !switchInfo.is_switched && (
-              <Button variant="ghost" size="sm" onClick={showSwitchModal} className="hidden lg:flex">
-                <RefreshCw className="h-4 w-4 mr-2" />
-                {t('layout.switchUser')}
-              </Button>
-            )}
-
-            {/* Exit tenant switch button */}
-            {switchInfo.is_switched && (
-              <Button variant="ghost" size="sm" onClick={handleExitSwitch} className="hidden lg:flex text-red-600 hover:text-red-700 hover:bg-red-50">
-                <RefreshCw className="h-4 w-4 mr-2" />
-                {t('layout.exitSwitch')}
-              </Button>
-            )}
-
-            {/* Current user display */}
-            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-md">
-              <span className="text-sm font-medium text-blue-700">{user?.email}</span>
-              {user?.is_super_admin && <span className="px-2 py-0.5 text-xs rounded bg-red-100 text-red-800 border border-red-200">{t('layout.admin')}</span>}
-            </div>
-
-            {/* System version */}
-            {systemVersion && <span className="hidden lg:inline text-xs text-slate-500">{systemVersion}</span>}
-
-            {/* User Menu Dropdown */}
-            <div className="relative group">
-              <button className="h-9 w-9 rounded-full bg-blue-600 flex items-center justify-center text-white hover:bg-blue-700 transition-colors">
-                <User className="h-4 w-4" />
-              </button>
-              <div className="absolute right-0 mt-2 w-48 bg-white border border-slate-200 rounded-md shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
-                <button onClick={() => navigate('/account')} className="w-full px-4 py-2 text-left text-sm hover:bg-slate-50 flex items-center gap-2">
-                  <User className="h-4 w-4" />
-                  {t('nav.account')}
-                </button>
-                <div className="border-t border-slate-200" />
-                <button
-                  onClick={() => {
-                    logout()
-                    navigate('/login')
-                  }}
-                  className="w-full px-4 py-2 text-left text-sm hover:bg-slate-50 flex items-center gap-2 text-red-600"
-                >
-                  <LogOut className="h-4 w-4" />
-                  {t('nav.logout')}
-                </button>
-              </div>
-            </div>
           </div>
         </header>
 
         {/* Content */}
         <main className="flex-1 overflow-auto p-4 lg:p-6">
-          <div className="bg-white rounded-md border border-slate-200 p-6">{children}</div>
+          <div className="bg-white rounded-md border border-slate-200 p-6 shadow-sm">{children}</div>
         </main>
       </div>
 
