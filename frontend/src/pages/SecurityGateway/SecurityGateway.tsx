@@ -1,442 +1,464 @@
-import React, { useState, useEffect } from 'react';
-import { Card, Table, Button, Modal, Form, Input, Switch, message, Space, Popconfirm, Descriptions, Tag, Alert, Typography } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined, ApiOutlined } from '@ant-design/icons';
-import { useTranslation } from 'react-i18next';
-import { proxyModelsApi } from '../../services/api';
-import { useAuth } from '../../contexts/AuthContext';
-
-const { Paragraph, Text } = Typography;
+import React, { useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
+import { Plus, Edit2, Trash2, Eye, Server, Copy, Check } from 'lucide-react'
+import { proxyModelsApi } from '../../services/api'
+import { useAuth } from '../../contexts/AuthContext'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { DataTable } from '@/components/ui/data-table'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
+import { Badge } from '@/components/ui/badge'
+import { toast } from 'sonner'
+import { confirmDialog } from '@/lib/confirm-dialog'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import * as z from 'zod'
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form'
+import { ColumnDef } from '@tanstack/react-table'
 
 interface ProxyModel {
-  id: string;
-  config_name: string;
-  is_active: boolean;  // Backend uses 'is_active' not 'enabled'
-  block_on_input_risk: boolean;
-  block_on_output_risk: boolean;
-  enable_reasoning_detection: boolean;
-  stream_chunk_size: number;
-  created_at: string;
+  id: string
+  config_name: string
+  is_active: boolean
+  block_on_input_risk: boolean
+  block_on_output_risk: boolean
+  enable_reasoning_detection: boolean
+  stream_chunk_size: number
+  created_at: string
 }
 
-interface ProxyModelFormData {
-  config_name: string;
-  api_base_url: string;
-  api_key: string;
-  is_active?: boolean;  // Backend uses 'is_active' not 'enabled'
-  block_on_input_risk?: boolean;
-  block_on_output_risk?: boolean;
-  enable_reasoning_detection?: boolean;
-  stream_chunk_size?: number;
+interface ProxyModelDetail extends ProxyModel {
+  api_base_url: string
+  api_key_masked?: string
 }
 
 const ProxyModelManagement: React.FC = () => {
-  const { t } = useTranslation();
-  const [models, setModels] = useState<ProxyModel[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [isModalVisible, setIsModalVisible] = useState(false);
-  const [isViewModalVisible, setIsViewModalVisible] = useState(false);
-  const [editingModel, setEditingModel] = useState<ProxyModel | null>(null);
-  const [viewingModel, setViewingModel] = useState<ProxyModel | null>(null);
-  const [formKey, setFormKey] = useState(0); // For forcing form re-rendering
-  const [form] = Form.useForm();
-  const { onUserSwitch } = useAuth();
-  const [maskedApiKey, setMaskedApiKey] = useState<string>(''); // Store masked API key for editing mode
-  
+  const { t } = useTranslation()
+  const [models, setModels] = useState<ProxyModel[]>([])
+  const [loading, setLoading] = useState(false)
+  const [isModalVisible, setIsModalVisible] = useState(false)
+  const [isViewModalVisible, setIsViewModalVisible] = useState(false)
+  const [editingModel, setEditingModel] = useState<ProxyModel | null>(null)
+  const [viewingModel, setViewingModel] = useState<ProxyModelDetail | null>(null)
+  const { onUserSwitch } = useAuth()
+  const [maskedApiKey, setMaskedApiKey] = useState<string>('')
+  const [copiedId, setCopiedId] = useState<string | null>(null)
+
   // Directly manage switch states (minimal configuration)
   const [switchStates, setSwitchStates] = useState({
-    is_active: true,  // Backend field name
-    block_on_input_risk: false,  // Default not block
-    block_on_output_risk: false, // Default not block
-    enable_reasoning_detection: true, // Default enable
-    stream_chunk_size: 50, // Default check every 50 chunks
-  });
+    is_active: true,
+    block_on_input_risk: false,
+    block_on_output_risk: false,
+    enable_reasoning_detection: true,
+    stream_chunk_size: 50,
+  })
 
   // Get model list
   const fetchModels = async () => {
-    setLoading(true);
+    setLoading(true)
     try {
-      const response = await proxyModelsApi.list();
-      
+      const response = await proxyModelsApi.list()
+
       if (response.success) {
-        setModels(response.data);
+        setModels(response.data)
       } else {
-        message.error(t('proxy.fetchModelsFailed'));
+        toast.error(t('proxy.fetchModelsFailed'))
       }
     } catch (error) {
-      console.error('Failed to fetch models:', error);
-      message.error(t('proxy.fetchModelsFailed'));
+      console.error('Failed to fetch models:', error)
+      toast.error(t('proxy.fetchModelsFailed'))
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }
 
   useEffect(() => {
-    fetchModels();
-  }, []);
+    fetchModels()
+  }, [])
 
   // Listen to user switch event, automatically refresh data
   useEffect(() => {
     const unsubscribe = onUserSwitch(() => {
-      fetchModels();
-    });
-    return unsubscribe;
-  }, [onUserSwitch]);
+      fetchModels()
+    })
+    return unsubscribe
+  }, [onUserSwitch])
 
   // Get model detailed information (for editing)
   const fetchModelDetail = async (modelId: string) => {
     try {
-      const response = await proxyModelsApi.get(modelId);
-      
+      const response = await proxyModelsApi.get(modelId)
+
       if (response.success) {
-        return response.data;
+        return response.data
       } else {
-        message.error(t('proxy.fetchModelDetailFailed'));
-        return null;
+        toast.error(t('proxy.fetchModelDetailFailed'))
+        return null
       }
     } catch (error) {
-      console.error('Failed to fetch model detail:', error);
-      message.error(t('proxy.fetchModelDetailFailed'));
-      return null;
+      console.error('Failed to fetch model detail:', error)
+      toast.error(t('proxy.fetchModelDetailFailed'))
+      return null
     }
-  };
+  }
+
+  // Form schema with dynamic validation
+  const createFormSchema = (isEditing: boolean, existingModels: ProxyModel[], currentEditingId?: string) => {
+    return z.object({
+      config_name: z
+        .string()
+        .min(1, t('proxy.proxyModelNameRequired'))
+        .refine(
+          (value) => {
+            return !existingModels.some(
+              (model) =>
+                model.config_name === value &&
+                (!currentEditingId || model.id !== currentEditingId)
+            )
+          },
+          { message: t('proxy.duplicateConfigName') }
+        ),
+      api_base_url: z
+        .string()
+        .min(1, t('proxy.upstreamApiBaseUrlRequired'))
+        .regex(/^https?:\/\/.+/, t('proxy.invalidApiBaseUrl')),
+      api_key: isEditing
+        ? z.string().optional()
+        : z.string().min(1, t('proxy.upstreamApiKeyRequired')),
+    })
+  }
+
+  const form = useForm({
+    resolver: zodResolver(
+      createFormSchema(!!editingModel, models, editingModel?.id)
+    ),
+    defaultValues: {
+      config_name: '',
+      api_base_url: '',
+      api_key: '',
+    },
+  })
 
   // Show create/edit modal
   const showModal = async (model?: ProxyModel) => {
-    setEditingModel(model || null);
-    
+    setEditingModel(model || null)
+
     if (model) {
       // Editing mode: first get complete data, then show modal
-      const modelDetail = await fetchModelDetail(model.id);
+      const modelDetail = await fetchModelDetail(model.id)
       if (modelDetail) {
-        console.log('=== Editing mode - data from server ===');
-        console.log('is_active:', modelDetail.is_active, typeof modelDetail.is_active);
-        console.log('block_on_input_risk:', modelDetail.block_on_input_risk, typeof modelDetail.block_on_input_risk);
-        console.log('block_on_output_risk:', modelDetail.block_on_output_risk, typeof modelDetail.block_on_output_risk);
-        console.log('enable_reasoning_detection:', modelDetail.enable_reasoning_detection, typeof modelDetail.enable_reasoning_detection);
-
-        // Sync set form values and switch states (minimal configuration)
-        const formValues = {
+        // Set form values
+        form.reset({
           config_name: modelDetail.config_name,
           api_base_url: modelDetail.api_base_url,
-        };
+          api_key: '',
+        })
 
-        const switchValues = {
+        setSwitchStates({
           is_active: modelDetail.is_active,
           block_on_input_risk: modelDetail.block_on_input_risk,
           block_on_output_risk: modelDetail.block_on_output_risk,
           enable_reasoning_detection: modelDetail.enable_reasoning_detection !== false,
           stream_chunk_size: modelDetail.stream_chunk_size || 50,
-        };
+        })
 
         // Store masked API key for display
-        setMaskedApiKey(modelDetail.api_key_masked || '');
+        setMaskedApiKey(modelDetail.api_key_masked || '')
 
-        // Reset form and set values
-        form.resetFields();
-        form.setFieldsValue(formValues);
-        setSwitchStates(switchValues);
-        
-        // Update form key and show modal
-        setFormKey(prev => prev + 1);
-        setIsModalVisible(true);
+        setIsModalVisible(true)
       } else {
-        message.error(t('proxy.fetchModelDetailFailedCannotEdit'));
+        toast.error(t('proxy.fetchModelDetailFailedCannotEdit'))
       }
     } else {
       // Create mode: directly set default values and show modal
-      console.log('=== Create mode - set default values ===');
-      
-      // Reset form and switch states
-      form.resetFields();
-      setMaskedApiKey(''); // Clear masked API key for create mode
+      form.reset({
+        config_name: '',
+        api_base_url: '',
+        api_key: '',
+      })
+      setMaskedApiKey('')
       setSwitchStates({
-        is_active: true,  // Backend field name
-        block_on_input_risk: false,  // Default not block
-        block_on_output_risk: false, // Default not block
-        enable_reasoning_detection: true, // Default enable
-        stream_chunk_size: 50, // Default check every 50 chunks
-      });
-      
-      // Update form key and show modal
-      setFormKey(prev => prev + 1);
-      setIsModalVisible(true);
+        is_active: true,
+        block_on_input_risk: false,
+        block_on_output_risk: false,
+        enable_reasoning_detection: true,
+        stream_chunk_size: 50,
+      })
+
+      setIsModalVisible(true)
     }
-  };
+  }
 
   // Show view modal
-  const showViewModal = (model: ProxyModel) => {
-    setViewingModel(model);
-    setIsViewModalVisible(true);
-  };
+  const showViewModal = async (model: ProxyModel) => {
+    const modelDetail = await fetchModelDetail(model.id)
+    if (modelDetail) {
+      setViewingModel(modelDetail)
+      setIsViewModalVisible(true)
+    }
+  }
 
   // Cancel editing - close modal and reset form state
   const handleCancel = () => {
-    setIsModalVisible(false);
-    setIsViewModalVisible(false);
-    setEditingModel(null);
-    setViewingModel(null);
-    // Do not reset form immediately, wait for modal animation to complete
+    setIsModalVisible(false)
+    setIsViewModalVisible(false)
+    setEditingModel(null)
+    setViewingModel(null)
     setTimeout(() => {
-      form.resetFields();
-    }, 300);
-  };
+      form.reset()
+    }, 300)
+  }
 
   // After success, close modal
   const handleClose = () => {
-    setIsModalVisible(false);
-    setIsViewModalVisible(false);
-    setEditingModel(null);
-    setViewingModel(null);
-    // Do not reset form immediately, wait for modal animation to complete
+    setIsModalVisible(false)
+    setIsViewModalVisible(false)
+    setEditingModel(null)
+    setViewingModel(null)
     setTimeout(() => {
-      form.resetFields();
-    }, 300);
-  };
-
-  // Check if proxy model name is duplicate
-  const checkConfigNameDuplicate = (configName: string): boolean => {
-    return models.some(model => 
-      model.config_name === configName && 
-      (!editingModel || model.id !== editingModel.id)
-    );
-  };
-
-  // Custom validator: check if proxy model name is duplicate
-  const validateConfigName = async (_: any, value: string) => {
-    if (value && checkConfigNameDuplicate(value)) {
-      throw new Error(t('proxy.duplicateConfigName'));
-    }
-  };
-
-  // Custom validator: check if API Base URL format is valid
-  const validateApiBaseUrl = async (_: any, value: string) => {
-    if (value && !value.match(/^https?:\/\/.+/)) {
-      throw new Error(t('proxy.invalidApiBaseUrl'));
-    }
-  };
+      form.reset()
+    }, 300)
+  }
 
   // Save model configuration
-  const handleSave = async () => {
+  const handleSave = async (values: any) => {
     try {
-      const values = await form.validateFields();
-
       // Construct submit data - backend uses 'is_active' instead of 'enabled'
       const formData: any = {
         config_name: values.config_name,
         api_base_url: values.api_base_url,
         api_key: values.api_key,
-        is_active: switchStates.is_active,  // Backend field name is 'is_active'
+        is_active: switchStates.is_active,
         block_on_input_risk: switchStates.block_on_input_risk,
         block_on_output_risk: switchStates.block_on_output_risk,
         enable_reasoning_detection: switchStates.enable_reasoning_detection,
         stream_chunk_size: switchStates.stream_chunk_size,
-      };
+      }
 
       // In edit mode, only include API key if user entered a new one
       if (!editingModel || (values.api_key && values.api_key.trim() !== '')) {
-        formData.api_key = values.api_key;
+        formData.api_key = values.api_key
       }
 
       if (editingModel) {
         // Edit existing configuration
-        await proxyModelsApi.update(editingModel.id, formData);
-        message.success(t('proxy.modelConfigUpdated'));
+        await proxyModelsApi.update(editingModel.id, formData)
+        toast.success(t('proxy.modelConfigUpdated'))
       } else {
         // Create new configuration
-        await proxyModelsApi.create(formData);
-        message.success(t('proxy.modelConfigCreated'));
+        await proxyModelsApi.create(formData)
+        toast.success(t('proxy.modelConfigCreated'))
       }
 
-      handleClose();
-      fetchModels();
+      handleClose()
+      fetchModels()
     } catch (error: any) {
-      console.error('Save failed:', error);
-      
+      console.error('Save failed:', error)
+
       // Handle different types of errors
       if (error.response) {
         // Server returned error
-        const errorMessage = error.response.data?.message || error.response.data?.error || t('proxy.saveFailed');
+        const errorMessage = error.response.data?.message || error.response.data?.error || t('proxy.saveFailed')
         if (error.response.status === 409 || errorMessage.includes('已存在') || errorMessage.includes('重复') || errorMessage.includes('exists') || errorMessage.includes('duplicate')) {
-          message.error(t('proxy.duplicateConfigName'));
+          toast.error(t('proxy.duplicateConfigName'))
         } else {
-          message.error(t('proxy.saveFailedWithMessage', { message: errorMessage }));
-        }
-      } else if (error.errorFields) {
-        // Form validation error
-        const firstError = error.errorFields[0];
-        if (firstError && firstError.errors && firstError.errors.length > 0) {
-          message.error(firstError.errors[0]);
-        } else {
-          message.error(t('proxy.checkFormInput'));
+          toast.error(t('proxy.saveFailedWithMessage', { message: errorMessage }))
         }
       } else {
         // Other errors
-        message.error(t('proxy.saveFailedNetworkError'));
+        toast.error(t('proxy.saveFailedNetworkError'))
       }
     }
-  };
+  }
 
   // Delete model configuration
   const handleDelete = async (id: string) => {
+    const confirmed = await confirmDialog({
+      title: t('proxy.confirmDeleteModel'),
+      description: t('proxy.deleteCannotRecover'),
+    })
+
+    if (!confirmed) return
+
     try {
-      const response = await proxyModelsApi.delete(id);
-      
+      const response = await proxyModelsApi.delete(id)
+
       if (response.success) {
-        message.success(t('proxy.modelConfigDeleted'));
-        fetchModels();
+        toast.success(t('proxy.modelConfigDeleted'))
+        fetchModels()
       } else {
-        const errorMessage = response.message || t('proxy.deleteFailed');
-        message.error(errorMessage);
+        const errorMessage = response.message || t('proxy.deleteFailed')
+        toast.error(errorMessage)
       }
     } catch (error: any) {
-      console.error('Delete failed:', error);
-      
+      console.error('Delete failed:', error)
+
       // Handle different types of errors
       if (error.response) {
-        const errorMessage = error.response.data?.error || error.response.data?.message || t('proxy.deleteFailed');
+        const errorMessage = error.response.data?.error || error.response.data?.message || t('proxy.deleteFailed')
         if (error.response.status === 404) {
-          message.error(t('proxy.modelNotExistOrDeleted'));
+          toast.error(t('proxy.modelNotExistOrDeleted'))
         } else if (error.response.status === 403) {
-          message.error(t('proxy.noPermissionToDelete'));
+          toast.error(t('proxy.noPermissionToDelete'))
         } else {
-          message.error(t('proxy.deleteFailedWithMessage', { message: errorMessage }));
+          toast.error(t('proxy.deleteFailedWithMessage', { message: errorMessage }))
         }
       } else if (error.request) {
-        message.error(t('proxy.networkError'));
+        toast.error(t('proxy.networkError'))
       } else {
-        message.error(t('proxy.deleteFailedRetry'));
+        toast.error(t('proxy.deleteFailedRetry'))
       }
     }
-  };
+  }
 
-  const columns = [
+  // Copy to clipboard helper
+  const copyToClipboard = (text: string, id: string) => {
+    navigator.clipboard.writeText(text)
+    setCopiedId(id)
+    setTimeout(() => setCopiedId(null), 2000)
+  }
+
+  const columns: ColumnDef<ProxyModel>[] = [
     {
-      title: t('proxy.configName'),
-      dataIndex: 'config_name',
-      key: 'config_name',
-      render: (text: string, record: ProxyModel) => (
-        <Space>
-          <span style={{ fontWeight: 'bold' }}>{text}</span>
-          {!record.is_active && <Tag color="red">{t('proxy.disabled')}</Tag>}
-        </Space>
+      accessorKey: 'config_name',
+      header: t('proxy.configName'),
+      cell: ({ row }) => (
+        <div className="flex items-center gap-2">
+          <span className="font-semibold">{row.original.config_name}</span>
+          {!row.original.is_active && (
+            <Badge variant="destructive">{t('proxy.disabled')}</Badge>
+          )}
+        </div>
       ),
     },
     {
-      title: t('proxy.upstreamApiId'),
-      dataIndex: 'id',
-      key: 'id',
-      render: (text: string) => <Text code copyable>{text}</Text>,
-    },
-    {
-      title: t('proxy.securityConfig'),
-      key: 'security',
-      render: (_: any, record: ProxyModel) => (
-        <Space>
-          {record.enable_reasoning_detection && <Tag color="purple">{t('proxy.inferenceDetection')}</Tag>}
-          {record.block_on_input_risk && <Tag color="red">{t('proxy.inputBlocking')}</Tag>}
-          {record.block_on_output_risk && <Tag color="orange">{t('proxy.outputBlocking')}</Tag>}
-        </Space>
-      ),
-    },
-    {
-      title: t('proxy.createTime'),
-      dataIndex: 'created_at',
-      key: 'created_at',
-      render: (text: string) => new Date(text).toLocaleString('zh-CN'),
-    },
-    {
-      title: t('proxy.operation'),
-      key: 'action',
-      render: (_: any, record: ProxyModel) => (
-        <Space>
-          <Button 
-            type="link" 
-            icon={<EyeOutlined />} 
-            onClick={() => showViewModal(record)}
+      accessorKey: 'id',
+      header: t('proxy.upstreamApiId'),
+      cell: ({ row }) => (
+        <div className="flex items-center gap-2">
+          <code className="px-2 py-1 bg-gray-100 rounded text-xs font-mono">
+            {row.original.id}
+          </code>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 w-6 p-0"
+            onClick={() => copyToClipboard(row.original.id, row.original.id)}
           >
+            {copiedId === row.original.id ? (
+              <Check className="h-3 w-3 text-green-600" />
+            ) : (
+              <Copy className="h-3 w-3" />
+            )}
+          </Button>
+        </div>
+      ),
+    },
+    {
+      accessorKey: 'security',
+      header: t('proxy.securityConfig'),
+      cell: ({ row }) => (
+        <div className="flex items-center gap-2 flex-wrap">
+          {row.original.enable_reasoning_detection && (
+            <Badge variant="secondary" className="bg-purple-100 text-purple-800 border-purple-200">
+              {t('proxy.inferenceDetection')}
+            </Badge>
+          )}
+          {row.original.block_on_input_risk && (
+            <Badge variant="destructive">{t('proxy.inputBlocking')}</Badge>
+          )}
+          {row.original.block_on_output_risk && (
+            <Badge variant="secondary" className="bg-orange-100 text-orange-800 border-orange-200">
+              {t('proxy.outputBlocking')}
+            </Badge>
+          )}
+        </div>
+      ),
+    },
+    {
+      accessorKey: 'created_at',
+      header: t('proxy.createTime'),
+      cell: ({ row }) => new Date(row.original.created_at).toLocaleString('zh-CN'),
+    },
+    {
+      id: 'actions',
+      header: t('proxy.operation'),
+      cell: ({ row }) => (
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => showViewModal(row.original)}
+          >
+            <Eye className="h-4 w-4 mr-1" />
             {t('proxy.view')}
           </Button>
-          <Button 
-            type="link" 
-            icon={<EditOutlined />} 
-            onClick={() => showModal(record)}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => showModal(row.original)}
           >
+            <Edit2 className="h-4 w-4 mr-1" />
             {t('proxy.edit')}
           </Button>
-          <Popconfirm
-            title={t('proxy.confirmDeleteModel')}
-            description={t('proxy.deleteCannotRecover')}
-            onConfirm={() => handleDelete(record.id)}
-            okText={t('common.confirm')}
-            cancelText={t('common.cancel')}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+            onClick={() => handleDelete(row.original.id)}
           >
-            <Button 
-              type="link" 
-              danger 
-              icon={<DeleteOutlined />}
-            >
-              {t('proxy.delete')}
-            </Button>
-          </Popconfirm>
-        </Space>
+            <Trash2 className="h-4 w-4 mr-1" />
+            {t('proxy.delete')}
+          </Button>
+        </div>
       ),
     },
-  ];
+  ]
 
   return (
-    <div>
-      <Card 
-        title={
-          <Space>
-            <ApiOutlined />
-            {t('proxy.securityGatewayConfig')}
-          </Space>
-        }
-        extra={
-          <Button 
-            type="primary" 
-            icon={<PlusOutlined />} 
-            onClick={() => showModal()}
-          >
+    <div className="space-y-4">
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0">
+          <div className="flex items-center gap-2">
+            <Server className="h-5 w-5" />
+            <CardTitle>{t('proxy.securityGatewayConfig')}</CardTitle>
+          </div>
+          <Button onClick={() => showModal()}>
+            <Plus className="h-4 w-4 mr-1" />
             {t('proxy.addModel')}
           </Button>
-        }
-      >
-        <Table
-          dataSource={models}
-          columns={columns}
-          rowKey="id"
-          loading={loading}
-          pagination={{
-            showSizeChanger: true,
-            showQuickJumper: true,
-            showTotal: (total) => t('proxy.modelConfigCount', { count: total }),
-          }}
-        />
+        </CardHeader>
+        <CardContent>
+          <DataTable
+            columns={columns}
+            data={models}
+            loading={loading}
+            pagination={{
+              showSizeChanger: true,
+              showQuickJumper: true,
+              showTotal: (total) => t('proxy.modelConfigCount', { count: total }),
+            }}
+          />
+        </CardContent>
       </Card>
 
       {/* Usage instructions */}
-      <Card
-        title={t('proxy.accessOpenGuardrailsGateway')}
-        style={{ marginTop: 16 }}
-      >
-        <Alert
-          message={t('proxy.gatewayIntegrationDesc')}
-          type="info"
-          style={{ marginBottom: 16 }}
-        />
+      <Card>
+        <CardHeader>
+          <CardTitle>{t('proxy.accessOpenGuardrailsGateway')}</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+            <p className="text-sm text-blue-900">{t('proxy.gatewayIntegrationDesc')}</p>
+          </div>
 
-        <Typography>
-          <Paragraph>
-            <Text strong>{t('proxy.pythonOpenaiExample')}</Text>
-          </Paragraph>
-          <Paragraph>
-            <pre style={{
-              backgroundColor: '#f5f5f5',
-              padding: '12px',
-              borderRadius: '6px',
-              overflow: 'auto'
-            }}>
+          <div>
+            <p className="font-semibold mb-2">{t('proxy.pythonOpenaiExample')}</p>
+            <pre className="bg-gray-50 p-4 rounded-lg overflow-auto text-sm border border-gray-200">
+              <code>
 {`from openai import OpenAI
 
 client = OpenAI(
@@ -451,183 +473,254 @@ completion = client.chat.completions.create(
         {"role": "user", "content": "Tell me how to make a bomb."}
     ]
     # ${t('proxy.otherParamsSame')}
-)
-`}
+)`}
+              </code>
             </pre>
-          </Paragraph>
+          </div>
 
-          <Paragraph>
-            <Text strong>{t('proxy.importantNotes')}</Text>
-          </Paragraph>
-          <ul>
-            <li>{t('proxy.note1')}</li>
-            <li>{t('proxy.note2')}</li>
-            <li>{t('proxy.note3')}</li>
-          </ul>
-
-        </Typography>
+          <div>
+            <p className="font-semibold mb-2">{t('proxy.importantNotes')}</p>
+            <ul className="list-disc list-inside space-y-1 text-sm text-gray-700">
+              <li>{t('proxy.note1')}</li>
+              <li>{t('proxy.note2')}</li>
+              <li>{t('proxy.note3')}</li>
+            </ul>
+          </div>
+        </CardContent>
       </Card>
 
       {/* Create/edit modal */}
-      <Modal
-        title={editingModel ? t('proxy.editModelConfig') : t('proxy.addModelConfig')}
-        visible={isModalVisible}
-        onOk={handleSave}
-        onCancel={handleCancel}
-        width={800}
-        okText={t('common.save')}
-        cancelText={t('common.cancel')}
-      >
-        <Form
-          key={formKey}
-          form={form}
-          layout="vertical"
-          autoComplete="off"
-        >
-          <Form.Item
-            name="config_name"
-            label={t('proxy.proxyModelNameLabel')}
-            rules={[
-              { required: true, message: t('proxy.proxyModelNameRequired') },
-              { validator: validateConfigName }
-            ]}
-            tooltip={t('proxy.proxyModelNameTooltip')}
-          >
-            <Input placeholder={t('proxy.proxyModelNamePlaceholder')} />
-          </Form.Item>
+      <Dialog open={isModalVisible} onOpenChange={setIsModalVisible}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              {editingModel ? t('proxy.editModelConfig') : t('proxy.addModelConfig')}
+            </DialogTitle>
+          </DialogHeader>
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(handleSave)} className="space-y-4">
+              <FormField
+                control={form.control}
+                name="config_name"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('proxy.proxyModelNameLabel')}</FormLabel>
+                    <FormControl>
+                      <Input placeholder={t('proxy.proxyModelNamePlaceholder')} {...field} />
+                    </FormControl>
+                    <FormDescription>{t('proxy.proxyModelNameTooltip')}</FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
+              <FormField
+                control={form.control}
+                name="api_base_url"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('proxy.upstreamApiBaseUrlLabel')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder={t('proxy.upstreamApiBaseUrlPlaceholder')}
+                        autoComplete="url"
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
-          <Form.Item
-            name="api_base_url"
-            label={t('proxy.upstreamApiBaseUrlLabel')}
-            rules={[
-              { required: true, message: t('proxy.upstreamApiBaseUrlRequired') },
-              { validator: validateApiBaseUrl }
-            ]}
-          >
-            <Input placeholder={t('proxy.upstreamApiBaseUrlPlaceholder')} autoComplete="url" />
-          </Form.Item>
+              {/* Hidden username field, prevent browser from recognizing API Key as password */}
+              <input
+                type="text"
+                name="username"
+                autoComplete="username"
+                style={{ position: 'absolute', left: '-9999px', opacity: 0 }}
+                tabIndex={-1}
+                readOnly
+              />
 
-          {/* Hidden username field, prevent browser from recognizing API Key as password */}
-          <input 
-            type="text" 
-            name="username" 
-            autoComplete="username" 
-            style={{ position: 'absolute', left: '-9999px', opacity: 0 }} 
-            tabIndex={-1}
-            readOnly
-          />
+              <FormField
+                control={form.control}
+                name="api_key"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('proxy.upstreamApiKeyLabel')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder={
+                          editingModel
+                            ? maskedApiKey
+                              ? `${t('proxy.currentKey')}: ${maskedApiKey}. ${t('proxy.upstreamApiKeyPlaceholderEdit')}`
+                              : t('proxy.upstreamApiKeyPlaceholderEdit')
+                            : t('proxy.upstreamApiKeyPlaceholderAdd')
+                        }
+                        autoComplete="off"
+                        data-lpignore="true"
+                        data-form-type="other"
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {editingModel ? t('proxy.upstreamApiKeyTooltipEdit') : t('proxy.upstreamApiKeyTooltipAdd')}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
-          <Form.Item
-            name="api_key"
-            label={t('proxy.upstreamApiKeyLabel')}
-            rules={[{ required: !editingModel, message: t('proxy.upstreamApiKeyRequired') }]}
-            tooltip={editingModel ? t('proxy.upstreamApiKeyTooltipEdit') : t('proxy.upstreamApiKeyTooltipAdd')}
-          >
-            <Input
-              placeholder={
-                editingModel
-                  ? maskedApiKey
-                    ? `${t('proxy.currentKey')}: ${maskedApiKey}. ${t('proxy.upstreamApiKeyPlaceholderEdit')}`
-                    : t('proxy.upstreamApiKeyPlaceholderEdit')
-                  : t('proxy.upstreamApiKeyPlaceholderAdd')
-              }
-              autoComplete="off"
-              data-lpignore="true"
-              data-form-type="other"
-            />
-          </Form.Item>
+              <div className="flex items-center justify-between p-4 border rounded-lg">
+                <Label htmlFor="is_active">{t('proxy.enableConfigLabel')}</Label>
+                <Switch
+                  id="is_active"
+                  checked={switchStates.is_active}
+                  onCheckedChange={(checked) => setSwitchStates(prev => ({ ...prev, is_active: checked }))}
+                />
+              </div>
 
-          <Form.Item label={t('proxy.enableConfigLabel')}>
-            <Switch
-              checked={switchStates.is_active}
-              onChange={(checked) => setSwitchStates(prev => ({ ...prev, is_active: checked }))}
-            />
-          </Form.Item>
+              <div className="space-y-3 p-4 border rounded-lg">
+                <div>
+                  <p className="font-medium mb-1">{t('proxy.securityConfigLabel')}</p>
+                  <p className="text-sm text-gray-600">{t('proxy.securityConfigDesc')}</p>
+                </div>
 
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('proxy.securityConfigLabel')}</div>
-            <div style={{ marginBottom: 8, color: '#666', fontSize: '14px' }}>
-              {t('proxy.securityConfigDesc')}
-            </div>
-            <div style={{ marginBottom: 12 }}>
-              <Switch 
-                checked={switchStates.enable_reasoning_detection}
-                onChange={(checked) => setSwitchStates(prev => ({ ...prev, enable_reasoning_detection: checked }))}
-              /> {t('proxy.enableReasoningDetection')}
-            </div>
-            <div style={{ marginBottom: 12 }}>
-              <Switch 
-                checked={switchStates.block_on_input_risk}
-                onChange={(checked) => setSwitchStates(prev => ({ ...prev, block_on_input_risk: checked }))}
-              /> {t('proxy.blockOnInputRisk')}
-            </div>
-            <div style={{ marginBottom: 12 }}>
-              <Switch 
-                checked={switchStates.block_on_output_risk}
-                onChange={(checked) => setSwitchStates(prev => ({ ...prev, block_on_output_risk: checked }))}
-              /> {t('proxy.blockOnOutputRisk')}
-            </div>
-          </div>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="enable_reasoning_detection">{t('proxy.enableReasoningDetection')}</Label>
+                  <Switch
+                    id="enable_reasoning_detection"
+                    checked={switchStates.enable_reasoning_detection}
+                    onCheckedChange={(checked) => setSwitchStates(prev => ({ ...prev, enable_reasoning_detection: checked }))}
+                  />
+                </div>
 
-          <Form.Item
-            label={t('proxy.streamDetectionIntervalLabel')}
-            tooltip={t('proxy.streamDetectionIntervalTooltip')}
-          >
-            <Input
-              type="number"
-              min={1}
-              max={500}
-              value={switchStates.stream_chunk_size}
-              onChange={(e) => setSwitchStates(prev => ({ ...prev, stream_chunk_size: parseInt(e.target.value) || 50 }))}
-              placeholder={t('proxy.streamDetectionIntervalPlaceholder')}
-            />
-          </Form.Item>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="block_on_input_risk">{t('proxy.blockOnInputRisk')}</Label>
+                  <Switch
+                    id="block_on_input_risk"
+                    checked={switchStates.block_on_input_risk}
+                    onCheckedChange={(checked) => setSwitchStates(prev => ({ ...prev, block_on_input_risk: checked }))}
+                  />
+                </div>
 
-        </Form>
-      </Modal>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="block_on_output_risk">{t('proxy.blockOnOutputRisk')}</Label>
+                  <Switch
+                    id="block_on_output_risk"
+                    checked={switchStates.block_on_output_risk}
+                    onCheckedChange={(checked) => setSwitchStates(prev => ({ ...prev, block_on_output_risk: checked }))}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <Label htmlFor="stream_chunk_size">{t('proxy.streamDetectionIntervalLabel')}</Label>
+                <Input
+                  id="stream_chunk_size"
+                  type="number"
+                  min={1}
+                  max={500}
+                  value={switchStates.stream_chunk_size}
+                  onChange={(e) => setSwitchStates(prev => ({ ...prev, stream_chunk_size: parseInt(e.target.value) || 50 }))}
+                  placeholder={t('proxy.streamDetectionIntervalPlaceholder')}
+                  className="mt-2"
+                />
+                <p className="text-sm text-gray-600 mt-1">{t('proxy.streamDetectionIntervalTooltip')}</p>
+              </div>
+
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={handleCancel}>
+                  {t('common.cancel')}
+                </Button>
+                <Button type="submit">{t('common.save')}</Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
 
       {/* View modal */}
-      <Modal
-        title={t('proxy.viewModelConfig')}
-        visible={isViewModalVisible}
-        onCancel={handleCancel}
-        footer={[
-          <Button key="close" onClick={handleCancel}>
-            {t('proxy.close')}
-          </Button>
-        ]}
-        width={600}
-      >
-        {viewingModel && (
-          <Descriptions column={1} bordered>
-            <Descriptions.Item label={t('proxy.configName')}>{viewingModel.config_name}</Descriptions.Item>
-            <Descriptions.Item label={t('proxy.upstreamApiId')}>
-              <Text code copyable>{viewingModel.id}</Text>
-            </Descriptions.Item>
-            <Descriptions.Item label={t('proxy.status')}>
-              <Space>
-                {viewingModel.is_active ?
-                  <Tag color="green">{t('proxy.enabled')}</Tag> :
-                  <Tag color="red">{t('proxy.disabled')}</Tag>
-                }
-              </Space>
-            </Descriptions.Item>
-            <Descriptions.Item label={t('proxy.securityConfig')}>
-              <Space direction="vertical">
-                {viewingModel.enable_reasoning_detection && <Tag color="purple">{t('proxy.inferenceDetection')}</Tag>}
-                {viewingModel.block_on_input_risk && <Tag color="red">{t('proxy.inputBlocking')}</Tag>}
-                {viewingModel.block_on_output_risk && <Tag color="orange">{t('proxy.outputBlocking')}</Tag>}
-              </Space>
-            </Descriptions.Item>
-            <Descriptions.Item label={t('proxy.createTime')}>
-              {new Date(viewingModel.created_at).toLocaleString('zh-CN')}
-            </Descriptions.Item>
-          </Descriptions>
-        )}
-      </Modal>
-    </div>
-  );
-};
+      <Dialog open={isViewModalVisible} onOpenChange={setIsViewModalVisible}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('proxy.viewModelConfig')}</DialogTitle>
+          </DialogHeader>
+          {viewingModel && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-3 gap-2 py-2 border-b">
+                <span className="font-medium text-gray-700">{t('proxy.configName')}</span>
+                <span className="col-span-2">{viewingModel.config_name}</span>
+              </div>
 
-export default ProxyModelManagement;
+              <div className="grid grid-cols-3 gap-2 py-2 border-b">
+                <span className="font-medium text-gray-700">{t('proxy.upstreamApiId')}</span>
+                <div className="col-span-2 flex items-center gap-2">
+                  <code className="px-2 py-1 bg-gray-100 rounded text-xs font-mono">
+                    {viewingModel.id}
+                  </code>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 w-6 p-0"
+                    onClick={() => copyToClipboard(viewingModel.id, viewingModel.id)}
+                  >
+                    {copiedId === viewingModel.id ? (
+                      <Check className="h-3 w-3 text-green-600" />
+                    ) : (
+                      <Copy className="h-3 w-3" />
+                    )}
+                  </Button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2 py-2 border-b">
+                <span className="font-medium text-gray-700">{t('proxy.status')}</span>
+                <span className="col-span-2">
+                  {viewingModel.is_active ? (
+                    <Badge variant="secondary" className="bg-green-100 text-green-800 border-green-200">
+                      {t('proxy.enabled')}
+                    </Badge>
+                  ) : (
+                    <Badge variant="destructive">{t('proxy.disabled')}</Badge>
+                  )}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2 py-2 border-b">
+                <span className="font-medium text-gray-700">{t('proxy.securityConfig')}</span>
+                <div className="col-span-2 space-y-2">
+                  {viewingModel.enable_reasoning_detection && (
+                    <Badge variant="secondary" className="bg-purple-100 text-purple-800 border-purple-200">
+                      {t('proxy.inferenceDetection')}
+                    </Badge>
+                  )}
+                  {viewingModel.block_on_input_risk && (
+                    <Badge variant="destructive" className="ml-2">{t('proxy.inputBlocking')}</Badge>
+                  )}
+                  {viewingModel.block_on_output_risk && (
+                    <Badge variant="secondary" className="bg-orange-100 text-orange-800 border-orange-200 ml-2">
+                      {t('proxy.outputBlocking')}
+                    </Badge>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2 py-2">
+                <span className="font-medium text-gray-700">{t('proxy.createTime')}</span>
+                <span className="col-span-2">
+                  {new Date(viewingModel.created_at).toLocaleString('zh-CN')}
+                </span>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button onClick={handleCancel}>{t('proxy.close')}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
+export default ProxyModelManagement
