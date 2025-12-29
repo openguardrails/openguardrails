@@ -1,108 +1,115 @@
-import React, { useState, useEffect } from 'react';
-import { Layout as AntLayout, Menu, theme, Dropdown, Avatar, Space, Button, Modal, Select, message, Tag } from 'antd';
-import { useNavigate, useLocation } from 'react-router-dom';
-import { useTranslation } from 'react-i18next';
+import React, { useState, useEffect } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import {
-  DashboardOutlined,
-  FileSearchOutlined,
-  BarChartOutlined,
-  SettingOutlined,
-  UserOutlined,
-  LogoutOutlined,
-  SwapOutlined,
-  ReloadOutlined,
-  ExperimentOutlined,
-  BookOutlined,
-  CreditCardOutlined,
-  AppstoreOutlined,
-} from '@ant-design/icons';
-import { useAuth } from '../../contexts/AuthContext';
-import { adminApi, configApi } from '../../services/api';
-import LanguageSwitcher from '../LanguageSwitcher/LanguageSwitcher';
-import ApplicationSelector from '../ApplicationSelector';
-import { features } from '../../config';
-
-const { Header, Sider, Content } = AntLayout;
+  LayoutDashboard,
+  FileSearch,
+  BarChart3,
+  Settings,
+  User,
+  LogOut,
+  RefreshCw,
+  TestTube,
+  Book,
+  CreditCard,
+  Grid3x3,
+  ChevronDown,
+  Menu as MenuIcon,
+  X,
+  Shield,
+  Users,
+  Gauge,
+  ShoppingCart,
+} from 'lucide-react'
+import { useAuth } from '../../contexts/AuthContext'
+import { adminApi, configApi } from '../../services/api'
+import LanguageSwitcher from '../LanguageSwitcher/LanguageSwitcher'
+import ApplicationSelector from '../ApplicationSelector'
+import { features } from '../../config'
+import { Button } from '../ui/button'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
+import { toast } from 'sonner'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../ui/collapsible'
+import { cn } from '../../lib/utils'
 
 interface LayoutProps {
-  children: React.ReactNode;
+  children: React.ReactNode
 }
 
 const Layout: React.FC<LayoutProps> = ({ children }) => {
-  const { t } = useTranslation();
-  const [collapsed, setCollapsed] = useState(false);
-  const [switchModalVisible, setSwitchModalVisible] = useState(false);
-  const [users, setUsers] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [systemVersion, setSystemVersion] = useState<string>('');
+  const { t } = useTranslation()
+  const [collapsed, setCollapsed] = useState(false)
+  const [switchModalVisible, setSwitchModalVisible] = useState(false)
+  const [users, setUsers] = useState<any[]>([])
+  const [loading, setLoading] = useState(false)
+  const [systemVersion, setSystemVersion] = useState<string>('')
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
-  const navigate = useNavigate();
-  const location = useLocation();
-  const { user, logout, switchInfo, switchToUser, exitSwitch, refreshSwitchStatus } = useAuth();
-  const {
-    token: { colorBgContainer },
-  } = theme.useToken();
+  const navigate = useNavigate()
+  const location = useLocation()
+  const { user, logout, switchInfo, switchToUser, exitSwitch, refreshSwitchStatus } = useAuth()
 
   useEffect(() => {
     // If super admin, periodically check switch status
     if (user?.is_super_admin) {
       const interval = setInterval(() => {
-        refreshSwitchStatus();
-      }, 30000); // Check every 30 seconds
-      return () => clearInterval(interval);
+        refreshSwitchStatus()
+      }, 30000) // Check every 30 seconds
+      return () => clearInterval(interval)
     }
-  }, [user?.is_super_admin, refreshSwitchStatus]);
+  }, [user?.is_super_admin, refreshSwitchStatus])
 
   useEffect(() => {
     // Get system version information
     const fetchSystemVersion = async () => {
       try {
-        const systemInfo = await configApi.getSystemInfo();
+        const systemInfo = await configApi.getSystemInfo()
         if (systemInfo.app_version) {
-          setSystemVersion(`v${systemInfo.app_version}`);
+          setSystemVersion(`v${systemInfo.app_version}`)
         }
       } catch (error) {
-        console.error('Failed to fetch system version:', error);
+        console.error('Failed to fetch system version:', error)
       }
-    };
+    }
 
-    fetchSystemVersion();
-  }, []);
+    fetchSystemVersion()
+  }, [])
 
   const menuItems = [
     {
       key: '/dashboard',
-      icon: <DashboardOutlined />,
+      icon: LayoutDashboard,
       label: t('nav.dashboard'),
     },
     {
       key: '/online-test',
-      icon: <ExperimentOutlined />,
+      icon: TestTube,
       label: t('nav.onlineTest'),
     },
     {
       key: '/results',
-      icon: <FileSearchOutlined />,
+      icon: FileSearch,
       label: t('nav.results'),
     },
     {
       key: '/reports',
-      icon: <BarChartOutlined />,
+      icon: BarChart3,
       label: t('nav.reports'),
     },
     {
       key: '/applications',
-      icon: <AppstoreOutlined />,
+      icon: Grid3x3,
       label: t('nav.applications'),
     },
     {
       key: '/security-gateway',
-      icon: <SettingOutlined />,
+      icon: Shield,
       label: t('nav.securityGateway'),
     },
     {
       key: '/config',
-      icon: <SettingOutlined />,
+      icon: Settings,
       label: t('nav.config'),
       children: [
         {
@@ -144,189 +151,300 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       ],
     },
     // Only super admins can see tenant management
-    ...(user?.is_super_admin ? [{
-      key: '/admin',
-      icon: <SettingOutlined />,
-      label: t('nav.admin'),
-      children: [
-        {
-          key: '/admin/users',
-          label: t('nav.tenantManagement'),
-        },
-        {
-          key: '/admin/rate-limits',
-          label: t('nav.rateLimiting'),
-        },
-        // Subscription management only in SaaS mode
-        ...(features.showSubscription() ? [{
-          key: '/admin/subscriptions',
-          label: t('nav.subscriptionManagement'),
-        }] : []),
-        // Package marketplace only in SaaS mode
-        ...(features.showMarketplace() ? [{
-          key: '/admin/package-marketplace',
-          label: t('nav.packageMarketplace'),
-        }] : []),
-      ],
-    }] : []),
+    ...(user?.is_super_admin
+      ? [
+          {
+            key: '/admin',
+            icon: Settings,
+            label: t('nav.admin'),
+            children: [
+              {
+                key: '/admin/users',
+                label: t('nav.tenantManagement'),
+              },
+              {
+                key: '/admin/rate-limits',
+                label: t('nav.rateLimiting'),
+              },
+              // Subscription management only in SaaS mode
+              ...(features.showSubscription()
+                ? [
+                    {
+                      key: '/admin/subscriptions',
+                      label: t('nav.subscriptionManagement'),
+                    },
+                  ]
+                : []),
+              // Package marketplace only in SaaS mode
+              ...(features.showMarketplace()
+                ? [
+                    {
+                      key: '/admin/package-marketplace',
+                      label: t('nav.packageMarketplace'),
+                    },
+                  ]
+                : []),
+            ],
+          },
+        ]
+      : []),
     {
       key: '/account',
-      icon: <UserOutlined />,
+      icon: User,
       label: t('nav.account'),
     },
     // Subscription menu only in SaaS mode
-    ...(features.showSubscription() ? [{
-      key: '/subscription',
-      icon: <CreditCardOutlined />,
-      label: t('nav.subscription'),
-    }] : []),
-  ];
+    ...(features.showSubscription()
+      ? [
+          {
+            key: '/subscription',
+            icon: CreditCard,
+            label: t('nav.subscription'),
+          },
+        ]
+      : []),
+  ]
 
-  const handleMenuClick = ({ key }: { key: string }) => {
-    navigate(key);
-  };
+  const handleMenuClick = (key: string) => {
+    navigate(key)
+    setMobileMenuOpen(false)
+  }
 
   const getSelectedKeys = () => {
-    const path = location.pathname;
+    const path = location.pathname
     if (path.startsWith('/config') || path.startsWith('/admin') || path.startsWith('/security-gateway')) {
-      return [path];
+      return [path]
     }
     if (path === '/' || path === '/') {
-      return ['/dashboard'];
+      return ['/dashboard']
     }
-    return [path.startsWith('/') ? path : '/platform' + path];
-  };
+    return [path.startsWith('/') ? path : '/platform' + path]
+  }
 
   const getOpenKeys = () => {
-    const path = location.pathname;
+    const path = location.pathname
     if (path.startsWith('/config')) {
-      return ['/config'];
+      return ['/config']
     }
     if (path.startsWith('/admin')) {
-      return ['/admin'];
+      return ['/admin']
     }
-    return [];
-  };
+    return []
+  }
 
   const loadUsers = async () => {
-    if (!user?.is_super_admin) return;
-    
-    setLoading(true);
+    if (!user?.is_super_admin) return
+
+    setLoading(true)
     try {
-      const response = await adminApi.getUsers();
-      setUsers(response.users || []);
+      const response = await adminApi.getUsers()
+      setUsers(response.users || [])
     } catch (error) {
-      console.error('Failed to load users:', error);
-      message.error(t('layout.loadUsersError'));
+      console.error('Failed to load users:', error)
+      toast.error(t('layout.loadUsersError'))
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }
 
   const handleSwitchUser = async (userId: string) => {
     try {
-      await switchToUser(userId);
-      setSwitchModalVisible(false);
-      message.success(t('layout.switchSuccess'));
+      await switchToUser(userId)
+      setSwitchModalVisible(false)
+      toast.success(t('layout.switchSuccess'))
       // Refresh current page
-      window.location.reload();
+      window.location.reload()
     } catch (error) {
-      console.error('Switch user failed:', error);
-      message.error(t('layout.switchError'));
+      console.error('Switch user failed:', error)
+      toast.error(t('layout.switchError'))
     }
-  };
+  }
 
   const handleExitSwitch = async () => {
     try {
-      await exitSwitch();
-      message.success(t('layout.exitSwitchSuccess'));
+      await exitSwitch()
+      toast.success(t('layout.exitSwitchSuccess'))
       // Refresh current page
-      window.location.reload();
+      window.location.reload()
     } catch (error) {
-      console.error('Exit switch failed:', error);
-      message.error(t('layout.exitSwitchError'));
+      console.error('Exit switch failed:', error)
+      toast.error(t('layout.exitSwitchError'))
     }
-  };
+  }
 
   const showSwitchModal = () => {
-    setSwitchModalVisible(true);
-    loadUsers();
-  };
+    setSwitchModalVisible(true)
+    loadUsers()
+  }
+
+  const selectedKeys = getSelectedKeys()
+  const openKeys = getOpenKeys()
 
   return (
-    <AntLayout style={{ minHeight: '100vh' }}>
-      <Sider trigger={null} collapsible collapsed={collapsed}>
-        <div
-          style={{
-            height: 48,
-            margin: 16,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'pointer',
-          }}
-          onClick={() => navigate('/dashboard')}
-        >
-          <img
-            src="/platform/logo.png"
-            alt="OpenGuardrails logo"
-            style={{
-              height: '100%',
-              maxWidth: collapsed ? '32px' : '100%',
-              objectFit: 'contain',
-            }}
-          />
+    <div className="flex h-screen bg-slate-50">
+      {/* Sidebar */}
+      <aside className={cn('bg-slate-900 text-white transition-all duration-300 flex flex-col', collapsed ? 'w-16' : 'w-64', 'hidden lg:flex')}>
+        {/* Logo */}
+        <div className="h-16 flex items-center justify-center px-4 cursor-pointer" onClick={() => navigate('/dashboard')}>
+          <img src="/platform/logo.png" alt="OpenGuardrails logo" className={cn('object-contain transition-all', collapsed ? 'h-8 w-8' : 'h-10 w-full')} />
         </div>
-        <style>{`
-          .ant-menu-inline .ant-menu-item,
-          .ant-menu-inline .ant-menu-submenu-title {
-            white-space: normal !important;
-            height: auto !important;
-            line-height: 1.5 !important;
-            padding: 8px 16px !important;
-            overflow-wrap: break-word !important;
-          }
-          .ant-menu-inline .ant-menu-item-icon {
-            vertical-align: top !important;
-            margin-top: 2px !important;
-          }
-          .ant-menu-submenu-inline .ant-menu-item {
-            white-space: normal !important;
-            height: auto !important;
-            line-height: 1.5 !important;
-            overflow-wrap: break-word !important;
-          }
-        `}</style>
-        <Menu
-          theme="dark"
-          mode="inline"
-          selectedKeys={getSelectedKeys()}
-          defaultOpenKeys={getOpenKeys()}
-          items={menuItems}
-          onClick={handleMenuClick}
-        />
-      </Sider>
-      <AntLayout>
-        <Header
-          style={{
-            padding: 0,
-            background: colorBgContainer,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            paddingRight: 24,
-          }}
-        >
-          <div style={{ paddingLeft: 24, fontSize: 18, fontWeight: 'bold' }}>
-            {t('common.appName')}
+
+        {/* Menu */}
+        <nav className="flex-1 overflow-y-auto py-4 px-2">
+          {menuItems.map((item) => {
+            if (item.children) {
+              const isOpen = openKeys.includes(item.key)
+              return (
+                <Collapsible key={item.key} defaultOpen={isOpen}>
+                  <CollapsibleTrigger className="w-full">
+                    <div
+                      className={cn(
+                        'flex items-center gap-3 px-3 py-2.5 rounded-md hover:bg-slate-800 transition-colors cursor-pointer mb-1',
+                        selectedKeys.some((k) => k.startsWith(item.key)) ? 'bg-slate-800 text-white' : 'text-slate-300'
+                      )}
+                    >
+                      {item.icon && <item.icon className="h-5 w-5 flex-shrink-0" />}
+                      {!collapsed && (
+                        <>
+                          <span className="flex-1 text-left text-sm">{item.label}</span>
+                          <ChevronDown className="h-4 w-4" />
+                        </>
+                      )}
+                    </div>
+                  </CollapsibleTrigger>
+                  {!collapsed && (
+                    <CollapsibleContent>
+                      <div className="ml-8 space-y-1">
+                        {item.children.map((child) => (
+                          <div
+                            key={child.key}
+                            onClick={() => handleMenuClick(child.key)}
+                            className={cn(
+                              'px-3 py-2 rounded-md hover:bg-slate-800 transition-colors cursor-pointer text-sm',
+                              selectedKeys.includes(child.key) ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'
+                            )}
+                          >
+                            {child.label}
+                          </div>
+                        ))}
+                      </div>
+                    </CollapsibleContent>
+                  )}
+                </Collapsible>
+              )
+            }
+
+            const Icon = item.icon
+            return (
+              <div
+                key={item.key}
+                onClick={() => handleMenuClick(item.key)}
+                className={cn(
+                  'flex items-center gap-3 px-3 py-2.5 rounded-md hover:bg-slate-800 transition-colors cursor-pointer mb-1',
+                  selectedKeys.includes(item.key) ? 'bg-slate-800 text-white' : 'text-slate-300 hover:text-white'
+                )}
+              >
+                {Icon && <Icon className="h-5 w-5 flex-shrink-0" />}
+                {!collapsed && <span className="text-sm">{item.label}</span>}
+              </div>
+            )
+          })}
+        </nav>
+
+        {/* Collapse Toggle */}
+        <div className="p-4 border-t border-slate-800">
+          <Button variant="ghost" size="sm" onClick={() => setCollapsed(!collapsed)} className="w-full text-slate-300 hover:text-white hover:bg-slate-800">
+            {collapsed ? <MenuIcon className="h-4 w-4" /> : <X className="h-4 w-4" />}
+          </Button>
+        </div>
+      </aside>
+
+      {/* Mobile Sidebar */}
+      {mobileMenuOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          <div className="fixed inset-0 bg-black/50" onClick={() => setMobileMenuOpen(false)} />
+          <aside className="fixed left-0 top-0 bottom-0 w-64 bg-slate-900 text-white flex flex-col">
+            <div className="h-16 flex items-center justify-between px-4">
+              <img src="/platform/logo.png" alt="OpenGuardrails logo" className="h-10 object-contain" />
+              <Button variant="ghost" size="sm" onClick={() => setMobileMenuOpen(false)} className="text-white">
+                <X className="h-5 w-5" />
+              </Button>
+            </div>
+            <nav className="flex-1 overflow-y-auto py-4 px-2">
+              {menuItems.map((item) => {
+                if (item.children) {
+                  const isOpen = openKeys.includes(item.key)
+                  return (
+                    <Collapsible key={item.key} defaultOpen={isOpen}>
+                      <CollapsibleTrigger className="w-full">
+                        <div
+                          className={cn(
+                            'flex items-center gap-3 px-3 py-2.5 rounded-md hover:bg-slate-800 transition-colors cursor-pointer mb-1',
+                            selectedKeys.some((k) => k.startsWith(item.key)) ? 'bg-slate-800 text-white' : 'text-slate-300'
+                          )}
+                        >
+                          {item.icon && <item.icon className="h-5 w-5 flex-shrink-0" />}
+                          <span className="flex-1 text-left text-sm">{item.label}</span>
+                          <ChevronDown className="h-4 w-4" />
+                        </div>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent>
+                        <div className="ml-8 space-y-1">
+                          {item.children.map((child) => (
+                            <div
+                              key={child.key}
+                              onClick={() => handleMenuClick(child.key)}
+                              className={cn(
+                                'px-3 py-2 rounded-md hover:bg-slate-800 transition-colors cursor-pointer text-sm',
+                                selectedKeys.includes(child.key) ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'
+                              )}
+                            >
+                              {child.label}
+                            </div>
+                          ))}
+                        </div>
+                      </CollapsibleContent>
+                    </Collapsible>
+                  )
+                }
+
+                const Icon = item.icon
+                return (
+                  <div
+                    key={item.key}
+                    onClick={() => handleMenuClick(item.key)}
+                    className={cn(
+                      'flex items-center gap-3 px-3 py-2.5 rounded-md hover:bg-slate-800 transition-colors cursor-pointer mb-1',
+                      selectedKeys.includes(item.key) ? 'bg-slate-800 text-white' : 'text-slate-300 hover:text-white'
+                    )}
+                  >
+                    {Icon && <Icon className="h-5 w-5 flex-shrink-0" />}
+                    <span className="text-sm">{item.label}</span>
+                  </div>
+                )
+              })}
+            </nav>
+          </aside>
+        </div>
+      )}
+
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Header */}
+        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 lg:px-6">
+          {/* Left side - Mobile menu & Title */}
+          <div className="flex items-center gap-4">
+            <Button variant="ghost" size="sm" className="lg:hidden" onClick={() => setMobileMenuOpen(true)}>
+              <MenuIcon className="h-5 w-5" />
+            </Button>
+            <h1 className="text-lg font-bold text-slate-900">{t('common.appName')}</h1>
           </div>
-          <Space>
+
+          {/* Right side - Actions */}
+          <div className="flex items-center gap-2 lg:gap-3">
             {/* Documentation Link */}
-            <Button
-              type="link"
-              icon={<BookOutlined />}
-              onClick={() => navigate('/documentation')}
-            >
+            <Button variant="ghost" size="sm" onClick={() => navigate('/documentation')} className="hidden sm:flex">
+              <Book className="h-4 w-4 mr-2" />
               {t('nav.documentation')}
             </Button>
 
@@ -338,140 +456,104 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
             {/* Tenant switch status display */}
             {switchInfo.is_switched && (
-              <Tag color="orange" style={{ marginRight: 8 }}>
+              <span className="hidden md:inline-flex px-2 py-1 text-xs rounded bg-orange-100 text-orange-800 border border-orange-200">
                 Switched to: {switchInfo.target_user?.email}
-              </Tag>
+              </span>
             )}
 
             {/* Super admin only: tenant switch button */}
             {user?.is_super_admin && !switchInfo.is_switched && (
-              <Button
-                type="link"
-                icon={<SwapOutlined />}
-                onClick={showSwitchModal}
-                size="small"
-              >
+              <Button variant="ghost" size="sm" onClick={showSwitchModal} className="hidden lg:flex">
+                <RefreshCw className="h-4 w-4 mr-2" />
                 {t('layout.switchUser')}
               </Button>
             )}
 
             {/* Exit tenant switch button */}
             {switchInfo.is_switched && (
-              <Button
-                type="link"
-                icon={<ReloadOutlined />}
-                onClick={handleExitSwitch}
-                size="small"
-                danger
-              >
+              <Button variant="ghost" size="sm" onClick={handleExitSwitch} className="hidden lg:flex text-red-600 hover:text-red-700 hover:bg-red-50">
+                <RefreshCw className="h-4 w-4 mr-2" />
                 {t('layout.exitSwitch')}
               </Button>
             )}
 
             {/* Current user display */}
-            <span style={{
-              color: '#1890ff',
-              fontWeight: 500,
-              padding: '4px 8px',
-              backgroundColor: '#f0f6ff',
-              borderRadius: '4px',
-              border: '1px solid #d6e4ff'
-            }}>
-              {user?.email}
-              {user?.is_super_admin && <Tag color="red" style={{ marginLeft: 4 }}>{t('layout.admin')}</Tag>}
-            </span>
+            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-md">
+              <span className="text-sm font-medium text-blue-700">{user?.email}</span>
+              {user?.is_super_admin && <span className="px-2 py-0.5 text-xs rounded bg-red-100 text-red-800 border border-red-200">{t('layout.admin')}</span>}
+            </div>
 
-            <span style={{ color: '#666' }}>{systemVersion}</span>
-            <Dropdown
-              menu={{
-                items: [
-                  {
-                    key: 'account',
-                    icon: <UserOutlined />,
-                    label: t('nav.account'),
-                    onClick: () => navigate('/account'),
-                  },
-                  {
-                    type: 'divider',
-                  },
-                  {
-                    key: 'logout',
-                    icon: <LogoutOutlined />,
-                    label: t('nav.logout'),
-                    onClick: () => {
-                      logout();
-                      navigate('/login');
-                    },
-                  },
-                ],
-              }}
-              placement="bottomRight"
-            >
-              <Avatar
-                style={{ cursor: 'pointer', backgroundColor: '#1890ff' }}
-                icon={<UserOutlined />}
-              />
-            </Dropdown>
-          </Space>
-        </Header>
-        <Content
-          style={{
-            margin: '24px 16px',
-            padding: 24,
-            minHeight: 280,
-            background: colorBgContainer,
-            borderRadius: 6,
-          }}
-        >
-          {children}
-        </Content>
-      </AntLayout>
-      
-      {/* Tenant switch Modal */}
-      <Modal
-        title={t('layout.switchTenant')}
-        open={switchModalVisible}
-        onCancel={() => setSwitchModalVisible(false)}
-        footer={null}
-        width={600}
-      >
-        <div style={{ marginBottom: 16 }}>
-          <p>{t('layout.selectTenantPrompt')}</p>
-        </div>
-        <Select
-          style={{ width: '100%' }}
-          placeholder={t('layout.selectTenantPlaceholder')}
-          loading={loading}
-          showSearch
-          filterOption={(input, option) => {
-            // Find corresponding tenant from users array for filtering
-            const user = users.find(u => u.id === option?.value);
-            return user ? user.email.toLowerCase().includes(input.toLowerCase()) : false;
-          }}
-          onSelect={handleSwitchUser}
-          options={users.map(user => ({
-            value: user.id,
-            label: (
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span>{user.email}</span>
-                <div>
-                  {user.is_super_admin && <Tag color="red">{t('layout.admin')}</Tag>}
-                  {user.is_verified ? (
-                    <Tag color="green">{t('layout.verified')}</Tag>
-                  ) : (
-                    <Tag color="orange">{t('layout.unverified')}</Tag>
-                  )}
-                </div>
+            {/* System version */}
+            {systemVersion && <span className="hidden lg:inline text-xs text-slate-500">{systemVersion}</span>}
+
+            {/* User Menu Dropdown */}
+            <div className="relative group">
+              <button className="h-9 w-9 rounded-full bg-blue-600 flex items-center justify-center text-white hover:bg-blue-700 transition-colors">
+                <User className="h-4 w-4" />
+              </button>
+              <div className="absolute right-0 mt-2 w-48 bg-white border border-slate-200 rounded-md shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
+                <button onClick={() => navigate('/account')} className="w-full px-4 py-2 text-left text-sm hover:bg-slate-50 flex items-center gap-2">
+                  <User className="h-4 w-4" />
+                  {t('nav.account')}
+                </button>
+                <div className="border-t border-slate-200" />
+                <button
+                  onClick={() => {
+                    logout()
+                    navigate('/login')
+                  }}
+                  className="w-full px-4 py-2 text-left text-sm hover:bg-slate-50 flex items-center gap-2 text-red-600"
+                >
+                  <LogOut className="h-4 w-4" />
+                  {t('nav.logout')}
+                </button>
               </div>
-            )
-          }))}
-        />
-        <div style={{ marginTop: 16, color: '#666', fontSize: '12px' }}>
-          {t('layout.switchNote')}
-        </div>
-      </Modal>
-    </AntLayout>
-  );
-};
+            </div>
+          </div>
+        </header>
 
-export default Layout;
+        {/* Content */}
+        <main className="flex-1 overflow-auto p-4 lg:p-6">
+          <div className="bg-white rounded-md border border-slate-200 p-6">{children}</div>
+        </main>
+      </div>
+
+      {/* Tenant switch Dialog */}
+      <Dialog open={switchModalVisible} onOpenChange={setSwitchModalVisible}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle>{t('layout.switchTenant')}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600">{t('layout.selectTenantPrompt')}</p>
+            <Select onValueChange={handleSwitchUser}>
+              <SelectTrigger>
+                <SelectValue placeholder={t('layout.selectTenantPlaceholder')} />
+              </SelectTrigger>
+              <SelectContent>
+                {users.map((u) => (
+                  <SelectItem key={u.id} value={u.id}>
+                    <div className="flex items-center justify-between w-full">
+                      <span>{u.email}</span>
+                      <div className="flex gap-1">
+                        {u.is_super_admin && <span className="px-2 py-0.5 text-xs rounded bg-red-100 text-red-800">{t('layout.admin')}</span>}
+                        {u.is_verified ? (
+                          <span className="px-2 py-0.5 text-xs rounded bg-green-100 text-green-800">{t('layout.verified')}</span>
+                        ) : (
+                          <span className="px-2 py-0.5 text-xs rounded bg-orange-100 text-orange-800">{t('layout.unverified')}</span>
+                        )}
+                      </div>
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-slate-500">{t('layout.switchNote')}</p>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
+export default Layout
