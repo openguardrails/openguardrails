@@ -27,6 +27,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { DataTable } from '@/components/data-table/DataTable'
 import { confirmDialog } from '@/utils/confirm-dialog'
 import { useAuth } from '../../contexts/AuthContext'
@@ -558,9 +559,84 @@ const UserManagement: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Analytics Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <div className="flex flex-col gap-6">
+      <Tabs defaultValue="users" className="w-full">
+        <TabsList>
+          <TabsTrigger value="users" className="gap-2">
+            <User className="h-4 w-4" />
+            {t('admin.tenantManagement')}
+          </TabsTrigger>
+          <TabsTrigger value="analytics" className="gap-2">
+            <TrendingUp className="h-4 w-4" />
+            {t('admin.analytics')}
+          </TabsTrigger>
+        </TabsList>
+
+        {/* User Management Tab */}
+        <TabsContent value="users" className="mt-6">
+          <Card>
+            <CardHeader>
+              <div className="flex justify-between items-start">
+                <div className="space-y-2">
+                  <CardTitle className="flex items-center gap-2">
+                    <User className="h-5 w-5" />
+                    {t('admin.tenantManagement')}
+                  </CardTitle>
+                  <p className="text-sm text-gray-600">{t('admin.manageTenants')}</p>
+                  {adminStats && (
+                    <div className="flex gap-4 text-sm">
+                      <span>
+                        <strong>{adminStats.total_users}</strong> {t('admin.totalTenants')}
+                      </span>
+                      <span className="text-gray-400">|</span>
+                      <span>
+                        {t('admin.totalDetections')}: <strong>{adminStats.total_detections}</strong>
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="outline" onClick={loadData} disabled={loading}>
+                    <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                    {t('common.refresh')}
+                  </Button>
+                  <Button onClick={handleAdd}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    {t('admin.addTenant')}
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {/* Search box */}
+              <div className="mb-4">
+                <Input
+                  placeholder={t('admin.searchTenantPlaceholder')}
+                  value={searchText}
+                  onChange={(e) => setSearchText(e.target.value)}
+                  className="max-w-xs"
+                />
+              </div>
+
+              <DataTable
+                columns={columns}
+                data={filteredUsers}
+                loading={loading}
+                pageCount={Math.ceil(total / pageSize)}
+                currentPage={currentPage}
+                pageSize={pageSize}
+                onPageChange={handlePageChange}
+                onPageSizeChange={handlePageSizeChange}
+              />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Analytics Tab */}
+        <TabsContent value="analytics" className="mt-6">
+          <div className="flex flex-col gap-6">
+            {/* Analytics Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Latest Created Tenants */}
         <Card>
           <CardHeader>
@@ -653,90 +729,35 @@ const UserManagement: React.FC = () => {
         </Card>
       </div>
 
-      {/* Trend Charts */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <Card>
-          <CardContent className="pt-6">
-            {analyticsLoading ? (
-              <div className="flex items-center justify-center h-64">
-                <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
-              </div>
-            ) : (
-              <ReactECharts option={getCreationTrendOption()} style={{ height: 300 }} />
-            )}
-          </CardContent>
-        </Card>
+            {/* Trend Charts */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <Card>
+                <CardContent className="pt-6">
+                  {analyticsLoading ? (
+                    <div className="flex items-center justify-center h-64">
+                      <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
+                    </div>
+                  ) : (
+                    <ReactECharts option={getCreationTrendOption()} style={{ height: 300 }} />
+                  )}
+                </CardContent>
+              </Card>
 
-        <Card>
-          <CardContent className="pt-6">
-            {analyticsLoading ? (
-              <div className="flex items-center justify-center h-64">
-                <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
-              </div>
-            ) : (
-              <ReactECharts option={getUsageTrendOption()} style={{ height: 300 }} />
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Tenant List */}
-      <Card>
-        <CardHeader>
-          <div className="flex justify-between items-start">
-            <div className="space-y-2">
-              <CardTitle className="flex items-center gap-2">
-                <User className="h-5 w-5" />
-                {t('admin.tenantManagement')}
-              </CardTitle>
-              <p className="text-sm text-gray-600">{t('admin.manageTenants')}</p>
-              {adminStats && (
-                <div className="flex gap-4 text-sm">
-                  <span>
-                    <strong>{adminStats.total_users}</strong> {t('admin.totalTenants')}
-                  </span>
-                  <span className="text-gray-400">|</span>
-                  <span>
-                    {t('admin.totalDetections')}: <strong>{adminStats.total_detections}</strong>
-                  </span>
-                </div>
-              )}
-            </div>
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={loadData} disabled={loading}>
-                <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-                {t('common.refresh')}
-              </Button>
-              <Button onClick={handleAdd}>
-                <Plus className="mr-2 h-4 w-4" />
-                {t('admin.addTenant')}
-              </Button>
+              <Card>
+                <CardContent className="pt-6">
+                  {analyticsLoading ? (
+                    <div className="flex items-center justify-center h-64">
+                      <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
+                    </div>
+                  ) : (
+                    <ReactECharts option={getUsageTrendOption()} style={{ height: 300 }} />
+                  )}
+                </CardContent>
+              </Card>
             </div>
           </div>
-        </CardHeader>
-        <CardContent>
-          {/* Search box */}
-          <div className="mb-4">
-            <Input
-              placeholder={t('admin.searchTenantPlaceholder')}
-              value={searchText}
-              onChange={(e) => setSearchText(e.target.value)}
-              className="max-w-xs"
-            />
-          </div>
-
-          <DataTable 
-            columns={columns} 
-            data={filteredUsers} 
-            loading={loading}
-            pageCount={Math.ceil(total / pageSize)}
-            currentPage={currentPage}
-            pageSize={pageSize}
-            onPageChange={handlePageChange}
-            onPageSizeChange={handlePageSizeChange}
-          />
-        </CardContent>
-      </Card>
+        </TabsContent>
+      </Tabs>
 
       <Dialog open={modalVisible} onOpenChange={setModalVisible}>
         <DialogContent className="sm:max-w-[500px]">

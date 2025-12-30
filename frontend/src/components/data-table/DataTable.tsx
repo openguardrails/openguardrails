@@ -36,6 +36,7 @@ interface DataTableProps<TData, TValue> {
   loading?: boolean
   pagination?: boolean
   emptyMessage?: string
+  fillHeight?: boolean
 }
 
 export function DataTable<TData, TValue>({
@@ -49,6 +50,7 @@ export function DataTable<TData, TValue>({
   loading = false,
   pagination = true,
   emptyMessage = "No results found.",
+  fillHeight = false,
 }: DataTableProps<TData, TValue>) {
   const [paginationState, setPaginationState] = React.useState<PaginationState>({
     pageIndex: currentPage - 1,
@@ -98,8 +100,8 @@ export function DataTable<TData, TValue>({
   const canGoNext = currentPage < totalPages
 
   return (
-    <div className="space-y-4">
-      <div className="rounded-md border">
+    <div className={fillHeight ? "h-full flex flex-col" : "space-y-4"}>
+      <div className={fillHeight ? "flex-1 overflow-auto border-t" : "rounded-md border"}>
         <Table>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
@@ -162,7 +164,7 @@ export function DataTable<TData, TValue>({
       </div>
 
       {pagination && pageCount > 0 && (
-        <div className="flex items-center justify-between px-2">
+        <div className={fillHeight ? "flex-shrink-0 flex items-center justify-between px-2 py-4 border-t bg-white" : "flex items-center justify-between px-2"}>
           <div className="flex items-center space-x-2">
             <p className="text-sm font-medium">Rows per page</p>
             <Select

@@ -22,7 +22,7 @@ import * as z from 'zod'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip'
 import { ColumnDef } from '@tanstack/react-table'
 
 const KnowledgeBaseManagement: React.FC = () => {
@@ -185,7 +185,15 @@ const KnowledgeBaseManagement: React.FC = () => {
 
   const handleAdd = async () => {
     setEditingItem(null)
-    form.reset()
+    form.reset({
+      scanner_type: 'official_scanner',
+      scanner_identifier: '',
+      name: '',
+      description: '',
+      similarity_threshold: 0.7,
+      is_active: true,
+      is_global: false,
+    })
     setSelectedFile(null)
     setSelectedScannerType('official_scanner')
     await fetchAvailableScanners()
@@ -195,6 +203,8 @@ const KnowledgeBaseManagement: React.FC = () => {
   const handleEdit = (record: KnowledgeBase) => {
     setEditingItem(record)
     form.reset({
+      scanner_type: record.scanner_type,
+      scanner_identifier: record.scanner_identifier,
       category: record.category,
       name: record.name,
       description: record.description,
@@ -277,8 +287,8 @@ const KnowledgeBaseManagement: React.FC = () => {
   }
 
   const formSchema = z.object({
-    scanner_type: editingItem ? z.string().optional() : z.string().min(1, t('knowledge.selectScannerType')),
-    scanner_identifier: editingItem ? z.string().optional() : z.string().min(1, t('knowledge.selectScanner')),
+    scanner_type: editingItem ? z.string().optional() : z.string().optional(),
+    scanner_identifier: editingItem ? z.string().optional() : z.string().optional(),
     name: z.string().min(1, t('knowledge.knowledgeBaseNameRequired')),
     description: z.string().optional(),
     similarity_threshold: z.number().min(0).max(1),
@@ -308,6 +318,12 @@ const KnowledgeBaseManagement: React.FC = () => {
         // Creating a knowledge base requires file upload
         if (!selectedFile) {
           toast.error(t('knowledge.selectFile'))
+          return
+        }
+
+        // Validate that a scanner is selected
+        if (!values.scanner_type || !values.scanner_identifier) {
+          toast.error(t('knowledge.selectScanner') || 'Please select a scanner')
           return
         }
 
@@ -642,7 +658,8 @@ const KnowledgeBaseManagement: React.FC = () => {
           : availableScanners.custom_scanners
 
   return (
-    <div className="space-y-4">
+    <TooltipProvider>
+      <div className="space-y-4">
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0">
           <div>
@@ -687,6 +704,7 @@ const KnowledgeBaseManagement: React.FC = () => {
       {/* Add/edit knowledge base modal */}
       <Dialog open={modalVisible} onOpenChange={setModalVisible}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <TooltipProvider>
           <DialogHeader>
             <DialogTitle>{editingItem ? t('knowledge.editKnowledgeBase') : t('knowledge.addKnowledgeBase')}</DialogTitle>
           </DialogHeader>
@@ -893,6 +911,7 @@ const KnowledgeBaseManagement: React.FC = () => {
               </DialogFooter>
             </form>
           </Form>
+          </TooltipProvider>
         </DialogContent>
       </Dialog>
 
@@ -994,7 +1013,8 @@ const KnowledgeBaseManagement: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+      </div>
+    </TooltipProvider>
   )
 }
 

@@ -166,7 +166,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     {
       key: '/documentation',
       icon: Book,
-      label: 'Documentation',
+      label: t('nav.documentation'),
     },
     // Admin menu - Only super admins can see (placed at bottom)
     ...(user?.is_super_admin
@@ -363,7 +363,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   )
 
   return (
-    <div className="flex h-screen bg-slate-50">
+    <div className="flex h-screen bg-slate-50 overflow-hidden">
       {/* Desktop Sidebar */}
       <aside className={cn('bg-white border-r border-slate-200 transition-all duration-300 flex flex-col', collapsed ? 'w-16' : 'w-64', 'hidden lg:flex')}>
         {/* Logo + Collapse Toggle */}
@@ -547,8 +547,10 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         </header>
 
         {/* Content */}
-        <main className="flex-1 overflow-auto p-4 lg:p-6">
-          <div className="bg-white rounded-md border border-slate-200 p-6 shadow-sm">{children}</div>
+        <main className="flex-1 overflow-y-auto p-4 lg:p-6">
+          <div className="h-full min-h-0 bg-white rounded-md border border-slate-200 p-6 shadow-sm">
+            {children}
+          </div>
         </main>
       </div>
 

@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { message } from 'antd';
+import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { paymentService, PaymentVerificationResult } from '../services/payment';
 
@@ -94,11 +94,10 @@ export function usePaymentSuccess(options: PaymentSuccessOptions = {}): PaymentS
 
   const verifyPayment = useCallback(async (sessionId: string) => {
     let attempts = 0;
-    let hideLoadingMessage: (() => void) | null = null;
 
-    // Show loading message
+    // Show loading toast
     if (showToast) {
-      hideLoadingMessage = message.loading(t('payment.verifying'), 0);
+      toast.loading(t('payment.verifying'), { id: 'payment-verify' });
     }
 
     setState({
@@ -116,11 +115,10 @@ export function usePaymentSuccess(options: PaymentSuccessOptions = {}): PaymentS
         // Payment completed successfully
         if (result.status === 'completed') {
           console.log('[usePaymentSuccess] Payment completed, attempts:', attempts);
-          if (hideLoadingMessage) hideLoadingMessage();
 
           if (showToast) {
             console.log('[usePaymentSuccess] Showing success toast');
-            message.success(t('payment.success'));
+            toast.success(t('payment.success'), { id: 'payment-verify' });
           }
 
           setState({
@@ -142,12 +140,10 @@ export function usePaymentSuccess(options: PaymentSuccessOptions = {}): PaymentS
 
         // Payment failed
         if (result.status === 'failed' || result.status === 'not_found') {
-          if (hideLoadingMessage) hideLoadingMessage();
-
           const errorMsg = result.message || t('payment.failed');
 
           if (showToast) {
-            message.error(errorMsg);
+            toast.error(errorMsg, { id: 'payment-verify' });
           }
 
           setState({
@@ -170,12 +166,10 @@ export function usePaymentSuccess(options: PaymentSuccessOptions = {}): PaymentS
           setTimeout(poll, pollingInterval);
         } else {
           // Timeout
-          if (hideLoadingMessage) hideLoadingMessage();
-
           const timeoutMsg = t('payment.verificationTimeout');
 
           if (showToast) {
-            message.warning(timeoutMsg);
+            toast.warning(timeoutMsg, { id: 'payment-verify' });
           }
 
           setState({
@@ -192,12 +186,10 @@ export function usePaymentSuccess(options: PaymentSuccessOptions = {}): PaymentS
           setSearchParams({});
         }
       } catch (error) {
-        if (hideLoadingMessage) hideLoadingMessage();
-
         const errorMsg = error instanceof Error ? error.message : t('payment.verificationError');
 
         if (showToast) {
-          message.error(errorMsg);
+          toast.error(errorMsg, { id: 'payment-verify' });
         }
 
         setState({

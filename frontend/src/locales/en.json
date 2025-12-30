@@ -54,7 +54,8 @@
     "action": "Action",
     "confirmDelete": "Confirm Delete",
     "active": "Active",
-    "inactive": "Inactive"
+    "inactive": "Inactive",
+    "copied": "Copied to clipboard"
   },
   "risk": {
     "level": {
@@ -155,7 +156,7 @@
     "dataSecurity": "Data Security",
     "account": "Account",
     "subscription": "Subscription & Usage",
-    "documentation": "Doc",
+    "documentation": "Documentation",
     "admin": "Admin",
     "logout": "Logout",
     "tenantManagement": "Tenant Management",
@@ -208,7 +209,7 @@
     "singleQuestion": "Single Question",
     "qaPair": "Q&A Pair",
     "manageProxyModels": "Manage Proxy Models",
-    "questionPlaceholder": "Enter the question to test (optional, you can upload images only)...",
+    "questionPlaceholder": "Enter the question to test ...",
     "qaPairPlaceholder": "Enter Q&A pair in the following format:\nQ: Your question\nA: Model's answer",
     "imageDetectionOptional": "Image Detection (Optional)",
     "selectTestModels": "Select test proxy models (optional):",
@@ -1226,6 +1227,7 @@
     "detections": "Detections",
     "lastActivity": "Last Activity",
     "noData": "No data available",
+    "analytics": "Analytics & Trends",
     "subscriptions": {
       "title": "Subscription Management",
       "email": "Email",

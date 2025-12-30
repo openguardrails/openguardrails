@@ -471,11 +471,11 @@ const Results: React.FC = () => {
   ]
 
   return (
-    <div className="space-y-6">
+    <div className="h-full flex flex-col gap-4">
       <h2 className="text-3xl font-bold tracking-tight">{t('results.title')}</h2>
 
       {/* Filters Card */}
-      <Card>
+      <Card className="flex-shrink-0">
         <CardContent className="pt-6">
           <div className="flex flex-wrap gap-3">
             {/* Risk Level */}
@@ -619,8 +619,8 @@ const Results: React.FC = () => {
       </Card>
 
       {/* Results Table */}
-      <Card>
-        <CardContent className="p-0">
+      <Card className="flex-1 flex flex-col overflow-hidden min-h-0">
+        <CardContent className="p-0 flex-1 overflow-hidden">
           <DataTable
             columns={columns}
             data={data?.items || []}
@@ -629,6 +629,7 @@ const Results: React.FC = () => {
             pageSize={pagination.pageSize}
             onPageChange={handlePageChange}
             loading={loading}
+            fillHeight={true}
           />
         </CardContent>
       </Card>

@@ -54,7 +54,8 @@
     "action": "操作",
     "confirmDelete": "确认删除",
     "active": "活跃",
-    "inactive": "未激活"
+    "inactive": "未激活",
+    "copied": "已复制到剪贴板"
   },
   "risk": {
     "level": {
@@ -205,7 +206,7 @@
     "singleQuestion": "单个问题",
     "qaPair": "问答对",
     "manageProxyModels": "管理代理模型",
-    "questionPlaceholder": "请输入要测试的问题（可选，可以只上传图片）...",
+    "questionPlaceholder": "请输入要测试的问题...",
     "qaPairPlaceholder": "请输入问答对，格式如下：\nQ: 您的问题\nA: 模型的回答",
     "imageDetectionOptional": "图片检测（可选）",
     "selectTestModels": "选择测试的代理模型（可选）：",
@@ -1223,6 +1224,7 @@
     "detections": "检测次数",
     "lastActivity": "最后活动",
     "noData": "暂无数据",
+    "analytics": "分析与趋势",
     "subscriptions": {
       "title": "订阅管理",
       "email": "邮箱",

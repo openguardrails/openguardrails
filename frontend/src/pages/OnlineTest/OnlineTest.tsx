@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import api, { testModelsApi } from '../../services/api'
-import { PlayCircle, X, Settings, Image as ImageIcon } from 'lucide-react'
-import ImageUpload from '../../components/ImageUpload/ImageUpload'
+import { PlayCircle, X, Settings } from 'lucide-react'
 import { Button } from '../../components/ui/button'
 import { Textarea } from '../../components/ui/textarea'
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card'
@@ -83,7 +82,6 @@ const OnlineTest: React.FC = () => {
   const [inputType, setInputType] = useState<'question' | 'qa_pair'>('question')
   const [testResult, setTestResult] = useState<TestResult | null>(null)
   const [models, setModels] = useState<TestModel[]>([])
-  const [uploadedImages, setUploadedImages] = useState<string[]>([])
   const [selectedCategory, setSelectedCategory] = useState('security')
 
   const loadModels = async () => {
@@ -256,34 +254,14 @@ const OnlineTest: React.FC = () => {
   const testCases: TestCase[] = [...testCasesByCategory.security, ...testCasesByCategory.dataLeak, ...testCasesByCategory.professional, ...testCasesByCategory.safe]
 
   const runTest = async () => {
-    if (!testInput.trim() && uploadedImages.length === 0) {
+    if (!testInput.trim()) {
       toast.warning(t('onlineTest.pleaseEnterTestContent'))
       return
     }
 
     setLoading(true)
     try {
-      let messages
-      let content: any[] = []
-
-      if (inputType === 'question') {
-        if (testInput.trim()) {
-          content.push({ type: 'text', text: testInput })
-        }
-
-        uploadedImages.forEach((base64Image) => {
-          content.push({
-            type: 'image_url',
-            image_url: { url: base64Image },
-          })
-        })
-
-        if (uploadedImages.length > 0) {
-          messages = [{ role: 'user', content }]
-        } else {
-          messages = [{ role: 'user', content: testInput }]
-        }
-      } else {
+      if (inputType === 'qa_pair') {
         const lines = testInput.split('\n')
         const question = lines.find((line) => line.startsWith('Q:'))?.substring(2).trim()
         const answer = lines.find((line) => line.startsWith('A:'))?.substring(2).trim()
@@ -292,49 +270,25 @@ const OnlineTest: React.FC = () => {
           toast.error(t('onlineTest.qaPairFormatError'))
           return
         }
-
-        messages = [
-          { role: 'user', content: question },
-          { role: 'assistant', content: answer },
-        ]
       }
 
-      const hasImages = uploadedImages.length > 0
-      let response
-
-      if (hasImages) {
-        const requestData = {
-          content: testInput,
-          input_type: inputType,
-          images: uploadedImages,
-        }
-
-        response = await api.post('/api/v1/test/online', requestData)
-
-        setTestResult({
-          guardrail: response.data.guardrail,
-          models: response.data.models || {},
-          original_responses: response.data.original_responses || {},
-        })
-      } else {
-        const selectedModels = models.filter((m) => m.selected)
-        if (inputType === 'question' && selectedModels.length === 0) {
-          toast.info(t('onlineTest.proxyModelHint'))
-        }
-
-        const requestData = {
-          content: testInput,
-          input_type: inputType,
-        }
-
-        response = await api.post('/api/v1/test/online', requestData)
-
-        setTestResult({
-          guardrail: response.data.guardrail,
-          models: response.data.models || {},
-          original_responses: response.data.original_responses || {},
-        })
+      const selectedModels = models.filter((m) => m.selected)
+      if (inputType === 'question' && selectedModels.length === 0) {
+        toast.info(t('onlineTest.proxyModelHint'))
       }
+
+      const requestData = {
+        content: testInput,
+        input_type: inputType,
+      }
+
+      const response = await api.post('/api/v1/test/online', requestData)
+
+      setTestResult({
+        guardrail: response.data.guardrail,
+        models: response.data.models || {},
+        original_responses: response.data.original_responses || {},
+      })
     } catch (error: any) {
       console.error('Test failed:', error)
       const errorMessage = error?.response?.data?.detail || error?.message || t('onlineTest.testExecutionFailed')
@@ -380,11 +334,6 @@ const OnlineTest: React.FC = () => {
   const clearInput = () => {
     setTestInput('')
     setTestResult(null)
-    setUploadedImages([])
-  }
-
-  const handleImageChange = (base64Images: string[]) => {
-    setUploadedImages(base64Images)
   }
 
   const useTestCase = (testCase: TestCase) => {
@@ -467,24 +416,6 @@ const OnlineTest: React.FC = () => {
                 rows={6}
                 className="font-mono text-sm"
               />
-
-              {/* Image upload - temporarily hidden */}
-              {false && inputType === 'question' && (
-                <Card className="bg-slate-50">
-                  <CardHeader>
-                    <CardTitle className="text-sm flex items-center gap-2">
-                      <ImageIcon className="h-4 w-4" />
-                      {t('onlineTest.imageDetectionOptional')}
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <ImageUpload onChange={handleImageChange} maxCount={5} maxSize={10} />
-                    {uploadedImages.length > 0 && (
-                      <div className="mt-3 p-2 bg-green-50 border border-green-200 rounded-md text-sm text-green-800">{t('onlineTest.imagesSelected', { count: uploadedImages.length })}</div>
-                    )}
-                  </CardContent>
-                </Card>
-              )}
 
               {/* Proxy model selection */}
               {inputType === 'question' && (
@@ -620,14 +551,14 @@ const OnlineTest: React.FC = () => {
                           </CardHeader>
                           <CardContent className="space-y-2">
                             <div>
-                              <span className="text-xs text-slate-600">{t('onlineTest.riskLevel')}: </span>
+                              <span className="text-xs text-slate-600">{t('onlineTest.riskLevel')} </span>
                               <span className={`inline-block px-2 py-0.5 text-xs rounded border ${getRiskColor(testResult.guardrail.security?.risk_level)}`}>
                                 {translateRiskLevel(testResult.guardrail.security?.risk_level || 'no_risk')}
                               </span>
                             </div>
                             {testResult.guardrail.security?.categories?.length > 0 && (
                               <div>
-                                <span className="text-xs text-slate-600">{t('onlineTest.riskCategory')}: </span>
+                                <span className="text-xs text-slate-600">{t('onlineTest.riskCategory')} </span>
                                 <div className="flex flex-wrap gap-1 mt-1">
                                   {testResult.guardrail.security.categories.map((cat, idx) => (
                                     <span key={idx} className="px-2 py-0.5 text-xs rounded bg-red-100 text-red-800 border border-red-200">
@@ -646,14 +577,14 @@ const OnlineTest: React.FC = () => {
                           </CardHeader>
                           <CardContent className="space-y-2">
                             <div>
-                              <span className="text-xs text-slate-600">{t('onlineTest.riskLevel')}: </span>
+                              <span className="text-xs text-slate-600">{t('onlineTest.riskLevel')} </span>
                               <span className={`inline-block px-2 py-0.5 text-xs rounded border ${getRiskColor(testResult.guardrail.compliance?.risk_level)}`}>
                                 {translateRiskLevel(testResult.guardrail.compliance?.risk_level || 'no_risk')}
                               </span>
                             </div>
                             {testResult.guardrail.compliance?.categories?.length > 0 && (
                               <div>
-                                <span className="text-xs text-slate-600">{t('onlineTest.riskCategory')}: </span>
+                                <span className="text-xs text-slate-600">{t('onlineTest.riskCategory')} </span>
                                 <div className="flex flex-wrap gap-1 mt-1">
                                   {testResult.guardrail.compliance.categories.map((cat, idx) => (
                                     <span key={idx} className="px-2 py-0.5 text-xs rounded bg-orange-100 text-orange-800 border border-orange-200">
@@ -672,14 +603,14 @@ const OnlineTest: React.FC = () => {
                           </CardHeader>
                           <CardContent className="space-y-2">
                             <div>
-                              <span className="text-xs text-slate-600">{t('onlineTest.riskLevel')}: </span>
+                              <span className="text-xs text-slate-600">{t('onlineTest.riskLevel')} </span>
                               <span className={`inline-block px-2 py-0.5 text-xs rounded border ${getRiskColor(testResult.guardrail.data?.risk_level || 'no_risk')}`}>
                                 {translateRiskLevel(testResult.guardrail.data?.risk_level || 'no_risk')}
                               </span>
                             </div>
                             {testResult.guardrail.data?.categories && testResult.guardrail.data.categories.length > 0 && (
                               <div>
-                                <span className="text-xs text-slate-600">{t('onlineTest.riskCategory')}: </span>
+                                <span className="text-xs text-slate-600">{t('onlineTest.riskCategory')} </span>
                                 <div className="flex flex-wrap gap-1 mt-1">
                                   {testResult.guardrail.data.categories.map((cat, idx) => (
                                     <span key={idx} className="px-2 py-0.5 text-xs rounded bg-purple-100 text-purple-800 border border-purple-200">
@@ -695,26 +626,30 @@ const OnlineTest: React.FC = () => {
 
                       <Separator />
 
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div>
-                          <span className="text-sm text-slate-600">{t('onlineTest.overallRiskLevel')}: </span>
-                          <span className={`inline-block px-2 py-1 text-sm font-semibold rounded border ${getRiskColor(testResult.guardrail.overall_risk_level)}`}>
-                            {translateRiskLevel(testResult.guardrail.overall_risk_level)}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="text-sm text-slate-600">{t('onlineTest.suggestedAction')}: </span>
-                          <span className={`inline-block px-2 py-1 text-sm font-semibold rounded border ${getActionColor(testResult.guardrail.suggest_action)}`}>{testResult.guardrail.suggest_action}</span>
-                        </div>
-                        <div>
-                          {testResult.guardrail.suggest_answer && (
+                      <Card className="border-slate-200 bg-slate-50">
+                        <CardContent className="pt-4">
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             <div>
-                              <span className="text-sm text-slate-600">{t('onlineTest.suggestedAnswer')}: </span>
-                              <code className="text-xs bg-slate-100 px-2 py-1 rounded">{testResult.guardrail.suggest_answer}</code>
+                              <p className="text-sm font-medium text-slate-700 mb-1">{t('onlineTest.overallRiskLevel')}</p>
+                              <span className={`inline-block px-3 py-1.5 text-sm font-semibold rounded border ${getRiskColor(testResult.guardrail.overall_risk_level)}`}>
+                                {translateRiskLevel(testResult.guardrail.overall_risk_level)}
+                              </span>
                             </div>
-                          )}
-                        </div>
-                      </div>
+                            <div>
+                              <p className="text-sm font-medium text-slate-700 mb-1">{t('onlineTest.suggestedAction')}</p>
+                              <span className={`inline-block px-3 py-1.5 text-sm font-semibold rounded border ${getActionColor(testResult.guardrail.suggest_action)}`}>{testResult.guardrail.suggest_action}</span>
+                            </div>
+                            <div>
+                              {testResult.guardrail.suggest_answer && (
+                                <>
+                                  <p className="text-sm font-medium text-slate-700 mb-1">{t('onlineTest.suggestedAnswer')}</p>
+                                  <code className="text-xs bg-white px-3 py-1.5 rounded border border-slate-200 block whitespace-pre-wrap break-all">{testResult.guardrail.suggest_answer}</code>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
                     </>
                   )}
                 </div>

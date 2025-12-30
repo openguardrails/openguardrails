@@ -1,9 +1,6 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
-import { ConfigProvider } from 'antd'
-import zhCN from 'antd/locale/zh_CN'
-import enUS from 'antd/locale/en_US'
 import { Toaster } from 'sonner'
 import { AuthProvider } from './contexts/AuthContext'
 import App from './App'
@@ -37,19 +34,15 @@ const getInitialLanguage = async () => {
 
 getInitialLanguage().then((userLanguage) => {
   return initializeLanguage(userLanguage);
-}).then((detectedLang) => {
-  const antdLocale = detectedLang === 'zh' ? zhCN : enUS;
-
+}).then(() => {
   ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
-      <ConfigProvider locale={antdLocale}>
-        <BrowserRouter basename="/platform">
-          <AuthProvider>
-            <App />
-            <Toaster position="top-right" richColors />
-          </AuthProvider>
-        </BrowserRouter>
-      </ConfigProvider>
+      <BrowserRouter basename="/platform">
+        <AuthProvider>
+          <App />
+          <Toaster position="top-right" richColors />
+        </AuthProvider>
+      </BrowserRouter>
     </React.StrictMode>,
   )
 })

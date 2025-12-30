@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
-import { Button, message, Modal, Spin } from 'antd';
-import { CreditCardOutlined, AlipayCircleOutlined, LoadingOutlined } from '@ant-design/icons';
+import { toast } from 'sonner';
+import { CreditCard, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { Button } from '../ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
 import paymentService, { PaymentResponse } from '../../services/payment';
 
 interface PaymentButtonProps {
@@ -64,14 +66,14 @@ const PaymentButton: React.FC<PaymentButtonProps> = ({
         }, 500);
       } else {
         const errorMsg = response.error || t('payment.error.createFailed');
-        message.error(errorMsg);
+        toast.error(errorMsg);
         onError?.(errorMsg);
         setLoading(false);
         setConfirmModalVisible(false);
       }
     } catch (error: any) {
       const errorMsg = error.response?.data?.detail || error.message || t('payment.error.unknown');
-      message.error(errorMsg);
+      toast.error(errorMsg);
       onError?.(errorMsg);
       setLoading(false);
       setConfirmModalVisible(false);
@@ -97,85 +99,67 @@ const PaymentButton: React.FC<PaymentButtonProps> = ({
     return t('payment.button.purchase');
   };
 
-  const getIcon = () => {
-    if (provider === 'alipay') {
-      return <AlipayCircleOutlined />;
-    }
-    return <CreditCardOutlined />;
-  };
-
   const priceDisplay = paymentService.formatPrice(amount || 0, currency);
 
   return (
     <>
       <Button
-        type={buttonType}
+        variant={buttonType === 'primary' ? 'default' : buttonType === 'link' ? 'link' : 'outline'}
         size={size}
-        block={block}
+        className={block ? 'w-full' : ''}
         disabled={disabled}
-        icon={getIcon()}
         onClick={showConfirmModal}
       >
+        <CreditCard className="h-4 w-4 mr-2" />
         {getButtonText()}
       </Button>
 
-      {/* Payment confirmation and loading modal */}
-      <Modal
-        title={loading ? null : (type === 'subscription'
-          ? t('payment.confirm.subscriptionTitle')
-          : t('payment.confirm.packageTitle'))}
-        open={confirmModalVisible}
-        onOk={handlePayment}
-        onCancel={handleCancel}
-        okText={t('payment.confirm.proceed')}
-        cancelText={t('common.cancel')}
-        confirmLoading={loading}
-        closable={!loading}
-        maskClosable={!loading}
-        keyboard={!loading}
-        centered
-        width={loading ? 400 : 500}
-        zIndex={2000}
-      >
-        {loading ? (
-          // Show loading state
-          <div style={{ 
-            padding: '40px 20px',
-            textAlign: 'center'
-          }}>
-            <Spin
-              indicator={<LoadingOutlined style={{ fontSize: 48, color: '#1890ff' }} spin />}
-              size="large"
-            />
-            <div style={{ 
-              marginTop: 24, 
-              fontSize: 16, 
-              fontWeight: 500,
-              color: '#262626'
-            }}>
-              {provider === 'alipay' 
-                ? t('payment.redirecting.alipay', '正在跳转到支付宝...') 
-                : t('payment.redirecting.stripe', '正在跳转到支付页面...')
-              }
+      {/* Payment confirmation and loading dialog */}
+      <Dialog open={confirmModalVisible} onOpenChange={!loading ? setConfirmModalVisible : undefined}>
+        <DialogContent className={loading ? 'max-w-md' : 'max-w-lg'}>
+          {loading ? (
+            // Show loading state
+            <div className="py-10 text-center">
+              <Loader2 className="h-12 w-12 mx-auto animate-spin text-blue-600" />
+              <div className="mt-6 text-base font-medium">
+                {provider === 'alipay'
+                  ? t('payment.redirecting.alipay', '正在跳转到支付宝...')
+                  : t('payment.redirecting.stripe', '正在跳转到支付页面...')
+                }
+              </div>
+              <div className="mt-3 text-sm text-muted-foreground">
+                {t('payment.processing.pleaseWait', '请稍候，请勿关闭页面或刷新')}
+              </div>
             </div>
-            <div style={{ 
-              marginTop: 12, 
-              fontSize: 14, 
-              color: '#8c8c8c'
-            }}>
-              {t('payment.processing.pleaseWait', '请稍候，请勿关闭页面或刷新')}
-            </div>
-          </div>
-        ) : (
-          // Show confirmation content
-          <div style={{ padding: '20px 0' }}>
-            {type === 'subscription'
-              ? t('payment.confirm.subscriptionContent', { price: priceDisplay })
-              : t('payment.confirm.packageContent', { name: packageName, price: priceDisplay })
-            }
-          </div>
-        )}
-      </Modal>
+          ) : (
+            // Show confirmation content
+            <>
+              <DialogHeader>
+                <DialogTitle>
+                  {type === 'subscription'
+                    ? t('payment.confirm.subscriptionTitle')
+                    : t('payment.confirm.packageTitle')
+                  }
+                </DialogTitle>
+                <DialogDescription>
+                  {type === 'subscription'
+                    ? t('payment.confirm.subscriptionContent', { price: priceDisplay })
+                    : t('payment.confirm.packageContent', { name: packageName, price: priceDisplay })
+                  }
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button variant="outline" onClick={handleCancel}>
+                  {t('common.cancel')}
+                </Button>
+                <Button onClick={handlePayment}>
+                  {t('payment.confirm.proceed')}
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </>
   );
 };

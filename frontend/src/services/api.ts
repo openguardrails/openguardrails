@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { message } from 'antd';
+import { toast } from 'sonner';
 import type {
   ApiResponse,
   GuardrailRequest,
@@ -93,7 +93,7 @@ api.interceptors.response.use(
     }
     
     const errorMessage = error.response?.data?.detail || error.message || 'Request failed';
-    message.error(errorMessage);
+    toast.error(errorMessage);
     return Promise.reject(error);
   }
 );
