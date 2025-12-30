@@ -6,8 +6,8 @@
 -- Description:
 -- Add bundle field to scanner_packages table for grouping premium packages
 
--- Add bundle column
-ALTER TABLE scanner_packages ADD COLUMN bundle VARCHAR(100);
+-- Add bundle column (IF NOT EXISTS for idempotency)
+ALTER TABLE scanner_packages ADD COLUMN IF NOT EXISTS bundle VARCHAR(100);
 
 -- Add index for sorting by bundle
 CREATE INDEX IF NOT EXISTS idx_scanner_packages_bundle ON scanner_packages(bundle);
