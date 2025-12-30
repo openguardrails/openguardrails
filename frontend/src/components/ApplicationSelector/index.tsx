@@ -106,13 +106,13 @@ const ApplicationSelector: React.FC = () => {
   );
 
   return (
-    <div className="flex items-center gap-2">
-      <span className="text-sm font-medium text-slate-700">{t('applicationSelector.label')}:</span>
+    <div className="flex items-center gap-1.5">
+      <span className="text-xs font-medium text-slate-700 whitespace-nowrap">{t('applicationSelector.label')}:</span>
       <Select value={displayValue} onValueChange={handleChange} disabled={loading}>
-        <SelectTrigger className="w-[180px] h-9 text-sm border-slate-200 focus:ring-blue-500">
+        <SelectTrigger className="w-[280px] h-9 text-xs border-slate-200 focus:ring-blue-500 !px-2">
           {loading ? (
             <div className="flex items-center gap-2">
-              <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-400" />
               <SelectValue placeholder={t('applicationSelector.placeholder')} />
             </div>
           ) : applications.length === 0 ? (
@@ -121,9 +121,9 @@ const ApplicationSelector: React.FC = () => {
             <SelectValue />
           )}
         </SelectTrigger>
-        <SelectContent className="min-w-[180px]">
+        <SelectContent className="min-w-[280px]">
           {applications.map(app => (
-            <SelectItem key={app.id} value={app.id}>
+            <SelectItem key={app.id} value={app.id} className="text-xs">
               {app.name}
             </SelectItem>
           ))}

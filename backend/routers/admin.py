@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Header
 from typing import Optional, List
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, desc
+from datetime import datetime, timedelta
 
 from database.connection import get_admin_db
 import uuid
@@ -97,10 +98,20 @@ async def get_admin_stats(
 @router.get("/admin/users")
 async def get_all_users(
     request: Request,
+    sort_by: str = 'created_at',
+    sort_order: str = 'desc',
+    skip: int = 0,
+    limit: int = 20,
     db: Session = Depends(get_admin_db)
 ):
     """
     Get all tenants list (only super admin can access)
+    
+    Query parameters:
+    - sort_by: Sort field ('created_at', 'detection_count', 'last_activity')
+    - sort_order: Sort order ('asc' or 'desc')
+    - skip: Number of records to skip for pagination
+    - limit: Maximum number of records to return
     """
     try:
         current_tenant = get_current_user(request)
@@ -108,12 +119,30 @@ async def get_all_users(
         if not admin_service.is_super_admin(current_tenant):
             raise HTTPException(status_code=403, detail="Only super admin can access this endpoint")
 
-        users = admin_service.get_all_users(db, current_tenant)
+        # Validate sort parameters
+        if sort_by not in ['created_at', 'detection_count', 'last_activity']:
+            sort_by = 'created_at'
+        if sort_order not in ['asc', 'desc']:
+            sort_order = 'desc'
+
+        # Validate pagination parameters
+        if skip < 0:
+            skip = 0
+        if limit < 1 or limit > 100:
+            limit = 20
+
+        users, total = admin_service.get_all_users(
+            db, current_tenant, 
+            sort_by=sort_by, 
+            sort_order=sort_order,
+            skip=skip,
+            limit=limit
+        )
         
         return {
             "status": "success",
             "users": users,
-            "total": len(users)
+            "total": total
         }
         
     except HTTPException:
@@ -635,4 +664,130 @@ async def reset_user_api_key(
     except Exception as e:
         db.rollback()
         logger.error(f"Reset API key error: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.get("/admin/tenant-analytics")
+async def get_tenant_analytics(
+    request: Request,
+    days: int = 30,
+    db: Session = Depends(get_admin_db)
+):
+    """
+    Get tenant analytics data (only super admin can access)
+    Returns:
+    - latest_created_tenants: List of recently created tenants
+    - recently_active_tenants: List of tenants with recent activity
+    - creation_trend: Daily tenant creation trend
+    - usage_trend: Daily detection usage trend
+    """
+    try:
+        current_tenant = get_current_user(request)
+        if not admin_service.is_super_admin(current_tenant):
+            raise HTTPException(status_code=403, detail="Access denied: Super admin required")
+
+        # Get latest created tenants (last 10)
+        latest_created = db.query(Tenant).order_by(desc(Tenant.created_at)).limit(10).all()
+        latest_created_tenants = [
+            {
+                "id": str(tenant.id),
+                "email": tenant.email,
+                "created_at": tenant.created_at.isoformat() if tenant.created_at else None,
+                "is_active": tenant.is_active,
+                "is_verified": tenant.is_verified,
+            }
+            for tenant in latest_created
+        ]
+
+        # Get recently active tenants (tenants with detections in the last 7 days, ordered by latest detection)
+        seven_days_ago = datetime.now() - timedelta(days=7)
+        recently_active_query = db.query(
+            Tenant.id,
+            Tenant.email,
+            Tenant.is_active,
+            Tenant.is_verified,
+            func.max(DetectionResult.created_at).label('last_activity')
+        ).join(
+            DetectionResult, Tenant.id == DetectionResult.tenant_id
+        ).filter(
+            DetectionResult.created_at >= seven_days_ago
+        ).group_by(
+            Tenant.id, Tenant.email, Tenant.is_active, Tenant.is_verified
+        ).order_by(
+            desc('last_activity')
+        ).limit(10).all()
+
+        recently_active_tenants = [
+            {
+                "id": str(row.id),
+                "email": row.email,
+                "last_activity": row.last_activity.isoformat() if row.last_activity else None,
+                "is_active": row.is_active,
+                "is_verified": row.is_verified,
+            }
+            for row in recently_active_query
+        ]
+
+        # Get creation trend (daily tenant creation count for the last N days)
+        end_date = datetime.now().date()
+        start_date = end_date - timedelta(days=days-1)
+
+        creation_trend_query = db.query(
+            func.date(Tenant.created_at).label('date'),
+            func.count(Tenant.id).label('count')
+        ).filter(
+            func.date(Tenant.created_at) >= start_date
+        ).group_by(
+            func.date(Tenant.created_at)
+        ).order_by(
+            func.date(Tenant.created_at)
+        ).all()
+
+        # Create complete date range for creation trend
+        creation_trend_map = {str(row.date): row.count for row in creation_trend_query}
+        creation_trend = []
+        for i in range(days):
+            current_date = start_date + timedelta(days=i)
+            date_str = str(current_date)
+            creation_trend.append({
+                "date": date_str,
+                "count": creation_trend_map.get(date_str, 0)
+            })
+
+        # Get usage trend (daily detection count for the last N days)
+        usage_trend_query = db.query(
+            func.date(DetectionResult.created_at).label('date'),
+            func.count(DetectionResult.id).label('count')
+        ).filter(
+            func.date(DetectionResult.created_at) >= start_date
+        ).group_by(
+            func.date(DetectionResult.created_at)
+        ).order_by(
+            func.date(DetectionResult.created_at)
+        ).all()
+
+        # Create complete date range for usage trend
+        usage_trend_map = {str(row.date): row.count for row in usage_trend_query}
+        usage_trend = []
+        for i in range(days):
+            current_date = start_date + timedelta(days=i)
+            date_str = str(current_date)
+            usage_trend.append({
+                "date": date_str,
+                "count": usage_trend_map.get(date_str, 0)
+            })
+
+        return {
+            "status": "success",
+            "data": {
+                "latest_created_tenants": latest_created_tenants,
+                "recently_active_tenants": recently_active_tenants,
+                "creation_trend": creation_trend,
+                "usage_trend": usage_trend,
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get tenant analytics error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")

@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any, Union
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, desc as sql_desc, asc as sql_asc
 from passlib.context import CryptContext
 
 from database.models import Tenant, TenantSwitch, DetectionResult
@@ -123,18 +123,42 @@ class AdminService:
         # Fallback to .env configuration for backward compatibility
         return tenant.email == settings.super_admin_username
     
-    def get_all_users(self, db: Session, admin_tenant: Tenant) -> List[Dict[str, Any]]:
-        """Get all tenants list (only super admin can access)"""
+    def get_all_users(self, db: Session, admin_tenant: Tenant, sort_by: str = 'created_at', sort_order: str = 'desc', skip: int = 0, limit: int = 20) -> tuple[List[Dict[str, Any]], int]:
+        """Get all tenants list (only super admin can access)
+        
+        Args:
+            sort_by: Sort field ('created_at', 'detection_count', 'last_activity')
+            sort_order: Sort order ('asc' or 'desc')
+            skip: Number of records to skip for pagination
+            limit: Maximum number of records to return
+        Returns:
+            Tuple of (list of tenant dicts, total count)
+        """
         if not self.is_super_admin(admin_tenant):
             raise PermissionError("Only super admin can access all tenants")
 
-        # Get tenants and detection counts
-        tenants_with_counts = db.query(
+        # Get tenants with detection counts and last activity
+        base_query = db.query(
             Tenant,
-            func.count(DetectionResult.id).label('detection_count')
-        ).outerjoin(DetectionResult, Tenant.id == DetectionResult.tenant_id).group_by(Tenant.id).all()
+            func.count(DetectionResult.id).label('detection_count'),
+            func.max(DetectionResult.created_at).label('last_activity')
+        ).outerjoin(DetectionResult, Tenant.id == DetectionResult.tenant_id).group_by(Tenant.id)
 
-        return [{
+        # Get total count
+        total_count = base_query.count()
+
+        # Apply sorting
+        if sort_by == 'detection_count':
+            order_by = sql_desc('detection_count') if sort_order == 'desc' else sql_asc('detection_count')
+        elif sort_by == 'last_activity':
+            order_by = sql_desc('last_activity') if sort_order == 'desc' else sql_asc('last_activity')
+        else:  # default to created_at
+            order_by = sql_desc(Tenant.created_at) if sort_order == 'desc' else sql_asc(Tenant.created_at)
+
+        # Apply pagination
+        tenants_with_counts = base_query.order_by(order_by).offset(skip).limit(limit).all()
+
+        users = [{
             "id": str(tenant.id),
             "email": tenant.email,
             "is_active": tenant.is_active,
@@ -143,9 +167,12 @@ class AdminService:
             "is_verified": tenant.is_verified,
             "api_key": tenant.api_key,
             "detection_count": detection_count,  # New detection count
+            "last_activity": last_activity.isoformat() if last_activity else None,  # Last activity time
             "created_at": tenant.created_at.isoformat() if tenant.created_at else None,
             "updated_at": tenant.updated_at.isoformat() if tenant.updated_at else None
-        } for tenant, detection_count in tenants_with_counts]
+        } for tenant, detection_count, last_activity in tenants_with_counts]
+
+        return users, total_count
     
     def switch_to_user(self, db: Session, admin_tenant: Tenant, target_tenant_id: Union[str, uuid.UUID]) -> str:
         """Super admin switch to specified tenant view"""

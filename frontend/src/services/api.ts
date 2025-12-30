@@ -254,8 +254,8 @@ export const adminApi = {
     api.get('/api/v1/admin/stats').then(res => res.data),
 
   // Get all tenants list
-  getUsers: (): Promise<{ status: string; users: any[]; total: number }> =>
-    api.get('/api/v1/admin/users').then(res => res.data),
+  getUsers: (params?: { sort_by?: string; sort_order?: string; skip?: number; limit?: number }): Promise<{ status: string; users: any[]; total: number }> =>
+    api.get('/api/v1/admin/users', { params }).then(res => res.data),
 
   // Switch to specified tenant perspective
   switchToUser: (tenantId: string): Promise<{
@@ -314,6 +314,36 @@ export const adminApi = {
 
   removeUserRateLimit: (tenantId: string): Promise<{ status: string; message: string }> =>
     api.delete(`/api/v1/admin/rate-limits/${tenantId}`).then(res => res.data),
+
+  // Get tenant analytics
+  getTenantAnalytics: (days?: number): Promise<{
+    status: string;
+    data: {
+      latest_created_tenants: Array<{
+        id: string;
+        email: string;
+        created_at: string | null;
+        is_active: boolean;
+        is_verified: boolean;
+      }>;
+      recently_active_tenants: Array<{
+        id: string;
+        email: string;
+        last_activity: string | null;
+        is_active: boolean;
+        is_verified: boolean;
+      }>;
+      creation_trend: Array<{
+        date: string;
+        count: number;
+      }>;
+      usage_trend: Array<{
+        date: string;
+        count: number;
+      }>;
+    };
+  }> =>
+    api.get('/api/v1/admin/tenant-analytics', { params: { days } }).then(res => res.data),
 };
 
 // Online test model API - Use proxy model configuration
