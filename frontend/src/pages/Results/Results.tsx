@@ -471,8 +471,8 @@ const Results: React.FC = () => {
   ]
 
   return (
-    <div className="h-full flex flex-col gap-4">
-      <h2 className="text-3xl font-bold tracking-tight">{t('results.title')}</h2>
+    <div className="h-full flex flex-col gap-4 overflow-hidden">
+      <h2 className="text-3xl font-bold tracking-tight flex-shrink-0">{t('results.title')}</h2>
 
       {/* Filters Card */}
       <Card className="flex-shrink-0">
@@ -620,7 +620,7 @@ const Results: React.FC = () => {
 
       {/* Results Table */}
       <Card className="flex-1 flex flex-col overflow-hidden min-h-0">
-        <CardContent className="p-0 flex-1 overflow-hidden">
+        <CardContent className="p-0 flex-1 overflow-hidden flex flex-col">
           <DataTable
             columns={columns}
             data={data?.items || []}

@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [5.0.6] - 2025-12-31
+## [5.0.7] - 2025-12-31
 
 ### 🎨 Major UI Overhaul - Enterprise SaaS Design System
 
