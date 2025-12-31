@@ -559,23 +559,23 @@ const UserManagement: React.FC = () => {
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      <Tabs defaultValue="users" className="w-full">
-        <TabsList>
+    <div className="h-full flex flex-col gap-6">
+      <Tabs defaultValue="analytics" className="w-full h-full flex flex-col">
+        <TabsList className="flex-shrink-0">
+          <TabsTrigger value="analytics" className="gap-2">
+              <TrendingUp className="h-4 w-4" />
+              {t('admin.analytics')}
+            </TabsTrigger>
           <TabsTrigger value="users" className="gap-2">
             <User className="h-4 w-4" />
             {t('admin.tenantManagement')}
           </TabsTrigger>
-          <TabsTrigger value="analytics" className="gap-2">
-            <TrendingUp className="h-4 w-4" />
-            {t('admin.analytics')}
-          </TabsTrigger>
         </TabsList>
 
         {/* User Management Tab */}
-        <TabsContent value="users" className="mt-6">
-          <Card>
-            <CardHeader>
+        <TabsContent value="users" className="mt-6 flex-1 flex flex-col min-h-0">
+          <Card className="flex-1 flex flex-col overflow-hidden min-h-0">
+            <CardHeader className="flex-shrink-0">
               <div className="flex justify-between items-start">
                 <div className="space-y-2">
                   <CardTitle className="flex items-center gap-2">
@@ -607,9 +607,9 @@ const UserManagement: React.FC = () => {
                 </div>
               </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="flex-1 flex flex-col overflow-hidden min-h-0 p-0">
               {/* Search box */}
-              <div className="mb-4">
+              <div className="p-6 pb-4 flex-shrink-0">
                 <Input
                   placeholder={t('admin.searchTenantPlaceholder')}
                   value={searchText}
@@ -618,58 +618,61 @@ const UserManagement: React.FC = () => {
                 />
               </div>
 
-              <DataTable
-                columns={columns}
-                data={filteredUsers}
-                loading={loading}
-                pageCount={Math.ceil(total / pageSize)}
-                currentPage={currentPage}
-                pageSize={pageSize}
-                onPageChange={handlePageChange}
-                onPageSizeChange={handlePageSizeChange}
-              />
+              <div className="flex-1 overflow-hidden px-6 pb-6">
+                <DataTable
+                  columns={columns}
+                  data={filteredUsers}
+                  loading={loading}
+                  pageCount={Math.ceil(total / pageSize)}
+                  currentPage={currentPage}
+                  pageSize={pageSize}
+                  onPageChange={handlePageChange}
+                  onPageSizeChange={handlePageSizeChange}
+                  fillHeight={true}
+                />
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
 
         {/* Analytics Tab */}
         <TabsContent value="analytics" className="mt-6">
-          <div className="flex flex-col gap-6">
+          <div className="flex flex-col gap-4">
             {/* Analytics Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Latest Created Tenants */}
         <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Users className="h-5 w-5" />
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Users className="h-4 w-4" />
               {t('admin.latestCreatedTenants')}
             </CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="pt-0">
             {analyticsLoading ? (
-              <div className="flex items-center justify-center h-48">
-                <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
+              <div className="flex items-center justify-center h-32">
+                <div className="h-6 w-6 animate-spin rounded-full border-3 border-primary border-t-transparent"></div>
               </div>
             ) : tenantAnalytics?.latest_created_tenants.length ? (
-              <div className="space-y-3">
-                {tenantAnalytics.latest_created_tenants.slice(0, 5).map((tenant) => (
+              <div className="space-y-2 max-h-56 overflow-y-auto">
+                {tenantAnalytics.latest_created_tenants.map((tenant) => (
                   <div
                     key={tenant.id}
-                    className="flex items-center justify-between p-2 border rounded-lg hover:bg-gray-50"
+                    className="flex items-center justify-between p-1.5 border rounded-md hover:bg-gray-50 text-sm"
                   >
-                    <div className="flex-1">
-                      <div className="font-medium">{tenant.email}</div>
-                      <div className="text-sm text-gray-500">
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-sm truncate">{tenant.email}</div>
+                      <div className="text-xs text-gray-500">
                         {tenant.created_at
                           ? new Date(tenant.created_at).toLocaleString()
                           : '-'}
                       </div>
                     </div>
-                    <div className="flex gap-2">
-                      <Badge variant={tenant.is_active ? 'default' : 'destructive'}>
+                    <div className="flex gap-1.5 flex-shrink-0 ml-2">
+                      <Badge variant={tenant.is_active ? 'default' : 'destructive'} className="text-xs px-1.5 py-0">
                         {tenant.is_active ? t('admin.active') : t('admin.inactive')}
                       </Badge>
-                      <Badge variant={tenant.is_verified ? 'default' : 'secondary'}>
+                      <Badge variant={tenant.is_verified ? 'default' : 'secondary'} className="text-xs px-1.5 py-0">
                         {tenant.is_verified ? t('admin.verified') : t('admin.unverified')}
                       </Badge>
                     </div>
@@ -677,45 +680,45 @@ const UserManagement: React.FC = () => {
                 ))}
               </div>
             ) : (
-              <div className="text-center text-gray-500 py-8">{t('admin.noData')}</div>
+              <div className="text-center text-gray-500 py-6 text-sm">{t('admin.noData')}</div>
             )}
           </CardContent>
         </Card>
 
         {/* Recently Active Tenants */}
         <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Clock className="h-5 w-5" />
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Clock className="h-4 w-4" />
               {t('admin.recentlyActiveTenants')}
             </CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="pt-0">
             {analyticsLoading ? (
-              <div className="flex items-center justify-center h-48">
-                <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
+              <div className="flex items-center justify-center h-32">
+                <div className="h-6 w-6 animate-spin rounded-full border-3 border-primary border-t-transparent"></div>
               </div>
             ) : tenantAnalytics?.recently_active_tenants.length ? (
-              <div className="space-y-3">
-                {tenantAnalytics.recently_active_tenants.slice(0, 5).map((tenant) => (
+              <div className="space-y-2 max-h-56 overflow-y-auto">
+                {tenantAnalytics.recently_active_tenants.map((tenant) => (
                   <div
                     key={tenant.id}
-                    className="flex items-center justify-between p-2 border rounded-lg hover:bg-gray-50"
+                    className="flex items-center justify-between p-1.5 border rounded-md hover:bg-gray-50 text-sm"
                   >
-                    <div className="flex-1">
-                      <div className="font-medium">{tenant.email}</div>
-                      <div className="text-sm text-gray-500">
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-sm truncate">{tenant.email}</div>
+                      <div className="text-xs text-gray-500">
                         {t('admin.lastActivity')}:{' '}
                         {tenant.last_activity
                           ? new Date(tenant.last_activity).toLocaleString()
                           : '-'}
                       </div>
                     </div>
-                    <div className="flex gap-2">
-                      <Badge variant={tenant.is_active ? 'default' : 'destructive'}>
+                    <div className="flex gap-1.5 flex-shrink-0 ml-2">
+                      <Badge variant={tenant.is_active ? 'default' : 'destructive'} className="text-xs px-1.5 py-0">
                         {tenant.is_active ? t('admin.active') : t('admin.inactive')}
                       </Badge>
-                      <Badge variant={tenant.is_verified ? 'default' : 'secondary'}>
+                      <Badge variant={tenant.is_verified ? 'default' : 'secondary'} className="text-xs px-1.5 py-0">
                         {tenant.is_verified ? t('admin.verified') : t('admin.unverified')}
                       </Badge>
                     </div>
@@ -723,34 +726,34 @@ const UserManagement: React.FC = () => {
                 ))}
               </div>
             ) : (
-              <div className="text-center text-gray-500 py-8">{t('admin.noData')}</div>
+              <div className="text-center text-gray-500 py-6 text-sm">{t('admin.noData')}</div>
             )}
           </CardContent>
         </Card>
       </div>
 
             {/* Trend Charts */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Card>
-                <CardContent className="pt-6">
+                <CardContent className="pt-4 pb-4">
                   {analyticsLoading ? (
-                    <div className="flex items-center justify-center h-64">
-                      <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
+                    <div className="flex items-center justify-center h-48">
+                      <div className="h-6 w-6 animate-spin rounded-full border-3 border-primary border-t-transparent"></div>
                     </div>
                   ) : (
-                    <ReactECharts option={getCreationTrendOption()} style={{ height: 300 }} />
+                    <ReactECharts option={getCreationTrendOption()} style={{ height: 250 }} />
                   )}
                 </CardContent>
               </Card>
 
               <Card>
-                <CardContent className="pt-6">
+                <CardContent className="pt-4 pb-4">
                   {analyticsLoading ? (
-                    <div className="flex items-center justify-center h-64">
-                      <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
+                    <div className="flex items-center justify-center h-48">
+                      <div className="h-6 w-6 animate-spin rounded-full border-3 border-primary border-t-transparent"></div>
                     </div>
                   ) : (
-                    <ReactECharts option={getUsageTrendOption()} style={{ height: 300 }} />
+                    <ReactECharts option={getUsageTrendOption()} style={{ height: 250 }} />
                   )}
                 </CardContent>
               </Card>
