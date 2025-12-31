@@ -239,6 +239,7 @@
     "proxyModelProtectedResponse": "🤖 代理模型护栏保护响应",
     "modelResponse": "模型响应：",
     "presetTestCases": "预设测试用例",
+    "clickToExpand": "点击展开",
     "testCaseLoaded": "已加载测试用例: {{name}}",
     "promptAttackExample": "提示词攻击示例",
     "promptAttackExampleDesc": "典型的提示词注入攻击尝试",

@@ -242,6 +242,7 @@
     "proxyModelProtectedResponse": "🤖 Proxy Model Guardrail Protected Response",
     "modelResponse": "Model Response:",
     "presetTestCases": "Preset Test Cases",
+    "clickToExpand": "Click to expand",
     "testCaseLoaded": "Test case loaded: {{name}}",
     "promptAttackExample": "Prompt Injection Example",
     "promptAttackExampleDesc": "Typical prompt injection attack attempt",

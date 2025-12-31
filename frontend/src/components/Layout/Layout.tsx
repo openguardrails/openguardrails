@@ -548,7 +548,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
         {/* Content */}
         <main className="flex-1 overflow-y-auto p-4 lg:p-6">
-          <div className="h-full min-h-0 bg-white rounded-md border border-slate-200 p-6 shadow-sm">
+          <div className="bg-white rounded-md border border-slate-200 p-6 shadow-sm">
             {children}
           </div>
         </main>

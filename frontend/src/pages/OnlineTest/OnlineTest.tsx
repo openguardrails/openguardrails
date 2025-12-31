@@ -380,14 +380,13 @@ const OnlineTest: React.FC = () => {
   }
 
   return (
-    <div>
+    <div className="max-w-5xl mx-auto">
       <h1 className="text-2xl font-bold mb-2">{t('onlineTest.title')}</h1>
       <p className="text-slate-600 mb-6">{t('onlineTest.description')}</p>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left side: Test input area */}
-        <div className="lg:col-span-2 space-y-6">
-          <Card>
+      <div className="space-y-6">
+        {/* Test input area */}
+        <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
                 <CardTitle>{t('onlineTest.testInput')}</CardTitle>
@@ -416,6 +415,46 @@ const OnlineTest: React.FC = () => {
                 rows={6}
                 className="font-mono text-sm"
               />
+
+              {/* Preset test cases */}
+              <Collapsible>
+                <CollapsibleTrigger asChild>
+                  <Button variant="outline" size="sm" className="w-full justify-between">
+                    <span>{t('onlineTest.presetTestCases')}</span>
+                    <span className="text-xs text-slate-500">{t('onlineTest.clickToExpand')}</span>
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="mt-3 space-y-3">
+                  <Select defaultValue="security" onValueChange={(value) => setSelectedCategory(value)}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="security">{t('onlineTest.categories.security')}</SelectItem>
+                      <SelectItem value="dataLeak">{t('onlineTest.categories.dataLeak')}</SelectItem>
+                      <SelectItem value="professional">{t('onlineTest.categories.professional')}</SelectItem>
+                      <SelectItem value="safe">{t('onlineTest.categories.safe')}</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    {testCasesByCategory[selectedCategory as keyof typeof testCasesByCategory].map((testCase) => (
+                      <Card key={testCase.id} className="cursor-pointer hover:bg-slate-50 transition-colors" onClick={() => useTestCase(testCase)}>
+                        <CardContent className="p-3 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <p className="text-sm font-semibold">{testCase.name}</p>
+                            <span className="px-2 py-0.5 text-xs rounded bg-blue-100 text-blue-800 border border-blue-200">{testCase.category}</span>
+                          </div>
+                          <p className="text-xs text-slate-600">{testCase.description}</p>
+                          <span className={`inline-block px-2 py-0.5 text-xs rounded border ${getRiskColor(testCase.expectedRisk || '')}`}>
+                            {t('onlineTest.expected')} {testCase.expectedRisk}
+                          </span>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
 
               {/* Proxy model selection */}
               {inputType === 'question' && (
@@ -514,15 +553,15 @@ const OnlineTest: React.FC = () => {
                 </Button>
               </div>
             </CardContent>
-          </Card>
+        </Card>
 
-          {/* Test Result */}
-          {testResult && (
-            <Card>
-              <CardHeader>
-                <CardTitle>{t('onlineTest.testResult')}</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-6">
+        {/* Test Result */}
+        {testResult && (
+          <Card>
+            <CardHeader>
+              <CardTitle>{t('onlineTest.testResult')}</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
                 {/* Guardrail detection result */}
                 <div>
                   <h4 className="text-base font-semibold mb-4">{t('onlineTest.guardrailResult')}</h4>
@@ -720,50 +759,9 @@ const OnlineTest: React.FC = () => {
                     </div>
                   </div>
                 )}
-              </CardContent>
-            </Card>
-          )}
-        </div>
-
-        {/* Right side: Preset test cases */}
-        <div>
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">{t('onlineTest.presetTestCases')}</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <Select defaultValue="security" onValueChange={(value) => setSelectedCategory(value)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="security">{t('onlineTest.categories.security')}</SelectItem>
-                  <SelectItem value="dataLeak">{t('onlineTest.categories.dataLeak')}</SelectItem>
-                  <SelectItem value="professional">{t('onlineTest.categories.professional')}</SelectItem>
-                  <SelectItem value="safe">{t('onlineTest.categories.safe')}</SelectItem>
-                </SelectContent>
-              </Select>
-
-              <div className="max-h-[600px] overflow-y-auto pr-1 space-y-2">
-                {testCasesByCategory[selectedCategory as keyof typeof testCasesByCategory].map((testCase) => (
-                  <Card key={testCase.id} className="cursor-pointer hover:bg-slate-50 transition-colors" onClick={() => useTestCase(testCase)}>
-                    <CardContent className="p-3 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm font-semibold">{testCase.name}</p>
-                        <span className="px-2 py-0.5 text-xs rounded bg-blue-100 text-blue-800 border border-blue-200">{testCase.category}</span>
-                      </div>
-                      <p className="text-xs text-slate-600">{testCase.description}</p>
-                      <p className="text-xs bg-slate-100 p-2 rounded">{testCase.content.length > 50 ? testCase.content.substring(0, 50) + '...' : testCase.content}</p>
-                      <span className={`inline-block px-2 py-0.5 text-xs rounded border ${getRiskColor(testCase.expectedRisk || '')}`}>
-                        {t('onlineTest.expected')} {testCase.expectedRisk}
-                      </span>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
             </CardContent>
           </Card>
-        </div>
+        )}
       </div>
     </div>
   )
