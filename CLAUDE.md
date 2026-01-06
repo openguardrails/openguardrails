@@ -158,37 +158,37 @@ openguardrails/
 
 **Data Leakage Disposal Service** (`backend/services/data_leakage_disposal_service.py`):
 - **Block**: Reject request completely (default for high risk)
-- **Switch Safe Model**: Redirect to data-safe model (default for medium risk)
+- **Switch Private Model**: Redirect to data-private model (default for medium risk)
 - **Anonymize**: Replace sensitive entities with placeholders (default for low risk)
 - **Pass**: Allow request, log only (audit mode)
 
-### Safe Model System
+### Private Model System
 
 **Model Safety Attributes** (`upstream_api_config` table):
 - `is_data_safe`: Mark as safe for sensitive data (on-premise, private cloud, air-gapped)
-- `is_default_safe_model`: Tenant-wide default safe model
-- `safe_model_priority`: Priority ranking (0-100, higher = preferred)
+- `is_default_private_model`: Tenant-wide default private model
+- `private_model_priority`: Priority ranking (0-100, higher = preferred)
 
-**Safe Model Selection Priority**:
-1. Application policy `safe_model_id` (explicit configuration)
-2. Tenant default safe model (`is_default_safe_model = true`)
-3. Highest priority safe model (`safe_model_priority DESC`)
+**Private Model Selection Priority**:
+1. Application policy `private_model_id` (explicit configuration)
+2. Tenant default private model (`is_default_private_model = true`)
+3. Highest priority private model (`private_model_priority DESC`)
 
 ### Application-Level Policies
 
 **Table**: `application_data_leakage_policy`
 
 **Configuration per application**:
-- `high_risk_action`: block | switch_safe_model | anonymize | pass
-- `medium_risk_action`: block | switch_safe_model | anonymize | pass
-- `low_risk_action`: block | switch_safe_model | anonymize | pass
-- `safe_model_id`: Override safe model for this app (nullable)
+- `high_risk_action`: block | switch_private_model | anonymize | pass
+- `medium_risk_action`: block | switch_private_model | anonymize | pass
+- `low_risk_action`: block | switch_private_model | anonymize | pass
+- `private_model_id`: Override private model for this app (nullable)
 - `enable_format_detection`: Enable/disable format detection
 - `enable_smart_segmentation`: Enable/disable smart segmentation
 
 **Default Strategy**:
 - High Risk → `block`
-- Medium Risk → `switch_safe_model`
+- Medium Risk → `switch_private_model`
 - Low Risk → `anonymize`
 
 ### Performance Characteristics
@@ -232,7 +232,7 @@ openguardrails/
 - `/api/v1/auth/{login,register}` - Authentication
 - `/api/v1/config/{blacklist,whitelist,templates,ban-policy}` - Config
 - `/api/v1/config/data-leakage-policy` - Data leakage disposal policy (per-app)
-- `/api/v1/config/safe-models` - List available safe models
+- `/api/v1/config/private-models` - List available private models
 - `/api/v1/risk-config` - Risk types
 - `/api/v1/proxy/{keys,models}` - Proxy management (includes safety attributes)
 - `/api/v1/dashboard/stats` - Statistics

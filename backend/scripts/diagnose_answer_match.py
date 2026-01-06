@@ -1,6 +1,6 @@
 """
-诊断拒答答案匹配问题
-帮助用户理解为什么建议答案没有按照答案库来回答
+Diagnose answer match issue
+Help users understand why the suggested answer does not answer according to the answer library
 """
 import sys
 import os
@@ -14,17 +14,17 @@ from utils.logger import setup_logger
 logger = setup_logger()
 
 def diagnose_answer_match_issue():
-    """诊断答案匹配问题"""
+    """Diagnose answer match issue"""
     db = get_db_session()
     try:
-        # 获取所有知识库
+        # Get all knowledge bases
         kbs = db.query(KnowledgeBase).filter(KnowledgeBase.is_active == True).all()
         
         logger.info("=" * 80)
-        logger.info("拒答答案库匹配诊断报告")
+        logger.info("Rejection answer library matching diagnosis report")
         logger.info("=" * 80)
         
-        # 按应用分组显示
+        # Group by application
         app_kb_map = {}
         global_kbs = []
         
@@ -32,78 +32,78 @@ def diagnose_answer_match_issue():
             if kb.is_global:
                 global_kbs.append(kb)
             else:
-                app_id = str(kb.application_id) if kb.application_id else "无应用ID"
+                app_id = str(kb.application_id) if kb.application_id else "No application ID"
                 if app_id not in app_kb_map:
                     app_kb_map[app_id] = []
                 app_kb_map[app_id].append(kb)
         
-        # 显示全局知识库
+        # Display global knowledge base
         if global_kbs:
-            logger.info("\n🌐 全局知识库（所有应用可用）:")
+            logger.info("\n🌐 Global knowledge base (all applications available):")
             logger.info("-" * 80)
             for kb in global_kbs:
                 logger.info(f"  📚 KB #{kb.id} - {kb.name}")
-                logger.info(f"     类别: {kb.category}")
-                logger.info(f"     扫描器: {kb.scanner_type}:{kb.scanner_identifier}")
-                logger.info(f"     阈值: {kb.similarity_threshold}")
-                logger.info(f"     应用ID: {kb.application_id}")
+                logger.info(f"     Category: {kb.category}")
+                logger.info(f"     Scanner: {kb.scanner_type}:{kb.scanner_identifier}")
+                logger.info(f"     Threshold: {kb.similarity_threshold}")
+                logger.info(f"     Application ID: {kb.application_id}")
         
-        # 显示每个应用的专属知识库
+        # Display each application's exclusive knowledge base
         if app_kb_map:
-            logger.info("\n📱 应用专属知识库:")
+            logger.info("\n📱 Application exclusive knowledge base:")
             logger.info("-" * 80)
             for app_id, kb_list in app_kb_map.items():
-                # 获取应用信息
+                # Get application information
                 app = db.query(Application).filter(Application.id == app_id).first()
-                app_name = app.name if app else "未知应用"
+                app_name = app.name if app else "Unknown application"
                 
-                logger.info(f"\n  应用: {app_name}")
-                logger.info(f"  应用ID: {app_id}")
-                logger.info(f"  知识库数量: {len(kb_list)}")
+                logger.info(f"\n   Application: {app_name}")
+                logger.info(f"   Application ID: {app_id}")
+                logger.info(f"   Knowledge base number: {len(kb_list)}")
                 
                 for kb in kb_list:
                     logger.info(f"\n    📚 KB #{kb.id} - {kb.name}")
-                    logger.info(f"       类别: {kb.category}")
-                    logger.info(f"       扫描器: {kb.scanner_type}:{kb.scanner_identifier}")
-                    logger.info(f"       阈值: {kb.similarity_threshold}")
+                    logger.info(f"        Category: {kb.category}")
+                    logger.info(f"        Scanner: {kb.scanner_type}:{kb.scanner_identifier}")
+                    logger.info(f"        Threshold: {kb.similarity_threshold}")
         
         logger.info("\n" + "=" * 80)
-        logger.info("问题排查提示")
+        logger.info("Problem diagnosis tips")
         logger.info("=" * 80)
-        logger.info("\n如果建议答案没有按照答案库来回答，可能的原因：")
-        logger.info("\n1. 🎯 应用ID不匹配")
-        logger.info("   - 知识库关联了特定应用，但测试时使用的是不同应用")
-        logger.info("   - 解决方法：确保在线测试时选择了正确的应用")
-        logger.info("   - 或者将知识库设置为全局（is_global=True）")
+        logger.info("\nIf the suggested answer does not answer according to the answer library, the possible reasons are:")
+        logger.info("\n1. 🎯 Application ID mismatch")
+        logger.info("   - The knowledge base is associated with a specific application, but the test is using a different application")
+        logger.info("   - Solution: Ensure that the correct application is selected during online testing")
+        logger.info("   - Or set the knowledge base to global (is_global=True)")
         
-        logger.info("\n2. 🔍 扫描器标识不匹配")
-        logger.info("   - 知识库的 scanner_type:scanner_identifier 与检测出的不一致")
-        logger.info("   - 解决方法：检查知识库的扫描器配置是否正确")
+        logger.info("\n2. 🔍 Scanner identifier mismatch")
+        logger.info("   - The knowledge base's scanner_type:scanner_identifier does not match the detected one")
+        logger.info("   - Solution: Check if the knowledge base's scanner configuration is correct")
         
-        logger.info("\n3. 📊 相似度阈值过高")
-        logger.info("   - 用户问题与知识库中的问题相似度低于阈值")
-        logger.info("   - 解决方法：降低相似度阈值（如从 0.9 改为 0.7）")
+        logger.info("\n3. 📊 Similarity threshold too high")
+        logger.info("   - The similarity between the user's question and the question in the knowledge base is below the threshold")
+        logger.info("   - Solution: Lower the similarity threshold (e.g., from 0.9 to 0.7)")
         
-        logger.info("\n4. ❌ 知识库未激活")
-        logger.info("   - 知识库的 is_active 为 False")
-        logger.info("   - 解决方法：激活知识库")
+        logger.info("\n4. ❌ Knowledge base not activated")
+        logger.info("   - The knowledge base's is_active is False")
+        logger.info("   - Solution: Activate the knowledge base")
         
-        logger.info("\n5. 📝 知识库内容不匹配")
-        logger.info("   - 知识库中没有与用户问题相似的问答对")
-        logger.info("   - 解决方法：补充知识库内容或检查向量文件")
+        logger.info("\n5. 📝 Knowledge base content mismatch")
+        logger.info("   - There is no question-answer pair in the knowledge base that is similar to the user's question")
+        logger.info("   - Solution: Supplement the knowledge base content or check the vector file")
         
         logger.info("\n" + "=" * 80)
-        logger.info("下一步操作建议")
+        logger.info("Next operation suggestions")
         logger.info("=" * 80)
-        logger.info("\n1. 查看在线测试日志：检查实际调用时使用的 application_id")
+        logger.info("\n1. Check online test logs: Check the application_id used during actual call")
         logger.info("   tail -f data/logs/detection.log | grep 'Knowledge base search'")
         
-        logger.info("\n2. 测试知识库搜索：")
-        logger.info("   python scripts/test_kb_search.py --kb-id <知识库ID> --query \"您的测试问题\"")
+        logger.info("\n2. Test knowledge base search:")
+        logger.info("   python scripts/test_kb_search.py --kb-id <Knowledge base ID> --query \"Your test question\"")
         
-        logger.info("\n3. 如果是应用ID不匹配，可以：")
-        logger.info("   - 方法A：将知识库设置为全局（推荐）")
-        logger.info("   - 方法B：确保测试时选择了正确的应用")
+        logger.info("\n3. If the application ID mismatch, you can:")
+        logger.info("   - Method A: Set the knowledge base to global (recommended)")
+        logger.info("   - Method B: Ensure that the correct application is selected during testing")
         
     finally:
         db.close()

@@ -32,7 +32,7 @@ const (
 	DefaultRequestJsonPath  = "messages.@reverse.0.content"
 	DefaultResponseJsonPath = "choices.0.message.content"
 	DefaultDenyCode         = 200
-	DefaultDenyMessage      = "很抱歉,我无法回答您的问题"
+	DefaultDenyMessage      = "Sorry, I can't answer your question."
 	DefaultTimeout          = 5000
 
 	OpenAIResponseFormat = `{"id": "%s","object":"chat.completion","model":"from-openguardrails","choices":[{"index":0,"message":{"role":"assistant","content":"%s"},"logprobs":null,"finish_reason":"stop"}],"usage":{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}}`

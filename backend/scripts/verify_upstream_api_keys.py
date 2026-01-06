@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-验证 Upstream API Key 配置的脚本
-帮助诊断是否错误地使用了 xxai API key 作为 Upstream API Key
+Verify Upstream API Key configuration script
+Help diagnose whether the xxai API key is used as an Upstream API Key incorrectly
 """
 
 import sys
@@ -30,7 +30,7 @@ def decrypt_api_key(encrypted_api_key: str, cipher_suite) -> str:
 
 def main():
     print("=" * 80)
-    print("验证 Upstream API Key 配置")
+    print("Verify Upstream API Key configuration")
     print("=" * 80)
     print()
     
@@ -39,7 +39,7 @@ def main():
         encryption_key = get_encryption_key()
         cipher_suite = Fernet(encryption_key)
     except Exception as e:
-        print(f"❌ 无法获取加密密钥: {e}")
+        print(f"❌ Failed to get encryption key: {e}")
         return 1
     
     # Query all upstream API configurations
@@ -48,18 +48,18 @@ def main():
         configs = db.query(UpstreamApiConfig).all()
         
         if not configs:
-            print("📝 没有找到任何 Upstream API 配置")
+            print("📝 No Upstream API configurations found")
             return 0
         
-        print(f"找到 {len(configs)} 个 Upstream API 配置：\n")
+        print(f"Found {len(configs)} Upstream API configurations:\n")
         
         issues_found = False
         
         for config in configs:
-            print(f"配置名称: {config.config_name}")
+            print(f"Configuration name: {config.config_name}")
             print(f"  UUID: {config.id}")
-            print(f"  上游 API URL: {config.api_base_url}")
-            print(f"  租户 ID: {config.tenant_id}")
+            print(f"  Upstream API URL: {config.api_base_url}")
+            print(f"  Tenant ID: {config.tenant_id}")
             
             # Decrypt and check API key
             try:
@@ -71,39 +71,39 @@ def main():
                 else:
                     masked_key = "***"
                 
-                print(f"  解密后的 API Key: {masked_key}")
+                print(f"  Decrypted API Key: {masked_key}")
                 
                 # Check if the key looks like an xxai key (potential misconfiguration)
                 if decrypted_key.startswith('sk-xxai-'):
-                    print(f"  ⚠️  警告: 这个 API Key 看起来像 OpenGuardrails 平台的 API Key (sk-xxai-)")
-                    print(f"      Upstream API Key 应该是上游服务（如 OpenAI）的 API Key")
-                    print(f"      而不是用于访问 OpenGuardrails 平台的 API Key")
+                    print(f"  ⚠️  Warning: This API Key looks like an OpenGuardrails platform API Key (sk-xxai-)")
+                    print(f"      Upstream API Key should be the API Key for the upstream service (e.g. OpenAI)")
+                    print(f"      Not the API Key for accessing the OpenGuardrails platform")
                     issues_found = True
                 elif decrypted_key.startswith('sk-'):
-                    print(f"  ✓ API Key 格式正常 (以 sk- 开头)")
+                    print(f"  ✓ API Key format is normal (starts with sk-)")
                 else:
-                    print(f"  ℹ️  API Key 格式: 其他格式")
+                    print(f"  ℹ️  API Key format: other format")
                 
             except Exception as e:
-                print(f"  ❌ 解密失败: {e}")
+                print(f"  ❌  Decryption failed: {e}")
                 issues_found = True
             
             print()
         
         if issues_found:
             print("=" * 80)
-            print("⚠️  发现潜在的配置问题！")
+            print("⚠️  Found potential configuration issues!")
             print()
-            print("说明：")
-            print("  • OpenGuardrails API Key (sk-xxai-xxx)：用于客户端访问 OpenGuardrails 平台")
-            print("  • Upstream API Key (如 sk-xxx)：存储在配置中，用于 OpenGuardrails 调用上游服务")
+            print("Explanation:")
+            print("  • OpenGuardrails API Key (sk-xxai-xxx): Used for client access to the OpenGuardrails platform")
+            print("  • Upstream API Key (e.g. sk-xxx): Stored in the configuration, used for OpenGuardrails to call the upstream service")
             print()
-            print("如果你错误地将 sk-xxai- 格式的 key 配置为 Upstream API Key，")
-            print("请在管理界面重新编辑配置，填入正确的上游服务 API Key。")
+            print("If you incorrectly configured the key in the sk-xxai- format as an Upstream API Key,")
+            print("please edit the configuration in the management interface to fill in the correct upstream service API Key.")
             print("=" * 80)
         else:
             print("=" * 80)
-            print("✓ 所有配置看起来正常")
+            print("✓ All configurations look normal")
             print("=" * 80)
         
         return 1 if issues_found else 0

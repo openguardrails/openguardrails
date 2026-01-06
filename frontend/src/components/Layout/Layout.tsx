@@ -110,6 +110,16 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       key: '/security-gateway',
       icon: Shield,
       label: t('nav.securityGateway'),
+      children: [
+        {
+          key: '/security-gateway/providers',
+          label: t('nav.llmProviders'),
+        },
+        {
+          key: '/security-gateway/policy',
+          label: t('nav.securityPolicy'),
+        },
+      ],
     },
     {
       key: '/config',

@@ -160,7 +160,7 @@ def initialize_application_configs(db: Session, application_id: str, tenant_id: 
                         tenant_id=tenant_id,
                         application_id=application_id,
                         entity_type=template.entity_type,
-                        display_name=template.display_name,
+                        entity_type_name=template.entity_type_name,
                         category=template.category,
                         recognition_method=template.recognition_method,
                         recognition_config=(template.recognition_config or {}).copy() if isinstance(template.recognition_config, dict) else {},

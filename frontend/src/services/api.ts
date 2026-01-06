@@ -674,6 +674,24 @@ export const purchasesApi = {
 };
 
 export const dataLeakagePolicyApi = {
+  // Get tenant-level default policy
+  getTenantDefaults: (): Promise<any> =>
+    api.get('/api/v1/config/data-leakage-policy/tenant-defaults').then(res => res.data),
+
+  // Update tenant-level default policy
+  updateTenantDefaults: (policyData: {
+    default_input_high_risk_action: string;
+    default_input_medium_risk_action: string;
+    default_input_low_risk_action: string;
+    default_output_high_risk_anonymize: boolean;
+    default_output_medium_risk_anonymize: boolean;
+    default_output_low_risk_anonymize: boolean;
+    default_private_model_id?: string | null;
+    default_enable_format_detection: boolean;
+    default_enable_smart_segmentation: boolean;
+  }): Promise<any> =>
+    api.put('/api/v1/config/data-leakage-policy/tenant-defaults', policyData).then(res => res.data),
+
   // Get data leakage policy for current application
   getPolicy: (applicationId: string): Promise<any> =>
     api.get('/api/v1/config/data-leakage-policy', {
@@ -682,20 +700,67 @@ export const dataLeakagePolicyApi = {
 
   // Update data leakage policy
   updatePolicy: (applicationId: string, policyData: {
-    high_risk_action: string;
-    medium_risk_action: string;
-    low_risk_action: string;
-    safe_model_id?: string | null;
-    enable_format_detection: boolean;
-    enable_smart_segmentation: boolean;
+    input_high_risk_action?: string | null;
+    input_medium_risk_action?: string | null;
+    input_low_risk_action?: string | null;
+    output_high_risk_anonymize?: boolean | null;
+    output_medium_risk_anonymize?: boolean | null;
+    output_low_risk_anonymize?: boolean | null;
+    private_model_id?: string | null;
+    enable_format_detection?: boolean | null;
+    enable_smart_segmentation?: boolean | null;
   }): Promise<any> =>
     api.put('/api/v1/config/data-leakage-policy', policyData, {
       headers: { 'X-Application-ID': applicationId }
     }).then(res => res.data),
 
-  // Get available safe models
-  getSafeModels: (): Promise<any[]> =>
-    api.get('/api/v1/config/safe-models').then(res => res.data),
+  // Get available private models
+  getPrivateModels: (): Promise<any[]> =>
+    api.get('/api/v1/config/private-models').then(res => res.data),
+};
+
+// Gateway Policy API (unified security policy for Security Gateway)
+export const gatewayPolicyApi = {
+  // Get tenant-level default gateway policy
+  getTenantDefaults: (): Promise<any> =>
+    api.get('/api/v1/config/gateway-policy/tenant-defaults').then(res => res.data),
+
+  // Update tenant-level default gateway policy
+  updateTenantDefaults: (policyData: {
+    default_general_high_risk_action: string;
+    default_general_medium_risk_action: string;
+    default_general_low_risk_action: string;
+    default_input_high_risk_action: string;
+    default_input_medium_risk_action: string;
+    default_input_low_risk_action: string;
+    default_output_high_risk_action: string;
+    default_output_medium_risk_action: string;
+    default_output_low_risk_action: string;
+  }): Promise<any> =>
+    api.put('/api/v1/config/gateway-policy/tenant-defaults', policyData).then(res => res.data),
+
+  // Get gateway policy for current application
+  getPolicy: (applicationId: string): Promise<any> =>
+    api.get('/api/v1/config/gateway-policy', {
+      headers: { 'X-Application-ID': applicationId }
+    }).then(res => res.data),
+
+  // Update gateway policy
+  updatePolicy: (applicationId: string, policyData: {
+    general_high_risk_action?: string | null;
+    general_medium_risk_action?: string | null;
+    general_low_risk_action?: string | null;
+    input_high_risk_action?: string | null;
+    input_medium_risk_action?: string | null;
+    input_low_risk_action?: string | null;
+    output_high_risk_action?: string | null;
+    output_medium_risk_action?: string | null;
+    output_low_risk_action?: string | null;
+    private_model_id?: string | null;
+  }): Promise<any> =>
+    api.put('/api/v1/config/gateway-policy', policyData, {
+      headers: { 'X-Application-ID': applicationId }
+    }).then(res => res.data),
 };
 
 export default api;

@@ -1,7 +1,7 @@
 """
-修复知识库配置问题
-- 激活被禁用的知识库
-- 调整过高的相似度阈值
+Fix knowledge base configuration issues
+- Activate disabled knowledge bases
+- Adjust too high similarity threshold
 """
 import sys
 import os
@@ -15,27 +15,27 @@ from utils.logger import setup_logger
 logger = setup_logger()
 
 def fix_knowledge_base_config():
-    """修复知识库配置"""
+    """Fix knowledge base configuration"""
     db = get_db_session()
     try:
         changes_made = []
         
-        # 获取所有知识库
+        # Get all knowledge bases
         knowledge_bases = db.query(KnowledgeBase).all()
         
         for kb in knowledge_bases:
             changes = []
             
-            # 检查是否未激活
+            # Check if not activated
             if not kb.is_active:
                 kb.is_active = True
-                changes.append(f"激活知识库")
+                changes.append(f"Activate knowledge base")
             
-            # 检查相似度阈值是否过高
+            # Check if similarity threshold is too high
             if kb.similarity_threshold and kb.similarity_threshold > 0.8:
                 old_threshold = kb.similarity_threshold
                 kb.similarity_threshold = 0.7
-                changes.append(f"调整相似度阈值: {old_threshold} -> 0.7")
+                changes.append(f"Adjust similarity threshold: {old_threshold} -> 0.7")
             
             if changes:
                 db.commit()
@@ -44,21 +44,21 @@ def fix_knowledge_base_config():
         
         if changes_made:
             logger.info("=" * 60)
-            logger.info(f"✅ 已修复 {len(changes_made)} 个知识库的配置")
+            logger.info(f"✅ Successfully fixed {len(changes_made)} knowledge base configurations")
             for change in changes_made:
                 logger.info(f"  - {change}")
         else:
-            logger.info("✅ 所有知识库配置正常，无需修复")
+            logger.info("✅ All knowledge base configurations are normal, no need to fix")
             
     except Exception as e:
-        logger.error(f"修复失败: {e}")
+        logger.error(f"Fix failed: {e}")
         db.rollback()
         raise
     finally:
         db.close()
 
 if __name__ == "__main__":
-    logger.info("开始检查并修复知识库配置...")
+    logger.info("Start checking and fixing knowledge base configurations...")
     fix_knowledge_base_config()
-    logger.info("完成！")
+    logger.info("Done!")
 

@@ -1,11 +1,11 @@
 """
-重建知识库向量索引
-用于修复缺失或损坏的向量文件
+Rebuild knowledge base vector index
+Fix missing or damaged vector files
 """
 import sys
 import os
 
-# 添加父目录到路径
+# Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import glob
@@ -18,10 +18,10 @@ from utils.logger import setup_logger
 logger = setup_logger()
 
 def rebuild_vectors():
-    """重建所有缺失的向量文件"""
+    """Rebuild all missing vector files"""
     db = get_db_session()
     try:
-        # 获取所有知识库
+        # Get all knowledge bases
         knowledge_bases = db.query(KnowledgeBase).all()
         
         logger.info(f"Found {len(knowledge_bases)} knowledge bases in database")
@@ -34,7 +34,7 @@ def rebuild_vectors():
             kb_id = kb.id
             kb_name = kb.name
             
-            # 检查向量文件是否存在
+            # Check if vector file exists
             vector_file = knowledge_base_service.storage_path / f"kb_{kb_id}_vectors.pkl"
             
             if vector_file.exists():
@@ -42,7 +42,7 @@ def rebuild_vectors():
                 skipped_count += 1
                 continue
             
-            # 查找原始文件
+            # Find original file
             pattern = str(knowledge_base_service.storage_path / f"kb_{kb_id}_*.jsonl*")
             original_files = glob.glob(pattern)
             
@@ -51,21 +51,21 @@ def rebuild_vectors():
                 error_count += 1
                 continue
             
-            # 使用第一个匹配的文件
+            # Use the first matching file
             original_file = Path(original_files[0])
             logger.info(f"KB #{kb_id} ({kb_name}): Found original file {original_file.name}")
             
             try:
-                # 读取原始文件
+                # Read original file
                 with open(original_file, 'rb') as f:
                     file_content = f.read()
                 
-                # 解析JSONL
+                # Parse JSONL
                 logger.info(f"KB #{kb_id} ({kb_name}): Parsing JSONL...")
                 qa_pairs = knowledge_base_service.parse_jsonl_file(file_content)
                 logger.info(f"KB #{kb_id} ({kb_name}): Parsed {len(qa_pairs)} QA pairs")
                 
-                # 创建向量索引
+                # Create vector index
                 logger.info(f"KB #{kb_id} ({kb_name}): Creating vector index...")
                 vector_file_path = knowledge_base_service.create_vector_index(qa_pairs, kb_id)
                 logger.info(f"KB #{kb_id} ({kb_name}): ✅ Vector index created at {vector_file_path}")
@@ -77,7 +77,7 @@ def rebuild_vectors():
                 error_count += 1
                 continue
         
-        # 打印总结
+        # Print summary
         logger.info("=" * 60)
         logger.info("Rebuild Summary:")
         logger.info(f"  Total knowledge bases: {len(knowledge_bases)}")

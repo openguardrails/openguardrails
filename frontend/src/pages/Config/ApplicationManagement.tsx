@@ -154,27 +154,28 @@ const ApplicationManagement: React.FC = () => {
     setModalVisible(true)
   }
 
-  const handleDelete = (appId: string) => {
-    confirmDialog({
+  const handleDelete = async (appId: string) => {
+    const confirmed = await confirmDialog({
       title: t('applicationManagement.deleteConfirm'),
       confirmText: t('common.yes'),
       cancelText: t('common.no'),
       variant: 'destructive',
-      onConfirm: async () => {
-        try {
-          await api.delete(`/api/v1/applications/${appId}`)
-          toast.success(t('applicationManagement.deleteSuccess'))
-          fetchApplications()
-          refreshApplications()
-        } catch (error: any) {
-          if (error.response?.status === 400) {
-            toast.error(t('applicationManagement.cannotDeleteLast'))
-          } else {
-            toast.error(t('applicationManagement.deleteError'))
-          }
-        }
-      },
     })
+
+    if (confirmed) {
+      try {
+        await api.delete(`/api/v1/applications/${appId}`)
+        toast.success(t('applicationManagement.deleteSuccess'))
+        fetchApplications()
+        refreshApplications()
+      } catch (error: any) {
+        if (error.response?.status === 400) {
+          toast.error(t('applicationManagement.cannotDeleteLast'))
+        } else {
+          toast.error(t('applicationManagement.deleteError'))
+        }
+      }
+    }
   }
 
   const handleSubmit = async (values: ApplicationFormData) => {

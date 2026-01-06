@@ -30,29 +30,29 @@ This release introduces a comprehensive **Data Leakage Prevention (DLP) System**
 ##### 📋 **Application-Level DLP Policies**
 
 **Per-Application Configuration:**
-- `high_risk_action`: block | switch_safe_model | anonymize | pass
-- `medium_risk_action`: block | switch_safe_model | anonymize | pass
-- `low_risk_action`: block | switch_safe_model | anonymize | pass
-- `safe_model_id`: Override safe model for this application
+- `high_risk_action`: block | switch_private_model | anonymize | pass
+- `medium_risk_action`: block | switch_private_model | anonymize | pass
+- `low_risk_action`: block | switch_private_model | anonymize | pass
+- `private_model_id`: Override private model for this application
 - `enable_format_detection`: Enable/disable format detection
 - `enable_smart_segmentation`: Enable/disable smart segmentation
 
 **Default Strategy:**
 - High Risk → `block` (reject request completely)
-- Medium Risk → `switch_safe_model` (redirect to safe model)
+- Medium Risk → `switch_private_model` (redirect to private model)
 - Low Risk → `anonymize` (replace sensitive entities with placeholders)
 
-##### 🔒 **Safe Model System**
+##### 🔒 **Private Model System**
 
 **Model Safety Attributes** (in `upstream_api_config` table):
 - `is_data_safe`: Marks model as safe for sensitive data (on-premise, private cloud, air-gapped)
-- `is_default_safe_model`: Tenant-wide default safe model
-- `safe_model_priority`: Priority ranking (0-100, higher = preferred)
+- `is_default_private_model`: Tenant-wide default private model
+- `private_model_priority`: Priority ranking (0-100, higher = preferred)
 
 **Selection Priority:**
-1. Application policy `safe_model_id` (explicit configuration)
-2. Tenant default safe model (`is_default_safe_model = true`)
-3. Highest priority safe model (`safe_model_priority DESC`)
+1. Application policy `private_model_id` (explicit configuration)
+2. Tenant default private model (`is_default_private_model = true`)
+3. Highest priority private model (`private_model_priority DESC`)
 
 ##### 🔍 **Format Detection Service**
 
@@ -90,7 +90,7 @@ This release introduces a comprehensive **Data Leakage Prevention (DLP) System**
 | Action | Description | Default For |
 |--------|-------------|-------------|
 | `block` | Reject request completely | High Risk |
-| `switch_safe_model` | Redirect to data-safe model | Medium Risk |
+| `switch_private_model` | Redirect to data-private model | Medium Risk |
 | `anonymize` | Replace entities with placeholders | Low Risk |
 | `pass` | Allow request, log only | Audit Mode |
 
@@ -103,8 +103,8 @@ POST   /api/v1/config/data-leakage-policy          # Create policy
 PUT    /api/v1/config/data-leakage-policy          # Update policy
 DELETE /api/v1/config/data-leakage-policy          # Delete policy
 
-# Safe Model Management
-GET    /api/v1/config/safe-models                  # List safe models
+# Private Model Management
+GET    /api/v1/config/private-models                  # List private models
 ```
 
 #### Changed
@@ -131,7 +131,7 @@ GET    /api/v1/config/safe-models                  # List safe models
 - `application_data_leakage_policy` - Per-application DLP configuration
 
 **Updated Tables:**
-- `upstream_api_config` - Added safety attributes (`is_data_safe`, `is_default_safe_model`, `safe_model_priority`)
+- `upstream_api_config` - Added safety attributes (`is_data_safe`, `is_default_private_model`, `private_model_priority`)
 
 **Migration:** `038_data_leakage_refactor.sql`
 
@@ -174,7 +174,7 @@ docker exec openguardrails-postgres psql -U openguardrails -d openguardrails \
   -c "SELECT * FROM application_data_leakage_policy LIMIT 5;"
 ```
 
-**Default Policies:** Automatically created for all existing applications with default disposal strategies (High→block, Medium→switch_safe_model, Low→anonymize).
+**Default Policies:** Automatically created for all existing applications with default disposal strategies (High→block, Medium→switch_private_model, Low→anonymize).
 
 ---
 

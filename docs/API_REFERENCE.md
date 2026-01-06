@@ -1066,7 +1066,7 @@ Update data security entity configurations.
 
 ### Data Leakage Policy API
 
-Configure data leakage prevention disposal policies and safe model selection.
+Configure data leakage prevention disposal policies and private model selection.
 
 #### GET `/api/v1/config/data-leakage-policy`
 
@@ -1088,26 +1088,26 @@ X-Application-ID: {application_id}
   "id": "policy_xxx",
   "application_id": "app_xxx",
   "high_risk_action": "block",
-  "medium_risk_action": "switch_safe_model",
+  "medium_risk_action": "switch_private_model",
   "low_risk_action": "anonymize",
-  "safe_model": {
+  "private_model": {
     "id": "model_xxx",
     "config_name": "Enterprise Private Model",
     "provider": "openai",
     "model": "gpt-4",
     "is_data_safe": true,
-    "is_default_safe_model": true,
-    "safe_model_priority": 10
+    "is_default_private_model": true,
+    "private_model_priority": 10
   },
-  "available_safe_models": [
+  "available_private_models": [
     {
       "id": "model_xxx",
       "config_name": "Enterprise Private Model",
       "provider": "openai",
       "model": "gpt-4",
       "is_data_safe": true,
-      "is_default_safe_model": true,
-      "safe_model_priority": 10
+      "is_default_private_model": true,
+      "private_model_priority": 10
     }
   ],
   "enable_format_detection": true,
@@ -1119,13 +1119,13 @@ X-Application-ID: {application_id}
 
 **Disposal Actions**:
 - `block`: Block the request completely
-- `switch_safe_model`: Switch to a data-safe model (e.g., on-premise/private)
+- `switch_private_model`: Switch to a data-private model (e.g., on-premise/private)
 - `anonymize`: Anonymize sensitive data before sending
 - `pass`: Allow the request (record only)
 
 **Default Strategy**:
 - High Risk → `block`
-- Medium Risk → `switch_safe_model`
+- Medium Risk → `switch_private_model`
 - Low Risk → `anonymize`
 
 ---
@@ -1148,9 +1148,9 @@ X-Application-ID: {application_id}
 ```json
 {
   "high_risk_action": "block",
-  "medium_risk_action": "switch_safe_model",
+  "medium_risk_action": "switch_private_model",
   "low_risk_action": "anonymize",
-  "safe_model_id": "model_xxx",
+  "private_model_id": "model_xxx",
   "enable_format_detection": true,
   "enable_smart_segmentation": true
 }
@@ -1160,15 +1160,15 @@ X-Application-ID: {application_id}
 
 **Field Descriptions**:
 - `high_risk_action`, `medium_risk_action`, `low_risk_action`: Disposal action for each risk level
-- `safe_model_id`: Specific safe model to use (null = use tenant's default)
+- `private_model_id`: Specific private model to use (null = use tenant's default)
 - `enable_format_detection`: Auto-detect content format (JSON/YAML/CSV/Markdown) for optimization
 - `enable_smart_segmentation`: Intelligently segment content by format for better GenAI detection
 
 ---
 
-#### GET `/api/v1/config/safe-models`
+#### GET `/api/v1/config/private-models`
 
-List all available data-safe models for the tenant.
+List all available data-private models for the tenant.
 
 **Service**: Admin Service (Port 5000)
 
@@ -1184,8 +1184,8 @@ List all available data-safe models for the tenant.
     "provider": "openai",
     "model": "gpt-4",
     "is_data_safe": true,
-    "is_default_safe_model": true,
-    "safe_model_priority": 10
+    "is_default_private_model": true,
+    "private_model_priority": 10
   },
   {
     "id": "model_yyy",
@@ -1193,16 +1193,16 @@ List all available data-safe models for the tenant.
     "provider": "ollama",
     "model": "llama2",
     "is_data_safe": true,
-    "is_default_safe_model": false,
-    "safe_model_priority": 5
+    "is_default_private_model": false,
+    "private_model_priority": 5
   }
 ]
 ```
 
-**Safe Model Selection Priority**:
-1. Application-configured safe model (`safe_model_id` in policy)
-2. Tenant's default safe model (`is_default_safe_model = true`)
-3. Highest priority safe model (`safe_model_priority` DESC)
+**Private Model Selection Priority**:
+1. Application-configured private model (`private_model_id` in policy)
+2. Tenant's default private model (`is_default_private_model = true`)
+3. Highest priority private model (`private_model_priority` DESC)
 
 ---
 

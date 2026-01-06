@@ -80,7 +80,7 @@ class OnlineTestModelInfo(BaseModel):
     selected: bool = False  # Whether it is selected for online test
     model_name: Optional[str] = None  # Model name specified by user for testing
 
-    # 允许以 model_ 开头的字段名
+    # Allow fields to start with model_
     model_config = ConfigDict(protected_namespaces=())
 
 class UpdateModelSelectionRequest(BaseModel):

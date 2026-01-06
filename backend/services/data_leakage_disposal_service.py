@@ -1,7 +1,7 @@
 """
 Data Leakage Disposal Service
 
-Handles data leakage disposal policy management and safe model selection.
+Handles data leakage disposal policy management and private model selection.
 """
 
 import logging
@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 
 from database.models import (
+    TenantDataLeakagePolicy,
     ApplicationDataLeakagePolicy,
     UpstreamApiConfig,
     Application
@@ -23,7 +24,7 @@ class DataLeakageDisposalService:
     """Service for managing data leakage disposal policies"""
 
     # Valid disposal actions
-    VALID_ACTIONS = {'block', 'switch_safe_model', 'anonymize', 'pass'}
+    VALID_ACTIONS = {'block', 'switch_private_model', 'anonymize', 'pass'}
 
     # Risk levels
     RISK_LEVELS = {'high_risk', 'medium_risk', 'low_risk', 'no_risk'}
@@ -37,11 +38,48 @@ class DataLeakageDisposalService:
         """
         self.db = db
 
+    def get_tenant_policy(self, tenant_id: str) -> Optional[TenantDataLeakagePolicy]:
+        """
+        Get tenant's default data leakage policy
+
+        If policy doesn't exist, create a default one.
+
+        Args:
+            tenant_id: Tenant ID
+
+        Returns:
+            TenantDataLeakagePolicy or None if tenant not found
+        """
+        try:
+            # Check if policy exists
+            policy = self.db.query(TenantDataLeakagePolicy).filter(
+                TenantDataLeakagePolicy.tenant_id == tenant_id
+            ).first()
+
+            if policy:
+                return policy
+
+            # Policy doesn't exist - create default
+            logger.info(f"Creating default tenant policy for tenant {tenant_id}")
+
+            default_policy = TenantDataLeakagePolicy(tenant_id=tenant_id)
+            self.db.add(default_policy)
+            self.db.commit()
+            self.db.refresh(default_policy)
+
+            logger.info(f"Created default tenant policy for tenant {tenant_id}")
+            return default_policy
+
+        except Exception as e:
+            logger.error(f"Error getting tenant policy: {e}", exc_info=True)
+            self.db.rollback()
+            return None
+
     def get_disposal_policy(self, application_id: str) -> Optional[ApplicationDataLeakagePolicy]:
         """
         Get application's data leakage disposal policy
 
-        If policy doesn't exist, create a default one.
+        If policy doesn't exist, create a default one (with NULL overrides).
 
         Args:
             application_id: Application ID
@@ -58,7 +96,7 @@ class DataLeakageDisposalService:
             if policy:
                 return policy
 
-            # Policy doesn't exist - create default
+            # Policy doesn't exist - create default with NULL overrides (inherits from tenant)
             logger.info(f"Creating default disposal policy for application {application_id}")
 
             # Get application to find tenant_id
@@ -70,15 +108,11 @@ class DataLeakageDisposalService:
                 logger.error(f"Application {application_id} not found")
                 return None
 
-            # Create default policy
+            # Create default policy with NULL overrides (will inherit from tenant defaults)
             default_policy = ApplicationDataLeakagePolicy(
                 tenant_id=application.tenant_id,
                 application_id=application_id,
-                high_risk_action='block',
-                medium_risk_action='switch_safe_model',
-                low_risk_action='anonymize',
-                enable_format_detection=True,
-                enable_smart_segmentation=True
+                # All fields default to NULL = inherit from tenant
             )
 
             self.db.add(default_policy)
@@ -93,117 +127,151 @@ class DataLeakageDisposalService:
             self.db.rollback()
             return None
 
-    def get_disposal_action(self, application_id: str, risk_level: str) -> str:
+    def get_disposal_action(self, application_id: str, risk_level: str, direction: str = 'input') -> str:
         """
-        Get disposal action for a specific risk level
+        Get disposal action for a specific risk level and direction
 
         Args:
             application_id: Application ID
             risk_level: 'high_risk' | 'medium_risk' | 'low_risk' | 'no_risk'
+            direction: 'input' (default) or 'output'
 
         Returns:
-            Disposal action: 'block' | 'switch_safe_model' | 'anonymize' | 'pass'
+            For input: 'block' | 'switch_private_model' | 'anonymize' | 'pass'
+            For output: boolean converted to action ('anonymize' or 'pass')
         """
         if risk_level == 'no_risk':
             return 'pass'
 
-        policy = self.get_disposal_policy(application_id)
-        if not policy:
+        app_policy = self.get_disposal_policy(application_id)
+        if not app_policy:
             # Fallback to safe defaults if policy retrieval fails
             logger.warning(f"No policy found for application {application_id}, using defaults")
-            return {
-                'high_risk': 'block',
-                'medium_risk': 'switch_safe_model',
-                'low_risk': 'anonymize'
-            }.get(risk_level, 'block')
+            if direction == 'input':
+                return {
+                    'high_risk': 'block',
+                    'medium_risk': 'switch_private_model',
+                    'low_risk': 'anonymize'
+                }.get(risk_level, 'block')
+            else:  # output
+                # Default: anonymize high/medium, pass low
+                return 'anonymize' if risk_level in ['high_risk', 'medium_risk'] else 'pass'
 
-        # Map risk level to action
-        action_map = {
-            'high_risk': policy.high_risk_action,
-            'medium_risk': policy.medium_risk_action,
-            'low_risk': policy.low_risk_action
-        }
+        # Get tenant policy for defaults
+        tenant_policy = self.get_tenant_policy(str(app_policy.tenant_id))
+        if not tenant_policy:
+            logger.warning(f"No tenant policy found, using hardcoded defaults")
+            if direction == 'input':
+                return {
+                    'high_risk': 'block',
+                    'medium_risk': 'switch_private_model',
+                    'low_risk': 'anonymize'
+                }.get(risk_level, 'block')
+            else:
+                return 'anonymize' if risk_level in ['high_risk', 'medium_risk'] else 'pass'
+
+        if direction == 'input':
+            # Resolve input actions (use override if present, else tenant default)
+            action_map = {
+                'high_risk': app_policy.input_high_risk_action or tenant_policy.default_input_high_risk_action,
+                'medium_risk': app_policy.input_medium_risk_action or tenant_policy.default_input_medium_risk_action,
+                'low_risk': app_policy.input_low_risk_action or tenant_policy.default_input_low_risk_action
+            }
+        else:  # output
+            # Resolve output anonymization flags (use override if present, else tenant default)
+            anonymize_map = {
+                'high_risk': (app_policy.output_high_risk_anonymize
+                             if app_policy.output_high_risk_anonymize is not None
+                             else tenant_policy.default_output_high_risk_anonymize),
+                'medium_risk': (app_policy.output_medium_risk_anonymize
+                               if app_policy.output_medium_risk_anonymize is not None
+                               else tenant_policy.default_output_medium_risk_anonymize),
+                'low_risk': (app_policy.output_low_risk_anonymize
+                            if app_policy.output_low_risk_anonymize is not None
+                            else tenant_policy.default_output_low_risk_anonymize)
+            }
+            should_anonymize = anonymize_map.get(risk_level, False)
+            action = 'anonymize' if should_anonymize else 'pass'
+            logger.debug(f"Output disposal action for {risk_level}: {action}")
+            return action
 
         action = action_map.get(risk_level, 'block')
-        logger.debug(f"Disposal action for {risk_level}: {action}")
+        logger.debug(f"Input disposal action for {risk_level}: {action}")
         return action
 
-    def get_safe_model(
+    def get_private_model(
         self,
         application_id: str,
         tenant_id: str
     ) -> Optional[UpstreamApiConfig]:
         """
-        Get safe model for switching
+        Get private model for switching (Simplified design)
 
         Priority:
-        1. Application-configured safe model (policy.safe_model_id)
-        2. Tenant's default safe model (is_default_safe_model=True)
-        3. Tenant's highest priority safe model (by safe_model_priority DESC)
+        1. Application-configured private model (app_policy.private_model_id)
+        2. Tenant's default private model (is_default_private_model=True)
+        3. First available private model (fallback)
 
         Args:
             application_id: Application ID
             tenant_id: Tenant ID
 
         Returns:
-            UpstreamApiConfig or None if no safe model available
+            UpstreamApiConfig or None if no private model available
         """
         try:
             # Get application's disposal policy
-            policy = self.get_disposal_policy(application_id)
+            app_policy = self.get_disposal_policy(application_id)
 
-            # 1. Check if application has configured a specific safe model
-            if policy and policy.safe_model_id:
-                safe_model = self.db.query(UpstreamApiConfig).filter(
+            # 1. Check if application has configured a specific private model override
+            if app_policy and app_policy.private_model_id:
+                private_model = self.db.query(UpstreamApiConfig).filter(
                     and_(
-                        UpstreamApiConfig.id == policy.safe_model_id,
-                        UpstreamApiConfig.is_data_safe == True,
+                        UpstreamApiConfig.id == app_policy.private_model_id,
+                        UpstreamApiConfig.is_private_model == True,
                         UpstreamApiConfig.is_active == True
                     )
                 ).first()
 
-                if safe_model:
-                    logger.info(f"Using application-configured safe model: {safe_model.config_name}")
-                    return safe_model
+                if private_model:
+                    logger.info(f"Using application-configured private model: {private_model.config_name}")
+                    return private_model
                 else:
-                    logger.warning(f"Application's configured safe model {policy.safe_model_id} not found or inactive")
+                    logger.warning(f"Application's configured private model {app_policy.private_model_id} not found or inactive")
 
-            # 2. Check for tenant's default safe model
-            default_safe_model = self.db.query(UpstreamApiConfig).filter(
+            # 2. Check for tenant's default private model
+            default_private_model = self.db.query(UpstreamApiConfig).filter(
                 and_(
                     UpstreamApiConfig.tenant_id == tenant_id,
-                    UpstreamApiConfig.is_data_safe == True,
-                    UpstreamApiConfig.is_default_safe_model == True,
+                    UpstreamApiConfig.is_private_model == True,
+                    UpstreamApiConfig.is_default_private_model == True,
                     UpstreamApiConfig.is_active == True
                 )
             ).first()
 
-            if default_safe_model:
-                logger.info(f"Using tenant's default safe model: {default_safe_model.config_name}")
-                return default_safe_model
+            if default_private_model:
+                logger.info(f"Using tenant's default private model: {default_private_model.config_name}")
+                return default_private_model
 
-            # 3. Get highest priority safe model
-            priority_safe_model = self.db.query(UpstreamApiConfig).filter(
+            # 3. Fallback: Get first available private model
+            fallback_private_model = self.db.query(UpstreamApiConfig).filter(
                 and_(
                     UpstreamApiConfig.tenant_id == tenant_id,
-                    UpstreamApiConfig.is_data_safe == True,
+                    UpstreamApiConfig.is_private_model == True,
                     UpstreamApiConfig.is_active == True
                 )
-            ).order_by(
-                UpstreamApiConfig.safe_model_priority.desc(),
-                UpstreamApiConfig.created_at.asc()
-            ).first()
+            ).order_by(UpstreamApiConfig.created_at.asc()).first()
 
-            if priority_safe_model:
-                logger.info(f"Using highest priority safe model: {priority_safe_model.config_name}")
-                return priority_safe_model
+            if fallback_private_model:
+                logger.info(f"Using first available private model: {fallback_private_model.config_name}")
+                return fallback_private_model
 
-            # No safe model found
-            logger.warning(f"No safe model found for tenant {tenant_id}")
+            # No private model found
+            logger.warning(f"No private model found for tenant {tenant_id}")
             return None
 
         except Exception as e:
-            logger.error(f"Error getting safe model: {e}", exc_info=True)
+            logger.error(f"Error getting private model: {e}", exc_info=True)
             return None
 
     def validate_disposal_action(
@@ -232,19 +300,19 @@ class DataLeakageDisposalService:
         if action in {'pass', 'block', 'anonymize'}:
             return True, ""
 
-        # 'switch_safe_model' requires a safe model to be available
-        if action == 'switch_safe_model':
-            safe_model = self.get_safe_model(application_id, tenant_id)
-            if safe_model:
+        # 'switch_private_model' requires a private model to be available
+        if action == 'switch_private_model':
+            private_model = self.get_private_model(application_id, tenant_id)
+            if private_model:
                 return True, ""
             else:
-                return False, "No safe model configured. Please configure a data-safe model first."
+                return False, "No private model configured. Please configure a data-private model first."
 
         return True, ""
 
     def get_policy_settings(self, application_id: str) -> dict:
         """
-        Get policy settings including feature flags
+        Get policy settings including feature flags (resolved from app override or tenant default)
 
         Args:
             application_id: Application ID
@@ -252,40 +320,61 @@ class DataLeakageDisposalService:
         Returns:
             Dictionary with policy settings
         """
-        policy = self.get_disposal_policy(application_id)
+        app_policy = self.get_disposal_policy(application_id)
 
-        if not policy:
+        if not app_policy:
             return {
                 'enable_format_detection': True,
                 'enable_smart_segmentation': True
             }
 
+        # Get tenant policy for defaults
+        tenant_policy = self.get_tenant_policy(str(app_policy.tenant_id))
+
+        # Resolve values (use override if present, else tenant default)
+        enable_format_detection = (app_policy.enable_format_detection
+                                   if app_policy.enable_format_detection is not None
+                                   else (tenant_policy.default_enable_format_detection if tenant_policy else True))
+
+        enable_smart_segmentation = (app_policy.enable_smart_segmentation
+                                     if app_policy.enable_smart_segmentation is not None
+                                     else (tenant_policy.default_enable_smart_segmentation if tenant_policy else True))
+
         return {
-            'enable_format_detection': policy.enable_format_detection,
-            'enable_smart_segmentation': policy.enable_smart_segmentation
+            'enable_format_detection': enable_format_detection,
+            'enable_smart_segmentation': enable_smart_segmentation
         }
 
     def update_disposal_policy(
         self,
         application_id: str,
-        high_risk_action: Optional[str] = None,
-        medium_risk_action: Optional[str] = None,
-        low_risk_action: Optional[str] = None,
-        safe_model_id: Optional[str] = None,
+        input_high_risk_action: Optional[str] = None,
+        input_medium_risk_action: Optional[str] = None,
+        input_low_risk_action: Optional[str] = None,
+        output_high_risk_anonymize: Optional[bool] = None,
+        output_medium_risk_anonymize: Optional[bool] = None,
+        output_low_risk_anonymize: Optional[bool] = None,
+        private_model_id: Optional[str] = None,
         enable_format_detection: Optional[bool] = None,
         enable_smart_segmentation: Optional[bool] = None
     ) -> Tuple[bool, str, Optional[ApplicationDataLeakagePolicy]]:
         """
-        Update disposal policy
+        Update disposal policy (deprecated - use API endpoints directly)
+
+        This method is kept for backward compatibility but new code should use
+        the data_leakage_policy_api endpoints directly.
 
         Args:
             application_id: Application ID
-            high_risk_action: Action for high risk (optional)
-            medium_risk_action: Action for medium risk (optional)
-            low_risk_action: Action for low risk (optional)
-            safe_model_id: Safe model ID (optional, can be None to unset)
-            enable_format_detection: Enable format detection (optional)
-            enable_smart_segmentation: Enable smart segmentation (optional)
+            input_high_risk_action: Input action for high risk (optional, NULL = inherit)
+            input_medium_risk_action: Input action for medium risk (optional, NULL = inherit)
+            input_low_risk_action: Input action for low risk (optional, NULL = inherit)
+            output_high_risk_anonymize: Anonymize high risk output (optional, NULL = inherit)
+            output_medium_risk_anonymize: Anonymize medium risk output (optional, NULL = inherit)
+            output_low_risk_anonymize: Anonymize low risk output (optional, NULL = inherit)
+            private_model_id: Private model ID (optional, NULL = inherit)
+            enable_format_detection: Enable format detection (optional, NULL = inherit)
+            enable_smart_segmentation: Enable smart segmentation (optional, NULL = inherit)
 
         Returns:
             Tuple of (success, message, updated_policy)
@@ -297,22 +386,28 @@ class DataLeakageDisposalService:
 
             # Validate actions if provided
             for action_name, action_value in [
-                ('high_risk_action', high_risk_action),
-                ('medium_risk_action', medium_risk_action),
-                ('low_risk_action', low_risk_action)
+                ('input_high_risk_action', input_high_risk_action),
+                ('input_medium_risk_action', input_medium_risk_action),
+                ('input_low_risk_action', input_low_risk_action)
             ]:
                 if action_value and action_value not in self.VALID_ACTIONS:
                     return False, f"Invalid {action_name}: {action_value}", None
 
             # Update fields if provided
-            if high_risk_action is not None:
-                policy.high_risk_action = high_risk_action
-            if medium_risk_action is not None:
-                policy.medium_risk_action = medium_risk_action
-            if low_risk_action is not None:
-                policy.low_risk_action = low_risk_action
-            if safe_model_id is not None:
-                policy.safe_model_id = safe_model_id
+            if input_high_risk_action is not None:
+                policy.input_high_risk_action = input_high_risk_action
+            if input_medium_risk_action is not None:
+                policy.input_medium_risk_action = input_medium_risk_action
+            if input_low_risk_action is not None:
+                policy.input_low_risk_action = input_low_risk_action
+            if output_high_risk_anonymize is not None:
+                policy.output_high_risk_anonymize = output_high_risk_anonymize
+            if output_medium_risk_anonymize is not None:
+                policy.output_medium_risk_anonymize = output_medium_risk_anonymize
+            if output_low_risk_anonymize is not None:
+                policy.output_low_risk_anonymize = output_low_risk_anonymize
+            if private_model_id is not None:
+                policy.private_model_id = private_model_id
             if enable_format_detection is not None:
                 policy.enable_format_detection = enable_format_detection
             if enable_smart_segmentation is not None:
@@ -329,9 +424,9 @@ class DataLeakageDisposalService:
             self.db.rollback()
             return False, f"Error updating policy: {str(e)}", None
 
-    def list_available_safe_models(self, tenant_id: str) -> list:
+    def list_available_private_models(self, tenant_id: str) -> list:
         """
-        List all available safe models for a tenant
+        List all available private models for a tenant
 
         Args:
             tenant_id: Tenant ID
@@ -340,20 +435,19 @@ class DataLeakageDisposalService:
             List of safe UpstreamApiConfig objects
         """
         try:
-            safe_models = self.db.query(UpstreamApiConfig).filter(
+            private_models = self.db.query(UpstreamApiConfig).filter(
                 and_(
                     UpstreamApiConfig.tenant_id == tenant_id,
-                    UpstreamApiConfig.is_data_safe == True,
+                    UpstreamApiConfig.is_private_model == True,
                     UpstreamApiConfig.is_active == True
                 )
             ).order_by(
-                UpstreamApiConfig.is_default_safe_model.desc(),
-                UpstreamApiConfig.safe_model_priority.desc(),
+                UpstreamApiConfig.is_default_private_model.desc(),
                 UpstreamApiConfig.created_at.asc()
             ).all()
 
-            return safe_models
+            return private_models
 
         except Exception as e:
-            logger.error(f"Error listing safe models: {e}", exc_info=True)
+            logger.error(f"Error listing private models: {e}", exc_info=True)
             return []

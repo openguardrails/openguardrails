@@ -400,6 +400,10 @@ app.include_router(data_security.router, prefix="/api/v1", dependencies=[Depends
 from routers import data_leakage_policy_api
 app.include_router(data_leakage_policy_api.router, dependencies=[Depends(verify_user_auth)])
 
+# Gateway Policy management (unified security policy for Security Gateway)
+from routers import gateway_policy_api
+app.include_router(gateway_policy_api.router, dependencies=[Depends(verify_user_auth)])
+
 # Billing and Payment routes (only in SaaS mode)
 if settings.is_saas_mode:
     app.include_router(billing.router, dependencies=[Depends(verify_user_auth)])  # Billing APIs

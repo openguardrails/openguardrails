@@ -7,7 +7,7 @@
 - [Overview](#overview)
 - [Architecture](#architecture)
 - [Quick Start](#quick-start)
-- [Safe Model Configuration](#safe-model-configuration)
+- [Private Model Configuration](#private-model-configuration)
 - [Policy Configuration](#policy-configuration)
 - [Format Detection](#format-detection)
 - [Smart Segmentation](#smart-segmentation)
@@ -31,9 +31,9 @@ OpenGuardrails' Data Leakage Prevention (DLP) system provides **multi-layer prot
 
 - **Format-Aware Detection**: Automatically identifies JSON, YAML, CSV, Markdown, or plain text
 - **Smart Segmentation**: Splits content intelligently based on format for parallel processing
-- **Three Disposal Methods**: Block, switch to safe model, or anonymize
+- **Three Disposal Methods**: Block, switch to private model, or anonymize
 - **Application-Level Policies**: Customize strategies per application
-- **Safe Model Priority System**: Flexible fallback model selection
+- **Private Model Priority System**: Flexible fallback model selection
 
 ---
 
@@ -91,7 +91,7 @@ OpenGuardrails' Data Leakage Prevention (DLP) system provides **multi-layer prot
 │ 6. Policy-Based Disposal                                         │
 │    ┌─────────────┬──────────────┬───────────────┐               │
 │    │ High Risk   │ Medium Risk  │ Low Risk      │               │
-│    │ → Block     │ → Safe Model │ → Anonymize   │ (defaults)    │
+│    │ → Block     │ → Private Model │ → Anonymize   │ (defaults)    │
 │    └─────────────┴──────────────┴───────────────┘               │
 └────────────────────┬────────────────────────────────────────────┘
                      │
@@ -99,7 +99,7 @@ OpenGuardrails' Data Leakage Prevention (DLP) system provides **multi-layer prot
 ┌─────────────────────────────────────────────────────────────────┐
 │ 7. Action Execution                                              │
 │    - Block: Return error, log incident                           │
-│    - Switch Model: Forward to safe model, log switch             │
+│    - Switch Model: Forward to private model, log switch             │
 │    - Anonymize: Replace entities, forward to original model      │
 │    - Pass: Allow request, log detection                          │
 └─────────────────────────────────────────────────────────────────┘
@@ -133,22 +133,22 @@ OpenGuardrails' Data Leakage Prevention (DLP) system provides **multi-layer prot
 
 ## Quick Start
 
-### Step 1: Configure Safe Models
+### Step 1: Configure Private Models
 
 1. Navigate to **Config > Proxy Models**
 2. Create or edit a model configuration
 3. Enable **"Data Safety Attributes"**:
    - **Is Data Safe**: Mark as safe (e.g., on-premise, private deployment)
-   - **Is Default Safe Model**: Set as tenant-wide default
-   - **Safe Model Priority**: Set priority (0-100, higher = preferred)
+   - **Is Default Private Model**: Set as tenant-wide default
+   - **Private Model Priority**: Set priority (0-100, higher = preferred)
 
 **Example**: Enterprise private deployment
 ```
 Model: gpt-4o (Private)
 Provider: Azure OpenAI
 Is Data Safe: ✓ Enabled
-Is Default Safe Model: ✓ Enabled
-Safe Model Priority: 90
+Is Default Private Model: ✓ Enabled
+Private Model Priority: 90
 ```
 
 ### Step 2: Configure Data Leakage Policy
@@ -156,9 +156,9 @@ Safe Model Priority: 90
 1. Navigate to **Config > Data Leakage Policy**
 2. Configure **Risk Level Actions**:
    - **High Risk**: Choose disposal action (default: Block)
-   - **Medium Risk**: Choose disposal action (default: Switch Safe Model)
+   - **Medium Risk**: Choose disposal action (default: Switch Private Model)
    - **Low Risk**: Choose disposal action (default: Anonymize)
-3. Select **Safe Model** (or leave as "Current Safe Model - Default")
+3. Select **Private Model** (or leave as "Current Private Model - Default")
 4. Enable **Feature Toggles**:
    - **Format Detection**: Recommended ✓
    - **Smart Segmentation**: Recommended ✓
@@ -190,11 +190,11 @@ curl -X POST http://localhost:5002/v1/chat/completions \
 
 ---
 
-## Safe Model Configuration
+## Private Model Configuration
 
-### What is a Safe Model?
+### What is a Private Model?
 
-A **safe model** is a model marked as **data-safe** for handling sensitive information. Common examples:
+A **private model** is a model marked as **data-safe** for handling sensitive information. Common examples:
 
 - **On-Premise Models**: Self-hosted models (Ollama, vLLM, etc.)
 - **Private Cloud**: Enterprise Azure OpenAI, AWS Bedrock with private endpoints
@@ -214,70 +214,70 @@ Marks the model as safe for sensitive data.
 - ✅ Compliance-certified endpoint
 - ❌ Public cloud APIs (OpenAI, Anthropic, etc.)
 
-#### `is_default_safe_model` (Boolean)
+#### `is_default_private_model` (Boolean)
 
-Sets this model as the **tenant-wide default** for safe model switching.
+Sets this model as the **tenant-wide default** for private model switching.
 
 **Rules**:
 - Only **one model per tenant** should have this enabled
-- Used when policy doesn't specify a `safe_model_id`
+- Used when policy doesn't specify a `private_model_id`
 - Overrides priority-based selection
 
-#### `safe_model_priority` (Integer 0-100)
+#### `private_model_priority` (Integer 0-100)
 
-Sets selection priority when multiple safe models exist.
+Sets selection priority when multiple private models exist.
 
 **Priority Rules**:
 1. Higher number = higher priority
-2. Used when no default safe model is set
+2. Used when no default private model is set
 3. Ties are broken by creation time (newest first)
 
 **Recommended Ranges**:
 - **90-100**: Production-grade, fully compliant
-- **70-89**: Standard safe models
-- **50-69**: Testing/staging safe models
+- **70-89**: Standard private models
+- **50-69**: Testing/staging private models
 - **0-49**: Low-priority fallbacks
 
-### Safe Model Selection Priority
+### Private Model Selection Priority
 
-When the disposal action is **"switch_safe_model"**, the system selects a model using this priority:
+When the disposal action is **"switch_private_model"**, the system selects a model using this priority:
 
 ```
-1. Application Policy Safe Model (safe_model_id in policy)
+1. Application Policy Private Model (private_model_id in policy)
    ↓ (if null)
-2. Tenant Default Safe Model (is_default_safe_model = true)
+2. Tenant Default Private Model (is_default_private_model = true)
    ↓ (if none)
-3. Highest Priority Safe Model (safe_model_priority DESC)
+3. Highest Priority Private Model (private_model_priority DESC)
    ↓ (if none)
-4. ERROR: No safe model available
+4. ERROR: No private model available
 ```
 
 ### Configuration Examples
 
-#### Example 1: Single Safe Model
+#### Example 1: Single Private Model
 
 ```
 Model: llama-3-70b-local
 Provider: Ollama
 API Base URL: http://local-ollama:11434
 Is Data Safe: ✓ Enabled
-Is Default Safe Model: ✓ Enabled
-Safe Model Priority: 80
+Is Default Private Model: ✓ Enabled
+Private Model Priority: 80
 ```
 
-**Result**: This model is always selected for "switch_safe_model" actions.
+**Result**: This model is always selected for "switch_private_model" actions.
 
 ---
 
-#### Example 2: Multi-Tier Safe Models
+#### Example 2: Multi-Tier Private Models
 
 **Production Model**:
 ```
 Model: gpt-4o-azure-private
 Provider: Azure OpenAI
 Is Data Safe: ✓ Enabled
-Is Default Safe Model: ✓ Enabled (tenant default)
-Safe Model Priority: 95
+Is Default Private Model: ✓ Enabled (tenant default)
+Private Model Priority: 95
 ```
 
 **Staging Model**:
@@ -285,8 +285,8 @@ Safe Model Priority: 95
 Model: gpt-4o-mini-azure-private
 Provider: Azure OpenAI
 Is Data Safe: ✓ Enabled
-Is Default Safe Model: ✗ Disabled
-Safe Model Priority: 70
+Is Default Private Model: ✗ Disabled
+Private Model Priority: 70
 ```
 
 **Fallback Model**:
@@ -294,26 +294,26 @@ Safe Model Priority: 70
 Model: llama-3-8b-local
 Provider: Ollama
 Is Data Safe: ✓ Enabled
-Is Default Safe Model: ✗ Disabled
-Safe Model Priority: 50
+Is Default Private Model: ✗ Disabled
+Private Model Priority: 50
 ```
 
 **Result**: gpt-4o-azure-private is selected by default (default flag overrides priority).
 
 ---
 
-#### Example 3: Application-Specific Safe Model
+#### Example 3: Application-Specific Private Model
 
 **Tenant Default**:
 ```
 Model: gpt-4o-mini-safe
-Is Default Safe Model: ✓ Enabled
+Is Default Private Model: ✓ Enabled
 ```
 
 **High-Security Application Policy**:
 ```
 Application: HIPAA-Compliant-App
-Safe Model ID: llama-3-70b-airgap (explicitly configured)
+Private Model ID: llama-3-70b-airgap (explicitly configured)
 ```
 
 **Result**: HIPAA app uses llama-3-70b-airgap; other apps use gpt-4o-mini-safe.
@@ -338,14 +338,14 @@ Entities typically classified as high risk:
 - Passport numbers
 
 **Alternative Actions**:
-- **Switch Safe Model**: If you have a compliant model that can handle these
+- **Switch Private Model**: If you have a compliant model that can handle these
 - **Anonymize**: For testing environments only (not recommended for production)
 
 ---
 
-#### Medium Risk (Default: Switch Safe Model)
+#### Medium Risk (Default: Switch Private Model)
 
-**Recommended Action**: **Switch Safe Model**
+**Recommended Action**: **Switch Private Model**
 
 Entities typically classified as medium risk:
 - Full names with context
@@ -373,7 +373,7 @@ Entities typically classified as low risk:
 
 **Alternative Actions**:
 - **Pass**: For audit-only mode
-- **Switch Safe Model**: For maximum protection
+- **Switch Private Model**: For maximum protection
 
 ---
 
@@ -389,30 +389,30 @@ When set to **Pass**:
 
 ---
 
-### Safe Model Selection in Policy
+### Private Model Selection in Policy
 
-#### Option 1: Use Current Safe Model (Default)
+#### Option 1: Use Current Private Model (Default)
 
 ```json
 {
-  "safe_model_id": null
+  "private_model_id": null
 }
 ```
 
-**Behavior**: Use tenant's default safe model or highest priority safe model.
+**Behavior**: Use tenant's default private model or highest priority private model.
 
 **Use When**:
 - Standard protection is sufficient
-- Tenant has one primary safe model
+- Tenant has one primary private model
 - Centralized management is preferred
 
 ---
 
-#### Option 2: Specify Application-Specific Safe Model
+#### Option 2: Specify Application-Specific Private Model
 
 ```json
 {
-  "safe_model_id": "uuid-of-safe-model"
+  "private_model_id": "uuid-of-private-model"
 }
 ```
 
@@ -420,7 +420,7 @@ When set to **Pass**:
 
 **Use When**:
 - Application has specific compliance requirements
-- Different apps need different safe models
+- Different apps need different private models
 - Multi-tier protection strategy
 
 ---
@@ -711,19 +711,19 @@ My name is 张三, ID: 110101199001011234. My friend 李四's ID is 110101199001
 
 ---
 
-### Switch Safe Model
+### Switch Private Model
 
-**Action**: Redirect request to data-safe model
+**Action**: Redirect request to data-private model
 
 **Use Case**:
 - Medium/high-risk data detected
-- Safe model available
+- Private model available
 - Maintain user experience while protecting data
 
 **Implementation**:
-1. Fetch safe model using priority logic
+1. Fetch private model using priority logic
 2. Replace `model` parameter in request
-3. Forward to safe model API
+3. Forward to private model API
 4. Return response to client
 5. Log model switch
 
@@ -735,10 +735,10 @@ User Request:
 
 ↓ Detection: Medium Risk
 
-↓ Policy: switch_safe_model
+↓ Policy: switch_private_model
 
-Safe Model Selection:
-  gpt-4o-azure-private (is_default_safe_model)
+Private Model Selection:
+  gpt-4o-azure-private (is_default_private_model)
 
 Modified Request:
   model: gpt-4o-azure-private
@@ -746,19 +746,19 @@ Modified Request:
 
 ↓ Forward to Azure Private Endpoint
 
-Response: (from safe model)
+Response: (from private model)
 ```
 
 **Logging**:
 - Risk level: MEDIUM
-- Action taken: SWITCH_SAFE_MODEL
+- Action taken: SWITCH_private_model
 - Original model: gpt-4o
-- Safe model used: gpt-4o-azure-private
+- Private model used: gpt-4o-azure-private
 - Detected entities: [list]
 
 **Error Handling**:
-- If no safe model available → fallback to BLOCK
-- If safe model API fails → return original error + log incident
+- If no private model available → fallback to BLOCK
+- If private model API fails → return original error + log incident
 
 ---
 
@@ -853,7 +853,7 @@ My name is 张三, ID card: [ID_CARD_1], phone: [PHONE_NUMBER_1]
 
 **Recommended Initial Configuration**:
 - High Risk → Block
-- Medium Risk → Switch Safe Model
+- Medium Risk → Switch Private Model
 - Low Risk → Anonymize
 - Format Detection: Enabled
 - Smart Segmentation: Enabled
@@ -875,15 +875,15 @@ My name is 张三, ID card: [ID_CARD_1], phone: [PHONE_NUMBER_1]
 
 ---
 
-#### 3. Configure Safe Models First
+#### 3. Configure Private Models First
 
-**Before enabling "Switch Safe Model"**:
-1. ✅ Configure at least one safe model
-2. ✅ Test safe model API connectivity
-3. ✅ Set default safe model or priorities
-4. ✅ Document safe model selection logic
+**Before enabling "Switch Private Model"**:
+1. ✅ Configure at least one private model
+2. ✅ Test private model API connectivity
+3. ✅ Set default private model or priorities
+4. ✅ Document private model selection logic
 
-**Why**: Prevents errors when policy tries to switch but no safe model exists.
+**Why**: Prevents errors when policy tries to switch but no private model exists.
 
 ---
 
@@ -898,32 +898,32 @@ My name is 张三, ID card: [ID_CARD_1], phone: [PHONE_NUMBER_1]
 
 **Internal HR System** (high sensitivity):
 - High → Block
-- Medium → Switch Safe Model
+- Medium → Switch Private Model
 - Low → Anonymize
 
 **Compliance-Critical App** (maximum sensitivity):
 - High → Block
 - Medium → Block
-- Low → Switch Safe Model
+- Low → Switch Private Model
 
 ---
 
-### Safe Model Management
+### Private Model Management
 
 #### 1. Maintain Model Redundancy
 
-**Recommendation**: Configure at least **2 safe models** per priority tier.
+**Recommendation**: Configure at least **2 private models** per priority tier.
 
 **Example**:
 - Primary: Azure OpenAI Private (priority 95)
 - Secondary: AWS Bedrock Private (priority 90)
 - Fallback: Local Ollama (priority 70)
 
-**Benefit**: Ensures availability even if primary safe model fails.
+**Benefit**: Ensures availability even if primary private model fails.
 
 ---
 
-#### 2. Test Safe Models Regularly
+#### 2. Test Private Models Regularly
 
 **Monthly Checklist**:
 - [ ] Test API connectivity
@@ -936,7 +936,7 @@ My name is 张三, ID card: [ID_CARD_1], phone: [PHONE_NUMBER_1]
 
 #### 3. Document Model Capabilities
 
-**For each safe model, document**:
+**For each private model, document**:
 - Model name and version
 - Provider and endpoint
 - Data residency (region, country)
@@ -994,13 +994,13 @@ My name is 张三, ID card: [ID_CARD_1], phone: [PHONE_NUMBER_1]
 
 ### Security Hardening
 
-#### 1. Rotate API Keys for Safe Models
+#### 1. Rotate API Keys for Private Models
 
 **Recommendation**: Rotate every 90 days
 
 **Process**:
 1. Generate new API key in provider console
-2. Update safe model configuration
+2. Update private model configuration
 3. Test connectivity
 4. Revoke old key after 7-day overlap
 
@@ -1011,7 +1011,7 @@ My name is 张三, ID card: [ID_CARD_1], phone: [PHONE_NUMBER_1]
 **Set up alerts for**:
 - High-risk detections (immediate alert)
 - Blocked requests exceeding threshold (hourly)
-- Safe model switch failures (immediate)
+- Private model switch failures (immediate)
 - Unusually high detection rate (daily)
 
 **Alert Channels**:
@@ -1051,39 +1051,39 @@ My name is 张三, ID card: [ID_CARD_1], phone: [PHONE_NUMBER_1]
 
 ### Common Issues
 
-#### Issue 1: "No safe model available" Error
+#### Issue 1: "No private model available" Error
 
 **Symptom**:
 ```json
 {
-  "error": "No safe model available for switching"
+  "error": "No private model available for switching"
 }
 ```
 
-**Cause**: Policy is set to "switch_safe_model", but no safe models are configured.
+**Cause**: Policy is set to "switch_private_model", but no private models are configured.
 
 **Solution**:
 1. Navigate to **Config > Proxy Models**
 2. Edit an existing model or create a new one
 3. Enable **"Is Data Safe"**
-4. Set **"Is Default Safe Model"** or assign a priority
+4. Set **"Is Default Private Model"** or assign a priority
 5. Save and test again
 
 ---
 
-#### Issue 2: Safe Model Switch Not Working
+#### Issue 2: Private Model Switch Not Working
 
 **Symptom**: Medium-risk data detected, but request still goes to original model.
 
 **Possible Causes**:
 
-**Cause 1**: Policy action is not set to "switch_safe_model"
+**Cause 1**: Policy action is not set to "switch_private_model"
 - **Solution**: Check **Config > Data Leakage Policy** → Medium Risk Action
 
-**Cause 2**: Safe model API is failing
-- **Solution**: Check logs for safe model API errors, verify connectivity
+**Cause 2**: Private model API is failing
+- **Solution**: Check logs for private model API errors, verify connectivity
 
-**Cause 3**: Safe model is marked inactive
+**Cause 3**: Private model is marked inactive
 - **Solution**: Navigate to **Proxy Models** → ensure "Is Active" is enabled
 
 ---
@@ -1162,13 +1162,13 @@ My name is 张三, ID card: [ID_CARD_1], phone: [PHONE_NUMBER_1]
 **Cause 2**: Too many segments (> 50)
 - **Solution**: System should fallback automatically; verify in logs
 
-**Cause 3**: Safe model API is slow
-- **Solution**: Monitor safe model latency; consider faster model
+**Cause 3**: Private model API is slow
+- **Solution**: Monitor private model latency; consider faster model
 
 **Performance Optimization**:
 1. Disable format detection if all content is plain text
 2. Disable smart segmentation for short content (< 1KB)
-3. Use faster safe models (e.g., gpt-4o-mini instead of gpt-4o)
+3. Use faster private models (e.g., gpt-4o-mini instead of gpt-4o)
 4. Increase proxy service worker count
 
 ---
@@ -1221,9 +1221,9 @@ DEBUG - Aggregated risk: MEDIUM (highest from 5 segments)
 
 **Disposal Action**:
 ```
-INFO - Data leakage risk: MEDIUM, action: SWITCH_SAFE_MODEL
-DEBUG - Safe model selected: gpt-4o-azure-private (priority: 95)
-DEBUG - Request forwarded to safe model
+INFO - Data leakage risk: MEDIUM, action: SWITCH_private_model
+DEBUG - Private model selected: gpt-4o-azure-private (priority: 95)
+DEBUG - Request forwarded to private model
 ```
 
 ---
@@ -1302,7 +1302,7 @@ curl -X POST http://localhost:5001/v1/guardrails \
       "risk_level": "MEDIUM",
       "detected_entity_types": ["ID_CARD"],
       "risk_details": ["ID card number detected: 110101..."],
-      "suggested_action": "SWITCH_SAFE_MODEL"
+      "suggested_action": "SWITCH_private_model"
     }
   ]
 }
@@ -1324,9 +1324,9 @@ if not result["is_safe"]:
     if action == "BLOCK":
         return {"error": "Request blocked due to data leakage risk"}
 
-    elif action == "SWITCH_SAFE_MODEL":
-        # Switch to safe model manually
-        messages_safe = messages  # Send to safe model
+    elif action == "SWITCH_private_model":
+        # Switch to private model manually
+        messages_safe = messages  # Send to private model
         safe_response = openai.ChatCompletion.create(
             model="gpt-4o-azure-private",
             messages=messages_safe
@@ -1382,26 +1382,26 @@ requests.put(
     },
     json={
         "high_risk_action": "block",
-        "medium_risk_action": "switch_safe_model",
+        "medium_risk_action": "switch_private_model",
         "low_risk_action": "anonymize",
-        "safe_model_id": "uuid-of-safe-model",  # or null for default
+        "private_model_id": "uuid-of-private-model",  # or null for default
         "enable_format_detection": True,
         "enable_smart_segmentation": True
     }
 )
 ```
 
-#### List Available Safe Models
+#### List Available Private Models
 
 ```python
 response = requests.get(
-    "http://localhost:5000/api/v1/config/safe-models",
+    "http://localhost:5000/api/v1/config/private-models",
     headers={"Authorization": "Bearer <JWT_TOKEN>"}
 )
 
-safe_models = response.json()
-for model in safe_models:
-    print(f"{model['config_name']}: priority {model['safe_model_priority']}")
+private_models = response.json()
+for model in private_models:
+    print(f"{model['config_name']}: priority {model['private_model_priority']}")
 ```
 
 ---
@@ -1410,16 +1410,16 @@ for model in safe_models:
 
 ### General Questions
 
-**Q: What happens if I don't configure any safe models?**
+**Q: What happens if I don't configure any private models?**
 
-A: If a disposal action is set to "switch_safe_model" and no safe models are configured, the system will **fallback to BLOCK** and return an error. Configure at least one safe model before enabling "switch_safe_model" actions.
+A: If a disposal action is set to "switch_private_model" and no private models are configured, the system will **fallback to BLOCK** and return an error. Configure at least one private model before enabling "switch_private_model" actions.
 
 ---
 
-**Q: Can I use multiple safe models for different risk levels?**
+**Q: Can I use multiple private models for different risk levels?**
 
-A: Not directly. The system uses a single safe model selection per request. However, you can:
-1. Configure application-specific policies with different `safe_model_id` values
+A: Not directly. The system uses a single private model selection per request. However, you can:
+1. Configure application-specific policies with different `private_model_id` values
 2. Use priority to prefer different models for different applications
 
 ---
@@ -1456,13 +1456,13 @@ A: **No**. If all content is plain text, format detection is unnecessary and add
 
 **Q: Can I set different policies for different applications?**
 
-A: **Yes**. Policies are configured per-application using the `X-Application-ID` header. Each application can have unique risk actions and safe models.
+A: **Yes**. Policies are configured per-application using the `X-Application-ID` header. Each application can have unique risk actions and private models.
 
 ---
 
-**Q: What happens if the safe model API fails?**
+**Q: What happens if the private model API fails?**
 
-A: The system logs the error and **falls back to BLOCK** to prevent data leakage. Configure redundant safe models to minimize failures.
+A: The system logs the error and **falls back to BLOCK** to prevent data leakage. Configure redundant private models to minimize failures.
 
 ---
 
@@ -1500,7 +1500,7 @@ A: Use **audit-only mode**:
 **Q: Is the system GDPR-compliant?**
 
 A: OpenGuardrails provides **technical controls** for data protection (detection, blocking, anonymization). GDPR compliance depends on:
-1. **Data residency**: Use on-premise or EU-region safe models
+1. **Data residency**: Use on-premise or EU-region private models
 2. **Data retention**: Configure log retention policies
 3. **User rights**: Implement data deletion on request
 
@@ -1512,7 +1512,7 @@ Consult legal counsel for full compliance.
 
 A: Anonymization **reduces risk** but may not meet HIPAA Safe Harbor or Expert Determination standards. For HIPAA:
 1. Use **"Block"** action for high-risk PHI
-2. Use **safe models** with BAAs (Business Associate Agreements)
+2. Use **private models** with BAAs (Business Associate Agreements)
 3. Conduct formal de-identification review
 
 ---
@@ -1521,8 +1521,8 @@ A: Anonymization **reduces risk** but may not meet HIPAA Safe Harbor or Expert D
 
 A: **Yes**, for detecting credit card numbers. Recommended configuration:
 - High Risk (credit cards) → **Block**
-- Medium Risk → **Switch Safe Model** (PCI-compliant endpoint)
-- Safe Model: Tokenization gateway or PCI-certified API
+- Medium Risk → **Switch Private Model** (PCI-compliant endpoint)
+- Private Model: Tokenization gateway or PCI-certified API
 
 **Note**: Full PCI DSS requires additional controls (encryption, access control, logging).
 
@@ -1534,9 +1534,9 @@ A: **Yes**, for detecting credit card numbers. Recommended configuration:
 
 | Risk Level | Default Action       | Alternative Actions              | Use Case                          |
 |------------|----------------------|----------------------------------|-----------------------------------|
-| **High**   | Block                | Switch Safe Model, Anonymize     | Critical data (ID, credit cards)  |
-| **Medium** | Switch Safe Model    | Block, Anonymize, Pass           | Sensitive data (names, addresses) |
-| **Low**    | Anonymize            | Pass, Switch Safe Model, Block   | Generic PII (phone, email)        |
+| **High**   | Block                | Switch Private Model, Anonymize     | Critical data (ID, credit cards)  |
+| **Medium** | Switch Private Model    | Block, Anonymize, Pass           | Sensitive data (names, addresses) |
+| **Low**    | Anonymize            | Pass, Switch Private Model, Block   | Generic PII (phone, email)        |
 
 ---
 
@@ -1564,7 +1564,7 @@ A: **Yes**, for detecting credit card numbers. Recommended configuration:
 ### Glossary
 
 - **Data Leakage Prevention (DLP)**: System for detecting and protecting sensitive data
-- **Safe Model**: Model marked as data-safe for handling sensitive information
+- **Private Model**: Model marked as data-safe for handling sensitive information
 - **Disposal Strategy**: Action taken when data leakage is detected (block, switch, anonymize, pass)
 - **Format Detection**: Automatic identification of content structure (JSON, YAML, etc.)
 - **Smart Segmentation**: Format-aware content splitting for parallel processing
@@ -1572,7 +1572,7 @@ A: **Yes**, for detecting credit card numbers. Recommended configuration:
 - **GenAI Entity**: Entity detected using AI models (e.g., names, addresses)
 - **Risk Aggregation**: Combining detection results from multiple segments
 - **Application Policy**: Per-application configuration for disposal strategies
-- **Safe Model Priority**: Ranking system for selecting safe models
+- **Private Model Priority**: Ranking system for selecting private models
 
 ---
 

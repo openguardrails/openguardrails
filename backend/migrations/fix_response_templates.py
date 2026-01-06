@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
 Fix response templates for S8 and S10 categories
-修复 S8 和 S10 类别的响应模板
 
 This script fixes the incorrect template content for:
 - S8 (Hate & Discrimination)

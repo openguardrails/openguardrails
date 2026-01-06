@@ -44,7 +44,7 @@ import type { ColumnDef } from '@tanstack/react-table'
 interface EntityType {
   id: string
   entity_type: string
-  display_name: string
+  entity_type_name: string
   risk_level?: string // Frontend field name
   category?: string // Backend field name (alias for risk_level)
   recognition_method?: string // 'regex' or 'genai'
@@ -66,9 +66,9 @@ const EntityTypeManagement: React.FC = () => {
   const { t } = useTranslation()
 
   const RISK_LEVELS = [
-    { value: 'low', label: t('entityType.lowRisk'), color: 'outline' as const },
-    { value: 'medium', label: t('entityType.mediumRisk'), color: 'default' as const },
     { value: 'high', label: t('entityType.highRisk'), color: 'destructive' as const },
+    { value: 'medium', label: t('entityType.mediumRisk'), color: 'default' as const },
+    { value: 'low', label: t('entityType.lowRisk'), color: 'outline' as const },
   ]
 
   const ANONYMIZATION_METHODS = [
@@ -90,20 +90,23 @@ const EntityTypeManagement: React.FC = () => {
   const { currentApplicationId } = useApplication()
 
   const formSchema = z.object({
-    entity_type: z.string().min(1, t('entityType.entityTypeCodeRequired')),
-    display_name: z.string().min(1, t('entityType.displayNameRequired')),
+    entity_type: z.string().min(1, t('entityType.entityTypeCodeRequired')).refine(
+      (val) => !/\s/.test(val),
+      { message: t('entityType.entityTypeCodeNoSpaces') }
+    ),
+    entity_type_name: z.string().min(1, t('entityType.entityTypeNameRequired')),
     risk_level: z.string().min(1, t('entityType.riskLevelRequired')),
     recognition_method: z.string().default('regex'),
     pattern: z.string().optional(),
     entity_definition: z.string().optional(),
     anonymization_method: z.string().min(1, t('entityType.anonymizationMethodRequired')),
-    // Regex脱敏配置
-    replace_text: z.string().optional(), // replace方法的替换内容
-    mask_keep_prefix: z.string().optional(), // mask方法保留前几位
-    mask_keep_suffix: z.string().optional(), // mask方法保留后几位
-    mask_char: z.string().optional(), // mask方法的掩码字符
-    // GenAI脱敏配置
-    masking_rule: z.string().optional(), // GenAI的脱敏规则
+    // Regex masking configuration
+    replace_text: z.string().optional(), // replace method replacement content
+    mask_keep_prefix: z.string().optional(), // mask method keep prefix
+    mask_keep_suffix: z.string().optional(), // mask method keep suffix
+    mask_char: z.string().optional(), // mask method mask character
+    // GenAI masking configuration
+    masking_rule: z.string().optional(), // GenAI masking rule
     check_input: z.boolean().default(true),
     check_output: z.boolean().default(true),
     is_active: z.boolean().default(true),
@@ -194,7 +197,7 @@ const EntityTypeManagement: React.FC = () => {
     const recognitionMethod = record.recognition_method || 'regex'
     const config = record.anonymization_config || {}
 
-    // 解析脱敏配置
+    // Parse masking configuration
     let replace_text = ''
     let mask_keep_prefix = ''
     let mask_keep_suffix = ''
@@ -215,7 +218,7 @@ const EntityTypeManagement: React.FC = () => {
 
     form.reset({
       entity_type: record.entity_type,
-      display_name: record.display_name,
+      entity_type_name: record.entity_type_name,
       risk_level: record.category || record.risk_level,
       recognition_method: recognitionMethod,
       pattern: record.pattern,
@@ -253,16 +256,16 @@ const EntityTypeManagement: React.FC = () => {
   const handleSubmit = async (values: z.infer<typeof formSchema>) => {
     const recognitionMethod = values.recognition_method || 'regex'
 
-    // 构建脱敏配置
+    // Build masking configuration
     let anonymization_config: any = {}
 
     if (recognitionMethod === 'genai') {
-      // GenAI类型的配置
+      // GenAI configuration
       if (values.masking_rule) {
         anonymization_config.masking_rule = values.masking_rule
       }
     } else {
-      // Regex类型的配置
+      // Regex configuration
       const method = values.anonymization_method
 
       if (method === 'replace') {
@@ -274,15 +277,15 @@ const EntityTypeManagement: React.FC = () => {
         anonymization_config.keep_prefix = keepPrefix
         anonymization_config.keep_suffix = keepSuffix
       }
-      // hash, encrypt, shuffle, random 不需要配置
+      // hash, encrypt, shuffle, random no configuration needed
     }
 
     const data: any = {
       entity_type: values.entity_type,
-      display_name: values.display_name,
+      entity_type_name: values.entity_type_name,
       category: values.risk_level,
       recognition_method: recognitionMethod,
-      // GenAI类型固定使用genai脱敏方法，Regex类型使用用户选择的方法
+      // GenAI type fixed using genai masking method, Regex type using user selected method
       anonymization_method: recognitionMethod === 'genai' ? 'genai' : values.anonymization_method,
       anonymization_config,
       check_input: values.check_input !== undefined ? values.check_input : true,
@@ -326,8 +329,8 @@ const EntityTypeManagement: React.FC = () => {
       size: 150,
     },
     {
-      accessorKey: 'display_name',
-      header: t('entityType.displayNameColumn'),
+      accessorKey: 'entity_type_name',
+      header: t('entityType.entityTypeNameColumn'),
       size: 120,
     },
     {
@@ -342,13 +345,13 @@ const EntityTypeManagement: React.FC = () => {
     },
     {
       id: 'recognition_method',
-      header: '识别方法',
+      header: t('entityType.recognitionMethodColumn'),
       size: 100,
       cell: ({ row }) => {
         const method = row.original.recognition_method || 'regex'
         return (
           <Badge variant="outline">
-            {method === 'genai' ? 'AI识别' : '正则'}
+            {method === 'genai' ? t('entityType.aiRecognition') : t('entityType.regexRecognition')}
           </Badge>
         )
       },
@@ -375,9 +378,9 @@ const EntityTypeManagement: React.FC = () => {
         const method = row.getValue('anonymization_method') as string
         const recognitionMethod = row.original.recognition_method || 'regex'
 
-        // GenAI类型显示"AI脱敏"
+        // GenAI type display "AI masking"
         if (recognitionMethod === 'genai' || method === 'genai') {
-          return <Badge variant="default">AI脱敏</Badge>
+          return <Badge variant="default">{t('entityType.aiDesensitization')}</Badge>
         }
 
         const m = ANONYMIZATION_METHODS.find((a) => a.value === method)
@@ -496,7 +499,7 @@ const EntityTypeManagement: React.FC = () => {
     const matchesSearch =
       !searchText ||
       item.entity_type.toLowerCase().includes(searchText.toLowerCase()) ||
-      item.display_name.toLowerCase().includes(searchText.toLowerCase()) ||
+      item.entity_type_name.toLowerCase().includes(searchText.toLowerCase()) ||
       (item.pattern && item.pattern.toLowerCase().includes(searchText.toLowerCase())) ||
       (item.entity_definition && item.entity_definition.toLowerCase().includes(searchText.toLowerCase()))
 
@@ -592,13 +595,16 @@ const EntityTypeManagement: React.FC = () => {
 
               <FormField
                 control={form.control}
-                name="display_name"
+                name="entity_type_name"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>{t('entityType.displayNameLabel')}</FormLabel>
+                    <FormLabel>{t('entityType.entityTypeNameLabel')}</FormLabel>
                     <FormControl>
-                      <Input {...field} placeholder={t('entityType.displayNamePlaceholder')} />
+                      <Input {...field} placeholder={t('entityType.entityTypeNamePlaceholder')} />
                     </FormControl>
+                    <p className="text-xs text-gray-500 mt-1">
+                      {t('entityType.entityTypeNameDescription')}
+                    </p>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -634,16 +640,16 @@ const EntityTypeManagement: React.FC = () => {
                 name="recognition_method"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>识别方法</FormLabel>
+                    <FormLabel>{t('entityType.recognitionMethodLabel')}</FormLabel>
                     <Select onValueChange={field.onChange} value={field.value}>
                       <FormControl>
                         <SelectTrigger>
-                          <SelectValue placeholder="选择识别方法" />
+                          <SelectValue placeholder={t('entityType.recognitionMethodPlaceholder')} />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="regex">正则表达式 (Regex)</SelectItem>
-                        <SelectItem value="genai">AI识别 (GenAI)</SelectItem>
+                        <SelectItem value="regex">{t('entityType.recognitionMethodRegex')}</SelectItem>
+                        <SelectItem value="genai">{t('entityType.recognitionMethodGenai')}</SelectItem>
                       </SelectContent>
                     </Select>
                     <FormMessage />
@@ -682,42 +688,42 @@ const EntityTypeManagement: React.FC = () => {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>
-                        实体定义
+                        {t('entityType.entityDefinitionLabel')}
                         <span className="ml-2 text-xs text-gray-500">
-                          用自然语言描述要识别的敏感信息
+                          {t('entityType.entityDefinitionTooltip')}
                         </span>
                       </FormLabel>
                       <FormControl>
                         <Textarea
                           {...field}
                           rows={3}
-                          placeholder="例如：用于联系的11位手机号码"
+                          placeholder={t('entityType.entityDefinitionPlaceholder')}
                         />
                       </FormControl>
                       <Card className="mt-2 bg-green-50 border-green-200">
                         <CardContent className="p-3">
                           <p className="text-xs font-semibold text-green-900 mb-2">
-                            💡 实体定义示例
+                            {t('entityType.entityDefinitionExamplesTitle')}
                           </p>
                           <ul className="text-xs text-green-800 space-y-1.5 list-none">
                             <li className="bg-white/50 p-1.5 rounded">
-                              • <strong>电话号码：</strong>"用于联系的11位手机号码"
+                              • {t('entityType.entityDefinitionExamplePhone')}
                             </li>
                             <li className="bg-white/50 p-1.5 rounded">
-                              • <strong>身份证号：</strong>"中国大陆18位身份证号码"
+                              • {t('entityType.entityDefinitionExampleIdCard')}
                             </li>
                             <li className="bg-white/50 p-1.5 rounded">
-                              • <strong>地址：</strong>"包含省市区街道门牌号的详细地址"
+                              • {t('entityType.entityDefinitionExampleAddress')}
                             </li>
                             <li className="bg-white/50 p-1.5 rounded">
-                              • <strong>银行卡号：</strong>"16-19位银行卡号"
+                              • {t('entityType.entityDefinitionExampleBankCard')}
                             </li>
                             <li className="bg-white/50 p-1.5 rounded">
-                              • <strong>姓名：</strong>"中文人名，2-4个汉字"
+                              • {t('entityType.entityDefinitionExampleName')}
                             </li>
                           </ul>
                           <p className="text-xs text-green-700 mt-2 pt-2 border-t border-green-300">
-                            ✨ AI会根据您的描述智能识别对应的敏感信息
+                            {t('entityType.entityDefinitionExamplesHint')}
                           </p>
                         </CardContent>
                       </Card>
@@ -734,11 +740,11 @@ const EntityTypeManagement: React.FC = () => {
                     name="anonymization_method"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>脱敏方法</FormLabel>
+                        <FormLabel>{t('entityType.anonymizationMethodSelectLabel')}</FormLabel>
                         <Select onValueChange={field.onChange} value={field.value}>
                           <FormControl>
                             <SelectTrigger>
-                              <SelectValue placeholder="选择脱敏方法" />
+                              <SelectValue placeholder={t('entityType.anonymizationMethodSelectPlaceholder')} />
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
@@ -760,15 +766,15 @@ const EntityTypeManagement: React.FC = () => {
                       name="replace_text"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>替换文本</FormLabel>
+                          <FormLabel>{t('entityType.replaceText')}</FormLabel>
                           <FormControl>
                             <Input
                               {...field}
-                              placeholder="例如：<身份证号>"
+                              placeholder={t('entityType.replaceTextPlaceholder')}
                             />
                           </FormControl>
                           <p className="text-xs text-gray-500 mt-1">
-                            敏感数据将被替换为此文本。如不填写，默认使用 &lt;实体类型代码&gt;
+                            {t('entityType.replaceTextHint')}
                           </p>
                           <FormMessage />
                         </FormItem>
@@ -784,7 +790,7 @@ const EntityTypeManagement: React.FC = () => {
                           name="mask_keep_prefix"
                           render={({ field }) => (
                             <FormItem>
-                              <FormLabel>保留前几位</FormLabel>
+                              <FormLabel>{t('entityType.maskKeepPrefix')}</FormLabel>
                               <FormControl>
                                 <Input
                                   {...field}
@@ -802,7 +808,7 @@ const EntityTypeManagement: React.FC = () => {
                           name="mask_keep_suffix"
                           render={({ field }) => (
                             <FormItem>
-                              <FormLabel>保留后几位</FormLabel>
+                              <FormLabel>{t('entityType.maskKeepSuffix')}</FormLabel>
                               <FormControl>
                                 <Input
                                   {...field}
@@ -820,7 +826,7 @@ const EntityTypeManagement: React.FC = () => {
                           name="mask_char"
                           render={({ field }) => (
                             <FormItem>
-                              <FormLabel>掩码字符</FormLabel>
+                              <FormLabel>{t('entityType.maskChar')}</FormLabel>
                               <FormControl>
                                 <Input
                                   {...field}
@@ -836,12 +842,12 @@ const EntityTypeManagement: React.FC = () => {
                       <Card className="bg-blue-50 border-blue-200">
                         <CardContent className="p-3">
                           <p className="text-xs text-blue-900">
-                            <strong>示例：</strong>手机号 13822323234
+                            <strong>{t('entityType.maskExampleTitle')}</strong>{t('entityType.maskExamplePhone')}
                           </p>
                           <ul className="text-xs text-blue-800 mt-2 space-y-1">
-                            <li>• 保留前3位，后4位：138****3234</li>
-                            <li>• 保留前6位，后0位：138223*****</li>
-                            <li>• 保留前0位，后4位：*******3234</li>
+                            <li>• {t('entityType.maskExample1')}</li>
+                            <li>• {t('entityType.maskExample2Str')}</li>
+                            <li>• {t('entityType.maskExample3')}</li>
                           </ul>
                         </CardContent>
                       </Card>
@@ -854,26 +860,26 @@ const EntityTypeManagement: React.FC = () => {
                     <Card className="bg-gray-50">
                       <CardContent className="p-3">
                         <p className="text-xs text-gray-700">
-                          <strong>{form.watch('anonymization_method')} 方法</strong> 不需要额外配置，将自动处理。
+                          <strong>{form.watch('anonymization_method')}</strong> {t('entityType.anonymizationMethodNoConfig')}
                         </p>
                         {form.watch('anonymization_method') === 'hash' && (
                           <p className="text-xs text-gray-600 mt-2">
-                            示例：13822323234 → a3f5e8d2c1b4
+                            {t('entityType.example')}: 13822323234 → a3f5e8d2c1b4
                           </p>
                         )}
                         {form.watch('anonymization_method') === 'encrypt' && (
                           <p className="text-xs text-gray-600 mt-2">
-                            示例：13822323234 → &lt;ENCRYPTED_a3f5e8d2&gt;
+                            {t('entityType.example')}: 13822323234 → &lt;ENCRYPTED_a3f5e8d2&gt;
                           </p>
                         )}
                         {form.watch('anonymization_method') === 'shuffle' && (
                           <p className="text-xs text-gray-600 mt-2">
-                            示例：13822323234 → 32438223134（随机打乱）
+                            {t('entityType.example')}: 13822323234 → 32438223134
                           </p>
                         )}
                         {form.watch('anonymization_method') === 'random' && (
                           <p className="text-xs text-gray-600 mt-2">
-                            示例：13822323234 → 97354861029（随机替换）
+                            {t('entityType.example')}: 13822323234 → 97354861029
                           </p>
                         )}
                       </CardContent>
@@ -883,59 +889,75 @@ const EntityTypeManagement: React.FC = () => {
               )}
 
               {form.watch('recognition_method') === 'genai' && (
-                <FormField
-                  control={form.control}
-                  name="masking_rule"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>脱敏规则 (可选)</FormLabel>
-                      <FormControl>
-                        <Textarea
-                          {...field}
-                          rows={3}
-                          placeholder="例如：后四位用*号代替"
-                        />
-                      </FormControl>
-                      <p className="text-xs text-gray-500 mt-1">
-                        使用自然语言描述如何脱敏。如不填写，默认替换为 &lt;{form.watch('display_name') || '实体名称'}&gt;
-                      </p>
+                <>
+                  <Card className="bg-yellow-50 border-yellow-300">
+                    <CardContent className="p-3">
+                      <div className="flex items-start gap-2">
+                        <div className="flex-1">
+                          <p className="text-sm font-semibold text-yellow-900 mb-1">
+                            {t('entityType.genaiDefaultBehaviorTitle')}
+                          </p>
+                          <p className="text-xs text-yellow-800">
+                            {t('entityType.genaiDefaultBehaviorFormat')} <code className="bg-yellow-200 px-1 py-0.5 rounded">[REDACTED_{(form.watch('entity_type_name') || 'ENTITY_NAME').toUpperCase().replace(/\s+/g, '_')}]</code>
+                          </p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <FormField
+                    control={form.control}
+                    name="masking_rule"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('entityType.maskingRule')}</FormLabel>
+                        <FormControl>
+                          <Textarea
+                            {...field}
+                            rows={3}
+                            placeholder={t('entityType.maskingRulePlaceholder')}
+                          />
+                        </FormControl>
+                        <p className="text-xs text-gray-500 mt-1">
+                          {t('entityType.maskingRuleHint')} [REDACTED_{(form.watch('entity_type_name') || 'ENTITY_NAME').toUpperCase().replace(/\s+/g, '_')}]
+                        </p>
                       <Card className="mt-2 bg-blue-50 border-blue-200">
                         <CardContent className="p-3">
                           <p className="text-xs font-semibold text-blue-900 mb-2">
-                            💡 AI智能脱敏说明
+                            {t('entityType.genaiMaskingTitle')}
                           </p>
                           <p className="text-xs text-blue-800 mb-3">
-                            GenAI类型使用大模型理解您的脱敏规则，无需编写复杂的正则表达式。大模型会智能识别敏感数据并按照您的描述进行脱敏处理。
+                            {t('entityType.genaiMaskingDescription')}
                           </p>
                           <div className="space-y-3">
                             <div>
-                              <p className="text-xs font-semibold text-blue-900">规则示例：</p>
+                              <p className="text-xs font-semibold text-blue-900">{t('entityType.genaiRuleExamplesTitle')}</p>
                               <ul className="text-xs text-blue-800 mt-1 space-y-2 list-none">
                                 <li className="bg-white/50 p-2 rounded">
-                                  <span className="font-semibold">规则：</span>"后四位用*号代替"
+                                  <span className="font-semibold">{t('entityType.genaiExample1Rule')}</span>{t('entityType.genaiExample1RuleText')}
                                   <br />
-                                  <span className="text-blue-600">效果：</span>13822323234 → 1382232****
+                                  <span className="text-blue-600">{t('entityType.genaiExample1Effect')}</span>{t('entityType.genaiExample1EffectText')}
                                 </li>
                                 <li className="bg-white/50 p-2 rounded">
-                                  <span className="font-semibold">规则：</span>"保留前3位和后4位，中间用***替换"
+                                  <span className="font-semibold">{t('entityType.genaiExample1Rule')}</span>{t('entityType.genaiExample2RuleText')}
                                   <br />
-                                  <span className="text-blue-600">效果：</span>13822323234 → 138***3234
+                                  <span className="text-blue-600">{t('entityType.genaiExample1Effect')}</span>{t('entityType.genaiExample2EffectText')}
                                 </li>
                                 <li className="bg-white/50 p-2 rounded">
-                                  <span className="font-semibold">规则：</span>"替换为[已脱敏]"
+                                  <span className="font-semibold">{t('entityType.genaiExample1Rule')}</span>{t('entityType.genaiExample3RuleText')}
                                   <br />
-                                  <span className="text-blue-600">效果：</span>13822323234 → [已脱敏]
+                                  <span className="text-blue-600">{t('entityType.genaiExample1Effect')}</span>{t('entityType.genaiExample3EffectText')}
                                 </li>
                                 <li className="bg-white/50 p-2 rounded">
-                                  <span className="font-semibold">规则：</span>"全部替换为&lt;电话号码&gt;"
+                                  <span className="font-semibold">{t('entityType.genaiExample1Rule')}</span>{t('entityType.genaiExample4RuleText')}
                                   <br />
-                                  <span className="text-blue-600">效果：</span>13822323234 → &lt;电话号码&gt;
+                                  <span className="text-blue-600">{t('entityType.genaiExample1Effect')}</span>{t('entityType.genaiExample4EffectText')}
                                 </li>
                               </ul>
                             </div>
                             <div className="border-t border-blue-300 pt-2">
                               <p className="text-xs text-blue-700">
-                                ✨ <strong>提示：</strong>您可以用任何清晰的中文描述脱敏规则，AI会智能理解并执行
+                                {t('entityType.genaiMaskingHint')}
                               </p>
                             </div>
                           </div>
@@ -944,7 +966,8 @@ const EntityTypeManagement: React.FC = () => {
                       <FormMessage />
                     </FormItem>
                   )}
-                />
+                  />
+                </>
               )}
 
               <div>

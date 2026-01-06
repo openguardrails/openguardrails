@@ -14,17 +14,17 @@ from utils.url_signature import (
 logger = setup_logger()
 router = APIRouter(tags=["Media"])
 
-# 导入认证依赖（用于上传、删除、列表等需要认证的接口）
-# 注意：这里不能直接从main导入，因为会产生循环依赖
-# 我们在每个需要认证的路由上单独添加认证逻辑
+# Import authentication dependency (for upload, delete, list etc. authenticated interfaces)
+# Note: Here we cannot directly import from main because it will cause a circular dependency
+# We add authentication logic separately to each authenticated route
 
-# 允许的图片文件类型
+# Allowed image file types
 ALLOWED_IMAGE_TYPES = {
     "image/jpeg", "image/jpg", "image/png", "image/gif",
     "image/bmp", "image/webp", "image/tiff"
 }
 
-# 最大文件大小：10MB
+# Maximum file size: 10MB
 MAX_FILE_SIZE = 10 * 1024 * 1024
 
 @router.post("/media/upload/image")

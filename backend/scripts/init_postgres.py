@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-PostgreSQL数据库初始化脚本
-用于创建数据库和必要的配置
+PostgreSQL database initialization script
+Create database and necessary configurations
 """
 
 import asyncio
@@ -12,9 +12,9 @@ from utils.logger import setup_logger
 logger = setup_logger()
 
 async def create_database():
-    """创建PostgreSQL数据库"""
+    """Create PostgreSQL database"""
     try:
-        # 解析数据库URL
+        # Parse database URL
         url_parts = settings.database_url.replace("postgresql://", "").split("/")
         connection_part = url_parts[0]
         db_name = url_parts[1] if len(url_parts) > 1 else "openguardrails"
@@ -23,23 +23,23 @@ async def create_database():
         user, password = user_pass.split(":")
         host, port = host_port.split(":")
         
-        # 连接到默认数据库
+        # Connect to default database
         conn = await asyncpg.connect(
             user=user,
             password=password,
             host=host,
             port=port,
-            database='postgres'  # 连接到默认数据库
+            database='postgres'  # Connect to default database
         )
         
         try:
-            # 检查数据库是否存在
+            # Check if database exists
             exists = await conn.fetchval(
                 "SELECT 1 FROM pg_database WHERE datname = $1", db_name
             )
             
             if not exists:
-                # 创建数据库
+                # Create database
                 await conn.execute(f'CREATE DATABASE "{db_name}"')
                 logger.info(f"Database '{db_name}' created successfully")
             else:
@@ -53,7 +53,7 @@ async def create_database():
         raise
 
 async def main():
-    """主函数"""
+    """Main function"""
     logger.info("Starting PostgreSQL database initialization...")
     await create_database()
     logger.info("PostgreSQL database initialization completed!")

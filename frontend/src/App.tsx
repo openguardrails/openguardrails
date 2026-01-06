@@ -16,7 +16,7 @@ import Config from './pages/Config/Config';
 import AdminPanel from './pages/Admin/AdminPanel';
 import Account from './pages/Account/Account';
 import OnlineTest from './pages/OnlineTest/OnlineTest';
-import SecurityGateway from './pages/SecurityGateway/SecurityGateway';
+import { LLMProviders, SecurityPolicy } from './pages/SecurityGateway';
 import Documentation from './pages/Documentation/Documentation';
 import Subscription from './pages/Billing/Subscription';
 import ApplicationManagement from './pages/Config/ApplicationManagement';
@@ -65,7 +65,8 @@ function App() {
               <Route path="/results" element={<Results />} />
               <Route path="/reports" element={<Reports />} />
               <Route path="/applications" element={<ApplicationManagement />} />
-              <Route path="/security-gateway" element={<SecurityGateway />} />
+              <Route path="/security-gateway/providers" element={<LLMProviders />} />
+              <Route path="/security-gateway/policy" element={<SecurityPolicy />} />
               <Route path="/config/*" element={<Config />} />
               <Route path="/admin/*" element={<AdminPanel />} />
               <Route path="/account" element={<Account />} />

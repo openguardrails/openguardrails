@@ -948,7 +948,7 @@ class DetectionGuardrailService:
     ):
         """Asynchronously record detection results to log file (not write to database)"""
 
-        # 清理内容中的NUL字符
+        # Clean NUL characters from content
         from utils.validators import clean_null_characters
 
         detection_data = {

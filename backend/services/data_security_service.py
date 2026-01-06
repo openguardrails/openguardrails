@@ -187,7 +187,7 @@ class DataSecurityService:
 
                 entity_types.append({
                     'entity_type': et.entity_type,
-                    'display_name': et.display_name,
+                    'entity_type_name': et.entity_type_name,
                     'risk_level': et.category,  # Use category field to store risk level
                     'recognition_method': et.recognition_method,
                     'pattern': recognition_config.get('pattern', ''),
@@ -214,7 +214,7 @@ class DataSecurityService:
             for match in regex.finditer(text):
                 matches.append({
                     'entity_type': entity_type['entity_type'],
-                    'display_name': entity_type['display_name'],
+                    'entity_type_name': entity_type['entity_type_name'],
                     'start': match.start(),
                     'end': match.end(),
                     'text': match.group(),
@@ -251,7 +251,7 @@ class DataSecurityService:
         try:
             # Process each entity type separately with simplified extraction prompts
             for et in entity_types:
-                entity_name = et['display_name']
+                entity_name = et['entity_type_name']
                 entity_definition = et.get('entity_definition', entity_name)
 
                 # Build English extraction prompt (inspired by testdlp.py)
@@ -328,7 +328,7 @@ Text:
                             # Add match
                             matches.append({
                                 'entity_type': et['entity_type'],
-                                'display_name': et['display_name'],
+                                'entity_type_name': et['entity_type_name'],
                                 'start': pos,
                                 'end': pos + len(original_text),
                                 'text': original_text,
@@ -495,7 +495,7 @@ Text:
             # Process according to de-sensitization method
             if method == 'genai':
                 # Use fixed redaction format: [REDACTED_EntityName]
-                replacement = f"[REDACTED_{entity['display_name'].upper().replace(' ', '_')}]"
+                replacement = f"[REDACTED_{entity['entity_type_name'].upper().replace(' ', '_')}]"
             elif method == 'replace':
                 # Replace with placeholder
                 replacement = config.get('replacement', f"<{entity['entity_type']}>")
@@ -581,7 +581,7 @@ Text:
         tenant_id: str,
         application_id: Optional[str] = None,
         entity_type: str = None,
-        display_name: str = None,
+        entity_type_name: str = None,
         risk_level: str = None,
         pattern: str = None,
         entity_definition: str = None,
@@ -612,7 +612,7 @@ Text:
 
         # Add pattern or entity_definition based on recognition method
         if recognition_method == 'genai':
-            recognition_config['entity_definition'] = entity_definition or display_name
+            recognition_config['entity_definition'] = entity_definition or entity_type_name
         else:
             recognition_config['pattern'] = pattern
 
@@ -630,7 +630,7 @@ Text:
             tenant_id=tenant_id,
             application_id=application_id if not is_global else None,  # Global templates don't have application_id
             entity_type=entity_type,
-            display_name=display_name,
+            entity_type_name=entity_type_name,
             category=risk_level,  # Use category field to store risk level
             recognition_method=recognition_method,
             recognition_config=recognition_config,
@@ -679,8 +679,8 @@ Text:
             return None
 
         # Update fields
-        if 'display_name' in kwargs:
-            entity_type.display_name = kwargs['display_name']
+        if 'entity_type_name' in kwargs:
+            entity_type.entity_type_name = kwargs['entity_type_name']
         if 'risk_level' in kwargs:
             entity_type.category = kwargs['risk_level']
         
@@ -961,7 +961,7 @@ Text:
                     tenant_id=tenant_id,
                     application_id=application_id,
                     entity_type=template.entity_type,
-                    display_name=template.display_name,
+                    entity_type_name=template.entity_type_name,
                     category=template.category,
                     recognition_method=template.recognition_method,
                     recognition_config=recognition_config.copy(),
@@ -1033,7 +1033,7 @@ Text:
                 copy = DataSecurityEntityType(
                     tenant_id=tenant_id,
                     entity_type=template.entity_type,
-                    display_name=template.display_name,
+                    entity_type_name=template.entity_type_name,
                     category=template.category,
                     recognition_method=template.recognition_method,
                     recognition_config=recognition_config.copy(),
@@ -1066,7 +1066,7 @@ def get_default_entity_types_config() -> List[Dict[str, Any]]:
     return [
         {
             'entity_type': 'ID_CARD_NUMBER_SYS',
-            'display_name': 'ID Card Number',
+            'entity_type_name': 'ID Card Number',
             'risk_level': 'high',
             'pattern': r'[1-8]\d{5}(19|20)\d{2}((0[1-9])|(1[0-2]))((0[1-9])|([12]\d)|(3[01]))\d{3}[\dxX]',
             'anonymization_method': 'mask',
@@ -1076,7 +1076,7 @@ def get_default_entity_types_config() -> List[Dict[str, Any]]:
         },
         {
             'entity_type': 'PHONE_NUMBER_SYS',
-            'display_name': 'Phone Number',
+            'entity_type_name': 'Phone Number',
             'risk_level': 'medium',
             'pattern': r'1[3-9]\d{9}',
             'anonymization_method': 'mask',
@@ -1086,7 +1086,7 @@ def get_default_entity_types_config() -> List[Dict[str, Any]]:
         },
         {
             'entity_type': 'EMAIL_SYS',
-            'display_name': 'Email',
+            'entity_type_name': 'Email',
             'risk_level': 'low',
             'pattern': r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}',
             'anonymization_method': 'mask',
@@ -1096,7 +1096,7 @@ def get_default_entity_types_config() -> List[Dict[str, Any]]:
         },
         {
             'entity_type': 'BANK_CARD_NUMBER_SYS',
-            'display_name': 'Bank Card Number',
+            'entity_type_name': 'Bank Card Number',
             'risk_level': 'high',
             'pattern': r'\d{16,19}',
             'anonymization_method': 'mask',
@@ -1106,7 +1106,7 @@ def get_default_entity_types_config() -> List[Dict[str, Any]]:
         },
         {
             'entity_type': 'PASSPORT_NUMBER_SYS',
-            'display_name': 'Passport Number',
+            'entity_type_name': 'Passport Number',
             'risk_level': 'high',
             'pattern': r'[EGP]\d{8}',
             'anonymization_method': 'mask',
@@ -1116,7 +1116,7 @@ def get_default_entity_types_config() -> List[Dict[str, Any]]:
         },
         {
             'entity_type': 'IP_ADDRESS_SYS',
-            'display_name': 'IP Address',
+            'entity_type_name': 'IP Address',
             'risk_level': 'low',
             'pattern': r'(?:\d{1,3}\.){3}\d{1,3}',
             'anonymization_method': 'replace',
@@ -1155,7 +1155,7 @@ def create_global_entity_types(db: Session, admin_tenant_id: str) -> int:
                 service.create_entity_type(
                     tenant_id=admin_tenant_id,
                     entity_type=entity_data['entity_type'],
-                    display_name=entity_data['display_name'],
+                    entity_type_name=entity_data['entity_type_name'],
                     risk_level=entity_data['risk_level'],
                     pattern=entity_data['pattern'],
                     anonymization_method=entity_data['anonymization_method'],

@@ -113,9 +113,10 @@ async def get_user_upstream_apis(request: Request):
                         "enable_reasoning_detection": config.enable_reasoning_detection,
                         "stream_chunk_size": config.stream_chunk_size,
                         "description": config.description,
-                        "is_data_safe": config.is_data_safe if config.is_data_safe is not None else False,
-                        "is_default_safe_model": config.is_default_safe_model if config.is_default_safe_model is not None else False,
-                        "safe_model_priority": config.safe_model_priority if config.safe_model_priority is not None else 0,
+                        "is_private_model": config.is_private_model if config.is_private_model is not None else False,
+                        "is_default_private_model": config.is_default_private_model if config.is_default_private_model is not None else False,
+                        "private_model_names": config.private_model_names if config.private_model_names is not None else [],
+                        "default_private_model_name": config.default_private_model_name,
                         "created_at": config.created_at.isoformat(),
                         "gateway_url": f"http://localhost:5002/v1/gateway/{config.id}/"
                     }
@@ -185,10 +186,11 @@ async def create_upstream_api(request: Request):
                 enable_reasoning_detection=bool(request_data.get('enable_reasoning_detection', True)),
                 stream_chunk_size=int(request_data.get('stream_chunk_size', 50)),
                 description=request_data.get('description'),
-                # Safety attributes for data leakage prevention
-                is_data_safe=bool(request_data.get('is_data_safe', False)),
-                is_default_safe_model=bool(request_data.get('is_default_safe_model', False)),
-                safe_model_priority=int(request_data.get('safe_model_priority', 0))
+                # Private model attributes for data leakage prevention
+                is_private_model=bool(request_data.get('is_private_model', False)),
+                is_default_private_model=bool(request_data.get('is_default_private_model', False)),
+                private_model_names=request_data.get('private_model_names', []),
+                default_private_model_name=request_data.get('default_private_model_name')
             )
 
             db.add(api_config)
@@ -256,9 +258,10 @@ async def get_upstream_api_detail(api_id: str, request: Request):
                     "block_on_output_risk": api_config.block_on_output_risk if api_config.block_on_output_risk is not None else False,
                     "stream_chunk_size": api_config.stream_chunk_size if api_config.stream_chunk_size is not None else 50,
                     "description": api_config.description,
-                    "is_data_safe": api_config.is_data_safe if api_config.is_data_safe is not None else False,
-                    "is_default_safe_model": api_config.is_default_safe_model if api_config.is_default_safe_model is not None else False,
-                    "safe_model_priority": api_config.safe_model_priority if api_config.safe_model_priority is not None else 0,
+                    "is_private_model": api_config.is_private_model if api_config.is_private_model is not None else False,
+                    "is_default_private_model": api_config.is_default_private_model if api_config.is_default_private_model is not None else False,
+                    "private_model_names": api_config.private_model_names if api_config.private_model_names is not None else [],
+                    "default_private_model_name": api_config.default_private_model_name,
                     "created_at": api_config.created_at.isoformat(),
                     "gateway_url": f"http://localhost:5002/v1/gateway/{api_config.id}/"
                 }
@@ -310,12 +313,18 @@ async def update_upstream_api(api_id: str, request: Request):
                 if field == 'api_key':
                     if value:  # If API key is provided, update
                         api_config.api_key_encrypted = _encrypt_api_key(value)
-                elif field in ['is_active', 'block_on_input_risk', 'block_on_output_risk', 'enable_reasoning_detection', 'is_data_safe', 'is_default_safe_model']:
-                    # Explicitly handle boolean fields (including safety attributes)
+                elif field in ['is_active', 'block_on_input_risk', 'block_on_output_risk', 'enable_reasoning_detection', 'is_private_model', 'is_default_private_model']:
+                    # Explicitly handle boolean fields (including private model attributes)
                     setattr(api_config, field, bool(value))
-                elif field in ['stream_chunk_size', 'safe_model_priority']:
-                    # Handle integer fields (including safety attributes)
+                elif field in ['stream_chunk_size']:
+                    # Handle integer fields
                     setattr(api_config, field, int(value))
+                elif field == 'private_model_names':
+                    # Handle JSON array field for private model names
+                    setattr(api_config, field, value if isinstance(value, list) else [])
+                elif field == 'default_private_model_name':
+                    # Handle the default private model name (can be null)
+                    setattr(api_config, field, value if value else None)
                 elif hasattr(api_config, field):
                     setattr(api_config, field, value)
 

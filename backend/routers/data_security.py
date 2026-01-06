@@ -47,7 +47,7 @@ async def get_entity_types(
             items.append({
                 "id": str(et.id),
                 "entity_type": et.entity_type,
-                "display_name": et.display_name,
+                "entity_type_name": et.entity_type_name,
                 "category": et.category,  # This is the risk_level
                 "recognition_method": et.recognition_method,
                 "pattern": pattern,
@@ -115,7 +115,7 @@ async def get_entity_type(
         return {
             "id": str(entity_type.id),
             "entity_type": entity_type.entity_type,
-            "display_name": entity_type.display_name,
+            "entity_type_name": entity_type.entity_type_name,
             "category": entity_type.category,
             "recognition_method": entity_type.recognition_method,
             "pattern": pattern,
@@ -168,7 +168,7 @@ async def create_entity_type(
             tenant_id=str(current_user.id),
             application_id=str(application_id),
             entity_type=data.get("entity_type"),
-            display_name=data.get("display_name"),
+            entity_type_name=data.get("entity_type_name"),
             risk_level=data.get("category", "medium"),  # category is risk_level in the service
             recognition_method=recognition_method,
             pattern=data.get("pattern"),
@@ -213,8 +213,8 @@ async def update_entity_type(
 
         # Build update kwargs
         update_kwargs = {}
-        if "display_name" in data:
-            update_kwargs["display_name"] = data["display_name"]
+        if "entity_type_name" in data:
+            update_kwargs["entity_type_name"] = data["entity_type_name"]
         if "category" in data:
             update_kwargs["risk_level"] = data["category"]  # category is risk_level in the service
 
@@ -340,7 +340,7 @@ async def create_global_entity_type(
             tenant_id=str(current_user.id),
             application_id=None,  # Global entity types don't have application_id
             entity_type=data.get("entity_type"),
-            display_name=data.get("display_name"),
+            entity_type_name=data.get("entity_type_name"),
             risk_level=data.get("category", "medium"),
             recognition_method=recognition_method,
             pattern=data.get("pattern"),

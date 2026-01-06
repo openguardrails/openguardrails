@@ -9,7 +9,7 @@ def run_fix():
     """Execute the template fix using the production Python environment"""
 
     # First, check current templates
-    print("=== 检查当前模板内容 ===")
+    print("=== Check current template content ===")
     check_cmd = [
         '/home/ecs-user/miniconda3/envs/guardrails/bin/python',
         '-c',
@@ -26,12 +26,12 @@ try:
             category=category, is_active=True
         ).order_by(ResponseTemplate.is_default).all()
 
-        print(f"\\n--- 当前 {category} 模板 ---")
+        print(f"\\n--- Current {category} template ---")
         for tmpl in templates:
             print(f"Tenant: {tmpl.tenant_id}, Default: {tmpl.is_default}")
             print(f"Content: {tmpl.template_content}")
-            if "Everyone deserves" in str(tmpl.template_content) or "平等对待" in str(tmpl.template_content):
-                print("⚠️  发现问题的模板内容!")
+            if "Everyone deserves" in str(tmpl.template_content) or "Treat everyone equally" in str(tmpl.template_content):
+                print("⚠️  Found problematic template content!")
             print("---")
 finally:
     db.close()
@@ -41,16 +41,16 @@ finally:
     result = subprocess.run(check_cmd, capture_output=True, text=True)
     print(result.stdout)
     if result.stderr:
-        print("错误:", result.stderr)
+        print("Error:", result.stderr)
 
     # Ask user if they want to proceed with fix
-    response = input("\n是否要继续修复模板? (y/N): ")
+    response = input("\nDo you want to continue fixing templates? (y/N): ")
     if response.lower() != 'y':
-        print("操作已取消")
+        print("Operation cancelled")
         return
 
     # Fix templates
-    print("\n=== 开始修复模板 ===")
+    print("\n=== Start fixing templates ===")
     fix_cmd = [
         '/home/ecs-user/miniconda3/envs/guardrails/bin/python',
         '-c',
@@ -81,20 +81,20 @@ try:
             category=category, is_active=True
         ).all()
 
-        print(f"\\n修复 {category} 模板...")
+        print(f"\\nFixing {category} template...")
         for tmpl in templates:
             old_content = str(tmpl.template_content)
             tmpl.template_content = template
             total_updated += 1
-            print(f"  更新模板 ID: {tmpl.id}, Tenant: {tmpl.tenant_id}")
-            print(f"  原内容: {old_content[:100]}...")
-            print(f"  新内容: {json.dumps(template)[:100]}...")
+            print(f"  Updated template ID: {tmpl.id}, Tenant: {tmpl.tenant_id}")
+            print(f"  Original content: {old_content[:100]}...")
+            print(f"  New content: {json.dumps(template)[:100]}...")
 
     db.commit()
-    print(f"\\n✅ 成功更新了 {total_updated} 个模板!")
+    print(f"\\n✅ Successfully updated {total_updated} templates!")
 
     # Verify updates
-    print("\\n=== 验证更新结果 ===")
+    print("\\n=== Verify update results ===")
     for category in ["S8", "S10"]:
         templates = db.query(ResponseTemplate).filter_by(
             category=category, is_active=True
@@ -114,8 +114,8 @@ finally:
     if result.stderr:
         print("错误:", result.stderr)
 
-    print("\n修复完成! 现在需要重启服务以使更改生效。")
-    print("运行: sudo systemctl restart xiangxin_guardrails_detection.service")
+    print("\nFix completed! Now you need to restart the service to make the changes take effect.")
+    print("Run: sudo systemctl restart xiangxin_guardrails_detection.service")
 
 if __name__ == "__main__":
     run_fix()

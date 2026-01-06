@@ -176,21 +176,21 @@ async def _sync_input_detection(model_config, input_messages: list, tenant_id: s
                     logger.warning(f"Request blocked due to data leakage - request {request_id}")
                     return result
 
-                elif disposal_action == 'switch_safe_model':
-                    # Try to switch to safe model
-                    safe_model = disposal_service.get_safe_model(application_id, tenant_id)
-                    if safe_model:
-                        modified_model_config = safe_model
-                        logger.info(f"Switched to safe model: {safe_model.config_name}")
+                elif disposal_action == 'switch_private_model':
+                    # Try to switch to private model
+                    private_model = disposal_service.get_private_model(application_id, tenant_id)
+                    if private_model:
+                        modified_model_config = private_model
+                        logger.info(f"Switched to private model: {private_model.config_name}")
                     else:
-                        # No safe model available, fallback to block
-                        logger.warning(f"No safe model available, blocking request instead")
+                        # No private model available, fallback to block
+                        logger.warning(f"No private model available, blocking request instead")
                         result = detection_result.copy()
                         result['blocked'] = True
                         result['detection_id'] = detection_id
                         result['disposal_action'] = 'block'
-                        result['disposal_reason'] = 'No safe model configured'
-                        result['suggest_answer'] = "数据泄漏风险已检测到，但未配置安全模型。请联系管理员。"
+                        result['disposal_reason'] = 'No private model configured'
+                        result['suggest_answer'] = "Data leakage risk detected, but no private model configured. Please contact the administrator."
                         return result
 
                 elif disposal_action == 'anonymize':
@@ -212,8 +212,8 @@ async def _sync_input_detection(model_config, input_messages: list, tenant_id: s
 
         # Check if blocking is needed (original logic for other risks)
         if model_config.block_on_input_risk and detection_result.get('suggest_action') in ['reject', 'replace']:
-            logger.warning(f"同步输入检测阻断请求 - request {request_id}")
-            logger.warning(f"检测结果: {detection_result}")
+            logger.warning(f"Input synchronous detection blocked request - request {request_id}")
+            logger.warning(f"Detection result: {detection_result}")
 
             # Return complete detection result, and add blocking mark
             result = detection_result.copy()
@@ -303,15 +303,15 @@ async def _background_output_detection(input_messages: list, response_content: s
         # Record detection result but not block
         if detection_result.get('suggest_action') in ['reject', 'replace']:
             logger.info(f"Asynchronous output detection found risk but not blocked - request {request_id}")
-            logger.info(f"检测结果: {detection_result}")
+            logger.info(f"Detection result: {detection_result}")
 
     except Exception as e:
         logger.error(f"Background output detection failed: {e}")
 
 async def _sync_output_detection(model_config, input_messages: list, response_content: str, tenant_id: str, request_id: str, user_id: str = None, application_id: str = None):
-    """Synchronous output detection - detect completed后再决定返回内容"""
+    """Synchronous output detection - detect completed and then decide to return content"""
     try:
-        # 构造检测messages: input + response
+        # Construct detection messages: input + response
         detection_messages = input_messages.copy()
         detection_messages.append({
             "role": "assistant",
@@ -1359,6 +1359,19 @@ async def create_gateway_chat_completion(
             input_blocked = input_detection_result.get('blocked', False)
             suggest_answer = input_detection_result.get('suggest_answer')
 
+            # NEW: Get modified messages and model config from disposal logic
+            actual_messages = input_detection_result.get('modified_messages', input_messages)
+            actual_api_config = input_detection_result.get('modified_model_config', api_config)
+            disposal_action = input_detection_result.get('disposal_action', 'pass')
+
+            # Log disposal action if taken
+            if disposal_action != 'pass':
+                logger.info(f"Gateway: Data leakage disposal action: {disposal_action}")
+                if disposal_action == 'switch_private_model' and actual_api_config != api_config:
+                    logger.info(f"Gateway: Switched from {api_config.config_name} to private model {actual_api_config.config_name}")
+                elif disposal_action == 'anonymize' and actual_messages != input_messages:
+                    logger.info(f"Gateway: Anonymized user message for data safety")
+
             # If input is blocked, record log and return
             if input_blocked:
                 # Record log
@@ -1449,9 +1462,11 @@ async def create_gateway_chat_completion(
             # Input passes, call upstream API
             # The model name is passed through directly - this is the key difference from old pattern
             # Clean messages: only keep role and content, remove name and other fields that vllm doesn't support
+            # NEW: Use actual_messages (possibly anonymized) instead of original messages
             clean_messages = [
-                {"role": msg.role, "content": msg.content}
-                for msg in request_data.messages
+                {"role": msg.get('role'), "content": msg.get('content')}
+                if isinstance(msg, dict) else {"role": msg.role, "content": msg.content}
+                for msg in actual_messages
             ]
 
             # Handle extra_body: OpenAI SDK unfolds extra_body parameters into the main request body,
@@ -1474,10 +1489,11 @@ async def create_gateway_chat_completion(
             if extra_params:
                 logger.info(f"Gateway: Found extra parameters to pass to upstream: {list(extra_params.keys())}")
 
+            # NEW: Use actual_api_config (possibly switched to private model)
             upstream_response = await proxy_service.call_upstream_api_gateway(
-                api_config=api_config,
+                api_config=actual_api_config,
                 model_name=request_data.model,  # Pass through original model name
-                messages=clean_messages,
+                messages=clean_messages,  # Already using actual_messages (possibly anonymized)
                 stream=request_data.stream,
                 temperature=request_data.temperature,
                 max_tokens=request_data.max_tokens,
@@ -1491,14 +1507,14 @@ async def create_gateway_chat_completion(
             # Handle streaming response
             if request_data.stream:
                 return await _handle_gateway_streaming_response(
-                    upstream_response, api_config, tenant_id, request_id,
+                    upstream_response, actual_api_config, tenant_id, request_id,
                     input_detection_id, user_id, request_data.model, start_time,
                     input_messages, application_id
                 )
             else:
                 # Handle non-streaming response
                 return await _handle_gateway_non_streaming_response(
-                    upstream_response, api_config, tenant_id, request_id,
+                    upstream_response, actual_api_config, tenant_id, request_id,
                     input_detection_id, user_id, request_data.model, start_time,
                     input_messages, application_id
                 )
@@ -1753,7 +1769,7 @@ async def create_chat_completion(
                 )
 
             # Forward request to target model
-            # NEW: Use actual_model_config (possibly switched to safe model) and actual_messages (possibly anonymized)
+            # NEW: Use actual_model_config (possibly switched to private model) and actual_messages (possibly anonymized)
             model_response = await proxy_service.forward_chat_completion(
                 model_config=actual_model_config,
                 request_data=request_data,

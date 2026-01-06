@@ -353,10 +353,11 @@ class UpstreamApiConfig(Base):
     enable_reasoning_detection = Column(Boolean, default=True)  # Whether to detect reasoning content
     stream_chunk_size = Column(Integer, default=50)  # Stream detection interval, detect every N chunks
 
-    # Data safety attributes (for data leakage prevention)
-    is_data_safe = Column(Boolean, default=False, index=True)  # Whether this model is data-safe (on-premise/private)
-    is_default_safe_model = Column(Boolean, default=False, index=True)  # First safe model becomes default
-    safe_model_priority = Column(Integer, default=0)  # Priority when multiple safe models exist (higher = preferred)
+    # Private model attributes (for data leakage prevention)
+    is_private_model = Column(Boolean, default=False, index=True)  # Whether this model is private (on-premise/data-safe)
+    is_default_private_model = Column(Boolean, default=False, index=True)  # Whether this is the default private model for tenant
+    private_model_names = Column(JSON, default=list)  # Model names available for automatic switching (e.g., ["gpt-4", "gpt-4-turbo"])
+    default_private_model_name = Column(String(255), nullable=True)  # The specific model name to use when this is the default private model
 
     # Metadata
     description = Column(Text)  # Optional description
@@ -497,7 +498,7 @@ class DataSecurityEntityType(Base):
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)  # Kept for backward compatibility
     application_id = Column(UUID(as_uuid=True), ForeignKey("applications.id", ondelete="CASCADE"), nullable=False, index=True)  # Associated application
     entity_type = Column(String(100), nullable=False, index=True)  # Entity type code, such as ID_CARD_NUMBER
-    display_name = Column(String(200), nullable=False)  # Display name, such as "ID Card Number"
+    entity_type_name = Column(String(200), nullable=False)  # Entity type name, such as "ID Card Number"
     category = Column(String(50), nullable=False, index=True)  # Risk level: low, medium, high
     recognition_method = Column(String(20), nullable=False)  # Recognition method: regex
     recognition_config = Column(JSON, nullable=False)  # Recognition config, such as {"pattern": "...", "check_input": true, "check_output": true}
@@ -744,25 +745,92 @@ class ApplicationScannerConfig(Base):
     )
 
 
+class TenantDataLeakagePolicy(Base):
+    """Tenant-level default data leakage prevention policies"""
+    __tablename__ = "tenant_data_leakage_policies"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+
+    # Input Policy Defaults (prevent external data leakage)
+    # Actions: 'block' | 'switch_private_model' | 'anonymize' | 'pass'
+    default_input_high_risk_action = Column(String(50), default='block', nullable=False)
+    default_input_medium_risk_action = Column(String(50), default='switch_private_model', nullable=False)
+    default_input_low_risk_action = Column(String(50), default='anonymize', nullable=False)
+
+    # Output Policy Defaults (prevent internal unauthorized access)
+    # Boolean flags: whether to anonymize output for each risk level (legacy, kept for backward compatibility)
+    default_output_high_risk_anonymize = Column(Boolean, default=True, nullable=False)
+    default_output_medium_risk_anonymize = Column(Boolean, default=True, nullable=False)
+    default_output_low_risk_anonymize = Column(Boolean, default=False, nullable=False)
+
+    # Output Policy Defaults - Action type (same as input policy)
+    # Actions: 'block' | 'switch_private_model' | 'anonymize' | 'pass'
+    default_output_high_risk_action = Column(String(50), default='block', nullable=False)
+    default_output_medium_risk_action = Column(String(50), default='anonymize', nullable=False)
+    default_output_low_risk_action = Column(String(50), default='pass', nullable=False)
+
+    # General Risk Policy Defaults (security, safety, company policy violations)
+    # Actions: 'block' | 'replace' (use knowledge base/template) | 'pass' (log only)
+    default_general_high_risk_action = Column(String(50), default='block', nullable=False)
+    default_general_medium_risk_action = Column(String(50), default='replace', nullable=False)
+    default_general_low_risk_action = Column(String(50), default='pass', nullable=False)
+
+    # Default Feature Flags
+    default_enable_format_detection = Column(Boolean, default=True, nullable=False)
+    default_enable_smart_segmentation = Column(Boolean, default=True, nullable=False)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    tenant = relationship("Tenant", backref="data_leakage_policy")
+    # Note: Default private model is determined by upstream_api_configs.is_default_private_model = true
+
+
 class ApplicationDataLeakagePolicy(Base):
-    """Application-level data leakage disposal policy configuration"""
+    """Application-level data leakage policy overrides. NULL values inherit from tenant defaults."""
     __tablename__ = "application_data_leakage_policies"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
     application_id = Column(UUID(as_uuid=True), ForeignKey("applications.id", ondelete="CASCADE"), nullable=False, index=True)
 
-    # Disposal actions for each risk level: 'block' | 'switch_safe_model' | 'anonymize' | 'pass'
-    high_risk_action = Column(String(50), default='block', nullable=False)
-    medium_risk_action = Column(String(50), default='switch_safe_model', nullable=False)
-    low_risk_action = Column(String(50), default='anonymize', nullable=False)
+    # Input Policy Overrides (prevent external data leakage)
+    # Actions: 'block' | 'switch_private_model' | 'anonymize' | 'pass'
+    # NULL = use tenant default
+    input_high_risk_action = Column(String(50), default=None, nullable=True)
+    input_medium_risk_action = Column(String(50), default=None, nullable=True)
+    input_low_risk_action = Column(String(50), default=None, nullable=True)
 
-    # Safe model configuration (nullable if using tenant's default)
-    safe_model_id = Column(UUID(as_uuid=True), ForeignKey("upstream_api_configs.id", ondelete="SET NULL"), nullable=True)
+    # Output Policy Overrides (prevent internal unauthorized access)
+    # Boolean flags: whether to anonymize output for each risk level (legacy, kept for backward compatibility)
+    # NULL = use tenant default
+    output_high_risk_anonymize = Column(Boolean, default=None, nullable=True)
+    output_medium_risk_anonymize = Column(Boolean, default=None, nullable=True)
+    output_low_risk_anonymize = Column(Boolean, default=None, nullable=True)
 
-    # Feature flags
-    enable_format_detection = Column(Boolean, default=True, nullable=False)
-    enable_smart_segmentation = Column(Boolean, default=True, nullable=False)
+    # Output Policy Overrides - Action type (same as input policy)
+    # Actions: 'block' | 'switch_private_model' | 'anonymize' | 'pass'
+    # NULL = use tenant default
+    output_high_risk_action = Column(String(50), default=None, nullable=True)
+    output_medium_risk_action = Column(String(50), default=None, nullable=True)
+    output_low_risk_action = Column(String(50), default=None, nullable=True)
+
+    # General Risk Policy Overrides (security, safety, company policy violations)
+    # Actions: 'block' | 'replace' (use knowledge base/template) | 'pass' (log only)
+    # NULL = use tenant default
+    general_high_risk_action = Column(String(50), default=None, nullable=True)
+    general_medium_risk_action = Column(String(50), default=None, nullable=True)
+    general_low_risk_action = Column(String(50), default=None, nullable=True)
+
+    # Private model configuration (nullable if using tenant's default)
+    private_model_id = Column(UUID(as_uuid=True), ForeignKey("upstream_api_configs.id", ondelete="SET NULL"), nullable=True)
+
+    # Feature flags (NULL = use tenant default)
+    enable_format_detection = Column(Boolean, default=None, nullable=True)
+    enable_smart_segmentation = Column(Boolean, default=None, nullable=True)
 
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -771,7 +839,7 @@ class ApplicationDataLeakagePolicy(Base):
     # Relationships
     tenant = relationship("Tenant")
     application = relationship("Application")
-    safe_model = relationship("UpstreamApiConfig", foreign_keys=[safe_model_id])
+    private_model = relationship("UpstreamApiConfig", foreign_keys=[private_model_id])
 
     # Constraints
     __table_args__ = (

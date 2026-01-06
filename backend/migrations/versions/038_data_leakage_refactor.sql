@@ -5,21 +5,21 @@
 
 -- Description:
 -- Major refactoring of data leakage prevention system:
--- 1. Add safe model fields to upstream_api_configs (is_data_safe, is_default_safe_model, safe_model_priority)
+-- 1. Add private model fields to upstream_api_configs (is_data_safe, is_default_private_model, private_model_priority)
 -- 2. Create application_data_leakage_policies table for application-level disposal strategies
 -- 3. Enable smart model switching, anonymization, and blocking based on data leakage risk
 
 -- ============================================================================
--- Part 1: Add safe model fields to upstream_api_configs
+-- Part 1: Add private model fields to upstream_api_configs
 -- ============================================================================
 
 ALTER TABLE upstream_api_configs ADD COLUMN IF NOT EXISTS is_data_safe BOOLEAN DEFAULT FALSE;
-ALTER TABLE upstream_api_configs ADD COLUMN IF NOT EXISTS is_default_safe_model BOOLEAN DEFAULT FALSE;
-ALTER TABLE upstream_api_configs ADD COLUMN IF NOT EXISTS safe_model_priority INTEGER DEFAULT 0;
+ALTER TABLE upstream_api_configs ADD COLUMN IF NOT EXISTS is_default_private_model BOOLEAN DEFAULT FALSE;
+ALTER TABLE upstream_api_configs ADD COLUMN IF NOT EXISTS private_model_priority INTEGER DEFAULT 0;
 
 -- Create indexes for efficient queries
 CREATE INDEX IF NOT EXISTS idx_upstream_api_configs_is_data_safe ON upstream_api_configs(is_data_safe);
-CREATE INDEX IF NOT EXISTS idx_upstream_api_configs_is_default_safe_model ON upstream_api_configs(is_default_safe_model);
+CREATE INDEX IF NOT EXISTS idx_upstream_api_configs_is_default_private_model ON upstream_api_configs(is_default_private_model);
 
 -- ============================================================================
 -- Part 2: Create application_data_leakage_policies table
@@ -31,13 +31,13 @@ CREATE TABLE IF NOT EXISTS application_data_leakage_policies (
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     application_id UUID NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
 
-    -- Disposal actions for each risk level: 'block' | 'switch_safe_model' | 'anonymize' | 'pass'
+    -- Disposal actions for each risk level: 'block' | 'switch_private_model' | 'anonymize' | 'pass'
     high_risk_action VARCHAR(50) NOT NULL DEFAULT 'block',
-    medium_risk_action VARCHAR(50) NOT NULL DEFAULT 'switch_safe_model',
+    medium_risk_action VARCHAR(50) NOT NULL DEFAULT 'switch_private_model',
     low_risk_action VARCHAR(50) NOT NULL DEFAULT 'anonymize',
 
-    -- Safe model configuration (nullable if using tenant's default)
-    safe_model_id UUID REFERENCES upstream_api_configs(id) ON DELETE SET NULL,
+    -- Private model configuration (nullable if using tenant's default)
+    private_model_id UUID REFERENCES upstream_api_configs(id) ON DELETE SET NULL,
 
     -- Feature flags
     enable_format_detection BOOLEAN NOT NULL DEFAULT TRUE,
@@ -63,9 +63,10 @@ ON application_data_leakage_policies(application_id);
 -- ============================================================================
 
 -- Create default policies for all existing applications
--- Default strategy: high=block, medium=switch_safe_model, low=anonymize
+-- Default strategy: high=block, medium=switch_private_model, low=anonymize
 -- Use WHERE NOT EXISTS to handle re-runs and partial failures
 INSERT INTO application_data_leakage_policies (
+    id,
     tenant_id,
     application_id,
     high_risk_action,
@@ -75,10 +76,11 @@ INSERT INTO application_data_leakage_policies (
     enable_smart_segmentation
 )
 SELECT
+    gen_random_uuid(),
     a.tenant_id,
     a.id,
     'block',
-    'switch_safe_model',
+    'switch_private_model',
     'anonymize',
     TRUE,
     TRUE

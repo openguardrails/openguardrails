@@ -287,12 +287,12 @@ async def get_current_user_info(
         rate_limit_config = rate_limit_service.get_user_rate_limit(str(tenant.id))
         # If there is a configuration and it is active, use the configuration value; otherwise use default value 10 RPS
         rate_limit = rate_limit_config.requests_per_second if rate_limit_config and rate_limit_config.is_active else 10
-        logger.info(f"租户 {tenant.email} 的速度限制: {rate_limit} (配置存在: {rate_limit_config is not None})")
+        logger.info(f"Tenant {tenant.email} speed limit: {rate_limit} (configuration exists: {rate_limit_config is not None})")
     except Exception as e:
         from utils.logger import setup_logger
         logger = setup_logger()
         logger.error(f"Get tenant speed limit failed: {e}")
-        rate_limit = 10  # 默认值
+        rate_limit = 10  # Default value
 
     return UserInfo(
         id=str(tenant.id),  # Convert to string format
