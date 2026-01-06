@@ -353,6 +353,11 @@ class UpstreamApiConfig(Base):
     enable_reasoning_detection = Column(Boolean, default=True)  # Whether to detect reasoning content
     stream_chunk_size = Column(Integer, default=50)  # Stream detection interval, detect every N chunks
 
+    # Data safety attributes (for data leakage prevention)
+    is_data_safe = Column(Boolean, default=False, index=True)  # Whether this model is data-safe (on-premise/private)
+    is_default_safe_model = Column(Boolean, default=False, index=True)  # First safe model becomes default
+    safe_model_priority = Column(Integer, default=0)  # Priority when multiple safe models exist (higher = preferred)
+
     # Metadata
     description = Column(Text)  # Optional description
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -736,6 +741,41 @@ class ApplicationScannerConfig(Base):
     # Constraints
     __table_args__ = (
         UniqueConstraint('application_id', 'scanner_id', name='uq_app_scanner_config'),
+    )
+
+
+class ApplicationDataLeakagePolicy(Base):
+    """Application-level data leakage disposal policy configuration"""
+    __tablename__ = "application_data_leakage_policies"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
+    application_id = Column(UUID(as_uuid=True), ForeignKey("applications.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Disposal actions for each risk level: 'block' | 'switch_safe_model' | 'anonymize' | 'pass'
+    high_risk_action = Column(String(50), default='block', nullable=False)
+    medium_risk_action = Column(String(50), default='switch_safe_model', nullable=False)
+    low_risk_action = Column(String(50), default='anonymize', nullable=False)
+
+    # Safe model configuration (nullable if using tenant's default)
+    safe_model_id = Column(UUID(as_uuid=True), ForeignKey("upstream_api_configs.id", ondelete="SET NULL"), nullable=True)
+
+    # Feature flags
+    enable_format_detection = Column(Boolean, default=True, nullable=False)
+    enable_smart_segmentation = Column(Boolean, default=True, nullable=False)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    tenant = relationship("Tenant")
+    application = relationship("Application")
+    safe_model = relationship("UpstreamApiConfig", foreign_keys=[safe_model_id])
+
+    # Constraints
+    __table_args__ = (
+        UniqueConstraint('application_id', name='uq_application_data_leakage_policy'),
     )
 
 

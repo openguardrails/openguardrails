@@ -47,7 +47,9 @@ interface EntityType {
   display_name: string
   risk_level?: string // Frontend field name
   category?: string // Backend field name (alias for risk_level)
+  recognition_method?: string // 'regex' or 'genai'
   pattern: string
+  entity_definition?: string // For genai method
   anonymization_method: string
   anonymization_config: any
   check_input: boolean
@@ -91,24 +93,55 @@ const EntityTypeManagement: React.FC = () => {
     entity_type: z.string().min(1, t('entityType.entityTypeCodeRequired')),
     display_name: z.string().min(1, t('entityType.displayNameRequired')),
     risk_level: z.string().min(1, t('entityType.riskLevelRequired')),
-    pattern: z.string().min(1, t('entityType.recognitionRuleRequired')),
+    recognition_method: z.string().default('regex'),
+    pattern: z.string().optional(),
+    entity_definition: z.string().optional(),
     anonymization_method: z.string().min(1, t('entityType.anonymizationMethodRequired')),
-    anonymization_config_text: z.string().optional(),
+    // Regex脱敏配置
+    replace_text: z.string().optional(), // replace方法的替换内容
+    mask_keep_prefix: z.string().optional(), // mask方法保留前几位
+    mask_keep_suffix: z.string().optional(), // mask方法保留后几位
+    mask_char: z.string().optional(), // mask方法的掩码字符
+    // GenAI脱敏配置
+    masking_rule: z.string().optional(), // GenAI的脱敏规则
     check_input: z.boolean().default(true),
     check_output: z.boolean().default(true),
     is_active: z.boolean().default(true),
     is_global: z.boolean().optional(),
+  }).superRefine((data, ctx) => {
+    if (data.recognition_method === 'regex') {
+      if (!data.pattern || data.pattern.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: t('entityType.recognitionRuleRequired'),
+          path: ['pattern'],
+        })
+      }
+    } else if (data.recognition_method === 'genai') {
+      if (!data.entity_definition || data.entity_definition.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: t('entityType.recognitionRuleRequired'),
+          path: ['entity_definition'],
+        })
+      }
+    }
   })
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
+      recognition_method: 'regex',
       is_active: true,
       check_input: true,
       check_output: true,
       anonymization_method: 'replace',
       is_global: false,
-      anonymization_config_text: '{}',
+      mask_char: '*',
+      mask_keep_prefix: '',
+      mask_keep_suffix: '',
+      replace_text: '',
+      masking_rule: '',
     },
   })
 
@@ -141,25 +174,58 @@ const EntityTypeManagement: React.FC = () => {
   const handleCreate = () => {
     setEditingEntity(null)
     form.reset({
+      recognition_method: 'regex',
       is_active: true,
       check_input: true,
       check_output: true,
       anonymization_method: 'replace',
       is_global: false,
-      anonymization_config_text: '{}',
+      mask_char: '*',
+      mask_keep_prefix: '',
+      mask_keep_suffix: '',
+      replace_text: '',
+      masking_rule: '',
     })
     setModalVisible(true)
   }
 
   const handleEdit = (record: EntityType) => {
     setEditingEntity(record)
+    const recognitionMethod = record.recognition_method || 'regex'
+    const config = record.anonymization_config || {}
+
+    // 解析脱敏配置
+    let replace_text = ''
+    let mask_keep_prefix = ''
+    let mask_keep_suffix = ''
+    let mask_char = '*'
+    let masking_rule = ''
+
+    if (recognitionMethod === 'regex') {
+      if (record.anonymization_method === 'replace') {
+        replace_text = config.replacement || ''
+      } else if (record.anonymization_method === 'mask') {
+        mask_keep_prefix = config.keep_prefix !== undefined ? String(config.keep_prefix) : ''
+        mask_keep_suffix = config.keep_suffix !== undefined ? String(config.keep_suffix) : ''
+        mask_char = config.mask_char || '*'
+      }
+    } else {
+      masking_rule = config.masking_rule || ''
+    }
+
     form.reset({
       entity_type: record.entity_type,
       display_name: record.display_name,
       risk_level: record.category || record.risk_level,
+      recognition_method: recognitionMethod,
       pattern: record.pattern,
-      anonymization_method: record.anonymization_method,
-      anonymization_config_text: JSON.stringify(record.anonymization_config || {}, null, 2),
+      entity_definition: record.entity_definition,
+      anonymization_method: recognitionMethod === 'genai' ? 'genai' : record.anonymization_method,
+      replace_text,
+      mask_keep_prefix,
+      mask_keep_suffix,
+      mask_char,
+      masking_rule,
       check_input: record.check_input,
       check_output: record.check_output,
       is_active: record.is_active,
@@ -185,26 +251,50 @@ const EntityTypeManagement: React.FC = () => {
   }
 
   const handleSubmit = async (values: z.infer<typeof formSchema>) => {
-    // Parse JSON config
-    let anonymization_config = {}
+    const recognitionMethod = values.recognition_method || 'regex'
 
-    try {
-      anonymization_config = JSON.parse(values.anonymization_config_text || '{}')
-    } catch (e) {
-      toast.error(t('entityType.invalidJsonConfig'))
-      return
+    // 构建脱敏配置
+    let anonymization_config: any = {}
+
+    if (recognitionMethod === 'genai') {
+      // GenAI类型的配置
+      if (values.masking_rule) {
+        anonymization_config.masking_rule = values.masking_rule
+      }
+    } else {
+      // Regex类型的配置
+      const method = values.anonymization_method
+
+      if (method === 'replace') {
+        anonymization_config.replacement = values.replace_text || `<${values.entity_type}>`
+      } else if (method === 'mask') {
+        anonymization_config.mask_char = values.mask_char || '*'
+        const keepPrefix = values.mask_keep_prefix ? parseInt(values.mask_keep_prefix) : 0
+        const keepSuffix = values.mask_keep_suffix ? parseInt(values.mask_keep_suffix) : 0
+        anonymization_config.keep_prefix = keepPrefix
+        anonymization_config.keep_suffix = keepSuffix
+      }
+      // hash, encrypt, shuffle, random 不需要配置
     }
 
-    const data = {
+    const data: any = {
       entity_type: values.entity_type,
       display_name: values.display_name,
-      risk_level: values.risk_level,
-      pattern: values.pattern,
-      anonymization_method: values.anonymization_method,
+      category: values.risk_level,
+      recognition_method: recognitionMethod,
+      // GenAI类型固定使用genai脱敏方法，Regex类型使用用户选择的方法
+      anonymization_method: recognitionMethod === 'genai' ? 'genai' : values.anonymization_method,
       anonymization_config,
       check_input: values.check_input !== undefined ? values.check_input : true,
       check_output: values.check_output !== undefined ? values.check_output : true,
       is_active: values.is_active !== undefined ? values.is_active : true,
+    }
+
+    // Add pattern or entity_definition based on recognition method
+    if (recognitionMethod === 'genai') {
+      data.entity_definition = values.entity_definition
+    } else {
+      data.pattern = values.pattern
     }
 
     try {
@@ -251,14 +341,28 @@ const EntityTypeManagement: React.FC = () => {
       },
     },
     {
-      accessorKey: 'pattern',
+      id: 'recognition_method',
+      header: '识别方法',
+      size: 100,
+      cell: ({ row }) => {
+        const method = row.original.recognition_method || 'regex'
+        return (
+          <Badge variant="outline">
+            {method === 'genai' ? 'AI识别' : '正则'}
+          </Badge>
+        )
+      },
+    },
+    {
+      id: 'recognition_rule',
       header: t('entityType.recognitionRulesColumn'),
       size: 200,
       cell: ({ row }) => {
-        const pattern = row.getValue('pattern') as string
+        const method = row.original.recognition_method || 'regex'
+        const content = method === 'genai' ? row.original.entity_definition : row.original.pattern
         return (
-          <div className="max-w-[200px] truncate" title={pattern}>
-            <code className="text-xs bg-gray-100 px-1 py-0.5 rounded">{pattern}</code>
+          <div className="max-w-[200px] truncate" title={content}>
+            <code className="text-xs bg-gray-100 px-1 py-0.5 rounded">{content}</code>
           </div>
         )
       },
@@ -269,6 +373,13 @@ const EntityTypeManagement: React.FC = () => {
       size: 100,
       cell: ({ row }) => {
         const method = row.getValue('anonymization_method') as string
+        const recognitionMethod = row.original.recognition_method || 'regex'
+
+        // GenAI类型显示"AI脱敏"
+        if (recognitionMethod === 'genai' || method === 'genai') {
+          return <Badge variant="default">AI脱敏</Badge>
+        }
+
         const m = ANONYMIZATION_METHODS.find((a) => a.value === method)
         return m?.label
       },
@@ -386,7 +497,8 @@ const EntityTypeManagement: React.FC = () => {
       !searchText ||
       item.entity_type.toLowerCase().includes(searchText.toLowerCase()) ||
       item.display_name.toLowerCase().includes(searchText.toLowerCase()) ||
-      item.pattern.toLowerCase().includes(searchText.toLowerCase())
+      (item.pattern && item.pattern.toLowerCase().includes(searchText.toLowerCase())) ||
+      (item.entity_definition && item.entity_definition.toLowerCase().includes(searchText.toLowerCase()))
 
     const risk_level = item.category || item.risk_level
     const matchesRiskLevel = !riskLevelFilter || risk_level === riskLevelFilter
@@ -519,48 +631,19 @@ const EntityTypeManagement: React.FC = () => {
 
               <FormField
                 control={form.control}
-                name="pattern"
+                name="recognition_method"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>
-                      {t('entityType.recognitionRuleLabel')}
-                      <span className="ml-2 text-xs text-gray-500">
-                        {t('entityType.recognitionRuleTooltip')}
-                      </span>
-                    </FormLabel>
-                    <FormControl>
-                      <Textarea
-                        {...field}
-                        rows={3}
-                        placeholder={t('entityType.recognitionRulePlaceholder')}
-                        className="font-mono"
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="anonymization_method"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('entityType.anonymizationMethodLabel')}</FormLabel>
+                    <FormLabel>识别方法</FormLabel>
                     <Select onValueChange={field.onChange} value={field.value}>
                       <FormControl>
                         <SelectTrigger>
-                          <SelectValue
-                            placeholder={t('entityType.anonymizationMethodPlaceholder')}
-                          />
+                          <SelectValue placeholder="选择识别方法" />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        {ANONYMIZATION_METHODS.map((method) => (
-                          <SelectItem key={method.value} value={method.value}>
-                            {method.label}
-                          </SelectItem>
-                        ))}
+                        <SelectItem value="regex">正则表达式 (Regex)</SelectItem>
+                        <SelectItem value="genai">AI识别 (GenAI)</SelectItem>
                       </SelectContent>
                     </Select>
                     <FormMessage />
@@ -568,71 +651,301 @@ const EntityTypeManagement: React.FC = () => {
                 )}
               />
 
-              <FormField
-                control={form.control}
-                name="anonymization_config_text"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('entityType.anonymizationConfigLabel')}</FormLabel>
-                    <FormControl>
-                      <Textarea
-                        {...field}
-                        rows={4}
-                        placeholder={t('entityType.anonymizationConfigPlaceholder')}
-                        className="font-mono"
-                      />
-                    </FormControl>
-                    <Card className="mt-2 bg-gray-50">
+              {form.watch('recognition_method') === 'regex' ? (
+                <FormField
+                  control={form.control}
+                  name="pattern"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>
+                        {t('entityType.recognitionRuleLabel')}
+                        <span className="ml-2 text-xs text-gray-500">
+                          {t('entityType.recognitionRuleTooltip')}
+                        </span>
+                      </FormLabel>
+                      <FormControl>
+                        <Textarea
+                          {...field}
+                          rows={3}
+                          placeholder={t('entityType.recognitionRulePlaceholder')}
+                          className="font-mono"
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              ) : (
+                <FormField
+                  control={form.control}
+                  name="entity_definition"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>
+                        实体定义
+                        <span className="ml-2 text-xs text-gray-500">
+                          用自然语言描述要识别的敏感信息
+                        </span>
+                      </FormLabel>
+                      <FormControl>
+                        <Textarea
+                          {...field}
+                          rows={3}
+                          placeholder="例如：用于联系的11位手机号码"
+                        />
+                      </FormControl>
+                      <Card className="mt-2 bg-green-50 border-green-200">
+                        <CardContent className="p-3">
+                          <p className="text-xs font-semibold text-green-900 mb-2">
+                            💡 实体定义示例
+                          </p>
+                          <ul className="text-xs text-green-800 space-y-1.5 list-none">
+                            <li className="bg-white/50 p-1.5 rounded">
+                              • <strong>电话号码：</strong>"用于联系的11位手机号码"
+                            </li>
+                            <li className="bg-white/50 p-1.5 rounded">
+                              • <strong>身份证号：</strong>"中国大陆18位身份证号码"
+                            </li>
+                            <li className="bg-white/50 p-1.5 rounded">
+                              • <strong>地址：</strong>"包含省市区街道门牌号的详细地址"
+                            </li>
+                            <li className="bg-white/50 p-1.5 rounded">
+                              • <strong>银行卡号：</strong>"16-19位银行卡号"
+                            </li>
+                            <li className="bg-white/50 p-1.5 rounded">
+                              • <strong>姓名：</strong>"中文人名，2-4个汉字"
+                            </li>
+                          </ul>
+                          <p className="text-xs text-green-700 mt-2 pt-2 border-t border-green-300">
+                            ✨ AI会根据您的描述智能识别对应的敏感信息
+                          </p>
+                        </CardContent>
+                      </Card>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
+
+              {form.watch('recognition_method') === 'regex' && (
+                <>
+                  <FormField
+                    control={form.control}
+                    name="anonymization_method"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>脱敏方法</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="选择脱敏方法" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {ANONYMIZATION_METHODS.map((method) => (
+                              <SelectItem key={method.value} value={method.value}>
+                                {method.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  {form.watch('anonymization_method') === 'replace' && (
+                    <FormField
+                      control={form.control}
+                      name="replace_text"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>替换文本</FormLabel>
+                          <FormControl>
+                            <Input
+                              {...field}
+                              placeholder="例如：<身份证号>"
+                            />
+                          </FormControl>
+                          <p className="text-xs text-gray-500 mt-1">
+                            敏感数据将被替换为此文本。如不填写，默认使用 &lt;实体类型代码&gt;
+                          </p>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  )}
+
+                  {form.watch('anonymization_method') === 'mask' && (
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-3 gap-4">
+                        <FormField
+                          control={form.control}
+                          name="mask_keep_prefix"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>保留前几位</FormLabel>
+                              <FormControl>
+                                <Input
+                                  {...field}
+                                  type="number"
+                                  min="0"
+                                  placeholder="0"
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        <FormField
+                          control={form.control}
+                          name="mask_keep_suffix"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>保留后几位</FormLabel>
+                              <FormControl>
+                                <Input
+                                  {...field}
+                                  type="number"
+                                  min="0"
+                                  placeholder="0"
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        <FormField
+                          control={form.control}
+                          name="mask_char"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>掩码字符</FormLabel>
+                              <FormControl>
+                                <Input
+                                  {...field}
+                                  maxLength={1}
+                                  placeholder="*"
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+                      <Card className="bg-blue-50 border-blue-200">
+                        <CardContent className="p-3">
+                          <p className="text-xs text-blue-900">
+                            <strong>示例：</strong>手机号 13822323234
+                          </p>
+                          <ul className="text-xs text-blue-800 mt-2 space-y-1">
+                            <li>• 保留前3位，后4位：138****3234</li>
+                            <li>• 保留前6位，后0位：138223*****</li>
+                            <li>• 保留前0位，后4位：*******3234</li>
+                          </ul>
+                        </CardContent>
+                      </Card>
+                    </div>
+                  )}
+
+                  {['hash', 'encrypt', 'shuffle', 'random'].includes(
+                    form.watch('anonymization_method') || ''
+                  ) && (
+                    <Card className="bg-gray-50">
                       <CardContent className="p-3">
-                        <p className="text-xs font-semibold mb-2">
-                          {t('entityType.anonymizationMethodConfigDesc')}
+                        <p className="text-xs text-gray-700">
+                          <strong>{form.watch('anonymization_method')} 方法</strong> 不需要额外配置，将自动处理。
                         </p>
-                        <ul className="space-y-2 text-xs text-gray-700 list-disc pl-4">
-                          <li>
-                            <code className="bg-gray-200 px-1 rounded">replace</code> -{' '}
-                            {t('entityType.replaceDesc')}
-                            <br />
-                            <span className="text-gray-600">{t('entityType.replaceExample')}</span>
-                          </li>
-                          <li>
-                            <code className="bg-gray-200 px-1 rounded">mask</code> -{' '}
-                            {t('entityType.maskDesc')}
-                            <br />
-                            <span className="text-gray-600">{t('entityType.maskExample')}</span>
-                            <br />
-                            <span className="text-gray-600">{t('entityType.maskExample2')}</span>
-                          </li>
-                          <li>
-                            <code className="bg-gray-200 px-1 rounded">hash</code> -{' '}
-                            {t('entityType.hashDesc')}
-                            <br />
-                            <span className="text-gray-600">{t('entityType.hashExample')}</span>
-                          </li>
-                          <li>
-                            <code className="bg-gray-200 px-1 rounded">encrypt</code> -{' '}
-                            {t('entityType.encryptDesc')}
-                            <br />
-                            <span className="text-gray-600">{t('entityType.encryptExample')}</span>
-                          </li>
-                          <li>
-                            <code className="bg-gray-200 px-1 rounded">shuffle</code> -{' '}
-                            {t('entityType.shuffleDesc')}
-                            <br />
-                            <span className="text-gray-600">{t('entityType.shuffleExample')}</span>
-                          </li>
-                          <li>
-                            <code className="bg-gray-200 px-1 rounded">random</code> -{' '}
-                            {t('entityType.randomDesc')}
-                            <br />
-                            <span className="text-gray-600">{t('entityType.randomExample')}</span>
-                          </li>
-                        </ul>
+                        {form.watch('anonymization_method') === 'hash' && (
+                          <p className="text-xs text-gray-600 mt-2">
+                            示例：13822323234 → a3f5e8d2c1b4
+                          </p>
+                        )}
+                        {form.watch('anonymization_method') === 'encrypt' && (
+                          <p className="text-xs text-gray-600 mt-2">
+                            示例：13822323234 → &lt;ENCRYPTED_a3f5e8d2&gt;
+                          </p>
+                        )}
+                        {form.watch('anonymization_method') === 'shuffle' && (
+                          <p className="text-xs text-gray-600 mt-2">
+                            示例：13822323234 → 32438223134（随机打乱）
+                          </p>
+                        )}
+                        {form.watch('anonymization_method') === 'random' && (
+                          <p className="text-xs text-gray-600 mt-2">
+                            示例：13822323234 → 97354861029（随机替换）
+                          </p>
+                        )}
                       </CardContent>
                     </Card>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                  )}
+                </>
+              )}
+
+              {form.watch('recognition_method') === 'genai' && (
+                <FormField
+                  control={form.control}
+                  name="masking_rule"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>脱敏规则 (可选)</FormLabel>
+                      <FormControl>
+                        <Textarea
+                          {...field}
+                          rows={3}
+                          placeholder="例如：后四位用*号代替"
+                        />
+                      </FormControl>
+                      <p className="text-xs text-gray-500 mt-1">
+                        使用自然语言描述如何脱敏。如不填写，默认替换为 &lt;{form.watch('display_name') || '实体名称'}&gt;
+                      </p>
+                      <Card className="mt-2 bg-blue-50 border-blue-200">
+                        <CardContent className="p-3">
+                          <p className="text-xs font-semibold text-blue-900 mb-2">
+                            💡 AI智能脱敏说明
+                          </p>
+                          <p className="text-xs text-blue-800 mb-3">
+                            GenAI类型使用大模型理解您的脱敏规则，无需编写复杂的正则表达式。大模型会智能识别敏感数据并按照您的描述进行脱敏处理。
+                          </p>
+                          <div className="space-y-3">
+                            <div>
+                              <p className="text-xs font-semibold text-blue-900">规则示例：</p>
+                              <ul className="text-xs text-blue-800 mt-1 space-y-2 list-none">
+                                <li className="bg-white/50 p-2 rounded">
+                                  <span className="font-semibold">规则：</span>"后四位用*号代替"
+                                  <br />
+                                  <span className="text-blue-600">效果：</span>13822323234 → 1382232****
+                                </li>
+                                <li className="bg-white/50 p-2 rounded">
+                                  <span className="font-semibold">规则：</span>"保留前3位和后4位，中间用***替换"
+                                  <br />
+                                  <span className="text-blue-600">效果：</span>13822323234 → 138***3234
+                                </li>
+                                <li className="bg-white/50 p-2 rounded">
+                                  <span className="font-semibold">规则：</span>"替换为[已脱敏]"
+                                  <br />
+                                  <span className="text-blue-600">效果：</span>13822323234 → [已脱敏]
+                                </li>
+                                <li className="bg-white/50 p-2 rounded">
+                                  <span className="font-semibold">规则：</span>"全部替换为&lt;电话号码&gt;"
+                                  <br />
+                                  <span className="text-blue-600">效果：</span>13822323234 → &lt;电话号码&gt;
+                                </li>
+                              </ul>
+                            </div>
+                            <div className="border-t border-blue-300 pt-2">
+                              <p className="text-xs text-blue-700">
+                                ✨ <strong>提示：</strong>您可以用任何清晰的中文描述脱敏规则，AI会智能理解并执行
+                              </p>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
 
               <div>
                 <FormLabel>{t('entityType.detectionScopeLabel')}</FormLabel>

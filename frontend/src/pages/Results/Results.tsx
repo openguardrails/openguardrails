@@ -636,7 +636,7 @@ const Results: React.FC = () => {
 
       {/* Detail Drawer */}
       <Sheet open={drawerVisible} onOpenChange={setDrawerVisible}>
-        <SheetContent className="w-[720px] overflow-y-auto">
+        <SheetContent className="w-[1000px] max-w-[90vw] overflow-y-auto">
           <SheetHeader>
             <SheetTitle>{t('results.detectionDetails')}</SheetTitle>
           </SheetHeader>
@@ -648,10 +648,10 @@ const Results: React.FC = () => {
             </div>
           ) : (
             selectedResult && (
-              <div className="space-y-6 mt-6">
+              <div className="space-y-4 mt-6">
                 {/* Request ID */}
-                <div className="grid grid-cols-3 gap-4 border-b pb-4">
-                  <div className="font-medium text-gray-600">{t('results.requestId')}:</div>
+                <div className="grid grid-cols-3 gap-4 border-b pb-3">
+                  <div className="font-medium text-gray-600 text-sm">{t('results.requestId')}:</div>
                   <div className="col-span-2">
                     <code className="text-xs bg-gray-100 px-2 py-1 rounded">
                       {selectedResult.request_id}
@@ -660,13 +660,14 @@ const Results: React.FC = () => {
                 </div>
 
                 {/* Prompt Attack */}
-                <div className="grid grid-cols-3 gap-4 border-b pb-4">
-                  <div className="font-medium text-gray-600">{t('results.promptAttack')}:</div>
+                <div className="grid grid-cols-3 gap-4 border-b pb-3">
+                  <div className="font-medium text-gray-600 text-sm">{t('results.promptAttack')}:</div>
                   <div className="col-span-2">
                     <Badge
                       variant={getRiskBadgeVariant(
                         selectedResult.security_risk_level || 'no_risk'
                       )}
+                      className="text-xs"
                     >
                       {formatRiskDisplay(
                         selectedResult.security_risk_level || t('risk.level.no_risk'),
@@ -677,8 +678,8 @@ const Results: React.FC = () => {
                 </div>
 
                 {/* Content Compliance */}
-                <div className="grid grid-cols-3 gap-4 border-b pb-4">
-                  <div className="font-medium text-gray-600">
+                <div className="grid grid-cols-3 gap-4 border-b pb-3">
+                  <div className="font-medium text-gray-600 text-sm">
                     {t('results.contentCompliance')}:
                   </div>
                   <div className="col-span-2">
@@ -686,6 +687,7 @@ const Results: React.FC = () => {
                       variant={getRiskBadgeVariant(
                         selectedResult.compliance_risk_level || 'no_risk'
                       )}
+                      className="text-xs"
                     >
                       {formatRiskDisplay(
                         selectedResult.compliance_risk_level || t('risk.level.no_risk'),
@@ -696,11 +698,12 @@ const Results: React.FC = () => {
                 </div>
 
                 {/* Data Leak */}
-                <div className="grid grid-cols-3 gap-4 border-b pb-4">
-                  <div className="font-medium text-gray-600">{t('results.dataLeak')}:</div>
+                <div className="grid grid-cols-3 gap-4 border-b pb-3">
+                  <div className="font-medium text-gray-600 text-sm">{t('results.dataLeak')}:</div>
                   <div className="col-span-2">
                     <Badge
                       variant={getRiskBadgeVariant(selectedResult.data_risk_level || 'no_risk')}
+                      className="text-xs"
                     >
                       {formatRiskDisplay(
                         selectedResult.data_risk_level || t('risk.level.no_risk'),
@@ -711,8 +714,8 @@ const Results: React.FC = () => {
                 </div>
 
                 {/* Suggested Action */}
-                <div className="grid grid-cols-3 gap-4 border-b pb-4">
-                  <div className="font-medium text-gray-600">{t('results.suggestedAction')}:</div>
+                <div className="grid grid-cols-3 gap-4 border-b pb-3">
+                  <div className="font-medium text-gray-600 text-sm">{t('results.suggestedAction')}:</div>
                   <div className="col-span-2">
                     <Badge
                       variant={
@@ -722,6 +725,7 @@ const Results: React.FC = () => {
                           ? 'destructive'
                           : 'default'
                       }
+                      className="text-xs"
                     >
                       {selectedResult.suggest_action}
                     </Badge>
@@ -729,21 +733,21 @@ const Results: React.FC = () => {
                 </div>
 
                 {/* Detection Time */}
-                <div className="grid grid-cols-3 gap-4 border-b pb-4">
-                  <div className="font-medium text-gray-600">{t('results.detectionTime')}:</div>
-                  <div className="col-span-2">
+                <div className="grid grid-cols-3 gap-4 border-b pb-3">
+                  <div className="font-medium text-gray-600 text-sm">{t('results.detectionTime')}:</div>
+                  <div className="col-span-2 text-sm">
                     {format(new Date(selectedResult.created_at), 'yyyy-MM-dd HH:mm:ss')}
                   </div>
                 </div>
 
                 {/* Detection Content */}
                 <div>
-                  <div className="font-medium text-gray-600 mb-3">
+                  <div className="font-medium text-gray-600 mb-3 text-sm">
                     {t('results.detectionContent')}:
                   </div>
                   <div className="mt-2 p-4 bg-gray-50 rounded-md">
                     {selectedResult.content && (
-                      <p className="mb-3 whitespace-pre-wrap">{selectedResult.content}</p>
+                      <p className="mb-3 whitespace-pre-wrap text-sm">{selectedResult.content}</p>
                     )}
 
                     {selectedResult.has_image &&
@@ -783,10 +787,10 @@ const Results: React.FC = () => {
                 {/* Suggested Answer */}
                 {selectedResult.suggest_answer && (
                   <div>
-                    <div className="font-medium text-gray-600 mb-3">
+                    <div className="font-medium text-gray-600 mb-3 text-sm">
                       {t('results.suggestedAnswer')}:
                     </div>
-                    <div className="mt-2 p-4 bg-blue-50 rounded-md whitespace-pre-wrap">
+                    <div className="mt-2 p-4 bg-blue-50 rounded-md whitespace-pre-wrap text-sm">
                       {selectedResult.suggest_answer}
                     </div>
                   </div>
@@ -800,18 +804,18 @@ const Results: React.FC = () => {
                   (selectedResult.data_categories &&
                     selectedResult.data_categories.length > 0)) && (
                   <div>
-                    <div className="font-medium text-gray-600 mb-3">
+                    <div className="font-medium text-gray-600 mb-3 text-sm">
                       {t('results.riskDetails')}:
                     </div>
                     <div className="space-y-2">
                       {selectedResult.security_categories &&
                         selectedResult.security_categories.length > 0 && (
                           <div>
-                            <span className="text-sm font-medium">
+                            <span className="text-xs font-medium">
                               {t('results.promptAttack')}:{' '}
                             </span>
                             {selectedResult.security_categories.map((category, index) => (
-                              <Badge key={`security-${index}`} variant="destructive" className="mr-1 mb-1">
+                              <Badge key={`security-${index}`} variant="destructive" className="mr-1 mb-1 text-xs">
                                 {category}
                               </Badge>
                             ))}
@@ -820,11 +824,11 @@ const Results: React.FC = () => {
                       {selectedResult.compliance_categories &&
                         selectedResult.compliance_categories.length > 0 && (
                           <div>
-                            <span className="text-sm font-medium">
+                            <span className="text-xs font-medium">
                               {t('results.contentCompliance')}:{' '}
                             </span>
                             {selectedResult.compliance_categories.map((category, index) => (
-                              <Badge key={`compliance-${index}`} variant="default" className="mr-1 mb-1">
+                              <Badge key={`compliance-${index}`} variant="default" className="mr-1 mb-1 text-xs">
                                 {category}
                               </Badge>
                             ))}
@@ -833,11 +837,11 @@ const Results: React.FC = () => {
                       {selectedResult.data_categories &&
                         selectedResult.data_categories.length > 0 && (
                           <div>
-                            <span className="text-sm font-medium">
+                            <span className="text-xs font-medium">
                               {t('results.dataLeak')}:{' '}
                             </span>
                             {selectedResult.data_categories.map((category, index) => (
-                              <Badge key={`data-${index}`} variant="secondary" className="mr-1 mb-1">
+                              <Badge key={`data-${index}`} variant="secondary" className="mr-1 mb-1 text-xs">
                                 {category}
                               </Badge>
                             ))}
@@ -849,8 +853,8 @@ const Results: React.FC = () => {
 
                 {/* Source IP */}
                 {selectedResult.ip_address && (
-                  <div className="grid grid-cols-3 gap-4 border-b pb-4">
-                    <div className="font-medium text-gray-600">{t('results.sourceIP')}:</div>
+                  <div className="grid grid-cols-3 gap-4 border-b pb-3">
+                    <div className="font-medium text-gray-600 text-sm">{t('results.sourceIP')}:</div>
                     <div className="col-span-2">
                       <code className="text-xs bg-gray-100 px-2 py-1 rounded">
                         {selectedResult.ip_address}

@@ -377,27 +377,33 @@ class ProxyService:
             raise Exception(f"Streaming request failed: {str(e)}")
 
     async def forward_chat_completion(
-        self, 
-        model_config: ProxyModelConfig, 
-        request_data: Any, 
-        request_id: str
+        self,
+        model_config: ProxyModelConfig,
+        request_data: Any,
+        request_id: str,
+        messages: list = None  # NEW: Optional messages override (for anonymization)
     ) -> Dict[str, Any]:
         """Forward chat completion request to target model"""
         api_key = self._decrypt_api_key(model_config.api_key_encrypted)
-        
+
         # Construct request URL
         url = f"{model_config.api_base_url}/chat/completions"
-        
+
         # Construct request headers
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
-        
+
         # Construct request body - fully pass user parameters
         payload = request_data.dict(exclude_unset=True)  # Only include user actual passed parameters
         payload["model"] = model_config.model_name  # Replace with actual model name
-        payload["messages"] = [{"role": msg.role, "content": msg.content} for msg in request_data.messages]
+
+        # NEW: Use provided messages if available (for anonymization), otherwise use original
+        if messages is not None:
+            payload["messages"] = messages
+        else:
+            payload["messages"] = [{"role": msg.role, "content": msg.content} for msg in request_data.messages]
 
         # Process extra_body parameters (exclude internal xxai_app_user_id)
         if hasattr(request_data, 'extra_body') and request_data.extra_body:

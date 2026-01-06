@@ -40,15 +40,18 @@ async def get_entity_types(
             # Extract pattern and check flags from recognition_config
             recognition_config = et.recognition_config or {}
             pattern = recognition_config.get('pattern', '')
+            entity_definition = recognition_config.get('entity_definition', '')
             check_input = recognition_config.get('check_input', True)
             check_output = recognition_config.get('check_output', True)
-            
+
             items.append({
                 "id": str(et.id),
                 "entity_type": et.entity_type,
                 "display_name": et.display_name,
                 "category": et.category,  # This is the risk_level
+                "recognition_method": et.recognition_method,
                 "pattern": pattern,
+                "entity_definition": entity_definition,
                 "anonymization_method": et.anonymization_method,
                 "anonymization_config": et.anonymization_config,
                 "check_input": check_input,
@@ -105,15 +108,18 @@ async def get_entity_type(
         # Extract pattern and check flags from recognition_config
         recognition_config = entity_type.recognition_config or {}
         pattern = recognition_config.get('pattern', '')
+        entity_definition = recognition_config.get('entity_definition', '')
         check_input = recognition_config.get('check_input', True)
         check_output = recognition_config.get('check_output', True)
-        
+
         return {
             "id": str(entity_type.id),
             "entity_type": entity_type.entity_type,
             "display_name": entity_type.display_name,
             "category": entity_type.category,
+            "recognition_method": entity_type.recognition_method,
             "pattern": pattern,
+            "entity_definition": entity_definition,
             "anonymization_method": entity_type.anonymization_method,
             "anonymization_config": entity_type.anonymization_config,
             "check_input": check_input,
@@ -143,7 +149,20 @@ async def create_entity_type(
     """
     try:
         current_user, application_id = get_current_user_and_application_from_request(request, db)
-        
+
+        recognition_method = data.get("recognition_method", "regex")
+
+        # Auto-detect genai type: if entity_definition is provided but recognition_method is regex, fix it
+        if data.get("entity_definition") and not data.get("pattern"):
+            recognition_method = "genai"
+            logger.info(f"Auto-corrected recognition_method to 'genai' based on entity_definition presence")
+
+        # GenAI类型固定使用genai脱敏方法
+        if recognition_method == "genai":
+            anonymization_method = "genai"
+        else:
+            anonymization_method = data.get("anonymization_method", "mask")
+
         service = DataSecurityService(db)
         entity_type = service.create_entity_type(
             tenant_id=str(current_user.id),
@@ -151,8 +170,10 @@ async def create_entity_type(
             entity_type=data.get("entity_type"),
             display_name=data.get("display_name"),
             risk_level=data.get("category", "medium"),  # category is risk_level in the service
+            recognition_method=recognition_method,
             pattern=data.get("pattern"),
-            anonymization_method=data.get("anonymization_method", "mask"),
+            entity_definition=data.get("entity_definition"),
+            anonymization_method=anonymization_method,
             anonymization_config=data.get("anonymization_config"),
             check_input=data.get("check_input", True),
             check_output=data.get("check_output", True),
@@ -187,19 +208,35 @@ async def update_entity_type(
     """
     try:
         current_user, application_id = get_current_user_and_application_from_request(request, db)
-        
+
         service = DataSecurityService(db)
-        
+
         # Build update kwargs
         update_kwargs = {}
         if "display_name" in data:
             update_kwargs["display_name"] = data["display_name"]
         if "category" in data:
             update_kwargs["risk_level"] = data["category"]  # category is risk_level in the service
+
+        # Auto-detect genai type: if entity_definition is provided but recognition_method is regex, fix it
+        recognition_method = data.get("recognition_method")
+        if data.get("entity_definition") and not data.get("pattern"):
+            recognition_method = "genai"
+            logger.info(f"Auto-corrected recognition_method to 'genai' based on entity_definition presence")
+
+        if recognition_method is not None:
+            update_kwargs["recognition_method"] = recognition_method
         if "pattern" in data:
             update_kwargs["pattern"] = data["pattern"]
-        if "anonymization_method" in data:
+        if "entity_definition" in data:
+            update_kwargs["entity_definition"] = data["entity_definition"]
+
+        # GenAI类型固定使用genai脱敏方法
+        if recognition_method == "genai":
+            update_kwargs["anonymization_method"] = "genai"
+        elif "anonymization_method" in data:
             update_kwargs["anonymization_method"] = data["anonymization_method"]
+
         if "anonymization_config" in data:
             update_kwargs["anonymization_config"] = data["anonymization_config"]
         if "check_input" in data:
@@ -280,11 +317,24 @@ async def create_global_entity_type(
     """
     try:
         current_user, application_id = get_current_user_and_application_from_request(request, db)
-        
+
         # Check admin permission
         if not current_user.is_super_admin:
             raise HTTPException(status_code=403, detail="Only administrators can create global entity types")
-        
+
+        recognition_method = data.get("recognition_method", "regex")
+
+        # Auto-detect genai type: if entity_definition is provided but recognition_method is regex, fix it
+        if data.get("entity_definition") and not data.get("pattern"):
+            recognition_method = "genai"
+            logger.info(f"Auto-corrected recognition_method to 'genai' based on entity_definition presence")
+
+        # GenAI类型固定使用genai脱敏方法
+        if recognition_method == "genai":
+            anonymization_method = "genai"
+        else:
+            anonymization_method = data.get("anonymization_method", "mask")
+
         service = DataSecurityService(db)
         entity_type = service.create_entity_type(
             tenant_id=str(current_user.id),
@@ -292,8 +342,10 @@ async def create_global_entity_type(
             entity_type=data.get("entity_type"),
             display_name=data.get("display_name"),
             risk_level=data.get("category", "medium"),
+            recognition_method=recognition_method,
             pattern=data.get("pattern"),
-            anonymization_method=data.get("anonymization_method", "mask"),
+            entity_definition=data.get("entity_definition"),
+            anonymization_method=anonymization_method,
             anonymization_config=data.get("anonymization_config"),
             check_input=data.get("check_input", True),
             check_output=data.get("check_output", True),

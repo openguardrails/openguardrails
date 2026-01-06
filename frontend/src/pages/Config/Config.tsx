@@ -88,7 +88,7 @@ const Config: React.FC = () => {
       <h2 className="text-3xl font-bold tracking-tight">{t('config.title')}</h2>
 
       <Tabs value={getActiveKey()} onValueChange={handleTabChange}>
-        <TabsList className="grid w-full grid-cols-3 lg:grid-cols-5 xl:grid-cols-9">
+        <TabsList className="grid w-full grid-cols-3 lg:grid-cols-5 xl:grid-cols-10">
           {tabs.map((tab) => (
             <TabsTrigger key={tab.key} value={tab.key}>
               {tab.label}

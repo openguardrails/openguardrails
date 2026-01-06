@@ -82,7 +82,7 @@ openguardrails/
 ├── frontend/
 │   ├── src/{pages,components,services,contexts}/
 │   └── nginx.conf
-└── docs/  # API_REFERENCE.md, DEPLOYMENT.md, MIGRATION_GUIDE.md
+└── docs/  # API_REFERENCE.md, DEPLOYMENT.md, MIGRATION_GUIDE.md, DATA_LEAKAGE_GUIDE.md
 ```
 
 ## Database Schema (Key Tables)
@@ -97,9 +97,10 @@ openguardrails/
 6. **ban_policy**: Auto-ban rules (thresholds, duration)
 7. **knowledge_base**: Q&A pairs (embeddings for similarity search)
 8. **proxy_keys**: Proxy API keys (upstream provider configs)
-9. **upstream_models**: Model configs (provider, api_base_url)
+9. **upstream_api_config**: Model configs (provider, api_base_url, **safety attributes**)
 10. **rate_limits**: Rate limit settings
-11. **data_security_entity_types**: Data leak entity types
+11. **data_security_entity_types**: Data leak entity types (regex/GenAI recognition)
+12. **application_data_leakage_policy**: Data leakage disposal policies per application
 
 ## Risk Categories (19 Types)
 
@@ -128,6 +129,76 @@ openguardrails/
 **API Endpoints**: `/api/v1/scanners/{packages,configs,custom,purchases/*}`
 
 **See**: docs/SCANNER_PACKAGE_IMPLEMENTATION_PLAN.md
+
+---
+
+## DATA LEAKAGE PREVENTION SYSTEM
+
+**Status**: Production-ready (v5.0.7+)
+
+**Architecture**: Multi-layer protection system with format-aware detection and intelligent disposal strategies
+
+### Key Components
+
+**Format Detection Service** (`backend/services/format_detection_service.py`):
+- Auto-detects content format (JSON, YAML, CSV, Markdown, Plain Text)
+- Enables format-aware smart segmentation
+
+**Segmentation Service** (`backend/services/segmentation_service.py`):
+- JSON: Split by top-level objects (max 50 segments)
+- YAML: Split by top-level keys (max 50 segments)
+- CSV: Split by rows with header retention (max 100 rows)
+- Markdown: Split by ## sections (max 30 sections)
+- Plain Text: Single segment (no segmentation)
+
+**Data Security Service** (`backend/services/data_security_service.py`):
+- **Regex entities**: Applied to full text (ID cards, credit cards, etc.)
+- **GenAI entities**: Applied per-segment with parallel processing
+- Risk aggregation: Highest risk from all segments wins
+
+**Data Leakage Disposal Service** (`backend/services/data_leakage_disposal_service.py`):
+- **Block**: Reject request completely (default for high risk)
+- **Switch Safe Model**: Redirect to data-safe model (default for medium risk)
+- **Anonymize**: Replace sensitive entities with placeholders (default for low risk)
+- **Pass**: Allow request, log only (audit mode)
+
+### Safe Model System
+
+**Model Safety Attributes** (`upstream_api_config` table):
+- `is_data_safe`: Mark as safe for sensitive data (on-premise, private cloud, air-gapped)
+- `is_default_safe_model`: Tenant-wide default safe model
+- `safe_model_priority`: Priority ranking (0-100, higher = preferred)
+
+**Safe Model Selection Priority**:
+1. Application policy `safe_model_id` (explicit configuration)
+2. Tenant default safe model (`is_default_safe_model = true`)
+3. Highest priority safe model (`safe_model_priority DESC`)
+
+### Application-Level Policies
+
+**Table**: `application_data_leakage_policy`
+
+**Configuration per application**:
+- `high_risk_action`: block | switch_safe_model | anonymize | pass
+- `medium_risk_action`: block | switch_safe_model | anonymize | pass
+- `low_risk_action`: block | switch_safe_model | anonymize | pass
+- `safe_model_id`: Override safe model for this app (nullable)
+- `enable_format_detection`: Enable/disable format detection
+- `enable_smart_segmentation`: Enable/disable smart segmentation
+
+**Default Strategy**:
+- High Risk → `block`
+- Medium Risk → `switch_safe_model`
+- Low Risk → `anonymize`
+
+### Performance Characteristics
+
+- **Format Detection**: ~5-10ms overhead
+- **Smart Segmentation**: ~10-20ms overhead
+- **Parallel Processing Gain**: 20-60% faster for large content (> 1KB)
+- **Net Impact**: Faster overall for medium/large content
+
+**See**: docs/DATA_LEAKAGE_GUIDE.md (comprehensive user guide)
 
 ---
 
@@ -160,8 +231,10 @@ openguardrails/
 ### Admin (5000)
 - `/api/v1/auth/{login,register}` - Authentication
 - `/api/v1/config/{blacklist,whitelist,templates,ban-policy}` - Config
+- `/api/v1/config/data-leakage-policy` - Data leakage disposal policy (per-app)
+- `/api/v1/config/safe-models` - List available safe models
 - `/api/v1/risk-config` - Risk types
-- `/api/v1/proxy/{keys,models}` - Proxy management
+- `/api/v1/proxy/{keys,models}` - Proxy management (includes safety attributes)
 - `/api/v1/dashboard/stats` - Statistics
 - `/api/v1/results` - Detection results
 
@@ -298,5 +371,5 @@ A: YES. Safe. Migrations unaffected (run once per container, not per worker).
 
 ---
 
-**Last Updated**: 2025-10-29
+**Last Updated**: 2026-01-05
 **Generated for**: AI assistants to quickly understand OpenGuardrails architecture.

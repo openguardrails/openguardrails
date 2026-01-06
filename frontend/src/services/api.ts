@@ -673,4 +673,29 @@ export const purchasesApi = {
     api.get('/api/v1/purchases/admin/statistics', { params: { package_id: packageId } }).then(res => res.data),
 };
 
+export const dataLeakagePolicyApi = {
+  // Get data leakage policy for current application
+  getPolicy: (applicationId: string): Promise<any> =>
+    api.get('/api/v1/config/data-leakage-policy', {
+      headers: { 'X-Application-ID': applicationId }
+    }).then(res => res.data),
+
+  // Update data leakage policy
+  updatePolicy: (applicationId: string, policyData: {
+    high_risk_action: string;
+    medium_risk_action: string;
+    low_risk_action: string;
+    safe_model_id?: string | null;
+    enable_format_detection: boolean;
+    enable_smart_segmentation: boolean;
+  }): Promise<any> =>
+    api.put('/api/v1/config/data-leakage-policy', policyData, {
+      headers: { 'X-Application-ID': applicationId }
+    }).then(res => res.data),
+
+  // Get available safe models
+  getSafeModels: (): Promise<any[]> =>
+    api.get('/api/v1/config/safe-models').then(res => res.data),
+};
+
 export default api;

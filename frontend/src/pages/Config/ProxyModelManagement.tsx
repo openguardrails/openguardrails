@@ -28,6 +28,9 @@ interface ProxyModel {
   block_on_output_risk: boolean
   enable_reasoning_detection: boolean
   stream_chunk_size: number
+  is_data_safe: boolean
+  is_default_safe_model: boolean
+  safe_model_priority: number
   created_at: string
 }
 
@@ -54,6 +57,9 @@ const ProxyModelManagement: React.FC = () => {
     block_on_output_risk: false,
     enable_reasoning_detection: true,
     stream_chunk_size: 50,
+    is_data_safe: false,
+    is_default_safe_model: false,
+    safe_model_priority: 0,
   })
 
   // Get model list
@@ -166,6 +172,9 @@ const ProxyModelManagement: React.FC = () => {
           block_on_output_risk: modelDetail.block_on_output_risk,
           enable_reasoning_detection: modelDetail.enable_reasoning_detection !== false,
           stream_chunk_size: modelDetail.stream_chunk_size || 50,
+          is_data_safe: modelDetail.is_data_safe || false,
+          is_default_safe_model: modelDetail.is_default_safe_model || false,
+          safe_model_priority: modelDetail.safe_model_priority || 0,
         })
 
         // Store masked API key for display
@@ -190,6 +199,9 @@ const ProxyModelManagement: React.FC = () => {
         block_on_output_risk: false,
         enable_reasoning_detection: true,
         stream_chunk_size: 50,
+        is_data_safe: false,
+        is_default_safe_model: false,
+        safe_model_priority: 0,
       })
 
       setIsModalVisible(true)
@@ -241,6 +253,9 @@ const ProxyModelManagement: React.FC = () => {
         block_on_output_risk: switchStates.block_on_output_risk,
         enable_reasoning_detection: switchStates.enable_reasoning_detection,
         stream_chunk_size: switchStates.stream_chunk_size,
+        is_data_safe: switchStates.is_data_safe,
+        is_default_safe_model: switchStates.is_default_safe_model,
+        safe_model_priority: switchStates.safe_model_priority,
       }
 
       // In edit mode, only include API key if user entered a new one
@@ -605,6 +620,52 @@ completion = openai_client.chat.completions.create(
                     checked={switchStates.block_on_output_risk}
                     onCheckedChange={(checked) => setSwitchStates(prev => ({ ...prev, block_on_output_risk: checked }))}
                   />
+                </div>
+              </div>
+
+              <div className="space-y-3 p-4 border rounded-lg bg-green-50">
+                <div>
+                  <p className="font-medium mb-1">{t('proxy.dataSafetyLabel')}</p>
+                  <p className="text-sm text-gray-600">{t('proxy.dataSafetyDesc')}</p>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label htmlFor="is_data_safe">{t('proxy.isDataSafe')}</Label>
+                    <p className="text-sm text-gray-600">{t('proxy.isDataSafeDesc')}</p>
+                  </div>
+                  <Switch
+                    id="is_data_safe"
+                    checked={switchStates.is_data_safe}
+                    onCheckedChange={(checked) => setSwitchStates(prev => ({ ...prev, is_data_safe: checked }))}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label htmlFor="is_default_safe_model">{t('proxy.isDefaultSafeModel')}</Label>
+                    <p className="text-sm text-gray-600">{t('proxy.isDefaultSafeModelDesc')}</p>
+                  </div>
+                  <Switch
+                    id="is_default_safe_model"
+                    checked={switchStates.is_default_safe_model}
+                    onCheckedChange={(checked) => setSwitchStates(prev => ({ ...prev, is_default_safe_model: checked }))}
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="safe_model_priority">{t('proxy.safeModelPriorityLabel')}</Label>
+                  <Input
+                    id="safe_model_priority"
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={switchStates.safe_model_priority}
+                    onChange={(e) => setSwitchStates(prev => ({ ...prev, safe_model_priority: parseInt(e.target.value) || 0 }))}
+                    placeholder={t('proxy.safeModelPriorityPlaceholder')}
+                    className="mt-2"
+                  />
+                  <p className="text-sm text-gray-600 mt-1">{t('proxy.safeModelPriorityTooltip')}</p>
                 </div>
               </div>
 

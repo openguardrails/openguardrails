@@ -113,6 +113,9 @@ async def get_user_upstream_apis(request: Request):
                         "enable_reasoning_detection": config.enable_reasoning_detection,
                         "stream_chunk_size": config.stream_chunk_size,
                         "description": config.description,
+                        "is_data_safe": config.is_data_safe if config.is_data_safe is not None else False,
+                        "is_default_safe_model": config.is_default_safe_model if config.is_default_safe_model is not None else False,
+                        "safe_model_priority": config.safe_model_priority if config.safe_model_priority is not None else 0,
                         "created_at": config.created_at.isoformat(),
                         "gateway_url": f"http://localhost:5002/v1/gateway/{config.id}/"
                     }
@@ -181,7 +184,11 @@ async def create_upstream_api(request: Request):
                 block_on_output_risk=bool(request_data.get('block_on_output_risk', False)),
                 enable_reasoning_detection=bool(request_data.get('enable_reasoning_detection', True)),
                 stream_chunk_size=int(request_data.get('stream_chunk_size', 50)),
-                description=request_data.get('description')
+                description=request_data.get('description'),
+                # Safety attributes for data leakage prevention
+                is_data_safe=bool(request_data.get('is_data_safe', False)),
+                is_default_safe_model=bool(request_data.get('is_default_safe_model', False)),
+                safe_model_priority=int(request_data.get('safe_model_priority', 0))
             )
 
             db.add(api_config)
@@ -249,6 +256,9 @@ async def get_upstream_api_detail(api_id: str, request: Request):
                     "block_on_output_risk": api_config.block_on_output_risk if api_config.block_on_output_risk is not None else False,
                     "stream_chunk_size": api_config.stream_chunk_size if api_config.stream_chunk_size is not None else 50,
                     "description": api_config.description,
+                    "is_data_safe": api_config.is_data_safe if api_config.is_data_safe is not None else False,
+                    "is_default_safe_model": api_config.is_default_safe_model if api_config.is_default_safe_model is not None else False,
+                    "safe_model_priority": api_config.safe_model_priority if api_config.safe_model_priority is not None else 0,
                     "created_at": api_config.created_at.isoformat(),
                     "gateway_url": f"http://localhost:5002/v1/gateway/{api_config.id}/"
                 }
@@ -300,11 +310,11 @@ async def update_upstream_api(api_id: str, request: Request):
                 if field == 'api_key':
                     if value:  # If API key is provided, update
                         api_config.api_key_encrypted = _encrypt_api_key(value)
-                elif field in ['is_active', 'block_on_input_risk', 'block_on_output_risk', 'enable_reasoning_detection']:
-                    # Explicitly handle boolean fields
+                elif field in ['is_active', 'block_on_input_risk', 'block_on_output_risk', 'enable_reasoning_detection', 'is_data_safe', 'is_default_safe_model']:
+                    # Explicitly handle boolean fields (including safety attributes)
                     setattr(api_config, field, bool(value))
-                elif field == 'stream_chunk_size':
-                    # Handle integer fields
+                elif field in ['stream_chunk_size', 'safe_model_priority']:
+                    # Handle integer fields (including safety attributes)
                     setattr(api_config, field, int(value))
                 elif hasattr(api_config, field):
                     setattr(api_config, field, value)

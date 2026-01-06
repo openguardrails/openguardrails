@@ -18,6 +18,7 @@
   - [Risk Configuration API](#risk-configuration-api)
   - [Detection Results API](#detection-results-api)
   - [Data Security API](#data-security-api)
+  - [Data Leakage Policy API](#data-leakage-policy-api)
   - [Media API](#media-api)
 - [Request/Response Models](#requestresponse-models)
 - [Error Handling](#error-handling)
@@ -1060,6 +1061,148 @@ Update data security entity configurations.
 **Authentication**: Admin role required
 
 **Request Body**: Same format as GET response
+
+---
+
+### Data Leakage Policy API
+
+Configure data leakage prevention disposal policies and safe model selection.
+
+#### GET `/api/v1/config/data-leakage-policy`
+
+Get data leakage disposal policy for the current application.
+
+**Service**: Admin Service (Port 5000)
+
+**Authentication**: Required
+
+**Headers**:
+```http
+X-Application-ID: {application_id}
+```
+
+**Response**:
+
+```json
+{
+  "id": "policy_xxx",
+  "application_id": "app_xxx",
+  "high_risk_action": "block",
+  "medium_risk_action": "switch_safe_model",
+  "low_risk_action": "anonymize",
+  "safe_model": {
+    "id": "model_xxx",
+    "config_name": "Enterprise Private Model",
+    "provider": "openai",
+    "model": "gpt-4",
+    "is_data_safe": true,
+    "is_default_safe_model": true,
+    "safe_model_priority": 10
+  },
+  "available_safe_models": [
+    {
+      "id": "model_xxx",
+      "config_name": "Enterprise Private Model",
+      "provider": "openai",
+      "model": "gpt-4",
+      "is_data_safe": true,
+      "is_default_safe_model": true,
+      "safe_model_priority": 10
+    }
+  ],
+  "enable_format_detection": true,
+  "enable_smart_segmentation": true,
+  "created_at": "2025-01-05T10:00:00Z",
+  "updated_at": "2025-01-05T12:30:00Z"
+}
+```
+
+**Disposal Actions**:
+- `block`: Block the request completely
+- `switch_safe_model`: Switch to a data-safe model (e.g., on-premise/private)
+- `anonymize`: Anonymize sensitive data before sending
+- `pass`: Allow the request (record only)
+
+**Default Strategy**:
+- High Risk → `block`
+- Medium Risk → `switch_safe_model`
+- Low Risk → `anonymize`
+
+---
+
+#### PUT `/api/v1/config/data-leakage-policy`
+
+Update data leakage disposal policy for an application.
+
+**Service**: Admin Service (Port 5000)
+
+**Authentication**: Required
+
+**Headers**:
+```http
+X-Application-ID: {application_id}
+```
+
+**Request Body**:
+
+```json
+{
+  "high_risk_action": "block",
+  "medium_risk_action": "switch_safe_model",
+  "low_risk_action": "anonymize",
+  "safe_model_id": "model_xxx",
+  "enable_format_detection": true,
+  "enable_smart_segmentation": true
+}
+```
+
+**Response**: Same as GET response
+
+**Field Descriptions**:
+- `high_risk_action`, `medium_risk_action`, `low_risk_action`: Disposal action for each risk level
+- `safe_model_id`: Specific safe model to use (null = use tenant's default)
+- `enable_format_detection`: Auto-detect content format (JSON/YAML/CSV/Markdown) for optimization
+- `enable_smart_segmentation`: Intelligently segment content by format for better GenAI detection
+
+---
+
+#### GET `/api/v1/config/safe-models`
+
+List all available data-safe models for the tenant.
+
+**Service**: Admin Service (Port 5000)
+
+**Authentication**: Required
+
+**Response**:
+
+```json
+[
+  {
+    "id": "model_xxx",
+    "config_name": "Enterprise Private GPT-4",
+    "provider": "openai",
+    "model": "gpt-4",
+    "is_data_safe": true,
+    "is_default_safe_model": true,
+    "safe_model_priority": 10
+  },
+  {
+    "id": "model_yyy",
+    "config_name": "Local Llama Model",
+    "provider": "ollama",
+    "model": "llama2",
+    "is_data_safe": true,
+    "is_default_safe_model": false,
+    "safe_model_priority": 5
+  }
+]
+```
+
+**Safe Model Selection Priority**:
+1. Application-configured safe model (`safe_model_id` in policy)
+2. Tenant's default safe model (`is_default_safe_model = true`)
+3. Highest priority safe model (`safe_model_priority` DESC)
 
 ---
 

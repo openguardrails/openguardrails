@@ -215,14 +215,25 @@ class ModelService:
             else:
                 unsafe_categories = ""
 
+            # Get role of last message
+            role = self._get_last_message_role(messages)
+
+            # Convert messages to conversation string
+            conversation = self._messages_to_conversation_string(messages)
+
+            # Build instruction using the template
+            instruction = f"[INST] Task: Determine whether the LAST {role} message violates ANY of the defined company policies below.\n\n<BEGIN COMPANY POLICIES>\n{unsafe_categories}\n<END COMPANY POLICIES>\n\n<BEGIN CONVERSATION>\n\n{conversation}\n\n<END CONVERSATION>\n\nProvide your policy violation assessment for ONLY THE LAST {role} message in the above conversation:\n- First line must read 'safe' or 'unsafe'.\n- If unsafe, a second line must include a comma-separated list of violated policies. [/INST]"
+
+            # Prepare new messages with instruction
+            prepared_messages = [
+                {"role": "user", "content": instruction}
+            ]
+
             payload = {
                 "model": settings.guardrails_vl_model_name if use_vl_model else settings.guardrails_model_name,
-                "messages": messages,
+                "messages": prepared_messages,
                 "temperature": 0.0,
-                "logprobs": True,
-                "chat_template_kwargs": {
-                    "unsafe_categories": unsafe_categories
-                }
+                "logprobs": True
             }
 
             # Use appropriate API URL and headers
@@ -269,6 +280,35 @@ class ModelService:
                     if isinstance(part, dict) and part.get("type") == "image_url":
                         return True
         return False
+
+    def _get_last_message_role(self, messages: List[dict]) -> str:
+        """Get the role of the last message, converted to User or Agent"""
+        if not messages:
+            return "User"
+
+        last_role = messages[-1].get("role", "user")
+        return "Agent" if last_role == "assistant" else "User"
+
+    def _messages_to_conversation_string(self, messages: List[dict]) -> str:
+        """Convert messages list to conversation string format"""
+        conversation_parts = []
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+
+            # Handle multimodal content (list format)
+            if isinstance(content, list):
+                text_parts = []
+                for part in content:
+                    if isinstance(part, dict) and part.get("type") == "text":
+                        text_parts.append(part.get("text", ""))
+                content = " ".join(text_parts)
+
+            # Convert role to display name
+            display_role = "Agent" if role == "assistant" else "User"
+            conversation_parts.append(f"{display_role}: {content}")
+
+        return "\n".join(conversation_parts)
 
     async def close(self):
         """Close HTTP client"""

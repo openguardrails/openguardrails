@@ -1,6 +1,7 @@
 import React from 'react'
 import { Shield, Info } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Collapsible,
@@ -8,6 +9,7 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import EntityTypeManagement from './EntityTypeManagement'
+import DataLeakagePolicyTab from './DataLeakagePolicyTab'
 
 const DataSecurity: React.FC = () => {
   const { t } = useTranslation()
@@ -70,7 +72,22 @@ const DataSecurity: React.FC = () => {
             </CollapsibleContent>
           </Collapsible>
 
-          <EntityTypeManagement />
+          <Tabs defaultValue="entity-types" className="w-full">
+            <TabsList>
+              <TabsTrigger value="entity-types">
+                {t('dataSecurity.entityTypeTab')}
+              </TabsTrigger>
+              <TabsTrigger value="policy">
+                {t('dataSecurity.policyTab')}
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent value="entity-types" className="mt-6">
+              <EntityTypeManagement />
+            </TabsContent>
+            <TabsContent value="policy" className="mt-6">
+              <DataLeakagePolicyTab />
+            </TabsContent>
+          </Tabs>
         </CardContent>
       </Card>
     </div>

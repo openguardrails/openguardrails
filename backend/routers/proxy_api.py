@@ -18,6 +18,8 @@ from services.proxy_service import proxy_service
 from services.detection_guardrail_service import detection_guardrail_service
 from services.ban_policy_service import BanPolicyService
 from services.billing_service import billing_service
+from services.data_leakage_disposal_service import DataLeakageDisposalService
+from database.connection import get_db
 from utils.i18n import get_language_from_request
 from utils.logger import setup_logger
 from enum import Enum
@@ -127,7 +129,7 @@ async def _background_input_detection(input_messages: list, tenant_id: str, requ
         logger.error(f"Background input detection failed: {e}")
 
 async def _sync_input_detection(model_config, input_messages: list, tenant_id: str, request_id: str, user_id: str = None, application_id: str = None):
-    """Synchronous input detection - detect completed后再决定是否继续"""
+    """Synchronous input detection with data leakage disposal logic"""
     try:
         detection_result = await detection_guardrail_service.detect_messages(
             messages=input_messages,
@@ -149,7 +151,66 @@ async def _sync_input_detection(model_config, input_messages: list, tenant_id: s
                 application_id=application_id
             )
 
-        # Check if blocking is needed
+        # NEW: Data leakage disposal logic
+        data_risk_level = detection_result.get('data_result', {}).get('risk_level', 'no_risk')
+        disposal_action = 'pass'
+        modified_messages = input_messages
+        modified_model_config = model_config
+
+        if data_risk_level != 'no_risk' and application_id:
+            # Get disposal policy and decide action
+            try:
+                db = next(get_db())
+                disposal_service = DataLeakageDisposalService(db)
+                disposal_action = disposal_service.get_disposal_action(application_id, data_risk_level)
+
+                logger.info(f"Data leakage detected (risk={data_risk_level}), disposal_action={disposal_action}")
+
+                if disposal_action == 'block':
+                    # Block the request
+                    result = detection_result.copy()
+                    result['blocked'] = True
+                    result['detection_id'] = detection_id
+                    result['disposal_action'] = 'block'
+                    result['disposal_reason'] = f'Data leakage risk: {data_risk_level}'
+                    logger.warning(f"Request blocked due to data leakage - request {request_id}")
+                    return result
+
+                elif disposal_action == 'switch_safe_model':
+                    # Try to switch to safe model
+                    safe_model = disposal_service.get_safe_model(application_id, tenant_id)
+                    if safe_model:
+                        modified_model_config = safe_model
+                        logger.info(f"Switched to safe model: {safe_model.config_name}")
+                    else:
+                        # No safe model available, fallback to block
+                        logger.warning(f"No safe model available, blocking request instead")
+                        result = detection_result.copy()
+                        result['blocked'] = True
+                        result['detection_id'] = detection_id
+                        result['disposal_action'] = 'block'
+                        result['disposal_reason'] = 'No safe model configured'
+                        result['suggest_answer'] = "数据泄漏风险已检测到，但未配置安全模型。请联系管理员。"
+                        return result
+
+                elif disposal_action == 'anonymize':
+                    # Use anonymized messages
+                    anonymized_text = detection_result.get('data_result', {}).get('anonymized_text')
+                    if anonymized_text:
+                        # Replace last user message with anonymized version
+                        modified_messages = input_messages.copy()
+                        for i in range(len(modified_messages) - 1, -1, -1):
+                            if modified_messages[i].get('role') == 'user':
+                                modified_messages[i] = modified_messages[i].copy()
+                                modified_messages[i]['content'] = anonymized_text
+                                logger.info(f"Anonymized user message for data safety")
+                                break
+
+            except Exception as e:
+                logger.error(f"Data leakage disposal failed: {e}", exc_info=True)
+                # Continue with original logic if disposal fails
+
+        # Check if blocking is needed (original logic for other risks)
         if model_config.block_on_input_risk and detection_result.get('suggest_action') in ['reject', 'replace']:
             logger.warning(f"同步输入检测阻断请求 - request {request_id}")
             logger.warning(f"检测结果: {detection_result}")
@@ -162,11 +223,14 @@ async def _sync_input_detection(model_config, input_messages: list, tenant_id: s
                 result['detection_id'] = detection_id
             return result
 
-        # Detection passed
+        # Detection passed (or disposal action applied)
         return {
             'blocked': False,
             'detection_id': detection_id,
-            'suggest_answer': None
+            'suggest_answer': None,
+            'modified_messages': modified_messages,  # NEW: Possibly anonymized
+            'modified_model_config': modified_model_config,  # NEW: Possibly switched
+            'disposal_action': disposal_action  # NEW: Action taken
         }
 
     except Exception as e:
@@ -176,7 +240,9 @@ async def _sync_input_detection(model_config, input_messages: list, tenant_id: s
         return {
             'blocked': False,
             'detection_id': f"{request_id}_input_error",
-            'suggest_answer': None
+            'suggest_answer': None,
+            'modified_messages': input_messages,
+            'modified_model_config': model_config
         }
 
 async def perform_output_detection(model_config, input_messages: list, response_content: str, tenant_id: str, request_id: str, user_id: str = None, application_id: str = None):
@@ -1573,11 +1639,20 @@ async def create_chat_completion(
             input_detection_result = await perform_input_detection(
                 model_config, input_messages, tenant_id, request_id, user_id, application_id
             )
-            
+
             input_detection_id = input_detection_result.get('detection_id')
             input_blocked = input_detection_result.get('blocked', False)
             suggest_answer = input_detection_result.get('suggest_answer')
-            
+
+            # NEW: Get modified messages and model config from disposal logic
+            actual_messages = input_detection_result.get('modified_messages', input_messages)
+            actual_model_config = input_detection_result.get('modified_model_config', model_config)
+            disposal_action = input_detection_result.get('disposal_action', 'pass')
+
+            # Log disposal action if taken
+            if disposal_action != 'pass':
+                logger.info(f"Data leakage disposal action: {disposal_action}")
+
             # If input is blocked, record log and return
             if input_blocked:
                 # Record log
@@ -1670,17 +1745,20 @@ async def create_chat_completion(
             # Check if it is a streaming request
             if request_data.stream:
                 # Streaming request handling (input is not blocked)
+                # NEW: Use actual_model_config and actual_messages (possibly modified by disposal)
                 return await _handle_streaming_chat_completion(
-                    model_config, request_data, request_id, tenant_id,
-                    input_messages, input_detection_id, input_blocked, start_time,
+                    actual_model_config, request_data, request_id, tenant_id,
+                    actual_messages, input_detection_id, input_blocked, start_time,
                     application_id=application_id
                 )
-            
+
             # Forward request to target model
+            # NEW: Use actual_model_config (possibly switched to safe model) and actual_messages (possibly anonymized)
             model_response = await proxy_service.forward_chat_completion(
-                model_config=model_config,
+                model_config=actual_model_config,
                 request_data=request_data,
-                request_id=request_id
+                request_id=request_id,
+                messages=actual_messages  # NEW: Pass possibly anonymized messages
             )
             
             # Output detection - select asynchronous/synchronous mode based on configuration

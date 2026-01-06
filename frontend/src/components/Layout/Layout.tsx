@@ -17,6 +17,7 @@ import {
   X,
   Shield,
   ChevronLeft,
+  CreditCard,
 } from 'lucide-react'
 import { useAuth } from '../../contexts/AuthContext'
 import { adminApi, configApi } from '../../services/api'
@@ -158,7 +159,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       ? [
           {
             key: '/subscription',
-            icon: Grid3x3,
+            icon: CreditCard,
             label: t('nav.subscription'),
           },
         ]
