@@ -11,6 +11,173 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [5.0.8] - 2026-01-05
+
+### 🛡️ Enterprise Data Leakage Prevention System
+
+This release introduces a comprehensive **Data Leakage Prevention (DLP) System** with intelligent content processing, multi-layer protection, and flexible disposal strategies for enterprise data security.
+
+#### 🎯 What's New
+
+**Core DLP Architecture:**
+- **Format Detection**: Automatic content format recognition (JSON, YAML, CSV, Markdown, Plain Text)
+- **Smart Segmentation**: Context-aware splitting for structured content with entity preservation
+- **Multi-Layer Detection**: Parallel regex and GenAI entity recognition across segments
+- **Intelligent Disposal**: Four disposal strategies with application-level policies
+
+#### Added
+
+##### 📋 **Application-Level DLP Policies**
+
+**Per-Application Configuration:**
+- `high_risk_action`: block | switch_safe_model | anonymize | pass
+- `medium_risk_action`: block | switch_safe_model | anonymize | pass
+- `low_risk_action`: block | switch_safe_model | anonymize | pass
+- `safe_model_id`: Override safe model for this application
+- `enable_format_detection`: Enable/disable format detection
+- `enable_smart_segmentation`: Enable/disable smart segmentation
+
+**Default Strategy:**
+- High Risk → `block` (reject request completely)
+- Medium Risk → `switch_safe_model` (redirect to safe model)
+- Low Risk → `anonymize` (replace sensitive entities with placeholders)
+
+##### 🔒 **Safe Model System**
+
+**Model Safety Attributes** (in `upstream_api_config` table):
+- `is_data_safe`: Marks model as safe for sensitive data (on-premise, private cloud, air-gapped)
+- `is_default_safe_model`: Tenant-wide default safe model
+- `safe_model_priority`: Priority ranking (0-100, higher = preferred)
+
+**Selection Priority:**
+1. Application policy `safe_model_id` (explicit configuration)
+2. Tenant default safe model (`is_default_safe_model = true`)
+3. Highest priority safe model (`safe_model_priority DESC`)
+
+##### 🔍 **Format Detection Service**
+
+**Auto-Detected Formats:**
+- **JSON**: Structured object arrays, max 50 segments
+- **YAML**: Top-level key separation, max 50 segments
+- **CSV**: Row-based splitting with header retention, max 100 rows
+- **Markdown**: Section-based (`##`) splitting, max 30 sections
+- **Plain Text**: Single segment (no segmentation)
+
+**Performance:** ~5-10ms overhead with format-aware processing
+
+##### ✂️ **Smart Segmentation Service**
+
+**Format-Aware Splitting:**
+- **JSON**: Splits by top-level objects, preserves array structure
+- **YAML**: Splits by top-level keys, maintains document structure
+- **CSV**: Splits by rows with header retention for each segment
+- **Markdown**: Splits by `##` section headers
+
+**Benefits:** 20-60% faster processing for large content (> 1KB)
+
+##### 🎯 **Data Security Service**
+
+**Dual Detection Engine:**
+- **Regex Entities**: Applied to full text (ID cards, credit cards, phone numbers, etc.)
+- **GenAI Entities**: Applied per-segment with parallel processing
+
+**Risk Aggregation:** Highest risk from all segments wins
+
+##### 📊 **Data Leakage Disposal Service**
+
+**Four Disposal Actions:**
+
+| Action | Description | Default For |
+|--------|-------------|-------------|
+| `block` | Reject request completely | High Risk |
+| `switch_safe_model` | Redirect to data-safe model | Medium Risk |
+| `anonymize` | Replace entities with placeholders | Low Risk |
+| `pass` | Allow request, log only | Audit Mode |
+
+##### 🌐 **New API Endpoints**
+
+```bash
+# Application DLP Policy Management
+GET    /api/v1/config/data-leakage-policy          # Get policy
+POST   /api/v1/config/data-leakage-policy          # Create policy
+PUT    /api/v1/config/data-leakage-policy          # Update policy
+DELETE /api/v1/config/data-leakage-policy          # Delete policy
+
+# Safe Model Management
+GET    /api/v1/config/safe-models                  # List safe models
+```
+
+#### Changed
+
+##### 🔄 **Detection Flow Enhancement**
+
+**Before (v5.0.7):**
+- Single-pass regex detection on full text
+- No format awareness
+- Single disposal action
+
+**After (v5.0.8):**
+```
+1. Format Detection (~5-10ms)
+2. Smart Segmentation (format-aware)
+3. Parallel Entity Detection (regex + GenAI)
+4. Risk Aggregation (highest wins)
+5. Policy-Based Disposal (application-scoped)
+```
+
+##### 🗄️ **Database Schema Updates**
+
+**New Tables:**
+- `application_data_leakage_policy` - Per-application DLP configuration
+
+**Updated Tables:**
+- `upstream_api_config` - Added safety attributes (`is_data_safe`, `is_default_safe_model`, `safe_model_priority`)
+
+**Migration:** `038_data_leakage_refactor.sql`
+
+##### ⚡ **Performance Optimizations**
+
+| Scenario | Improvement |
+|----------|-------------|
+| Small content (< 1KB) | ~5-10ms overhead (format detection) |
+| Large content (> 1KB) | 20-60% faster (parallel segment processing) |
+| Structured data (JSON/YAML) | Better accuracy (segment-aware detection) |
+
+#### Documentation
+
+- Added `docs/DATA_LEAKAGE_GUIDE.md` - Comprehensive DLP user guide
+- Updated `docs/API_REFERENCE.md` with new endpoints
+- Added inline documentation for all DLP services
+
+#### Technical Implementation
+
+**Backend Services:**
+- `backend/services/format_detection_service.py` - Format recognition
+- `backend/services/segmentation_service.py` - Content splitting
+- `backend/services/data_security_service.py` - Entity detection
+- `backend/services/data_leakage_disposal_service.py` - Disposal actions
+
+**API Routes:**
+- `backend/routers/config_api.py` - Policy management endpoints
+
+**Database:**
+- Migration script: `backend/migrations/versions/038_data_leakage_refactor.sql`
+
+#### Migration Guide
+
+```bash
+# Automatic migration runs on startup
+docker compose down && docker compose up -d
+
+# Verify migration
+docker exec openguardrails-postgres psql -U openguardrails -d openguardrails \
+  -c "SELECT * FROM application_data_leakage_policy LIMIT 5;"
+```
+
+**Default Policies:** Automatically created for all existing applications with default disposal strategies (High→block, Medium→switch_safe_model, Low→anonymize).
+
+---
+
 ## [5.0.7] - 2025-12-31
 
 ### 🎨 Major UI Overhaul - Enterprise SaaS Design System

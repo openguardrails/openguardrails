@@ -134,7 +134,7 @@ openguardrails/
 
 ## DATA LEAKAGE PREVENTION SYSTEM
 
-**Status**: Production-ready (v5.0.7+)
+**Status**: Production-ready (v5.0.8+)
 
 **Architecture**: Multi-layer protection system with format-aware detection and intelligent disposal strategies
 

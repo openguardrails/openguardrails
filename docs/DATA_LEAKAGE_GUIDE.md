@@ -1594,4 +1594,4 @@ A: **Yes**, for detecting credit card numbers. Recommended configuration:
 ---
 
 **Last Updated**: 2025-01-05
-**Version**: 5.0.7+
+**Version**: 5.0.8+
