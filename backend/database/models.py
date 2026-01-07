@@ -512,11 +512,12 @@ class DataSecurityEntityType(Base):
     application = relationship("Application", back_populates="data_security_entity_types")
 
 class TenantEntityTypeDisable(Base):
-    """Tenant entity type disable table"""
+    """Tenant entity type disable table - supports application-level entity type disabling"""
     __tablename__ = "tenant_entity_type_disables"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
+    application_id = Column(UUID(as_uuid=True), ForeignKey("applications.id"), nullable=True, index=True)  # Optional: for application-level disable
     entity_type = Column(String(100), nullable=False, index=True)  # Entity type code, such as ID_CARD_NUMBER_SYS
     disabled_at = Column(DateTime(timezone=True), server_default=func.now())
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -524,10 +525,11 @@ class TenantEntityTypeDisable(Base):
 
     # Association relationships
     tenant = relationship("Tenant")
+    application = relationship("Application")
 
-    # Unique constraint
+    # Unique constraint - includes application_id for application-level disabling
     __table_args__ = (
-        UniqueConstraint('tenant_id', 'entity_type', name='_tenant_entity_type_disable_uc'),
+        UniqueConstraint('tenant_id', 'application_id', 'entity_type', name='_tenant_app_entity_type_disable_uc'),
     )
 
 class BanPolicy(Base):

@@ -169,6 +169,14 @@ async def create_upstream_api(request: Request):
 
             encrypted_api_key = _encrypt_api_key(api_key_to_encrypt)
 
+            # If setting as default private model, clear other defaults for this tenant
+            if bool(request_data.get('is_default_private_model', False)):
+                db.query(UpstreamApiConfig).filter(
+                    UpstreamApiConfig.tenant_id == current_user.id,
+                    UpstreamApiConfig.is_default_private_model == True
+                ).update({UpstreamApiConfig.is_default_private_model: False})
+                logger.info(f"Cleared existing default private model for tenant {current_user.id}")
+
             # Create upstream API configuration (tenant-level, no application_id)
             api_config = UpstreamApiConfig(
                 id=uuid.uuid4(),
@@ -301,6 +309,15 @@ async def update_upstream_api(api_id: str, request: Request):
                 ).first()
                 if existing:
                     raise ValueError(f"Upstream API configuration '{request_data['config_name']}' already exists")
+
+            # If setting as default private model, clear other defaults for this tenant first
+            if request_data.get('is_default_private_model'):
+                db.query(UpstreamApiConfig).filter(
+                    UpstreamApiConfig.tenant_id == current_user.id,
+                    UpstreamApiConfig.is_default_private_model == True,
+                    UpstreamApiConfig.id != api_id  # Exclude current configuration
+                ).update({UpstreamApiConfig.is_default_private_model: False})
+                logger.info(f"Cleared existing default private model for tenant {current_user.id}")
 
             # Update fields
             for field, value in request_data.items():
