@@ -87,15 +87,15 @@ const SecurityPolicy: React.FC = () => {
       const data = await gatewayPolicyApi.getPolicy(currentApplicationId)
       setPolicy(data)
       setFormData({
-        general_high_risk_action: data.general_high_risk_action_override || data.general_high_risk_action,
-        general_medium_risk_action: data.general_medium_risk_action_override || data.general_medium_risk_action,
-        general_low_risk_action: data.general_low_risk_action_override || data.general_low_risk_action,
-        input_high_risk_action: data.input_high_risk_action_override || data.input_high_risk_action,
-        input_medium_risk_action: data.input_medium_risk_action_override || data.input_medium_risk_action,
-        input_low_risk_action: data.input_low_risk_action_override || data.input_low_risk_action,
-        output_high_risk_action: data.output_high_risk_action_override || data.output_high_risk_action,
-        output_medium_risk_action: data.output_medium_risk_action_override || data.output_medium_risk_action,
-        output_low_risk_action: data.output_low_risk_action_override || data.output_low_risk_action,
+        general_high_risk_action: data.general_high_risk_action_override || data.general_high_risk_action || 'block',
+        general_medium_risk_action: data.general_medium_risk_action_override || data.general_medium_risk_action || 'block',
+        general_low_risk_action: data.general_low_risk_action_override || data.general_low_risk_action || 'block',
+        input_high_risk_action: data.input_high_risk_action_override || data.input_high_risk_action || 'block',
+        input_medium_risk_action: data.input_medium_risk_action_override || data.input_medium_risk_action || 'anonymize',
+        input_low_risk_action: data.input_low_risk_action_override || data.input_low_risk_action || 'pass',
+        output_high_risk_action: data.output_high_risk_action_override || data.output_high_risk_action || 'pass',
+        output_medium_risk_action: data.output_medium_risk_action_override || data.output_medium_risk_action || 'pass',
+        output_low_risk_action: data.output_low_risk_action_override || data.output_low_risk_action || 'pass',
         private_model_id: data.private_model_override,
       })
     } catch (error) {

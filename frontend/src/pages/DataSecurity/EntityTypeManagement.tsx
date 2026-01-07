@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Plus, Edit, Trash2, Globe, User, Info } from 'lucide-react'
+import { Plus, Edit, Trash2, Globe, User, Info, Loader2, Wand2, Play } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { useForm } from 'react-hook-form'
@@ -72,6 +72,8 @@ const EntityTypeManagement: React.FC = () => {
   ]
 
   const ANONYMIZATION_METHODS = [
+    { value: 'regex_replace', label: t('entityType.regexReplace') },
+    { value: 'genai', label: t('entityType.genaiAnonymize') },
     { value: 'replace', label: t('entityType.replace') },
     { value: 'mask', label: t('entityType.mask') },
     { value: 'hash', label: t('entityType.hash') },
@@ -86,6 +88,26 @@ const EntityTypeManagement: React.FC = () => {
   const [editingEntity, setEditingEntity] = useState<EntityType | null>(null)
   const [searchText, setSearchText] = useState('')
   const [riskLevelFilter, setRiskLevelFilter] = useState<string | undefined>(undefined)
+  const [generatingRegex, setGeneratingRegex] = useState(false)
+  const [testingAnonymization, setTestingAnonymization] = useState(false)
+  const [testResult, setTestResult] = useState<string | null>(null)
+  // New states for recognition regex
+  const [generatingRecognitionRegex, setGeneratingRecognitionRegex] = useState(false)
+  const [testingRecognitionRegex, setTestingRecognitionRegex] = useState(false)
+  const [recognitionTestResult, setRecognitionTestResult] = useState<{
+    matched: boolean
+    matches: string[]
+    error?: string
+  } | null>(null)
+  // State for entity type code generation
+  const [generatingEntityTypeCode, setGeneratingEntityTypeCode] = useState(false)
+  // State for GenAI entity definition testing
+  const [testingEntityDefinition, setTestingEntityDefinition] = useState(false)
+  const [entityDefinitionTestResult, setEntityDefinitionTestResult] = useState<{
+    matched: boolean
+    matches: string[]
+    error?: string
+  } | null>(null)
   const { user, onUserSwitch } = useAuth()
   const { currentApplicationId } = useApplication()
 
@@ -105,8 +127,21 @@ const EntityTypeManagement: React.FC = () => {
     mask_keep_prefix: z.string().optional(), // mask method keep prefix
     mask_keep_suffix: z.string().optional(), // mask method keep suffix
     mask_char: z.string().optional(), // mask method mask character
-    // GenAI masking configuration
-    masking_rule: z.string().optional(), // GenAI masking rule
+    // GenAI masking configuration (legacy)
+    masking_rule: z.string().optional(), // GenAI masking rule (legacy)
+    // New regex_replace configuration
+    regex_natural_desc: z.string().optional(), // natural language description for regex generation
+    regex_pattern: z.string().optional(), // regex pattern for anonymization
+    regex_replacement: z.string().optional(), // replacement template (\1, \2 for Python regex)
+    // New genai anonymization configuration
+    genai_anonymization_prompt: z.string().optional(), // AI anonymization instruction
+    // Recognition regex configuration
+    recognition_natural_desc: z.string().optional(), // natural language description for recognition regex generation
+    recognition_test_input: z.string().optional(), // test input for recognition regex testing
+    // GenAI entity definition test input
+    entity_definition_test_input: z.string().optional(), // test input for GenAI entity definition testing
+    // Test input
+    test_input: z.string().optional(), // sample data for testing
     check_input: z.boolean().default(true),
     check_output: z.boolean().default(true),
     is_active: z.boolean().default(true),
@@ -138,13 +173,21 @@ const EntityTypeManagement: React.FC = () => {
       is_active: true,
       check_input: true,
       check_output: true,
-      anonymization_method: 'replace',
+      anonymization_method: 'regex_replace',
       is_global: false,
       mask_char: '*',
       mask_keep_prefix: '',
       mask_keep_suffix: '',
       replace_text: '',
       masking_rule: '',
+      regex_natural_desc: '',
+      regex_pattern: '',
+      regex_replacement: '',
+      genai_anonymization_prompt: '',
+      recognition_natural_desc: '',
+      recognition_test_input: '',
+      entity_definition_test_input: '',
+      test_input: '',
     },
   })
 
@@ -176,44 +219,67 @@ const EntityTypeManagement: React.FC = () => {
 
   const handleCreate = () => {
     setEditingEntity(null)
+    setTestResult(null)
+    setRecognitionTestResult(null)
+    setEntityDefinitionTestResult(null)
     form.reset({
       recognition_method: 'regex',
       is_active: true,
       check_input: true,
       check_output: true,
-      anonymization_method: 'replace',
+      anonymization_method: 'regex_replace',
       is_global: false,
       mask_char: '*',
       mask_keep_prefix: '',
       mask_keep_suffix: '',
       replace_text: '',
       masking_rule: '',
+      regex_natural_desc: '',
+      regex_pattern: '',
+      regex_replacement: '',
+      genai_anonymization_prompt: '',
+      recognition_natural_desc: '',
+      recognition_test_input: '',
+      entity_definition_test_input: '',
+      test_input: '',
     })
     setModalVisible(true)
   }
 
   const handleEdit = (record: EntityType) => {
     setEditingEntity(record)
+    setTestResult(null)
+    setRecognitionTestResult(null)
+    setEntityDefinitionTestResult(null)
     const recognitionMethod = record.recognition_method || 'regex'
     const config = record.anonymization_config || {}
 
-    // Parse masking configuration
+    // Parse masking configuration based on anonymization method
     let replace_text = ''
     let mask_keep_prefix = ''
     let mask_keep_suffix = ''
     let mask_char = '*'
     let masking_rule = ''
+    let regex_natural_desc = ''
+    let regex_pattern = ''
+    let regex_replacement = ''
+    let genai_anonymization_prompt = ''
 
-    if (recognitionMethod === 'regex') {
-      if (record.anonymization_method === 'replace') {
-        replace_text = config.replacement || ''
-      } else if (record.anonymization_method === 'mask') {
-        mask_keep_prefix = config.keep_prefix !== undefined ? String(config.keep_prefix) : ''
-        mask_keep_suffix = config.keep_suffix !== undefined ? String(config.keep_suffix) : ''
-        mask_char = config.mask_char || '*'
-      }
-    } else {
-      masking_rule = config.masking_rule || ''
+    const anonymizationMethod = record.anonymization_method || 'mask'
+
+    if (anonymizationMethod === 'replace') {
+      replace_text = config.replacement || ''
+    } else if (anonymizationMethod === 'mask') {
+      mask_keep_prefix = config.keep_prefix !== undefined ? String(config.keep_prefix) : ''
+      mask_keep_suffix = config.keep_suffix !== undefined ? String(config.keep_suffix) : ''
+      mask_char = config.mask_char || '*'
+    } else if (anonymizationMethod === 'regex_replace') {
+      regex_natural_desc = config.natural_language_desc || ''
+      regex_pattern = config.regex_pattern || ''
+      regex_replacement = config.replacement_template || ''
+    } else if (anonymizationMethod === 'genai') {
+      genai_anonymization_prompt = config.anonymization_prompt || ''
+      masking_rule = config.masking_rule || '' // legacy support
     }
 
     form.reset({
@@ -223,15 +289,23 @@ const EntityTypeManagement: React.FC = () => {
       recognition_method: recognitionMethod,
       pattern: record.pattern,
       entity_definition: record.entity_definition,
-      anonymization_method: recognitionMethod === 'genai' ? 'genai' : record.anonymization_method,
+      anonymization_method: anonymizationMethod,
       replace_text,
       mask_keep_prefix,
       mask_keep_suffix,
       mask_char,
       masking_rule,
+      regex_natural_desc,
+      regex_pattern,
+      regex_replacement,
+      genai_anonymization_prompt,
+      recognition_natural_desc: '',
+      recognition_test_input: '',
+      entity_definition_test_input: '',
       check_input: record.check_input,
       check_output: record.check_output,
       is_active: record.is_active,
+      test_input: '',
     })
     setModalVisible(true)
   }
@@ -255,29 +329,38 @@ const EntityTypeManagement: React.FC = () => {
 
   const handleSubmit = async (values: z.infer<typeof formSchema>) => {
     const recognitionMethod = values.recognition_method || 'regex'
+    const anonymizationMethod = values.anonymization_method || 'mask'
 
-    // Build masking configuration
+    // Build anonymization configuration based on method
     let anonymization_config: any = {}
 
-    if (recognitionMethod === 'genai') {
-      // GenAI configuration
-      if (values.masking_rule) {
-        anonymization_config.masking_rule = values.masking_rule
-      }
-    } else {
-      // Regex configuration
-      const method = values.anonymization_method
-
-      if (method === 'replace') {
-        anonymization_config.replacement = values.replace_text || `<${values.entity_type}>`
-      } else if (method === 'mask') {
-        anonymization_config.mask_char = values.mask_char || '*'
-        const keepPrefix = values.mask_keep_prefix ? parseInt(values.mask_keep_prefix) : 0
-        const keepSuffix = values.mask_keep_suffix ? parseInt(values.mask_keep_suffix) : 0
-        anonymization_config.keep_prefix = keepPrefix
-        anonymization_config.keep_suffix = keepSuffix
-      }
-      // hash, encrypt, shuffle, random no configuration needed
+    switch (anonymizationMethod) {
+      case 'regex_replace':
+        anonymization_config = {
+          regex_pattern: values.regex_pattern || '',
+          replacement_template: values.regex_replacement || '***',
+          natural_language_desc: values.regex_natural_desc || '',
+        }
+        break
+      case 'genai':
+        anonymization_config = {
+          anonymization_prompt: values.genai_anonymization_prompt || '',
+          masking_rule: values.masking_rule || '', // legacy support
+        }
+        break
+      case 'replace':
+        anonymization_config = {
+          replacement: values.replace_text || `<${values.entity_type}>`,
+        }
+        break
+      case 'mask':
+        anonymization_config = {
+          mask_char: values.mask_char || '*',
+          keep_prefix: values.mask_keep_prefix ? parseInt(values.mask_keep_prefix) : 0,
+          keep_suffix: values.mask_keep_suffix ? parseInt(values.mask_keep_suffix) : 0,
+        }
+        break
+      // hash, encrypt, shuffle, random - no configuration needed
     }
 
     const data: any = {
@@ -285,8 +368,7 @@ const EntityTypeManagement: React.FC = () => {
       entity_type_name: values.entity_type_name,
       category: values.risk_level,
       recognition_method: recognitionMethod,
-      // GenAI type fixed using genai masking method, Regex type using user selected method
-      anonymization_method: recognitionMethod === 'genai' ? 'genai' : values.anonymization_method,
+      anonymization_method: anonymizationMethod,
       anonymization_config,
       check_input: values.check_input !== undefined ? values.check_input : true,
       check_output: values.check_output !== undefined ? values.check_output : true,
@@ -319,6 +401,266 @@ const EntityTypeManagement: React.FC = () => {
       loadEntityTypes()
     } catch (error) {
       console.error('Submit error:', error)
+    }
+  }
+
+  // Generate anonymization regex using AI
+  const handleGenerateRegex = async () => {
+    const desc = form.getValues('regex_natural_desc')
+    const entityType = form.getValues('entity_type')
+    const testInput = form.getValues('test_input')
+
+    if (!desc) {
+      toast.error(t('entityType.pleaseEnterDescription'))
+      return
+    }
+
+    setGeneratingRegex(true)
+    try {
+      const result = await dataSecurityApi.generateAnonymizationRegex({
+        description: desc,
+        entity_type: entityType || 'ENTITY',
+        sample_data: testInput || undefined,
+      })
+
+      if (result.success) {
+        form.setValue('regex_pattern', result.regex_pattern)
+        form.setValue('regex_replacement', result.replacement_template)
+        toast.success(result.explanation || t('entityType.generateRegexSuccess'))
+      } else {
+        toast.error(result.explanation || t('entityType.generateRegexFailed'))
+      }
+    } catch (error) {
+      console.error('Generate regex error:', error)
+      toast.error(t('entityType.generateRegexFailed'))
+    } finally {
+      setGeneratingRegex(false)
+    }
+  }
+
+  // Test anonymization effect
+  const handleTestAnonymization = async () => {
+    const method = form.getValues('anonymization_method')
+    const testInput = form.getValues('test_input')
+
+    if (!testInput) {
+      toast.error(t('entityType.pleaseEnterTestInput'))
+      return
+    }
+
+    let config: Record<string, any> = {}
+
+    switch (method) {
+      case 'regex_replace':
+        config = {
+          regex_pattern: form.getValues('regex_pattern'),
+          replacement_template: form.getValues('regex_replacement'),
+        }
+        break
+      case 'genai':
+        config = {
+          anonymization_prompt: form.getValues('genai_anonymization_prompt'),
+        }
+        break
+      case 'mask':
+        config = {
+          mask_char: form.getValues('mask_char') || '*',
+          keep_prefix: form.getValues('mask_keep_prefix') ? parseInt(form.getValues('mask_keep_prefix')) : 0,
+          keep_suffix: form.getValues('mask_keep_suffix') ? parseInt(form.getValues('mask_keep_suffix')) : 0,
+        }
+        break
+      case 'replace':
+        config = {
+          replacement: form.getValues('replace_text') || `<${form.getValues('entity_type')}>`,
+        }
+        break
+    }
+
+    setTestingAnonymization(true)
+    setTestResult(null)
+
+    try {
+      const result = await dataSecurityApi.testAnonymization({
+        method,
+        config,
+        test_input: testInput,
+      })
+
+      if (result.success) {
+        setTestResult(result.result)
+      } else {
+        toast.error(result.result || t('entityType.testFailed'))
+      }
+    } catch (error) {
+      console.error('Test anonymization error:', error)
+      toast.error(t('entityType.testFailed'))
+    } finally {
+      setTestingAnonymization(false)
+    }
+  }
+
+  // Generate recognition regex using AI
+  const handleGenerateRecognitionRegex = async () => {
+    const desc = form.getValues('recognition_natural_desc')
+    const entityType = form.getValues('entity_type')
+    const entityTypeName = form.getValues('entity_type_name')
+    const testInput = form.getValues('recognition_test_input')
+
+    if (!desc) {
+      toast.error(t('entityType.pleaseEnterRecognitionDescription'))
+      return
+    }
+
+    setGeneratingRecognitionRegex(true)
+    try {
+      const result = await dataSecurityApi.generateRecognitionRegex({
+        description: desc,
+        entity_type: entityTypeName || entityType || 'ENTITY',
+        sample_data: testInput || undefined,
+      })
+
+      if (result.success) {
+        form.setValue('pattern', result.regex_pattern)
+        toast.success(result.explanation || t('entityType.generateRecognitionRegexSuccess'))
+      } else {
+        toast.error(result.explanation || t('entityType.generateRecognitionRegexFailed'))
+      }
+    } catch (error) {
+      console.error('Generate recognition regex error:', error)
+      toast.error(t('entityType.generateRecognitionRegexFailed'))
+    } finally {
+      setGeneratingRecognitionRegex(false)
+    }
+  }
+
+  // Test recognition regex
+  const handleTestRecognitionRegex = async () => {
+    const pattern = form.getValues('pattern')
+    const testInput = form.getValues('recognition_test_input')
+
+    if (!pattern) {
+      toast.error(t('entityType.pleaseEnterPattern'))
+      return
+    }
+    if (!testInput) {
+      toast.error(t('entityType.pleaseEnterRecognitionTestInput'))
+      return
+    }
+
+    setTestingRecognitionRegex(true)
+    setRecognitionTestResult(null)
+
+    try {
+      const result = await dataSecurityApi.testRecognitionRegex({
+        pattern,
+        test_input: testInput,
+      })
+
+      if (result.success) {
+        setRecognitionTestResult({
+          matched: result.matched,
+          matches: result.matches,
+        })
+      } else {
+        setRecognitionTestResult({
+          matched: false,
+          matches: [],
+          error: result.error,
+        })
+      }
+    } catch (error) {
+      console.error('Test recognition regex error:', error)
+      toast.error(t('entityType.testRecognitionRegexFailed'))
+    } finally {
+      setTestingRecognitionRegex(false)
+    }
+  }
+
+  // Test GenAI entity definition
+  const handleTestEntityDefinition = async () => {
+    const entityDefinition = form.getValues('entity_definition')
+    const entityTypeName = form.getValues('entity_type_name')
+    const testInput = form.getValues('entity_definition_test_input')
+
+    if (!entityDefinition) {
+      toast.error(t('entityType.pleaseEnterEntityDefinition'))
+      return
+    }
+    if (!testInput) {
+      toast.error(t('entityType.pleaseEnterEntityDefinitionTestInput'))
+      return
+    }
+
+    setTestingEntityDefinition(true)
+    setEntityDefinitionTestResult(null)
+
+    try {
+      const result = await dataSecurityApi.testEntityDefinition({
+        entity_definition: entityDefinition,
+        entity_type_name: entityTypeName || '',
+        test_input: testInput,
+      })
+
+      if (result.success) {
+        setEntityDefinitionTestResult({
+          matched: result.matched,
+          matches: result.matches,
+        })
+      } else {
+        setEntityDefinitionTestResult({
+          matched: false,
+          matches: [],
+          error: result.error,
+        })
+      }
+    } catch (error) {
+      console.error('Test entity definition error:', error)
+      toast.error(t('entityType.testEntityDefinitionFailed'))
+    } finally {
+      setTestingEntityDefinition(false)
+    }
+  }
+
+  // Generate entity type code using AI
+  const handleGenerateEntityTypeCode = async (entityTypeName: string) => {
+    if (!entityTypeName || entityTypeName.trim().length === 0) {
+      return
+    }
+
+    setGeneratingEntityTypeCode(true)
+    try {
+      const result = await dataSecurityApi.generateEntityTypeCode({
+        entity_type_name: entityTypeName.trim(),
+      })
+
+      if (result.success && result.entity_type_code) {
+        form.setValue('entity_type', result.entity_type_code)
+      } else {
+        // Fallback: simple conversion for English names
+        const fallbackCode = entityTypeName
+          .toUpperCase()
+          .replace(/[^A-Z\s]/g, '')
+          .replace(/\s+/g, '_')
+          .replace(/_+/g, '_')
+          .replace(/^_|_$/g, '')
+        if (fallbackCode) {
+          form.setValue('entity_type', fallbackCode)
+        }
+      }
+    } catch (error) {
+      console.error('Generate entity type code error:', error)
+      // Fallback on error
+      const fallbackCode = entityTypeName
+        .toUpperCase()
+        .replace(/[^A-Z\s]/g, '')
+        .replace(/\s+/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/^_|_$/g, '')
+      if (fallbackCode) {
+        form.setValue('entity_type', fallbackCode)
+      }
+    } finally {
+      setGeneratingEntityTypeCode(false)
     }
   }
 
@@ -568,24 +910,6 @@ const EntityTypeManagement: React.FC = () => {
 
           <Form {...form}>
             <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
-              <FormField
-                control={form.control}
-                name="entity_type"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('entityType.entityTypeCode')}</FormLabel>
-                    <FormControl>
-                      <Input
-                        {...field}
-                        placeholder={t('entityType.entityTypeCodePlaceholder')}
-                        disabled={!!editingEntity}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
               {editingEntity && editingEntity.source_type === 'system_copy' && (
                 <div className="flex items-start gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
                   <Info className="h-4 w-4 text-blue-600 mt-0.5" />
@@ -600,11 +924,53 @@ const EntityTypeManagement: React.FC = () => {
                   <FormItem>
                     <FormLabel>{t('entityType.entityTypeNameLabel')}</FormLabel>
                     <FormControl>
-                      <Input {...field} placeholder={t('entityType.entityTypeNamePlaceholder')} />
+                      <Input
+                        {...field}
+                        placeholder={t('entityType.entityTypeNamePlaceholder')}
+                        onBlur={(e) => {
+                          field.onBlur()
+                          // Auto-generate entity type code when name is entered (only in create mode)
+                          if (!editingEntity && e.target.value) {
+                            handleGenerateEntityTypeCode(e.target.value)
+                          }
+                        }}
+                      />
                     </FormControl>
                     <p className="text-xs text-gray-500 mt-1">
                       {t('entityType.entityTypeNameDescription')}
                     </p>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="entity_type"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('entityType.entityTypeCode')}</FormLabel>
+                    <FormControl>
+                      <div className="relative">
+                        <Input
+                          {...field}
+                          placeholder={editingEntity ? t('entityType.entityTypeCodePlaceholder') : t('entityType.entityTypeCodeAutoGenerate')}
+                          disabled={!!editingEntity || generatingEntityTypeCode}
+                          readOnly={!editingEntity}
+                          className={!editingEntity ? 'bg-gray-50' : ''}
+                        />
+                        {generatingEntityTypeCode && (
+                          <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                            <Loader2 className="h-4 w-4 animate-spin text-gray-400" />
+                          </div>
+                        )}
+                      </div>
+                    </FormControl>
+                    {!editingEntity && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        {t('entityType.entityTypeCodeAutoGenerateHint')}
+                      </p>
+                    )}
                     <FormMessage />
                   </FormItem>
                 )}
@@ -658,109 +1024,433 @@ const EntityTypeManagement: React.FC = () => {
               />
 
               {form.watch('recognition_method') === 'regex' ? (
-                <FormField
-                  control={form.control}
-                  name="pattern"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>
-                        {t('entityType.recognitionRuleLabel')}
-                        <span className="ml-2 text-xs text-gray-500">
-                          {t('entityType.recognitionRuleTooltip')}
-                        </span>
-                      </FormLabel>
-                      <FormControl>
-                        <Textarea
-                          {...field}
-                          rows={3}
-                          placeholder={t('entityType.recognitionRulePlaceholder')}
-                          className="font-mono"
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              ) : (
-                <FormField
-                  control={form.control}
-                  name="entity_definition"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>
-                        {t('entityType.entityDefinitionLabel')}
-                        <span className="ml-2 text-xs text-gray-500">
-                          {t('entityType.entityDefinitionTooltip')}
-                        </span>
-                      </FormLabel>
-                      <FormControl>
-                        <Textarea
-                          {...field}
-                          rows={3}
-                          placeholder={t('entityType.entityDefinitionPlaceholder')}
-                        />
-                      </FormControl>
-                      <Card className="mt-2 bg-green-50 border-green-200">
-                        <CardContent className="p-3">
-                          <p className="text-xs font-semibold text-green-900 mb-2">
-                            {t('entityType.entityDefinitionExamplesTitle')}
-                          </p>
-                          <ul className="text-xs text-green-800 space-y-1.5 list-none">
-                            <li className="bg-white/50 p-1.5 rounded">
-                              • {t('entityType.entityDefinitionExamplePhone')}
-                            </li>
-                            <li className="bg-white/50 p-1.5 rounded">
-                              • {t('entityType.entityDefinitionExampleIdCard')}
-                            </li>
-                            <li className="bg-white/50 p-1.5 rounded">
-                              • {t('entityType.entityDefinitionExampleAddress')}
-                            </li>
-                            <li className="bg-white/50 p-1.5 rounded">
-                              • {t('entityType.entityDefinitionExampleBankCard')}
-                            </li>
-                            <li className="bg-white/50 p-1.5 rounded">
-                              • {t('entityType.entityDefinitionExampleName')}
-                            </li>
-                          </ul>
-                          <p className="text-xs text-green-700 mt-2 pt-2 border-t border-green-300">
-                            {t('entityType.entityDefinitionExamplesHint')}
-                          </p>
-                        </CardContent>
-                      </Card>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              )}
-
-              {form.watch('recognition_method') === 'regex' && (
-                <>
+                <div className="space-y-4 p-4 border rounded-lg bg-blue-50/30">
+                  {/* Natural language description + AI generate */}
                   <FormField
                     control={form.control}
-                    name="anonymization_method"
+                    name="recognition_natural_desc"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>{t('entityType.anonymizationMethodSelectLabel')}</FormLabel>
-                        <Select onValueChange={field.onChange} value={field.value}>
+                        <FormLabel>{t('entityType.recognitionNaturalDesc')}</FormLabel>
+                        <div className="flex gap-2">
                           <FormControl>
-                            <SelectTrigger>
-                              <SelectValue placeholder={t('entityType.anonymizationMethodSelectPlaceholder')} />
-                            </SelectTrigger>
+                            <Input
+                              {...field}
+                              placeholder={t('entityType.recognitionNaturalDescPlaceholder')}
+                            />
                           </FormControl>
-                          <SelectContent>
-                            {ANONYMIZATION_METHODS.map((method) => (
-                              <SelectItem key={method.value} value={method.value}>
-                                {method.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={handleGenerateRecognitionRegex}
+                            disabled={generatingRecognitionRegex}
+                          >
+                            {generatingRecognitionRegex ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Wand2 className="h-4 w-4" />
+                            )}
+                            <span className="ml-1">{t('entityType.generateRegex')}</span>
+                          </Button>
+                        </div>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
 
-                  {form.watch('anonymization_method') === 'replace' && (
+                  {/* Regex pattern */}
+                  <FormField
+                    control={form.control}
+                    name="pattern"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>
+                          {t('entityType.recognitionRuleLabel')}
+                          <span className="ml-2 text-xs text-gray-500">
+                            {t('entityType.recognitionRuleTooltip')}
+                          </span>
+                        </FormLabel>
+                        <FormControl>
+                          <Textarea
+                            {...field}
+                            rows={2}
+                            placeholder={t('entityType.recognitionRulePlaceholder')}
+                            className="font-mono"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  {/* Test input + test button */}
+                  <FormField
+                    control={form.control}
+                    name="recognition_test_input"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('entityType.recognitionTestInput')}</FormLabel>
+                        <div className="flex gap-2">
+                          <FormControl>
+                            <Input
+                              {...field}
+                              placeholder={t('entityType.recognitionTestInputPlaceholder')}
+                            />
+                          </FormControl>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={handleTestRecognitionRegex}
+                            disabled={testingRecognitionRegex}
+                          >
+                            {testingRecognitionRegex ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Play className="h-4 w-4" />
+                            )}
+                            <span className="ml-1">{t('entityType.test')}</span>
+                          </Button>
+                        </div>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  {/* Test result */}
+                  {recognitionTestResult && (
+                    <div className={`p-3 border rounded-lg ${
+                      recognitionTestResult.error
+                        ? 'bg-red-50 border-red-200'
+                        : recognitionTestResult.matched
+                          ? 'bg-green-50 border-green-200'
+                          : 'bg-yellow-50 border-yellow-200'
+                    }`}>
+                      {recognitionTestResult.error ? (
+                        <p className="text-sm text-red-700">{recognitionTestResult.error}</p>
+                      ) : recognitionTestResult.matched ? (
+                        <div>
+                          <p className="text-sm font-medium text-green-700 mb-1">
+                            {t('entityType.recognitionTestMatched', { count: recognitionTestResult.matches.length })}
+                          </p>
+                          <div className="flex flex-wrap gap-1">
+                            {recognitionTestResult.matches.map((match, idx) => (
+                              <code key={idx} className="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded">
+                                {match}
+                              </code>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-sm text-yellow-700">{t('entityType.recognitionTestNotMatched')}</p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Examples card */}
+                  <Card className="bg-blue-50 border-blue-200">
+                    <CardContent className="p-3">
+                      <p className="text-xs font-semibold text-blue-900 mb-2">
+                        {t('entityType.recognitionRegexExamplesTitle')}
+                      </p>
+                      <ul className="text-xs text-blue-800 space-y-1.5 list-none">
+                        <li className="bg-white/50 p-1.5 rounded">
+                          • {t('entityType.recognitionRegexExamplePhone')}
+                        </li>
+                        <li className="bg-white/50 p-1.5 rounded">
+                          • {t('entityType.recognitionRegexExampleEmail')}
+                        </li>
+                        <li className="bg-white/50 p-1.5 rounded">
+                          • {t('entityType.recognitionRegexExampleIdCard')}
+                        </li>
+                      </ul>
+                    </CardContent>
+                  </Card>
+                </div>
+              ) : (
+                <div className="space-y-4 p-4 border rounded-lg bg-green-50/30">
+                  {/* Entity Definition */}
+                  <FormField
+                    control={form.control}
+                    name="entity_definition"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>
+                          {t('entityType.entityDefinitionLabel')}
+                          <span className="ml-2 text-xs text-gray-500">
+                            {t('entityType.entityDefinitionTooltip')}
+                          </span>
+                        </FormLabel>
+                        <FormControl>
+                          <Textarea
+                            {...field}
+                            rows={3}
+                            placeholder={t('entityType.entityDefinitionPlaceholder')}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  {/* Test input + test button */}
+                  <FormField
+                    control={form.control}
+                    name="entity_definition_test_input"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('entityType.entityDefinitionTestInput')}</FormLabel>
+                        <div className="flex gap-2">
+                          <FormControl>
+                            <Input
+                              {...field}
+                              placeholder={t('entityType.entityDefinitionTestInputPlaceholder')}
+                            />
+                          </FormControl>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={handleTestEntityDefinition}
+                            disabled={testingEntityDefinition}
+                          >
+                            {testingEntityDefinition ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Play className="h-4 w-4" />
+                            )}
+                            <span className="ml-1">{t('entityType.test')}</span>
+                          </Button>
+                        </div>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  {/* Test result */}
+                  {entityDefinitionTestResult && (
+                    <div className={`p-3 border rounded-lg ${
+                      entityDefinitionTestResult.error
+                        ? 'bg-red-50 border-red-200'
+                        : entityDefinitionTestResult.matched
+                          ? 'bg-green-50 border-green-200'
+                          : 'bg-yellow-50 border-yellow-200'
+                    }`}>
+                      {entityDefinitionTestResult.error ? (
+                        <p className="text-sm text-red-700">{entityDefinitionTestResult.error}</p>
+                      ) : entityDefinitionTestResult.matched ? (
+                        <div>
+                          <p className="text-sm font-medium text-green-700 mb-1">
+                            {t('entityType.entityDefinitionTestMatched', { count: entityDefinitionTestResult.matches.length })}
+                          </p>
+                          <div className="flex flex-wrap gap-1">
+                            {entityDefinitionTestResult.matches.map((match, idx) => (
+                              <code key={idx} className="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded">
+                                {match}
+                              </code>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-sm text-yellow-700">{t('entityType.entityDefinitionTestNotMatched')}</p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Examples card */}
+                  <Card className="bg-green-50 border-green-200">
+                    <CardContent className="p-3">
+                      <p className="text-xs font-semibold text-green-900 mb-2">
+                        {t('entityType.entityDefinitionExamplesTitle')}
+                      </p>
+                      <ul className="text-xs text-green-800 space-y-1.5 list-none">
+                        <li className="bg-white/50 p-1.5 rounded">
+                          • {t('entityType.entityDefinitionExamplePhone')}
+                        </li>
+                        <li className="bg-white/50 p-1.5 rounded">
+                          • {t('entityType.entityDefinitionExampleIdCard')}
+                        </li>
+                        <li className="bg-white/50 p-1.5 rounded">
+                          • {t('entityType.entityDefinitionExampleAddress')}
+                        </li>
+                        <li className="bg-white/50 p-1.5 rounded">
+                          • {t('entityType.entityDefinitionExampleBankCard')}
+                        </li>
+                        <li className="bg-white/50 p-1.5 rounded">
+                          • {t('entityType.entityDefinitionExampleName')}
+                        </li>
+                      </ul>
+                      <p className="text-xs text-green-700 mt-2 pt-2 border-t border-green-300">
+                        {t('entityType.entityDefinitionExamplesHint')}
+                      </p>
+                    </CardContent>
+                  </Card>
+                </div>
+              )}
+
+              {/* Anonymization Method Selection - Available for all recognition methods */}
+              <FormField
+                control={form.control}
+                name="anonymization_method"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('entityType.anonymizationMethodSelectLabel')}</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder={t('entityType.anonymizationMethodSelectPlaceholder')} />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {ANONYMIZATION_METHODS.map((method) => (
+                          <SelectItem key={method.value} value={method.value}>
+                            {method.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              {/* regex_replace configuration */}
+              {form.watch('anonymization_method') === 'regex_replace' && (
+                <div className="space-y-4 p-4 border rounded-lg bg-purple-50/30">
+                  <div>
+                    <FormField
+                      control={form.control}
+                      name="regex_natural_desc"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>{t('entityType.regexNaturalDesc')}</FormLabel>
+                          <div className="flex gap-2">
+                            <FormControl>
+                              <Input
+                                {...field}
+                                placeholder={t('entityType.regexNaturalDescPlaceholder')}
+                              />
+                            </FormControl>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={handleGenerateRegex}
+                              disabled={generatingRegex}
+                            >
+                              {generatingRegex ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Wand2 className="h-4 w-4" />
+                              )}
+                              <span className="ml-1">{t('entityType.generateRegex')}</span>
+                            </Button>
+                          </div>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <FormField
+                      control={form.control}
+                      name="regex_pattern"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>{t('entityType.regexPattern')}</FormLabel>
+                          <FormControl>
+                            <Input
+                              {...field}
+                              placeholder="(\d{3})\d{4}(\d{4})"
+                              className="font-mono"
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="regex_replacement"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>{t('entityType.regexReplacement')}</FormLabel>
+                          <FormControl>
+                            <Input
+                              {...field}
+                              placeholder="\1****\2"
+                              className="font-mono"
+                            />
+                          </FormControl>
+                          <p className="text-xs text-gray-500 mt-1">
+                            {t('entityType.regexReplacementHint')}
+                          </p>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                  <Card className="bg-purple-50 border-purple-200">
+                    <CardContent className="p-3">
+                      <p className="text-xs font-semibold text-purple-900 mb-2">
+                        {t('entityType.regexReplaceExamplesTitle')}
+                      </p>
+                      <ul className="text-xs text-purple-800 space-y-1.5 list-none">
+                        <li className="bg-white/50 p-1.5 rounded">
+                          • {t('entityType.regexReplaceExamplePhone')}
+                        </li>
+                        <li className="bg-white/50 p-1.5 rounded">
+                          • {t('entityType.regexReplaceExampleEmail')}
+                        </li>
+                        <li className="bg-white/50 p-1.5 rounded">
+                          • {t('entityType.regexReplaceExampleIP')}
+                        </li>
+                      </ul>
+                    </CardContent>
+                  </Card>
+                </div>
+              )}
+
+              {/* genai anonymization configuration */}
+              {form.watch('anonymization_method') === 'genai' && (
+                <div className="space-y-4 p-4 border rounded-lg bg-green-50/30">
+                  <FormField
+                    control={form.control}
+                    name="genai_anonymization_prompt"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('entityType.genaiAnonymizationPrompt')}</FormLabel>
+                        <FormControl>
+                          <Textarea
+                            {...field}
+                            rows={3}
+                            placeholder={t('entityType.genaiAnonymizationPromptPlaceholder')}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <Card className="bg-green-50 border-green-200">
+                    <CardContent className="p-3">
+                      <p className="text-xs font-semibold text-green-900 mb-2">
+                        {t('entityType.genaiAnonymizationExamplesTitle')}
+                      </p>
+                      <ul className="text-xs text-green-800 space-y-1.5 list-none">
+                        <li className="bg-white/50 p-1.5 rounded">
+                          • {t('entityType.genaiAnonymizationExample1')}
+                        </li>
+                        <li className="bg-white/50 p-1.5 rounded">
+                          • {t('entityType.genaiAnonymizationExample2')}
+                        </li>
+                        <li className="bg-white/50 p-1.5 rounded">
+                          • {t('entityType.genaiAnonymizationExample3')}
+                        </li>
+                      </ul>
+                    </CardContent>
+                  </Card>
+                </div>
+              )}
+
+              {/* replace configuration */}
+              {form.watch('anonymization_method') === 'replace' && (
                     <FormField
                       control={form.control}
                       name="replace_text"
@@ -885,90 +1575,49 @@ const EntityTypeManagement: React.FC = () => {
                       </CardContent>
                     </Card>
                   )}
-                </>
-              )}
 
-              {form.watch('recognition_method') === 'genai' && (
-                <>
-                  <Card className="bg-yellow-50 border-yellow-300">
-                    <CardContent className="p-3">
-                      <div className="flex items-start gap-2">
-                        <div className="flex-1">
-                          <p className="text-sm font-semibold text-yellow-900 mb-1">
-                            {t('entityType.genaiDefaultBehaviorTitle')}
-                          </p>
-                          <p className="text-xs text-yellow-800">
-                            {t('entityType.genaiDefaultBehaviorFormat')} <code className="bg-yellow-200 px-1 py-0.5 rounded">[REDACTED_{(form.watch('entity_type_name') || 'ENTITY_NAME').toUpperCase().replace(/\s+/g, '_')}]</code>
-                          </p>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <FormField
-                    control={form.control}
-                    name="masking_rule"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>{t('entityType.maskingRule')}</FormLabel>
+              {/* Test Anonymization Section */}
+              <div className="space-y-3 p-4 border rounded-lg bg-gray-50/50">
+                <FormField
+                  control={form.control}
+                  name="test_input"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('entityType.testInput')}</FormLabel>
+                      <div className="flex gap-2">
                         <FormControl>
-                          <Textarea
+                          <Input
                             {...field}
-                            rows={3}
-                            placeholder={t('entityType.maskingRulePlaceholder')}
+                            placeholder={t('entityType.testInputPlaceholder')}
                           />
                         </FormControl>
-                        <p className="text-xs text-gray-500 mt-1">
-                          {t('entityType.maskingRuleHint')} [REDACTED_{(form.watch('entity_type_name') || 'ENTITY_NAME').toUpperCase().replace(/\s+/g, '_')}]
-                        </p>
-                      <Card className="mt-2 bg-blue-50 border-blue-200">
-                        <CardContent className="p-3">
-                          <p className="text-xs font-semibold text-blue-900 mb-2">
-                            {t('entityType.genaiMaskingTitle')}
-                          </p>
-                          <p className="text-xs text-blue-800 mb-3">
-                            {t('entityType.genaiMaskingDescription')}
-                          </p>
-                          <div className="space-y-3">
-                            <div>
-                              <p className="text-xs font-semibold text-blue-900">{t('entityType.genaiRuleExamplesTitle')}</p>
-                              <ul className="text-xs text-blue-800 mt-1 space-y-2 list-none">
-                                <li className="bg-white/50 p-2 rounded">
-                                  <span className="font-semibold">{t('entityType.genaiExample1Rule')}</span>{t('entityType.genaiExample1RuleText')}
-                                  <br />
-                                  <span className="text-blue-600">{t('entityType.genaiExample1Effect')}</span>{t('entityType.genaiExample1EffectText')}
-                                </li>
-                                <li className="bg-white/50 p-2 rounded">
-                                  <span className="font-semibold">{t('entityType.genaiExample1Rule')}</span>{t('entityType.genaiExample2RuleText')}
-                                  <br />
-                                  <span className="text-blue-600">{t('entityType.genaiExample1Effect')}</span>{t('entityType.genaiExample2EffectText')}
-                                </li>
-                                <li className="bg-white/50 p-2 rounded">
-                                  <span className="font-semibold">{t('entityType.genaiExample1Rule')}</span>{t('entityType.genaiExample3RuleText')}
-                                  <br />
-                                  <span className="text-blue-600">{t('entityType.genaiExample1Effect')}</span>{t('entityType.genaiExample3EffectText')}
-                                </li>
-                                <li className="bg-white/50 p-2 rounded">
-                                  <span className="font-semibold">{t('entityType.genaiExample1Rule')}</span>{t('entityType.genaiExample4RuleText')}
-                                  <br />
-                                  <span className="text-blue-600">{t('entityType.genaiExample1Effect')}</span>{t('entityType.genaiExample4EffectText')}
-                                </li>
-                              </ul>
-                            </div>
-                            <div className="border-t border-blue-300 pt-2">
-                              <p className="text-xs text-blue-700">
-                                {t('entityType.genaiMaskingHint')}
-                              </p>
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={handleTestAnonymization}
+                          disabled={testingAnonymization}
+                        >
+                          {testingAnonymization ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Play className="h-4 w-4" />
+                          )}
+                          <span className="ml-1">{t('entityType.test')}</span>
+                        </Button>
+                      </div>
                       <FormMessage />
                     </FormItem>
                   )}
-                  />
-                </>
-              )}
+                />
+                {testResult && (
+                  <div className="p-3 bg-white border rounded-lg">
+                    <p className="text-sm font-medium text-gray-700">{t('entityType.testResult')}:</p>
+                    <code className="text-sm text-green-700 bg-green-50 px-2 py-1 rounded mt-1 block">
+                      {testResult}
+                    </code>
+                  </div>
+                )}
+              </div>
 
               <div>
                 <FormLabel>{t('entityType.detectionScopeLabel')}</FormLabel>

@@ -519,6 +519,82 @@ export const dataSecurityApi = {
   createGlobalEntityType: (data: any): Promise<any> =>
     api.post('/api/v1/config/data-security/global-entity-types', data).then(res => res.data),
 
+  // Generate anonymization regex using AI
+  generateAnonymizationRegex: (data: {
+    description: string
+    entity_type: string
+    sample_data?: string
+  }): Promise<{
+    success: boolean
+    regex_pattern: string
+    replacement_template: string
+    explanation: string
+  }> =>
+    api.post('/api/v1/config/data-security/generate-anonymization-regex', data).then(res => res.data),
+
+  // Test anonymization effect
+  testAnonymization: (data: {
+    method: string
+    config: Record<string, any>
+    test_input: string
+  }): Promise<{
+    success: boolean
+    result: string
+    processing_time_ms: number
+  }> =>
+    api.post('/api/v1/config/data-security/test-anonymization', data).then(res => res.data),
+
+  // Generate recognition regex using AI
+  generateRecognitionRegex: (data: {
+    description: string
+    entity_type: string
+    sample_data?: string
+  }): Promise<{
+    success: boolean
+    regex_pattern: string
+    explanation: string
+  }> =>
+    api.post('/api/v1/config/data-security/generate-recognition-regex', data).then(res => res.data),
+
+  // Generate entity type code using AI
+  generateEntityTypeCode: (data: {
+    entity_type_name: string
+  }): Promise<{
+    success: boolean
+    entity_type_code: string
+    error?: string
+  }> =>
+    api.post('/api/v1/config/data-security/generate-entity-type-code', data).then(res => res.data),
+
+  // Test recognition regex
+  testRecognitionRegex: (data: {
+    pattern: string
+    test_input: string
+  }): Promise<{
+    success: boolean
+    matched: boolean
+    matches: string[]
+    match_count: number
+    error?: string
+    processing_time_ms: number
+  }> =>
+    api.post('/api/v1/config/data-security/test-recognition-regex', data).then(res => res.data),
+
+  // Test GenAI entity definition
+  testEntityDefinition: (data: {
+    entity_definition: string
+    entity_type_name: string
+    test_input: string
+  }): Promise<{
+    success: boolean
+    matched: boolean
+    matches: string[]
+    match_count: number
+    error?: string
+    processing_time_ms: number
+  }> =>
+    api.post('/api/v1/config/data-security/test-entity-definition', data).then(res => res.data),
+
   // Get detection results list
   getDetectionResults: (limit: number, offset: number): Promise<{ items: any[]; total: number }> =>
     api.get(`/api/v1/results?per_page=${limit}&page=${Math.floor(offset / limit) + 1}`).then(res => res.data),

@@ -157,11 +157,8 @@ async def create_entity_type(
             recognition_method = "genai"
             logger.info(f"Auto-corrected recognition_method to 'genai' based on entity_definition presence")
 
-        # GenAI类型固定使用genai脱敏方法
-        if recognition_method == "genai":
-            anonymization_method = "genai"
-        else:
-            anonymization_method = data.get("anonymization_method", "mask")
+        # 允许用户自定义脱敏方法，GenAI识别也可以使用任何脱敏方法
+        anonymization_method = data.get("anonymization_method", "mask")
 
         service = DataSecurityService(db)
         entity_type = service.create_entity_type(
@@ -231,10 +228,8 @@ async def update_entity_type(
         if "entity_definition" in data:
             update_kwargs["entity_definition"] = data["entity_definition"]
 
-        # GenAI类型固定使用genai脱敏方法
-        if recognition_method == "genai":
-            update_kwargs["anonymization_method"] = "genai"
-        elif "anonymization_method" in data:
+        # 允许用户自定义脱敏方法，GenAI识别也可以使用任何脱敏方法
+        if "anonymization_method" in data:
             update_kwargs["anonymization_method"] = data["anonymization_method"]
 
         if "anonymization_config" in data:
@@ -329,11 +324,8 @@ async def create_global_entity_type(
             recognition_method = "genai"
             logger.info(f"Auto-corrected recognition_method to 'genai' based on entity_definition presence")
 
-        # GenAI类型固定使用genai脱敏方法
-        if recognition_method == "genai":
-            anonymization_method = "genai"
-        else:
-            anonymization_method = data.get("anonymization_method", "mask")
+        # 允许用户自定义脱敏方法，GenAI识别也可以使用任何脱敏方法
+        anonymization_method = data.get("anonymization_method", "mask")
 
         service = DataSecurityService(db)
         entity_type = service.create_entity_type(
@@ -360,9 +352,319 @@ async def create_global_entity_type(
             "message": "Global entity type created successfully",
             "id": str(entity_type.id)
         }
-    
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Create global entity type error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to create global entity type: {str(e)}")
+
+
+@router.post("/config/data-security/generate-anonymization-regex")
+async def generate_anonymization_regex(
+    data: dict,
+    request: Request,
+    db: Session = Depends(get_admin_db)
+):
+    """
+    使用AI生成脱敏正则表达式
+
+    Input:
+        {
+            "description": "保留前3位和后4位",
+            "entity_type": "PHONE_NUMBER",
+            "sample_data": "13812345678"  (可选)
+        }
+
+    Output:
+        {
+            "success": true,
+            "regex_pattern": "(\\d{3})\\d{4}(\\d{4})",
+            "replacement_template": "\\1****\\2",
+            "explanation": "Pattern captures first 3 and last 4 digits"
+        }
+    """
+    try:
+        current_user, application_id = get_current_user_and_application_from_request(request, db)
+
+        description = data.get("description", "")
+        entity_type = data.get("entity_type", "")
+        sample_data = data.get("sample_data")
+
+        if not description:
+            raise HTTPException(status_code=400, detail="Description is required")
+
+        service = DataSecurityService(db)
+        result = await service.generate_anonymization_regex(
+            description=description,
+            entity_type=entity_type,
+            sample_data=sample_data
+        )
+
+        logger.info(f"Generated anonymization regex for user: {current_user.email}, entity_type: {entity_type}")
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Generate anonymization regex error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to generate anonymization regex: {str(e)}")
+
+
+@router.post("/config/data-security/test-anonymization")
+async def test_anonymization(
+    data: dict,
+    request: Request,
+    db: Session = Depends(get_admin_db)
+):
+    """
+    测试脱敏效果
+
+    Input:
+        {
+            "method": "regex_replace",
+            "config": {
+                "regex_pattern": "(\\d{3})\\d{4}(\\d{4})",
+                "replacement_template": "\\1****\\2"
+            },
+            "test_input": "13812345678"
+        }
+
+    Output:
+        {
+            "success": true,
+            "result": "138****5678",
+            "processing_time_ms": 0.5
+        }
+    """
+    try:
+        current_user, application_id = get_current_user_and_application_from_request(request, db)
+
+        method = data.get("method", "")
+        config = data.get("config", {})
+        test_input = data.get("test_input", "")
+
+        if not method:
+            raise HTTPException(status_code=400, detail="Method is required")
+        if not test_input:
+            raise HTTPException(status_code=400, detail="Test input is required")
+
+        service = DataSecurityService(db)
+        result = service.test_anonymization(
+            method=method,
+            config=config,
+            test_input=test_input
+        )
+
+        logger.info(f"Tested anonymization for user: {current_user.email}, method: {method}")
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Test anonymization error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to test anonymization: {str(e)}")
+
+
+@router.post("/config/data-security/generate-entity-type-code")
+async def generate_entity_type_code(
+    data: dict,
+    request: Request,
+    db: Session = Depends(get_admin_db)
+):
+    """
+    使用AI根据实体类型名称生成实体类型代码
+
+    Input:
+        {
+            "entity_type_name": "手机号码"
+        }
+
+    Output:
+        {
+            "success": true,
+            "entity_type_code": "PHONE_NUMBER"
+        }
+    """
+    try:
+        current_user, application_id = get_current_user_and_application_from_request(request, db)
+
+        entity_type_name = data.get("entity_type_name", "")
+
+        if not entity_type_name:
+            raise HTTPException(status_code=400, detail="Entity type name is required")
+
+        service = DataSecurityService(db)
+        result = await service.generate_entity_type_code(
+            entity_type_name=entity_type_name
+        )
+
+        logger.info(f"Generated entity type code for user: {current_user.email}, name: {entity_type_name}")
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Generate entity type code error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to generate entity type code: {str(e)}")
+
+
+@router.post("/config/data-security/generate-recognition-regex")
+async def generate_recognition_regex(
+    data: dict,
+    request: Request,
+    db: Session = Depends(get_admin_db)
+):
+    """
+    使用AI生成识别正则表达式
+
+    Input:
+        {
+            "description": "中国手机号码",
+            "entity_type": "PHONE_NUMBER",
+            "sample_data": "13812345678"  (可选)
+        }
+
+    Output:
+        {
+            "success": true,
+            "regex_pattern": "1[3-9]\\d{9}",
+            "explanation": "Pattern matches Chinese mobile phone numbers starting with 1 followed by 3-9 and 9 more digits"
+        }
+    """
+    try:
+        current_user, application_id = get_current_user_and_application_from_request(request, db)
+
+        description = data.get("description", "")
+        entity_type = data.get("entity_type", "")
+        sample_data = data.get("sample_data")
+
+        if not description:
+            raise HTTPException(status_code=400, detail="Description is required")
+
+        service = DataSecurityService(db)
+        result = await service.generate_recognition_regex(
+            description=description,
+            entity_type=entity_type,
+            sample_data=sample_data
+        )
+
+        logger.info(f"Generated recognition regex for user: {current_user.email}, entity_type: {entity_type}")
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Generate recognition regex error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to generate recognition regex: {str(e)}")
+
+
+@router.post("/config/data-security/test-recognition-regex")
+async def test_recognition_regex(
+    data: dict,
+    request: Request,
+    db: Session = Depends(get_admin_db)
+):
+    """
+    测试识别正则表达式
+
+    Input:
+        {
+            "pattern": "1[3-9]\\d{9}",
+            "test_input": "我的电话是13812345678，请联系我"
+        }
+
+    Output:
+        {
+            "success": true,
+            "matched": true,
+            "matches": ["13812345678"],
+            "match_count": 1,
+            "processing_time_ms": 0.5
+        }
+    """
+    try:
+        current_user, application_id = get_current_user_and_application_from_request(request, db)
+
+        pattern = data.get("pattern", "")
+        test_input = data.get("test_input", "")
+
+        if not pattern:
+            raise HTTPException(status_code=400, detail="Pattern is required")
+        if not test_input:
+            raise HTTPException(status_code=400, detail="Test input is required")
+
+        service = DataSecurityService(db)
+        result = service.test_recognition_regex(
+            pattern=pattern,
+            test_input=test_input
+        )
+
+        logger.info(f"Tested recognition regex for user: {current_user.email}")
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Test recognition regex error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to test recognition regex: {str(e)}")
+
+
+@router.post("/config/data-security/test-entity-definition")
+async def test_entity_definition(
+    data: dict,
+    request: Request,
+    db: Session = Depends(get_admin_db)
+):
+    """
+    测试GenAI实体定义
+
+    Input:
+        {
+            "entity_definition": "用于联系的11位手机号码",
+            "entity_type_name": "手机号码",
+            "test_input": "我的电话是13812345678，请联系我"
+        }
+
+    Output:
+        {
+            "success": true,
+            "matched": true,
+            "matches": ["13812345678"],
+            "match_count": 1,
+            "processing_time_ms": 500.5
+        }
+    """
+    try:
+        current_user, application_id = get_current_user_and_application_from_request(request, db)
+
+        entity_definition = data.get("entity_definition", "")
+        entity_type_name = data.get("entity_type_name", "")
+        test_input = data.get("test_input", "")
+
+        if not entity_definition:
+            raise HTTPException(status_code=400, detail="Entity definition is required")
+        if not test_input:
+            raise HTTPException(status_code=400, detail="Test input is required")
+
+        service = DataSecurityService(db)
+        result = await service.test_entity_definition(
+            entity_definition=entity_definition,
+            entity_type_name=entity_type_name,
+            test_input=test_input
+        )
+
+        logger.info(f"Tested entity definition for user: {current_user.email}")
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Test entity definition error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to test entity definition: {str(e)}")

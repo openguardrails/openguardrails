@@ -108,6 +108,13 @@ const LLMProviders: React.FC = () => {
     }
   }
 
+  // Provider type options
+  const providerTypeOptions = [
+    { value: 'OpenAI/OpenAI Compatible', label: 'OpenAI/OpenAI Compatible' },
+    { value: 'Azure OpenAI', label: 'Azure OpenAI' },
+    { value: 'Anthropic Claude', label: 'Anthropic Claude' },
+  ]
+
   // Form schema
   const createFormSchema = (isEditing: boolean, existingProviders: LLMProvider[], currentEditingId?: string) => {
     return z.object({
@@ -131,7 +138,7 @@ const LLMProviders: React.FC = () => {
       api_key: isEditing
         ? z.string().optional()
         : z.string().min(1, t('proxy.upstreamApiKeyRequired')),
-      provider: z.string().optional(),
+      provider: z.string().min(1, t('gateway.providerTypeRequired')),
     })
   }
 
@@ -143,7 +150,7 @@ const LLMProviders: React.FC = () => {
       config_name: '',
       api_base_url: '',
       api_key: '',
-      provider: '',
+      provider: 'OpenAI/OpenAI Compatible',
     },
   })
 
@@ -179,7 +186,7 @@ const LLMProviders: React.FC = () => {
         config_name: '',
         api_base_url: '',
         api_key: '',
-        provider: '',
+        provider: 'OpenAI/OpenAI Compatible',
       })
       setMaskedApiKey('')
       setSwitchStates({
@@ -507,10 +514,24 @@ completion = client.chat.completions.create(
                 name="provider"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>{t('gateway.providerType')}</FormLabel>
-                    <FormControl>
-                      <Input placeholder={t('gateway.providerTypePlaceholder')} {...field} />
-                    </FormControl>
+                    <FormLabel>{t('gateway.providerType')} </FormLabel>
+                    <Select
+                      onValueChange={field.onChange}
+                      value={field.value}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder={t('gateway.providerTypePlaceholder')} />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {providerTypeOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     <FormDescription>{t('gateway.providerTypeDesc')}</FormDescription>
                     <FormMessage />
                   </FormItem>

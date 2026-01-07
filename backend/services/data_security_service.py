@@ -27,6 +27,25 @@ RISK_LEVEL_MAPPING = {
     'high': 'high_risk'
 }
 
+def _convert_replacement_template(template: str) -> str:
+    """
+    Ensure replacement template uses Python's \\1, \\2 syntax.
+
+    The preferred format is now \\1, \\2 (Python regex syntax).
+    For backward compatibility, $1, $2 format is still supported and will be converted.
+    """
+    # Check if template already uses Python format (\1, \2)
+    # If it contains \1-\9, assume it's already in Python format
+    import re
+    if re.search(r'\\[1-9]', template):
+        return template
+
+    # Convert legacy $1, $2, ... $9 to \1, \2, ... \9
+    result = template
+    for i in range(9, 0, -1):  # Start from 9 to avoid $1 matching part of $10
+        result = result.replace(f'${i}', f'\\{i}')
+    return result
+
 class DataSecurityService:
     """Data security service - sensitive data detection and de-sensitization"""
 
@@ -366,7 +385,7 @@ Text:
                             if pos == -1:
                                 break
 
-                            # Add match
+                            # Add match - use entity type's configured anonymization method
                             matches.append({
                                 'entity_type': et['entity_type'],
                                 'entity_type_name': et['entity_type_name'],
@@ -374,8 +393,8 @@ Text:
                                 'end': pos + len(original_text),
                                 'text': original_text,
                                 'risk_level': et['risk_level'],
-                                'anonymization_method': 'genai',  # Special marker for GenAI-based masking
-                                'anonymization_config': {}  # No config needed, masking is fixed
+                                'anonymization_method': et.get('anonymization_method', 'genai'),
+                                'anonymization_config': et.get('anonymization_config', {})
                             })
 
                             start_pos = pos + len(original_text)
@@ -534,9 +553,28 @@ Text:
             original_text = entity['text']
 
             # Process according to de-sensitization method
-            if method == 'genai':
-                # Use fixed redaction format: [REDACTED_EntityName]
-                replacement = f"[REDACTED_{entity['entity_type_name'].upper().replace(' ', '_')}]"
+            if method == 'regex_replace':
+                # 正则替换脱敏 - 使用捕获组和替换模板
+                pattern = config.get('regex_pattern', '')
+                replacement_template = config.get('replacement_template', '***')
+                try:
+                    if pattern:
+                        # Ensure replacement uses Python regex syntax (\1, \2)
+                        python_replacement = _convert_replacement_template(replacement_template)
+                        replacement = re.sub(pattern, python_replacement, original_text)
+                    else:
+                        replacement = '***'
+                except re.error as e:
+                    logger.warning(f"Regex replace error for {entity['entity_type']}: {e}")
+                    replacement = f"<{entity['entity_type']}>"
+            elif method == 'genai':
+                # GenAI智能脱敏 - 使用AI生成替换内容
+                anonymization_prompt = config.get('anonymization_prompt', '')
+                if anonymization_prompt:
+                    replacement = self._genai_anonymize_sync(original_text, anonymization_prompt, entity.get('entity_type_name', entity['entity_type']))
+                else:
+                    # 无提示词时使用默认格式
+                    replacement = f"[REDACTED_{entity.get('entity_type_name', entity['entity_type']).upper().replace(' ', '_')}]"
             elif method == 'replace':
                 # Replace with placeholder
                 replacement = config.get('replacement', f"<{entity['entity_type']}>")
@@ -604,6 +642,517 @@ Text:
                 replacement += char
         return replacement
 
+    def _genai_anonymize_sync(self, text: str, prompt: str, entity_type_name: str) -> str:
+        """
+        同步调用GenAI执行脱敏
+
+        Args:
+            text: 需要脱敏的原始文本
+            prompt: 用户定义的脱敏指令
+            entity_type_name: 实体类型名称
+
+        Returns:
+            脱敏后的文本
+        """
+        try:
+            messages = [
+                {
+                    "role": "system",
+                    "content": "You are a data anonymization assistant. Your task is to anonymize sensitive data according to the given instruction. Return ONLY the anonymized result, nothing else. Do not include any explanation or prefix."
+                },
+                {
+                    "role": "user",
+                    "content": f"Original sensitive data: {text}\nAnonymization instruction: {prompt}\n\nReturn the anonymized result only:"
+                }
+            ]
+
+            # 使用事件循环运行异步方法
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # 如果已经在异步上下文中，创建一个新任务
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future = executor.submit(asyncio.run, self.model_service.check_messages(messages))
+                        result = future.result(timeout=30)
+                else:
+                    result = loop.run_until_complete(self.model_service.check_messages(messages))
+            except RuntimeError:
+                # 没有事件循环，创建一个新的
+                result = asyncio.run(self.model_service.check_messages(messages))
+
+            if result:
+                # 清理结果，移除可能的引号和空白
+                cleaned_result = result.strip().strip('"\'')
+                return cleaned_result if cleaned_result else f"[REDACTED_{entity_type_name.upper().replace(' ', '_')}]"
+
+            return f"[REDACTED_{entity_type_name.upper().replace(' ', '_')}]"
+
+        except Exception as e:
+            logger.error(f"GenAI anonymization failed for {entity_type_name}: {e}")
+            return f"[REDACTED_{entity_type_name.upper().replace(' ', '_')}]"
+
+    async def generate_anonymization_regex(self, description: str, entity_type: str, sample_data: str = None) -> dict:
+        """
+        使用AI生成脱敏正则表达式
+
+        Args:
+            description: 用户对脱敏规则的自然语言描述
+            entity_type: 实体类型
+            sample_data: 可选的示例数据
+
+        Returns:
+            包含regex_pattern, replacement_template, explanation的字典
+        """
+        prompt = f"""Generate a regex pattern and replacement template for data anonymization.
+
+Entity type: {entity_type}
+Anonymization requirement: {description}
+{f'Sample data: {sample_data}' if sample_data else ''}
+
+Requirements:
+1. The regex pattern should use capture groups (e.g., (\\d{{3}}) ) to preserve parts of the data
+2. The replacement template MUST use Python regex syntax: \\1, \\2, etc. to reference capture groups (NOT $1, $2)
+3. Use * for masked characters
+4. Make sure the regex pattern matches the entire text
+
+Examples:
+- "Keep first 3 and last 4 digits of phone number" → pattern: (\\d{{3}})\\d{{4}}(\\d{{4}}), replacement: \\1****\\2
+- "Mask email before @" → pattern: [^@]+(@.+), replacement: ****\\1
+- "Replace each digit group in IP with ***" → pattern: \\d+, replacement: ***
+- "Keep first 2 characters of name" → pattern: (.{{2}}).*, replacement: \\1***
+
+Return JSON only, no markdown:
+{{"regex_pattern": "your_pattern_here", "replacement_template": "your_replacement_here", "explanation": "brief_explanation"}}"""
+
+        try:
+            messages = [
+                {"role": "system", "content": "You are a regex expert. Return valid JSON only, no markdown code blocks."},
+                {"role": "user", "content": prompt}
+            ]
+
+            result = await self.model_service.check_messages(messages)
+
+            if result:
+                # 尝试解析JSON
+                try:
+                    # 清理可能的markdown代码块
+                    cleaned = result.strip()
+                    if cleaned.startswith('```'):
+                        cleaned = cleaned.split('\n', 1)[1] if '\n' in cleaned else cleaned[3:]
+                    if cleaned.endswith('```'):
+                        cleaned = cleaned[:-3]
+                    cleaned = cleaned.strip()
+
+                    parsed = json.loads(cleaned)
+                    return {
+                        "success": True,
+                        "regex_pattern": parsed.get("regex_pattern", ""),
+                        "replacement_template": parsed.get("replacement_template", "***"),
+                        "explanation": parsed.get("explanation", "")
+                    }
+                except json.JSONDecodeError as e:
+                    logger.warning(f"Failed to parse AI response as JSON: {e}, response: {result}")
+                    return {
+                        "success": False,
+                        "regex_pattern": "",
+                        "replacement_template": "***",
+                        "explanation": f"Failed to generate regex: {str(e)}"
+                    }
+
+            return {
+                "success": False,
+                "regex_pattern": "",
+                "replacement_template": "***",
+                "explanation": "No response from AI model"
+            }
+
+        except Exception as e:
+            logger.error(f"Generate anonymization regex failed: {e}")
+            return {
+                "success": False,
+                "regex_pattern": "",
+                "replacement_template": "***",
+                "explanation": f"Error: {str(e)}"
+            }
+
+    async def generate_recognition_regex(self, description: str, entity_type: str, sample_data: str = None) -> dict:
+        """
+        使用AI生成识别用的正则表达式
+
+        Args:
+            description: 用户对要识别数据的自然语言描述
+            entity_type: 实体类型名称
+            sample_data: 可选的示例数据
+
+        Returns:
+            包含regex_pattern和explanation的字典
+        """
+        prompt = f"""Generate a regex pattern to recognize/detect a specific type of sensitive data.
+
+Entity type: {entity_type}
+Description of what to detect: {description}
+{f'Sample data that should match: {sample_data}' if sample_data else ''}
+
+Requirements:
+1. The regex pattern should accurately match the described data type
+2. Be specific enough to avoid false positives
+3. Be flexible enough to match common variations
+4. Use appropriate character classes and quantifiers
+
+Examples:
+- "Chinese phone number" → pattern: 1[3-9]\\d{{9}}
+- "Email address" → pattern: [a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{{2,}}
+- "Chinese ID card number" → pattern: [1-9]\\d{{5}}(?:19|20)\\d{{2}}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\\d|3[01])\\d{{3}}[\\dXx]
+- "IPv4 address" → pattern: (?:25[0-5]|2[0-4]\\d|[01]?\\d\\d?)\\.(?:25[0-5]|2[0-4]\\d|[01]?\\d\\d?)\\.(?:25[0-5]|2[0-4]\\d|[01]?\\d\\d?)\\.(?:25[0-5]|2[0-4]\\d|[01]?\\d\\d?)
+- "Credit card number (16 digits)" → pattern: \\d{{4}}[- ]?\\d{{4}}[- ]?\\d{{4}}[- ]?\\d{{4}}
+
+Return JSON only, no markdown:
+{{"regex_pattern": "your_pattern_here", "explanation": "brief_explanation_of_what_this_pattern_matches"}}"""
+
+        try:
+            messages = [
+                {"role": "system", "content": "You are a regex expert specializing in data recognition patterns. Return valid JSON only, no markdown code blocks."},
+                {"role": "user", "content": prompt}
+            ]
+
+            result = await self.model_service.check_messages(messages)
+
+            if result:
+                try:
+                    # 清理可能的markdown代码块
+                    cleaned = result.strip()
+                    if cleaned.startswith('```'):
+                        cleaned = cleaned.split('\n', 1)[1] if '\n' in cleaned else cleaned[3:]
+                    if cleaned.endswith('```'):
+                        cleaned = cleaned[:-3]
+                    cleaned = cleaned.strip()
+
+                    parsed = json.loads(cleaned)
+                    return {
+                        "success": True,
+                        "regex_pattern": parsed.get("regex_pattern", ""),
+                        "explanation": parsed.get("explanation", "")
+                    }
+                except json.JSONDecodeError as e:
+                    logger.warning(f"Failed to parse AI response as JSON: {e}, response: {result}")
+                    return {
+                        "success": False,
+                        "regex_pattern": "",
+                        "explanation": f"Failed to generate regex: {str(e)}"
+                    }
+
+            return {
+                "success": False,
+                "regex_pattern": "",
+                "explanation": "No response from AI model"
+            }
+
+        except Exception as e:
+            logger.error(f"Generate recognition regex failed: {e}")
+            return {
+                "success": False,
+                "regex_pattern": "",
+                "explanation": f"Error: {str(e)}"
+            }
+
+    async def generate_entity_type_code(self, entity_type_name: str) -> dict:
+        """
+        使用AI根据实体类型名称生成实体类型代码
+
+        Args:
+            entity_type_name: 实体类型名称（可以是中文或英文）
+
+        Returns:
+            包含entity_type_code的字典
+        """
+        prompt = f"""Generate an entity type code based on the given entity type name.
+
+Entity type name: {entity_type_name}
+
+Requirements:
+1. The code must only contain UPPERCASE English letters and underscores
+2. The code should be a meaningful English abbreviation or translation of the name
+3. Use underscores to separate words
+4. Keep it concise but clear (typically 2-4 words)
+5. No spaces, numbers, or special characters allowed
+
+Examples:
+- "手机号码" → PHONE_NUMBER
+- "身份证号" → ID_CARD_NUMBER
+- "邮箱地址" → EMAIL_ADDRESS
+- "银行卡号" → BANK_CARD_NUMBER
+- "家庭住址" → HOME_ADDRESS
+- "公司名称" → COMPANY_NAME
+- "信用卡" → CREDIT_CARD
+- "护照号" → PASSPORT_NUMBER
+- "IP地址" → IP_ADDRESS
+- "车牌号" → LICENSE_PLATE
+
+Return JSON only, no markdown:
+{{"entity_type_code": "YOUR_CODE_HERE"}}"""
+
+        try:
+            messages = [
+                {"role": "system", "content": "You are an expert at generating standardized entity type codes. Return valid JSON only, no markdown code blocks."},
+                {"role": "user", "content": prompt}
+            ]
+
+            result = await self.model_service.check_messages(messages)
+
+            if result:
+                try:
+                    # 清理可能的markdown代码块
+                    cleaned = result.strip()
+                    if cleaned.startswith('```'):
+                        cleaned = cleaned.split('\n', 1)[1] if '\n' in cleaned else cleaned[3:]
+                    if cleaned.endswith('```'):
+                        cleaned = cleaned[:-3]
+                    cleaned = cleaned.strip()
+
+                    parsed = json.loads(cleaned)
+                    code = parsed.get("entity_type_code", "")
+
+                    # 验证生成的代码格式
+                    if code and re.match(r'^[A-Z][A-Z_]*[A-Z]$|^[A-Z]+$', code):
+                        return {
+                            "success": True,
+                            "entity_type_code": code
+                        }
+                    else:
+                        # 如果格式不对，尝试修正
+                        fixed_code = re.sub(r'[^A-Z_]', '', code.upper().replace(' ', '_'))
+                        fixed_code = re.sub(r'_+', '_', fixed_code).strip('_')
+                        if fixed_code:
+                            return {
+                                "success": True,
+                                "entity_type_code": fixed_code
+                            }
+                        return {
+                            "success": False,
+                            "entity_type_code": "",
+                            "error": "Generated code format is invalid"
+                        }
+                except json.JSONDecodeError as e:
+                    logger.warning(f"Failed to parse AI response as JSON: {e}, response: {result}")
+                    return {
+                        "success": False,
+                        "entity_type_code": "",
+                        "error": f"Failed to parse response: {str(e)}"
+                    }
+
+            return {
+                "success": False,
+                "entity_type_code": "",
+                "error": "No response from AI model"
+            }
+
+        except Exception as e:
+            logger.error(f"Generate entity type code failed: {e}")
+            return {
+                "success": False,
+                "entity_type_code": "",
+                "error": f"Error: {str(e)}"
+            }
+
+    async def test_entity_definition(self, entity_definition: str, entity_type_name: str, test_input: str) -> dict:
+        """
+        测试GenAI实体定义是否能识别输入中的敏感数据
+
+        Args:
+            entity_definition: 实体定义描述
+            entity_type_name: 实体类型名称
+            test_input: 测试输入
+
+        Returns:
+            包含匹配结果的字典
+        """
+        import time
+        start_time = time.time()
+
+        try:
+            if not entity_definition:
+                return {
+                    "success": False,
+                    "matched": False,
+                    "matches": [],
+                    "error": "Entity definition is empty",
+                    "processing_time_ms": (time.time() - start_time) * 1000
+                }
+
+            if not test_input:
+                return {
+                    "success": False,
+                    "matched": False,
+                    "matches": [],
+                    "error": "Test input is empty",
+                    "processing_time_ms": (time.time() - start_time) * 1000
+                }
+
+            # Build entity type config for GenAI detection
+            entity_types = [{
+                'entity_type': 'TEST_ENTITY',
+                'entity_type_name': entity_type_name or 'Test Entity',
+                'risk_level': 'medium',
+                'entity_definition': entity_definition,
+                'recognition_method': 'genai',
+                'anonymization_method': 'genai',
+                'anonymization_config': {}
+            }]
+
+            # Call GenAI detection
+            matches = await self._match_pattern_genai(test_input, entity_types, 'input')
+
+            # Extract matched texts
+            matched_texts = [m['text'] for m in matches]
+
+            return {
+                "success": True,
+                "matched": len(matched_texts) > 0,
+                "matches": matched_texts,
+                "match_count": len(matched_texts),
+                "processing_time_ms": (time.time() - start_time) * 1000
+            }
+
+        except Exception as e:
+            logger.error(f"Test entity definition failed: {e}")
+            return {
+                "success": False,
+                "matched": False,
+                "matches": [],
+                "error": f"Error: {str(e)}",
+                "processing_time_ms": (time.time() - start_time) * 1000
+            }
+
+    def test_recognition_regex(self, pattern: str, test_input: str) -> dict:
+        """
+        测试识别正则表达式是否能匹配输入
+
+        Args:
+            pattern: 正则表达式
+            test_input: 测试输入
+
+        Returns:
+            包含匹配结果的字典
+        """
+        import time
+        start_time = time.time()
+
+        try:
+            if not pattern:
+                return {
+                    "success": False,
+                    "matched": False,
+                    "matches": [],
+                    "error": "Pattern is empty",
+                    "processing_time_ms": (time.time() - start_time) * 1000
+                }
+
+            regex = re.compile(pattern)
+            matches = regex.findall(test_input)
+
+            # 如果 findall 返回元组（有捕获组），展开它们
+            if matches and isinstance(matches[0], tuple):
+                # 对于有捕获组的情况，使用 finditer 获取完整匹配
+                matches = [m.group(0) for m in regex.finditer(test_input)]
+
+            return {
+                "success": True,
+                "matched": len(matches) > 0,
+                "matches": matches,
+                "match_count": len(matches),
+                "processing_time_ms": (time.time() - start_time) * 1000
+            }
+
+        except re.error as e:
+            return {
+                "success": False,
+                "matched": False,
+                "matches": [],
+                "error": f"Invalid regex pattern: {str(e)}",
+                "processing_time_ms": (time.time() - start_time) * 1000
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "matched": False,
+                "matches": [],
+                "error": f"Error: {str(e)}",
+                "processing_time_ms": (time.time() - start_time) * 1000
+            }
+
+    def test_anonymization(self, method: str, config: dict, test_input: str) -> dict:
+        """
+        测试脱敏效果
+
+        Args:
+            method: 脱敏方法
+            config: 脱敏配置
+            test_input: 测试输入
+
+        Returns:
+            包含result和processing_time_ms的字典
+        """
+        import time
+        start_time = time.time()
+
+        try:
+            if method == 'regex_replace':
+                pattern = config.get('regex_pattern', '')
+                replacement_template = config.get('replacement_template', '***')
+                try:
+                    if pattern:
+                        # Ensure replacement uses Python regex syntax (\1, \2)
+                        python_replacement = _convert_replacement_template(replacement_template)
+                        result = re.sub(pattern, python_replacement, test_input)
+                    else:
+                        result = '***'
+                except re.error as e:
+                    return {
+                        "success": False,
+                        "result": f"Regex error: {str(e)}",
+                        "processing_time_ms": (time.time() - start_time) * 1000
+                    }
+            elif method == 'genai':
+                anonymization_prompt = config.get('anonymization_prompt', '')
+                if anonymization_prompt:
+                    result = self._genai_anonymize_sync(test_input, anonymization_prompt, 'TEST_ENTITY')
+                else:
+                    result = '[REDACTED_TEST_ENTITY]'
+            elif method == 'mask':
+                mask_char = config.get('mask_char', '*')
+                keep_prefix = config.get('keep_prefix', 0)
+                keep_suffix = config.get('keep_suffix', 0)
+                result = self._mask_string(test_input, mask_char, keep_prefix, keep_suffix)
+            elif method == 'replace':
+                result = config.get('replacement', '<PLACEHOLDER>')
+            elif method == 'hash':
+                result = self._hash_string(test_input)
+            elif method == 'encrypt':
+                result = f"<ENCRYPTED_{hashlib.md5(test_input.encode()).hexdigest()[:8]}>"
+            elif method == 'shuffle':
+                result = self._shuffle_string(test_input)
+            elif method == 'random':
+                result = self._random_replacement(test_input)
+            else:
+                result = f"<{method.upper()}>"
+
+            processing_time_ms = (time.time() - start_time) * 1000
+
+            return {
+                "success": True,
+                "result": result,
+                "processing_time_ms": round(processing_time_ms, 2)
+            }
+
+        except Exception as e:
+            logger.error(f"Test anonymization failed: {e}")
+            return {
+                "success": False,
+                "result": f"Error: {str(e)}",
+                "processing_time_ms": (time.time() - start_time) * 1000
+            }
+
     def _compare_risk_level(self, level1: str, level2: str) -> int:
         """Compare risk level, return 1 if level1 > level2, -1 if level1 < level2, 0 if equal"""
         risk_order = {'no_risk': 0, 'low': 1, 'low_risk': 1, 'medium': 2, 'medium_risk': 2, 'high': 3, 'high_risk': 3}
@@ -661,11 +1210,8 @@ Text:
         if is_global and source_type == 'custom':
             source_type = 'system_template'
 
-        # Force genai anonymization method for genai recognition method
-        if recognition_method == 'genai':
-            anonymization_method = 'genai'
-            # Clear any user-provided anonymization_config as it's not used for genai
-            anonymization_config = {}
+        # GenAI recognition can now use any anonymization method
+        # No longer force genai anonymization for genai recognition
 
         entity_type_obj = DataSecurityEntityType(
             tenant_id=tenant_id,
@@ -752,13 +1298,8 @@ Text:
             if recognition_config_updated:
                 entity_type.recognition_config = recognition_config
 
-        # GenAI type must use genai anonymization method (fixed format)
-        current_recognition_method = entity_type.recognition_method
-        if current_recognition_method == 'genai':
-            entity_type.anonymization_method = 'genai'
-            # Clear anonymization_config as it's not used for genai (fixed format)
-            entity_type.anonymization_config = {}
-        elif 'anonymization_method' in kwargs:
+        # GenAI recognition can now use any anonymization method
+        if 'anonymization_method' in kwargs:
             entity_type.anonymization_method = kwargs['anonymization_method']
             if 'anonymization_config' in kwargs:
                 entity_type.anonymization_config = kwargs['anonymization_config']
