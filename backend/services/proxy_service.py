@@ -100,8 +100,7 @@ class ProxyService:
                 # Ensure all attributes are loaded into memory (only access actual fields)
                 _ = (model.id, model.config_name, model.model_name, model.api_base_url,
                      model.api_key_encrypted, model.enabled, model.created_at, model.updated_at,
-                     model.stream_chunk_size, model.block_on_input_risk, model.block_on_output_risk,
-                     model.enable_reasoning_detection)
+                     model.stream_chunk_size, model.enable_reasoning_detection)
                 # Detach object from session
                 db.expunge(model)
 
@@ -130,7 +129,6 @@ class ProxyService:
                 _ = config.tenant  # Trigger tenant relationship loading
                 _ = (config.id, config.config_name, config.api_base_url,
                      config.api_key_encrypted, config.provider, config.is_active,
-                     config.block_on_input_risk, config.block_on_output_risk,
                      config.enable_reasoning_detection, config.stream_chunk_size,
                      config.description, config.created_at, config.updated_at)
                 
@@ -173,8 +171,7 @@ class ProxyService:
                 # Ensure all attributes are loaded into memory (only access actual fields)
                 _ = (model.id, model.config_name, model.model_name, model.api_base_url,
                      model.api_key_encrypted, model.enabled, model.created_at, model.updated_at,
-                     model.stream_chunk_size, model.block_on_input_risk, model.block_on_output_risk,
-                     model.enable_reasoning_detection)
+                     model.stream_chunk_size, model.enable_reasoning_detection)
 
                 # Detach object from session to avoid issues after session is closed
                 db.expunge(model)
@@ -215,8 +212,6 @@ class ProxyService:
                 api_key_encrypted=encrypted_api_key,
                 model_name=model_data['model_name'],
                 enabled=model_data.get('enabled', True),
-                block_on_input_risk=model_data.get('block_on_input_risk', False),
-                block_on_output_risk=model_data.get('block_on_output_risk', False),
                 enable_reasoning_detection=model_data.get('enable_reasoning_detection', True)
             )
             

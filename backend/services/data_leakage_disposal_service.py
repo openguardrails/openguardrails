@@ -178,25 +178,61 @@ class DataLeakageDisposalService:
                 'low_risk': app_policy.input_low_risk_action or tenant_policy.default_input_low_risk_action
             }
         else:  # output
-            # Resolve output anonymization flags (use override if present, else tenant default)
-            anonymize_map = {
-                'high_risk': (app_policy.output_high_risk_anonymize
-                             if app_policy.output_high_risk_anonymize is not None
-                             else tenant_policy.default_output_high_risk_anonymize),
-                'medium_risk': (app_policy.output_medium_risk_anonymize
-                               if app_policy.output_medium_risk_anonymize is not None
-                               else tenant_policy.default_output_medium_risk_anonymize),
-                'low_risk': (app_policy.output_low_risk_anonymize
-                            if app_policy.output_low_risk_anonymize is not None
-                            else tenant_policy.default_output_low_risk_anonymize)
+            # Resolve output actions (use override if present, else tenant default)
+            # Uses the new output_xxx_risk_action fields (block/anonymize/pass)
+            action_map = {
+                'high_risk': app_policy.output_high_risk_action or tenant_policy.default_output_high_risk_action,
+                'medium_risk': app_policy.output_medium_risk_action or tenant_policy.default_output_medium_risk_action,
+                'low_risk': app_policy.output_low_risk_action or tenant_policy.default_output_low_risk_action
             }
-            should_anonymize = anonymize_map.get(risk_level, False)
-            action = 'anonymize' if should_anonymize else 'pass'
-            logger.debug(f"Output disposal action for {risk_level}: {action}")
-            return action
 
         action = action_map.get(risk_level, 'block')
-        logger.debug(f"Input disposal action for {risk_level}: {action}")
+        logger.debug(f"{direction.capitalize()} disposal action for {risk_level}: {action}")
+        return action
+
+    def get_general_risk_action(self, application_id: str, risk_level: str) -> str:
+        """
+        Get action for general risks (security, safety, compliance)
+
+        Args:
+            application_id: Application ID
+            risk_level: 'high_risk' | 'medium_risk' | 'low_risk' | 'no_risk'
+
+        Returns:
+            'block' | 'replace' | 'pass'
+        """
+        if risk_level == 'no_risk':
+            return 'pass'
+
+        app_policy = self.get_disposal_policy(application_id)
+        if not app_policy:
+            # Fallback to safe defaults if policy retrieval fails
+            logger.warning(f"No policy found for application {application_id}, using general risk defaults")
+            return {
+                'high_risk': 'block',
+                'medium_risk': 'replace',
+                'low_risk': 'pass'
+            }.get(risk_level, 'block')
+
+        # Get tenant policy for defaults
+        tenant_policy = self.get_tenant_policy(str(app_policy.tenant_id))
+        if not tenant_policy:
+            logger.warning(f"No tenant policy found, using hardcoded general risk defaults")
+            return {
+                'high_risk': 'block',
+                'medium_risk': 'replace',
+                'low_risk': 'pass'
+            }.get(risk_level, 'block')
+
+        # Resolve general risk actions (use override if present, else tenant default)
+        action_map = {
+            'high_risk': getattr(app_policy, 'general_high_risk_action', None) or getattr(tenant_policy, 'default_general_high_risk_action', 'block') or 'block',
+            'medium_risk': getattr(app_policy, 'general_medium_risk_action', None) or getattr(tenant_policy, 'default_general_medium_risk_action', 'replace') or 'replace',
+            'low_risk': getattr(app_policy, 'general_low_risk_action', None) or getattr(tenant_policy, 'default_general_low_risk_action', 'pass') or 'pass'
+        }
+
+        action = action_map.get(risk_level, 'pass')
+        logger.debug(f"General risk action for {risk_level}: {action}")
         return action
 
     def get_private_model(

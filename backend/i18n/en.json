@@ -22,6 +22,8 @@
     }
   },
   "guardrail": {
-    "blacklistHit": "Sorry, I can't provide content involving {list_name}."
+    "blacklistHit": "Sorry, I can't provide content involving {list_name}.",
+    "dataLeakageInputBlocked": "Request blocked by OpenGuardrails due to data security policy.",
+    "dataLeakageOutputBlocked": "Response blocked by OpenGuardrails due to data security policy."
   }
 }

@@ -223,7 +223,7 @@ class DetectionGuardrailService:
             detection_direction = "output" if truncated_messages and truncated_messages[-1].role == "assistant" else "input"
             # Extract appropriate content for data leak detection
             content_for_data_detection = self._extract_content_for_data_detection(truncated_messages, detection_direction)
-            data_result, data_anonymized_text = await self._check_data_security(content_for_data_detection, tenant_id, direction=detection_direction)
+            data_result, data_anonymized_text = await self._check_data_security(content_for_data_detection, tenant_id, direction=detection_direction, application_id=application_id)
 
             # 3. Model detection (using truncated messages, get sensitivity)
             # Convert messages to dictionary format, support multi-modal
@@ -605,13 +605,13 @@ class DetectionGuardrailService:
             SecurityResult(risk_level="no_risk", categories=[])
         )
     
-    async def _check_data_security(self, text: str, tenant_id: Optional[str], direction: str = "input") -> Tuple[DataSecurityResult, Optional[str]]:
+    async def _check_data_security(self, text: str, tenant_id: Optional[str], direction: str = "input", application_id: Optional[str] = None) -> Tuple[DataSecurityResult, Optional[str]]:
         """Check data security and return anonymized text
 
         Returns:
             Tuple of (DataSecurityResult, anonymized_text)
         """
-        logger.info(f"_check_data_security called for user {tenant_id}, direction {direction}")
+        logger.info(f"_check_data_security called for user {tenant_id}, application {application_id}, direction {direction}")
         if not tenant_id:
             logger.info("No tenant_id, returning safe")
             return DataSecurityResult(risk_level="no_risk", categories=[]), None
@@ -625,15 +625,19 @@ class DetectionGuardrailService:
 
                 # Execute data security detection
                 logger.info(f"Calling detect_sensitive_data for text: {text[:50]}...")
-                result = await service.detect_sensitive_data(text, tenant_id, direction)
+                result = await service.detect_sensitive_data(text, tenant_id, direction, application_id=application_id)
                 logger.info(f"Data security detection result: {result}")
 
                 # Return both result and anonymized text
+                anonymized_text = result.get('anonymized_text') if result['risk_level'] != 'no_risk' else None
+                detected_entities = result.get('detected_entities', []) if result['risk_level'] != 'no_risk' else []
+
                 data_result = DataSecurityResult(
                     risk_level=result['risk_level'],
-                    categories=result['categories']
+                    categories=result['categories'],
+                    detected_entities=detected_entities,
+                    anonymized_text=anonymized_text
                 )
-                anonymized_text = result.get('anonymized_text') if result['risk_level'] != 'no_risk' else None
 
                 return data_result, anonymized_text
             finally:

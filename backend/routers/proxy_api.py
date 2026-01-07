@@ -21,6 +21,7 @@ from services.billing_service import billing_service
 from services.data_leakage_disposal_service import DataLeakageDisposalService
 from database.connection import get_db
 from utils.i18n import get_language_from_request
+from utils.i18n_loader import get_translation
 from utils.logger import setup_logger
 from enum import Enum
 
@@ -57,23 +58,98 @@ class DetectionMode(Enum):
 
 def get_detection_mode(model_config, detection_type: str) -> DetectionMode:
     """Determine detection mode based on model configuration and detection type
-    
+
     Args:
         model_config: Model configuration
         detection_type: Detection type ('input' | 'output')
-        
+
     Returns:
         DetectionMode: Detection mode
+
+    Note: Always use SYNC_SERIAL mode to allow security policy to control actions.
+    The actual blocking/replacement behavior is determined by the security policy
+    configuration in application_data_leakage_policies table.
     """
-    if detection_type == 'input':
-        # Input detection: if blocking is configured, use serial mode, otherwise use bypass mode
-        return DetectionMode.SYNC_SERIAL if model_config.block_on_input_risk else DetectionMode.ASYNC_BYPASS
-    elif detection_type == 'output':
-        # Output detection: if blocking is configured, use serial mode, otherwise use bypass mode
-        return DetectionMode.SYNC_SERIAL if model_config.block_on_output_risk else DetectionMode.ASYNC_BYPASS
-    else:
-        # Default use bypass mode
-        return DetectionMode.ASYNC_BYPASS
+    # Always use synchronous serial mode - security policy determines the action
+    return DetectionMode.SYNC_SERIAL
+
+
+def _anonymize_all_user_messages(messages: list, detected_entities: list, logger) -> list:
+    """Anonymize sensitive data in all user messages
+
+    This function takes the detected entities and applies anonymization to each
+    user message in the conversation, preserving the message structure.
+
+    Args:
+        messages: List of message dicts with 'role' and 'content'
+        detected_entities: List of detected entity dicts from data_security_service
+        logger: Logger instance
+
+    Returns:
+        List of messages with anonymized user content
+    """
+    if not detected_entities:
+        return messages
+
+    # Build a lookup of entities by their original text
+    # Each entity has: entity_type, entity_type_name, start, end, text, risk_level, anonymization_method, anonymization_config
+    entity_replacements = {}
+    for entity in detected_entities:
+        original_text = entity.get('text', '')
+        if not original_text:
+            continue
+
+        # Generate replacement based on anonymization method
+        method = entity.get('anonymization_method', 'replace')
+        config = entity.get('anonymization_config', {})
+        entity_type = entity.get('entity_type', 'UNKNOWN')
+        entity_type_name = entity.get('entity_type_name', entity_type)
+
+        if method == 'genai':
+            replacement = f"[REDACTED_{entity_type_name.upper().replace(' ', '_')}]"
+        elif method == 'replace':
+            replacement = config.get('replacement', f"<{entity_type}>")
+        elif method == 'mask':
+            mask_char = config.get('mask_char', '*')
+            keep_prefix = config.get('keep_prefix', 0)
+            keep_suffix = config.get('keep_suffix', 0)
+            if len(original_text) <= keep_prefix + keep_suffix:
+                replacement = original_text
+            else:
+                prefix = original_text[:keep_prefix] if keep_prefix > 0 else ''
+                suffix = original_text[-keep_suffix:] if keep_suffix > 0 else ''
+                middle_length = len(original_text) - keep_prefix - keep_suffix
+                replacement = prefix + mask_char * middle_length + suffix
+        else:
+            replacement = f"<{entity_type}>"
+
+        entity_replacements[original_text] = replacement
+
+    # Anonymize each user message
+    modified_messages = []
+    for msg in messages:
+        if msg.get('role') == 'user':
+            content = msg.get('content', '')
+            if isinstance(content, str):
+                # Apply all entity replacements to this message content
+                anonymized_content = content
+                # Sort by length (longest first) to avoid partial replacements
+                for original, replacement in sorted(entity_replacements.items(), key=lambda x: len(x[0]), reverse=True):
+                    anonymized_content = anonymized_content.replace(original, replacement)
+
+                modified_msg = msg.copy()
+                modified_msg['content'] = anonymized_content
+                modified_messages.append(modified_msg)
+                logger.debug(f"Anonymized user message: replaced {len(entity_replacements)} entity types")
+            else:
+                # Non-string content (e.g., multimodal), keep as is for now
+                modified_messages.append(msg.copy())
+        else:
+            # Non-user messages (system, assistant), keep as is
+            modified_messages.append(msg.copy())
+
+    return modified_messages
+
 
 async def perform_input_detection(model_config, input_messages: list, tenant_id: str, request_id: str, user_id: str = None, application_id: str = None):
     """Perform input detection - select asynchronous or synchronous mode based on configuration"""
@@ -156,6 +232,7 @@ async def _sync_input_detection(model_config, input_messages: list, tenant_id: s
         disposal_action = 'pass'
         modified_messages = input_messages
         modified_model_config = model_config
+        disposal_service = None  # Initialize to None
 
         if data_risk_level != 'no_risk' and application_id:
             # Get disposal policy and decide action
@@ -167,61 +244,106 @@ async def _sync_input_detection(model_config, input_messages: list, tenant_id: s
                 logger.info(f"Data leakage detected (risk={data_risk_level}), disposal_action={disposal_action}")
 
                 if disposal_action == 'block':
-                    # Block the request
+                    # Block the request with fixed i18n message
                     result = detection_result.copy()
                     result['blocked'] = True
                     result['detection_id'] = detection_id
                     result['disposal_action'] = 'block'
                     result['disposal_reason'] = f'Data leakage risk: {data_risk_level}'
+                    # Use fixed i18n message for data leakage block (default to English)
+                    try:
+                        result['suggest_answer'] = get_translation('en', 'guardrail', 'dataLeakageInputBlocked')
+                    except Exception:
+                        result['suggest_answer'] = "Request blocked by OpenGuardrails due to data security policy."
                     logger.warning(f"Request blocked due to data leakage - request {request_id}")
                     return result
 
                 elif disposal_action == 'switch_private_model':
-                    # Try to switch to private model
+                    # Switch to private model with ORIGINAL text (not anonymized)
+                    # Private models are data-safe, so sensitive data can be sent as-is
                     private_model = disposal_service.get_private_model(application_id, tenant_id)
                     if private_model:
                         modified_model_config = private_model
-                        logger.info(f"Switched to private model: {private_model.config_name}")
+                        # Keep original messages - private model is safe for sensitive data
+                        logger.info(f"Switched to private model: {private_model.config_name} (using original text)")
                     else:
-                        # No private model available, fallback to block
+                        # No private model available, fallback to block with fixed i18n message
                         logger.warning(f"No private model available, blocking request instead")
                         result = detection_result.copy()
                         result['blocked'] = True
                         result['detection_id'] = detection_id
                         result['disposal_action'] = 'block'
                         result['disposal_reason'] = 'No private model configured'
-                        result['suggest_answer'] = "Data leakage risk detected, but no private model configured. Please contact the administrator."
+                        try:
+                            result['suggest_answer'] = get_translation('en', 'guardrail', 'dataLeakageInputBlocked')
+                        except Exception:
+                            result['suggest_answer'] = "Request blocked by OpenGuardrails due to data security policy."
                         return result
 
                 elif disposal_action == 'anonymize':
-                    # Use anonymized messages
-                    anonymized_text = detection_result.get('data_result', {}).get('anonymized_text')
-                    if anonymized_text:
-                        # Replace last user message with anonymized version
-                        modified_messages = input_messages.copy()
-                        for i in range(len(modified_messages) - 1, -1, -1):
-                            if modified_messages[i].get('role') == 'user':
-                                modified_messages[i] = modified_messages[i].copy()
-                                modified_messages[i]['content'] = anonymized_text
-                                logger.info(f"Anonymized user message for data safety")
-                                break
+                    # Anonymize all user messages before sending to original model
+                    detected_entities = detection_result.get('data_result', {}).get('detected_entities', [])
+                    if detected_entities:
+                        modified_messages = _anonymize_all_user_messages(
+                            input_messages, detected_entities, logger
+                        )
+                        logger.info(f"Anonymized {len([m for m in input_messages if m.get('role') == 'user'])} user messages for data safety")
 
             except Exception as e:
                 logger.error(f"Data leakage disposal failed: {e}", exc_info=True)
                 # Continue with original logic if disposal fails
 
-        # Check if blocking is needed (original logic for other risks)
-        if model_config.block_on_input_risk and detection_result.get('suggest_action') in ['reject', 'replace']:
-            logger.warning(f"Input synchronous detection blocked request - request {request_id}")
-            logger.warning(f"Detection result: {detection_result}")
+        # Check if blocking/replacement is needed for general risks (security, safety, compliance)
+        # Use security policy configuration instead of deprecated block_on_input_risk
+        overall_risk_level = detection_result.get('overall_risk_level', 'no_risk')
+        suggest_action = detection_result.get('suggest_action')
 
-            # Return complete detection result, and add blocking mark
-            result = detection_result.copy()
-            result['blocked'] = True
-            # Ensure detection_id field exists (for backward compatibility)
-            if 'detection_id' not in result:
-                result['detection_id'] = detection_id
-            return result
+        # Check if there are non-data-leakage risks (compliance or security risks)
+        compliance_risk = detection_result.get('compliance_result', {}).get('risk_level', 'no_risk') if detection_result.get('compliance_result') else 'no_risk'
+        security_risk = detection_result.get('security_result', {}).get('risk_level', 'no_risk') if detection_result.get('security_result') else 'no_risk'
+        has_general_risk = compliance_risk != 'no_risk' or security_risk != 'no_risk'
+
+        # Skip general risk blocking if:
+        # 1. Data leakage risk was already handled (switch_private_model, anonymize, or pass)
+        # 2. AND there are no other general risks (compliance/security)
+        # Note: 'pass' means allow the request through even with data leakage risk
+        data_leakage_handled = disposal_action in ['switch_private_model', 'anonymize', 'pass']
+        if data_leakage_handled and not has_general_risk:
+            logger.info(f"Skipping general risk check - data leakage handled with {disposal_action}, no general risks")
+        elif suggest_action in ['reject', 'replace'] and application_id:
+            try:
+                if not disposal_service:
+                    db = next(get_db())
+                    disposal_service = DataLeakageDisposalService(db)
+                general_action = disposal_service.get_general_risk_action(application_id, overall_risk_level)
+                logger.info(f"General risk action for {overall_risk_level}: {general_action}")
+
+                if general_action == 'block':
+                    logger.warning(f"Input detection blocked request due to general risk - request {request_id}")
+                    result = detection_result.copy()
+                    result['blocked'] = True
+                    if 'detection_id' not in result:
+                        result['detection_id'] = detection_id
+                    return result
+                elif general_action == 'replace':
+                    # Replace action: use suggest_answer but don't block, continue to upstream
+                    # The suggest_answer will be used if upstream also fails
+                    logger.info(f"Input detection: replace action for {overall_risk_level}, using suggest_answer")
+                    result = detection_result.copy()
+                    result['blocked'] = True  # Block with replacement
+                    if 'detection_id' not in result:
+                        result['detection_id'] = detection_id
+                    return result
+                # 'pass' action: log only, continue to upstream
+            except Exception as e:
+                logger.error(f"Error getting general risk action: {e}", exc_info=True)
+                # Fallback to safe behavior if policy check fails
+                if suggest_action == 'reject':
+                    result = detection_result.copy()
+                    result['blocked'] = True
+                    if 'detection_id' not in result:
+                        result['detection_id'] = detection_id
+                    return result
 
         # Detection passed (or disposal action applied)
         return {
@@ -338,26 +460,106 @@ async def _sync_output_detection(model_config, input_messages: list, response_co
                 application_id=application_id
             )
 
-        # Check if blocking is needed
-        if model_config.block_on_output_risk and detection_result.get('suggest_action') in ['reject', 'replace']:
-            logger.warning(f"Synchronous output detection block response - request {request_id}")
-            logger.warning(f"Detection result: {detection_result}")
+        # NEW: Output data leakage disposal logic
+        data_risk_level = detection_result.get('data_result', {}).get('risk_level', 'no_risk')
+        final_content = response_content
+        disposal_action = 'pass'
+        disposal_service = None  # Initialize to None
 
-            # Return alternative content
-            suggest_answer = detection_result.get('suggest_answer', 'Sorry, the generated content contains inappropriate information.')
-            return {
-                'blocked': True,
-                'detection_id': detection_id,
-                'suggest_answer': suggest_answer,
-                'response_content': suggest_answer  # Alternative content
-            }
+        if data_risk_level != 'no_risk' and application_id:
+            try:
+                db = next(get_db())
+                disposal_service = DataLeakageDisposalService(db)
+                disposal_action = disposal_service.get_disposal_action(application_id, data_risk_level, direction='output')
 
-        # Detection passed, return original content
+                logger.info(f"Output data leakage detected (risk={data_risk_level}), disposal_action={disposal_action}")
+
+                if disposal_action == 'block':
+                    # Block the response with fixed i18n message
+                    try:
+                        block_message = get_translation('en', 'guardrail', 'dataLeakageOutputBlocked')
+                    except Exception:
+                        block_message = "Response blocked by OpenGuardrails due to data security policy."
+                    logger.warning(f"Response blocked due to output data leakage - request {request_id}")
+                    return {
+                        'blocked': True,
+                        'detection_id': detection_id,
+                        'suggest_answer': block_message,
+                        'response_content': block_message,
+                        'disposal_action': 'block'
+                    }
+
+                elif disposal_action == 'anonymize':
+                    # Use anonymized response content
+                    anonymized_text = detection_result.get('data_result', {}).get('anonymized_text')
+                    if anonymized_text:
+                        final_content = anonymized_text
+                        logger.info(f"Anonymized output content for data safety")
+
+                elif disposal_action == 'switch_private_model':
+                    # switch_private_model is not applicable for output direction
+                    # (response is already generated), treat as 'pass'
+                    logger.info(f"switch_private_model not applicable for output, treating as pass")
+                    disposal_action = 'pass'
+
+                # 'pass' action: just log but don't modify content
+
+            except Exception as e:
+                logger.error(f"Output data leakage disposal failed: {e}", exc_info=True)
+                # Continue with original logic if disposal fails
+
+        # Check if blocking/replacement is needed for general risks (security, safety, compliance)
+        # Use security policy configuration instead of deprecated block_on_output_risk
+        overall_risk_level = detection_result.get('overall_risk_level', 'no_risk')
+        suggest_action = detection_result.get('suggest_action')
+
+        # Check if there are non-data-leakage risks (compliance or security risks)
+        compliance_risk = detection_result.get('compliance_result', {}).get('risk_level', 'no_risk') if detection_result.get('compliance_result') else 'no_risk'
+        security_risk = detection_result.get('security_result', {}).get('risk_level', 'no_risk') if detection_result.get('security_result') else 'no_risk'
+        has_general_risk = compliance_risk != 'no_risk' or security_risk != 'no_risk'
+
+        # Skip general risk blocking if data leakage was already handled (anonymize or pass) and no other general risks
+        # Note: 'pass' means allow the response through even with data leakage risk (for audit mode)
+        data_leakage_handled = disposal_action in ['anonymize', 'pass']
+        if data_leakage_handled and not has_general_risk:
+            logger.info(f"Skipping output general risk check - data leakage handled with {disposal_action}, no general risks")
+        elif suggest_action in ['reject', 'replace'] and application_id:
+            try:
+                if not disposal_service:
+                    db = next(get_db())
+                    disposal_service = DataLeakageDisposalService(db)
+                general_action = disposal_service.get_general_risk_action(application_id, overall_risk_level)
+                logger.info(f"Output general risk action for {overall_risk_level}: {general_action}")
+
+                if general_action in ['block', 'replace']:
+                    logger.warning(f"Synchronous output detection block response - request {request_id}")
+                    suggest_answer = detection_result.get('suggest_answer', 'Sorry, the generated content contains inappropriate information.')
+                    return {
+                        'blocked': True,
+                        'detection_id': detection_id,
+                        'suggest_answer': suggest_answer,
+                        'response_content': suggest_answer  # Alternative content
+                    }
+                # 'pass' action: log only, return original content
+            except Exception as e:
+                logger.error(f"Error getting output general risk action: {e}", exc_info=True)
+                # Fallback to safe behavior if policy check fails
+                if suggest_action == 'reject':
+                    suggest_answer = detection_result.get('suggest_answer', 'Sorry, the generated content contains inappropriate information.')
+                    return {
+                        'blocked': True,
+                        'detection_id': detection_id,
+                        'suggest_answer': suggest_answer,
+                        'response_content': suggest_answer
+                    }
+
+        # Detection passed (or anonymized), return final content
         return {
             'blocked': False,
             'detection_id': detection_id,
             'suggest_answer': None,
-            'response_content': response_content  # Original response content
+            'response_content': final_content,  # Possibly anonymized response content
+            'disposal_action': disposal_action
         }
 
     except Exception as e:
@@ -1364,13 +1566,21 @@ async def create_gateway_chat_completion(
             actual_api_config = input_detection_result.get('modified_model_config', api_config)
             disposal_action = input_detection_result.get('disposal_action', 'pass')
 
-            # Log disposal action if taken
-            if disposal_action != 'pass':
+            # Determine actual model name to use
+            # When switched to private model, use the private model's model name
+            actual_model_name = request_data.model  # Default: use original model name
+            if disposal_action == 'switch_private_model' and actual_api_config != api_config:
+                # Use private model's default model name, or first available model from private_model_names
+                if actual_api_config.default_private_model_name:
+                    actual_model_name = actual_api_config.default_private_model_name
+                elif actual_api_config.private_model_names and len(actual_api_config.private_model_names) > 0:
+                    actual_model_name = actual_api_config.private_model_names[0]
+                # If neither is set, keep the original model name (may cause error if not supported)
+                logger.info(f"Gateway: Switched from {api_config.config_name} to private model {actual_api_config.config_name}, using model name: {actual_model_name}")
+            elif disposal_action == 'anonymize' and actual_messages != input_messages:
+                logger.info(f"Gateway: Anonymized user message for data safety")
+            elif disposal_action != 'pass':
                 logger.info(f"Gateway: Data leakage disposal action: {disposal_action}")
-                if disposal_action == 'switch_private_model' and actual_api_config != api_config:
-                    logger.info(f"Gateway: Switched from {api_config.config_name} to private model {actual_api_config.config_name}")
-                elif disposal_action == 'anonymize' and actual_messages != input_messages:
-                    logger.info(f"Gateway: Anonymized user message for data safety")
 
             # If input is blocked, record log and return
             if input_blocked:
@@ -1462,7 +1672,7 @@ async def create_gateway_chat_completion(
             # Input passes, call upstream API
             # The model name is passed through directly - this is the key difference from old pattern
             # Clean messages: only keep role and content, remove name and other fields that vllm doesn't support
-            # NEW: Use actual_messages (possibly anonymized) instead of original messages
+            # Use actual_messages: anonymized for 'anonymize' action, original for 'switch_private_model'
             clean_messages = [
                 {"role": msg.get('role'), "content": msg.get('content')}
                 if isinstance(msg, dict) else {"role": msg.role, "content": msg.content}
@@ -1492,8 +1702,8 @@ async def create_gateway_chat_completion(
             # NEW: Use actual_api_config (possibly switched to private model)
             upstream_response = await proxy_service.call_upstream_api_gateway(
                 api_config=actual_api_config,
-                model_name=request_data.model,  # Pass through original model name
-                messages=clean_messages,  # Already using actual_messages (possibly anonymized)
+                model_name=actual_model_name,  # Use actual model name (may be switched to private model)
+                messages=clean_messages,  # actual_messages: original for private model, anonymized for anonymize action
                 stream=request_data.stream,
                 temperature=request_data.temperature,
                 max_tokens=request_data.max_tokens,
@@ -1769,12 +1979,13 @@ async def create_chat_completion(
                 )
 
             # Forward request to target model
-            # NEW: Use actual_model_config (possibly switched to private model) and actual_messages (possibly anonymized)
+            # Use actual_model_config (possibly switched to private model)
+            # Use actual_messages: original for switch_private_model, anonymized for anonymize action
             model_response = await proxy_service.forward_chat_completion(
                 model_config=actual_model_config,
                 request_data=request_data,
                 request_id=request_id,
-                messages=actual_messages  # NEW: Pass possibly anonymized messages
+                messages=actual_messages  # original for private model, anonymized for anonymize action
             )
             
             # Output detection - select asynchronous/synchronous mode based on configuration

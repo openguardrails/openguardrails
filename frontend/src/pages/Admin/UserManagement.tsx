@@ -142,11 +142,12 @@ const UserManagement: React.FC = () => {
     setLoading(true)
     try {
       const skip = (currentPage - 1) * pageSize
-      const response = await adminApi.getUsers({ 
-        sort_by: sortBy, 
+      const response = await adminApi.getUsers({
+        sort_by: sortBy,
         sort_order: sortOrder,
         skip,
-        limit: pageSize
+        limit: pageSize,
+        search: searchText || undefined
       })
       setUsers(response.users || [])
       setTotal(response.total || 0)
@@ -164,7 +165,7 @@ const UserManagement: React.FC = () => {
 
   useEffect(() => {
     loadData()
-  }, [sortBy, sortOrder, currentPage, pageSize])
+  }, [sortBy, sortOrder, currentPage, pageSize, searchText])
 
   const handlePageChange = (page: number) => {
     setCurrentPage(page)
@@ -461,12 +462,7 @@ const UserManagement: React.FC = () => {
     },
   ]
 
-  const filteredUsers = users.filter(
-    (user) =>
-      !searchText ||
-      user.email.toLowerCase().includes(searchText.toLowerCase()) ||
-      user.id.toLowerCase().includes(searchText.toLowerCase())
-  )
+  // Search is now handled by the backend API
 
   const getCreationTrendOption = () => {
     if (!tenantAnalytics) return {}
@@ -559,7 +555,7 @@ const UserManagement: React.FC = () => {
   }
 
   return (
-    <div className="h-full flex flex-col gap-6">
+    <div className="h-full flex flex-col">
       <Tabs defaultValue="analytics" className="w-full h-full flex flex-col">
         <TabsList className="flex-shrink-0">
           <TabsTrigger value="analytics" className="gap-2">
@@ -573,7 +569,7 @@ const UserManagement: React.FC = () => {
         </TabsList>
 
         {/* User Management Tab */}
-        <TabsContent value="users" className="mt-6 flex-1 flex flex-col min-h-0">
+        <TabsContent value="users" className="mt-0 flex-1 flex flex-col min-h-0">
           <Card className="flex-1 flex flex-col overflow-hidden min-h-0">
             <CardHeader className="flex-shrink-0">
               <div className="flex justify-between items-start">
@@ -613,7 +609,10 @@ const UserManagement: React.FC = () => {
                 <Input
                   placeholder={t('admin.searchTenantPlaceholder')}
                   value={searchText}
-                  onChange={(e) => setSearchText(e.target.value)}
+                  onChange={(e) => {
+                    setSearchText(e.target.value)
+                    setCurrentPage(1) // Reset to first page when searching
+                  }}
                   className="max-w-xs"
                 />
               </div>
@@ -621,7 +620,7 @@ const UserManagement: React.FC = () => {
               <div className="flex-1 overflow-hidden px-6 pb-6">
                 <DataTable
                   columns={columns}
-                  data={filteredUsers}
+                  data={users}
                   loading={loading}
                   pageCount={Math.ceil(total / pageSize)}
                   currentPage={currentPage}
@@ -636,101 +635,101 @@ const UserManagement: React.FC = () => {
         </TabsContent>
 
         {/* Analytics Tab */}
-        <TabsContent value="analytics" className="mt-6">
-          <div className="flex flex-col gap-4">
+        <TabsContent value="analytics" className="mt-0 flex-1 flex flex-col min-h-0">
+          <div className="flex flex-col gap-4 overflow-y-auto">
             {/* Analytics Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Latest Created Tenants */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Users className="h-4 w-4" />
-              {t('admin.latestCreatedTenants')}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0">
-            {analyticsLoading ? (
-              <div className="flex items-center justify-center h-32">
-                <div className="h-6 w-6 animate-spin rounded-full border-3 border-primary border-t-transparent"></div>
-              </div>
-            ) : tenantAnalytics?.latest_created_tenants.length ? (
-              <div className="space-y-2 max-h-56 overflow-y-auto">
-                {tenantAnalytics.latest_created_tenants.map((tenant) => (
-                  <div
-                    key={tenant.id}
-                    className="flex items-center justify-between p-1.5 border rounded-md hover:bg-gray-50 text-sm"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-sm truncate">{tenant.email}</div>
-                      <div className="text-xs text-gray-500">
-                        {tenant.created_at
-                          ? new Date(tenant.created_at).toLocaleString()
-                          : '-'}
-                      </div>
+              {/* Latest Created Tenants */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Users className="h-4 w-4" />
+                    {t('admin.latestCreatedTenants')}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  {analyticsLoading ? (
+                    <div className="flex items-center justify-center h-32">
+                      <div className="h-6 w-6 animate-spin rounded-full border-3 border-primary border-t-transparent"></div>
                     </div>
-                    <div className="flex gap-1.5 flex-shrink-0 ml-2">
-                      <Badge variant={tenant.is_active ? 'default' : 'destructive'} className="text-xs px-1.5 py-0">
-                        {tenant.is_active ? t('admin.active') : t('admin.inactive')}
-                      </Badge>
-                      <Badge variant={tenant.is_verified ? 'default' : 'secondary'} className="text-xs px-1.5 py-0">
-                        {tenant.is_verified ? t('admin.verified') : t('admin.unverified')}
-                      </Badge>
+                  ) : tenantAnalytics?.latest_created_tenants.length ? (
+                    <div className="space-y-2 max-h-56 overflow-y-auto">
+                      {tenantAnalytics.latest_created_tenants.map((tenant) => (
+                        <div
+                          key={tenant.id}
+                          className="flex items-center justify-between p-1.5 border rounded-md hover:bg-gray-50 text-sm"
+                        >
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-sm truncate">{tenant.email}</div>
+                            <div className="text-xs text-gray-500">
+                              {tenant.created_at
+                                ? new Date(tenant.created_at).toLocaleString()
+                                : '-'}
+                            </div>
+                          </div>
+                          <div className="flex gap-1.5 flex-shrink-0 ml-2">
+                            <Badge variant={tenant.is_active ? 'default' : 'destructive'} className="text-xs px-1.5 py-0">
+                              {tenant.is_active ? t('admin.active') : t('admin.inactive')}
+                            </Badge>
+                            <Badge variant={tenant.is_verified ? 'default' : 'secondary'} className="text-xs px-1.5 py-0">
+                              {tenant.is_verified ? t('admin.verified') : t('admin.unverified')}
+                            </Badge>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="text-center text-gray-500 py-6 text-sm">{t('admin.noData')}</div>
-            )}
-          </CardContent>
-        </Card>
+                  ) : (
+                    <div className="text-center text-gray-500 py-6 text-sm">{t('admin.noData')}</div>
+                  )}
+                </CardContent>
+              </Card>
 
-        {/* Recently Active Tenants */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Clock className="h-4 w-4" />
-              {t('admin.recentlyActiveTenants')}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0">
-            {analyticsLoading ? (
-              <div className="flex items-center justify-center h-32">
-                <div className="h-6 w-6 animate-spin rounded-full border-3 border-primary border-t-transparent"></div>
-              </div>
-            ) : tenantAnalytics?.recently_active_tenants.length ? (
-              <div className="space-y-2 max-h-56 overflow-y-auto">
-                {tenantAnalytics.recently_active_tenants.map((tenant) => (
-                  <div
-                    key={tenant.id}
-                    className="flex items-center justify-between p-1.5 border rounded-md hover:bg-gray-50 text-sm"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-sm truncate">{tenant.email}</div>
-                      <div className="text-xs text-gray-500">
-                        {t('admin.lastActivity')}:{' '}
-                        {tenant.last_activity
-                          ? new Date(tenant.last_activity).toLocaleString()
-                          : '-'}
-                      </div>
+              {/* Recently Active Tenants */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Clock className="h-4 w-4" />
+                    {t('admin.recentlyActiveTenants')}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  {analyticsLoading ? (
+                    <div className="flex items-center justify-center h-32">
+                      <div className="h-6 w-6 animate-spin rounded-full border-3 border-primary border-t-transparent"></div>
                     </div>
-                    <div className="flex gap-1.5 flex-shrink-0 ml-2">
-                      <Badge variant={tenant.is_active ? 'default' : 'destructive'} className="text-xs px-1.5 py-0">
-                        {tenant.is_active ? t('admin.active') : t('admin.inactive')}
-                      </Badge>
-                      <Badge variant={tenant.is_verified ? 'default' : 'secondary'} className="text-xs px-1.5 py-0">
-                        {tenant.is_verified ? t('admin.verified') : t('admin.unverified')}
-                      </Badge>
+                  ) : tenantAnalytics?.recently_active_tenants.length ? (
+                    <div className="space-y-2 max-h-56 overflow-y-auto">
+                      {tenantAnalytics.recently_active_tenants.map((tenant) => (
+                        <div
+                          key={tenant.id}
+                          className="flex items-center justify-between p-1.5 border rounded-md hover:bg-gray-50 text-sm"
+                        >
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-sm truncate">{tenant.email}</div>
+                            <div className="text-xs text-gray-500">
+                              {t('admin.lastActivity')}:{' '}
+                              {tenant.last_activity
+                                ? new Date(tenant.last_activity).toLocaleString()
+                                : '-'}
+                            </div>
+                          </div>
+                          <div className="flex gap-1.5 flex-shrink-0 ml-2">
+                            <Badge variant={tenant.is_active ? 'default' : 'destructive'} className="text-xs px-1.5 py-0">
+                              {tenant.is_active ? t('admin.active') : t('admin.inactive')}
+                            </Badge>
+                            <Badge variant={tenant.is_verified ? 'default' : 'secondary'} className="text-xs px-1.5 py-0">
+                              {tenant.is_verified ? t('admin.verified') : t('admin.unverified')}
+                            </Badge>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="text-center text-gray-500 py-6 text-sm">{t('admin.noData')}</div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+                  ) : (
+                    <div className="text-center text-gray-500 py-6 text-sm">{t('admin.noData')}</div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
 
             {/* Trend Charts */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

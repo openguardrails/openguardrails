@@ -175,8 +175,8 @@ const Reports: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
+    <div className="flex flex-col gap-4">
+      <div className="flex justify-between items-center flex-shrink-0">
         <h2 className="text-3xl font-bold tracking-tight">{t('reports.title')}</h2>
         <DateRangePicker
           value={dateRange}

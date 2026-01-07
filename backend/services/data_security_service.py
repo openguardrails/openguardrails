@@ -39,6 +39,7 @@ class DataSecurityService:
         text: str,
         tenant_id: str,  # tenant_id, for backward compatibility keep parameter name tenant_id
         direction: str = "input",  # input or output
+        application_id: Optional[str] = None,  # NEW: application_id for application-level entity type filtering
         enable_format_detection: bool = True,  # NEW: Enable format detection
         enable_smart_segmentation: bool = True  # NEW: Enable smart segmentation
     ) -> Dict[str, Any]:
@@ -49,6 +50,7 @@ class DataSecurityService:
             text: text to detect
             tenant_id: tenant ID (actually tenant_id, parameter name for backward compatibility)
             direction: detection direction, input means input detection, output means output detection
+            application_id: application ID for application-level entity type filtering
             enable_format_detection: Enable automatic format detection (JSON/YAML/CSV/Markdown)
             enable_smart_segmentation: Enable intelligent segmentation based on format
 
@@ -66,7 +68,7 @@ class DataSecurityService:
                 logger.warning(f"Format detection failed: {e}, falling back to plain_text")
 
         # 2. Get tenant's sensitive data definition
-        entity_types = self._get_user_entity_types(tenant_id, direction)
+        entity_types = self._get_user_entity_types(tenant_id, direction, application_id)
 
         if not entity_types:
             return {
@@ -84,13 +86,18 @@ class DataSecurityService:
         regex_entity_types = [et for et in entity_types if et.get('recognition_method', 'regex') == 'regex']
         genai_entity_types = [et for et in entity_types if et.get('recognition_method') == 'genai']
 
+        logger.info(f"Entity types breakdown: {len(regex_entity_types)} regex, {len(genai_entity_types)} genai")
+
         detected_entities = []
         highest_risk_level = 'no_risk'
         detected_categories = set()
 
         # 4. Regex detection (full text, no segmentation)
         for entity_type in regex_entity_types:
+            pattern_preview = entity_type.get('pattern', '')[:80] if entity_type.get('pattern') else 'NO PATTERN'
+            logger.info(f"Regex checking entity type: {entity_type.get('entity_type')} with pattern: {pattern_preview}")
             matches = self._match_pattern(text, entity_type)
+            logger.info(f"Regex result for {entity_type.get('entity_type')}: {len(matches)} matches")
             if matches:
                 detected_entities.extend(matches)
                 detected_categories.add(entity_type['entity_type'])
@@ -142,35 +149,64 @@ class DataSecurityService:
             }
         }
 
-    def _get_user_entity_types(self, tenant_id: str, direction: str) -> List[Dict[str, Any]]:
+    def _get_user_entity_types(self, tenant_id: str, direction: str, application_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get tenant's sensitive data type configuration
 
         Note: For backward compatibility, keep function name _get_user_entity_types, parameter name tenant_id, but actually process tenant_id
+        When application_id is provided, filter by application to respect application-level is_active settings.
         """
-        tenant_id = tenant_id  # For backward compatibility, internally use tenant_id
         try:
-            # Ensure tenant has copies of all system templates
-            self.ensure_tenant_has_system_copies(tenant_id)
-            
-            # Get disabled entity types for this tenant
-            disabled_entity_types = set()
-            disabled_query = self.db.query(TenantEntityTypeDisable).filter(
-                TenantEntityTypeDisable.tenant_id == tenant_id
-            )
-            for disabled in disabled_query.all():
-                disabled_entity_types.add(disabled.entity_type)
+            # If application_id is provided, use application-level filtering
+            if application_id:
+                # Ensure application has copies of all system templates
+                self.ensure_application_has_system_copies(tenant_id, application_id)
 
-            # Get only tenant's own entity types (both system_copy and custom)
-            # No longer include global templates directly
-            query = self.db.query(DataSecurityEntityType).filter(
-                and_(
-                    DataSecurityEntityType.is_active == True,
-                    DataSecurityEntityType.tenant_id == tenant_id
+                # Get disabled entity types for this application
+                disabled_entity_types = set()
+                disabled_query = self.db.query(TenantEntityTypeDisable).filter(
+                    and_(
+                        TenantEntityTypeDisable.tenant_id == tenant_id,
+                        TenantEntityTypeDisable.application_id == application_id
+                    )
                 )
-            )
+                for disabled in disabled_query.all():
+                    disabled_entity_types.add(disabled.entity_type)
+
+                # Get only application's own entity types (both system_copy and custom)
+                # Filter by application_id to respect application-level is_active settings
+                query = self.db.query(DataSecurityEntityType).filter(
+                    and_(
+                        DataSecurityEntityType.is_active == True,
+                        DataSecurityEntityType.application_id == application_id
+                    )
+                )
+            else:
+                # Fallback: use tenant-level filtering (for backward compatibility)
+                # Ensure tenant has copies of all system templates
+                self.ensure_tenant_has_system_copies(tenant_id)
+
+                # Get disabled entity types for this tenant
+                disabled_entity_types = set()
+                disabled_query = self.db.query(TenantEntityTypeDisable).filter(
+                    TenantEntityTypeDisable.tenant_id == tenant_id
+                )
+                for disabled in disabled_query.all():
+                    disabled_entity_types.add(disabled.entity_type)
+
+                # Get only tenant's own entity types (both system_copy and custom)
+                # No longer include global templates directly
+                query = self.db.query(DataSecurityEntityType).filter(
+                    and_(
+                        DataSecurityEntityType.is_active == True,
+                        DataSecurityEntityType.tenant_id == tenant_id
+                    )
+                )
 
             entity_types_orm = query.all()
-            logger.info(f"Found {len(entity_types_orm)} entity types for tenant {tenant_id}")
+            if application_id:
+                logger.info(f"Found {len(entity_types_orm)} entity types for application {application_id}")
+            else:
+                logger.info(f"Found {len(entity_types_orm)} entity types for tenant {tenant_id}")
             entity_types = []
 
             for et in entity_types_orm:
@@ -210,6 +246,11 @@ class DataSecurityService:
             return matches
 
         try:
+            # Fix: Handle double-escaped patterns from JSON storage
+            # Replace \\d with \d, \\s with \s, etc.
+            if '\\\\' in pattern:
+                pattern = pattern.replace('\\\\', '\\')
+
             regex = re.compile(pattern)
             for match in regex.finditer(text):
                 matches.append({

@@ -24,8 +24,6 @@ interface ProxyModel {
   config_name: string
   model_name: string
   enabled: boolean
-  block_on_input_risk: boolean
-  block_on_output_risk: boolean
   enable_reasoning_detection: boolean
   stream_chunk_size: number
   is_private_model: boolean
@@ -52,8 +50,6 @@ const ProxyModelManagement: React.FC = () => {
   // Directly manage switch states (minimal configuration)
   const [switchStates, setSwitchStates] = useState({
     enabled: true,
-    block_on_input_risk: false,
-    block_on_output_risk: false,
     enable_reasoning_detection: true,
     stream_chunk_size: 50,
     is_private_model: false,
@@ -166,8 +162,6 @@ const ProxyModelManagement: React.FC = () => {
 
         setSwitchStates({
           enabled: modelDetail.enabled,
-          block_on_input_risk: modelDetail.block_on_input_risk,
-          block_on_output_risk: modelDetail.block_on_output_risk,
           enable_reasoning_detection: modelDetail.enable_reasoning_detection !== false,
           stream_chunk_size: modelDetail.stream_chunk_size || 50,
           is_private_model: modelDetail.is_private_model || false,
@@ -192,8 +186,6 @@ const ProxyModelManagement: React.FC = () => {
       setMaskedApiKey('')
       setSwitchStates({
         enabled: true,
-        block_on_input_risk: false,
-        block_on_output_risk: false,
         enable_reasoning_detection: true,
         stream_chunk_size: 50,
         is_private_model: false,
@@ -245,8 +237,6 @@ const ProxyModelManagement: React.FC = () => {
         api_key: values.api_key,
         model_name: values.model_name,
         enabled: switchStates.enabled,
-        block_on_input_risk: switchStates.block_on_input_risk,
-        block_on_output_risk: switchStates.block_on_output_risk,
         enable_reasoning_detection: switchStates.enable_reasoning_detection,
         stream_chunk_size: switchStates.stream_chunk_size,
         is_private_model: switchStates.is_private_model,
@@ -354,14 +344,6 @@ const ProxyModelManagement: React.FC = () => {
           {row.original.enable_reasoning_detection && (
             <Badge variant="secondary" className="bg-purple-100 text-purple-800 border-purple-200">
               {t('proxy.inferenceDetection')}
-            </Badge>
-          )}
-          {row.original.block_on_input_risk && (
-            <Badge variant="destructive">{t('proxy.inputBlocking')}</Badge>
-          )}
-          {row.original.block_on_output_risk && (
-            <Badge variant="secondary" className="bg-orange-100 text-orange-800 border-orange-200">
-              {t('proxy.outputBlocking')}
             </Badge>
           )}
         </div>
@@ -599,23 +581,6 @@ completion = openai_client.chat.completions.create(
                   />
                 </div>
 
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="block_on_input_risk">{t('proxy.blockOnInputRisk')}</Label>
-                  <Switch
-                    id="block_on_input_risk"
-                    checked={switchStates.block_on_input_risk}
-                    onCheckedChange={(checked) => setSwitchStates(prev => ({ ...prev, block_on_input_risk: checked }))}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="block_on_output_risk">{t('proxy.blockOnOutputRisk')}</Label>
-                  <Switch
-                    id="block_on_output_risk"
-                    checked={switchStates.block_on_output_risk}
-                    onCheckedChange={(checked) => setSwitchStates(prev => ({ ...prev, block_on_output_risk: checked }))}
-                  />
-                </div>
               </div>
 
               <div className="space-y-3 p-4 border rounded-lg bg-green-50">
@@ -712,14 +677,6 @@ completion = openai_client.chat.completions.create(
                   {viewingModel.enable_reasoning_detection && (
                     <Badge variant="secondary" className="bg-purple-100 text-purple-800 border-purple-200">
                       {t('proxy.inferenceDetection')}
-                    </Badge>
-                  )}
-                  {viewingModel.block_on_input_risk && (
-                    <Badge variant="destructive" className="ml-2">{t('proxy.inputBlocking')}</Badge>
-                  )}
-                  {viewingModel.block_on_output_risk && (
-                    <Badge variant="secondary" className="bg-orange-100 text-orange-800 border-orange-200 ml-2">
-                      {t('proxy.outputBlocking')}
                     </Badge>
                   )}
                 </div>

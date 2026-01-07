@@ -18,6 +18,7 @@ import {
   Shield,
   ChevronLeft,
   CreditCard,
+  Users,
 } from 'lucide-react'
 import { useAuth } from '../../contexts/AuthContext'
 import { adminApi, configApi } from '../../services/api'
@@ -184,7 +185,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       ? [
           {
             key: '/admin',
-            icon: Settings,
+            icon: Users,
             label: t('nav.admin'),
             children: [
               {

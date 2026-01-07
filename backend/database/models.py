@@ -348,8 +348,6 @@ class UpstreamApiConfig(Base):
     is_active = Column(Boolean, default=True, index=True)  # Whether this config is active
 
     # Security config
-    block_on_input_risk = Column(Boolean, default=False)  # Whether to block on input risk
-    block_on_output_risk = Column(Boolean, default=False)  # Whether to block on output risk
     enable_reasoning_detection = Column(Boolean, default=True)  # Whether to detect reasoning content
     stream_chunk_size = Column(Integer, default=50)  # Stream detection interval, detect every N chunks
 
@@ -385,8 +383,6 @@ class ProxyModelConfig(Base):
     enabled = Column(Boolean, default=True, index=True)  # Whether enabled
 
     # Security config (simplified design)
-    block_on_input_risk = Column(Boolean, default=False)  # Whether to block on input risk, default not block
-    block_on_output_risk = Column(Boolean, default=False)  # Whether to block on output risk, default not block
     enable_reasoning_detection = Column(Boolean, default=True)  # Whether to detect reasoning content, default enabled
     stream_chunk_size = Column(Integer, default=50)  # Stream detection interval, detect every N chunks, default 50
 

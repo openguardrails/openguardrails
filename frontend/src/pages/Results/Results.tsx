@@ -32,7 +32,7 @@ import { DataTable } from '@/components/data-table/DataTable'
 import { DateRangePicker } from '@/components/forms/DateRangePicker'
 import { resultsApi, dataSecurityApi } from '../../services/api'
 import type { DetectionResult, PaginatedResponse, DataSecurityEntityType } from '../../types'
-import { translateRiskLevel, getRiskLevelColor } from '../../utils/i18nMapper'
+import { translateRiskLevel } from '../../utils/i18nMapper'
 import { useApplication } from '../../contexts/ApplicationContext'
 import type { ColumnDef } from '@tanstack/react-table'
 import type { DateRange } from 'react-day-picker'
@@ -195,11 +195,11 @@ const Results: React.FC = () => {
     fetchDataEntityTypes()
   }, [])
 
-  const handlePageChange = (page: number, pageSize: number) => {
-    setPagination({
+  const handlePageChange = (page: number, newPageSize?: number) => {
+    setPagination((prev) => ({
       current: page,
-      pageSize: pageSize,
-    })
+      pageSize: newPageSize ?? prev.pageSize,
+    }))
   }
 
   const handleFilterChange = (key: string, value: any) => {
@@ -280,13 +280,39 @@ const Results: React.FC = () => {
     }
   }
 
-  const getRiskBadgeVariant = (level: string): "default" | "secondary" | "destructive" | "outline" => {
-    const color = getRiskLevelColor(level)
-    if (color === 'red' || color === '#ff4d4f') return 'destructive'
-    if (color === 'orange' || color === '#faad14') return 'default'
-    if (color === 'yellow' || color === '#fadb14') return 'secondary'
-    if (color === 'green' || color === '#52c41a') return 'outline'
-    return 'secondary'
+  // Risk level colors: high -> red, medium -> orange, low -> yellow
+  const getRiskBadgeClasses = (level: string): string => {
+    // Match both English and Chinese formats
+    if (level === 'high_risk' || level === '高风险') {
+      return '!bg-red-100 !text-red-800 !border-red-200'
+    }
+    if (level === 'medium_risk' || level === '中风险') {
+      return '!bg-orange-100 !text-orange-800 !border-orange-200'
+    }
+    if (level === 'low_risk' || level === '低风险') {
+      return '!bg-yellow-100 !text-yellow-800 !border-yellow-200'
+    }
+    // no_risk or other
+    return '!bg-gray-100 !text-gray-800 !border-gray-200'
+  }
+
+  // Action colors: pass -> green, reject -> red, replace -> orange
+  const getActionBadgeClasses = (action: string): string => {
+    // Match both original values and translated values
+    const passText = t('action.pass')
+    const rejectText = t('action.reject')
+    const replaceText = t('action.replace')
+
+    if (action === 'pass' || action === passText) {
+      return '!bg-green-100 !text-green-800 !border-green-200'
+    }
+    if (action === 'reject' || action === rejectText) {
+      return '!bg-red-100 !text-red-800 !border-red-200'
+    }
+    if (action === 'replace' || action === replaceText) {
+      return '!bg-orange-100 !text-orange-800 !border-orange-200'
+    }
+    return '!bg-gray-100 !text-gray-800 !border-gray-200'
   }
 
   // Helper function to format risk display
@@ -381,7 +407,7 @@ const Results: React.FC = () => {
         const displayText = formatRiskDisplay(riskLevel, categories)
 
         return (
-          <Badge variant={getRiskBadgeVariant(riskLevel)} title={categories.join(', ')}>
+          <Badge className={getRiskBadgeClasses(riskLevel)} title={categories.join(', ')}>
             {displayText}
           </Badge>
         )
@@ -397,7 +423,7 @@ const Results: React.FC = () => {
         const displayText = formatRiskDisplay(riskLevel, categories)
 
         return (
-          <Badge variant={getRiskBadgeVariant(riskLevel)} title={categories.join(', ')}>
+          <Badge className={getRiskBadgeClasses(riskLevel)} title={categories.join(', ')}>
             {displayText}
           </Badge>
         )
@@ -413,7 +439,7 @@ const Results: React.FC = () => {
         const displayText = formatRiskDisplay(riskLevel, categories)
 
         return (
-          <Badge variant={getRiskBadgeVariant(riskLevel)} title={categories.join(', ')}>
+          <Badge className={getRiskBadgeClasses(riskLevel)} title={categories.join(', ')}>
             {displayText}
           </Badge>
         )
@@ -424,20 +450,12 @@ const Results: React.FC = () => {
       header: t('results.suggestedAction'),
       cell: ({ row }) => {
         const action = row.getValue('suggest_action') as string
-        const pass = t('action.pass')
-        const reject = t('action.reject')
-        const replace = t('action.replace')
 
-        let variant: "default" | "secondary" | "destructive" | "outline" = 'secondary'
-        if (action === pass) {
-          variant = 'outline'
-        } else if (action === reject) {
-          variant = 'destructive'
-        } else if (action === replace) {
-          variant = 'default'
-        }
-
-        return <Badge variant={variant}>{action}</Badge>
+        return (
+          <Badge className={getActionBadgeClasses(action)}>
+            {action}
+          </Badge>
+        )
       },
     },
     {
@@ -636,7 +654,7 @@ const Results: React.FC = () => {
 
       {/* Detail Drawer */}
       <Sheet open={drawerVisible} onOpenChange={setDrawerVisible}>
-        <SheetContent className="w-[1000px] max-w-[90vw] overflow-y-auto">
+        <SheetContent className="w-[800px] max-w-[80vw] overflow-y-auto">
           <SheetHeader>
             <SheetTitle>{t('results.detectionDetails')}</SheetTitle>
           </SheetHeader>
@@ -663,12 +681,7 @@ const Results: React.FC = () => {
                 <div className="grid grid-cols-3 gap-4 border-b pb-3">
                   <div className="font-medium text-gray-600 text-sm">{t('results.promptAttack')}:</div>
                   <div className="col-span-2">
-                    <Badge
-                      variant={getRiskBadgeVariant(
-                        selectedResult.security_risk_level || 'no_risk'
-                      )}
-                      className="text-xs"
-                    >
+                    <Badge className={getRiskBadgeClasses(selectedResult.security_risk_level || 'no_risk')}>
                       {formatRiskDisplay(
                         selectedResult.security_risk_level || t('risk.level.no_risk'),
                         selectedResult.security_categories || []
@@ -683,12 +696,7 @@ const Results: React.FC = () => {
                     {t('results.contentCompliance')}:
                   </div>
                   <div className="col-span-2">
-                    <Badge
-                      variant={getRiskBadgeVariant(
-                        selectedResult.compliance_risk_level || 'no_risk'
-                      )}
-                      className="text-xs"
-                    >
+                    <Badge className={getRiskBadgeClasses(selectedResult.compliance_risk_level || 'no_risk')}>
                       {formatRiskDisplay(
                         selectedResult.compliance_risk_level || t('risk.level.no_risk'),
                         selectedResult.compliance_categories || []
@@ -701,10 +709,7 @@ const Results: React.FC = () => {
                 <div className="grid grid-cols-3 gap-4 border-b pb-3">
                   <div className="font-medium text-gray-600 text-sm">{t('results.dataLeak')}:</div>
                   <div className="col-span-2">
-                    <Badge
-                      variant={getRiskBadgeVariant(selectedResult.data_risk_level || 'no_risk')}
-                      className="text-xs"
-                    >
+                    <Badge className={getRiskBadgeClasses(selectedResult.data_risk_level || 'no_risk')}>
                       {formatRiskDisplay(
                         selectedResult.data_risk_level || t('risk.level.no_risk'),
                         selectedResult.data_categories || []
@@ -717,16 +722,7 @@ const Results: React.FC = () => {
                 <div className="grid grid-cols-3 gap-4 border-b pb-3">
                   <div className="font-medium text-gray-600 text-sm">{t('results.suggestedAction')}:</div>
                   <div className="col-span-2">
-                    <Badge
-                      variant={
-                        selectedResult.suggest_action === t('action.pass')
-                          ? 'outline'
-                          : selectedResult.suggest_action === t('action.reject')
-                          ? 'destructive'
-                          : 'default'
-                      }
-                      className="text-xs"
-                    >
+                    <Badge className={getActionBadgeClasses(selectedResult.suggest_action)}>
                       {selectedResult.suggest_action}
                     </Badge>
                   </div>

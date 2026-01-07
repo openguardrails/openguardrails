@@ -144,18 +144,24 @@ class GuardrailService:
 
             if not has_assistant_message:
                 # This is INPUT detection - check user input for sensitive data before sending to model
-                logger.info(f"Starting input data leak detection for tenant {tenant_id}")
+                logger.info(f"Starting input data leak detection for tenant {tenant_id}, application {application_id}")
                 data_detection_result = await data_security_service.detect_sensitive_data(
                     text=user_content,
                     tenant_id=tenant_id,
-                    direction='input'
+                    direction='input',
+                    application_id=application_id
                 )
                 logger.info(f"Input data leak detection result: {data_detection_result}")
 
-                # Construct data security result
+                # Construct data security result with detected entities for anonymization
+                detected_entities = data_detection_result.get('detected_entities', []) if data_detection_result.get('risk_level', 'no_risk') != 'no_risk' else []
+                anonymized_text_result = data_detection_result.get('anonymized_text') if data_detection_result.get('risk_level', 'no_risk') != 'no_risk' else None
+
                 data_result = DataSecurityResult(
                     risk_level=data_detection_result.get('risk_level', 'no_risk'),
-                    categories=data_detection_result.get('categories', [])
+                    categories=data_detection_result.get('categories', []),
+                    detected_entities=detected_entities,
+                    anonymized_text=anonymized_text_result
                 )
 
                 # If sensitive data found in input, store the desensitized text
@@ -273,18 +279,24 @@ class GuardrailService:
                 # This is OUTPUT detection - check assistant's response for sensitive data
                 detection_content = self._extract_assistant_content(request.messages)
 
-                logger.info(f"Starting output data leak detection for tenant {tenant_id}")
+                logger.info(f"Starting output data leak detection for tenant {tenant_id}, application {application_id}")
                 data_detection_result = await data_security_service.detect_sensitive_data(
                     text=detection_content,
                     tenant_id=tenant_id,
-                    direction='output'
+                    direction='output',
+                    application_id=application_id
                 )
                 logger.info(f"Output data leak detection result: {data_detection_result}")
 
-                # Construct data security result
+                # Construct data security result with detected entities for anonymization
+                detected_entities = data_detection_result.get('detected_entities', []) if data_detection_result.get('risk_level', 'no_risk') != 'no_risk' else []
+                anonymized_text_result = data_detection_result.get('anonymized_text') if data_detection_result.get('risk_level', 'no_risk') != 'no_risk' else None
+
                 data_result = DataSecurityResult(
                     risk_level=data_detection_result.get('risk_level', 'no_risk'),
-                    categories=data_detection_result.get('categories', [])
+                    categories=data_detection_result.get('categories', []),
+                    detected_entities=detected_entities,
+                    anonymized_text=anonymized_text_result
                 )
 
                 # If sensitive data found in output, store the desensitized text

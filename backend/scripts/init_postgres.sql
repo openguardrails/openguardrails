@@ -303,8 +303,6 @@ CREATE TABLE IF NOT EXISTS proxy_model_configs (
     model_name VARCHAR(255) NOT NULL,
     enabled BOOLEAN DEFAULT TRUE,
     -- Security config (simplified)
-    block_on_input_risk BOOLEAN DEFAULT FALSE,
-    block_on_output_risk BOOLEAN DEFAULT FALSE,
     enable_reasoning_detection BOOLEAN DEFAULT TRUE,
     -- Stream and confidence config
     stream_chunk_size INTEGER DEFAULT 50,
@@ -615,8 +613,6 @@ COMMENT ON COLUMN detection_results.image_count IS 'Image count';
 COMMENT ON COLUMN detection_results.image_paths IS 'Saved image file path list';
 COMMENT ON COLUMN detection_results.data_risk_level IS 'Data leakage risk level';
 COMMENT ON COLUMN detection_results.data_categories IS 'Data leakage categories';
-COMMENT ON COLUMN proxy_model_configs.block_on_input_risk IS 'Whether to block on input risk, default not block';
-COMMENT ON COLUMN proxy_model_configs.block_on_output_risk IS 'Whether to block on output risk, default not block';
 COMMENT ON COLUMN proxy_model_configs.enable_reasoning_detection IS 'Whether to detect reasoning content, default enabled';
 COMMENT ON COLUMN proxy_model_configs.stream_chunk_size IS 'Stream detection interval, detect every N chunks, default 50';
 COMMENT ON COLUMN proxy_model_configs.confidence_trigger_level IS 'Confidence trigger level: high, medium, low';

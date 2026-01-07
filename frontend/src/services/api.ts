@@ -254,7 +254,7 @@ export const adminApi = {
     api.get('/api/v1/admin/stats').then(res => res.data),
 
   // Get all tenants list
-  getUsers: (params?: { sort_by?: string; sort_order?: string; skip?: number; limit?: number }): Promise<{ status: string; users: any[]; total: number }> =>
+  getUsers: (params?: { sort_by?: string; sort_order?: string; skip?: number; limit?: number; search?: string }): Promise<{ status: string; users: any[]; total: number }> =>
     api.get('/api/v1/admin/users', { params }).then(res => res.data),
 
   // Switch to specified tenant perspective
@@ -390,8 +390,6 @@ export const proxyModelsApi = {
     api_base_url: string;
     api_key: string;
     is_active?: boolean;
-    block_on_input_risk?: boolean;
-    block_on_output_risk?: boolean;
     enable_reasoning_detection?: boolean;
     stream_chunk_size?: number;
   }): Promise<{ success: boolean; message: string; data?: any }> =>
@@ -403,8 +401,6 @@ export const proxyModelsApi = {
     api_base_url?: string;
     api_key?: string;
     is_active?: boolean;
-    block_on_input_risk?: boolean;
-    block_on_output_risk?: boolean;
     enable_reasoning_detection?: boolean;
     stream_chunk_size?: number;
   }): Promise<{ success: boolean; message: string }> =>

@@ -108,8 +108,6 @@ async def get_user_upstream_apis(request: Request):
                         "api_base_url": config.api_base_url,
                         "provider": config.provider,
                         "is_active": config.is_active,
-                        "block_on_input_risk": config.block_on_input_risk,
-                        "block_on_output_risk": config.block_on_output_risk,
                         "enable_reasoning_detection": config.enable_reasoning_detection,
                         "stream_chunk_size": config.stream_chunk_size,
                         "description": config.description,
@@ -181,8 +179,6 @@ async def create_upstream_api(request: Request):
                 api_key_encrypted=encrypted_api_key,
                 provider=request_data.get('provider'),  # Optional
                 is_active=bool(request_data.get('is_active', True)),
-                block_on_input_risk=bool(request_data.get('block_on_input_risk', False)),
-                block_on_output_risk=bool(request_data.get('block_on_output_risk', False)),
                 enable_reasoning_detection=bool(request_data.get('enable_reasoning_detection', True)),
                 stream_chunk_size=int(request_data.get('stream_chunk_size', 50)),
                 description=request_data.get('description'),
@@ -254,8 +250,6 @@ async def get_upstream_api_detail(api_id: str, request: Request):
                     "provider": api_config.provider,
                     "is_active": api_config.is_active if api_config.is_active is not None else True,
                     "enable_reasoning_detection": api_config.enable_reasoning_detection if api_config.enable_reasoning_detection is not None else True,
-                    "block_on_input_risk": api_config.block_on_input_risk if api_config.block_on_input_risk is not None else False,
-                    "block_on_output_risk": api_config.block_on_output_risk if api_config.block_on_output_risk is not None else False,
                     "stream_chunk_size": api_config.stream_chunk_size if api_config.stream_chunk_size is not None else 50,
                     "description": api_config.description,
                     "is_private_model": api_config.is_private_model if api_config.is_private_model is not None else False,
@@ -313,7 +307,7 @@ async def update_upstream_api(api_id: str, request: Request):
                 if field == 'api_key':
                     if value:  # If API key is provided, update
                         api_config.api_key_encrypted = _encrypt_api_key(value)
-                elif field in ['is_active', 'block_on_input_risk', 'block_on_output_risk', 'enable_reasoning_detection', 'is_private_model', 'is_default_private_model']:
+                elif field in ['is_active', 'enable_reasoning_detection', 'is_private_model', 'is_default_private_model']:
                     # Explicitly handle boolean fields (including private model attributes)
                     setattr(api_config, field, bool(value))
                 elif field in ['stream_chunk_size']:

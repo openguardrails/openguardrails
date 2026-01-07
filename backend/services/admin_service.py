@@ -123,14 +123,15 @@ class AdminService:
         # Fallback to .env configuration for backward compatibility
         return tenant.email == settings.super_admin_username
     
-    def get_all_users(self, db: Session, admin_tenant: Tenant, sort_by: str = 'created_at', sort_order: str = 'desc', skip: int = 0, limit: int = 20) -> tuple[List[Dict[str, Any]], int]:
+    def get_all_users(self, db: Session, admin_tenant: Tenant, sort_by: str = 'created_at', sort_order: str = 'desc', skip: int = 0, limit: int = 20, search: Optional[str] = None) -> tuple[List[Dict[str, Any]], int]:
         """Get all tenants list (only super admin can access)
-        
+
         Args:
             sort_by: Sort field ('created_at', 'detection_count', 'last_activity')
             sort_order: Sort order ('asc' or 'desc')
             skip: Number of records to skip for pagination
             limit: Maximum number of records to return
+            search: Search string to filter by email or id
         Returns:
             Tuple of (list of tenant dicts, total count)
         """
@@ -142,7 +143,18 @@ class AdminService:
             Tenant,
             func.count(DetectionResult.id).label('detection_count'),
             func.max(DetectionResult.created_at).label('last_activity')
-        ).outerjoin(DetectionResult, Tenant.id == DetectionResult.tenant_id).group_by(Tenant.id)
+        ).outerjoin(DetectionResult, Tenant.id == DetectionResult.tenant_id)
+
+        # Apply search filter
+        if search:
+            search_pattern = f"%{search}%"
+            from sqlalchemy import cast, String
+            base_query = base_query.filter(
+                (Tenant.email.ilike(search_pattern)) |
+                (cast(Tenant.id, String).ilike(search_pattern))
+            )
+
+        base_query = base_query.group_by(Tenant.id)
 
         # Get total count
         total_count = base_query.count()

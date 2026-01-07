@@ -11,7 +11,7 @@
 # OpenGuardrails
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Version](https://img.shields.io/badge/Version-4.5.0-green.svg)](https://github.com/openguardrails/openguardrails/releases)
+[![Version](https://img.shields.io/badge/Version-5.1.0-green.svg)](https://github.com/openguardrails/openguardrails/releases)
 [![Stars](https://img.shields.io/github/stars/openguardrails/openguardrails?style=social)](https://github.com/openguardrails/openguardrails)
 
 > 🏢 **The only production-ready, fully open-source AI guardrails platform for enterprise AI applications**
@@ -57,6 +57,7 @@ OpenGuardrails focuses on a more important enterprise question:
   - Prompt injection & jailbreak detection
   - Unsafe and non-compliant content detection
   - Input / output data leak prevention
+  - **Automatic private model switching** for enterprise data protection (v5.1.0)
 
 - 📜 **Policy-Based Guardrails**
   - Enforce enterprise rules beyond "unsafe"

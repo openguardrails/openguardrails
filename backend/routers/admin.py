@@ -102,16 +102,18 @@ async def get_all_users(
     sort_order: str = 'desc',
     skip: int = 0,
     limit: int = 20,
+    search: Optional[str] = None,
     db: Session = Depends(get_admin_db)
 ):
     """
     Get all tenants list (only super admin can access)
-    
+
     Query parameters:
     - sort_by: Sort field ('created_at', 'detection_count', 'last_activity')
     - sort_order: Sort order ('asc' or 'desc')
     - skip: Number of records to skip for pagination
     - limit: Maximum number of records to return
+    - search: Search string to filter by email or id
     """
     try:
         current_tenant = get_current_user(request)
@@ -132,11 +134,12 @@ async def get_all_users(
             limit = 20
 
         users, total = admin_service.get_all_users(
-            db, current_tenant, 
-            sort_by=sort_by, 
+            db, current_tenant,
+            sort_by=sort_by,
             sort_order=sort_order,
             skip=skip,
-            limit=limit
+            limit=limit,
+            search=search
         )
         
         return {

@@ -16,6 +16,8 @@ class DataSecurityResult(BaseModel):
     """Data security detection result"""
     risk_level: str
     categories: List[str]
+    detected_entities: List[Dict[str, Any]] = []  # Detected sensitive entities for anonymization
+    anonymized_text: Optional[str] = None  # Anonymized text for replacement action
 
 class GuardrailResult(BaseModel):
     """Guardrail detection result"""

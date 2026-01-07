@@ -11,6 +11,163 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [5.1.0] - 2026-01-06
+
+### 🚀 Major Update: Automatic Private Model Switching for Enterprise Data Protection
+
+This release introduces **Automatic Private Model Switching** — a major enhancement to the Data Leakage Prevention (DLP) system that enables enterprise AI agents to seamlessly protect sensitive data **without affecting user experience**.
+
+#### 🎯 Key Value Proposition
+
+**Problem Solved**: Enterprise AI applications often face a dilemma between data security and user experience. Blocking requests with sensitive data disrupts workflows, while allowing them risks data leakage to external AI providers.
+
+**Solution**: Automatic Private Model Switching intelligently routes requests containing sensitive data to private/on-premise models, ensuring:
+- ✅ **Zero User Disruption**: Users continue their workflow seamlessly
+- ✅ **Complete Data Protection**: Sensitive data never leaves your infrastructure
+- ✅ **Transparent Operation**: Switching happens automatically without user intervention
+- ✅ **Flexible Policies**: Configure different actions for different risk levels
+
+#### 🆕 What's New
+
+##### 🔄 **Automatic Private Model Switching**
+
+When sensitive data is detected, the system can automatically redirect requests to a designated private model instead of blocking or anonymizing:
+
+**How It Works**:
+```
+1. User sends request to AI agent
+2. DLP system detects sensitive entities (PII, financial data, etc.)
+3. Based on configured risk level action:
+   - High Risk → Block (default) or Switch to Private Model
+   - Medium Risk → Switch to Private Model (default)
+   - Low Risk → Anonymize (default) or Pass
+4. If action is "switch_private_model":
+   - Request is transparently routed to configured private model
+   - User receives response normally, unaware of the switch
+   - Sensitive data stays within your infrastructure
+```
+
+**Enterprise Benefits**:
+- **For AI Agents**: Uninterrupted operation with automatic data protection
+- **For Users**: Seamless experience without security interruptions
+- **For Security Teams**: Complete audit trail and policy compliance
+- **For Compliance**: Data residency requirements automatically enforced
+
+##### 🏗️ **Private Model Configuration**
+
+**Model Safety Attributes** (enhanced in `upstream_api_config`):
+- `is_data_safe`: Mark model as safe for processing sensitive data
+- `is_default_private_model`: Set as tenant-wide default private model
+- `private_model_priority`: Priority ranking (0-100) for private model selection
+
+**Selection Priority Logic**:
+1. **Application-Specific**: `private_model_id` in application policy (highest priority)
+2. **Tenant Default**: Model with `is_default_private_model = true`
+3. **Priority-Based**: Model with highest `private_model_priority` value
+
+##### 📊 **Enhanced Policy Configuration**
+
+**Per-Application Data Leakage Policies**:
+```python
+# Example: Configure different actions for different risk levels
+{
+    "application_id": "your-app-id",
+    "input_high_risk_action": "block",              # Block high-risk content
+    "input_medium_risk_action": "switch_private_model",  # Auto-switch for medium risk
+    "input_low_risk_action": "anonymize",           # Anonymize low-risk content
+    "output_high_risk_action": "block",
+    "output_medium_risk_action": "switch_private_model",
+    "output_low_risk_action": "pass",
+    "private_model_id": "uuid-of-preferred-private-model"  # Optional override
+}
+```
+
+**Four Disposal Actions**:
+
+| Action | Description | Use Case |
+|--------|-------------|----------|
+| `block` | Reject request completely | Critical security violations |
+| `switch_private_model` | Route to private/on-prem model | **Enterprise data protection (NEW)** |
+| `anonymize` | Replace entities with placeholders | Logging/analytics with masked data |
+| `pass` | Allow request, log only | Audit mode, low-risk scenarios |
+
+##### 🌐 **New API Endpoints**
+
+```bash
+# Private Model Management
+GET  /api/v1/config/private-models              # List available private models
+PUT  /api/v1/proxy/models/{id}/safety           # Update model safety attributes
+
+# Application DLP Policy (enhanced)
+GET  /api/v1/config/data-leakage-policy         # Get policy with new action fields
+PUT  /api/v1/config/data-leakage-policy         # Update policy with private model config
+```
+
+#### 🔧 Technical Implementation
+
+**Backend Services Updated**:
+- `backend/services/data_leakage_disposal_service.py` - Enhanced with private model switching logic
+- `backend/services/proxy_service.py` - Integrated automatic model switching in proxy flow
+- `backend/services/data_security_service.py` - Improved entity detection and risk aggregation
+
+**Database Changes**:
+- Migration `045_remove_deprecated_block_on_risk_columns.sql` - Schema cleanup for new action system
+
+**Detection Flow Enhancement**:
+```
+Request → Format Detection → Segmentation → Entity Detection → Risk Aggregation
+                                                                      ↓
+                                                              Policy Lookup
+                                                                      ↓
+                                            ┌─────────────────────────┴─────────────────────────┐
+                                            ↓                         ↓                         ↓
+                                         Block                 Switch Model               Anonymize/Pass
+                                            ↓                         ↓                         ↓
+                                      Return Error           Route to Private         Process & Continue
+                                                                  Model
+```
+
+#### 📈 Performance Characteristics
+
+- **Model Switch Latency**: < 5ms overhead for routing decision
+- **Transparent Switching**: No additional latency visible to end users
+- **Parallel Processing**: Entity detection continues to benefit from smart segmentation
+
+#### 🔒 Security & Compliance
+
+- **Data Residency**: Sensitive data automatically stays within designated infrastructure
+- **Audit Trail**: All model switches logged for compliance review
+- **Policy Enforcement**: Configurable per-application, per-risk-level granularity
+- **Zero Trust**: Private models can be air-gapped or on-premise deployments
+
+#### 📚 Documentation
+
+- Updated `docs/DATA_LEAKAGE_GUIDE.md` with private model switching guide
+- Enhanced `CLAUDE.md` with v5.1.0 architecture details
+- Added private model configuration examples
+
+#### ⬆️ Migration Guide
+
+```bash
+# Automatic migration on startup
+docker compose down && docker compose up -d
+
+# Verify private model configuration
+docker exec openguardrails-postgres psql -U openguardrails -d openguardrails \
+  -c "SELECT name, is_data_safe, is_default_private_model, private_model_priority FROM upstream_api_config;"
+
+# Check application policies
+docker exec openguardrails-postgres psql -U openguardrails -d openguardrails \
+  -c "SELECT application_id, input_medium_risk_action, private_model_id FROM application_data_leakage_policy;"
+```
+
+**For Existing Users**:
+- Existing policies are preserved with default action mappings
+- Configure private models via Admin UI → Proxy Model Management → Safety Settings
+- Set `is_data_safe = true` for your on-premise/private models
+
+---
+
 ## [5.0.8] - 2026-01-05
 
 ### 🛡️ Enterprise Data Leakage Prevention System

@@ -22,6 +22,8 @@
     }
   },
   "guardrail": {
-    "blacklistHit": "抱歉，我无法提供涉及{list_name}的内容。"
+    "blacklistHit": "抱歉，我无法提供涉及{list_name}的内容。",
+    "dataLeakageInputBlocked": "请求因数据安全策略被OpenGuardrails拦截。",
+    "dataLeakageOutputBlocked": "响应因数据安全策略被OpenGuardrails拦截。"
   }
 }

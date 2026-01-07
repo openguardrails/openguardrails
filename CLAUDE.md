@@ -134,9 +134,11 @@ openguardrails/
 
 ## DATA LEAKAGE PREVENTION SYSTEM
 
-**Status**: Production-ready (v5.0.8+)
+**Status**: Production-ready (v5.1.0+)
 
-**Architecture**: Multi-layer protection system with format-aware detection and intelligent disposal strategies
+**v5.1.0 Highlight**: **Automatic Private Model Switching** - Enterprise AI agents can now seamlessly protect sensitive data without affecting user experience. When sensitive data is detected, requests are automatically routed to private/on-premise models instead of blocking, ensuring data never leaves your infrastructure while maintaining uninterrupted user workflows.
+
+**Architecture**: Multi-layer protection system with format-aware detection, intelligent disposal strategies, and automatic private model switching
 
 ### Key Components
 
@@ -158,11 +160,27 @@ openguardrails/
 
 **Data Leakage Disposal Service** (`backend/services/data_leakage_disposal_service.py`):
 - **Block**: Reject request completely (default for high risk)
-- **Switch Private Model**: Redirect to data-private model (default for medium risk)
+- **Switch Private Model**: Redirect to data-private model (default for medium risk) ⭐ **v5.1.0 Key Feature**
 - **Anonymize**: Replace sensitive entities with placeholders (default for low risk)
 - **Pass**: Allow request, log only (audit mode)
 
-### Private Model System
+**Automatic Private Model Switching Flow** (v5.1.0):
+```
+User Request → DLP Detection → Sensitive Data Found → Risk Level Determined
+                                                              ↓
+                           ┌──────────────────────────────────┼──────────────────────────────────┐
+                           ↓                                  ↓                                  ↓
+                    High Risk Action              Medium Risk Action                 Low Risk Action
+                           ↓                                  ↓                                  ↓
+                  Block (default)          Switch Private Model (default)         Anonymize (default)
+                           ↓                                  ↓                                  ↓
+                    Return Error          Route to Private Model             Process & Continue
+                                          (transparent to user)
+```
+
+**Enterprise Value**: Users continue their workflow seamlessly while sensitive data automatically stays within your infrastructure.
+
+### Private Model System (v5.1.0 Enhanced)
 
 **Model Safety Attributes** (`upstream_api_config` table):
 - `is_data_safe`: Mark as safe for sensitive data (on-premise, private cloud, air-gapped)
@@ -173,6 +191,11 @@ openguardrails/
 1. Application policy `private_model_id` (explicit configuration)
 2. Tenant default private model (`is_default_private_model = true`)
 3. Highest priority private model (`private_model_priority DESC`)
+
+**Configuration via Admin UI**:
+- Navigate to Proxy Model Management → Select model → Safety Settings
+- Set `is_data_safe = true` for on-premise/private models
+- Optionally set as default or configure priority
 
 ### Application-Level Policies
 
@@ -371,5 +394,5 @@ A: YES. Safe. Migrations unaffected (run once per container, not per worker).
 
 ---
 
-**Last Updated**: 2026-01-05
+**Last Updated**: 2026-01-06
 **Generated for**: AI assistants to quickly understand OpenGuardrails architecture.
