@@ -809,7 +809,7 @@ Text:
 
     def _random_replacement(self, text: str) -> str:
         """Random replace"""
-        # 保持长度，随机替换字符
+        # Keep length, random replace characters
         replacement = ''
         for char in text:
             if char.isdigit():
@@ -825,15 +825,15 @@ Text:
 
     def _genai_anonymize_sync(self, text: str, prompt: str, entity_type_name: str) -> str:
         """
-        同步调用GenAI执行脱敏
+        Synchronously call GenAI to execute anonymization
 
         Args:
-            text: 需要脱敏的原始文本
-            prompt: 用户定义的脱敏指令
-            entity_type_name: 实体类型名称
+            text: Original text to anonymize
+            prompt: User-defined anonymization instruction
+            entity_type_name: Entity type name
 
         Returns:
-            脱敏后的文本
+            Anonymized text
         """
         try:
             messages = [
@@ -847,11 +847,11 @@ Text:
                 }
             ]
 
-            # 使用事件循环运行异步方法
+            # Use event loop to run asynchronous method
             try:
                 loop = asyncio.get_event_loop()
                 if loop.is_running():
-                    # 如果已经在异步上下文中，创建一个新任务
+                    # If already in asynchronous context, create a new task
                     import concurrent.futures
                     with concurrent.futures.ThreadPoolExecutor() as executor:
                         future = executor.submit(asyncio.run, self.model_service.check_messages(messages))
@@ -859,11 +859,11 @@ Text:
                 else:
                     result = loop.run_until_complete(self.model_service.check_messages(messages))
             except RuntimeError:
-                # 没有事件循环，创建一个新的
+                # No event loop, create a new one
                 result = asyncio.run(self.model_service.check_messages(messages))
 
             if result:
-                # 清理结果，移除可能的引号和空白
+                # Clean up result, remove possible quotes and whitespace
                 cleaned_result = result.strip().strip('"\'')
                 return cleaned_result if cleaned_result else f"[REDACTED_{entity_type_name.upper().replace(' ', '_')}]"
 
@@ -1047,9 +1047,9 @@ Return JSON only, no markdown:
             result = await self.model_service.check_messages(messages)
 
             if result:
-                # 尝试解析JSON
+                # Try to parse JSON
                 try:
-                    # 清理可能的markdown代码块
+                    # Clean up possible markdown code blocks
                     cleaned = result.strip()
                     if cleaned.startswith('```'):
                         cleaned = cleaned.split('\n', 1)[1] if '\n' in cleaned else cleaned[3:]
@@ -1133,7 +1133,7 @@ Return JSON only, no markdown:
 
             if result:
                 try:
-                    # 清理可能的markdown代码块
+                    # Clean up possible markdown code blocks
                     cleaned = result.strip()
                     if cleaned.startswith('```'):
                         cleaned = cleaned.split('\n', 1)[1] if '\n' in cleaned else cleaned[3:]
@@ -1215,7 +1215,7 @@ Return JSON only, no markdown:
 
             if result:
                 try:
-                    # 清理可能的markdown代码块
+                    # Clean up possible markdown code blocks
                     cleaned = result.strip()
                     if cleaned.startswith('```'):
                         cleaned = cleaned.split('\n', 1)[1] if '\n' in cleaned else cleaned[3:]
@@ -1226,14 +1226,14 @@ Return JSON only, no markdown:
                     parsed = json.loads(cleaned)
                     code = parsed.get("entity_type_code", "")
 
-                    # 验证生成的代码格式
+                    # Validate generated code format
                     if code and re.match(r'^[A-Z][A-Z_]*[A-Z]$|^[A-Z]+$', code):
                         return {
                             "success": True,
                             "entity_type_code": code
                         }
                     else:
-                        # 如果格式不对，尝试修正
+                        # If format is incorrect, try to fix it
                         fixed_code = re.sub(r'[^A-Z_]', '', code.upper().replace(' ', '_'))
                         fixed_code = re.sub(r'_+', '_', fixed_code).strip('_')
                         if fixed_code:
@@ -1270,15 +1270,15 @@ Return JSON only, no markdown:
 
     async def test_entity_definition(self, entity_definition: str, entity_type_name: str, test_input: str) -> dict:
         """
-        测试GenAI实体定义是否能识别输入中的敏感数据
+        Test if GenAI entity definition can recognize sensitive data in input
 
         Args:
-            entity_definition: 实体定义描述
-            entity_type_name: 实体类型名称
-            test_input: 测试输入
+            entity_definition: Entity definition description
+            entity_type_name: Entity type name
+            test_input: Test input
 
         Returns:
-            包含匹配结果的字典
+            Dictionary containing match results
         """
         import time
         start_time = time.time()
@@ -1364,9 +1364,9 @@ Return JSON only, no markdown:
             regex = re.compile(pattern)
             matches = regex.findall(test_input)
 
-            # 如果 findall 返回元组（有捕获组），展开它们
+            # If findall returns tuple (with capture groups), expand them
             if matches and isinstance(matches[0], tuple):
-                # 对于有捕获组的情况，使用 finditer 获取完整匹配
+                # For cases with capture groups, use finditer to get full matches
                 matches = [m.group(0) for m in regex.finditer(test_input)]
 
             return {
