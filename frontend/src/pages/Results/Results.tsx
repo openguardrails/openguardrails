@@ -8,6 +8,8 @@ import {
   Download,
   Image as ImageIcon,
   FileImage,
+  X,
+  RotateCcw,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -208,6 +210,47 @@ const Results: React.FC = () => {
       [key]: value,
     }))
     setPagination((prev) => ({ ...prev, current: 1 }))
+  }
+
+  const handleClearFilter = (key: string) => {
+    setFilters((prev) => ({
+      ...prev,
+      [key]: undefined,
+    }))
+    setPagination((prev) => ({ ...prev, current: 1 }))
+  }
+
+  const handleResetAllFilters = () => {
+    setFilters({
+      risk_level: undefined,
+      security_risk_level: undefined,
+      compliance_risk_level: undefined,
+      data_risk_level: undefined,
+      category: undefined,
+      data_entity_type: undefined,
+      data_leak: undefined,
+      date_range: undefined,
+      content_search: undefined,
+      request_id_search: undefined,
+    })
+    setDateRange(undefined)
+    setPagination((prev) => ({ ...prev, current: 1 }))
+  }
+
+  // Check if any filter is active
+  const hasActiveFilters = () => {
+    return (
+      filters.risk_level ||
+      filters.security_risk_level ||
+      filters.compliance_risk_level ||
+      filters.data_risk_level ||
+      filters.category ||
+      filters.data_entity_type ||
+      filters.content_search ||
+      filters.request_id_search ||
+      dateRange?.from ||
+      dateRange?.to
+    )
   }
 
   const handleExport = useCallback(async () => {
@@ -494,142 +537,230 @@ const Results: React.FC = () => {
 
       {/* Filters Card */}
       <Card className="flex-shrink-0">
-        <CardContent className="pt-6">
-          <div className="flex flex-wrap gap-3">
+        <CardContent className="pt-4 pb-4">
+          <div className="flex flex-wrap gap-2 items-center">
             {/* Risk Level */}
-            <Select
-              value={filters.risk_level}
-              onValueChange={(value) => handleFilterChange('risk_level', value)}
-            >
-              <SelectTrigger className="w-[150px]">
-                <SelectValue placeholder={t('results.selectRiskLevel')} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="any_risk">{t('risk.level.any_risk')}</SelectItem>
-                <SelectItem value="high_risk">{t('risk.level.high_risk')}</SelectItem>
-                <SelectItem value="medium_risk">{t('risk.level.medium_risk')}</SelectItem>
-                <SelectItem value="low_risk">{t('risk.level.low_risk')}</SelectItem>
-                <SelectItem value="no_risk">{t('risk.level.no_risk')}</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="relative">
+              <Select
+                value={filters.risk_level}
+                onValueChange={(value) => handleFilterChange('risk_level', value)}
+              >
+                <SelectTrigger className="w-[120px] h-8 text-xs">
+                  <SelectValue placeholder={t('results.selectRiskLevel')} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="any_risk">{t('risk.level.any_risk')}</SelectItem>
+                  <SelectItem value="high_risk">{t('risk.level.high_risk')}</SelectItem>
+                  <SelectItem value="medium_risk">{t('risk.level.medium_risk')}</SelectItem>
+                  <SelectItem value="low_risk">{t('risk.level.low_risk')}</SelectItem>
+                  <SelectItem value="no_risk">{t('risk.level.no_risk')}</SelectItem>
+                </SelectContent>
+              </Select>
+              {filters.risk_level && (
+                <button
+                  onClick={() => handleClearFilter('risk_level')}
+                  className="absolute -right-1 -top-1 w-4 h-4 bg-gray-400 hover:bg-gray-500 rounded-full flex items-center justify-center"
+                >
+                  <X className="w-2.5 h-2.5 text-white" />
+                </button>
+              )}
+            </div>
 
             {/* Security Risk */}
-            <Select
-              value={filters.security_risk_level}
-              onValueChange={(value) => handleFilterChange('security_risk_level', value)}
-            >
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder={t('results.filterSecurityRisk')} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="any_risk">{t('risk.level.any_risk')}</SelectItem>
-                <SelectItem value="high_risk">{t('risk.level.high_risk')}</SelectItem>
-                <SelectItem value="medium_risk">{t('risk.level.medium_risk')}</SelectItem>
-                <SelectItem value="low_risk">{t('risk.level.low_risk')}</SelectItem>
-                <SelectItem value="no_risk">{t('risk.level.no_risk')}</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="relative">
+              <Select
+                value={filters.security_risk_level}
+                onValueChange={(value) => handleFilterChange('security_risk_level', value)}
+              >
+                <SelectTrigger className="w-[120px] h-8 text-xs">
+                  <SelectValue placeholder={t('results.filterSecurityRisk')} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="any_risk">{t('risk.level.any_risk')}</SelectItem>
+                  <SelectItem value="high_risk">{t('risk.level.high_risk')}</SelectItem>
+                  <SelectItem value="medium_risk">{t('risk.level.medium_risk')}</SelectItem>
+                  <SelectItem value="low_risk">{t('risk.level.low_risk')}</SelectItem>
+                  <SelectItem value="no_risk">{t('risk.level.no_risk')}</SelectItem>
+                </SelectContent>
+              </Select>
+              {filters.security_risk_level && (
+                <button
+                  onClick={() => handleClearFilter('security_risk_level')}
+                  className="absolute -right-1 -top-1 w-4 h-4 bg-gray-400 hover:bg-gray-500 rounded-full flex items-center justify-center"
+                >
+                  <X className="w-2.5 h-2.5 text-white" />
+                </button>
+              )}
+            </div>
 
             {/* Compliance Risk */}
-            <Select
-              value={filters.compliance_risk_level}
-              onValueChange={(value) => handleFilterChange('compliance_risk_level', value)}
-            >
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder={t('results.filterComplianceRisk')} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="any_risk">{t('risk.level.any_risk')}</SelectItem>
-                <SelectItem value="high_risk">{t('risk.level.high_risk')}</SelectItem>
-                <SelectItem value="medium_risk">{t('risk.level.medium_risk')}</SelectItem>
-                <SelectItem value="low_risk">{t('risk.level.low_risk')}</SelectItem>
-                <SelectItem value="no_risk">{t('risk.level.no_risk')}</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="relative">
+              <Select
+                value={filters.compliance_risk_level}
+                onValueChange={(value) => handleFilterChange('compliance_risk_level', value)}
+              >
+                <SelectTrigger className="w-[120px] h-8 text-xs">
+                  <SelectValue placeholder={t('results.filterComplianceRisk')} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="any_risk">{t('risk.level.any_risk')}</SelectItem>
+                  <SelectItem value="high_risk">{t('risk.level.high_risk')}</SelectItem>
+                  <SelectItem value="medium_risk">{t('risk.level.medium_risk')}</SelectItem>
+                  <SelectItem value="low_risk">{t('risk.level.low_risk')}</SelectItem>
+                  <SelectItem value="no_risk">{t('risk.level.no_risk')}</SelectItem>
+                </SelectContent>
+              </Select>
+              {filters.compliance_risk_level && (
+                <button
+                  onClick={() => handleClearFilter('compliance_risk_level')}
+                  className="absolute -right-1 -top-1 w-4 h-4 bg-gray-400 hover:bg-gray-500 rounded-full flex items-center justify-center"
+                >
+                  <X className="w-2.5 h-2.5 text-white" />
+                </button>
+              )}
+            </div>
 
             {/* Data Leak Risk */}
-            <Select
-              value={filters.data_risk_level}
-              onValueChange={(value) => handleFilterChange('data_risk_level', value)}
-            >
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder={t('results.filterDataLeakRisk')} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="any_risk">{t('risk.level.any_risk')}</SelectItem>
-                <SelectItem value="high_risk">{t('risk.level.high_risk')}</SelectItem>
-                <SelectItem value="medium_risk">{t('risk.level.medium_risk')}</SelectItem>
-                <SelectItem value="low_risk">{t('risk.level.low_risk')}</SelectItem>
-                <SelectItem value="no_risk">{t('risk.level.no_risk')}</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="relative">
+              <Select
+                value={filters.data_risk_level}
+                onValueChange={(value) => handleFilterChange('data_risk_level', value)}
+              >
+                <SelectTrigger className="w-[130px] h-8 text-xs">
+                  <SelectValue placeholder={t('results.filterDataLeakRisk')} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="any_risk">{t('risk.level.any_risk')}</SelectItem>
+                  <SelectItem value="high_risk">{t('risk.level.high_risk')}</SelectItem>
+                  <SelectItem value="medium_risk">{t('risk.level.medium_risk')}</SelectItem>
+                  <SelectItem value="low_risk">{t('risk.level.low_risk')}</SelectItem>
+                  <SelectItem value="no_risk">{t('risk.level.no_risk')}</SelectItem>
+                </SelectContent>
+              </Select>
+              {filters.data_risk_level && (
+                <button
+                  onClick={() => handleClearFilter('data_risk_level')}
+                  className="absolute -right-1 -top-1 w-4 h-4 bg-gray-400 hover:bg-gray-500 rounded-full flex items-center justify-center"
+                >
+                  <X className="w-2.5 h-2.5 text-white" />
+                </button>
+              )}
+            </div>
 
             {/* Category */}
-            <Select
-              value={filters.category}
-              onValueChange={(value) => handleFilterChange('category', value)}
-            >
-              <SelectTrigger className="w-[200px]">
-                <SelectValue placeholder={t('results.selectCategory')} />
-              </SelectTrigger>
-              <SelectContent>
-                {getAllCategories().map((cat) => (
-                  <SelectItem key={cat.value} value={cat.value}>
-                    {cat.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            {/* Data Entity Type */}
-            <Select
-              value={filters.data_entity_type}
-              onValueChange={(value) => handleFilterChange('data_entity_type', value)}
-            >
-              <SelectTrigger className="w-[200px]">
-                <SelectValue placeholder={t('results.selectDataEntityType')} />
-              </SelectTrigger>
-              <SelectContent>
-                {dataEntityTypes
-                  .filter((et) => et.is_active)
-                  .map((et) => (
-                    <SelectItem key={et.entity_type} value={et.entity_type}>
-                      {et.display_name}
+            <div className="relative">
+              <Select
+                value={filters.category}
+                onValueChange={(value) => handleFilterChange('category', value)}
+              >
+                <SelectTrigger className="w-[140px] h-8 text-xs">
+                  <SelectValue placeholder={t('results.selectCategory')} />
+                </SelectTrigger>
+                <SelectContent>
+                  {getAllCategories().map((cat) => (
+                    <SelectItem key={cat.value} value={cat.value}>
+                      {cat.label}
                     </SelectItem>
                   ))}
-              </SelectContent>
-            </Select>
+                </SelectContent>
+              </Select>
+              {filters.category && (
+                <button
+                  onClick={() => handleClearFilter('category')}
+                  className="absolute -right-1 -top-1 w-4 h-4 bg-gray-400 hover:bg-gray-500 rounded-full flex items-center justify-center"
+                >
+                  <X className="w-2.5 h-2.5 text-white" />
+                </button>
+              )}
+            </div>
+
+            {/* Data Entity Type */}
+            <div className="relative">
+              <Select
+                value={filters.data_entity_type}
+                onValueChange={(value) => handleFilterChange('data_entity_type', value)}
+              >
+                <SelectTrigger className="w-[140px] h-8 text-xs">
+                  <SelectValue placeholder={t('results.selectDataEntityType')} />
+                </SelectTrigger>
+                <SelectContent>
+                  {dataEntityTypes
+                    .filter((et) => et.is_active)
+                    .map((et) => (
+                      <SelectItem key={et.entity_type} value={et.entity_type}>
+                        {et.display_name || et.entity_type}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+              {filters.data_entity_type && (
+                <button
+                  onClick={() => handleClearFilter('data_entity_type')}
+                  className="absolute -right-1 -top-1 w-4 h-4 bg-gray-400 hover:bg-gray-500 rounded-full flex items-center justify-center"
+                >
+                  <X className="w-2.5 h-2.5 text-white" />
+                </button>
+              )}
+            </div>
 
             {/* Content Search */}
-            <Input
-              placeholder={t('results.contentSearch')}
-              value={filters.content_search || ''}
-              onChange={(e) => handleFilterChange('content_search', e.target.value || undefined)}
-              className="w-[200px]"
-            />
+            <div className="relative">
+              <Input
+                placeholder={t('results.contentSearch')}
+                value={filters.content_search || ''}
+                onChange={(e) => handleFilterChange('content_search', e.target.value || undefined)}
+                className="w-[140px] h-8 text-xs"
+              />
+              {filters.content_search && (
+                <button
+                  onClick={() => handleClearFilter('content_search')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 bg-gray-400 hover:bg-gray-500 rounded-full flex items-center justify-center"
+                >
+                  <X className="w-2.5 h-2.5 text-white" />
+                </button>
+              )}
+            </div>
 
             {/* Request ID Search */}
-            <Input
-              placeholder={t('results.requestIdSearch')}
-              value={filters.request_id_search || ''}
-              onChange={(e) =>
-                handleFilterChange('request_id_search', e.target.value || undefined)
-              }
-              className="w-[200px]"
-            />
+            <div className="relative">
+              <Input
+                placeholder={t('results.requestIdSearch')}
+                value={filters.request_id_search || ''}
+                onChange={(e) =>
+                  handleFilterChange('request_id_search', e.target.value || undefined)
+                }
+                className="w-[140px] h-8 text-xs"
+              />
+              {filters.request_id_search && (
+                <button
+                  onClick={() => handleClearFilter('request_id_search')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 bg-gray-400 hover:bg-gray-500 rounded-full flex items-center justify-center"
+                >
+                  <X className="w-2.5 h-2.5 text-white" />
+                </button>
+              )}
+            </div>
 
             {/* Date Range */}
             <DateRangePicker value={dateRange} onChange={setDateRange} />
 
+            {/* Reset All Filters Button */}
+            {hasActiveFilters() && (
+              <Button variant="ghost" size="sm" onClick={handleResetAllFilters} className="h-8 text-xs text-gray-500 hover:text-gray-700">
+                <RotateCcw className="mr-1 h-3 w-3" />
+                {t('common.reset')}
+              </Button>
+            )}
+
             {/* Refresh Button */}
-            <Button variant="outline" onClick={fetchResults}>
-              <RefreshCw className="mr-2 h-4 w-4" />
+            <Button variant="outline" size="sm" onClick={fetchResults} className="h-8 text-xs">
+              <RefreshCw className="mr-1 h-3 w-3" />
               {t('results.refresh')}
             </Button>
 
             {/* Export Button */}
-            <Button onClick={handleExport}>
-              <Download className="mr-2 h-4 w-4" />
+            <Button size="sm" onClick={handleExport} className="h-8 text-xs">
+              <Download className="mr-1 h-3 w-3" />
               {t('results.export')}
             </Button>
           </div>

@@ -668,17 +668,22 @@ const EntityTypeManagement: React.FC = () => {
     {
       accessorKey: 'entity_type',
       header: t('entityType.entityTypeColumn'),
-      size: 150,
+      cell: ({ row }) => (
+        <code className="text-xs bg-gray-100 px-1.5 py-0.5 rounded whitespace-nowrap">
+          {row.getValue('entity_type')}
+        </code>
+      ),
     },
     {
       accessorKey: 'entity_type_name',
       header: t('entityType.entityTypeNameColumn'),
-      size: 120,
+      cell: ({ row }) => (
+        <span className="whitespace-nowrap">{row.getValue('entity_type_name')}</span>
+      ),
     },
     {
       id: 'risk_level',
       header: t('entityType.riskLevelColumn'),
-      size: 100,
       cell: ({ row }) => {
         const risk_level = row.original.category || row.original.risk_level
         const level = RISK_LEVELS.find((l) => l.value === risk_level)
@@ -688,7 +693,6 @@ const EntityTypeManagement: React.FC = () => {
     {
       id: 'recognition_method',
       header: t('entityType.recognitionMethodColumn'),
-      size: 100,
       cell: ({ row }) => {
         const method = row.original.recognition_method || 'regex'
         return (
@@ -699,23 +703,8 @@ const EntityTypeManagement: React.FC = () => {
       },
     },
     {
-      id: 'recognition_rule',
-      header: t('entityType.recognitionRulesColumn'),
-      size: 200,
-      cell: ({ row }) => {
-        const method = row.original.recognition_method || 'regex'
-        const content = method === 'genai' ? row.original.entity_definition : row.original.pattern
-        return (
-          <div className="max-w-[200px] truncate" title={content}>
-            <code className="text-xs bg-gray-100 px-1 py-0.5 rounded">{content}</code>
-          </div>
-        )
-      },
-    },
-    {
       accessorKey: 'anonymization_method',
       header: t('entityType.desensitizationMethodColumn'),
-      size: 100,
       cell: ({ row }) => {
         const method = row.getValue('anonymization_method') as string
         const recognitionMethod = row.original.recognition_method || 'regex'
@@ -726,15 +715,14 @@ const EntityTypeManagement: React.FC = () => {
         }
 
         const m = ANONYMIZATION_METHODS.find((a) => a.value === method)
-        return m?.label
+        return <span className="whitespace-nowrap">{m?.label}</span>
       },
     },
     {
       id: 'check_scope',
       header: t('entityType.detectionScopeColumn'),
-      size: 100,
       cell: ({ row }) => (
-        <div className="flex gap-1">
+        <div className="flex gap-1 whitespace-nowrap">
           {row.original.check_input && (
             <Badge variant="default" className="text-xs">
               {t('entityType.input')}
@@ -751,7 +739,6 @@ const EntityTypeManagement: React.FC = () => {
     {
       accessorKey: 'is_active',
       header: t('entityType.statusColumn'),
-      size: 80,
       cell: ({ row }) => {
         const is_active = row.getValue('is_active') as boolean
         return (
@@ -764,28 +751,27 @@ const EntityTypeManagement: React.FC = () => {
     {
       id: 'source_type',
       header: t('entityType.sourceColumn'),
-      size: 100,
       cell: ({ row }) => {
         const sourceType =
           row.original.source_type || (row.original.is_global ? 'system_template' : 'custom')
 
         if (sourceType === 'system_template') {
           return (
-            <Badge variant="default" className="gap-1">
+            <Badge variant="default" className="gap-1 whitespace-nowrap">
               <Globe className="h-3 w-3" />
               {t('entityType.systemTemplate')}
             </Badge>
           )
         } else if (sourceType === 'system_copy') {
           return (
-            <Badge variant="secondary" className="gap-1">
+            <Badge variant="secondary" className="gap-1 whitespace-nowrap">
               <Globe className="h-3 w-3" />
               {t('entityType.systemCopy')}
             </Badge>
           )
         } else {
           return (
-            <Badge variant="outline" className="gap-1">
+            <Badge variant="outline" className="gap-1 whitespace-nowrap">
               <User className="h-3 w-3" />
               {t('entityType.custom')}
             </Badge>
@@ -796,7 +782,6 @@ const EntityTypeManagement: React.FC = () => {
     {
       id: 'action',
       header: t('entityType.operationColumn'),
-      size: 120,
       cell: ({ row }) => {
         const record = row.original
         const sourceType = record.source_type || (record.is_global ? 'system_template' : 'custom')
@@ -805,7 +790,7 @@ const EntityTypeManagement: React.FC = () => {
           sourceType === 'system_template' ? user?.is_super_admin : sourceType === 'custom'
 
         return (
-          <div className="flex gap-2">
+          <div className="flex gap-1">
             <Button
               variant="ghost"
               size="sm"
@@ -896,7 +881,7 @@ const EntityTypeManagement: React.FC = () => {
             </div>
           </div>
 
-          <DataTable columns={columns} data={filteredEntityTypes} loading={loading} />
+          <DataTable columns={columns} data={filteredEntityTypes} loading={loading} stickyLastColumn />
         </CardContent>
       </Card>
 

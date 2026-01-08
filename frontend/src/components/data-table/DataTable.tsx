@@ -37,6 +37,8 @@ interface DataTableProps<TData, TValue> {
   pagination?: boolean
   emptyMessage?: string
   fillHeight?: boolean
+  /** Enable horizontal scrolling with sticky last column (for action column) */
+  stickyLastColumn?: boolean
 }
 
 export function DataTable<TData, TValue>({
@@ -51,6 +53,7 @@ export function DataTable<TData, TValue>({
   pagination = true,
   emptyMessage = "No results found.",
   fillHeight = false,
+  stickyLastColumn = false,
 }: DataTableProps<TData, TValue>) {
   const [paginationState, setPaginationState] = React.useState<PaginationState>({
     pageIndex: currentPage - 1,
@@ -99,16 +102,37 @@ export function DataTable<TData, TValue>({
   const canGoPrevious = currentPage > 1
   const canGoNext = currentPage < totalPages
 
+  // Helper to determine if a column is the last one (for sticky positioning)
+  const isLastColumn = (index: number, total: number) => stickyLastColumn && index === total - 1
+
+  // Sticky column styles
+  const stickyColumnStyle: React.CSSProperties = {
+    position: 'sticky',
+    right: 0,
+    zIndex: 1,
+  }
+
+  const stickyHeaderStyle: React.CSSProperties = {
+    position: 'sticky',
+    right: 0,
+    zIndex: 2,
+  }
+
   return (
     <div className={fillHeight ? "h-full flex flex-col" : "space-y-4"}>
-      <div className={fillHeight ? "flex-1 overflow-auto border-t" : "rounded-md border"}>
-        <Table>
+      <div className={`${fillHeight ? "flex-1 overflow-auto border-t" : "rounded-md border"} ${stickyLastColumn ? "overflow-x-auto" : ""}`}>
+        <Table className={stickyLastColumn ? "min-w-max table-auto" : ""}>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id}>
-                {headerGroup.headers.map((header) => {
+                {headerGroup.headers.map((header, index) => {
+                  const isLast = isLastColumn(index, headerGroup.headers.length)
                   return (
-                    <TableHead key={header.id}>
+                    <TableHead
+                      key={header.id}
+                      style={isLast ? stickyHeaderStyle : undefined}
+                      className={isLast ? "bg-muted shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.1)]" : ""}
+                    >
                       {header.isPlaceholder
                         ? null
                         : flexRender(
@@ -139,14 +163,21 @@ export function DataTable<TData, TValue>({
                   key={row.id}
                   data-state={row.getIsSelected() && "selected"}
                 >
-                  {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id}>
-                      {flexRender(
-                        cell.column.columnDef.cell,
-                        cell.getContext()
-                      )}
-                    </TableCell>
-                  ))}
+                  {row.getVisibleCells().map((cell, index) => {
+                    const isLast = isLastColumn(index, row.getVisibleCells().length)
+                    return (
+                      <TableCell
+                        key={cell.id}
+                        style={isLast ? stickyColumnStyle : undefined}
+                        className={isLast ? "!bg-white shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.1)]" : ""}
+                      >
+                        {flexRender(
+                          cell.column.columnDef.cell,
+                          cell.getContext()
+                        )}
+                      </TableCell>
+                    )
+                  })}
                 </TableRow>
               ))
             ) : (
