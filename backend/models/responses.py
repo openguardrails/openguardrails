@@ -18,6 +18,7 @@ class DataSecurityResult(BaseModel):
     categories: List[str]
     detected_entities: List[Dict[str, Any]] = []  # Detected sensitive entities for anonymization
     anonymized_text: Optional[str] = None  # Anonymized text for replacement action
+    restore_mapping: Optional[Dict[str, str]] = None  # Mapping for restoring numbered placeholders to original values
 
 class GuardrailResult(BaseModel):
     """Guardrail detection result"""

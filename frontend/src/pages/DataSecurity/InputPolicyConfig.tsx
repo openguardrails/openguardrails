@@ -30,9 +30,9 @@ import { dataLeakagePolicyApi } from '../../services/api'
 import { useApplication } from '../../contexts/ApplicationContext'
 
 const inputPolicySchema = z.object({
-  input_high_risk_action: z.enum(['block', 'switch_private_model', 'anonymize', 'pass']).nullable(),
-  input_medium_risk_action: z.enum(['block', 'switch_private_model', 'anonymize', 'pass']).nullable(),
-  input_low_risk_action: z.enum(['block', 'switch_private_model', 'anonymize', 'pass']).nullable(),
+  input_high_risk_action: z.enum(['block', 'switch_private_model', 'anonymize', 'anonymize_restore', 'pass']).nullable(),
+  input_medium_risk_action: z.enum(['block', 'switch_private_model', 'anonymize', 'anonymize_restore', 'pass']).nullable(),
+  input_low_risk_action: z.enum(['block', 'switch_private_model', 'anonymize', 'anonymize_restore', 'pass']).nullable(),
   private_model_id: z.string().nullable(),
   enable_format_detection: z.boolean().nullable(),
   enable_smart_segmentation: z.boolean().nullable(),
@@ -142,6 +142,7 @@ const InputPolicyConfig: React.FC<InputPolicyConfigProps> = ({ policy, hasPrivat
     { value: 'block', label: t('dataLeakagePolicy.actionBlock'), desc: t('dataLeakagePolicy.actionBlockDesc') },
     { value: 'switch_private_model', label: t('dataLeakagePolicy.actionSwitchPrivateModel'), desc: t('dataLeakagePolicy.actionSwitchPrivateModelDesc'), requiresPrivateModel: true },
     { value: 'anonymize', label: t('dataLeakagePolicy.actionAnonymize'), desc: t('dataLeakagePolicy.actionAnonymizeDesc') },
+    { value: 'anonymize_restore', label: t('dataLeakagePolicy.actionAnonymizeRestore'), desc: t('dataLeakagePolicy.actionAnonymizeRestoreDesc') },
     { value: 'pass', label: t('dataLeakagePolicy.actionPass'), desc: t('dataLeakagePolicy.actionPassDesc') },
   ]
 

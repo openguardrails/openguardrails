@@ -154,14 +154,15 @@ class DataSecurityService:
                     if self._compare_risk_level(entity_risk, highest_risk_level) > 0:
                         highest_risk_level = RISK_LEVEL_MAPPING.get(entity_risk, 'medium_risk')
 
-        # 6. De-sensitization
-        anonymized_text = self._anonymize_text(text, detected_entities, entity_types)
+        # 6. De-sensitization - unified handling for both restore and normal entities
+        anonymized_text, restore_mapping = self._anonymize_text_unified(text, detected_entities, entity_types)
 
         return {
             'risk_level': highest_risk_level,
             'categories': list(detected_categories),
             'detected_entities': detected_entities,
             'anonymized_text': anonymized_text,
+            'restore_mapping': restore_mapping if restore_mapping else None,
             'format_info': {
                 'format_type': format_type,
                 'metadata': format_metadata
@@ -248,7 +249,11 @@ class DataSecurityService:
                     'pattern': recognition_config.get('pattern', ''),
                     'entity_definition': recognition_config.get('entity_definition', ''),
                     'anonymization_method': et.anonymization_method,
-                    'anonymization_config': et.anonymization_config or {}
+                    'anonymization_config': et.anonymization_config or {},
+                    # Restore anonymization fields
+                    'restore_enabled': et.restore_enabled or False,
+                    'restore_code': et.restore_code,
+                    'restore_code_hash': et.restore_code_hash
                 })
 
             return entity_types
@@ -280,7 +285,11 @@ class DataSecurityService:
                     'text': match.group(),
                     'risk_level': entity_type['risk_level'],
                     'anonymization_method': entity_type['anonymization_method'],
-                    'anonymization_config': entity_type['anonymization_config']
+                    'anonymization_config': entity_type['anonymization_config'],
+                    # Restore anonymization fields
+                    'restore_enabled': entity_type.get('restore_enabled', False),
+                    'restore_code': entity_type.get('restore_code'),
+                    'restore_code_hash': entity_type.get('restore_code_hash')
                 })
         except re.error as e:
             logger.error(f"Invalid regex pattern for {entity_type['entity_type']}: {e}")
@@ -394,7 +403,11 @@ Text:
                                 'text': original_text,
                                 'risk_level': et['risk_level'],
                                 'anonymization_method': et.get('anonymization_method', 'genai'),
-                                'anonymization_config': et.get('anonymization_config', {})
+                                'anonymization_config': et.get('anonymization_config', {}),
+                                # Restore anonymization fields
+                                'restore_enabled': et.get('restore_enabled', False),
+                                'restore_code': et.get('restore_code'),
+                                'restore_code_hash': et.get('restore_code_hash')
                             })
 
                             start_pos = pos + len(original_text)
@@ -509,7 +522,16 @@ Text:
         detected_entities: List[Dict[str, Any]],
         entity_types: List[Dict[str, Any]]
     ) -> str:
-        """De-sensitize text"""
+        """De-sensitize text and store anonymized_value in each entity.
+
+        This method:
+        1. Applies anonymization to each detected entity based on its configured method
+        2. Stores the anonymized result in entity['anonymized_value'] for reuse by proxy
+        3. Returns the fully anonymized text
+
+        The anonymized_value is stored in the original detected_entities list so that
+        proxy_api can reuse it without re-computing the anonymization.
+        """
         if not detected_entities:
             return text
 
@@ -554,7 +576,7 @@ Text:
 
             # Process according to de-sensitization method
             if method == 'regex_replace':
-                # 正则替换脱敏 - 使用捕获组和替换模板
+                # Regex replace anonymization - use capture groups and replacement template
                 pattern = config.get('regex_pattern', '')
                 replacement_template = config.get('replacement_template', '***')
                 try:
@@ -568,7 +590,7 @@ Text:
                     logger.warning(f"Regex replace error for {entity['entity_type']}: {e}")
                     replacement = f"<{entity['entity_type']}>"
             elif method == 'genai':
-                # GenAI智能脱敏 - 使用AI生成替换内容
+                # GenAI anonymization - use AI to generate replacement content
                 anonymization_prompt = config.get('anonymization_prompt', '')
                 if anonymization_prompt:
                     replacement = self._genai_anonymize_sync(original_text, anonymization_prompt, entity.get('entity_type_name', entity['entity_type']))
@@ -600,10 +622,169 @@ Text:
                 # Default replace
                 replacement = f"<{entity['entity_type']}>"
 
+            # Store anonymized value in entity for reuse by proxy_api
+            # This avoids re-computing the anonymization in proxy
+            entity['anonymized_value'] = replacement
+
             # Replace text
             anonymized_text = anonymized_text[:entity['start']] + replacement + anonymized_text[entity['end']:]
 
         return anonymized_text
+
+    def _anonymize_text_unified(
+        self,
+        text: str,
+        detected_entities: List[Dict[str, Any]],
+        entity_types: List[Dict[str, Any]]
+    ) -> Tuple[str, Dict[str, str]]:
+        """Unified de-sensitization for both restore and normal entities.
+
+        This method handles both restore-enabled entities (using numbered placeholders like [email_1])
+        and normal entities (using standard anonymization methods like mask, replace, etc.)
+
+        Args:
+            text: Original text to anonymize
+            detected_entities: List of detected entities with their positions and configs
+            entity_types: List of entity type configurations
+
+        Returns:
+            Tuple of (anonymized_text, restore_mapping)
+            - anonymized_text: The fully anonymized text
+            - restore_mapping: Dict mapping placeholders to original values (for restore entities)
+        """
+        if not detected_entities:
+            return text, {}
+
+        # Remove overlapping entities (same logic as _anonymize_text)
+        filtered_entities = []
+        for i, entity1 in enumerate(detected_entities):
+            is_contained = False
+            for j, entity2 in enumerate(detected_entities):
+                if i != j:
+                    if (entity1['start'] >= entity2['start'] and
+                        entity1['end'] <= entity2['end'] and
+                        len(entity1['text']) < len(entity2['text'])):
+                        is_contained = True
+                        break
+                    elif (entity1['start'] == entity2['start'] and
+                          entity1['end'] == entity2['end'] and
+                          entity1.get('anonymization_method') == 'mask' and
+                          entity2.get('anonymization_method') == 'replace'):
+                        continue
+                    elif (entity1['start'] == entity2['start'] and
+                          entity1['end'] == entity2['end'] and
+                          entity1.get('anonymization_method') == 'replace' and
+                          entity2.get('anonymization_method') == 'mask'):
+                        is_contained = True
+                        break
+            if not is_contained:
+                filtered_entities.append(entity1)
+
+        # Sort by position in descending order (back to front replacement)
+        sorted_entities = sorted(filtered_entities, key=lambda x: (x['start'], len(x['text'])), reverse=True)
+
+        anonymized_text = text
+        restore_mapping = {}
+        restore_counters = {}
+
+        for entity in sorted_entities:
+            original_text = entity['text']
+            entity_type_code = entity['entity_type']
+
+            # Check if this entity has restore enabled with valid code
+            restore_enabled = entity.get('restore_enabled', False)
+            restore_code = entity.get('restore_code')
+            restore_code_hash = entity.get('restore_code_hash')
+
+            if restore_enabled:
+                # Use numbered placeholder for restore mode
+                if restore_code and restore_code_hash:
+                    # Use AI-generated restore code if available
+                    from services.restore_anonymization_service import get_restore_anonymization_service
+                    restore_service = get_restore_anonymization_service()
+
+                    try:
+                        # Execute the stored restore code
+                        result_text, new_mapping, new_counters = restore_service.execute_restore_anonymization(
+                            original_text,
+                            entity_type_code,
+                            restore_code,
+                            restore_code_hash,
+                            restore_mapping,
+                            restore_counters
+                        )
+
+                        # Update mappings and counters
+                        restore_mapping.update(new_mapping)
+                        restore_counters.update(new_counters)
+                        replacement = result_text
+
+                        logger.debug(f"Restore anonymization for {entity_type_code}: {original_text} -> {replacement}")
+
+                    except Exception as e:
+                        logger.error(f"Restore anonymization failed for {entity_type_code}: {e}")
+                        # Fallback to simple numbered placeholder
+                        counter_key = entity_type_code.lower()
+                        counter = restore_counters.get(counter_key, 0) + 1
+                        restore_counters[counter_key] = counter
+                        replacement = f"[{counter_key}_{counter}]"
+                        restore_mapping[replacement] = original_text
+                else:
+                    # No AI code available, use simple numbered placeholder format
+                    counter_key = entity_type_code.lower()
+                    counter = restore_counters.get(counter_key, 0) + 1
+                    restore_counters[counter_key] = counter
+                    replacement = f"[{counter_key}_{counter}]"
+                    restore_mapping[replacement] = original_text
+                    logger.debug(f"Simple numbered placeholder for {entity_type_code}: {original_text} -> {replacement}")
+            else:
+                # Use standard anonymization methods
+                method = entity.get('anonymization_method', 'replace')
+                config = entity.get('anonymization_config', {})
+
+                if method == 'regex_replace':
+                    pattern = config.get('regex_pattern', '')
+                    replacement_template = config.get('replacement_template', '***')
+                    try:
+                        if pattern:
+                            python_replacement = _convert_replacement_template(replacement_template)
+                            replacement = re.sub(pattern, python_replacement, original_text)
+                        else:
+                            replacement = '***'
+                    except re.error as e:
+                        logger.warning(f"Regex replace error for {entity_type_code}: {e}")
+                        replacement = f"<{entity_type_code}>"
+                elif method == 'genai':
+                    anonymization_prompt = config.get('anonymization_prompt', '')
+                    if anonymization_prompt:
+                        replacement = self._genai_anonymize_sync(original_text, anonymization_prompt, entity.get('entity_type_name', entity_type_code))
+                    else:
+                        replacement = f"[REDACTED_{entity.get('entity_type_name', entity_type_code).upper().replace(' ', '_')}]"
+                elif method == 'replace':
+                    replacement = config.get('replacement', f"<{entity_type_code}>")
+                elif method == 'mask':
+                    mask_char = config.get('mask_char', '*')
+                    keep_prefix = config.get('keep_prefix', 0)
+                    keep_suffix = config.get('keep_suffix', 0)
+                    replacement = self._mask_string(original_text, mask_char, keep_prefix, keep_suffix)
+                elif method == 'hash':
+                    replacement = self._hash_string(original_text)
+                elif method == 'encrypt':
+                    replacement = f"<ENCRYPTED_{hashlib.md5(original_text.encode()).hexdigest()[:8]}>"
+                elif method == 'shuffle':
+                    replacement = self._shuffle_string(original_text)
+                elif method == 'random':
+                    replacement = self._random_replacement(original_text)
+                else:
+                    replacement = f"<{entity_type_code}>"
+
+            # Store anonymized value in entity for reuse
+            entity['anonymized_value'] = replacement
+
+            # Replace text
+            anonymized_text = anonymized_text[:entity['start']] + replacement + anonymized_text[entity['end']:]
+
+        return anonymized_text, restore_mapping
 
     def _mask_string(self, text: str, mask_char: str = '*', keep_prefix: int = 0, keep_suffix: int = 0) -> str:
         """Mask string"""
@@ -692,17 +873,149 @@ Text:
             logger.error(f"GenAI anonymization failed for {entity_type_name}: {e}")
             return f"[REDACTED_{entity_type_name.upper().replace(' ', '_')}]"
 
-    async def generate_anonymization_regex(self, description: str, entity_type: str, sample_data: str = None) -> dict:
+    def anonymize_text_with_restore(
+        self,
+        text: str,
+        detected_entities: List[Dict[str, Any]],
+        entity_type_configs: Dict[str, Any],
+        existing_mapping: Dict[str, str] = None,
+        existing_counters: Dict[str, int] = None
+    ) -> Tuple[str, Dict[str, str], Dict[str, int]]:
         """
-        使用AI生成脱敏正则表达式
+        Anonymize text with numbered placeholders for later restoration.
+
+        This method replaces sensitive data with placeholders like [email_1], [phone_1]
+        and returns a mapping that can be used to restore the original values.
 
         Args:
-            description: 用户对脱敏规则的自然语言描述
-            entity_type: 实体类型
-            sample_data: 可选的示例数据
+            text: Input text to anonymize
+            detected_entities: List of detected entities with start, end, text, entity_type
+            entity_type_configs: Dict of entity type code to config (including restore_code)
+            existing_mapping: Existing placeholder->original mappings to continue from
+            existing_counters: Existing entity type counters
 
         Returns:
-            包含regex_pattern, replacement_template, explanation的字典
+            Tuple of (anonymized_text, mapping, counters)
+            - anonymized_text: Text with placeholders
+            - mapping: Dict of placeholder -> original value
+            - counters: Updated entity type counters
+        """
+        from services.restore_anonymization_service import get_restore_anonymization_service
+
+        if not detected_entities:
+            return text, existing_mapping or {}, existing_counters or {}
+
+        mapping = dict(existing_mapping) if existing_mapping else {}
+        counters = dict(existing_counters) if existing_counters else {}
+        restore_service = get_restore_anonymization_service()
+
+        # Filter entities that have restore enabled
+        restore_entities = []
+        normal_entities = []
+
+        for entity in detected_entities:
+            entity_type_code = entity.get('entity_type', '')
+            config = entity_type_configs.get(entity_type_code, {})
+
+            if config.get('restore_enabled') and config.get('restore_code') and config.get('restore_code_hash'):
+                restore_entities.append((entity, config))
+            else:
+                normal_entities.append(entity)
+
+        # First, process entities with restore enabled
+        anonymized_text = text
+        processed_positions = set()
+
+        # Sort restore entities by position (reverse order for back-to-front replacement)
+        restore_entities_sorted = sorted(
+            restore_entities,
+            key=lambda x: x[0]['start'],
+            reverse=True
+        )
+
+        for entity, config in restore_entities_sorted:
+            start, end = entity['start'], entity['end']
+            original_text = entity['text']
+            entity_type_code = entity['entity_type']
+
+            # Skip if this position was already processed
+            if (start, end) in processed_positions:
+                continue
+
+            try:
+                # Execute the stored restore code
+                result_text, new_mapping, new_counters = restore_service.execute_restore_anonymization(
+                    original_text,
+                    entity_type_code,
+                    config['restore_code'],
+                    config['restore_code_hash'],
+                    mapping,
+                    counters
+                )
+
+                # Update mappings and counters
+                mapping.update(new_mapping)
+                counters.update(new_counters)
+
+                # Replace in text
+                anonymized_text = anonymized_text[:start] + result_text + anonymized_text[end:]
+                processed_positions.add((start, end))
+
+            except Exception as e:
+                logger.error(f"Restore anonymization failed for {entity_type_code}: {e}")
+                # Fallback to simple placeholder
+                counter_key = entity_type_code.lower()
+                counter = counters.get(counter_key, 0) + 1
+                counters[counter_key] = counter
+                placeholder = f"[{counter_key}_{counter}]"
+                mapping[placeholder] = original_text
+                anonymized_text = anonymized_text[:start] + placeholder + anonymized_text[end:]
+                processed_positions.add((start, end))
+
+        # Then, process normal entities (without restore) using simple placeholders
+        # Re-calculate positions based on current anonymized_text
+        # This is simpler: just apply standard anonymization for non-restore entities
+        if normal_entities:
+            # For normal entities, use the standard _anonymize_text method
+            # But we need to update positions based on changes already made
+            # For simplicity, we'll just do simple placeholder replacement
+            normal_sorted = sorted(
+                normal_entities,
+                key=lambda x: x['start'],
+                reverse=True
+            )
+
+            for entity in normal_sorted:
+                start, end = entity['start'], entity['end']
+                if (start, end) in processed_positions:
+                    continue
+
+                entity_type_code = entity['entity_type']
+                counter_key = entity_type_code.lower()
+                counter = counters.get(counter_key, 0) + 1
+                counters[counter_key] = counter
+                placeholder = f"[{counter_key}_{counter}]"
+
+                # Store full text in mapping
+                mapping[placeholder] = entity['text']
+
+                # Replace in text
+                anonymized_text = anonymized_text[:start] + placeholder + anonymized_text[end:]
+                processed_positions.add((start, end))
+
+        return anonymized_text, mapping, counters
+
+    async def generate_anonymization_regex(self, description: str, entity_type: str, sample_data: str = None) -> dict:
+        """
+        Generate anonymization regex using AI
+
+        Args:
+            description: natural language description of anonymization rule
+            entity_type: entity type
+            sample_data: optional sample data
+
+        Returns:
+            Dictionary containing regex_pattern, replacement_template, explanation
         """
         prompt = f"""Generate a regex pattern and replacement template for data anonymization.
 
@@ -778,15 +1091,15 @@ Return JSON only, no markdown:
 
     async def generate_recognition_regex(self, description: str, entity_type: str, sample_data: str = None) -> dict:
         """
-        使用AI生成识别用的正则表达式
+        Generate recognition regex using AI
 
         Args:
-            description: 用户对要识别数据的自然语言描述
-            entity_type: 实体类型名称
-            sample_data: 可选的示例数据
+            description: natural language description of what to detect
+            entity_type: entity type name
+            sample_data: optional sample data
 
         Returns:
-            包含regex_pattern和explanation的字典
+            Dictionary containing regex_pattern and explanation
         """
         prompt = f"""Generate a regex pattern to recognize/detect a specific type of sensitive data.
 
@@ -858,13 +1171,13 @@ Return JSON only, no markdown:
 
     async def generate_entity_type_code(self, entity_type_name: str) -> dict:
         """
-        使用AI根据实体类型名称生成实体类型代码
+        Generate entity type code using AI based on entity type name
 
         Args:
-            entity_type_name: 实体类型名称（可以是中文或英文）
+            entity_type_name: entity type name (can be Chinese or English)
 
         Returns:
-            包含entity_type_code的字典
+            Dictionary containing entity_type_code
         """
         prompt = f"""Generate an entity type code based on the given entity type name.
 
@@ -878,16 +1191,16 @@ Requirements:
 5. No spaces, numbers, or special characters allowed
 
 Examples:
-- "手机号码" → PHONE_NUMBER
-- "身份证号" → ID_CARD_NUMBER
-- "邮箱地址" → EMAIL_ADDRESS
-- "银行卡号" → BANK_CARD_NUMBER
-- "家庭住址" → HOME_ADDRESS
-- "公司名称" → COMPANY_NAME
-- "信用卡" → CREDIT_CARD
-- "护照号" → PASSPORT_NUMBER
-- "IP地址" → IP_ADDRESS
-- "车牌号" → LICENSE_PLATE
+- "Phone Number" → PHONE_NUMBER
+- "ID Card Number" → ID_CARD_NUMBER
+- "Email Address" → EMAIL_ADDRESS
+- "Bank Card Number" → BANK_CARD_NUMBER
+- "Home Address" → HOME_ADDRESS
+- "Company Name" → COMPANY_NAME
+- "Credit Card" → CREDIT_CARD
+- "Passport Number" → PASSPORT_NUMBER
+- "IP Address" → IP_ADDRESS
+- "License Plate" → LICENSE_PLATE
 
 Return JSON only, no markdown:
 {{"entity_type_code": "YOUR_CODE_HERE"}}"""
@@ -1026,14 +1339,14 @@ Return JSON only, no markdown:
 
     def test_recognition_regex(self, pattern: str, test_input: str) -> dict:
         """
-        测试识别正则表达式是否能匹配输入
+        Test if recognition regex can match input
 
         Args:
-            pattern: 正则表达式
-            test_input: 测试输入
+            pattern: regex pattern
+            test_input: test input
 
         Returns:
-            包含匹配结果的字典
+            Dictionary containing matching results
         """
         import time
         start_time = time.time()
@@ -1083,15 +1396,15 @@ Return JSON only, no markdown:
 
     def test_anonymization(self, method: str, config: dict, test_input: str) -> dict:
         """
-        测试脱敏效果
+        Test anonymization effect
 
         Args:
-            method: 脱敏方法
-            config: 脱敏配置
-            test_input: 测试输入
+            method: anonymization method
+            config: anonymization config
+            test_input: test input
 
         Returns:
-            包含result和processing_time_ms的字典
+            Dictionary containing result and processing_time_ms
         """
         import time
         start_time = time.time()
@@ -1182,7 +1495,9 @@ Return JSON only, no markdown:
         check_output: bool = True,
         is_global: bool = False,
         source_type: str = 'custom',
-        template_id: Optional[str] = None
+        template_id: Optional[str] = None,
+        restore_enabled: bool = False,
+        restore_natural_desc: Optional[str] = None
     ) -> DataSecurityEntityType:
         """Create sensitive data type configuration
 
@@ -1225,7 +1540,9 @@ Return JSON only, no markdown:
             anonymization_config=anonymization_config or {},
             is_global=is_global,
             source_type=source_type,
-            template_id=template_id
+            template_id=template_id,
+            restore_enabled=restore_enabled,
+            restore_natural_desc=restore_natural_desc
         )
 
         self.db.add(entity_type_obj)
@@ -1305,6 +1622,12 @@ Return JSON only, no markdown:
                 entity_type.anonymization_config = kwargs['anonymization_config']
         if 'is_active' in kwargs:
             entity_type.is_active = kwargs['is_active']
+
+        # Restore anonymization fields
+        if 'restore_enabled' in kwargs:
+            entity_type.restore_enabled = kwargs['restore_enabled']
+        if 'restore_natural_desc' in kwargs:
+            entity_type.restore_natural_desc = kwargs['restore_natural_desc']
 
         entity_type.updated_at = datetime.utcnow()
         self.db.commit()

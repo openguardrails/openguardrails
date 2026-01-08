@@ -99,9 +99,9 @@ class UpstreamApiConfigBrief(BaseModel):
 class TenantPolicyUpdate(BaseModel):
     """Update tenant-level default data leakage policy"""
     # Input policy defaults
-    default_input_high_risk_action: str = Field(..., pattern='^(block|switch_private_model|anonymize|pass)$')
-    default_input_medium_risk_action: str = Field(..., pattern='^(block|switch_private_model|anonymize|pass)$')
-    default_input_low_risk_action: str = Field(..., pattern='^(block|switch_private_model|anonymize|pass)$')
+    default_input_high_risk_action: str = Field(..., pattern='^(block|switch_private_model|anonymize|anonymize_restore|pass)$')
+    default_input_medium_risk_action: str = Field(..., pattern='^(block|switch_private_model|anonymize|anonymize_restore|pass)$')
+    default_input_low_risk_action: str = Field(..., pattern='^(block|switch_private_model|anonymize|anonymize_restore|pass)$')
 
     # Output policy defaults
     default_output_high_risk_anonymize: bool
@@ -147,9 +147,9 @@ class TenantPolicyResponse(BaseModel):
 class ApplicationPolicyUpdate(BaseModel):
     """Update application-level policy overrides (NULL = use tenant default)"""
     # Input policy overrides
-    input_high_risk_action: Optional[str] = Field(None, pattern='^(block|switch_private_model|anonymize|pass)$')
-    input_medium_risk_action: Optional[str] = Field(None, pattern='^(block|switch_private_model|anonymize|pass)$')
-    input_low_risk_action: Optional[str] = Field(None, pattern='^(block|switch_private_model|anonymize|pass)$')
+    input_high_risk_action: Optional[str] = Field(None, pattern='^(block|switch_private_model|anonymize|anonymize_restore|pass)$')
+    input_medium_risk_action: Optional[str] = Field(None, pattern='^(block|switch_private_model|anonymize|anonymize_restore|pass)$')
+    input_low_risk_action: Optional[str] = Field(None, pattern='^(block|switch_private_model|anonymize|anonymize_restore|pass)$')
 
     # Output policy overrides
     output_high_risk_anonymize: Optional[bool] = None

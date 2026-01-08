@@ -631,12 +631,14 @@ class DetectionGuardrailService:
                 # Return both result and anonymized text
                 anonymized_text = result.get('anonymized_text') if result['risk_level'] != 'no_risk' else None
                 detected_entities = result.get('detected_entities', []) if result['risk_level'] != 'no_risk' else []
+                restore_mapping = result.get('restore_mapping') if result['risk_level'] != 'no_risk' else None
 
                 data_result = DataSecurityResult(
                     risk_level=result['risk_level'],
                     categories=result['categories'],
                     detected_entities=detected_entities,
-                    anonymized_text=anonymized_text
+                    anonymized_text=anonymized_text,
+                    restore_mapping=restore_mapping
                 )
 
                 return data_result, anonymized_text

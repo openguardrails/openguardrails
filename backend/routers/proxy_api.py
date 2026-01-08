@@ -75,14 +75,16 @@ def get_detection_mode(model_config, detection_type: str) -> DetectionMode:
 
 
 def _anonymize_all_user_messages(messages: list, detected_entities: list, logger) -> list:
-    """Anonymize sensitive data in all user messages
+    """Anonymize sensitive data in all user messages using pre-computed anonymized values.
 
-    This function takes the detected entities and applies anonymization to each
-    user message in the conversation, preserving the message structure.
+    This function uses the 'anonymized_value' field from detected_entities, which was
+    pre-computed by data_security_service._anonymize_text(). This avoids redundant
+    re-computation of anonymization.
 
     Args:
         messages: List of message dicts with 'role' and 'content'
         detected_entities: List of detected entity dicts from data_security_service
+            Each entity should contain: text, anonymized_value (pre-computed)
         logger: Logger instance
 
     Returns:
@@ -91,39 +93,27 @@ def _anonymize_all_user_messages(messages: list, detected_entities: list, logger
     if not detected_entities:
         return messages
 
-    # Build a lookup of entities by their original text
-    # Each entity has: entity_type, entity_type_name, start, end, text, risk_level, anonymization_method, anonymization_config
+    # Build replacement map using pre-computed anonymized_value
     entity_replacements = {}
-    for entity in detected_entities:
+
+    # Sort by text length (longest first) to avoid partial replacements
+    sorted_entities = sorted(detected_entities, key=lambda x: len(x.get('text', '')), reverse=True)
+
+    for entity in sorted_entities:
         original_text = entity.get('text', '')
-        if not original_text:
+        if not original_text or original_text in entity_replacements:
             continue
 
-        # Generate replacement based on anonymization method
-        method = entity.get('anonymization_method', 'replace')
-        config = entity.get('anonymization_config', {})
-        entity_type = entity.get('entity_type', 'UNKNOWN')
-        entity_type_name = entity.get('entity_type_name', entity_type)
-
-        if method == 'genai':
-            replacement = f"[REDACTED_{entity_type_name.upper().replace(' ', '_')}]"
-        elif method == 'replace':
-            replacement = config.get('replacement', f"<{entity_type}>")
-        elif method == 'mask':
-            mask_char = config.get('mask_char', '*')
-            keep_prefix = config.get('keep_prefix', 0)
-            keep_suffix = config.get('keep_suffix', 0)
-            if len(original_text) <= keep_prefix + keep_suffix:
-                replacement = original_text
-            else:
-                prefix = original_text[:keep_prefix] if keep_prefix > 0 else ''
-                suffix = original_text[-keep_suffix:] if keep_suffix > 0 else ''
-                middle_length = len(original_text) - keep_prefix - keep_suffix
-                replacement = prefix + mask_char * middle_length + suffix
+        # Use pre-computed anonymized_value from data_security_service
+        # Falls back to entity_type placeholder if not available
+        anonymized_value = entity.get('anonymized_value')
+        if anonymized_value is not None:
+            entity_replacements[original_text] = anonymized_value
         else:
-            replacement = f"<{entity_type}>"
-
-        entity_replacements[original_text] = replacement
+            # Fallback if anonymized_value not pre-computed (shouldn't happen normally)
+            entity_type = entity.get('entity_type', 'UNKNOWN')
+            entity_replacements[original_text] = f"<{entity_type}>"
+            logger.warning(f"Entity {entity_type} missing anonymized_value, using fallback")
 
     # Anonymize each user message
     modified_messages = []
@@ -131,7 +121,6 @@ def _anonymize_all_user_messages(messages: list, detected_entities: list, logger
         if msg.get('role') == 'user':
             content = msg.get('content', '')
             if isinstance(content, str):
-                # Apply all entity replacements to this message content
                 anonymized_content = content
                 # Sort by length (longest first) to avoid partial replacements
                 for original, replacement in sorted(entity_replacements.items(), key=lambda x: len(x[0]), reverse=True):
@@ -140,7 +129,7 @@ def _anonymize_all_user_messages(messages: list, detected_entities: list, logger
                 modified_msg = msg.copy()
                 modified_msg['content'] = anonymized_content
                 modified_messages.append(modified_msg)
-                logger.debug(f"Anonymized user message: replaced {len(entity_replacements)} entity types")
+                logger.debug(f"Anonymized user message: replaced {len(entity_replacements)} entities using pre-computed values")
             else:
                 # Non-string content (e.g., multimodal), keep as is for now
                 modified_messages.append(msg.copy())
@@ -149,6 +138,143 @@ def _anonymize_all_user_messages(messages: list, detected_entities: list, logger
             modified_messages.append(msg.copy())
 
     return modified_messages
+
+
+def _anonymize_all_user_messages_with_restore(
+    messages: list,
+    detected_entities: list,
+    application_id: str,
+    db,
+    logger
+) -> tuple:
+    """Anonymize sensitive data with numbered placeholders for later restoration.
+
+    This function always generates numbered placeholders (e.g., [email_sys_1], [phone_number_sys_1])
+    for ALL detected entities, ensuring they can be restored in the output.
+
+    Two modes are supported:
+    1. Entities with restore_enabled=True and restore_code: Execute the restore_code to generate
+       custom placeholders (e.g., [email_sys_1]@gmail.com preserving domain)
+    2. Entities without restore_code: Use simple numbered placeholder format [entity_type_N]
+
+    Args:
+        messages: List of message dicts with 'role' and 'content'
+        detected_entities: List of detected entity dicts from data_security_service
+        application_id: Application ID to get entity type configs
+        db: Database session
+        logger: Logger instance
+
+    Returns:
+        Tuple of (modified_messages, restore_mapping)
+        - modified_messages: List of messages with placeholder content
+        - restore_mapping: Dict of placeholder -> original value (for ALL entities)
+    """
+    from database.models import DataSecurityEntityType
+
+    if not detected_entities:
+        return messages, {}
+
+    # Get entity type configs with restore settings
+    entity_type_codes = list(set(e.get('entity_type', '') for e in detected_entities))
+    entity_type_configs = {}
+
+    try:
+        entity_types = db.query(DataSecurityEntityType).filter(
+            DataSecurityEntityType.application_id == application_id,
+            DataSecurityEntityType.entity_type.in_(entity_type_codes),
+            DataSecurityEntityType.is_active == True
+        ).all()
+
+        for et in entity_types:
+            entity_type_configs[et.entity_type] = {
+                'restore_enabled': et.restore_enabled,
+                'restore_code': et.restore_code,
+                'restore_code_hash': et.restore_code_hash
+            }
+    except Exception as e:
+        logger.error(f"Failed to get entity type configs: {e}")
+
+    # Build mapping for restoration and replacement map
+    restore_mapping = {}
+    entity_counters = {}
+    entity_replacements = {}
+
+    # Sort by text length (longest first) to avoid partial replacements
+    sorted_entities = sorted(detected_entities, key=lambda x: len(x.get('text', '')), reverse=True)
+
+    # Import restore service for entities with restore_code
+    from services.restore_anonymization_service import get_restore_anonymization_service
+    restore_service = get_restore_anonymization_service()
+
+    for entity in sorted_entities:
+        original_text = entity.get('text', '')
+        if not original_text or original_text in entity_replacements:
+            continue
+
+        entity_type = entity.get('entity_type', 'UNKNOWN')
+        config = entity_type_configs.get(entity_type, {})
+
+        # Check if this entity type has restore enabled with valid code
+        restore_enabled = config.get('restore_enabled', False)
+        restore_code = config.get('restore_code')
+        restore_code_hash = config.get('restore_code_hash')
+
+        if restore_enabled and restore_code and restore_code_hash:
+            # Execute restore_code to get custom placeholder format
+            try:
+                result_text, new_mapping, new_counters = restore_service.execute_restore_anonymization(
+                    original_text,
+                    entity_type,
+                    restore_code,
+                    restore_code_hash,
+                    restore_mapping,
+                    entity_counters
+                )
+                entity_replacements[original_text] = result_text
+                restore_mapping.update(new_mapping)
+                entity_counters.update(new_counters)
+                logger.debug(f"Executed restore_code for {entity_type}: {original_text} -> {result_text}")
+            except Exception as e:
+                logger.warning(f"Restore code execution failed for {entity_type}: {e}, falling back to simple placeholder")
+                # Fallback to simple placeholder
+                counter_key = entity_type.lower()
+                counter = entity_counters.get(counter_key, 0) + 1
+                entity_counters[counter_key] = counter
+                placeholder = f"[{counter_key}_{counter}]"
+                entity_replacements[original_text] = placeholder
+                restore_mapping[placeholder] = original_text
+        else:
+            # No restore_code configured - use simple numbered placeholder format
+            # This ensures anonymize_restore action always produces restorable placeholders
+            counter_key = entity_type.lower()
+            counter = entity_counters.get(counter_key, 0) + 1
+            entity_counters[counter_key] = counter
+            placeholder = f"[{counter_key}_{counter}]"
+            entity_replacements[original_text] = placeholder
+            restore_mapping[placeholder] = original_text
+            logger.debug(f"Using numbered placeholder for {entity_type}: {original_text} -> {placeholder}")
+
+    # Anonymize each user message
+    modified_messages = []
+    for msg in messages:
+        if msg.get('role') == 'user':
+            content = msg.get('content', '')
+            if isinstance(content, str):
+                anonymized_content = content
+                # Apply all entity replacements
+                for original, replacement in sorted(entity_replacements.items(), key=lambda x: len(x[0]), reverse=True):
+                    anonymized_content = anonymized_content.replace(original, replacement)
+
+                modified_msg = msg.copy()
+                modified_msg['content'] = anonymized_content
+                modified_messages.append(modified_msg)
+                logger.debug(f"Anonymized with restore: replaced {len(entity_replacements)} entities, {len(restore_mapping)} restorable")
+            else:
+                modified_messages.append(msg.copy())
+        else:
+            modified_messages.append(msg.copy())
+
+    return modified_messages, restore_mapping
 
 
 async def perform_input_detection(model_config, input_messages: list, tenant_id: str, request_id: str, user_id: str = None, application_id: str = None):
@@ -232,6 +358,7 @@ async def _sync_input_detection(model_config, input_messages: list, tenant_id: s
         disposal_action = 'pass'
         modified_messages = input_messages
         modified_model_config = model_config
+        restore_mapping = {}  # For anonymize_restore action
         disposal_service = None  # Initialize to None
 
         if data_risk_level != 'no_risk' and application_id:
@@ -288,6 +415,26 @@ async def _sync_input_detection(model_config, input_messages: list, tenant_id: s
                             input_messages, detected_entities, logger
                         )
                         logger.info(f"Anonymized {len([m for m in input_messages if m.get('role') == 'user'])} user messages for data safety")
+
+                        # Save restore_mapping for output restoration (if available)
+                        data_restore_mapping = detection_result.get('data_result', {}).get('restore_mapping', {})
+                        if data_restore_mapping:
+                            from services.request_context import AnonymizationContext
+                            AnonymizationContext.set_mapping(data_restore_mapping)
+                            logger.info(f"Saved restore_mapping with {len(data_restore_mapping)} entries for output restoration")
+
+                elif disposal_action == 'anonymize_restore':
+                    # Anonymize with numbered placeholders for later restoration
+                    detected_entities = detection_result.get('data_result', {}).get('detected_entities', [])
+                    if detected_entities:
+                        modified_messages, restore_mapping = _anonymize_all_user_messages_with_restore(
+                            input_messages, detected_entities, application_id, db, logger
+                        )
+                        if restore_mapping:
+                            # Store mapping in request context for restoration in response
+                            from services.request_context import AnonymizationContext
+                            AnonymizationContext.set_mapping(restore_mapping)
+                            logger.info(f"Anonymized with restore: {len(restore_mapping)} placeholders created")
 
             except Exception as e:
                 logger.error(f"Data leakage disposal failed: {e}", exc_info=True)
@@ -352,7 +499,8 @@ async def _sync_input_detection(model_config, input_messages: list, tenant_id: s
             'suggest_answer': None,
             'modified_messages': modified_messages,  # NEW: Possibly anonymized
             'modified_model_config': modified_model_config,  # NEW: Possibly switched
-            'disposal_action': disposal_action  # NEW: Action taken
+            'disposal_action': disposal_action,  # NEW: Action taken
+            'restore_mapping': restore_mapping  # NEW: For anonymize_restore action
         }
 
     except Exception as e:
@@ -793,11 +941,23 @@ async def _handle_gateway_streaming_response(
 ):
     """Handle gateway streaming response with output detection"""
     try:
+        # Check if we have anonymization mapping for output restoration
+        from services.request_context import AnonymizationContext
+        from services.restore_anonymization_service import StreamingRestoreBuffer
+
+        restore_mapping = AnonymizationContext.get_mapping()
+        has_restore_mapping = bool(restore_mapping)
+        restore_buffer = StreamingRestoreBuffer(restore_mapping) if has_restore_mapping else None
+
+        if has_restore_mapping:
+            logger.info(f"Gateway streaming: Using restore buffer with {len(restore_mapping)} mappings")
+
         # Select detection mode based on configuration
         output_detection_mode = get_detection_mode(api_config, 'output')
         detector = StreamChunkDetector(output_detection_mode, application_id=application_id)
 
         async def stream_generator():
+            nonlocal restore_buffer, has_restore_mapping
             full_content = ""
             output_detection_id = None
             output_blocked = False
@@ -813,8 +973,8 @@ async def _handle_gateway_streaming_response(
                                 line = line[6:]
 
                                 if line.strip() == "[DONE]":
-                                    # Final detection before completing
-                                    if not detector.should_stop:
+                                    # Final detection before completing (skip if we have restore mapping)
+                                    if not detector.should_stop and not has_restore_mapping:
                                         should_stop = await detector.final_detection(
                                             api_config, input_messages, tenant_id, request_id
                                         )
@@ -847,7 +1007,39 @@ async def _handle_gateway_streaming_response(
                                             # Detection safe, output ALL queued chunks in serial mode
                                             if detector.detection_mode == DetectionMode.SYNC_SERIAL:
                                                 for queued_chunk in chunks_queue:
-                                                    yield f"data: {json.dumps(queued_chunk)}\n\n"
+                                                    # If we have restore mapping, apply restoration
+                                                    if has_restore_mapping and restore_buffer:
+                                                        if 'choices' in queued_chunk and queued_chunk['choices']:
+                                                            delta = queued_chunk['choices'][0].get('delta', {})
+                                                            chunk_content = delta.get('content', '')
+                                                            if chunk_content:
+                                                                restored_content = restore_buffer.process_chunk(chunk_content)
+                                                                if restored_content:
+                                                                    modified_chunk = json.loads(json.dumps(queued_chunk))
+                                                                    modified_chunk['choices'][0]['delta']['content'] = restored_content
+                                                                    yield f"data: {json.dumps(modified_chunk)}\n\n"
+                                                            else:
+                                                                yield f"data: {json.dumps(queued_chunk)}\n\n"
+                                                        else:
+                                                            yield f"data: {json.dumps(queued_chunk)}\n\n"
+                                                    else:
+                                                        yield f"data: {json.dumps(queued_chunk)}\n\n"
+
+                                    # Flush any remaining content in restore buffer
+                                    if has_restore_mapping and restore_buffer and restore_buffer.has_pending_content():
+                                        remaining = restore_buffer.flush()
+                                        if remaining:
+                                            flush_chunk = {
+                                                "id": f"chatcmpl-{request_id}",
+                                                "object": "chat.completion.chunk",
+                                                "created": int(time.time()),
+                                                "model": model_name,
+                                                "choices": [{
+                                                    "index": 0,
+                                                    "delta": {"content": remaining}
+                                                }]
+                                            }
+                                            yield f"data: {json.dumps(flush_chunk)}\n\n"
 
                                     yield "data: [DONE]\n\n"
                                     break
@@ -867,18 +1059,22 @@ async def _handle_gateway_streaming_response(
                                         if content or reasoning_content:
                                             full_content += content
 
-                                            # Extract tool_calls content for security detection (also need to extract tool_calls from chunk)
-                                            tool_calls_content = ""
-                                            has_tool_calls = _chunk_has_tool_calls(chunk_data)
-                                            if has_tool_calls:
-                                                tool_calls_content = _extract_tool_calls_content(chunk_data)
-                                                logger.debug(f"Extracted tool_calls content for detection: {tool_calls_content[:100]}...")
+                                            # Skip output detection if we have restore mapping
+                                            # (input was anonymized, output will be restored, no need for detection)
+                                            should_stop = False
+                                            if not has_restore_mapping:
+                                                # Extract tool_calls content for security detection (also need to extract tool_calls from chunk)
+                                                tool_calls_content = ""
+                                                has_tool_calls = _chunk_has_tool_calls(chunk_data)
+                                                if has_tool_calls:
+                                                    tool_calls_content = _extract_tool_calls_content(chunk_data)
+                                                    logger.debug(f"Extracted tool_calls content for detection: {tool_calls_content[:100]}...")
 
-                                            # Detect chunk (including all content types)
-                                            should_stop = await detector.add_chunk(
-                                                content, reasoning_content, tool_calls_content, api_config,
-                                                input_messages, tenant_id, request_id
-                                            )
+                                                # Detect chunk (including all content types)
+                                                should_stop = await detector.add_chunk(
+                                                    content, reasoning_content, tool_calls_content, api_config,
+                                                    input_messages, tenant_id, request_id
+                                                )
 
                                             if should_stop:
                                                 output_blocked = True
@@ -908,7 +1104,27 @@ async def _handle_gateway_streaming_response(
 
                                     # In serial mode, QUEUE ALL chunks; in async mode, output immediately
                                     if detector.detection_mode == DetectionMode.ASYNC_BYPASS:
-                                        yield f"data: {json.dumps(chunk_data)}\n\n"
+                                        # If we have restore mapping, apply restoration to the content
+                                        if has_restore_mapping and restore_buffer:
+                                            # Extract and restore content from chunk
+                                            if 'choices' in chunk_data and chunk_data['choices']:
+                                                delta = chunk_data['choices'][0].get('delta', {})
+                                                chunk_content = delta.get('content', '')
+                                                if chunk_content:
+                                                    # Process through restore buffer
+                                                    restored_content = restore_buffer.process_chunk(chunk_content)
+                                                    if restored_content:
+                                                        # Create modified chunk with restored content
+                                                        modified_chunk = json.loads(json.dumps(chunk_data))  # Deep copy
+                                                        modified_chunk['choices'][0]['delta']['content'] = restored_content
+                                                        yield f"data: {json.dumps(modified_chunk)}\n\n"
+                                                    # If no content ready (buffered for partial placeholder), skip this chunk
+                                                else:
+                                                    yield f"data: {json.dumps(chunk_data)}\n\n"
+                                            else:
+                                                yield f"data: {json.dumps(chunk_data)}\n\n"
+                                        else:
+                                            yield f"data: {json.dumps(chunk_data)}\n\n"
                                     else:
                                         # Serial mode: SAVE ALL CHUNKS, do NOT output yet
                                         chunks_queue.append(chunk_data)
@@ -932,8 +1148,19 @@ async def _handle_gateway_streaming_response(
                     response_time_ms=int((time.time() - start_time) * 1000)
                 )
 
+                # Clear anonymization context at end of stream
+                if has_restore_mapping:
+                    AnonymizationContext.clear()
+                    logger.debug("Cleared AnonymizationContext at end of stream")
+
             except Exception as e:
                 logger.error(f"Gateway streaming error: {e}")
+                # Clear anonymization context on error too
+                if has_restore_mapping:
+                    try:
+                        AnonymizationContext.clear()
+                    except Exception:
+                        pass
                 error_chunk = {
                     "id": f"chatcmpl-{request_id}",
                     "object": "chat.completion.chunk",
@@ -976,18 +1203,34 @@ async def _handle_gateway_non_streaming_response(
         output_detection_id = None
         output_blocked = False
 
+        # Check if we have anonymization mapping for output restoration
+        from services.request_context import AnonymizationContext, restore_placeholders
+        has_restore_mapping = AnonymizationContext.has_mapping()
+
         # Extract response content for detection
         if upstream_response.get('choices'):
             output_content = upstream_response['choices'][0]['message']['content']
 
-            # Perform output detection
-            output_detection_result = await perform_output_detection(
-                api_config, input_messages, output_content, tenant_id, request_id, user_id, application_id
-            )
+            # If we have restore mapping, restore placeholders first before any output detection
+            # This ensures the output is restored and not re-anonymized
+            if has_restore_mapping:
+                restored_content = restore_placeholders(output_content)
+                logger.info(f"Restored placeholders in output: {len(AnonymizationContext.get_mapping())} mappings applied")
+                output_content = restored_content
+                # Skip output detection since we've already handled the sensitive data
+                # The input was anonymized and output is now restored - no need for re-detection
+                final_content = output_content
+                output_detection_id = f"{request_id}_output_skip_restored"
+                logger.info(f"Skipping output detection - content was restored from anonymized input")
+            else:
+                # Perform output detection as normal (no restore mapping means input wasn't anonymized)
+                output_detection_result = await perform_output_detection(
+                    api_config, input_messages, output_content, tenant_id, request_id, user_id, application_id
+                )
 
-            output_detection_id = output_detection_result.get('detection_id')
-            output_blocked = output_detection_result.get('blocked', False)
-            final_content = output_detection_result.get('response_content', output_content)
+                output_detection_id = output_detection_result.get('detection_id')
+                output_blocked = output_detection_result.get('blocked', False)
+                final_content = output_detection_result.get('response_content', output_content)
 
             # Update response content
             upstream_response['choices'][0]['message']['content'] = final_content
@@ -1019,10 +1262,20 @@ async def _handle_gateway_non_streaming_response(
             response_time_ms=int((time.time() - start_time) * 1000)
         )
 
+        # Clear anonymization context at end of request
+        if has_restore_mapping:
+            AnonymizationContext.clear()
+
         return JSONResponse(content=upstream_response)
 
     except Exception as e:
         logger.error(f"Gateway non-streaming handler error: {e}")
+        # Clear anonymization context on error too
+        try:
+            from services.request_context import AnonymizationContext
+            AnonymizationContext.clear()
+        except Exception:
+            pass
         return JSONResponse(
             status_code=500,
             content={"error": {"message": str(e), "type": "internal_error"}}

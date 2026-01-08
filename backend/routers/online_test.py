@@ -422,19 +422,12 @@ async def online_test(
                     logger.error(f"Failed to decrypt API key for model {db_model.id}: {e}")
                     continue
                 
-                # Use user-specified model_name if available, otherwise use sensible defaults
+                # Use user-specified model_name if available, otherwise use the configured model_name from database
                 if user_model_name:
                     model_name = user_model_name
                 else:
-                    # Determine default model name based on provider
-                    # For upstream configs, use sensible defaults based on provider
-                    default_model_names = {
-                        'openai': 'gpt-4',
-                        'anthropic': 'claude-3-5-sonnet-20241022',
-                        'local': 'local-model',
-                        'other': 'default-model'
-                    }
-                    model_name = default_model_names.get(db_model.provider or 'other', 'default-model')
+                    # Use the model_name configured in UpstreamApiConfig
+                    model_name = db_model.model_name
 
                 # Create ModelConfig object
                 model_config = ModelConfig(

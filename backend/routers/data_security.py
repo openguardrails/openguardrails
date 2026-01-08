@@ -59,6 +59,11 @@ async def get_entity_types(
                 "is_active": et.is_active,
                 "source_type": et.source_type,
                 "is_system_template": (et.source_type == 'system_template'),
+                # Restore anonymization fields
+                "restore_enabled": et.restore_enabled or False,
+                "restore_natural_desc": et.restore_natural_desc,
+                "restore_code": et.restore_code,
+                "has_restore_code": bool(et.restore_code),
                 "created_at": et.created_at.isoformat() if et.created_at else None,
                 "updated_at": et.updated_at.isoformat() if et.updated_at else None
             })
@@ -175,7 +180,9 @@ async def create_entity_type(
             check_input=data.get("check_input", True),
             check_output=data.get("check_output", True),
             is_global=False,
-            source_type='custom'
+            source_type='custom',
+            restore_enabled=data.get("restore_enabled", False),
+            restore_natural_desc=data.get("restore_natural_desc")
         )
         
         logger.info(f"Entity type created: {data.get('entity_type')} for user: {current_user.email}, app: {application_id}")
@@ -240,7 +247,13 @@ async def update_entity_type(
             update_kwargs["check_output"] = data["check_output"]
         if "is_active" in data:
             update_kwargs["is_active"] = data["is_active"]
-        
+
+        # Restore anonymization fields
+        if "restore_enabled" in data:
+            update_kwargs["restore_enabled"] = data["restore_enabled"]
+        if "restore_natural_desc" in data:
+            update_kwargs["restore_natural_desc"] = data["restore_natural_desc"]
+
         result = service.update_entity_type(
             entity_type_id=entity_type_id,
             tenant_id=str(current_user.id),
@@ -367,13 +380,13 @@ async def generate_anonymization_regex(
     db: Session = Depends(get_admin_db)
 ):
     """
-    使用AI生成脱敏正则表达式
+    Generate anonymization regex using AI
 
     Input:
         {
-            "description": "保留前3位和后4位",
+            "description": "Keep first 3 and last 4 digits",
             "entity_type": "PHONE_NUMBER",
-            "sample_data": "13812345678"  (可选)
+            "sample_data": "13812345678"  (optional)
         }
 
     Output:
@@ -419,7 +432,7 @@ async def test_anonymization(
     db: Session = Depends(get_admin_db)
 ):
     """
-    测试脱敏效果
+    Test anonymization effect
 
     Input:
         {
@@ -475,11 +488,11 @@ async def generate_entity_type_code(
     db: Session = Depends(get_admin_db)
 ):
     """
-    使用AI根据实体类型名称生成实体类型代码
+    Generate entity type code using AI based on entity type name
 
     Input:
         {
-            "entity_type_name": "手机号码"
+            "entity_type_name": "Phone Number"
         }
 
     Output:
@@ -519,13 +532,13 @@ async def generate_recognition_regex(
     db: Session = Depends(get_admin_db)
 ):
     """
-    使用AI生成识别正则表达式
+    Generate recognition regex using AI
 
     Input:
         {
-            "description": "中国手机号码",
+            "description": "Chinese phone number",
             "entity_type": "PHONE_NUMBER",
-            "sample_data": "13812345678"  (可选)
+            "sample_data": "13812345678"  (optional)
         }
 
     Output:
@@ -570,12 +583,12 @@ async def test_recognition_regex(
     db: Session = Depends(get_admin_db)
 ):
     """
-    测试识别正则表达式
+    Test recognition regex
 
     Input:
         {
             "pattern": "1[3-9]\\d{9}",
-            "test_input": "我的电话是13812345678，请联系我"
+            "test_input": "My phone is 13812345678, please contact me"
         }
 
     Output:
@@ -622,13 +635,13 @@ async def test_entity_definition(
     db: Session = Depends(get_admin_db)
 ):
     """
-    测试GenAI实体定义
+    Test GenAI entity definition
 
     Input:
         {
-            "entity_definition": "用于联系的11位手机号码",
+            "entity_definition": "11-digit phone number for contact",
             "entity_type_name": "手机号码",
-            "test_input": "我的电话是13812345678，请联系我"
+            "test_input": "My phone is 13812345678, please contact me"
         }
 
     Output:
@@ -668,3 +681,227 @@ async def test_entity_definition(
     except Exception as e:
         logger.error(f"Test entity definition error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to test entity definition: {str(e)}")
+
+
+# ============== Restore Anonymization APIs ==============
+
+@router.post("/config/data-security/entity-types/{entity_type_id}/generate-restore-code")
+async def generate_restore_code(
+    entity_type_id: str,
+    data: dict,
+    request: Request,
+    db: Session = Depends(get_admin_db)
+):
+    """
+    Generate Python code for restore-enabled anonymization based on natural language description.
+
+    Input:
+        {
+            "natural_description": "Replace email addresses with placeholders, keep domain visible",
+            "sample_data": "Contact alice@gmail.com for details"
+        }
+
+    Output:
+        {
+            "success": true,
+            "placeholder_format": "[email_N]",
+            "message": "Code generated successfully"
+        }
+    """
+    from services.restore_anonymization_service import get_restore_anonymization_service, CodeGenerationError
+
+    try:
+        current_user, application_id = get_current_user_and_application_from_request(request, db)
+
+        natural_description = data.get("natural_description", "")
+        sample_data = data.get("sample_data", "")
+
+        if not natural_description:
+            raise HTTPException(status_code=400, detail="Natural language description is required")
+
+        # Get the entity type
+        from database.models import DataSecurityEntityType
+        entity_type = db.query(DataSecurityEntityType).filter(
+            DataSecurityEntityType.id == entity_type_id
+        ).first()
+
+        if not entity_type:
+            raise HTTPException(status_code=404, detail="Entity type not found")
+
+        # Verify ownership
+        if str(entity_type.tenant_id) != str(current_user.id) and not current_user.is_super_admin:
+            raise HTTPException(status_code=403, detail="Access denied")
+
+        # Generate restore code
+        service = get_restore_anonymization_service()
+        result = await service.generate_restore_code(
+            entity_type_code=entity_type.entity_type,
+            entity_type_name=entity_type.entity_type_name,
+            natural_description=natural_description,
+            sample_data=sample_data
+        )
+
+        # Update the entity type with generated code
+        entity_type.restore_code = result['code']
+        entity_type.restore_code_hash = result['code_hash']
+        entity_type.restore_natural_desc = natural_description
+        db.commit()
+
+        logger.info(f"Generated restore code for entity type {entity_type_id} by user {current_user.email}")
+
+        return {
+            "success": True,
+            "code_generated": True,
+            "restore_code": result['code'],
+            "placeholder_format": result['placeholder_format'],
+            "message": "Code generated successfully"
+        }
+
+    except CodeGenerationError as e:
+        logger.error(f"Code generation error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Generate restore code error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to generate restore code: {str(e)}")
+
+
+@router.post("/config/data-security/entity-types/{entity_type_id}/test-restore-anonymization")
+async def test_restore_anonymization(
+    entity_type_id: str,
+    data: dict,
+    request: Request,
+    db: Session = Depends(get_admin_db)
+):
+    """
+    Test the generated anonymization code with user-provided test input.
+
+    Input:
+        {
+            "test_input": "Contact alice@gmail.com and bob@company.com"
+        }
+
+    Output:
+        {
+            "success": true,
+            "anonymized_text": "Contact [email_1] and [email_2]",
+            "mapping": {
+                "[email_1]": "alice@gmail.com",
+                "[email_2]": "bob@company.com"
+            },
+            "placeholder_count": 2
+        }
+    """
+    from services.restore_anonymization_service import get_restore_anonymization_service
+
+    try:
+        current_user, application_id = get_current_user_and_application_from_request(request, db)
+
+        test_input = data.get("test_input", "")
+        if not test_input:
+            raise HTTPException(status_code=400, detail="Test input is required")
+
+        # Get the entity type
+        from database.models import DataSecurityEntityType
+        entity_type = db.query(DataSecurityEntityType).filter(
+            DataSecurityEntityType.id == entity_type_id
+        ).first()
+
+        if not entity_type:
+            raise HTTPException(status_code=404, detail="Entity type not found")
+
+        # Verify ownership
+        if str(entity_type.tenant_id) != str(current_user.id) and not current_user.is_super_admin:
+            raise HTTPException(status_code=403, detail="Access denied")
+
+        # Check if restore code exists
+        if not entity_type.restore_code:
+            raise HTTPException(status_code=400, detail="Restore code not generated yet. Please generate code first.")
+
+        # Test the restore anonymization
+        service = get_restore_anonymization_service()
+        result = service.test_restore_anonymization(
+            text=test_input,
+            entity_type_code=entity_type.entity_type,
+            restore_code=entity_type.restore_code
+        )
+
+        logger.info(f"Tested restore anonymization for entity type {entity_type_id} by user {current_user.email}")
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Test restore anonymization error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to test restore anonymization: {str(e)}")
+
+
+@router.put("/config/data-security/entity-types/{entity_type_id}/restore-config")
+async def save_restore_config(
+    entity_type_id: str,
+    data: dict,
+    request: Request,
+    db: Session = Depends(get_admin_db)
+):
+    """
+    Save the restore anonymization configuration.
+
+    Input:
+        {
+            "restore_enabled": true,
+            "natural_description": "Replace email addresses with placeholders"
+        }
+
+    Output:
+        {
+            "success": true,
+            "message": "Restore configuration saved"
+        }
+    """
+    try:
+        current_user, application_id = get_current_user_and_application_from_request(request, db)
+
+        restore_enabled = data.get("restore_enabled", False)
+        natural_description = data.get("natural_description", "")
+
+        # Get the entity type
+        from database.models import DataSecurityEntityType
+        entity_type = db.query(DataSecurityEntityType).filter(
+            DataSecurityEntityType.id == entity_type_id
+        ).first()
+
+        if not entity_type:
+            raise HTTPException(status_code=404, detail="Entity type not found")
+
+        # Verify ownership
+        if str(entity_type.tenant_id) != str(current_user.id) and not current_user.is_super_admin:
+            raise HTTPException(status_code=403, detail="Access denied")
+
+        # If enabling restore, ensure code exists
+        if restore_enabled and not entity_type.restore_code:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot enable restore without generated code. Please generate code first."
+            )
+
+        # Update configuration
+        entity_type.restore_enabled = restore_enabled
+        if natural_description:
+            entity_type.restore_natural_desc = natural_description
+
+        db.commit()
+
+        logger.info(f"Saved restore config for entity type {entity_type_id} by user {current_user.email}")
+
+        return {
+            "success": True,
+            "message": "Restore configuration saved"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Save restore config error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to save restore config: {str(e)}")

@@ -595,6 +595,43 @@ export const dataSecurityApi = {
   }> =>
     api.post('/api/v1/config/data-security/test-entity-definition', data).then(res => res.data),
 
+  // Generate restore anonymization code using AI
+  generateRestoreCode: (entityTypeId: string, data: {
+    natural_description: string
+    sample_data?: string
+  }): Promise<{
+    success: boolean
+    code_generated: boolean
+    restore_code?: string
+    placeholder_format?: string
+    message: string
+    error?: string
+  }> =>
+    api.post(`/api/v1/config/data-security/entity-types/${entityTypeId}/generate-restore-code`, data).then(res => res.data),
+
+  // Test restore anonymization
+  testRestoreAnonymization: (entityTypeId: string, data: {
+    test_input: string
+  }): Promise<{
+    success: boolean
+    anonymized_text: string
+    mapping: Record<string, string>
+    error?: string
+    processing_time_ms: number
+  }> =>
+    api.post(`/api/v1/config/data-security/entity-types/${entityTypeId}/test-restore-anonymization`, data).then(res => res.data),
+
+  // Save restore anonymization config
+  saveRestoreConfig: (entityTypeId: string, data: {
+    restore_enabled: boolean
+    restore_natural_desc: string
+  }): Promise<{
+    success: boolean
+    message: string
+    error?: string
+  }> =>
+    api.put(`/api/v1/config/data-security/entity-types/${entityTypeId}/restore-config`, data).then(res => res.data),
+
   // Get detection results list
   getDetectionResults: (limit: number, offset: number): Promise<{ items: any[]; total: number }> =>
     api.get(`/api/v1/results?per_page=${limit}&page=${Math.floor(offset / limit) + 1}`).then(res => res.data),

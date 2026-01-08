@@ -24,7 +24,12 @@ class DataLeakageDisposalService:
     """Service for managing data leakage disposal policies"""
 
     # Valid disposal actions
-    VALID_ACTIONS = {'block', 'switch_private_model', 'anonymize', 'pass'}
+    # - block: Block the request entirely
+    # - switch_private_model: Switch to a private/on-premise model
+    # - anonymize: Anonymize sensitive data (one-way)
+    # - anonymize_restore: Anonymize with numbered placeholders, restore in output
+    # - pass: Allow the request (audit only)
+    VALID_ACTIONS = {'block', 'switch_private_model', 'anonymize', 'anonymize_restore', 'pass'}
 
     # Risk levels
     RISK_LEVELS = {'high_risk', 'medium_risk', 'low_risk', 'no_risk'}

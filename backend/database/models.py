@@ -504,6 +504,13 @@ class DataSecurityEntityType(Base):
     is_global = Column(Boolean, default=False, index=True)  # Whether it is a global config (deprecated, use source_type instead)
     source_type = Column(String(20), default='custom', index=True)  # Source type: 'system_template', 'system_copy', 'custom'
     template_id = Column(UUID(as_uuid=True), index=True, nullable=True)  # Template ID if copied from a template
+
+    # Restore anonymization fields (脱敏+还原)
+    restore_enabled = Column(Boolean, default=False)  # Whether this entity type supports restorable anonymization
+    restore_code = Column(Text, nullable=True)  # AI-generated Python code for anonymization (hidden from user)
+    restore_code_hash = Column(String(64), nullable=True)  # SHA-256 hash for code integrity verification
+    restore_natural_desc = Column(Text, nullable=True)  # User natural language description for anonymization rule
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
