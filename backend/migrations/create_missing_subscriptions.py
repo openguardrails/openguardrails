@@ -94,7 +94,7 @@ def create_missing_subscriptions():
                 subscription = TenantSubscription(
                     tenant_id=tenant.id,
                     subscription_type='free',
-                    monthly_quota=10000,
+                    monthly_quota=1000,
                     current_month_usage=0,
                     usage_reset_at=reset_date,
                     created_at=current_time,

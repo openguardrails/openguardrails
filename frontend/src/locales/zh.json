@@ -2029,7 +2029,7 @@
     "contactSupport": "联系支持以升级: {{email}}",
     "upgradeToUnlockMore": "升级解锁更多功能",
     "feature1": "图片检测与分析功能",
-    "feature2": "更高的月度API调用配额（100万+次调用）",
+    "feature2": "更高的月度API调用配额（10万+次调用）",
     "feature3": "优先技术支持",
     "feature4": "定制模型训练和优化",
     "feature5": "专属客户经理",
@@ -2355,7 +2355,7 @@
     "feature2": "支持 GenAI 智能检测、正则表达式和关键词三种扫描类型",
     "feature3": "针对您的业务场景定制专属检测规则",
     "feature4": "灵活配置风险等级和扫描范围",
-    "feature5": "享受 100 万次/月的 API 调用配额（免费版仅 1 万次/月）",
+    "feature5": "享受 10 万次/月的 API 调用配额（免费版仅 1 千次/月）",
     "upgradeNow": "立即订阅",
     "pricingInfo": "订阅价格",
     "pricingDetails": "仅需 ¥19/月，即可解锁自定义扫描器及更多高级功能"

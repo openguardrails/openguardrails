@@ -25,11 +25,11 @@ class BillingService:
     # Subscription type configurations
     SUBSCRIPTION_CONFIGS = {
         'free': {
-            'monthly_quota': 10000,
+            'monthly_quota': 1000,
             'name': 'Free Plan'
         },
         'subscribed': {
-            'monthly_quota': 1000000,
+            'monthly_quota': 100000,
             'name': 'Subscribed Plan'
         }
     }

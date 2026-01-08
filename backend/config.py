@@ -166,7 +166,7 @@ class Settings(BaseSettings):
 
     # Default tenant limits
     # Default monthly scan limit for new tenants (detections per month)
-    default_monthly_scan_limit: int = 10000
+    default_monthly_scan_limit: int = 1000
 
     # Default rate limit for new tenants (requests per second)
     default_rate_limit_rps: int = 10

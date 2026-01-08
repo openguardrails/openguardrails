@@ -2032,7 +2032,7 @@
     "contactSupport": "Contact support to upgrade: {{email}}",
     "upgradeToUnlockMore": "Upgrade to Unlock More Features",
     "feature1": "Image detection and analysis",
-    "feature2": "Higher monthly API call quota (1,000,000+ calls)",
+    "feature2": "Higher monthly API call quota (100,000+ calls)",
     "feature3": "Priority technical support",
     "feature4": "Custom model training and optimization",
     "feature5": "Dedicated account manager",
@@ -2358,7 +2358,7 @@
     "feature2": "Support for GenAI, regex, and keyword detection types",
     "feature3": "Customize detection rules for your business scenarios",
     "feature4": "Flexible configuration of risk levels and scan scope",
-    "feature5": "1,000,000 API calls per month (vs. 10,000 on free plan)",
+    "feature5": "100,000 API calls per month (vs. 1,000 on free plan)",
     "upgradeNow": "Subscribe Now",
     "pricingInfo": "Subscription Pricing",
     "pricingDetails": "Only $19/month to unlock custom scanners and more premium features"
