@@ -569,7 +569,7 @@ const UserManagement: React.FC = () => {
         </TabsList>
 
         {/* User Management Tab */}
-        <TabsContent value="users" className="mt-0 flex-1 flex flex-col min-h-0">
+        <TabsContent value="users" className="mt-0 flex-1 flex flex-col min-h-0 data-[state=inactive]:hidden">
           <Card className="flex-1 flex flex-col overflow-hidden min-h-0">
             <CardHeader className="flex-shrink-0">
               <div className="flex justify-between items-start">
@@ -635,8 +635,8 @@ const UserManagement: React.FC = () => {
         </TabsContent>
 
         {/* Analytics Tab */}
-        <TabsContent value="analytics" className="mt-0 flex-1 flex flex-col min-h-0">
-          <div className="flex flex-col gap-4 overflow-y-auto">
+        <TabsContent value="analytics" className="mt-0 flex-1 flex flex-col min-h-0 data-[state=inactive]:hidden">
+          <div className="flex-1 flex flex-col gap-4 overflow-y-auto">
             {/* Analytics Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Latest Created Tenants */}
