@@ -15,6 +15,7 @@ from utils.auth import verify_token
 from services.payment_service import payment_service
 from services.alipay_service import alipay_service
 from services.stripe_service import stripe_service
+from services.billing_service import billing_service
 from utils.logger import get_logger
 import uuid
 
@@ -590,7 +591,7 @@ async def stripe_webhook(
 
                 if subscription:
                     subscription.subscription_type = 'free'
-                    subscription.monthly_quota = 10000
+                    subscription.monthly_quota = billing_service.SUBSCRIPTION_CONFIGS['free']['monthly_quota']
 
                 db.commit()
 

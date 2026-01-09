@@ -166,7 +166,9 @@ class Settings(BaseSettings):
 
     # Default tenant limits
     # Default monthly scan limit for new tenants (detections per month)
-    default_monthly_scan_limit: int = 1000
+    # Note: This should match free_user_monthly_quota for consistency
+    # If not set, will use free_user_monthly_quota as default
+    default_monthly_scan_limit: Optional[int] = None
 
     # Default rate limit for new tenants (requests per second)
     default_rate_limit_rps: int = 10
@@ -194,6 +196,10 @@ class Settings(BaseSettings):
     # Subscription pricing
     subscription_price_cny: float = 19.0  # Monthly price in CNY
     subscription_price_usd: float = 19.0  # Monthly price in USD
+
+    # Subscription quota limits
+    free_user_monthly_quota: int = 1000  # Monthly quota for free users
+    paid_user_monthly_quota: int = 100000  # Monthly quota for paid/subscribed users
 
     class Config:
         # Ensure we load the .env file next to this config module,

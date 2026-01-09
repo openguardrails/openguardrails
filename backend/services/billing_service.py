@@ -10,6 +10,7 @@ from sqlalchemy import text, func
 from uuid import UUID
 from database.models import TenantSubscription, DetectionResult, Tenant
 from utils.logger import setup_logger
+from config import settings
 
 logger = setup_logger()
 
@@ -22,17 +23,9 @@ def get_current_utc_time() -> datetime:
 class BillingService:
     """Tenant billing and subscription management service"""
 
-    # Subscription type configurations
-    SUBSCRIPTION_CONFIGS = {
-        'free': {
-            'monthly_quota': 1000,
-            'name': 'Free Plan'
-        },
-        'subscribed': {
-            'monthly_quota': 100000,
-            'name': 'Subscribed Plan'
-        }
-    }
+    # Subscription type configurations loaded from settings
+    # This will be initialized when the class is defined
+    SUBSCRIPTION_CONFIGS: Dict = {}
 
     def __init__(self):
         # Cache for tenant subscriptions {tenant_id: (subscription, cached_time)}
@@ -485,6 +478,18 @@ class BillingService:
             self._subscription_cache.clear()
             logger.debug("Cleared all billing cache")
 
+
+# Initialize SUBSCRIPTION_CONFIGS from settings
+BillingService.SUBSCRIPTION_CONFIGS = {
+    'free': {
+        'monthly_quota': settings.free_user_monthly_quota,
+        'name': 'Free Plan'
+    },
+    'subscribed': {
+        'monthly_quota': settings.paid_user_monthly_quota,
+        'name': 'Subscribed Plan'
+    }
+}
 
 # Global billing service instance
 billing_service = BillingService()

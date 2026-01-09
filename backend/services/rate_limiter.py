@@ -267,7 +267,10 @@ class RateLimitService:
 
             # Use config default if monthly_scan_limit not provided
             if monthly_scan_limit is None:
+                # Use default_monthly_scan_limit if set, otherwise use free_user_monthly_quota
                 monthly_scan_limit = settings.default_monthly_scan_limit
+                if monthly_scan_limit is None:
+                    monthly_scan_limit = settings.free_user_monthly_quota
 
             # Check if tenant exists
             tenant = self.db.query(Tenant).filter(Tenant.id == tenant_uuid).first()

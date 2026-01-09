@@ -623,7 +623,7 @@ class TenantSubscription(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, unique=True, index=True)
     subscription_type = Column(String(20), nullable=False, default='free', index=True)  # 'free' or 'subscribed'
-    monthly_quota = Column(Integer, nullable=False, default=10000)  # Monthly API call quota
+    monthly_quota = Column(Integer, nullable=False, default=1000)  # Monthly API call quota (default for free plan)
     current_month_usage = Column(Integer, nullable=False, default=0)  # Current month usage
     usage_reset_at = Column(DateTime(timezone=True), nullable=False)  # Next reset date (1st of next month)
 

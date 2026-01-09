@@ -17,6 +17,7 @@ from database.models import (
 )
 from services.alipay_service import alipay_service
 from services.stripe_service import stripe_service
+from services.billing_service import billing_service
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -367,7 +368,7 @@ class PaymentService:
         if subscription:
             now = datetime.utcnow()
             subscription.subscription_type = 'subscribed'
-            subscription.monthly_quota = 1000000  # 1M for subscribed users
+            subscription.monthly_quota = billing_service.SUBSCRIPTION_CONFIGS['subscribed']['monthly_quota']
             subscription.subscription_started_at = now
             subscription.subscription_expires_at = now + timedelta(days=30)
 
