@@ -113,28 +113,29 @@ const BlacklistManagement: React.FC = () => {
     setModalVisible(true)
   }
 
-  const handleDelete = (record: Blacklist) => {
-    confirmDialog({
-      title: t('config.blacklist.confirmDelete'),
-      description: t('config.blacklist.confirmDeleteContent', { name: record.name }),
+  const handleDelete = async (record: Blacklist) => {
+    const confirmed = await confirmDialog({
+      title: t('blacklist.confirmDelete'),
+      description: t('blacklist.confirmDeleteContent', { name: record.name }),
       confirmText: t('common.confirm'),
       cancelText: t('common.cancel'),
       variant: 'destructive',
-      onConfirm: async () => {
-        try {
-          await configApi.blacklist.delete(record.id)
-          toast.success(t('common.deleteSuccess'))
-          fetchData()
-          eventBus.emit(EVENTS.BLACKLIST_DELETED, {
-            blacklistId: record.id,
-            blacklistName: record.name,
-          })
-        } catch (error) {
-          console.error('Error deleting blacklist:', error)
-          toast.error(t('common.deleteFailed'))
-        }
-      },
     })
+
+    if (confirmed) {
+      try {
+        await configApi.blacklist.delete(record.id)
+        toast.success(t('common.deleteSuccess'))
+        fetchData()
+        eventBus.emit(EVENTS.BLACKLIST_DELETED, {
+          blacklistId: record.id,
+          blacklistName: record.name,
+        })
+      } catch (error) {
+        console.error('Error deleting blacklist:', error)
+        toast.error(t('common.deleteFailed'))
+      }
+    }
   }
 
   const handleSubmit = async (values: BlacklistFormData) => {

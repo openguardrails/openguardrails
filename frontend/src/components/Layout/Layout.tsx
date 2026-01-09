@@ -16,6 +16,7 @@ import {
   Menu as MenuIcon,
   X,
   Shield,
+  ShieldAlert,
   ChevronLeft,
   CreditCard,
   Users,
@@ -136,16 +137,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           label: t('customScanners.title'),
         },
         {
-          key: '/config/sensitivity-thresholds',
-          label: t('config.sensitivity'),
-        },
-        {
           key: '/config/data-security',
           label: t('config.dataSecurity'),
-        },
-        {
-          key: '/config/ban-policy',
-          label: t('config.banPolicy'),
         },
         {
           key: '/config/blacklist',
@@ -162,6 +155,25 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         {
           key: '/config/knowledge-bases',
           label: t('config.knowledge'),
+        },
+        {
+          key: '/config/sensitivity-thresholds',
+          label: t('config.sensitivity'),
+        },
+      ],
+    },
+    {
+      key: '/access-control',
+      icon: ShieldAlert,
+      label: t('nav.accessControl'),
+      children: [
+        {
+          key: '/access-control/ban-policy',
+          label: t('nav.banPolicy'),
+        },
+        {
+          key: '/access-control/false-positive-appeal',
+          label: t('nav.falsePositiveAppeal'),
         },
       ],
     },
@@ -227,7 +239,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
   const getSelectedKeys = () => {
     const path = location.pathname
-    if (path.startsWith('/config') || path.startsWith('/admin') || path.startsWith('/security-gateway')) {
+    if (path.startsWith('/config') || path.startsWith('/admin') || path.startsWith('/security-gateway') || path.startsWith('/access-control')) {
       return [path]
     }
     if (path === '/' || path === '/') {
@@ -240,6 +252,9 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     const path = location.pathname
     if (path.startsWith('/config')) {
       return ['/config']
+    }
+    if (path.startsWith('/access-control')) {
+      return ['/access-control']
     }
     if (path.startsWith('/admin')) {
       return ['/admin']

@@ -5,6 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
+import { Settings2, ChevronDown, ChevronUp } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -28,6 +29,11 @@ import { InputNumber } from '@/components/ui/input-number'
 import { Badge } from '@/components/ui/badge'
 import { DataTable } from '@/components/data-table/DataTable'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
 import { configApi } from '../../services/api'
 import { translateRiskLevel, getRiskLevelColor } from '../../utils/i18nMapper'
 import { useApplication } from '../../contexts/ApplicationContext'
@@ -75,7 +81,7 @@ interface RiskTrigger {
   triggered_at: string
 }
 
-const BanPolicy: React.FC = () => {
+const BanPolicyPage: React.FC = () => {
   const { t } = useTranslation()
   const [policy, setPolicy] = useState<BanPolicy | null>(null)
   const [bannedUsers, setBannedUsers] = useState<BannedUser[]>([])
@@ -84,6 +90,7 @@ const BanPolicy: React.FC = () => {
   const [historyVisible, setHistoryVisible] = useState(false)
   const [selectedUserId, setSelectedUserId] = useState<string>('')
   const [userHistory, setUserHistory] = useState<RiskTrigger[]>([])
+  const [configExpanded, setConfigExpanded] = useState(false)
   const { currentApplicationId } = useApplication()
   const { onUserSwitch } = useAuth()
 
@@ -167,6 +174,18 @@ const BanPolicy: React.FC = () => {
     })
     return unsubscribe
   }, [onUserSwitch])
+
+  // Disable html/body scroll to prevent double scrollbars
+  useEffect(() => {
+    const originalHtmlOverflow = document.documentElement.style.overflow
+    const originalBodyOverflow = document.body.style.overflow
+    document.documentElement.style.overflow = 'hidden'
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.documentElement.style.overflow = originalHtmlOverflow
+      document.body.style.overflow = originalBodyOverflow
+    }
+  }, [])
 
   const handleSave = async (values: BanPolicyFormData) => {
     try {
@@ -337,166 +356,180 @@ const BanPolicy: React.FC = () => {
   ]
 
   return (
-    <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>{t('banPolicy.title')}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(handleSave)} className="space-y-6">
-              <FormField
-                control={form.control}
-                name="enabled"
-                render={({ field }) => (
-                  <FormItem className="flex items-center justify-between rounded-lg border p-4">
-                    <div className="space-y-0.5">
-                      <FormLabel className="text-base">
-                        {t('banPolicy.enableBanPolicyLabel')}
-                      </FormLabel>
-                      <FormDescription>{t('banPolicy.enableBanPolicyDesc')}</FormDescription>
+    <div className="h-full flex flex-col gap-4 overflow-hidden">
+      <h2 className="text-2xl font-bold tracking-tight flex-shrink-0">{t('banPolicy.title')}</h2>
+
+      {/* Compact Config Section */}
+      <Collapsible open={configExpanded} onOpenChange={setConfigExpanded} className="flex-shrink-0">
+        <Card>
+          <CollapsibleTrigger asChild>
+            <CardHeader className="cursor-pointer hover:bg-muted/50 transition-colors">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Settings2 className="h-5 w-5 text-muted-foreground" />
+                  <div>
+                    <CardTitle className="text-base">{t('banPolicy.configTitle')}</CardTitle>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      {policy?.enabled ? t('common.enabled') : t('common.disabled')}
+                      {policy?.enabled && ` - ${getRiskLevelText(policy.risk_level)}, ${policy.trigger_count}${t('banPolicy.triggerCountUnit')}/${policy.time_window_minutes}${t('banPolicy.timeWindowUnit')}, ${t('banPolicy.banDurationLabel')} ${policy.ban_duration_minutes}${t('banPolicy.timeWindowUnit')}`}
+                    </p>
+                  </div>
+                </div>
+                {configExpanded ? (
+                  <ChevronUp className="h-5 w-5 text-muted-foreground" />
+                ) : (
+                  <ChevronDown className="h-5 w-5 text-muted-foreground" />
+                )}
+              </div>
+            </CardHeader>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <CardContent className="pt-0 space-y-4">
+              <Form {...form}>
+                <form onSubmit={form.handleSubmit(handleSave)} className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <FormField
+                      control={form.control}
+                      name="enabled"
+                      render={({ field }) => (
+                        <FormItem className="flex items-center justify-between rounded-lg border p-3">
+                          <div className="space-y-0.5">
+                            <FormLabel className="text-sm">
+                              {t('banPolicy.enableBanPolicyLabel')}
+                            </FormLabel>
+                            <FormDescription className="text-xs">{t('banPolicy.enableBanPolicyDesc')}</FormDescription>
+                          </div>
+                          <FormControl>
+                            <Switch checked={field.value} onCheckedChange={field.onChange} />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="risk_level"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-sm">{t('banPolicy.triggerRiskLevelLabel')}</FormLabel>
+                          <Select value={field.value} onValueChange={field.onChange}>
+                            <FormControl>
+                              <SelectTrigger className="h-9">
+                                <SelectValue />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="high_risk">{t('banPolicy.highRisk')}</SelectItem>
+                              <SelectItem value="medium_risk">{t('banPolicy.mediumRisk')}</SelectItem>
+                              <SelectItem value="low_risk">{t('banPolicy.lowRisk')}</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <FormDescription className="text-xs">{t('banPolicy.triggerRiskLevelDesc')}</FormDescription>
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <FormField
+                      control={form.control}
+                      name="trigger_count"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-sm">{t('banPolicy.triggerCountThresholdLabel')}</FormLabel>
+                          <FormControl>
+                            <InputNumber
+                              min={1}
+                              max={100}
+                              value={field.value}
+                              onChange={(val) => field.onChange(val)}
+                              className="h-9"
+                            />
+                          </FormControl>
+                          <FormDescription className="text-xs">{t('banPolicy.triggerCountThresholdDesc')}</FormDescription>
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="time_window_minutes"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-sm">{t('banPolicy.timeWindowLabel')}</FormLabel>
+                          <FormControl>
+                            <InputNumber
+                              min={1}
+                              max={1440}
+                              value={field.value}
+                              onChange={(val) => field.onChange(val)}
+                              className="h-9"
+                            />
+                          </FormControl>
+                          <FormDescription className="text-xs">{t('banPolicy.timeWindowMinutesDesc')}</FormDescription>
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="ban_duration_minutes"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-sm">{t('banPolicy.banDurationLabel')}</FormLabel>
+                          <FormControl>
+                            <InputNumber
+                              min={1}
+                              max={10080}
+                              value={field.value}
+                              onChange={(val) => field.onChange(val)}
+                              className="h-9"
+                            />
+                          </FormControl>
+                          <FormDescription className="text-xs">{t('banPolicy.banDurationMinutesDesc')}</FormDescription>
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2">
+                    <div className="flex flex-wrap gap-2">
+                      <Button type="button" variant="outline" size="sm" onClick={() => applyTemplate('strict')}>
+                        {t('banPolicy.strictModeTemplate')}
+                      </Button>
+                      <Button type="button" variant="outline" size="sm" onClick={() => applyTemplate('standard')}>
+                        {t('banPolicy.standardModeTemplate')}
+                      </Button>
+                      <Button type="button" variant="outline" size="sm" onClick={() => applyTemplate('relaxed')}>
+                        {t('banPolicy.lenientModeTemplate')}
+                      </Button>
+                      <Button type="button" variant="outline" size="sm" onClick={() => applyTemplate('disabled')}>
+                        {t('common.disabled')}
+                      </Button>
                     </div>
-                    <FormControl>
-                      <Switch checked={field.value} onCheckedChange={field.onChange} />
-                    </FormControl>
-                  </FormItem>
-                )}
-              />
+                    <Button type="submit" disabled={loading} size="sm">
+                      {t('banPolicy.saveConfig')}
+                    </Button>
+                  </div>
+                </form>
+              </Form>
+            </CardContent>
+          </CollapsibleContent>
+        </Card>
+      </Collapsible>
 
-              <FormField
-                control={form.control}
-                name="risk_level"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('banPolicy.triggerRiskLevelLabel')}</FormLabel>
-                    <Select value={field.value} onValueChange={field.onChange}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="high_risk">{t('banPolicy.highRisk')}</SelectItem>
-                        <SelectItem value="medium_risk">{t('banPolicy.mediumRisk')}</SelectItem>
-                        <SelectItem value="low_risk">{t('banPolicy.lowRisk')}</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <FormDescription>{t('banPolicy.triggerRiskLevelDesc')}</FormDescription>
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="trigger_count"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('banPolicy.triggerCountThresholdLabel')}</FormLabel>
-                    <FormControl>
-                      <InputNumber
-                        min={1}
-                        max={100}
-                        value={field.value}
-                        onChange={(val) => field.onChange(val)}
-                      />
-                    </FormControl>
-                    <FormDescription>{t('banPolicy.triggerCountThresholdDesc')}</FormDescription>
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="time_window_minutes"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('banPolicy.timeWindowLabel')}</FormLabel>
-                    <FormControl>
-                      <InputNumber
-                        min={1}
-                        max={1440}
-                        value={field.value}
-                        onChange={(val) => field.onChange(val)}
-                      />
-                    </FormControl>
-                    <FormDescription>{t('banPolicy.timeWindowMinutesDesc')}</FormDescription>
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="ban_duration_minutes"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('banPolicy.banDurationLabel')}</FormLabel>
-                    <FormControl>
-                      <InputNumber
-                        min={1}
-                        max={10080}
-                        value={field.value}
-                        onChange={(val) => field.onChange(val)}
-                      />
-                    </FormControl>
-                    <FormDescription>{t('banPolicy.banDurationMinutesDesc')}</FormDescription>
-                  </FormItem>
-                )}
-              />
-
-              <Button type="submit" disabled={loading}>
-                {t('banPolicy.saveConfig')}
-              </Button>
-            </form>
-          </Form>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>{t('banPolicy.presetTemplates')}</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex flex-wrap gap-3">
-            <Button variant="outline" onClick={() => applyTemplate('strict')}>
-              {t('banPolicy.strictModeTemplate')}
-            </Button>
-            <Button variant="outline" onClick={() => applyTemplate('standard')}>
-              {t('banPolicy.standardModeTemplate')}
-            </Button>
-            <Button variant="outline" onClick={() => applyTemplate('relaxed')}>
-              {t('banPolicy.lenientModeTemplate')}
-            </Button>
-            <Button variant="outline" onClick={() => applyTemplate('disabled')}>
-              {t('common.disabled')}
-            </Button>
-          </div>
-          <div className="space-y-2 text-sm text-muted-foreground">
-            <div>
-              <span className="font-medium">{t('banPolicy.strictModeTemplate')}:</span>{' '}
-              {t('banPolicy.strictModeTemplateDesc')}
-            </div>
-            <div>
-              <span className="font-medium">{t('banPolicy.standardModeTemplate')}:</span>{' '}
-              {t('banPolicy.standardModeTemplateDesc')}
-            </div>
-            <div>
-              <span className="font-medium">{t('banPolicy.lenientModeTemplate')}:</span>{' '}
-              {t('banPolicy.lenientModeTemplateDesc')}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
+      {/* Banned Users List - Main Content */}
+      <Card className="flex-1 flex flex-col overflow-hidden min-h-0">
+        <CardHeader className="flex-shrink-0">
           <CardTitle>{t('banPolicy.bannedUsersList')}</CardTitle>
         </CardHeader>
-        <CardContent className="p-0">
+        <CardContent className="p-0 flex-1 overflow-hidden flex flex-col">
           <DataTable
             columns={bannedUsersColumns}
             data={bannedUsers}
             loading={tableLoading}
             pageSize={10}
+            fillHeight={true}
           />
         </CardContent>
       </Card>
@@ -515,4 +548,4 @@ const BanPolicy: React.FC = () => {
   )
 }
 
-export default BanPolicy
+export default BanPolicyPage

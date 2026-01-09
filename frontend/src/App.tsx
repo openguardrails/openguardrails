@@ -20,7 +20,7 @@ import { LLMProviders, SecurityPolicy } from './pages/SecurityGateway';
 import Documentation from './pages/Documentation/Documentation';
 import Subscription from './pages/Billing/Subscription';
 import ApplicationManagement from './pages/Config/ApplicationManagement';
-import TailwindDemo from './pages/TailwindDemo';
+import { AccessControl } from './pages/AccessControl';
 import { initSystemConfig, features } from './config';
 
 function App() {
@@ -49,7 +49,6 @@ function App() {
   return (
     <ApplicationProvider>
       <Routes>
-        <Route path="/tailwind-demo" element={<TailwindDemo />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
         <Route path="/verify" element={<Verify />} />
@@ -68,6 +67,7 @@ function App() {
               <Route path="/security-gateway/providers" element={<LLMProviders />} />
               <Route path="/security-gateway/policy" element={<SecurityPolicy />} />
               <Route path="/config/*" element={<Config />} />
+              <Route path="/access-control/*" element={<AccessControl />} />
               <Route path="/admin/*" element={<AdminPanel />} />
               <Route path="/account" element={<Account />} />
               {features.showSubscription() && (

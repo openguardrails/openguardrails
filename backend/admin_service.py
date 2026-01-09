@@ -429,6 +429,11 @@ else:
 # Import and register ban policy routes
 from routers import ban_policy_api
 app.include_router(ban_policy_api.router, dependencies=[Depends(verify_user_auth)])
+
+# Import and register appeal configuration routes
+from routers import appeal_api
+app.include_router(appeal_api.router, dependencies=[Depends(verify_user_auth)])
+
 # Risk configuration routes
 app.include_router(risk_config_api.router, dependencies=[Depends(verify_user_auth)])
 # Media router: image upload/delete needs authentication, but image access does not need authentication

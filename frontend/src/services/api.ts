@@ -234,6 +234,78 @@ export const configApi = {
     checkUserStatus: (userId: string): Promise<any> =>
       api.get(`/api/v1/ban-policy/check-status/${userId}`).then(res => res.data),
   },
+
+  // Appeal configuration management
+  appealConfig: {
+    // Get appeal configuration
+    get: (): Promise<{
+      id?: string;
+      enabled: boolean;
+      message_template: string;
+      appeal_base_url: string;
+      final_reviewer_email?: string;
+      created_at?: string;
+      updated_at?: string;
+    }> => api.get('/api/v1/config/appeal').then(res => res.data),
+
+    // Update appeal configuration
+    update: (data: {
+      enabled: boolean;
+      message_template: string;
+      appeal_base_url: string;
+      final_reviewer_email?: string;
+    }): Promise<any> => api.put('/api/v1/config/appeal', data).then(res => res.data),
+
+    // Get appeal records
+    getRecords: (params?: {
+      status?: string;
+      page?: number;
+      page_size?: number;
+    }): Promise<{
+      items: Array<{
+        id: string;
+        request_id: string;
+        user_id?: string;
+        application_id?: string;
+        application_name?: string;
+        original_content: string;
+        original_risk_level: string;
+        original_categories: string[];
+        status: string;
+        ai_approved?: boolean;
+        ai_review_result?: string;
+        processor_type?: string;
+        processor_id?: string;
+        processor_reason?: string;
+        created_at?: string;
+        ai_reviewed_at?: string;
+        processed_at?: string;
+      }>;
+      total: number;
+      page: number;
+      page_size: number;
+      pages: number;
+    }> => api.get('/api/v1/config/appeal/records', { params }).then(res => res.data),
+
+    // Manual review appeal
+    reviewAppeal: (appealId: string, data: {
+      action: 'approve' | 'reject';
+      reason?: string;
+    }): Promise<{
+      success: boolean;
+      status: string;
+      message: string;
+    }> => api.post(`/api/v1/config/appeal/records/${appealId}/review`, data).then(res => res.data),
+
+    // Export appeal records to Excel
+    exportRecords: (params?: {
+      status?: string;
+    }): Promise<Blob> =>
+      api.get('/api/v1/config/appeal/records/export', {
+        params,
+        responseType: 'blob'
+      }).then(res => res.data),
+  },
 };
 
 // Admin API

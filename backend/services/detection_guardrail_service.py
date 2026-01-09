@@ -337,7 +337,31 @@ class DetectionGuardrailService:
             overall_risk_level, suggest_action, suggest_answer = await self._determine_action_with_data(
                 compliance_result, security_result, data_result, tenant_id, application_id, user_content, data_anonymized_text, matched_scanners
             )
-            
+
+            # 5.1 Append appeal link if applicable (any risk level with reject/replace action)
+            if suggest_answer and suggest_action in ['reject', 'replace']:
+                try:
+                    from services.appeal_service import appeal_service
+                    # Get tenant's language preference for appeal page
+                    appeal_language = 'zh'  # Default to Chinese
+                    if tenant_id:
+                        try:
+                            from database.models import Tenant
+                            tenant = self.db.query(Tenant).filter(Tenant.id == tenant_id).first()
+                            if tenant and tenant.language:
+                                appeal_language = tenant.language
+                        except Exception:
+                            pass
+                    appeal_link = await appeal_service.generate_appeal_link(
+                        request_id=request_id,
+                        application_id=application_id,
+                        language=appeal_language
+                    )
+                    if appeal_link:
+                        suggest_answer = f"{suggest_answer}\n\n{appeal_link}"
+                except Exception as e:
+                    logger.warning(f"Failed to generate appeal link: {e}")
+
             # 6. Asynchronously record detection results to log file (not write to database)
             await self._log_detection_result(
                 request_id, user_content, compliance_result, security_result, data_result,

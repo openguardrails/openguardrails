@@ -253,6 +253,10 @@ app.include_router(billing.router, dependencies=[Depends(verify_user_auth)])  # 
 # Register direct model access routes (no dependency on verify_user_auth, uses its own auth)
 app.include_router(model_direct_access.router, prefix="/v1")  # Direct Model Access (auth handled internally)
 
+# Register appeal routes (public endpoint, no authentication required)
+from routers import appeal_router
+app.include_router(appeal_router.router)  # Appeal processing (public URL contains request_id as token)
+
 # Global exception handling
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):

@@ -58,6 +58,8 @@ class Application(Base):
     detection_results = relationship("DetectionResult", back_populates="application")
     user_ban_records = relationship("UserBanRecord", back_populates="application", cascade="all, delete-orphan")
     user_risk_triggers = relationship("UserRiskTrigger", back_populates="application", cascade="all, delete-orphan")
+    appeal_config = relationship("AppealConfig", back_populates="application", uselist=False, cascade="all, delete-orphan")
+    appeal_records = relationship("AppealRecord", back_populates="application", cascade="all, delete-orphan")
 
     __table_args__ = (
         UniqueConstraint('tenant_id', 'name', name='uq_applications_tenant_name'),
@@ -990,5 +992,90 @@ class SubscriptionPayment(Base):
     # Relationships
     tenant = relationship("Tenant")
     payment_order = relationship("PaymentOrder")
+
+
+# =====================================================
+# Appeal System Models
+# =====================================================
+
+class AppealConfig(Base):
+    """Appeal configuration table - per-application settings for false positive appeals"""
+    __tablename__ = "appeal_config"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    application_id = Column(UUID(as_uuid=True), ForeignKey("applications.id", ondelete="CASCADE"), nullable=False, index=True)
+    enabled = Column(Boolean, nullable=False, default=False)
+    # Template for appeal link message, supports {appeal_url} placeholder
+    message_template = Column(Text, nullable=False, default='如果您认为这是误报，请点击此链接申诉: {appeal_url}')
+    # Base URL for appeal links (e.g., https://domain.com or http://192.168.1.100:5001)
+    appeal_base_url = Column(String(512), nullable=False, default='')
+    # Final reviewer email - when AI considers it a true positive, send email for human review
+    final_reviewer_email = Column(String(255), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    tenant = relationship("Tenant")
+    application = relationship("Application", back_populates="appeal_config")
+
+    # Constraints
+    __table_args__ = (
+        UniqueConstraint('application_id', name='uq_appeal_config_application'),
+    )
+
+
+class AppealRecord(Base):
+    """Appeal records table - tracks false positive appeal requests and reviews"""
+    __tablename__ = "appeal_records"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    application_id = Column(UUID(as_uuid=True), ForeignKey("applications.id", ondelete="CASCADE"), nullable=False, index=True)
+    request_id = Column(String(64), nullable=False, unique=True, index=True)  # Original detection request_id (guardrails-xxx)
+    user_id = Column(String(255), index=True)  # User who triggered the detection
+
+    # Original detection info (denormalized for review)
+    original_content = Column(Text, nullable=False)
+    original_risk_level = Column(String(20), nullable=False)
+    original_categories = Column(JSON, nullable=False)
+    original_suggest_action = Column(String(20), nullable=False)
+
+    # Review status: pending, reviewing, pending_review, approved, rejected
+    # pending_review: AI rejected, waiting for human final review
+    status = Column(String(20), nullable=False, default='pending', index=True)
+
+    # AI review results
+    ai_review_result = Column(Text)  # AI reasoning output
+    ai_approved = Column(Boolean)  # AI decision: true=false positive confirmed (NOT actual violation)
+    ai_reviewed_at = Column(DateTime(timezone=True))
+
+    # Human review fields
+    processor_type = Column(String(20), nullable=True)  # 'agent' | 'human'
+    processor_id = Column(String(255), nullable=True)  # Human reviewer identifier (email prefix)
+    processor_reason = Column(Text, nullable=True)  # Human reviewer's reason (optional)
+    processed_at = Column(DateTime(timezone=True))  # When the appeal was finally processed
+
+    # Content hash for duplicate detection (一事不再理)
+    content_hash = Column(String(64), nullable=True, index=True)
+
+    # Context for review
+    user_recent_requests = Column(JSON)  # Recent 10 requests from this user
+    user_ban_history = Column(JSON)  # User's ban records if any
+
+    # Whitelist addition
+    whitelist_id = Column(Integer, ForeignKey("whitelist.id", ondelete="SET NULL"))
+    whitelist_keyword = Column(Text)  # The specific keyword/phrase added
+
+    # Metadata
+    ip_address = Column(String(45))
+    user_agent = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    tenant = relationship("Tenant")
+    application = relationship("Application", back_populates="appeal_records")
+    whitelist = relationship("Whitelist")
 
 

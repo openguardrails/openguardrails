@@ -1196,6 +1196,19 @@ const EntityTypeManagement: React.FC = () => {
                       )}
                     />
 
+                    {/* Warning banner for AI-generated recognition rules */}
+                    <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                      <Info className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                      <div className="text-sm space-y-1">
+                        <p className="font-medium text-amber-900">{t('entityType.testInputWarning')}</p>
+                        <p className="text-amber-800">{t('entityType.testInputHint')}</p>
+                        <ul className="text-amber-800 space-y-0.5 pl-4">
+                          <li>{t('entityType.testInputHintRegenerate')}</li>
+                          <li>{t('entityType.testInputHintManual')}</li>
+                        </ul>
+                      </div>
+                    </div>
+
                     <FormField
                       control={form.control}
                       name="recognition_test_input"
@@ -1250,6 +1263,19 @@ const EntityTypeManagement: React.FC = () => {
                         </FormItem>
                       )}
                     />
+
+                    {/* Warning banner for AI-generated entity definitions */}
+                    <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                      <Info className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                      <div className="text-sm space-y-1">
+                        <p className="font-medium text-amber-900">{t('entityType.testInputWarning')}</p>
+                        <p className="text-amber-800">{t('entityType.testInputHint')}</p>
+                        <ul className="text-amber-800 space-y-0.5 pl-4">
+                          <li>{t('entityType.testInputHintRegenerate')}</li>
+                          <li>{t('entityType.testInputHintManual')}</li>
+                        </ul>
+                      </div>
+                    </div>
 
                     <FormField
                       control={form.control}
@@ -1482,6 +1508,21 @@ const EntityTypeManagement: React.FC = () => {
 
                     {/* Test anonymization */}
                     <div className="pt-4 border-t">
+                      {/* Warning banner for AI-generated anonymization rules */}
+                      {['regex_replace', 'genai'].includes(form.watch('anonymization_method') || '') && (
+                        <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg mb-4">
+                          <Info className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                          <div className="text-sm space-y-1">
+                            <p className="font-medium text-amber-900">{t('entityType.testInputWarning')}</p>
+                            <p className="text-amber-800">{t('entityType.testInputHint')}</p>
+                            <ul className="text-amber-800 space-y-0.5 pl-4">
+                              <li>{t('entityType.testInputHintRegenerate')}</li>
+                              <li>{t('entityType.testInputHintManual')}</li>
+                            </ul>
+                          </div>
+                        </div>
+                      )}
+
                       <FormField
                         control={form.control}
                         name="test_input"
@@ -1552,6 +1593,21 @@ const EntityTypeManagement: React.FC = () => {
 
                     {!editingEntity && (
                       <p className="text-xs text-amber-600 bg-amber-100 p-2 rounded">{t('entityType.saveFirstForRestoreCodeHint')}</p>
+                    )}
+
+                    {/* Warning banner for AI-generated restore code */}
+                    {editingEntity?.has_restore_code && (
+                      <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                        <Info className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                        <div className="text-sm space-y-1">
+                          <p className="font-medium text-amber-900">{t('entityType.testInputWarning')}</p>
+                          <p className="text-amber-800">{t('entityType.testInputHint')}</p>
+                          <ul className="text-amber-800 space-y-0.5 pl-4">
+                            <li>{t('entityType.testInputHintRegenerate')}</li>
+                            <li>{t('entityType.testInputHintManual')}</li>
+                          </ul>
+                        </div>
+                      </div>
                     )}
 
                     <FormField

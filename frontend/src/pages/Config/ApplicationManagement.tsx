@@ -217,23 +217,24 @@ const ApplicationManagement: React.FC = () => {
     }
   }
 
-  const handleDeleteKey = (keyId: string) => {
-    confirmDialog({
+  const handleDeleteKey = async (keyId: string) => {
+    const confirmed = await confirmDialog({
       title: t('applicationManagement.deleteKeyConfirm'),
       confirmText: t('common.yes'),
       cancelText: t('common.no'),
       variant: 'destructive',
-      onConfirm: async () => {
-        try {
-          await api.delete(`/api/v1/applications/${currentAppId}/keys/${keyId}`)
-          toast.success(t('applicationManagement.keyDeleteSuccess'))
-          await fetchApiKeys(currentAppId)
-          fetchApplications()
-        } catch (error) {
-          toast.error(t('applicationManagement.keyDeleteError'))
-        }
-      },
     })
+
+    if (confirmed) {
+      try {
+        await api.delete(`/api/v1/applications/${currentAppId}/keys/${keyId}`)
+        toast.success(t('applicationManagement.keyDeleteSuccess'))
+        await fetchApiKeys(currentAppId)
+        fetchApplications()
+      } catch (error) {
+        toast.error(t('applicationManagement.keyDeleteError'))
+      }
+    }
   }
 
   const handleToggleKey = async (keyId: string) => {

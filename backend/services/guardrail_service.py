@@ -306,10 +306,35 @@ class GuardrailService:
 
             # 6. Determine suggested action and answer
             overall_risk_level, suggest_action, suggest_answer = await self._determine_action(
-                compliance_result, security_result, tenant_id=tenant_id, application_id=application_id, 
+                compliance_result, security_result, tenant_id=tenant_id, application_id=application_id,
                 user_query=user_content, data_result=data_result, anonymized_text=anonymized_text,
                 matched_scanners=matched_scanners
             )
+
+            # 6.1 Append appeal link if applicable (any risk level with reject/replace action)
+            if suggest_answer and suggest_action in ['reject', 'replace']:
+                try:
+                    from services.appeal_service import appeal_service
+                    # Get tenant's language preference for appeal page
+                    appeal_language = 'zh'  # Default to Chinese
+                    if tenant_id:
+                        try:
+                            from database.models import Tenant
+                            tenant = self.db.query(Tenant).filter(Tenant.id == tenant_id).first()
+                            if tenant and tenant.language:
+                                appeal_language = tenant.language
+                        except Exception:
+                            pass
+                    appeal_link = await appeal_service.generate_appeal_link(
+                        request_id=request_id,
+                        application_id=application_id,
+                        language=appeal_language,
+                        db=self.db
+                    )
+                    if appeal_link:
+                        suggest_answer = f"{suggest_answer}\n\n{appeal_link}"
+                except Exception as e:
+                    logger.warning(f"Failed to generate appeal link: {e}")
 
             # 7. Asynchronously log detection results
             await self._log_detection_result(

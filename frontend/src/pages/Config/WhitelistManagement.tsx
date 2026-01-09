@@ -113,28 +113,29 @@ const WhitelistManagement: React.FC = () => {
     setModalVisible(true)
   }
 
-  const handleDelete = (record: Whitelist) => {
-    confirmDialog({
+  const handleDelete = async (record: Whitelist) => {
+    const confirmed = await confirmDialog({
       title: t('whitelist.confirmDelete'),
       description: t('whitelist.confirmDeleteContent', { name: record.name }),
       confirmText: t('common.confirm'),
       cancelText: t('common.cancel'),
       variant: 'destructive',
-      onConfirm: async () => {
-        try {
-          await configApi.whitelist.delete(record.id)
-          toast.success(t('common.deleteSuccess'))
-          fetchData()
-          eventBus.emit(EVENTS.WHITELIST_DELETED, {
-            whitelistId: record.id,
-            whitelistName: record.name,
-          })
-        } catch (error) {
-          console.error('Error deleting whitelist:', error)
-          toast.error(t('common.deleteFailed'))
-        }
-      },
     })
+
+    if (confirmed) {
+      try {
+        await configApi.whitelist.delete(record.id)
+        toast.success(t('common.deleteSuccess'))
+        fetchData()
+        eventBus.emit(EVENTS.WHITELIST_DELETED, {
+          whitelistId: record.id,
+          whitelistName: record.name,
+        })
+      } catch (error) {
+        console.error('Error deleting whitelist:', error)
+        toast.error(t('common.deleteFailed'))
+      }
+    }
   }
 
   const handleSubmit = async (values: WhitelistFormData) => {
