@@ -224,6 +224,8 @@ class ModelService:
             # Build instruction using the template
             instruction = f"[INST] Task: Check if there is unsafe content in '{role}' messages in conversations according to our safety policy with the below categories.\n\n<BEGIN UNSAFE CONTENT CATEGORIES>\n{unsafe_categories}\n<END UNSAFE CONTENT CATEGORIES>\n\n<BEGIN CONVERSATION>\n\n{conversation}\n\n<END CONVERSATION>\n\nProvide your safety assessment for ONLY THE LAST {role} message in the above conversation:\n- First line must read 'safe' or 'unsafe'.\n- If unsafe, a second line must include a comma-separated list of violated categories. [/INST]"
 
+            logger.info(f"Model detection - role={role}, conversation={conversation[:500]}...")
+
             # Prepare new messages with instruction
             prepared_messages = [
                 {"role": "user", "content": instruction}

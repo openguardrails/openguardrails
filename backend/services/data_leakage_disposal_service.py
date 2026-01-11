@@ -195,13 +195,14 @@ class DataLeakageDisposalService:
         logger.debug(f"{direction.capitalize()} disposal action for {risk_level}: {action}")
         return action
 
-    def get_general_risk_action(self, application_id: str, risk_level: str) -> str:
+    def get_general_risk_action(self, application_id: str, risk_level: str, direction: str = 'input') -> str:
         """
         Get action for general risks (security, safety, compliance)
 
         Args:
             application_id: Application ID
             risk_level: 'high_risk' | 'medium_risk' | 'low_risk' | 'no_risk'
+            direction: 'input' (default) or 'output'
 
         Returns:
             'block' | 'replace' | 'pass'
@@ -229,15 +230,22 @@ class DataLeakageDisposalService:
                 'low_risk': 'pass'
             }.get(risk_level, 'block')
 
-        # Resolve general risk actions (use override if present, else tenant default)
-        action_map = {
-            'high_risk': getattr(app_policy, 'general_high_risk_action', None) or getattr(tenant_policy, 'default_general_high_risk_action', 'block') or 'block',
-            'medium_risk': getattr(app_policy, 'general_medium_risk_action', None) or getattr(tenant_policy, 'default_general_medium_risk_action', 'replace') or 'replace',
-            'low_risk': getattr(app_policy, 'general_low_risk_action', None) or getattr(tenant_policy, 'default_general_low_risk_action', 'pass') or 'pass'
-        }
+        # Resolve general risk actions based on direction (use override if present, else tenant default)
+        if direction == 'input':
+            action_map = {
+                'high_risk': getattr(app_policy, 'general_input_high_risk_action', None) or getattr(tenant_policy, 'default_general_input_high_risk_action', None) or getattr(tenant_policy, 'default_general_high_risk_action', 'block') or 'block',
+                'medium_risk': getattr(app_policy, 'general_input_medium_risk_action', None) or getattr(tenant_policy, 'default_general_input_medium_risk_action', None) or getattr(tenant_policy, 'default_general_medium_risk_action', 'replace') or 'replace',
+                'low_risk': getattr(app_policy, 'general_input_low_risk_action', None) or getattr(tenant_policy, 'default_general_input_low_risk_action', None) or getattr(tenant_policy, 'default_general_low_risk_action', 'pass') or 'pass'
+            }
+        else:  # output
+            action_map = {
+                'high_risk': getattr(app_policy, 'general_output_high_risk_action', None) or getattr(tenant_policy, 'default_general_output_high_risk_action', None) or getattr(tenant_policy, 'default_general_high_risk_action', 'block') or 'block',
+                'medium_risk': getattr(app_policy, 'general_output_medium_risk_action', None) or getattr(tenant_policy, 'default_general_output_medium_risk_action', None) or getattr(tenant_policy, 'default_general_medium_risk_action', 'replace') or 'replace',
+                'low_risk': getattr(app_policy, 'general_output_low_risk_action', None) or getattr(tenant_policy, 'default_general_output_low_risk_action', None) or getattr(tenant_policy, 'default_general_low_risk_action', 'pass') or 'pass'
+            }
 
         action = action_map.get(risk_level, 'pass')
-        logger.debug(f"General risk action for {risk_level}: {action}")
+        logger.debug(f"General {direction} risk action for {risk_level}: {action}")
         return action
 
     def get_private_model(

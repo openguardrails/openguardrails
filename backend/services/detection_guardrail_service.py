@@ -704,45 +704,81 @@ class DetectionGuardrailService:
         data_anonymized_text: Optional[str] = None,
         matched_scanners: Optional[list] = None
     ) -> Tuple[str, str, Optional[str]]:
-        """Determine suggested action (include data security detection result)"""
-        # Collect all risk levels and categories
-        risk_levels = [compliance_result.risk_level, security_result.risk_level, data_result.risk_level]
+        """Determine suggested action (include data security detection result)
+
+        Important:
+        - For general risks (security + compliance), use template/KB answer
+        - For DLP risks, use fixed i18n message (not anonymized text)
+        - overall_risk_level considers all three types for logging purposes
+        - suggest_action is based on the highest risk from general risks
+        - DLP disposal is handled separately in proxy layer
+        """
+        # Collect all categories for general risks only (not DLP)
         all_categories = []
 
         if compliance_result.risk_level != "no_risk":
             all_categories.extend(compliance_result.categories)
         if security_result.risk_level != "no_risk":
             all_categories.extend(security_result.categories)
-        # Note: data_result.categories contain internal entity types (ID_CARD_NUMBER_SYS, etc.)
-        # These should NOT be used for template lookups, only for risk level calculation
 
-        # Determine highest risk level
+        # Determine general risk level (security + compliance only, NOT DLP)
+        general_risk_levels = [compliance_result.risk_level, security_result.risk_level]
+        general_risk_level = "no_risk"
+        for level in ["high_risk", "medium_risk", "low_risk"]:
+            if level in general_risk_levels:
+                general_risk_level = level
+                break
+
+        # Determine overall risk level (including DLP for logging purposes)
+        all_risk_levels = [compliance_result.risk_level, security_result.risk_level, data_result.risk_level]
         overall_risk_level = "no_risk"
         for level in ["high_risk", "medium_risk", "low_risk"]:
-            if level in risk_levels:
+            if level in all_risk_levels:
                 overall_risk_level = level
                 break
 
-        # Determine suggested action
+        # If no risks at all, pass
         if overall_risk_level == "no_risk":
             return overall_risk_level, "pass", None
 
-        # If there is data leakage, use the anonymized text from detection result
+        # Determine suggest_answer based on risk type
         suggest_answer = None
-        if data_result.risk_level != "no_risk" and data_anonymized_text:
-            # Use the anonymized text from the original data security check
-            suggest_answer = data_anonymized_text
-            logger.info(f"Using anonymized text for data leak: {suggest_answer[:100]}...")
 
-        # If there is no data leakage de-sensitized text, use traditional template answer
-        if not suggest_answer:
+        # Case 1: Has general risk (security/compliance) - use template/KB answer
+        if general_risk_level != "no_risk":
             suggest_answer = await self._get_suggest_answer(all_categories, tenant_id, application_id, user_query, matched_scanners)
+            logger.info(f"Using template answer for general risk: {general_risk_level}")
 
-        # Determine action based on risk level
-        if overall_risk_level == "high_risk":
+        # Case 2: Only DLP risk (no general risk) - use fixed i18n message
+        elif data_result.risk_level != "no_risk":
+            # Get user's language preference for i18n
+            user_language = 'en'  # Default to English
+            if tenant_id:
+                try:
+                    from database.models import Tenant
+                    db = get_db_session()
+                    try:
+                        tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+                        if tenant and tenant.language:
+                            user_language = tenant.language
+                    finally:
+                        db.close()
+                except Exception as e:
+                    logger.warning(f"Failed to get user language for DLP message: {e}")
+
+            # Use fixed i18n message for DLP risk (not anonymized text)
+            suggest_answer = get_translation(user_language, 'guardrail', 'sensitiveDataPolicyViolation')
+            logger.info(f"Using fixed i18n message for DLP risk: {data_result.risk_level}")
+
+        # Determine action based on general risk level (DLP handling is done in proxy layer)
+        if general_risk_level == "high_risk":
             return overall_risk_level, "reject", suggest_answer
-        else:  # Medium or low risk
+        elif general_risk_level in ["medium_risk", "low_risk"]:
             return overall_risk_level, "replace", suggest_answer
+        else:
+            # Only DLP risk, no general risk - action depends on DLP policy (handled in proxy)
+            # Return "pass" for suggest_action, actual DLP disposal is in proxy layer
+            return overall_risk_level, "pass", suggest_answer
 
     async def _determine_action(self, compliance_result: ComplianceResult, security_result: SecurityResult, tenant_id: Optional[str] = None, application_id: Optional[str] = None, user_query: Optional[str] = None, matched_scanners: Optional[list] = None) -> Tuple[str, str, Optional[str]]:
         """Determine suggested action"""

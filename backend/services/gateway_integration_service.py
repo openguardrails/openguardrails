@@ -28,7 +28,9 @@ from database.models import (
     Application, UpstreamApiConfig, Tenant,
     DataSecurityEntityType, ApplicationDataLeakagePolicy
 )
+from database.connection import get_db_session
 from utils.logger import setup_logger
+from utils.i18n_loader import get_translation
 
 logger = setup_logger()
 
@@ -67,6 +69,28 @@ class GatewayIntegrationService:
         self.db = db
         self.disposal_service = DataLeakageDisposalService(db)
 
+    def _get_language(self, tenant_id: Optional[str]) -> str:
+        """
+        Get language preference for tenant.
+        
+        Args:
+            tenant_id: Tenant ID
+            
+        Returns:
+            Language code ('en' or 'zh'), defaults to 'en'
+        """
+        if not tenant_id:
+            return 'en'
+        
+        try:
+            tenant = self.db.query(Tenant).filter(Tenant.id == tenant_id).first()
+            if tenant and tenant.language:
+                return tenant.language
+        except Exception as e:
+            logger.warning(f"Failed to get language for tenant {tenant_id}: {e}")
+        
+        return 'en'
+
     async def process_input(
         self,
         application_id: str,
@@ -84,24 +108,31 @@ class GatewayIntegrationService:
         request_id = f"gw-{uuid.uuid4().hex[:12]}"
 
         try:
+            # Get language preference for i18n messages
+            language = self._get_language(tenant_id)
+
             # 1. Check ban policy
             if user_id:
                 ban_record = await BanPolicyService.check_user_banned(tenant_id, user_id)
                 if ban_record:
+                    ban_until = ban_record.get('ban_until', 'indefinitely')
+                    message_template = get_translation(language, 'guardrail', 'userBannedUntil')
+                    message = message_template.format(ban_until=ban_until)
                     return self._create_block_response(
                         request_id=request_id,
                         reason="user_banned",
-                        message=f"User has been banned until {ban_record.get('ban_until', 'indefinitely')}",
+                        message=message,
                         detection_result={"banned": True, "user_id": user_id}
                     )
 
             if client_ip:
                 ip_ban = await BanPolicyService.check_ip_banned(tenant_id, client_ip)
                 if ip_ban:
+                    message = get_translation(language, 'guardrail', 'ipAddressBanned')
                     return self._create_block_response(
                         request_id=request_id,
                         reason="ip_banned",
-                        message="IP address has been banned",
+                        message=message,
                         detection_result={"banned": True, "client_ip": client_ip}
                     )
 
@@ -163,17 +194,21 @@ class GatewayIntegrationService:
                 logger.info(f"[{request_id}] General risk: {overall_risk}, policy action: {general_action}")
 
                 if general_action == "block":
+                    if not suggest_answer:
+                        suggest_answer = get_translation(language, 'guardrail', 'securityPolicyBlocked')
                     return self._create_block_response(
                         request_id=request_id,
                         reason="security_risk",
-                        message=suggest_answer or "Request blocked due to security policy",
+                        message=suggest_answer,
                         detection_result=result_info
                     )
 
                 if general_action == "replace":
+                    if not suggest_answer:
+                        suggest_answer = get_translation(language, 'guardrail', 'cannotAssist')
                     return self._create_replace_response(
                         request_id=request_id,
-                        message=suggest_answer or "I cannot assist with this request.",
+                        message=suggest_answer,
                         detection_result=result_info
                     )
 
@@ -193,10 +228,11 @@ class GatewayIntegrationService:
                 logger.info(f"[{request_id}] Data risk: {data_risk_level}, disposal: {disposal_action}")
 
                 if disposal_action == "block":
+                    message = get_translation(language, 'guardrail', 'sensitiveDataPolicyViolation')
                     return self._create_block_response(
                         request_id=request_id,
                         reason="data_leakage_policy",
-                        message="Request blocked due to sensitive data detection",
+                        message=message,
                         detection_result=result_info
                     )
 
@@ -215,10 +251,11 @@ class GatewayIntegrationService:
                     else:
                         # No private model available, fallback to block
                         logger.warning(f"[{request_id}] No private model available, falling back to block")
+                        message = get_translation(language, 'guardrail', 'noPrivateModelConfigured')
                         return self._create_block_response(
                             request_id=request_id,
                             reason="no_private_model",
-                            message="Sensitive data detected but no private model configured",
+                            message=message,
                             detection_result=result_info
                         )
 
@@ -274,6 +311,9 @@ class GatewayIntegrationService:
         """
         request_id = f"gw-out-{uuid.uuid4().hex[:12]}"
 
+        # Get language preference for i18n messages
+        language = self._get_language(tenant_id)
+
         try:
             # 1. Restore anonymized data if session exists
             restored_content = content
@@ -324,55 +364,78 @@ class GatewayIntegrationService:
             }
 
             # 3. Handle output risks
-            if suggest_action == "reject":
-                return {
-                    "action": "block",
-                    "request_id": request_id,
-                    "detection_result": result_info,
-                    "block_response": {
-                        "code": 200,
-                        "content_type": "application/json",
-                        "body": json.dumps({
-                            "id": f"chatcmpl-blocked-{request_id}",
-                            "object": "chat.completion",
-                            "model": "openguardrails-security",
-                            "choices": [{
-                                "index": 0,
-                                "message": {
-                                    "role": "assistant",
-                                    "content": suggest_answer or "Response blocked due to security policy."
-                                },
-                                "finish_reason": "content_filter"
-                            }],
-                            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-                        })
-                    }
-                }
 
-            if suggest_action == "replace":
-                return {
-                    "action": "replace",
-                    "request_id": request_id,
-                    "detection_result": result_info,
-                    "replace_response": {
-                        "code": 200,
-                        "content_type": "application/json",
-                        "body": json.dumps({
-                            "id": f"chatcmpl-replaced-{request_id}",
-                            "object": "chat.completion",
-                            "model": "openguardrails-security",
-                            "choices": [{
-                                "index": 0,
-                                "message": {
-                                    "role": "assistant",
-                                    "content": suggest_answer or "I cannot provide this information."
-                                },
-                                "finish_reason": "content_filter"
-                            }],
-                            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-                        })
+            # Check if we have actual security/compliance risks (not just DLP)
+            has_security_risk = bool(security_result.get("categories"))
+            has_compliance_risk = bool(compliance_result.get("categories"))
+            has_dlp_risk = data_result.get("risk_level") not in (None, "no_risk")
+
+            # 3a. Security/Compliance risks - use policy-based action determination
+            if has_security_risk or has_compliance_risk:
+                # Get action from policy for output direction
+                general_action = self.disposal_service.get_general_risk_action(
+                    application_id=application_id,
+                    risk_level=overall_risk,
+                    direction="output"
+                )
+
+                logger.info(f"[{request_id}] Output general risk: {overall_risk}, policy action: {general_action}")
+
+                if general_action == "block":
+                    if not suggest_answer:
+                        suggest_answer = get_translation(language, 'guardrail', 'responseBlockedSecurity')
+                    return self._create_block_response(
+                        request_id=request_id,
+                        reason="security_risk",
+                        message=suggest_answer,
+                        detection_result=result_info
+                    )
+
+                if general_action == "replace":
+                    if not suggest_answer:
+                        suggest_answer = get_translation(language, 'guardrail', 'cannotProvideInformation')
+                    return self._create_replace_response(
+                        request_id=request_id,
+                        message=suggest_answer,
+                        detection_result=result_info
+                    )
+
+                # If general_action == "pass", continue to check DLP risks
+
+            # 3b. Data leakage risks - get disposal action from policy
+            data_risk_level = data_result.get("risk_level", "no_risk")
+            detected_entities = data_result.get("detected_entities", [])
+
+            if data_risk_level != "no_risk" and detected_entities:
+                disposal_action = self.disposal_service.get_disposal_action(
+                    application_id=application_id,
+                    risk_level=data_risk_level,
+                    direction="output"
+                )
+
+                logger.info(f"[{request_id}] Output data risk: {data_risk_level}, disposal: {disposal_action}")
+
+                if disposal_action == "block":
+                    message = get_translation(language, 'guardrail', 'responseBlockedDataLeakage')
+                    return self._create_block_response(
+                        request_id=request_id,
+                        reason="data_leakage_policy",
+                        message=message,
+                        detection_result=result_info
+                    )
+
+                elif disposal_action == "anonymize":
+                    # Anonymize sensitive data in output
+                    anonymized_content = self._anonymize_output_content(
+                        content=restored_content,
+                        detected_entities=detected_entities
+                    )
+                    return {
+                        "action": "anonymize",
+                        "request_id": request_id,
+                        "detection_result": result_info,
+                        "anonymized_content": anonymized_content
                     }
-                }
 
             # 4. Return restored/original content
             if has_restoration:
@@ -533,6 +596,49 @@ class GatewayIntegrationService:
             reverse=True
         ):
             result = result.replace(placeholder, original)
+
+        return result
+
+    def _anonymize_output_content(
+        self,
+        content: str,
+        detected_entities: List[Dict[str, Any]]
+    ) -> str:
+        """
+        Anonymize sensitive data in output content.
+
+        Args:
+            content: The content to anonymize
+            detected_entities: List of detected entities with text and entity_type
+
+        Returns:
+            Anonymized content with sensitive data replaced
+        """
+        if not detected_entities:
+            return content
+
+        result = content
+
+        # Sort by text length (longest first) to avoid partial replacements
+        sorted_entities = sorted(
+            detected_entities,
+            key=lambda x: len(x.get('text', '')),
+            reverse=True
+        )
+
+        for entity in sorted_entities:
+            original_text = entity.get('text', '')
+            if not original_text:
+                continue
+
+            entity_type = entity.get('entity_type', 'UNKNOWN').upper()
+
+            # Use pre-computed anonymized value if available, otherwise use placeholder
+            anonymized = entity.get('anonymized_value')
+            if not anonymized:
+                anonymized = f"<{entity_type}>"
+
+            result = result.replace(original_text, anonymized)
 
         return result
 

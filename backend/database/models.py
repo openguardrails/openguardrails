@@ -780,9 +780,20 @@ class TenantDataLeakagePolicy(Base):
 
     # General Risk Policy Defaults (security, safety, company policy violations)
     # Actions: 'block' | 'replace' (use knowledge base/template) | 'pass' (log only)
+    # Legacy fields (kept for backward compatibility)
     default_general_high_risk_action = Column(String(50), default='block', nullable=False)
     default_general_medium_risk_action = Column(String(50), default='replace', nullable=False)
     default_general_low_risk_action = Column(String(50), default='pass', nullable=False)
+
+    # General Risk Policy - Input Defaults
+    default_general_input_high_risk_action = Column(String(50), default='block', nullable=False)
+    default_general_input_medium_risk_action = Column(String(50), default='replace', nullable=False)
+    default_general_input_low_risk_action = Column(String(50), default='pass', nullable=False)
+
+    # General Risk Policy - Output Defaults
+    default_general_output_high_risk_action = Column(String(50), default='block', nullable=False)
+    default_general_output_medium_risk_action = Column(String(50), default='replace', nullable=False)
+    default_general_output_low_risk_action = Column(String(50), default='pass', nullable=False)
 
     # Default Feature Flags
     default_enable_format_detection = Column(Boolean, default=True, nullable=False)
@@ -829,9 +840,20 @@ class ApplicationDataLeakagePolicy(Base):
     # General Risk Policy Overrides (security, safety, company policy violations)
     # Actions: 'block' | 'replace' (use knowledge base/template) | 'pass' (log only)
     # NULL = use tenant default
+    # Legacy fields (kept for backward compatibility)
     general_high_risk_action = Column(String(50), default=None, nullable=True)
     general_medium_risk_action = Column(String(50), default=None, nullable=True)
     general_low_risk_action = Column(String(50), default=None, nullable=True)
+
+    # General Risk Policy - Input Overrides
+    general_input_high_risk_action = Column(String(50), default=None, nullable=True)
+    general_input_medium_risk_action = Column(String(50), default=None, nullable=True)
+    general_input_low_risk_action = Column(String(50), default=None, nullable=True)
+
+    # General Risk Policy - Output Overrides
+    general_output_high_risk_action = Column(String(50), default=None, nullable=True)
+    general_output_medium_risk_action = Column(String(50), default=None, nullable=True)
+    general_output_low_risk_action = Column(String(50), default=None, nullable=True)
 
     # Private model configuration (nullable if using tenant's default)
     private_model_id = Column(UUID(as_uuid=True), ForeignKey("upstream_api_configs.id", ondelete="SET NULL"), nullable=True)

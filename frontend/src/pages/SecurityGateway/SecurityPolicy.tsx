@@ -24,21 +24,28 @@ interface PrivateModel {
 interface GatewayPolicy {
   id: string
   application_id: string
-  // General risk policy
-  general_high_risk_action: string
-  general_medium_risk_action: string
-  general_low_risk_action: string
-  general_high_risk_action_override: string | null
-  general_medium_risk_action_override: string | null
-  general_low_risk_action_override: string | null
-  // Input policy
+  // General risk policy - Input
+  general_input_high_risk_action: string
+  general_input_medium_risk_action: string
+  general_input_low_risk_action: string
+  general_input_high_risk_action_override: string | null
+  general_input_medium_risk_action_override: string | null
+  general_input_low_risk_action_override: string | null
+  // General risk policy - Output
+  general_output_high_risk_action: string
+  general_output_medium_risk_action: string
+  general_output_low_risk_action: string
+  general_output_high_risk_action_override: string | null
+  general_output_medium_risk_action_override: string | null
+  general_output_low_risk_action_override: string | null
+  // Data leakage - Input policy
   input_high_risk_action: string
   input_medium_risk_action: string
   input_low_risk_action: string
   input_high_risk_action_override: string | null
   input_medium_risk_action_override: string | null
   input_low_risk_action_override: string | null
-  // Output policy
+  // Data leakage - Output policy
   output_high_risk_action: string
   output_medium_risk_action: string
   output_low_risk_action: string
@@ -62,17 +69,21 @@ const SecurityPolicy: React.FC = () => {
 
   // Form state
   const [formData, setFormData] = useState({
-    // General risk
-    general_high_risk_action: 'block' as string,
-    general_medium_risk_action: 'block' as string,
-    general_low_risk_action: 'block' as string,
-    // Input
+    // General risk - Input
+    general_input_high_risk_action: 'block' as string,
+    general_input_medium_risk_action: 'replace' as string,
+    general_input_low_risk_action: 'pass' as string,
+    // General risk - Output
+    general_output_high_risk_action: 'block' as string,
+    general_output_medium_risk_action: 'replace' as string,
+    general_output_low_risk_action: 'pass' as string,
+    // Data leakage - Input
     input_high_risk_action: 'block' as string,
     input_medium_risk_action: 'anonymize' as string,
     input_low_risk_action: 'pass' as string,
-    // Output
-    output_high_risk_action: 'pass' as string,
-    output_medium_risk_action: 'pass' as string,
+    // Data leakage - Output
+    output_high_risk_action: 'block' as string,
+    output_medium_risk_action: 'anonymize' as string,
     output_low_risk_action: 'pass' as string,
     // Private model
     private_model_id: null as string | null,
@@ -87,14 +98,21 @@ const SecurityPolicy: React.FC = () => {
       const data = await gatewayPolicyApi.getPolicy(currentApplicationId)
       setPolicy(data)
       setFormData({
-        general_high_risk_action: data.general_high_risk_action_override || data.general_high_risk_action || 'block',
-        general_medium_risk_action: data.general_medium_risk_action_override || data.general_medium_risk_action || 'block',
-        general_low_risk_action: data.general_low_risk_action_override || data.general_low_risk_action || 'block',
+        // General risk - Input
+        general_input_high_risk_action: data.general_input_high_risk_action_override || data.general_input_high_risk_action || 'block',
+        general_input_medium_risk_action: data.general_input_medium_risk_action_override || data.general_input_medium_risk_action || 'replace',
+        general_input_low_risk_action: data.general_input_low_risk_action_override || data.general_input_low_risk_action || 'pass',
+        // General risk - Output
+        general_output_high_risk_action: data.general_output_high_risk_action_override || data.general_output_high_risk_action || 'block',
+        general_output_medium_risk_action: data.general_output_medium_risk_action_override || data.general_output_medium_risk_action || 'replace',
+        general_output_low_risk_action: data.general_output_low_risk_action_override || data.general_output_low_risk_action || 'pass',
+        // Data leakage - Input
         input_high_risk_action: data.input_high_risk_action_override || data.input_high_risk_action || 'block',
         input_medium_risk_action: data.input_medium_risk_action_override || data.input_medium_risk_action || 'anonymize',
         input_low_risk_action: data.input_low_risk_action_override || data.input_low_risk_action || 'pass',
-        output_high_risk_action: data.output_high_risk_action_override || data.output_high_risk_action || 'pass',
-        output_medium_risk_action: data.output_medium_risk_action_override || data.output_medium_risk_action || 'pass',
+        // Data leakage - Output
+        output_high_risk_action: data.output_high_risk_action_override || data.output_high_risk_action || 'block',
+        output_medium_risk_action: data.output_medium_risk_action_override || data.output_medium_risk_action || 'anonymize',
         output_low_risk_action: data.output_low_risk_action_override || data.output_low_risk_action || 'pass',
         private_model_id: data.private_model_override,
       })
@@ -132,11 +150,6 @@ const SecurityPolicy: React.FC = () => {
     } finally {
       setSaving(false)
     }
-  }
-
-  // Reset field to default
-  const resetField = (field: keyof typeof formData) => {
-    setFormData(prev => ({ ...prev, [field]: null }))
   }
 
   // General risk action options
@@ -271,11 +284,12 @@ const SecurityPolicy: React.FC = () => {
             </TabsList>
 
             {/* General Risk Policy Tab */}
-            <TabsContent value="general" className="mt-4">
+            <TabsContent value="general" className="mt-4 space-y-4">
+              {/* General Risk - Input Policy */}
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">{t('gateway.generalRiskPolicyTitle')}</CardTitle>
-                  <CardDescription>{t('gateway.generalRiskPolicyDesc')}</CardDescription>
+                  <CardTitle className="text-base">{t('gateway.generalInputPolicyTitle')}</CardTitle>
+                  <CardDescription>{t('gateway.generalInputPolicyDesc')}</CardDescription>
                 </CardHeader>
                 <CardContent>
                   {policy && (
@@ -284,19 +298,51 @@ const SecurityPolicy: React.FC = () => {
                         level="high"
                         label={t('gateway.highRisk')}
                         actions={generalRiskActions}
-                        field="general_high_risk_action"
+                        field="general_input_high_risk_action"
                       />
                       <RiskLevelRow
                         level="medium"
                         label={t('gateway.mediumRisk')}
                         actions={generalRiskActions}
-                        field="general_medium_risk_action"
+                        field="general_input_medium_risk_action"
                       />
                       <RiskLevelRow
                         level="low"
                         label={t('gateway.lowRisk')}
                         actions={generalRiskActions}
-                        field="general_low_risk_action"
+                        field="general_input_low_risk_action"
+                      />
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* General Risk - Output Policy */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">{t('gateway.generalOutputPolicyTitle')}</CardTitle>
+                  <CardDescription>{t('gateway.generalOutputPolicyDesc')}</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {policy && (
+                    <div className="space-y-1">
+                      <RiskLevelRow
+                        level="high"
+                        label={t('gateway.highRisk')}
+                        actions={generalRiskActions}
+                        field="general_output_high_risk_action"
+                      />
+                      <RiskLevelRow
+                        level="medium"
+                        label={t('gateway.mediumRisk')}
+                        actions={generalRiskActions}
+                        field="general_output_medium_risk_action"
+                      />
+                      <RiskLevelRow
+                        level="low"
+                        label={t('gateway.lowRisk')}
+                        actions={generalRiskActions}
+                        field="general_output_low_risk_action"
                       />
                     </div>
                   )}

@@ -331,7 +331,14 @@ async def _background_input_detection(input_messages: list, tenant_id: str, requ
         logger.error(f"Background input detection failed: {e}")
 
 async def _sync_input_detection(model_config, input_messages: list, tenant_id: str, request_id: str, user_id: str = None, application_id: str = None):
-    """Synchronous input detection with data leakage disposal logic"""
+    """Synchronous input detection with separated general risk and DLP risk handling
+
+    Important logic:
+    - General risks (security + compliance) and DLP risks are handled separately
+    - General risks use suggest_answer for reject/replace actions
+    - DLP risks are handled according to DLP policy (block/anonymize/switch_private_model/pass)
+    - When both exist, use the highest risk disposal action
+    """
     try:
         detection_result = await detection_guardrail_service.detect_messages(
             messages=input_messages,
@@ -353,16 +360,28 @@ async def _sync_input_detection(model_config, input_messages: list, tenant_id: s
                 application_id=application_id
             )
 
-        # NEW: Data leakage disposal logic
+        # Extract risk levels
         data_risk_level = detection_result.get('data_result', {}).get('risk_level', 'no_risk')
+        compliance_risk = detection_result.get('compliance_result', {}).get('risk_level', 'no_risk') if detection_result.get('compliance_result') else 'no_risk'
+        security_risk = detection_result.get('security_result', {}).get('risk_level', 'no_risk') if detection_result.get('security_result') else 'no_risk'
+
+        # Determine general risk level (security + compliance only, NOT DLP)
+        risk_priority = {'no_risk': 0, 'low_risk': 1, 'medium_risk': 2, 'high_risk': 3}
+        general_risk_level = 'no_risk'
+        for level in [compliance_risk, security_risk]:
+            if risk_priority.get(level, 0) > risk_priority.get(general_risk_level, 0):
+                general_risk_level = level
+
         disposal_action = 'pass'
         modified_messages = input_messages
         modified_model_config = model_config
-        restore_mapping = {}  # For anonymize_restore action
-        disposal_service = None  # Initialize to None
+        restore_mapping = {}
+        disposal_service = None
+        dlp_blocked = False
+        general_blocked = False
 
+        # ============ DLP Risk Handling ============
         if data_risk_level != 'no_risk' and application_id:
-            # Get disposal policy and decide action
             try:
                 db = next(get_db())
                 disposal_service = DataLeakageDisposalService(db)
@@ -371,44 +390,28 @@ async def _sync_input_detection(model_config, input_messages: list, tenant_id: s
                 logger.info(f"Data leakage detected (risk={data_risk_level}), disposal_action={disposal_action}")
 
                 if disposal_action == 'block':
-                    # Block the request with fixed i18n message
-                    result = detection_result.copy()
-                    result['blocked'] = True
-                    result['detection_id'] = detection_id
-                    result['disposal_action'] = 'block'
-                    result['disposal_reason'] = f'Data leakage risk: {data_risk_level}'
-                    # Use fixed i18n message for data leakage block (default to English)
+                    dlp_blocked = True
+                    # DLP block uses fixed i18n message
                     try:
-                        result['suggest_answer'] = get_translation('en', 'guardrail', 'dataLeakageInputBlocked')
+                        dlp_block_message = get_translation('en', 'guardrail', 'sensitiveDataPolicyViolation')
                     except Exception:
-                        result['suggest_answer'] = "Request blocked by OpenGuardrails due to data security policy."
-                    logger.warning(f"Request blocked due to data leakage - request {request_id}")
-                    return result
+                        dlp_block_message = "Request blocked by OpenGuardrails due to sensitive data policy violation."
 
                 elif disposal_action == 'switch_private_model':
-                    # Switch to private model with ORIGINAL text (not anonymized)
-                    # Private models are data-safe, so sensitive data can be sent as-is
                     private_model = disposal_service.get_private_model(application_id, tenant_id)
                     if private_model:
                         modified_model_config = private_model
-                        # Keep original messages - private model is safe for sensitive data
                         logger.info(f"Switched to private model: {private_model.config_name} (using original text)")
                     else:
-                        # No private model available, fallback to block with fixed i18n message
+                        # No private model available, fallback to block
                         logger.warning(f"No private model available, blocking request instead")
-                        result = detection_result.copy()
-                        result['blocked'] = True
-                        result['detection_id'] = detection_id
-                        result['disposal_action'] = 'block'
-                        result['disposal_reason'] = 'No private model configured'
+                        dlp_blocked = True
                         try:
-                            result['suggest_answer'] = get_translation('en', 'guardrail', 'dataLeakageInputBlocked')
+                            dlp_block_message = get_translation('en', 'guardrail', 'sensitiveDataPolicyViolation')
                         except Exception:
-                            result['suggest_answer'] = "Request blocked by OpenGuardrails due to data security policy."
-                        return result
+                            dlp_block_message = "Request blocked by OpenGuardrails due to sensitive data policy violation."
 
                 elif disposal_action == 'anonymize':
-                    # Anonymize all user messages before sending to original model
                     detected_entities = detection_result.get('data_result', {}).get('detected_entities', [])
                     if detected_entities:
                         modified_messages = _anonymize_all_user_messages(
@@ -416,7 +419,6 @@ async def _sync_input_detection(model_config, input_messages: list, tenant_id: s
                         )
                         logger.info(f"Anonymized {len([m for m in input_messages if m.get('role') == 'user'])} user messages for data safety")
 
-                        # Save restore_mapping for output restoration (if available)
                         data_restore_mapping = detection_result.get('data_result', {}).get('restore_mapping', {})
                         if data_restore_mapping:
                             from services.request_context import AnonymizationContext
@@ -424,80 +426,75 @@ async def _sync_input_detection(model_config, input_messages: list, tenant_id: s
                             logger.info(f"Saved restore_mapping with {len(data_restore_mapping)} entries for output restoration")
 
                 elif disposal_action == 'anonymize_restore':
-                    # Anonymize with numbered placeholders for later restoration
                     detected_entities = detection_result.get('data_result', {}).get('detected_entities', [])
                     if detected_entities:
                         modified_messages, restore_mapping = _anonymize_all_user_messages_with_restore(
                             input_messages, detected_entities, application_id, db, logger
                         )
                         if restore_mapping:
-                            # Store mapping in request context for restoration in response
                             from services.request_context import AnonymizationContext
                             AnonymizationContext.set_mapping(restore_mapping)
                             logger.info(f"Anonymized with restore: {len(restore_mapping)} placeholders created")
 
             except Exception as e:
                 logger.error(f"Data leakage disposal failed: {e}", exc_info=True)
-                # Continue with original logic if disposal fails
 
-        # Check if blocking/replacement is needed for general risks (security, safety, compliance)
-        # Use security policy configuration instead of deprecated block_on_input_risk
-        overall_risk_level = detection_result.get('overall_risk_level', 'no_risk')
-        suggest_action = detection_result.get('suggest_action')
+        # ============ General Risk Handling (security + compliance) ============
+        suggest_answer = detection_result.get('suggest_answer')
 
-        # Check if there are non-data-leakage risks (compliance or security risks)
-        compliance_risk = detection_result.get('compliance_result', {}).get('risk_level', 'no_risk') if detection_result.get('compliance_result') else 'no_risk'
-        security_risk = detection_result.get('security_result', {}).get('risk_level', 'no_risk') if detection_result.get('security_result') else 'no_risk'
-        has_general_risk = compliance_risk != 'no_risk' or security_risk != 'no_risk'
-
-        # Skip general risk blocking if:
-        # 1. Data leakage risk was already handled (switch_private_model, anonymize, or pass)
-        # 2. AND there are no other general risks (compliance/security)
-        # Note: 'pass' means allow the request through even with data leakage risk
-        data_leakage_handled = disposal_action in ['switch_private_model', 'anonymize', 'pass']
-        if data_leakage_handled and not has_general_risk:
-            logger.info(f"Skipping general risk check - data leakage handled with {disposal_action}, no general risks")
-        elif suggest_action in ['reject', 'replace'] and application_id:
+        if general_risk_level != 'no_risk' and application_id:
             try:
                 if not disposal_service:
                     db = next(get_db())
                     disposal_service = DataLeakageDisposalService(db)
-                general_action = disposal_service.get_general_risk_action(application_id, overall_risk_level)
-                logger.info(f"General risk action for {overall_risk_level}: {general_action}")
+                general_action = disposal_service.get_general_risk_action(application_id, general_risk_level)
+                logger.info(f"General risk action for {general_risk_level}: {general_action}")
 
-                if general_action == 'block':
-                    logger.warning(f"Input detection blocked request due to general risk - request {request_id}")
-                    result = detection_result.copy()
-                    result['blocked'] = True
-                    if 'detection_id' not in result:
-                        result['detection_id'] = detection_id
-                    return result
-                elif general_action == 'replace':
-                    # Replace action: use suggest_answer but don't block, continue to upstream
-                    # The suggest_answer will be used if upstream also fails
-                    logger.info(f"Input detection: replace action for {overall_risk_level}, using suggest_answer")
-                    result = detection_result.copy()
-                    result['blocked'] = True  # Block with replacement
-                    if 'detection_id' not in result:
-                        result['detection_id'] = detection_id
-                    return result
-                # 'pass' action: log only, continue to upstream
+                if general_action in ['block', 'replace']:
+                    general_blocked = True
+                    # General risk uses suggest_answer from detection service
+                    general_block_message = suggest_answer or "Request blocked by OpenGuardrails due to policy violation."
             except Exception as e:
                 logger.error(f"Error getting general risk action: {e}", exc_info=True)
-                # Fallback to safe behavior if policy check fails
-                if suggest_action == 'reject':
-                    result = detection_result.copy()
-                    result['blocked'] = True
-                    if 'detection_id' not in result:
-                        result['detection_id'] = detection_id
-                    return result
+                # Fallback: block high risk
+                if general_risk_level == 'high_risk':
+                    general_blocked = True
+                    general_block_message = suggest_answer or "Request blocked by OpenGuardrails due to policy violation."
 
-        # Detection passed (or disposal action applied)
+        # ============ Combine Results: Use highest risk disposal ============
+        # Priority: block > replace/anonymize > pass
+        if dlp_blocked or general_blocked:
+            # Both blocked - use the one with higher risk level
+            if dlp_blocked and general_blocked:
+                # Both have risks, determine which is higher
+                if risk_priority.get(data_risk_level, 0) >= risk_priority.get(general_risk_level, 0):
+                    # DLP risk is higher or equal, use DLP message
+                    final_message = dlp_block_message
+                    logger.warning(f"Request blocked due to DLP risk ({data_risk_level}) - request {request_id}")
+                else:
+                    # General risk is higher, use suggest_answer
+                    final_message = general_block_message
+                    logger.warning(f"Request blocked due to general risk ({general_risk_level}) - request {request_id}")
+            elif dlp_blocked:
+                final_message = dlp_block_message
+                logger.warning(f"Request blocked due to DLP risk ({data_risk_level}) - request {request_id}")
+            else:
+                final_message = general_block_message
+                logger.warning(f"Request blocked due to general risk ({general_risk_level}) - request {request_id}")
+
+            result = detection_result.copy()
+            result['blocked'] = True
+            result['detection_id'] = detection_id
+            result['suggest_answer'] = final_message
+            result['disposal_action'] = 'block' if dlp_blocked else 'replace'
+            return result
+
+        # Detection passed (or non-blocking disposal action applied)
         return {
             'blocked': False,
             'detection_id': detection_id,
             'suggest_answer': None,
-            'modified_messages': modified_messages,  # NEW: Possibly anonymized
+            'modified_messages': modified_messages,  # Possibly anonymized
             'modified_model_config': modified_model_config,  # NEW: Possibly switched
             'disposal_action': disposal_action,  # NEW: Action taken
             'restore_mapping': restore_mapping  # NEW: For anonymize_restore action
@@ -579,8 +576,18 @@ async def _background_output_detection(input_messages: list, response_content: s
         logger.error(f"Background output detection failed: {e}")
 
 async def _sync_output_detection(model_config, input_messages: list, response_content: str, tenant_id: str, request_id: str, user_id: str = None, application_id: str = None):
-    """Synchronous output detection - detect completed and then decide to return content"""
+    """Synchronous output detection with separated general risk and DLP risk handling
+
+    Important logic:
+    - General risks (security + compliance) and DLP risks are handled separately
+    - General risks use suggest_answer for reject/replace actions
+    - DLP risks are handled according to DLP policy (block/anonymize/pass)
+    - When both exist, use the highest risk disposal action
+    """
     try:
+        logger.info(f"[{request_id}] Starting sync output detection, application_id={application_id}")
+        logger.info(f"[{request_id}] Output content to detect: {response_content[:200]}...")
+
         # Construct detection messages: input + response
         detection_messages = input_messages.copy()
         detection_messages.append({
@@ -596,6 +603,10 @@ async def _sync_output_detection(model_config, input_messages: list, response_co
         )
 
         detection_id = detection_result.get('request_id')
+        logger.info(f"[{request_id}] Output detection result: overall_risk={detection_result.get('overall_risk_level')}, "
+                    f"suggest_action={detection_result.get('suggest_action')}, "
+                    f"security_risk={detection_result.get('security_result', {}).get('risk_level')}, "
+                    f"compliance_risk={detection_result.get('compliance_result', {}).get('risk_level')}")
 
         # Synchronous record risk trigger and apply ban policy
         if user_id and detection_result.get('overall_risk_level') in ['medium_risk', 'high_risk']:
@@ -608,12 +619,25 @@ async def _sync_output_detection(model_config, input_messages: list, response_co
                 application_id=application_id
             )
 
-        # NEW: Output data leakage disposal logic
+        # Extract risk levels
         data_risk_level = detection_result.get('data_result', {}).get('risk_level', 'no_risk')
+        compliance_risk = detection_result.get('compliance_result', {}).get('risk_level', 'no_risk') if detection_result.get('compliance_result') else 'no_risk'
+        security_risk = detection_result.get('security_result', {}).get('risk_level', 'no_risk') if detection_result.get('security_result') else 'no_risk'
+
+        # Determine general risk level (security + compliance only, NOT DLP)
+        risk_priority = {'no_risk': 0, 'low_risk': 1, 'medium_risk': 2, 'high_risk': 3}
+        general_risk_level = 'no_risk'
+        for level in [compliance_risk, security_risk]:
+            if risk_priority.get(level, 0) > risk_priority.get(general_risk_level, 0):
+                general_risk_level = level
+
         final_content = response_content
         disposal_action = 'pass'
-        disposal_service = None  # Initialize to None
+        disposal_service = None
+        dlp_blocked = False
+        general_blocked = False
 
+        # ============ DLP Risk Handling ============
         if data_risk_level != 'no_risk' and application_id:
             try:
                 db = next(get_db())
@@ -623,19 +647,12 @@ async def _sync_output_detection(model_config, input_messages: list, response_co
                 logger.info(f"Output data leakage detected (risk={data_risk_level}), disposal_action={disposal_action}")
 
                 if disposal_action == 'block':
-                    # Block the response with fixed i18n message
+                    dlp_blocked = True
+                    # DLP block uses fixed i18n message
                     try:
-                        block_message = get_translation('en', 'guardrail', 'dataLeakageOutputBlocked')
+                        dlp_block_message = get_translation('en', 'guardrail', 'sensitiveDataPolicyViolation')
                     except Exception:
-                        block_message = "Response blocked by OpenGuardrails due to data security policy."
-                    logger.warning(f"Response blocked due to output data leakage - request {request_id}")
-                    return {
-                        'blocked': True,
-                        'detection_id': detection_id,
-                        'suggest_answer': block_message,
-                        'response_content': block_message,
-                        'disposal_action': 'block'
-                    }
+                        dlp_block_message = "Request blocked by OpenGuardrails due to sensitive data policy violation."
 
                 elif disposal_action == 'anonymize':
                     # Use anonymized response content
@@ -654,54 +671,59 @@ async def _sync_output_detection(model_config, input_messages: list, response_co
 
             except Exception as e:
                 logger.error(f"Output data leakage disposal failed: {e}", exc_info=True)
-                # Continue with original logic if disposal fails
 
-        # Check if blocking/replacement is needed for general risks (security, safety, compliance)
-        # Use security policy configuration instead of deprecated block_on_output_risk
-        overall_risk_level = detection_result.get('overall_risk_level', 'no_risk')
-        suggest_action = detection_result.get('suggest_action')
+        # ============ General Risk Handling (security + compliance) ============
+        suggest_answer = detection_result.get('suggest_answer')
 
-        # Check if there are non-data-leakage risks (compliance or security risks)
-        compliance_risk = detection_result.get('compliance_result', {}).get('risk_level', 'no_risk') if detection_result.get('compliance_result') else 'no_risk'
-        security_risk = detection_result.get('security_result', {}).get('risk_level', 'no_risk') if detection_result.get('security_result') else 'no_risk'
-        has_general_risk = compliance_risk != 'no_risk' or security_risk != 'no_risk'
-
-        # Skip general risk blocking if data leakage was already handled (anonymize or pass) and no other general risks
-        # Note: 'pass' means allow the response through even with data leakage risk (for audit mode)
-        data_leakage_handled = disposal_action in ['anonymize', 'pass']
-        if data_leakage_handled and not has_general_risk:
-            logger.info(f"Skipping output general risk check - data leakage handled with {disposal_action}, no general risks")
-        elif suggest_action in ['reject', 'replace'] and application_id:
+        if general_risk_level != 'no_risk' and application_id:
             try:
                 if not disposal_service:
                     db = next(get_db())
                     disposal_service = DataLeakageDisposalService(db)
-                general_action = disposal_service.get_general_risk_action(application_id, overall_risk_level)
-                logger.info(f"Output general risk action for {overall_risk_level}: {general_action}")
+                general_action = disposal_service.get_general_risk_action(application_id, general_risk_level, direction='output')
+                logger.info(f"[{request_id}] Output general risk: level={general_risk_level}, action={general_action}, suggest_answer={suggest_answer[:100] if suggest_answer else None}")
 
                 if general_action in ['block', 'replace']:
-                    logger.warning(f"Synchronous output detection block response - request {request_id}")
-                    suggest_answer = detection_result.get('suggest_answer', 'Sorry, the generated content contains inappropriate information.')
-                    return {
-                        'blocked': True,
-                        'detection_id': detection_id,
-                        'suggest_answer': suggest_answer,
-                        'response_content': suggest_answer  # Alternative content
-                    }
-                # 'pass' action: log only, return original content
+                    general_blocked = True
+                    # General risk uses suggest_answer from detection service
+                    general_block_message = suggest_answer or "Sorry, the generated content contains inappropriate information."
             except Exception as e:
                 logger.error(f"Error getting output general risk action: {e}", exc_info=True)
-                # Fallback to safe behavior if policy check fails
-                if suggest_action == 'reject':
-                    suggest_answer = detection_result.get('suggest_answer', 'Sorry, the generated content contains inappropriate information.')
-                    return {
-                        'blocked': True,
-                        'detection_id': detection_id,
-                        'suggest_answer': suggest_answer,
-                        'response_content': suggest_answer
-                    }
+                # Fallback: block high risk
+                if general_risk_level == 'high_risk':
+                    general_blocked = True
+                    general_block_message = suggest_answer or "Sorry, the generated content contains inappropriate information."
 
-        # Detection passed (or anonymized), return final content
+        # ============ Combine Results: Use highest risk disposal ============
+        # Priority: block > replace/anonymize > pass
+        if dlp_blocked or general_blocked:
+            # Both blocked - use the one with higher risk level
+            if dlp_blocked and general_blocked:
+                # Both have risks, determine which is higher
+                if risk_priority.get(data_risk_level, 0) >= risk_priority.get(general_risk_level, 0):
+                    # DLP risk is higher or equal, use DLP message
+                    final_message = dlp_block_message
+                    logger.warning(f"Response blocked due to DLP risk ({data_risk_level}) - request {request_id}")
+                else:
+                    # General risk is higher, use suggest_answer
+                    final_message = general_block_message
+                    logger.warning(f"Response blocked due to general risk ({general_risk_level}) - request {request_id}")
+            elif dlp_blocked:
+                final_message = dlp_block_message
+                logger.warning(f"Response blocked due to DLP risk ({data_risk_level}) - request {request_id}")
+            else:
+                final_message = general_block_message
+                logger.warning(f"Response blocked due to general risk ({general_risk_level}) - request {request_id}")
+
+            return {
+                'blocked': True,
+                'detection_id': detection_id,
+                'suggest_answer': final_message,
+                'response_content': final_message,
+                'disposal_action': 'block' if dlp_blocked else 'replace'
+            }
+
+        # Detection passed (or non-blocking disposal action applied), return final content
         return {
             'blocked': False,
             'detection_id': detection_id,
@@ -847,21 +869,21 @@ class StreamChunkDetector:
         except Exception as e:
             logger.error(f"Asynchronous detection failed: {e}")
 
-    async def _sync_detection(self, model_config, input_messages: list, 
+    async def _sync_detection(self, model_config, input_messages: list,
                              tenant_id: str, request_id: str, is_final: bool = False) -> bool:
         """Synchronous serial detection - may block stream"""
         if not self.chunks_buffer:
             return False
-            
+
         try:
             # Construct detection messages
             accumulated_content = ''.join(self.chunks_buffer)
             detection_messages = input_messages.copy()
             detection_messages.append({
-                "role": "assistant", 
+                "role": "assistant",
                 "content": accumulated_content
             })
-            
+
             # Synchronous detection
             detection_result = await detection_guardrail_service.detect_messages(
                 messages=detection_messages,
@@ -869,40 +891,63 @@ class StreamChunkDetector:
                 request_id=f"{request_id}_stream_sync_{self.chunk_count}",
                 application_id=self.application_id
             )
-            
-            # Check risk and decide whether to block
+
+            # Check general risk (security + compliance) and decide whether to block
             if detection_result.get('suggest_action') in ['reject', 'replace']:
-                logger.warning(f"Synchronous detection found risk and block - chunk {self.chunk_count}, request {request_id}")
+                logger.warning(f"Synchronous detection found general risk and block - chunk {self.chunk_count}, request {request_id}")
                 logger.warning(f"Detection result: {detection_result}")
                 self.risk_detected = True
                 self.should_stop = True
                 self.detection_result = detection_result  # Save detection result
                 return True
-            
+
+            # Check DLP risk and apply output disposal policy
+            data_risk_level = detection_result.get('data_result', {}).get('risk_level', 'no_risk')
+            if data_risk_level != 'no_risk' and self.application_id:
+                try:
+                    db = next(get_db())
+                    disposal_service = DataLeakageDisposalService(db)
+                    disposal_action = disposal_service.get_disposal_action(self.application_id, data_risk_level, direction='output')
+
+                    if disposal_action == 'block':
+                        logger.warning(f"Synchronous detection found DLP risk ({data_risk_level}) and block - chunk {self.chunk_count}, request {request_id}")
+                        self.risk_detected = True
+                        self.should_stop = True
+                        # Create a DLP-specific detection result
+                        self.detection_result = detection_result.copy() if detection_result else {}
+                        try:
+                            dlp_block_message = get_translation('en', 'guardrail', 'sensitiveDataPolicyViolation')
+                        except Exception:
+                            dlp_block_message = "Request blocked by OpenGuardrails due to sensitive data policy violation."
+                        self.detection_result['suggest_answer'] = dlp_block_message
+                        return True
+                except Exception as e:
+                    logger.error(f"DLP disposal check failed in stream detection: {e}")
+
             # Clear buffer for next detection
             self.chunks_buffer = []
             self.chunk_count = 0
             return False
-            
+
         except Exception as e:
             logger.error(f"Synchronous detection failed: {e}")
             return False
 
-    async def _sync_final_detection(self, model_config, input_messages: list, 
+    async def _sync_final_detection(self, model_config, input_messages: list,
                                    tenant_id: str, request_id: str) -> bool:
         """Synchronous final detection - used for detection at stream end"""
         if not self.chunks_buffer:
             return False
-            
+
         try:
             # Construct detection messages
             accumulated_content = ''.join(self.chunks_buffer)
             detection_messages = input_messages.copy()
             detection_messages.append({
-                "role": "assistant", 
+                "role": "assistant",
                 "content": accumulated_content
             })
-            
+
             # Synchronous detection
             detection_result = await detection_guardrail_service.detect_messages(
                 messages=detection_messages,
@@ -910,21 +955,44 @@ class StreamChunkDetector:
                 request_id=f"{request_id}_stream_final_{self.chunk_count}",
                 application_id=self.application_id
             )
-            
-            # Check risk and decide whether to block
+
+            # Check general risk (security + compliance) and decide whether to block
             if detection_result.get('suggest_action') in ['reject', 'replace']:
-                logger.warning(f"Synchronous final detection found risk and block - chunk {self.chunk_count}, request {request_id}")
+                logger.warning(f"Synchronous final detection found general risk and block - chunk {self.chunk_count}, request {request_id}")
                 logger.warning(f"Detection result: {detection_result}")
                 self.risk_detected = True
                 self.should_stop = True
                 self.detection_result = detection_result  # Save detection result
                 return True
-            
+
+            # Check DLP risk and apply output disposal policy
+            data_risk_level = detection_result.get('data_result', {}).get('risk_level', 'no_risk')
+            if data_risk_level != 'no_risk' and self.application_id:
+                try:
+                    db = next(get_db())
+                    disposal_service = DataLeakageDisposalService(db)
+                    disposal_action = disposal_service.get_disposal_action(self.application_id, data_risk_level, direction='output')
+
+                    if disposal_action == 'block':
+                        logger.warning(f"Synchronous final detection found DLP risk ({data_risk_level}) and block - chunk {self.chunk_count}, request {request_id}")
+                        self.risk_detected = True
+                        self.should_stop = True
+                        # Create a DLP-specific detection result
+                        self.detection_result = detection_result.copy() if detection_result else {}
+                        try:
+                            dlp_block_message = get_translation('en', 'guardrail', 'sensitiveDataPolicyViolation')
+                        except Exception:
+                            dlp_block_message = "Request blocked by OpenGuardrails due to sensitive data policy violation."
+                        self.detection_result['suggest_answer'] = dlp_block_message
+                        return True
+                except Exception as e:
+                    logger.error(f"DLP disposal check failed in stream final detection: {e}")
+
             # Clear buffer
             self.chunks_buffer = []
             self.chunk_count = 0
             return False
-            
+
         except Exception as e:
             logger.error(f"Synchronous final detection failed: {e}")
             return False
@@ -973,8 +1041,10 @@ async def _handle_gateway_streaming_response(
                                 line = line[6:]
 
                                 if line.strip() == "[DONE]":
-                                    # Final detection before completing (skip if we have restore mapping)
-                                    if not detector.should_stop and not has_restore_mapping:
+                                    # Final detection before completing
+                                    # Detection runs on model output (with placeholders), not restored content
+                                    # Placeholders won't be detected as sensitive data
+                                    if not detector.should_stop:
                                         should_stop = await detector.final_detection(
                                             api_config, input_messages, tenant_id, request_id
                                         )
@@ -1059,22 +1129,23 @@ async def _handle_gateway_streaming_response(
                                         if content or reasoning_content:
                                             full_content += content
 
-                                            # Skip output detection if we have restore mapping
-                                            # (input was anonymized, output will be restored, no need for detection)
+                                            # Run output detection on model output (with placeholders)
+                                            # Placeholders won't be detected as sensitive data
+                                            # Only NEW sensitive data from model will trigger detection
                                             should_stop = False
-                                            if not has_restore_mapping:
-                                                # Extract tool_calls content for security detection (also need to extract tool_calls from chunk)
-                                                tool_calls_content = ""
-                                                has_tool_calls = _chunk_has_tool_calls(chunk_data)
-                                                if has_tool_calls:
-                                                    tool_calls_content = _extract_tool_calls_content(chunk_data)
-                                                    logger.debug(f"Extracted tool_calls content for detection: {tool_calls_content[:100]}...")
 
-                                                # Detect chunk (including all content types)
-                                                should_stop = await detector.add_chunk(
-                                                    content, reasoning_content, tool_calls_content, api_config,
-                                                    input_messages, tenant_id, request_id
-                                                )
+                                            # Extract tool_calls content for security detection
+                                            tool_calls_content = ""
+                                            has_tool_calls = _chunk_has_tool_calls(chunk_data)
+                                            if has_tool_calls:
+                                                tool_calls_content = _extract_tool_calls_content(chunk_data)
+                                                logger.debug(f"Extracted tool_calls content for detection: {tool_calls_content[:100]}...")
+
+                                            # Detect chunk (including all content types)
+                                            should_stop = await detector.add_chunk(
+                                                content, reasoning_content, tool_calls_content, api_config,
+                                                input_messages, tenant_id, request_id
+                                            )
 
                                             if should_stop:
                                                 output_blocked = True
@@ -1211,26 +1282,23 @@ async def _handle_gateway_non_streaming_response(
         if upstream_response.get('choices'):
             output_content = upstream_response['choices'][0]['message']['content']
 
-            # If we have restore mapping, restore placeholders first before any output detection
-            # This ensures the output is restored and not re-anonymized
-            if has_restore_mapping:
-                restored_content = restore_placeholders(output_content)
-                logger.info(f"Restored placeholders in output: {len(AnonymizationContext.get_mapping())} mappings applied")
-                output_content = restored_content
-                # Skip output detection since we've already handled the sensitive data
-                # The input was anonymized and output is now restored - no need for re-detection
-                final_content = output_content
-                output_detection_id = f"{request_id}_output_skip_restored"
-                logger.info(f"Skipping output detection - content was restored from anonymized input")
-            else:
-                # Perform output detection as normal (no restore mapping means input wasn't anonymized)
-                output_detection_result = await perform_output_detection(
-                    api_config, input_messages, output_content, tenant_id, request_id, user_id, application_id
-                )
+            # Always perform output detection first (before restore)
+            # Detection runs on model output which may contain placeholders like [email_sys_1]
+            # Placeholders won't be detected as sensitive data, only NEW sensitive data from model will be detected
+            output_detection_result = await perform_output_detection(
+                api_config, input_messages, output_content, tenant_id, request_id, user_id, application_id
+            )
 
-                output_detection_id = output_detection_result.get('detection_id')
-                output_blocked = output_detection_result.get('blocked', False)
-                final_content = output_detection_result.get('response_content', output_content)
+            output_detection_id = output_detection_result.get('detection_id')
+            output_blocked = output_detection_result.get('blocked', False)
+            final_content = output_detection_result.get('response_content', output_content)
+
+            # After detection and processing, restore placeholders if we have restore mapping
+            # This happens AFTER detection, so restored content won't trigger re-detection
+            if has_restore_mapping and not output_blocked:
+                restored_content = restore_placeholders(final_content)
+                logger.info(f"Restored placeholders in output: {len(AnonymizationContext.get_mapping())} mappings applied")
+                final_content = restored_content
 
             # Update response content
             upstream_response['choices'][0]['message']['content'] = final_content

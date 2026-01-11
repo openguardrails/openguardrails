@@ -92,11 +92,17 @@ class PrivateModelBrief(BaseModel):
 
 class GatewayPolicyUpdate(BaseModel):
     """Update gateway security policy"""
-    # General Risk Policy (security, safety, compliance)
+    # General Risk Policy - Input (security, safety, compliance)
     # Actions: 'block' | 'replace' (use knowledge base/template) | 'pass' (log only)
-    general_high_risk_action: Optional[str] = Field(None, pattern='^(block|replace|pass)$')
-    general_medium_risk_action: Optional[str] = Field(None, pattern='^(block|replace|pass)$')
-    general_low_risk_action: Optional[str] = Field(None, pattern='^(block|replace|pass)$')
+    general_input_high_risk_action: Optional[str] = Field(None, pattern='^(block|replace|pass)$')
+    general_input_medium_risk_action: Optional[str] = Field(None, pattern='^(block|replace|pass)$')
+    general_input_low_risk_action: Optional[str] = Field(None, pattern='^(block|replace|pass)$')
+
+    # General Risk Policy - Output (security, safety, compliance)
+    # Actions: 'block' | 'replace' (use knowledge base/template) | 'pass' (log only)
+    general_output_high_risk_action: Optional[str] = Field(None, pattern='^(block|replace|pass)$')
+    general_output_medium_risk_action: Optional[str] = Field(None, pattern='^(block|replace|pass)$')
+    general_output_low_risk_action: Optional[str] = Field(None, pattern='^(block|replace|pass)$')
 
     # Data Leakage - Input Policy
     # Actions: 'block' | 'switch_private_model' | 'anonymize' | 'pass'
@@ -119,15 +125,25 @@ class GatewayPolicyResponse(BaseModel):
     id: str
     application_id: str
 
-    # General Risk Policy - resolved values
-    general_high_risk_action: str
-    general_medium_risk_action: str
-    general_low_risk_action: str
+    # General Risk Policy - Input - resolved values
+    general_input_high_risk_action: str
+    general_input_medium_risk_action: str
+    general_input_low_risk_action: str
 
-    # General Risk Policy - overrides (NULL = use tenant default)
-    general_high_risk_action_override: Optional[str]
-    general_medium_risk_action_override: Optional[str]
-    general_low_risk_action_override: Optional[str]
+    # General Risk Policy - Input - overrides (NULL = use tenant default)
+    general_input_high_risk_action_override: Optional[str]
+    general_input_medium_risk_action_override: Optional[str]
+    general_input_low_risk_action_override: Optional[str]
+
+    # General Risk Policy - Output - resolved values
+    general_output_high_risk_action: str
+    general_output_medium_risk_action: str
+    general_output_low_risk_action: str
+
+    # General Risk Policy - Output - overrides (NULL = use tenant default)
+    general_output_high_risk_action_override: Optional[str]
+    general_output_medium_risk_action_override: Optional[str]
+    general_output_low_risk_action_override: Optional[str]
 
     # Data Leakage - Input Policy - resolved values
     input_high_risk_action: str
@@ -166,10 +182,15 @@ class TenantGatewayPolicyResponse(BaseModel):
     id: str
     tenant_id: str
 
-    # General Risk Policy defaults
-    default_general_high_risk_action: str
-    default_general_medium_risk_action: str
-    default_general_low_risk_action: str
+    # General Risk Policy - Input defaults
+    default_general_input_high_risk_action: str
+    default_general_input_medium_risk_action: str
+    default_general_input_low_risk_action: str
+
+    # General Risk Policy - Output defaults
+    default_general_output_high_risk_action: str
+    default_general_output_medium_risk_action: str
+    default_general_output_low_risk_action: str
 
     # Data Leakage - Input Policy defaults
     default_input_high_risk_action: str
@@ -194,10 +215,15 @@ class TenantGatewayPolicyResponse(BaseModel):
 
 class TenantGatewayPolicyUpdate(BaseModel):
     """Update tenant-level default gateway policy"""
-    # General Risk Policy defaults
-    default_general_high_risk_action: str = Field(..., pattern='^(block|replace|pass)$')
-    default_general_medium_risk_action: str = Field(..., pattern='^(block|replace|pass)$')
-    default_general_low_risk_action: str = Field(..., pattern='^(block|replace|pass)$')
+    # General Risk Policy - Input defaults
+    default_general_input_high_risk_action: str = Field(..., pattern='^(block|replace|pass)$')
+    default_general_input_medium_risk_action: str = Field(..., pattern='^(block|replace|pass)$')
+    default_general_input_low_risk_action: str = Field(..., pattern='^(block|replace|pass)$')
+
+    # General Risk Policy - Output defaults
+    default_general_output_high_risk_action: str = Field(..., pattern='^(block|replace|pass)$')
+    default_general_output_medium_risk_action: str = Field(..., pattern='^(block|replace|pass)$')
+    default_general_output_low_risk_action: str = Field(..., pattern='^(block|replace|pass)$')
 
     # Data Leakage - Input Policy defaults
     default_input_high_risk_action: str = Field(..., pattern='^(block|switch_private_model|anonymize|pass)$')
@@ -256,12 +282,19 @@ async def get_tenant_gateway_policy(
         return TenantGatewayPolicyResponse(
             id=str(tenant_policy.id),
             tenant_id=str(tenant_policy.tenant_id),
-            default_general_high_risk_action=getattr(tenant_policy, 'default_general_high_risk_action', 'block') or 'block',
-            default_general_medium_risk_action=getattr(tenant_policy, 'default_general_medium_risk_action', 'replace') or 'replace',
-            default_general_low_risk_action=getattr(tenant_policy, 'default_general_low_risk_action', 'pass') or 'pass',
+            # General risk - input
+            default_general_input_high_risk_action=getattr(tenant_policy, 'default_general_input_high_risk_action', None) or getattr(tenant_policy, 'default_general_high_risk_action', 'block') or 'block',
+            default_general_input_medium_risk_action=getattr(tenant_policy, 'default_general_input_medium_risk_action', None) or getattr(tenant_policy, 'default_general_medium_risk_action', 'replace') or 'replace',
+            default_general_input_low_risk_action=getattr(tenant_policy, 'default_general_input_low_risk_action', None) or getattr(tenant_policy, 'default_general_low_risk_action', 'pass') or 'pass',
+            # General risk - output
+            default_general_output_high_risk_action=getattr(tenant_policy, 'default_general_output_high_risk_action', None) or getattr(tenant_policy, 'default_general_high_risk_action', 'block') or 'block',
+            default_general_output_medium_risk_action=getattr(tenant_policy, 'default_general_output_medium_risk_action', None) or getattr(tenant_policy, 'default_general_medium_risk_action', 'replace') or 'replace',
+            default_general_output_low_risk_action=getattr(tenant_policy, 'default_general_output_low_risk_action', None) or getattr(tenant_policy, 'default_general_low_risk_action', 'pass') or 'pass',
+            # Data leakage - input
             default_input_high_risk_action=tenant_policy.default_input_high_risk_action,
             default_input_medium_risk_action=tenant_policy.default_input_medium_risk_action,
             default_input_low_risk_action=tenant_policy.default_input_low_risk_action,
+            # Data leakage - output
             default_output_high_risk_action=getattr(tenant_policy, 'default_output_high_risk_action', 'block') or 'block',
             default_output_medium_risk_action=getattr(tenant_policy, 'default_output_medium_risk_action', 'anonymize') or 'anonymize',
             default_output_low_risk_action=getattr(tenant_policy, 'default_output_low_risk_action', 'pass') or 'pass',
@@ -301,17 +334,22 @@ async def update_tenant_gateway_policy(
             tenant_policy = TenantDataLeakagePolicy(tenant_id=tenant_id)
             db.add(tenant_policy)
 
-        # Update general risk policy
-        tenant_policy.default_general_high_risk_action = policy_update.default_general_high_risk_action
-        tenant_policy.default_general_medium_risk_action = policy_update.default_general_medium_risk_action
-        tenant_policy.default_general_low_risk_action = policy_update.default_general_low_risk_action
+        # Update general risk policy - input
+        tenant_policy.default_general_input_high_risk_action = policy_update.default_general_input_high_risk_action
+        tenant_policy.default_general_input_medium_risk_action = policy_update.default_general_input_medium_risk_action
+        tenant_policy.default_general_input_low_risk_action = policy_update.default_general_input_low_risk_action
 
-        # Update input policy
+        # Update general risk policy - output
+        tenant_policy.default_general_output_high_risk_action = policy_update.default_general_output_high_risk_action
+        tenant_policy.default_general_output_medium_risk_action = policy_update.default_general_output_medium_risk_action
+        tenant_policy.default_general_output_low_risk_action = policy_update.default_general_output_low_risk_action
+
+        # Update data leakage - input policy
         tenant_policy.default_input_high_risk_action = policy_update.default_input_high_risk_action
         tenant_policy.default_input_medium_risk_action = policy_update.default_input_medium_risk_action
         tenant_policy.default_input_low_risk_action = policy_update.default_input_low_risk_action
 
-        # Update output policy
+        # Update data leakage - output policy
         tenant_policy.default_output_high_risk_action = policy_update.default_output_high_risk_action
         tenant_policy.default_output_medium_risk_action = policy_update.default_output_medium_risk_action
         tenant_policy.default_output_low_risk_action = policy_update.default_output_low_risk_action
@@ -336,12 +374,19 @@ async def update_tenant_gateway_policy(
         return TenantGatewayPolicyResponse(
             id=str(tenant_policy.id),
             tenant_id=str(tenant_policy.tenant_id),
-            default_general_high_risk_action=tenant_policy.default_general_high_risk_action,
-            default_general_medium_risk_action=tenant_policy.default_general_medium_risk_action,
-            default_general_low_risk_action=tenant_policy.default_general_low_risk_action,
+            # General risk - input
+            default_general_input_high_risk_action=tenant_policy.default_general_input_high_risk_action,
+            default_general_input_medium_risk_action=tenant_policy.default_general_input_medium_risk_action,
+            default_general_input_low_risk_action=tenant_policy.default_general_input_low_risk_action,
+            # General risk - output
+            default_general_output_high_risk_action=tenant_policy.default_general_output_high_risk_action,
+            default_general_output_medium_risk_action=tenant_policy.default_general_output_medium_risk_action,
+            default_general_output_low_risk_action=tenant_policy.default_general_output_low_risk_action,
+            # Data leakage - input
             default_input_high_risk_action=tenant_policy.default_input_high_risk_action,
             default_input_medium_risk_action=tenant_policy.default_input_medium_risk_action,
             default_input_low_risk_action=tenant_policy.default_input_low_risk_action,
+            # Data leakage - output
             default_output_high_risk_action=tenant_policy.default_output_high_risk_action,
             default_output_medium_risk_action=tenant_policy.default_output_medium_risk_action,
             default_output_low_risk_action=tenant_policy.default_output_low_risk_action,
@@ -422,32 +467,49 @@ async def get_gateway_policy(
         return GatewayPolicyResponse(
             id=str(app_policy.id),
             application_id=str(app_policy.application_id),
-            # General risk - resolved
-            general_high_risk_action=resolve(
-                getattr(app_policy, 'general_high_risk_action', None),
-                getattr(tenant_policy, 'default_general_high_risk_action', 'block') or 'block'
+            # General risk - input - resolved
+            general_input_high_risk_action=resolve(
+                getattr(app_policy, 'general_input_high_risk_action', None),
+                getattr(tenant_policy, 'default_general_input_high_risk_action', None) or getattr(tenant_policy, 'default_general_high_risk_action', 'block') or 'block'
             ),
-            general_medium_risk_action=resolve(
-                getattr(app_policy, 'general_medium_risk_action', None),
-                getattr(tenant_policy, 'default_general_medium_risk_action', 'replace') or 'replace'
+            general_input_medium_risk_action=resolve(
+                getattr(app_policy, 'general_input_medium_risk_action', None),
+                getattr(tenant_policy, 'default_general_input_medium_risk_action', None) or getattr(tenant_policy, 'default_general_medium_risk_action', 'replace') or 'replace'
             ),
-            general_low_risk_action=resolve(
-                getattr(app_policy, 'general_low_risk_action', None),
-                getattr(tenant_policy, 'default_general_low_risk_action', 'pass') or 'pass'
+            general_input_low_risk_action=resolve(
+                getattr(app_policy, 'general_input_low_risk_action', None),
+                getattr(tenant_policy, 'default_general_input_low_risk_action', None) or getattr(tenant_policy, 'default_general_low_risk_action', 'pass') or 'pass'
             ),
-            # General risk - overrides
-            general_high_risk_action_override=getattr(app_policy, 'general_high_risk_action', None),
-            general_medium_risk_action_override=getattr(app_policy, 'general_medium_risk_action', None),
-            general_low_risk_action_override=getattr(app_policy, 'general_low_risk_action', None),
-            # Input policy - resolved
+            # General risk - input - overrides
+            general_input_high_risk_action_override=getattr(app_policy, 'general_input_high_risk_action', None),
+            general_input_medium_risk_action_override=getattr(app_policy, 'general_input_medium_risk_action', None),
+            general_input_low_risk_action_override=getattr(app_policy, 'general_input_low_risk_action', None),
+            # General risk - output - resolved
+            general_output_high_risk_action=resolve(
+                getattr(app_policy, 'general_output_high_risk_action', None),
+                getattr(tenant_policy, 'default_general_output_high_risk_action', None) or getattr(tenant_policy, 'default_general_high_risk_action', 'block') or 'block'
+            ),
+            general_output_medium_risk_action=resolve(
+                getattr(app_policy, 'general_output_medium_risk_action', None),
+                getattr(tenant_policy, 'default_general_output_medium_risk_action', None) or getattr(tenant_policy, 'default_general_medium_risk_action', 'replace') or 'replace'
+            ),
+            general_output_low_risk_action=resolve(
+                getattr(app_policy, 'general_output_low_risk_action', None),
+                getattr(tenant_policy, 'default_general_output_low_risk_action', None) or getattr(tenant_policy, 'default_general_low_risk_action', 'pass') or 'pass'
+            ),
+            # General risk - output - overrides
+            general_output_high_risk_action_override=getattr(app_policy, 'general_output_high_risk_action', None),
+            general_output_medium_risk_action_override=getattr(app_policy, 'general_output_medium_risk_action', None),
+            general_output_low_risk_action_override=getattr(app_policy, 'general_output_low_risk_action', None),
+            # Data leakage - Input policy - resolved
             input_high_risk_action=resolve(app_policy.input_high_risk_action, tenant_policy.default_input_high_risk_action),
             input_medium_risk_action=resolve(app_policy.input_medium_risk_action, tenant_policy.default_input_medium_risk_action),
             input_low_risk_action=resolve(app_policy.input_low_risk_action, tenant_policy.default_input_low_risk_action),
-            # Input policy - overrides
+            # Data leakage - Input policy - overrides
             input_high_risk_action_override=app_policy.input_high_risk_action,
             input_medium_risk_action_override=app_policy.input_medium_risk_action,
             input_low_risk_action_override=app_policy.input_low_risk_action,
-            # Output policy - resolved
+            # Data leakage - Output policy - resolved
             output_high_risk_action=resolve(
                 getattr(app_policy, 'output_high_risk_action', None),
                 getattr(tenant_policy, 'default_output_high_risk_action', 'block') or 'block'
@@ -460,7 +522,7 @@ async def get_gateway_policy(
                 getattr(app_policy, 'output_low_risk_action', None),
                 getattr(tenant_policy, 'default_output_low_risk_action', 'pass') or 'pass'
             ),
-            # Output policy - overrides
+            # Data leakage - Output policy - overrides
             output_high_risk_action_override=getattr(app_policy, 'output_high_risk_action', None),
             output_medium_risk_action_override=getattr(app_policy, 'output_medium_risk_action', None),
             output_low_risk_action_override=getattr(app_policy, 'output_low_risk_action', None),
@@ -506,20 +568,28 @@ async def update_gateway_policy(
             )
             db.add(app_policy)
 
-        # Update general risk policy
-        if hasattr(app_policy, 'general_high_risk_action'):
-            app_policy.general_high_risk_action = policy_update.general_high_risk_action
-        if hasattr(app_policy, 'general_medium_risk_action'):
-            app_policy.general_medium_risk_action = policy_update.general_medium_risk_action
-        if hasattr(app_policy, 'general_low_risk_action'):
-            app_policy.general_low_risk_action = policy_update.general_low_risk_action
+        # Update general risk policy - input
+        if hasattr(app_policy, 'general_input_high_risk_action'):
+            app_policy.general_input_high_risk_action = policy_update.general_input_high_risk_action
+        if hasattr(app_policy, 'general_input_medium_risk_action'):
+            app_policy.general_input_medium_risk_action = policy_update.general_input_medium_risk_action
+        if hasattr(app_policy, 'general_input_low_risk_action'):
+            app_policy.general_input_low_risk_action = policy_update.general_input_low_risk_action
 
-        # Update input policy
+        # Update general risk policy - output
+        if hasattr(app_policy, 'general_output_high_risk_action'):
+            app_policy.general_output_high_risk_action = policy_update.general_output_high_risk_action
+        if hasattr(app_policy, 'general_output_medium_risk_action'):
+            app_policy.general_output_medium_risk_action = policy_update.general_output_medium_risk_action
+        if hasattr(app_policy, 'general_output_low_risk_action'):
+            app_policy.general_output_low_risk_action = policy_update.general_output_low_risk_action
+
+        # Update data leakage - input policy
         app_policy.input_high_risk_action = policy_update.input_high_risk_action
         app_policy.input_medium_risk_action = policy_update.input_medium_risk_action
         app_policy.input_low_risk_action = policy_update.input_low_risk_action
 
-        # Update output policy
+        # Update data leakage - output policy
         if hasattr(app_policy, 'output_high_risk_action'):
             app_policy.output_high_risk_action = policy_update.output_high_risk_action
         if hasattr(app_policy, 'output_medium_risk_action'):

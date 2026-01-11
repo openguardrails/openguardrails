@@ -364,7 +364,10 @@ Return ONLY the Python code, no markdown, no explanation."""
         """
         # Pre-define state dict for closures to work in exec() environment
         # Must be in globals for nested functions to access it
-        state = {'counter': 0, 'mapping': {}}
+        # Initialize counter from existing_counters using entity_type_code as key
+        counter_key = entity_type_code.lower()
+        initial_counter = existing_counters.get(counter_key, 0)
+        state = {'counter': initial_counter, 'mapping': {}}
         result = {
             'anonymized_text': input_text,
             'mapping': {},
@@ -416,10 +419,20 @@ Return ONLY the Python code, no markdown, no explanation."""
                 # WORKAROUND: Due to exec() scoping issues, nested functions (like replace_fn)
                 # update safe_globals['state'] but the code's local 'state' variable shadows it.
                 # So result['mapping'] = state['mapping'] uses the local (empty) state.
-                # We need to copy the mapping from safe_globals['state'] if result['mapping'] is empty.
+                # We need to copy the mapping and counters from safe_globals['state'].
                 if not result.get('mapping') and safe_globals.get('state', {}).get('mapping'):
                     result['mapping'] = safe_globals['state']['mapping']
                     logger.debug(f"Recovered mapping from safe_globals['state']: {result['mapping']}")
+
+                # Also recover counters from safe_globals['state'] if the counter was updated
+                state_counter = safe_globals.get('state', {}).get('counter', 0)
+                if state_counter > 0:
+                    # The entity_type_code is lowercased for the counter key
+                    counter_key = safe_globals.get('entity_type_code', '').lower()
+                    if counter_key:
+                        result['counters'] = safe_globals.get('existing_counters', {}).copy()
+                        result['counters'][counter_key] = state_counter
+                        logger.debug(f"Recovered counter from safe_globals['state']: {counter_key}={state_counter}")
 
                 return result
             except Exception as e:
