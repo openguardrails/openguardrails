@@ -17,6 +17,7 @@ import logging
 from database.connection import get_admin_db
 from database.models import Application, AppealRecord
 from services.appeal_service import appeal_service
+from utils.i18n_loader import get_translation
 
 logger = logging.getLogger(__name__)
 
@@ -72,11 +73,16 @@ def get_current_user_and_application_from_request(request: Request, db: Session)
         raise HTTPException(status_code=400, detail="Invalid tenant ID format")
 
 
+def get_default_message_template(language: str = 'en') -> str:
+    """Get default message template based on language"""
+    return get_translation(language, 'appealPage', 'defaultMessageTemplate')
+
+
 class AppealConfigUpdate(BaseModel):
     """Appeal configuration update model"""
     enabled: bool = Field(False, description="Whether to enable appeal feature")
-    message_template: str = Field(
-        "如果您认为这是误报，请点击此链接申诉: {appeal_url}",
+    message_template: Optional[str] = Field(
+        None,
         description="Template for appeal message, {appeal_url} will be replaced with actual URL"
     )
     appeal_base_url: str = Field(
@@ -140,13 +146,17 @@ async def get_appeal_config(request: Request, db: Session = Depends(get_admin_db
     try:
         current_user, application_id = get_current_user_and_application_from_request(request, db)
 
+        # Get language preference from Accept-Language header
+        accept_language = request.headers.get('accept-language', 'en')
+        language = 'zh' if 'zh' in accept_language.lower() else 'en'
+
         config = await appeal_service.get_config(application_id, db)
 
         if not config:
-            # Return default config if not exists
+            # Return default config if not exists (with i18n message template)
             return AppealConfigResponse(
                 enabled=False,
-                message_template="如果您认为这是误报，请点击此链接申诉: {appeal_url}",
+                message_template=get_default_message_template(language),
                 appeal_base_url="",
                 final_reviewer_email=None
             )

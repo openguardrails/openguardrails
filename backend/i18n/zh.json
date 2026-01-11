@@ -1,6 +1,7 @@
 {
   "appealPage": {
     "title": "申诉结果",
+    "defaultMessageTemplate": "如果您认为这是误报，请点击此链接申诉: {appeal_url}",
     "statusApproved": "申诉通过",
     "statusRejected": "申诉未通过",
     "statusPendingReview": "等待人工终审",
@@ -72,6 +73,33 @@
   "guardrail": {
     "blacklistHit": "抱歉，我无法提供涉及{list_name}的内容。",
     "dataLeakageInputBlocked": "请求因数据安全策略被OpenGuardrails拦截。",
-    "dataLeakageOutputBlocked": "响应因数据安全策略被OpenGuardrails拦截。"
+    "dataLeakageOutputBlocked": "响应因数据安全策略被OpenGuardrails拦截。",
+    "responseTemplates": {
+      "S1": "请求已被OpenGuardrails拦截，原因：可能涉及一般政治话题。",
+      "S2": "请求已被OpenGuardrails拦截，原因：可能涉及敏感政治话题。",
+      "S3": "请求已被OpenGuardrails拦截，原因：可能涉及侮辱国家象征或领导人。",
+      "S4": "请求已被OpenGuardrails拦截，原因：可能涉及伤害未成年人。",
+      "S5": "请求已被OpenGuardrails拦截，原因：可能涉及暴力犯罪。",
+      "S6": "请求已被OpenGuardrails拦截，原因：可能涉及非暴力犯罪。",
+      "S7": "请求已被OpenGuardrails拦截，原因：可能涉及色情内容。",
+      "S8": "请求已被OpenGuardrails拦截，原因：可能涉及仇恨与歧视。",
+      "S9": "请求已被OpenGuardrails拦截，原因：可能涉及提示词注入攻击。",
+      "S10": "请求已被OpenGuardrails拦截，原因：可能涉及辱骂。",
+      "S11": "请求已被OpenGuardrails拦截，原因：可能涉及侵犯个人隐私。",
+      "S12": "请求已被OpenGuardrails拦截，原因：可能涉及商业违法违规。",
+      "S13": "请求已被OpenGuardrails拦截，原因：可能涉及侵犯知识产权。",
+      "S14": "请求已被OpenGuardrails拦截，原因：可能涉及骚扰。",
+      "S15": "请求已被OpenGuardrails拦截，原因：可能涉及大规模杀伤性武器。",
+      "S16": "请求已被OpenGuardrails拦截，原因：可能涉及自我伤害。",
+      "S17": "请求已被OpenGuardrails拦截，原因：可能涉及性犯罪。",
+      "S18": "请求已被OpenGuardrails拦截，原因：可能涉及威胁。",
+      "S19": "请求已被OpenGuardrails拦截，原因：可能涉及专业金融建议。",
+      "S20": "请求已被OpenGuardrails拦截，原因：可能涉及专业医疗建议。",
+      "S21": "请求已被OpenGuardrails拦截，原因：可能涉及专业法律建议。",
+      "default": "请求已被OpenGuardrails拦截，原因：违反内容政策。",
+      "blacklist": "请求已被OpenGuardrails拦截，原因：触发黑名单策略：{name}。",
+      "customScanner": "请求已被OpenGuardrails拦截，原因：{name}。",
+      "marketplaceScanner": "请求已被OpenGuardrails拦截。检测到：{name}。"
+    }
   }
 }

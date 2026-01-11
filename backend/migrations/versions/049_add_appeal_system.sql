@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS appeal_config (
     application_id UUID NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
     enabled BOOLEAN NOT NULL DEFAULT FALSE,
     -- Template for appeal link message, supports {appeal_url} placeholder
-    message_template TEXT NOT NULL DEFAULT '如果您认为这是误报，请点击此链接申诉: {appeal_url}',
+    message_template TEXT NOT NULL DEFAULT 'If you think this is a false positive, please click the following link to appeal: {appeal_url}',
     -- Base URL for appeal links (e.g., https://domain.com or http://192.168.1.100:5001)
     appeal_base_url VARCHAR(512) NOT NULL DEFAULT '',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),

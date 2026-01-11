@@ -24,8 +24,8 @@ logger = setup_logger()
 
 # Correct template for S8
 CORRECT_S8_TEMPLATE = {
-    'en': "Your message contains hate or discrimination language, which is not allowed.",
-    'zh': "您的消息包含仇恨或歧视性语言，这是不允许的。"
+    'en': "Request blocked by OpenGuardrails due to content potentially involving hate and discrimination.",
+    'zh': "请求已被OpenGuardrails拦截，原因：可能涉及仇恨与歧视。"
 }
 
 def fix_s8_template():

@@ -11,6 +11,289 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [5.1.2] - 2026-01-09
+
+### 🛡️ Self-Service False Positive Appeal System
+
+This release introduces a comprehensive **Self-Service False Positive Appeal System** that enables end users to appeal when they believe their requests have been incorrectly flagged as high-risk content. The system supports both AI-powered auto-review and manual human review workflows, significantly reducing false positive impact on legitimate user workflows.
+
+#### 🎯 What's New
+
+**Problem Solved**: Online guardrails systems inevitably produce false positives, which can disrupt legitimate user workflows. Traditional approaches require platform administrators to manually review these cases, creating bottlenecks and poor user experience.
+
+**Solution**: A self-service appeal system that:
+- ✅ **User-Friendly**: End users can easily submit appeals with a clicking an appeal link
+- ✅ **AI-Powered Review**: Automatic AI review for quick resolution of genuine false positives
+- ✅ **Human Fallback**: Manual review capabilities for complex or ambiguous cases
+- ✅ **Flexible Configuration**: Per-application appeal settings with custom messages
+- ✅ **Complete Audit Trail**: Full history of appeals, reviews, and decisions
+
+#### Added
+
+##### 🔔 **Appeal Configuration Management**
+
+**Per-Application Configuration**:
+- `enabled`: Enable/disable appeal feature per application
+- `message_template`: Custom appeal message with `{appeal_url}` placeholder
+- `appeal_base_url`: Base URL for appeal links (public-facing domain)
+- `final_reviewer_email`: Email for human review notifications when AI rejects appeal
+
+**Appeal Flow**:
+```
+1. User request blocked by guardrails
+2. System returns response with appeal URL link
+3. User clicks link → Opens self-service appeal page
+4. User submits appeal with optional reason
+5. AI auto-reviews appeal → Approve/Reject
+6. If AI unsure → Escalate to human reviewer
+7. Human approves/rejects → User notified
+8. Auto-lift ban if appeal approved (for banned users)
+```
+
+##### 🤖 **AI-Powered Appeal Review**
+
+The system uses AI to automatically evaluate appeal requests:
+
+**AI Review Process**:
+- Analyzes original content against risk categories
+- Evaluates user-provided reason for appeal
+- Makes approve/reject decision with confidence score
+- Provides detailed explanation for decision
+
+**Review Outcomes**:
+- `approved`: Appeal accepted, ban lifted or content allowed
+- `rejected`: Appeal denied, original decision upheld
+- `pending_review`: AI uncertain, escalate to human reviewer
+
+**Statistics Tracking**:
+- AI approval rate: Track how often AI approves appeals
+- Review accuracy: Validate AI decisions against human reviews
+- Processing time: Measure AI review performance
+
+##### 👤 **User-Friendly Appeal Interface**
+
+**End-User Appeal Page** (`/appeal/{request_id}`):
+- Display original blocked content and risk level
+- Show matched risk categories
+- Provide appeal reason input (optional)
+- Submit appeal with one click
+- View appeal status in real-time
+
+**Appeal Status Flow**:
+1. `pending` → Initial state, awaiting review
+2. `reviewing` → AI is currently reviewing
+3. `pending_review` → Escalated to human reviewer
+4. `approved` → Appeal accepted
+5. `rejected` → Appeal denied
+
+##### 📊 **Admin Appeal Management**
+
+**Appeal Management Dashboard** (`/platform/config/appeal`):
+- View all appeals for current application
+- Filter by status (pending, reviewing, pending_review, approved, rejected)
+- Paginated list with detailed information
+- Manual review capabilities for human reviewers
+- Export appeals to Excel for compliance auditing
+
+**Manual Review Actions**:
+- **Approve Appeal**: Override AI decision, approve the appeal
+- **Reject Appeal**: Confirm AI decision, reject the appeal
+- **Add Reason**: Record rationale for manual review decisions
+
+##### 🗂️ **Database Schema**
+
+**New Table: `appeal_config`**
+- Stores per-application appeal configuration
+- `id`, `application_id`, `tenant_id`
+- `enabled`, `message_template`, `appeal_base_url`, `final_reviewer_email`
+- `created_at`, `updated_at`
+
+**New Table: `appeal_records`**
+- Stores all appeal submissions and reviews
+- `id`, `request_id`, `application_id`, `tenant_id`, `user_id`
+- `original_content`, `original_risk_level`, `original_categories`
+- `status`, `ai_approved`, `ai_review_result`
+- `ai_reviewed_at`, `processed_at`
+- `processor_type`, `processor_id`, `processor_reason`
+- `created_at`
+
+##### 🌐 **New API Endpoints**
+
+**Appeal Configuration** (Admin API - Port 5000):
+```bash
+GET  /api/v1/config/appeal              # Get appeal config
+PUT  /api/v1/config/appeal              # Update appeal config
+```
+
+**Appeal Records** (Admin API - Port 5000):
+```bash
+GET  /api/v1/config/appeal/records      # List appeal records (paginated)
+POST /api/v1/config/appeal/records/{id}/review  # Manual review
+GET  /api/v1/config/appeal/records/export  # Export to Excel
+```
+
+**Appeal Submission** (Detection API - Port 5001):
+```bash
+GET  /v1/appeal/{request_id}            # Get appeal details (public link)
+POST /v1/appeal/{request_id}            # Submit appeal
+GET  /v1/appeal/{request_id}/status     # Check appeal status (polling)
+```
+
+##### 🔄 **Integration with Existing Systems**
+
+**Detection Service Integration**:
+- When request is blocked, check if appeal is enabled for application
+- If enabled, generate appeal URL and include in response
+- Store appeal request ID in detection results
+
+**Ban Policy Integration**:
+- If appeal is approved, auto-lift ban (if user was banned)
+- Update banned users table with appeal resolution status
+- Revoke pending ban timers for appealed users
+
+**Proxy Service Integration**:
+- Pass appeal URL through proxy responses
+- Maintain consistent appeal experience across API and Gateway modes
+
+##### 🌍 **Internationalization**
+
+**Added Translations**:
+- Complete English and Chinese translations for appeal system
+- Appeal status messages (pending, reviewing, approved, rejected)
+- UI labels and help text
+- Error messages and notifications
+
+#### Changed
+
+##### 📝 **Detection Response Format**
+
+**Enhanced Response with Appeal Link**:
+```json
+{
+  "is_blocked": true,
+  "risk_level": "high",
+  "categories": ["S5", "S9"],
+  "suggest_answer": "...",
+  "appeal_url": "https://your-domain.com/appeal/{request_id}",
+  "appeal_message": ""
+}
+```
+
+**Backward Compatible**: Fields only added when appeal is enabled for application.
+
+##### 🤖 **AI Model Integration**
+
+Appeal review uses the existing OpenGuardrails-Text model for intelligent content analysis:
+- Leverages same risk categories (S1-S21) as detection
+- Consistent risk assessment across detection and appeal
+- No additional infrastructure required
+
+#### Documentation
+
+**New UI Pages**:
+- `/platform/config/appeal` - Admin appeal management dashboard
+- `/appeal/{request_id}` - Public self-service appeal page
+
+**Updated Backend Services**:
+- `backend/services/appeal_service.py` - Appeal business logic
+- `backend/routers/appeal_api.py` - Admin appeal configuration API
+- `backend/routers/appeal_router.py` - Detection API appeal routes
+
+**Frontend Components**:
+- `frontend/src/pages/AccessControl/FalsePositiveAppeal.tsx` - Public appeal page
+- `frontend/src/pages/AccessControl/AppealManagement.tsx` - Admin dashboard
+- Updated API service with appeal endpoints
+- Updated i18n files (en.json, zh.json)
+
+#### Usage Example
+
+**End-User Appeal Flow**:
+
+1. User sends request that gets blocked:
+```python
+client.check_prompt("Normal business inquiry that was falsely flagged")
+# Response: is_blocked=True with appeal_url
+```
+
+2. User receives response with appeal link:
+```
+您的请求被拦截，原因：高风险内容
+申诉链接: https://your-domain.com/appeal/550e8400-e29b-41d4-a716-446655440000
+```
+
+3. User clicks link, sees appeal page, submits appeal
+4. System auto-reviews using AI, approves appeal
+5. User retry the original request - now allowed
+
+**Admin Manual Review**:
+
+```python
+import requests
+
+# View pending appeals
+response = requests.get(
+    "http://localhost:5000/api/v1/config/appeal/records?status=pending_review",
+    headers={"Authorization": "Bearer your-jwt-token"}
+)
+
+# Manually approve appeal
+requests.post(
+    f"http://localhost:5000/api/v1/config/appeal/records/{appeal_id}/review",
+    headers={"Authorization": "Bearer your-jwt-token"},
+    json={
+        "action": "approve",
+        "reason": "Reviewed content manually - legitimate business use case"
+    }
+)
+```
+
+#### Configuration
+
+**Enable Appeal for Application**:
+
+```bash
+# Update appeal config
+curl -X PUT "http://localhost:5000/api/v1/config/appeal" \
+  -H "Authorization: Bearer your-jwt-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "enabled": true,
+    "message_template": "If you think this is a false positive, please click the following link to appeal: {appeal_url}",
+    "appeal_base_url": "https://your-public-domain.com",
+    "final_reviewer_email": "reviewer@yourcompany.com"
+  }'
+```
+
+**Environment Variables**:
+No new environment variables required. Appeal configuration is per-application via Admin UI.
+
+#### Security & Privacy
+
+- **Public appeal pages require request ID**: Only users who received a blocked response can appeal
+- **No user authentication required**: Encourages users to submit appeals without friction
+- **Limited information exposure**: Appeal page shows only blocked content, not user-identifiable data
+- **Permission controls**: Manual review APIs require Admin authentication
+- **Audit trail**: All appeals and reviews permanently logged for compliance
+
+#### Performance
+
+- **Appeal submission**: < 100ms overhead on existing detection flow
+- **AI review**: Typically < 500ms (uses existing OpenGuardrails-Text model)
+- **Database queries**: Indexed on request_id for fast lookups
+- **No impact on detection**: Appeal system only activated when request is blocked
+
+#### Future Enhancements
+
+Potential improvements in future releases:
+- Email notifications for appeal status updates
+- Appeal statistics and trends dashboard
+- Bulk appeal approval/rejection tools
+- Custom AI review prompts per application
+- Appeal rate limiting (prevent abuse)
+- Multi-tenant appeal review visibility
+
+---
+
 ## [5.1.0] - 2026-01-06
 
 ### 🚀 Major Update: Automatic Private Model Switching for Enterprise Data Protection

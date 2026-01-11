@@ -6,6 +6,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 from database.models import ResponseTemplate, Scanner, Blacklist, Whitelist
 from utils.logger import setup_logger
+from utils.i18n_loader import get_translation
 
 logger = setup_logger()
 
@@ -108,9 +109,12 @@ class ResponseTemplateService:
             logger.info(f"Template for custom scanner {scanner.tag} already exists (ID: {existing.id})")
             return None
 
+        # Use i18n for default content
+        en_template = get_translation('en', 'guardrail', 'responseTemplates', 'customScanner')
+        zh_template = get_translation('zh', 'guardrail', 'responseTemplates', 'customScanner')
         default_content = {
-            "en": f"This content is not allowed. Reason: {scanner.name}",
-            "zh": f"此内容不被允许。原因：{scanner.name}"
+            "en": en_template.format(name=scanner.name),
+            "zh": zh_template.format(name=scanner.name)
         }
 
         template = ResponseTemplate(
@@ -168,9 +172,12 @@ class ResponseTemplateService:
             logger.info(f"Template for marketplace scanner {scanner.tag} already exists (ID: {existing.id})")
             return None
 
+        # Use i18n for default content
+        en_template = get_translation('en', 'guardrail', 'responseTemplates', 'marketplaceScanner')
+        zh_template = get_translation('zh', 'guardrail', 'responseTemplates', 'marketplaceScanner')
         default_content = {
-            "en": f"This content is not allowed. Detected by: {scanner.name}",
-            "zh": f"此内容不被允许。检测到：{scanner.name}"
+            "en": en_template.format(name=scanner.name),
+            "zh": zh_template.format(name=scanner.name)
         }
 
         template = ResponseTemplate(
@@ -228,9 +235,12 @@ class ResponseTemplateService:
             logger.info(f"Template for blacklist '{blacklist.name}' already exists (ID: {existing.id})")
             return None
 
+        # Use i18n for default content
+        en_template = get_translation('en', 'guardrail', 'responseTemplates', 'blacklist')
+        zh_template = get_translation('zh', 'guardrail', 'responseTemplates', 'blacklist')
         default_content = {
-            "en": f"This content violates our policy. (Blacklist: {blacklist.name})",
-            "zh": f"此内容违反了我们的政策。（黑名单：{blacklist.name}）"
+            "en": en_template.format(name=blacklist.name),
+            "zh": zh_template.format(name=blacklist.name)
         }
 
         template = ResponseTemplate(
@@ -328,7 +338,7 @@ class ResponseTemplateService:
 
     def _get_default_content_for_official_scanner(self, tag: str) -> Dict[str, str]:
         """
-        Get default multilingual content for official scanners (S1-S21).
+        Get default multilingual content for official scanners (S1-S21) using i18n.
 
         Args:
             tag: Scanner tag (S1, S2, etc.)
@@ -336,97 +346,19 @@ class ResponseTemplateService:
         Returns:
             Dictionary with multilingual content
         """
-        # Default content mapping for S1-S21
-        default_contents = {
-            'S1': {
-                'en': 'Your message contains general political content that may not be appropriate.',
-                'zh': '您的消息包含一般性政治内容，可能不合适。'
-            },
-            'S2': {
-                'en': 'Your message contains sensitive political topics that are not allowed.',
-                'zh': '您的消息包含敏感的政治话题，不被允许。'
-            },
-            'S3': {
-                'en': 'Your message contains insults to national symbols or leaders, which is prohibited.',
-                'zh': '您的消息包含对国家象征或领导人的侮辱，这是被禁止的。'
-            },
-            'S4': {
-                'en': 'Your message contains content that may harm minors, which is strictly prohibited.',
-                'zh': '您的消息包含可能伤害未成年人的内容，这是严格禁止的。'
-            },
-            'S5': {
-                'en': 'Your message contains violent crime content, which is not allowed.',
-                'zh': '您的消息包含暴力犯罪内容，不被允许。'
-            },
-            'S6': {
-                'en': 'Your message contains non-violent crime content, which is not allowed.',
-                'zh': '您的消息包含非暴力犯罪内容，不被允许。'
-            },
-            'S7': {
-                'en': 'Your message contains pornographic content, which is strictly prohibited.',
-                'zh': '您的消息包含色情内容，这是严格禁止的。'
-            },
-            'S8': {
-                'en': 'Your message contains hate speech or discrimination, which is not allowed.',
-                'zh': '您的消息包含仇恨言论或歧视，不被允许。'
-            },
-            'S9': {
-                'en': 'Your message appears to be a prompt injection attack, which is prohibited.',
-                'zh': '您的消息似乎是提示词注入攻击，这是被禁止的。'
-            },
-            'S10': {
-                'en': 'Your message contains gambling-related content, which is not allowed.',
-                'zh': '您的消息包含赌博相关内容，不被允许。'
-            },
-            'S11': {
-                'en': 'Your message contains drug-related content, which is not allowed.',
-                'zh': '您的消息包含毒品相关内容，不被允许。'
-            },
-            'S12': {
-                'en': 'Your message contains self-harm content, which is concerning and not allowed.',
-                'zh': '您的消息包含自残内容，这令人担忧且不被允许。'
-            },
-            'S13': {
-                'en': 'Your message contains fraudulent schemes, which are strictly prohibited.',
-                'zh': '您的消息包含欺诈计划，这是严格禁止的。'
-            },
-            'S14': {
-                'en': 'Your message contains illegal activities, which are not allowed.',
-                'zh': '您的消息包含非法活动，不被允许。'
-            },
-            'S15': {
-                'en': 'Your message contains malicious code or security threats, which are prohibited.',
-                'zh': '您的消息包含恶意代码或安全威胁，这是被禁止的。'
-            },
-            'S16': {
-                'en': 'Your message may infringe intellectual property rights, which is not allowed.',
-                'zh': '您的消息可能侵犯知识产权，不被允许。'
-            },
-            'S17': {
-                'en': 'Your message contains misinformation, which we cannot support.',
-                'zh': '您的消息包含虚假信息，我们无法支持。'
-            },
-            'S18': {
-                'en': 'Your message involves privacy violations, which are strictly prohibited.',
-                'zh': '您的消息涉及隐私侵犯，这是严格禁止的。'
-            },
-            'S19': {
-                'en': 'Your message contains spam or advertising, which is not allowed.',
-                'zh': '您的消息包含垃圾信息或广告，不被允许。'
-            },
-            'S20': {
-                'en': 'Your message contains unsafe advice that could cause harm.',
-                'zh': '您的消息包含可能造成伤害的不安全建议。'
-            },
-            'S21': {
-                'en': 'Your message contains specialized knowledge that requires verification.',
-                'zh': '您的消息包含需要验证的专业知识。'
-            }
-        }
+        # Use i18n to get translations for both languages
+        try:
+            en_content = get_translation('en', 'guardrail', 'responseTemplates', tag)
+        except KeyError:
+            en_content = get_translation('en', 'guardrail', 'responseTemplates', 'default')
 
-        # Return specific content or default generic content
-        return default_contents.get(tag, {
-            'en': 'Your message contains content that is not allowed.',
-            'zh': '您的消息包含不被允许的内容。'
-        })
+        try:
+            zh_content = get_translation('zh', 'guardrail', 'responseTemplates', tag)
+        except KeyError:
+            zh_content = get_translation('zh', 'guardrail', 'responseTemplates', 'default')
+
+        return {
+            'en': en_content,
+            'zh': zh_content
+        }
 

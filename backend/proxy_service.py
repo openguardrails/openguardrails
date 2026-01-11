@@ -18,7 +18,7 @@ import asyncio
 
 from config import settings
 # Import complete proxy service implementation
-from routers import proxy_api
+from routers import proxy_api, gateway_integration_api
 from services.async_logger import async_detection_logger
 from utils.logger import setup_logger
 
@@ -271,6 +271,10 @@ async def verify_user_auth(
 
 # Register proxy routes - routes already contain /v1 prefix, no need to add again
 app.include_router(proxy_api.router, dependencies=[Depends(verify_user_auth)])
+
+# Register gateway integration API (for third-party AI gateways like Higress, LiteLLM, Kong)
+# See docs/THIRD_PARTY_GATEWAY_INTEGRATION.md for full documentation
+app.include_router(gateway_integration_api.router, dependencies=[Depends(verify_user_auth)])
 
 # Global exception handling
 @app.exception_handler(Exception)

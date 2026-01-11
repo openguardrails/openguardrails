@@ -20,86 +20,95 @@ from utils.logger import setup_logger
 logger = setup_logger()
 
 # Default multilingual templates for each category
+# Format: "Request blocked by OpenGuardrails due to content potentially involving [topic]."
 DEFAULT_TEMPLATES = {
     'S1': {
-        'en': "I'm sorry, but I cannot discuss general political topics. Please ask about something else.",
-        'zh': "抱歉，我无法讨论一般政治话题。请询问其他内容。"
+        'en': "Request blocked by OpenGuardrails due to content potentially involving general political topics.",
+        'zh': "请求已被OpenGuardrails拦截，原因：可能涉及一般政治话题。"
     },
     'S2': {
-        'en': "I'm sorry, but I cannot discuss sensitive political topics. This violates content policy.",
-        'zh': "抱歉，我无法讨论敏感政治话题。这违反了内容政策。"
+        'en': "Request blocked by OpenGuardrails due to content potentially involving sensitive political topics.",
+        'zh': "请求已被OpenGuardrails拦截，原因：可能涉及敏感政治话题。"
     },
     'S3': {
-        'en': "I'm sorry, but I cannot engage with content that insults national symbols or leaders.",
-        'zh': "抱歉，我无法处理侮辱国家象征或领导人的内容。"
+        'en': "Request blocked by OpenGuardrails due to content potentially involving insult to national symbols or leaders.",
+        'zh': "请求已被OpenGuardrails拦截，原因：可能涉及侮辱国家象征或领导人。"
     },
     'S4': {
-        'en': "I'm sorry, but I cannot provide content that may harm minors.",
-        'zh': "抱歉，我无法提供可能伤害未成年人的内容。"
+        'en': "Request blocked by OpenGuardrails due to content potentially involving harm to minors.",
+        'zh': "请求已被OpenGuardrails拦截，原因：可能涉及伤害未成年人。"
     },
     'S5': {
-        'en': "I'm sorry, but I cannot discuss violent crimes. If you need help, please contact local authorities.",
-        'zh': "抱歉，我无法讨论暴力犯罪。如需帮助，请联系当地执法部门。"
+        'en': "Request blocked by OpenGuardrails due to content potentially involving violent crime.",
+        'zh': "请求已被OpenGuardrails拦截，原因：可能涉及暴力犯罪。"
     },
     'S6': {
-        'en': "I'm sorry, but I cannot provide information about non-violent crimes.",
-        'zh': "抱歉，我无法提供有关非暴力犯罪的信息。"
+        'en': "Request blocked by OpenGuardrails due to content potentially involving non-violent crime.",
+        'zh': "请求已被OpenGuardrails拦截，原因：可能涉及非暴力犯罪。"
     },
     'S7': {
-        'en': "I'm sorry, but I cannot provide pornographic or sexually explicit content.",
-        'zh': "抱歉，我无法提供色情或性暗示内容。"
+        'en': "Request blocked by OpenGuardrails due to content potentially involving pornography.",
+        'zh': "请求已被OpenGuardrails拦截，原因：可能涉及色情内容。"
     },
     'S8': {
-        'en': "I'm sorry, but I cannot engage with content containing hate speech or discrimination.",
-        'zh': "抱歉，我无法处理包含仇恨言论或歧视的内容。"
+        'en': "Request blocked by OpenGuardrails due to content potentially involving hate and discrimination.",
+        'zh': "请求已被OpenGuardrails拦截，原因：可能涉及仇恨与歧视。"
     },
     'S9': {
-        'en': "I'm sorry, but I detected a prompt attack attempt. Please rephrase your question appropriately.",
-        'zh': "抱歉，我检测到了提示词攻击尝试。请适当地重新表述您的问题。"
+        'en': "Request blocked by OpenGuardrails due to content potentially involving prompt injection attacks.",
+        'zh': "请求已被OpenGuardrails拦截，原因：可能涉及提示词注入攻击。"
     },
     'S10': {
-        'en': "I'm sorry, but I cannot respond to profanity or offensive language.",
-        'zh': "抱歉，我无法回应脏话或冒犯性语言。"
+        'en': "Request blocked by OpenGuardrails due to content potentially involving profanity.",
+        'zh': "请求已被OpenGuardrails拦截，原因：可能涉及辱骂。"
     },
     'S11': {
-        'en': "I'm sorry, but I cannot process requests involving privacy invasion.",
-        'zh': "抱歉，我无法处理涉及侵犯隐私的请求。"
+        'en': "Request blocked by OpenGuardrails due to content potentially involving privacy invasion.",
+        'zh': "请求已被OpenGuardrails拦截，原因：可能涉及侵犯个人隐私。"
     },
     'S12': {
-        'en': "I'm sorry, but I cannot provide information about commercial violations.",
-        'zh': "抱歉，我无法提供有关商业违法违规的信息。"
+        'en': "Request blocked by OpenGuardrails due to content potentially involving commercial violations.",
+        'zh': "请求已被OpenGuardrails拦截，原因：可能涉及商业违法违规。"
     },
     'S13': {
-        'en': "I'm sorry, but I cannot assist with intellectual property infringement.",
-        'zh': "抱歉，我无法协助知识产权侵权行为。"
+        'en': "Request blocked by OpenGuardrails due to content potentially involving intellectual property infringement.",
+        'zh': "请求已被OpenGuardrails拦截，原因：可能涉及侵犯知识产权。"
     },
     'S14': {
-        'en': "I'm sorry, but I cannot engage with harassing or abusive content.",
-        'zh': "抱歉，我无法处理骚扰或辱骂性内容。"
+        'en': "Request blocked by OpenGuardrails due to content potentially involving harassment.",
+        'zh': "请求已被OpenGuardrails拦截，原因：可能涉及骚扰。"
     },
     'S15': {
-        'en': "I'm sorry, but I cannot provide information about weapons of mass destruction.",
-        'zh': "抱歉，我无法提供有关大规模杀伤性武器的信息。"
+        'en': "Request blocked by OpenGuardrails due to content potentially involving weapons of mass destruction.",
+        'zh': "请求已被OpenGuardrails拦截，原因：可能涉及大规模杀伤性武器。"
     },
     'S16': {
-        'en': "I'm sorry, but I cannot provide content about self-harm. If you're in crisis, please contact a mental health professional or crisis helpline.",
-        'zh': "抱歉，我无法提供有关自我伤害的内容。如果您处于危机中，请联系心理健康专业人员或危机热线。"
+        'en': "Request blocked by OpenGuardrails due to content potentially involving self-harm.",
+        'zh': "请求已被OpenGuardrails拦截，原因：可能涉及自我伤害。"
     },
     'S17': {
-        'en': "I'm sorry, but I cannot discuss sexual crimes. If you need help, please contact appropriate authorities.",
-        'zh': "抱歉，我无法讨论性犯罪。如需帮助，请联系相关机构。"
+        'en': "Request blocked by OpenGuardrails due to content potentially involving sexual crimes.",
+        'zh': "请求已被OpenGuardrails拦截，原因：可能涉及性犯罪。"
     },
     'S18': {
-        'en': "I'm sorry, but I cannot process threatening or intimidating content.",
-        'zh': "抱歉，我无法处理威胁或恐吓性内容。"
+        'en': "Request blocked by OpenGuardrails due to content potentially involving threats.",
+        'zh': "请求已被OpenGuardrails拦截，原因：可能涉及威胁。"
     },
     'S19': {
-        'en': "I'm sorry, but I cannot provide professional advice in this area. Please consult with qualified professionals.",
-        'zh': "抱歉，我无法在此领域提供专业建议。请咨询合格的专业人士。"
+        'en': "Request blocked by OpenGuardrails due to content potentially involving professional financial advice.",
+        'zh': "请求已被OpenGuardrails拦截，原因：可能涉及专业金融建议。"
+    },
+    'S20': {
+        'en': "Request blocked by OpenGuardrails due to content potentially involving professional medical advice.",
+        'zh': "请求已被OpenGuardrails拦截，原因：可能涉及专业医疗建议。"
+    },
+    'S21': {
+        'en': "Request blocked by OpenGuardrails due to content potentially involving professional legal advice.",
+        'zh': "请求已被OpenGuardrails拦截，原因：可能涉及专业法律建议。"
     },
     'default': {
-        'en': "I'm sorry, but I cannot answer this question. If you have any questions, please contact customer service.",
-        'zh': "抱歉，我无法回答这个问题。如有任何疑问，请联系客服。"
+        'en': "Request blocked by OpenGuardrails due to content policy violation.",
+        'zh': "请求已被OpenGuardrails拦截，原因：违反内容政策。"
     }
 }
 

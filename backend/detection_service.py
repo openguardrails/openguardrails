@@ -30,7 +30,7 @@ class AuthContextMiddleware(BaseHTTPMiddleware):
     """Authentication context middleware - detection service version (simplified version)"""
     
     async def dispatch(self, request: Request, call_next):
-        # Only handle detection API routes (including guardrails and dify moderation)
+        # Only handle detection API routes (guardrails and dify moderation)
         if request.url.path.startswith('/v1/guardrails') or request.url.path.startswith('/v1/dify'):
             auth_header = request.headers.get('authorization')
 

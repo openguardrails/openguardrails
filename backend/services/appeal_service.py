@@ -6,6 +6,7 @@ import hashlib
 from datetime import datetime, timezone
 from typing import Optional, Tuple, List
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy import desc
 
 from database.models import (
@@ -32,42 +33,42 @@ def compute_content_hash(content: str) -> str:
     return hashlib.sha256(content.encode('utf-8')).hexdigest()
 
 # AI Review Prompts
-APPEAL_REVIEW_SYSTEM_PROMPT = """你是一名内容审核复核员。你的任务是判断一个被护栏系统标记的内容是否为误报。
+APPEAL_REVIEW_SYSTEM_PROMPT = """You are a content review supervisor. Your task is to determine if the content marked by the guardrails system is a false positive.
 
-审核原则：
-1. 考虑内容是否可能被检测系统误判（例如：讨论历史事件、学术讨论、文学引用等）
-2. 检查用户是否有恶意行为模式（结合用户最近请求和封禁历史）
-3. 考虑上下文 - 有时候无害内容会因为特定关键词而触发检测
-4. 谨慎但公正 - 对于真正的误报应该给予通过
-5. 如果内容确实违规，即使用户申诉也应该驳回
+Review principles:
+1. Consider if the content may be misjudged by the detection system (e.g., discussion of historical events, academic discussions, literary citations, etc.)
+2. Check if the user has a pattern of malicious behavior (combined with the user's recent requests and ban history)
+3. Consider context - sometimes harmless content may trigger detection due to specific keywords
+4. Be cautious but fair - false positives should be approved
+5. If the content is actually违规，even if the user appeals, it should be rejected
 
-你必须严格按照以下格式回复：
+You must reply strictly in the following format:
 DECISION: [APPROVED/REJECTED]
-REASONING: [详细说明理由，用中文]"""
+REASONING: [Detailed explanation of the reason, in Chinese]"""
 
-APPEAL_REVIEW_USER_PROMPT = """请审核以下内容的误报申诉:
+APPEAL_REVIEW_USER_PROMPT = """Please review the false positive appeal for the following content:
 
-原始内容: {original_content}
+The original content: {original_content}
 
-被判定的风险类别: {categories}
+The risk categories determined: {categories}
 
-原始风险等级: {risk_level}
+The original risk level: {risk_level}
 
-原始处理动作: {suggest_action}
+The original processing action: {suggest_action}
 
-用户最近10条请求:
+The user's recent 10 requests:
 {recent_requests}
 
-用户封禁历史:
+The user's ban history:
 {ban_history}
 
-请根据以上信息判断这是否为误报，并详细说明理由。"""
+Please determine if this is a false positive based on the above information and provide a detailed explanation of the reason."""
 
 
 class AppealService:
     """Service for handling false positive appeals"""
 
-    APPEAL_WHITELIST_NAME = "用户误报申诉白名单"
+    APPEAL_WHITELIST_NAME = "False positive appeal whitelist"
 
     def __init__(self):
         self.model_service = ModelService()
@@ -135,11 +136,13 @@ class AppealService:
                     config.final_reviewer_email = config_data.get('final_reviewer_email')
             else:
                 # Create new config
+                # Use English as default for database storage (user can customize later)
+                default_template = get_translation('en', 'appealPage', 'defaultMessageTemplate')
                 config = AppealConfig(
                     tenant_id=tenant_uuid,
                     application_id=app_uuid,
                     enabled=config_data.get('enabled', False),
-                    message_template=config_data.get('message_template', '如果您认为这是误报，请点击此链接申诉: {appeal_url}'),
+                    message_template=config_data.get('message_template') or default_template,
                     appeal_base_url=config_data.get('appeal_base_url', ''),
                     final_reviewer_email=config_data.get('final_reviewer_email')
                 )
@@ -248,7 +251,7 @@ class AppealService:
                         "message": t(language, 'processingMessage')
                     }
 
-            # 3.1 Check for duplicate content appeals (res judicata - 一事不再理)
+            # 3.1 Check for duplicate content appeals
             content_hash = compute_content_hash(detection.content)
             duplicate_content_appeal = db.query(AppealRecord).filter(
                 AppealRecord.application_id == uuid.UUID(application_id),
@@ -620,6 +623,8 @@ class AppealService:
             if keyword not in existing_keywords:
                 existing_keywords.append(keyword)
                 whitelist.keywords = existing_keywords
+                # Mark JSON field as modified so SQLAlchemy detects the change
+                flag_modified(whitelist, 'keywords')
         else:
             # Create new whitelist
             whitelist = Whitelist(
@@ -627,7 +632,7 @@ class AppealService:
                 application_id=app_uuid,
                 name=self.APPEAL_WHITELIST_NAME,
                 keywords=[keyword],
-                description="用户误报申诉审核通过后自动添加的白名单",
+                description="False positive appeal whitelist",
                 is_active=True
             )
             db.add(whitelist)
@@ -792,6 +797,8 @@ class AppealService:
                             if appeal_record.whitelist_keyword in existing_keywords:
                                 existing_keywords.remove(appeal_record.whitelist_keyword)
                                 whitelist.keywords = existing_keywords
+                                # Mark JSON field as modified so SQLAlchemy detects the change
+                                flag_modified(whitelist, 'keywords')
                                 # Invalidate cache
                                 await keyword_cache.invalidate_cache()
                     except Exception as e:
@@ -860,7 +867,7 @@ class AppealService:
 
         # Include language parameter in appeal URL
         appeal_url = f"{base_url}/v1/appeal/{request_id}?lang={language}"
-        message_template = config.get('message_template', '如果您认为这是误报，请点击此链接申诉: {appeal_url}')
+        message_template = config.get('message_template', 'If you think this is a false positive, please click the following link to appeal: {appeal_url}')
         message = message_template.replace('{appeal_url}', appeal_url)
 
         return message

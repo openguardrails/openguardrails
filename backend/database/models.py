@@ -358,6 +358,7 @@ class UpstreamApiConfig(Base):
     is_default_private_model = Column(Boolean, default=False, index=True)  # Whether this is the default private model for tenant
     private_model_names = Column(JSON, default=list)  # Model names available for automatic switching (e.g., ["gpt-4", "gpt-4-turbo"])
     default_private_model_name = Column(String(255), nullable=True)  # The specific model name to use when this is the default private model
+    higress_cluster = Column(String(255), nullable=True)  # Higress cluster name for routing (e.g., outbound|443||private-llm.dns)
 
     # Metadata
     description = Column(Text)  # Optional description
@@ -1007,7 +1008,8 @@ class AppealConfig(Base):
     application_id = Column(UUID(as_uuid=True), ForeignKey("applications.id", ondelete="CASCADE"), nullable=False, index=True)
     enabled = Column(Boolean, nullable=False, default=False)
     # Template for appeal link message, supports {appeal_url} placeholder
-    message_template = Column(Text, nullable=False, default='如果您认为这是误报，请点击此链接申诉: {appeal_url}')
+    # Note: Default value uses English. Localized defaults are provided via i18n when config is first displayed.
+    message_template = Column(Text, nullable=False, default='If you think this is a false positive, please click the following link to appeal: {appeal_url}')
     # Base URL for appeal links (e.g., https://domain.com or http://192.168.1.100:5001)
     appeal_base_url = Column(String(512), nullable=False, default='')
     # Final reviewer email - when AI considers it a true positive, send email for human review
@@ -1056,7 +1058,7 @@ class AppealRecord(Base):
     processor_reason = Column(Text, nullable=True)  # Human reviewer's reason (optional)
     processed_at = Column(DateTime(timezone=True))  # When the appeal was finally processed
 
-    # Content hash for duplicate detection (一事不再理)
+    # Content hash for duplicate detection
     content_hash = Column(String(64), nullable=True, index=True)
 
     # Context for review

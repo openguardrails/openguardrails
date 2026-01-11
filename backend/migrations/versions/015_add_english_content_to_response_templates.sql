@@ -30,53 +30,54 @@ BEGIN
         WHERE (template_content::jsonb) ? 'zh' AND NOT ((template_content::jsonb) ? 'en')
     LOOP
         -- Determine English content based on category
+        -- Format: "Request blocked by OpenGuardrails due to content potentially involving [topic]."
         CASE template_record.category
             WHEN 'S1' THEN
-                english_text := 'Sorry, I cannot answer questions involving general political topics. If you have other questions, I''d be happy to help.';
+                english_text := 'Request blocked by OpenGuardrails due to content potentially involving general political topics.';
             WHEN 'S2' THEN
-                english_text := 'Sorry, I cannot answer questions involving sensitive political topics. If you have other questions, I''d be happy to help.';
+                english_text := 'Request blocked by OpenGuardrails due to content potentially involving sensitive political topics.';
             WHEN 'S3' THEN
-                english_text := 'Sorry, I cannot answer questions that may damage national image. If you have other questions, I''d be happy to help.';
+                english_text := 'Request blocked by OpenGuardrails due to content potentially involving insult to national symbols or leaders.';
             WHEN 'S4' THEN
-                english_text := 'Sorry, I cannot answer questions that may harm minors. If you have other questions, I''d be happy to help.';
+                english_text := 'Request blocked by OpenGuardrails due to content potentially involving harm to minors.';
             WHEN 'S5' THEN
-                english_text := 'Sorry, I cannot answer questions involving violent crime. If you have other questions, I''d be happy to help.';
+                english_text := 'Request blocked by OpenGuardrails due to content potentially involving violent crime.';
             WHEN 'S6' THEN
-                english_text := 'Sorry, I cannot answer questions involving illegal activities. If you have other questions, I''d be happy to help.';
+                english_text := 'Request blocked by OpenGuardrails due to content potentially involving non-violent crime.';
             WHEN 'S7' THEN
-                english_text := 'Sorry, I cannot answer questions involving pornographic content. If you have other questions, I''d be happy to help.';
+                english_text := 'Request blocked by OpenGuardrails due to content potentially involving pornography.';
             WHEN 'S8' THEN
-                english_text := 'Sorry, I cannot answer questions involving discriminatory content. If you have other questions, I''d be happy to help.';
+                english_text := 'Request blocked by OpenGuardrails due to content potentially involving hate and discrimination.';
             WHEN 'S9' THEN
-                english_text := 'Sorry, I cannot answer questions involving prompt injection attacks. If you have other questions, I''d be happy to help.';
+                english_text := 'Request blocked by OpenGuardrails due to content potentially involving prompt injection attacks.';
             WHEN 'S10' THEN
-                english_text := 'Sorry, I cannot answer questions involving insulting content. If you have other questions, I''d be happy to help.';
+                english_text := 'Request blocked by OpenGuardrails due to content potentially involving profanity.';
             WHEN 'S11' THEN
-                english_text := 'Sorry, I cannot answer questions involving personal privacy. If you have other questions, I''d be happy to help.';
+                english_text := 'Request blocked by OpenGuardrails due to content potentially involving privacy invasion.';
             WHEN 'S12' THEN
-                english_text := 'Sorry, I cannot answer questions involving business violations. If you have other questions, I''d be happy to help.';
+                english_text := 'Request blocked by OpenGuardrails due to content potentially involving commercial violations.';
             WHEN 'S13' THEN
-                english_text := 'Sorry, I cannot answer questions involving intellectual property infringement. If you have other questions, I''d be happy to help.';
+                english_text := 'Request blocked by OpenGuardrails due to content potentially involving intellectual property infringement.';
             WHEN 'S14' THEN
-                english_text := 'Sorry, I cannot answer questions involving harassment. If you have other questions, I''d be happy to help.';
+                english_text := 'Request blocked by OpenGuardrails due to content potentially involving harassment.';
             WHEN 'S15' THEN
-                english_text := 'Sorry, I cannot answer questions involving weapons of mass destruction. If you have other questions, I''d be happy to help.';
+                english_text := 'Request blocked by OpenGuardrails due to content potentially involving weapons of mass destruction.';
             WHEN 'S16' THEN
-                english_text := 'Sorry, I cannot answer questions involving self-harm. If you have other questions, I''d be happy to help.';
+                english_text := 'Request blocked by OpenGuardrails due to content potentially involving self-harm.';
             WHEN 'S17' THEN
-                english_text := 'Sorry, I cannot answer questions involving sexual crimes. If you have other questions, I''d be happy to help.';
+                english_text := 'Request blocked by OpenGuardrails due to content potentially involving sexual crimes.';
             WHEN 'S18' THEN
-                english_text := 'Sorry, I cannot answer questions involving threats. If you have other questions, I''d be happy to help.';
+                english_text := 'Request blocked by OpenGuardrails due to content potentially involving threats.';
             WHEN 'S19' THEN
-                english_text := 'Sorry, I cannot provide professional financial advice. For specific financial decisions, please consult a qualified financial advisor. If you have other questions, I''d be happy to help.';
+                english_text := 'Request blocked by OpenGuardrails due to content potentially involving professional financial advice.';
             WHEN 'S20' THEN
-                english_text := 'Sorry, I cannot provide professional medical advice. For health concerns, please consult a qualified healthcare provider. If you have other questions, I''d be happy to help.';
+                english_text := 'Request blocked by OpenGuardrails due to content potentially involving professional medical advice.';
             WHEN 'S21' THEN
-                english_text := 'Sorry, I cannot provide professional legal advice. For legal matters, please consult a qualified attorney. If you have other questions, I''d be happy to help.';
+                english_text := 'Request blocked by OpenGuardrails due to content potentially involving professional legal advice.';
             WHEN 'default' THEN
-                english_text := 'Sorry, I cannot answer this question. If you have other questions, I''d be happy to help.';
+                english_text := 'Request blocked by OpenGuardrails due to content policy violation.';
             ELSE
-                english_text := 'Sorry, I cannot answer this question. If you have other questions, I''d be happy to help.';
+                english_text := 'Request blocked by OpenGuardrails due to content policy violation.';
         END CASE;
 
         -- Add English content to existing JSONB
