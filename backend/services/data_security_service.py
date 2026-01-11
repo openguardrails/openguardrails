@@ -250,8 +250,7 @@ class DataSecurityService:
                     'entity_definition': recognition_config.get('entity_definition', ''),
                     'anonymization_method': et.anonymization_method,
                     'anonymization_config': et.anonymization_config or {},
-                    # Restore anonymization fields
-                    'restore_enabled': et.restore_enabled or False,
+                    # GenAI code anonymization fields (for genai_code method)
                     'restore_code': et.restore_code,
                     'restore_code_hash': et.restore_code_hash
                 })
@@ -286,8 +285,7 @@ class DataSecurityService:
                     'risk_level': entity_type['risk_level'],
                     'anonymization_method': entity_type['anonymization_method'],
                     'anonymization_config': entity_type['anonymization_config'],
-                    # Restore anonymization fields
-                    'restore_enabled': entity_type.get('restore_enabled', False),
+                    # GenAI code anonymization fields (for genai_code method)
                     'restore_code': entity_type.get('restore_code'),
                     'restore_code_hash': entity_type.get('restore_code_hash')
                 })
@@ -402,10 +400,9 @@ Text:
                                 'end': pos + len(original_text),
                                 'text': original_text,
                                 'risk_level': et['risk_level'],
-                                'anonymization_method': et.get('anonymization_method', 'genai'),
+                                'anonymization_method': et.get('anonymization_method', 'genai_natural'),
                                 'anonymization_config': et.get('anonymization_config', {}),
-                                # Restore anonymization fields
-                                'restore_enabled': et.get('restore_enabled', False),
+                                # GenAI code anonymization fields (for genai_code method)
                                 'restore_code': et.get('restore_code'),
                                 'restore_code_hash': et.get('restore_code_hash')
                             })
@@ -589,14 +586,39 @@ Text:
                 except re.error as e:
                     logger.warning(f"Regex replace error for {entity['entity_type']}: {e}")
                     replacement = f"<{entity['entity_type']}>"
-            elif method == 'genai':
-                # GenAI anonymization - use AI to generate replacement content
+            elif method in ('genai', 'genai_natural'):
+                # GenAI Natural Language anonymization - use AI with natural language prompt
+                # 'genai' is kept for backward compatibility, 'genai_natural' is the new name
                 anonymization_prompt = config.get('anonymization_prompt', '')
                 if anonymization_prompt:
                     replacement = self._genai_anonymize_sync(original_text, anonymization_prompt, entity.get('entity_type_name', entity['entity_type']))
                 else:
-                    # 无提示词时使用默认格式
+                    # No prompt, use default format
                     replacement = f"[REDACTED_{entity.get('entity_type_name', entity['entity_type']).upper().replace(' ', '_')}]"
+            elif method == 'genai_code':
+                # GenAI Code Logic anonymization - execute AI-generated Python code
+                restore_code = entity.get('restore_code')
+                restore_code_hash = entity.get('restore_code_hash')
+                if restore_code and restore_code_hash:
+                    from services.restore_anonymization_service import get_restore_anonymization_service
+                    restore_service = get_restore_anonymization_service()
+                    try:
+                        # Execute the stored code (for anonymize action, we ignore the mapping)
+                        result_text, _, _ = restore_service.execute_restore_anonymization(
+                            original_text,
+                            entity['entity_type'],
+                            restore_code,
+                            restore_code_hash,
+                            {},  # Empty mapping for anonymize-only
+                            {}   # Empty counters for anonymize-only
+                        )
+                        replacement = result_text
+                    except Exception as e:
+                        logger.error(f"GenAI code execution failed for {entity['entity_type']}: {e}")
+                        replacement = f"<{entity['entity_type']}>"
+                else:
+                    # No code configured
+                    replacement = f"<{entity['entity_type']}>"
             elif method == 'replace':
                 # Replace with placeholder
                 replacement = config.get('replacement', f"<{entity['entity_type']}>")
@@ -691,92 +713,68 @@ Text:
             original_text = entity['text']
             entity_type_code = entity['entity_type']
 
-            # Check if this entity has restore enabled with valid code
-            restore_enabled = entity.get('restore_enabled', False)
-            restore_code = entity.get('restore_code')
-            restore_code_hash = entity.get('restore_code_hash')
+            # Use standard anonymization methods (restore_enabled is no longer used)
+            method = entity.get('anonymization_method', 'replace')
+            config = entity.get('anonymization_config', {})
 
-            if restore_enabled:
-                # Use numbered placeholder for restore mode
+            if method == 'regex_replace':
+                pattern = config.get('regex_pattern', '')
+                replacement_template = config.get('replacement_template', '***')
+                try:
+                    if pattern:
+                        python_replacement = _convert_replacement_template(replacement_template)
+                        replacement = re.sub(pattern, python_replacement, original_text)
+                    else:
+                        replacement = '***'
+                except re.error as e:
+                    logger.warning(f"Regex replace error for {entity_type_code}: {e}")
+                    replacement = f"<{entity_type_code}>"
+            elif method in ('genai', 'genai_natural'):
+                # GenAI Natural Language anonymization
+                anonymization_prompt = config.get('anonymization_prompt', '')
+                if anonymization_prompt:
+                    replacement = self._genai_anonymize_sync(original_text, anonymization_prompt, entity.get('entity_type_name', entity_type_code))
+                else:
+                    replacement = f"[REDACTED_{entity.get('entity_type_name', entity_type_code).upper().replace(' ', '_')}]"
+            elif method == 'genai_code':
+                # GenAI Code Logic anonymization - execute AI-generated Python code
+                restore_code = entity.get('restore_code')
+                restore_code_hash = entity.get('restore_code_hash')
                 if restore_code and restore_code_hash:
-                    # Use AI-generated restore code if available
                     from services.restore_anonymization_service import get_restore_anonymization_service
                     restore_service = get_restore_anonymization_service()
-
                     try:
-                        # Execute the stored restore code
-                        result_text, new_mapping, new_counters = restore_service.execute_restore_anonymization(
+                        result_text, _, _ = restore_service.execute_restore_anonymization(
                             original_text,
                             entity_type_code,
                             restore_code,
                             restore_code_hash,
-                            restore_mapping,
-                            restore_counters
+                            {},
+                            {}
                         )
-
-                        # Update mappings and counters
-                        restore_mapping.update(new_mapping)
-                        restore_counters.update(new_counters)
                         replacement = result_text
-
-                        logger.debug(f"Restore anonymization for {entity_type_code}: {original_text} -> {replacement}")
-
                     except Exception as e:
-                        logger.error(f"Restore anonymization failed for {entity_type_code}: {e}")
-                        # Fallback to simple numbered placeholder
-                        counter_key = entity_type_code.lower()
-                        counter = restore_counters.get(counter_key, 0) + 1
-                        restore_counters[counter_key] = counter
-                        replacement = f"[{counter_key}_{counter}]"
-                        restore_mapping[replacement] = original_text
-                else:
-                    # No AI code available, use simple numbered placeholder format
-                    counter_key = entity_type_code.lower()
-                    counter = restore_counters.get(counter_key, 0) + 1
-                    restore_counters[counter_key] = counter
-                    replacement = f"[{counter_key}_{counter}]"
-                    restore_mapping[replacement] = original_text
-                    logger.debug(f"Simple numbered placeholder for {entity_type_code}: {original_text} -> {replacement}")
-            else:
-                # Use standard anonymization methods
-                method = entity.get('anonymization_method', 'replace')
-                config = entity.get('anonymization_config', {})
-
-                if method == 'regex_replace':
-                    pattern = config.get('regex_pattern', '')
-                    replacement_template = config.get('replacement_template', '***')
-                    try:
-                        if pattern:
-                            python_replacement = _convert_replacement_template(replacement_template)
-                            replacement = re.sub(pattern, python_replacement, original_text)
-                        else:
-                            replacement = '***'
-                    except re.error as e:
-                        logger.warning(f"Regex replace error for {entity_type_code}: {e}")
+                        logger.error(f"GenAI code execution failed for {entity_type_code}: {e}")
                         replacement = f"<{entity_type_code}>"
-                elif method == 'genai':
-                    anonymization_prompt = config.get('anonymization_prompt', '')
-                    if anonymization_prompt:
-                        replacement = self._genai_anonymize_sync(original_text, anonymization_prompt, entity.get('entity_type_name', entity_type_code))
-                    else:
-                        replacement = f"[REDACTED_{entity.get('entity_type_name', entity_type_code).upper().replace(' ', '_')}]"
-                elif method == 'replace':
-                    replacement = config.get('replacement', f"<{entity_type_code}>")
-                elif method == 'mask':
-                    mask_char = config.get('mask_char', '*')
-                    keep_prefix = config.get('keep_prefix', 0)
-                    keep_suffix = config.get('keep_suffix', 0)
-                    replacement = self._mask_string(original_text, mask_char, keep_prefix, keep_suffix)
-                elif method == 'hash':
-                    replacement = self._hash_string(original_text)
-                elif method == 'encrypt':
-                    replacement = f"<ENCRYPTED_{hashlib.md5(original_text.encode()).hexdigest()[:8]}>"
-                elif method == 'shuffle':
-                    replacement = self._shuffle_string(original_text)
-                elif method == 'random':
-                    replacement = self._random_replacement(original_text)
                 else:
                     replacement = f"<{entity_type_code}>"
+            elif method == 'replace':
+                replacement = config.get('replacement', f"<{entity_type_code}>")
+            elif method == 'mask':
+                mask_char = config.get('mask_char', '*')
+                keep_prefix = config.get('keep_prefix', 0)
+                keep_suffix = config.get('keep_suffix', 0)
+                replacement = self._mask_string(original_text, mask_char, keep_prefix, keep_suffix)
+            elif method == 'hash':
+                replacement = self._hash_string(original_text)
+            elif method == 'encrypt':
+                replacement = f"<ENCRYPTED_{hashlib.md5(original_text.encode()).hexdigest()[:8]}>"
+            elif method == 'shuffle':
+                replacement = self._shuffle_string(original_text)
+            elif method == 'random':
+                replacement = self._random_replacement(original_text)
+            else:
+                replacement = f"<{entity_type_code}>"
 
             # Store anonymized value in entity for reuse
             entity['anonymized_value'] = replacement
@@ -917,7 +915,8 @@ Text:
             entity_type_code = entity.get('entity_type', '')
             config = entity_type_configs.get(entity_type_code, {})
 
-            if config.get('restore_enabled') and config.get('restore_code') and config.get('restore_code_hash'):
+            # Check if this entity type uses genai_code method with valid code
+            if config.get('anonymization_method') == 'genai_code' and config.get('restore_code') and config.get('restore_code_hash'):
                 restore_entities.append((entity, config))
             else:
                 normal_entities.append(entity)
@@ -1426,7 +1425,7 @@ Return JSON only, no markdown:
                         "result": f"Regex error: {str(e)}",
                         "processing_time_ms": (time.time() - start_time) * 1000
                     }
-            elif method == 'genai':
+            elif method in ('genai', 'genai_natural'):
                 anonymization_prompt = config.get('anonymization_prompt', '')
                 if anonymization_prompt:
                     result = self._genai_anonymize_sync(test_input, anonymization_prompt, 'TEST_ENTITY')
@@ -1496,7 +1495,6 @@ Return JSON only, no markdown:
         is_global: bool = False,
         source_type: str = 'custom',
         template_id: Optional[str] = None,
-        restore_enabled: bool = False,
         restore_natural_desc: Optional[str] = None
     ) -> DataSecurityEntityType:
         """Create sensitive data type configuration
@@ -1541,8 +1539,7 @@ Return JSON only, no markdown:
             is_global=is_global,
             source_type=source_type,
             template_id=template_id,
-            restore_enabled=restore_enabled,
-            restore_natural_desc=restore_natural_desc
+            restore_natural_desc=restore_natural_desc  # Used for genai_code method
         )
 
         self.db.add(entity_type_obj)
@@ -1623,9 +1620,7 @@ Return JSON only, no markdown:
         if 'is_active' in kwargs:
             entity_type.is_active = kwargs['is_active']
 
-        # Restore anonymization fields
-        if 'restore_enabled' in kwargs:
-            entity_type.restore_enabled = kwargs['restore_enabled']
+        # GenAI code anonymization fields (for genai_code method)
         if 'restore_natural_desc' in kwargs:
             entity_type.restore_natural_desc = kwargs['restore_natural_desc']
 

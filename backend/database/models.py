@@ -508,11 +508,11 @@ class DataSecurityEntityType(Base):
     source_type = Column(String(20), default='custom', index=True)  # Source type: 'system_template', 'system_copy', 'custom'
     template_id = Column(UUID(as_uuid=True), index=True, nullable=True)  # Template ID if copied from a template
 
-    # Restore anonymization fields (脱敏+还原)
-    restore_enabled = Column(Boolean, default=False)  # Whether this entity type supports restorable anonymization
-    restore_code = Column(Text, nullable=True)  # AI-generated Python code for anonymization (hidden from user)
+    # GenAI code anonymization fields (for anonymization_method='genai_code')
+    # These are used when the anonymization_method is 'genai_code' to execute custom AI-generated Python code
+    restore_code = Column(Text, nullable=True)  # AI-generated Python code for genai_code anonymization
     restore_code_hash = Column(String(64), nullable=True)  # SHA-256 hash for code integrity verification
-    restore_natural_desc = Column(Text, nullable=True)  # User natural language description for anonymization rule
+    restore_natural_desc = Column(Text, nullable=True)  # Natural language description used to generate the code
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -763,7 +763,7 @@ class TenantDataLeakagePolicy(Base):
     # Input Policy Defaults (prevent external data leakage)
     # Actions: 'block' | 'switch_private_model' | 'anonymize' | 'pass'
     default_input_high_risk_action = Column(String(50), default='block', nullable=False)
-    default_input_medium_risk_action = Column(String(50), default='switch_private_model', nullable=False)
+    default_input_medium_risk_action = Column(String(50), default='anonymize', nullable=False)
     default_input_low_risk_action = Column(String(50), default='anonymize', nullable=False)
 
     # Output Policy Defaults (prevent internal unauthorized access)

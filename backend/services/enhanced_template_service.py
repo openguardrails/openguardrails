@@ -1,27 +1,44 @@
 """
-Enhanced template service
-Combine traditional template and knowledge base question-answer pairs, provide more intelligent answer functionality
+Enhanced Template Service
+
+Provides intelligent answer generation for blocked content:
+1. Proxy Answer (代答): When knowledge base is hit, generate safe response using guardrail model
+2. Fixed Answer (据答): When no KB hit, use generic template with scanner_name
+
+Flow:
+  User Query → Risk Detected → Search Knowledge Base
+                                    ↓
+                           ┌───────┴───────┐
+                           ↓               ↓
+                      KB Hit           KB Miss
+                           ↓               ↓
+                  Generate Proxy    Return Fixed
+                  Answer (Model)    Answer (Template)
+                           ↓               ↓
+                      Safe Response   Template Response
 """
 import time
 import asyncio
-from typing import Dict, Optional, List, Tuple
+from typing import Dict, Optional, List
 from sqlalchemy.orm import Session
-from database.models import ResponseTemplate, KnowledgeBase, TenantKnowledgeBaseDisable
+
+from database.models import KnowledgeBase, TenantKnowledgeBaseDisable
 from database.connection import get_db_session
 from services.knowledge_base_service import knowledge_base_service
+from services.proxy_answer_service import proxy_answer_service
 from utils.logger import setup_logger
+from utils.i18n_loader import get_translation
 
 logger = setup_logger()
 
+
 class EnhancedTemplateService:
-    """Enhanced template service, support knowledge base search"""
+    """Enhanced template service with proxy answer generation"""
 
     def __init__(self, cache_ttl: int = 600):
-        # Template cache
-        self._template_cache: Dict[str, Dict[str, Dict[bool, str]]] = {}
-        # Knowledge base cache: {application_id: {category: [knowledge_base_ids]}}
+        # Knowledge base cache: {application_id: {scanner_key: [kb_ids]}}
         self._knowledge_base_cache: Dict[str, Dict[str, List[int]]] = {}
-        # Global knowledge base cache: {category: [knowledge_base_ids]}
+        # Global knowledge base cache: {scanner_key: [kb_ids]}
         self._global_knowledge_base_cache: Dict[str, List[int]] = {}
         # Tenant disabled KB cache: {tenant_id: set(kb_ids)}
         self._tenant_disabled_kb_cache: Dict[str, set] = {}
@@ -29,528 +46,347 @@ class EnhancedTemplateService:
         self._cache_ttl = cache_ttl
         self._lock = asyncio.Lock()
 
-    async def get_suggest_answer(self, categories: List[str], tenant_id: Optional[str] = None, application_id: Optional[str] = None, user_query: Optional[str] = None, user_language: Optional[str] = None, scanner_type: Optional[str] = None, scanner_identifier: Optional[str] = None, scanner_name: Optional[str] = None) -> str:
+    async def get_suggest_answer(
+        self,
+        categories: List[str],
+        tenant_id: Optional[str] = None,
+        application_id: Optional[str] = None,
+        user_query: Optional[str] = None,
+        user_language: Optional[str] = None,
+        scanner_type: Optional[str] = None,
+        scanner_identifier: Optional[str] = None,
+        scanner_name: Optional[str] = None
+    ) -> str:
         """
-        Get suggested answer, first search from knowledge base, if not found, use default template
+        Get suggested answer - proxy answer (代答) or fixed answer (据答).
+
+        Flow:
+        1. If user_query provided, search knowledge base
+        2. If KB hit, generate proxy answer using guardrail model
+        3. If KB miss or no user_query, return fixed answer template
+
         Args:
-            categories: Risk categories list (legacy, for backward compatibility)
-            tenant_id: DEPRECATED - kept for backward compatibility
-            application_id: Application ID for multi-application support
-            user_query: User original question (for knowledge base search)
-            user_language: User's preferred language (e.g., 'en', 'zh')
-            scanner_type: Scanner type (blacklist, whitelist, official_scanner, marketplace_scanner, custom_scanner)
-            scanner_identifier: Scanner identifier (blacklist name, whitelist name, or scanner tag like S1, S100)
-            scanner_name: Human-readable scanner name for {scanner_name} variable in templates
+            categories: Risk categories list
+            tenant_id: Tenant ID
+            application_id: Application ID
+            user_query: User's original question (for KB search and proxy answer)
+            user_language: User's preferred language ('en', 'zh')
+            scanner_type: Scanner type
+            scanner_identifier: Scanner identifier (e.g., S8, S100)
+            scanner_name: Human-readable scanner name
+
         Returns:
-            Suggested answer content
+            Suggested answer (proxy or fixed)
         """
         await self._ensure_cache_fresh()
 
-        # If neither categories nor scanner info provided, return default
-        if not categories and not (scanner_type and scanner_identifier):
-            return self._get_default_answer(application_id, user_language, scanner_name)
+        lang = user_language or 'en'
 
-        try:
-            # 1. Try to get answer from knowledge base
-            if user_query and user_query.strip():
-                logger.debug(f"Knowledge base search: application_id={application_id}, tenant_id={tenant_id}, user_query={user_query[:50]}..., categories={categories}, scanner_type={scanner_type}, scanner_identifier={scanner_identifier}")
-                kb_answer = await self._search_knowledge_base_answer(
-                    categories=categories,
+        # If no scanner_name provided, try to extract from categories
+        if not scanner_name and categories:
+            scanner_name = categories[0]
+
+        # If no scanner_name still, use default
+        if not scanner_name:
+            scanner_name = "policy violation" if lang != 'zh' else "政策违规"
+
+        # Try proxy answer (代答) if user_query is provided
+        if user_query and user_query.strip() and application_id:
+            try:
+                kb_answer = await self._search_and_generate_proxy_answer(
+                    user_query=user_query.strip(),
                     tenant_id=tenant_id,
                     application_id=application_id,
-                    user_query=user_query.strip(),
                     scanner_type=scanner_type,
-                    scanner_identifier=scanner_identifier
+                    scanner_identifier=scanner_identifier,
+                    scanner_name=scanner_name,
+                    categories=categories,
+                    user_language=lang
                 )
                 if kb_answer:
-                    logger.info(f"Found answer from knowledge base for application {application_id}, scanner={scanner_type}/{scanner_identifier}, query: {user_query[:50]}...")
-                    # Replace {scanner_name} variable in KB answer if provided
-                    if scanner_name and '{scanner_name}' in kb_answer:
-                        kb_answer = kb_answer.replace('{scanner_name}', scanner_name)
                     return kb_answer
-                else:
-                    logger.debug(f"No answer found in knowledge base for application {application_id}, query: {user_query[:50]}...")
+            except Exception as e:
+                logger.error(f"Proxy answer generation failed: {e}", exc_info=True)
 
-            # 2. Knowledge base didn't find answer, use traditional template logic
-            return await self._get_template_answer(
-                categories=categories,
-                application_id=application_id,
-                user_language=user_language,
-                scanner_type=scanner_type,
-                scanner_identifier=scanner_identifier,
-                scanner_name=scanner_name
-            )
+        # Fallback to fixed answer (据答)
+        return self._get_fixed_answer(scanner_name, lang)
 
-        except Exception as e:
-            logger.error(f"Get suggest answer error: {e}")
-            return self._get_default_answer(application_id, user_language, scanner_name)
-
-    async def _search_knowledge_base_answer(self, categories: List[str], tenant_id: Optional[str], application_id: Optional[str], user_query: str, scanner_type: Optional[str] = None, scanner_identifier: Optional[str] = None) -> Optional[str]:
-        """Search answer from knowledge base"""
-        # If no application_id, try to find default application from tenant_id
-        if not application_id and tenant_id:
-            try:
-                from database.connection import get_db_session
-                from database.models import Application
-                import uuid as uuid_module
-                
-                db = get_db_session()
-                try:
-                    tenant_uuid = uuid_module.UUID(str(tenant_id))
-                    default_app = db.query(Application).filter(
-                        Application.tenant_id == tenant_uuid,
-                        Application.is_active == True
-                    ).order_by(Application.created_at.asc()).first()
-                    
-                    if default_app:
-                        application_id = str(default_app.id)
-                        logger.debug(f"Knowledge base search: Using default application {application_id} for tenant {tenant_id}")
-                finally:
-                    db.close()
-            except (ValueError, Exception) as e:
-                logger.warning(f"Knowledge base search: Failed to find default application for tenant {tenant_id}: {e}")
-        
-        if not application_id:
-            logger.warning("Knowledge base search: No application_id available, skipping search")
-            return None
-
-        try:
-            # Define risk level priority
-            risk_priority = {
-                "high_risk": 3,
-                "medium_risk": 2,
-                "low_risk": 1,
-                "no_risk": 0
-            }
-
-            # Risk level mapping (must match RISK_LEVEL_MAPPING in guardrail_service.py)
-            risk_level_mapping = {
-                'S2': 'high_risk', 'S3': 'high_risk', 'S5': 'high_risk', 'S9': 'high_risk',
-                'S15': 'high_risk', 'S17': 'high_risk',  # Weapons of Mass Destruction, Sexual Crimes
-                'S4': 'medium_risk', 'S7': 'medium_risk', 'S16': 'medium_risk',  # Harm to Minors, Pornography, Self-Harm
-                'S1': 'low_risk', 'S6': 'low_risk', 'S8': 'low_risk', 'S10': 'low_risk',
-                'S11': 'low_risk', 'S12': 'low_risk', 'S13': 'low_risk', 'S14': 'low_risk',
-                'S18': 'low_risk', 'S19': 'low_risk', 'S20': 'low_risk', 'S21': 'low_risk',
-            }
-
-            # Category name mapping (must match CATEGORY_NAMES in guardrail_service.py)
-            category_names = {
-                'S1': 'General Political Topics',
-                'S2': 'Sensitive Political Topics',
-                'S3': 'Insult to National Symbols or Leaders',
-                'S4': 'Harm to Minors',
-                'S5': 'Violent Crime',
-                'S6': 'Non-Violent Crime',
-                'S7': 'Pornography',
-                'S8': 'Hate & Discrimination',
-                'S9': 'Prompt Attacks',
-                'S10': 'Profanity',
-                'S11': 'Privacy Invasion',
-                'S12': 'Commercial Violations',
-                'S13': 'Intellectual Property Infringement',
-                'S14': 'Harassment',
-                'S15': 'Weapons of Mass Destruction',
-                'S16': 'Self-Harm',
-                'S17': 'Sexual Crimes',
-                'S18': 'Threats',
-                'S19': 'Professional Financial Advice',
-                'S20': 'Professional Medical Advice',
-                'S21': 'Professional Legal Advice',
-            }
-
-            # Convert category name to category code, and calculate risk level
-            category_risk_mapping = []
-            for category in categories:
-                category_key = None
-                for key, name in category_names.items():
-                    if name == category:
-                        category_key = key
-                        break
-
-                if category_key:
-                    risk_level = risk_level_mapping.get(category_key, "low_risk")
-                    priority = risk_priority.get(risk_level, 0)
-                    category_risk_mapping.append((category_key, risk_level, priority))
-
-            # Sort by risk level, higher priority first
-            category_risk_mapping.sort(key=lambda x: x[2], reverse=True)
-
-            # Search knowledge base by scanner_type/scanner_identifier first, then by category
-            app_cache = self._knowledge_base_cache.get(str(application_id), {})
-            logger.debug(f"Knowledge base cache for application {application_id}: {list(app_cache.keys())} keys")
-            logger.debug(f"Global knowledge base cache: {list(self._global_knowledge_base_cache.keys())} keys")
-
-            # Priority 1: Search by scanner_type:scanner_identifier if provided
-            if scanner_type and scanner_identifier:
-                scanner_key = f"{scanner_type}:{scanner_identifier}"
-                logger.debug(f"Searching KB by scanner key: {scanner_key}")
-
-                # Collect knowledge base IDs for this scanner
-                knowledge_base_ids = app_cache.get(scanner_key, []).copy()
-                global_kb_ids = self._global_knowledge_base_cache.get(scanner_key, [])
-
-                # Filter out disabled global KBs for this tenant
-                disabled_kb_ids = self._tenant_disabled_kb_cache.get(str(tenant_id), set())
-                filtered_global_kb_ids = [kb_id for kb_id in global_kb_ids if kb_id not in disabled_kb_ids]
-                knowledge_base_ids.extend(filtered_global_kb_ids)
-                knowledge_base_ids = list(set(knowledge_base_ids))
-
-                logger.debug(f"Found {len(knowledge_base_ids)} KBs for scanner {scanner_key}")
-
-                # Search these knowledge bases
-                from database.connection import get_db_session
-                db = get_db_session()
-                try:
-                    for kb_id in knowledge_base_ids:
-                        try:
-                            logger.debug(f"Searching KB {kb_id} with query: {user_query[:50]}...")
-                            results = knowledge_base_service.search_similar_questions(
-                                user_query,
-                                kb_id,
-                                top_k=1,
-                                db=db
-                            )
-
-                            if results:
-                                best_result = results[0]
-                                kb_type = "global" if kb_id in global_kb_ids else "application"
-                                logger.info(f"Found similar question in {kb_type} KB {kb_id}: similarity={best_result['similarity_score']:.3f}, query: {user_query[:50]}...")
-                                return best_result['answer']
-                        except Exception as e:
-                            logger.warning(f"Error searching knowledge base {kb_id}: {e}", exc_info=True)
-                            continue
-                finally:
-                    db.close()
-
-            # Priority 2: Search by legacy category
-            for category_key, risk_level, priority in category_risk_mapping:
-                # Collect knowledge base IDs to search: application's own + global
-                knowledge_base_ids = app_cache.get(category_key, []).copy()
-                global_kb_ids = self._global_knowledge_base_cache.get(category_key, [])
-                
-                logger.debug(f"Category {category_key}: app KBs={len(knowledge_base_ids)}, global KBs={len(global_kb_ids)}")
-
-                # Filter out disabled global KBs for this tenant
-                disabled_kb_ids = self._tenant_disabled_kb_cache.get(str(tenant_id), set())
-                filtered_global_kb_ids = [kb_id for kb_id in global_kb_ids if kb_id not in disabled_kb_ids]
-
-                knowledge_base_ids.extend(filtered_global_kb_ids)
-
-                # Remove duplicates
-                knowledge_base_ids = list(set(knowledge_base_ids))
-                
-                logger.debug(f"Total KBs to search for category {category_key}: {len(knowledge_base_ids)}")
-
-                # Get database session for fetching KB's similarity threshold
-                from database.connection import get_db_session
-                db = get_db_session()
-                try:
-                    for kb_id in knowledge_base_ids:
-                        try:
-                            logger.debug(f"Searching KB {kb_id} with query: {user_query[:50]}...")
-                            # Search similar questions (will use KB's configured threshold)
-                            results = knowledge_base_service.search_similar_questions(
-                                user_query,
-                                kb_id,
-                                top_k=1,
-                                db=db
-                            )
-
-                            if results:
-                                best_result = results[0]
-                                kb_type = "global" if kb_id in global_kb_ids else "application"
-                                logger.info(f"Found similar question in {kb_type} KB {kb_id}: similarity={best_result['similarity_score']:.3f}, query: {user_query[:50]}...")
-                                return best_result['answer']
-                            else:
-                                logger.debug(f"No similar questions found in KB {kb_id} for query: {user_query[:50]}...")
-
-                        except Exception as e:
-                            logger.warning(f"Error searching knowledge base {kb_id}: {e}", exc_info=True)
-                            continue
-                finally:
-                    db.close()
-
-            return None
-
-        except Exception as e:
-            logger.error(f"Search knowledge base answer error: {e}")
-            return None
-
-    async def _get_template_answer(self, categories: List[str], application_id: Optional[str], user_language: Optional[str] = None, scanner_type: Optional[str] = None, scanner_identifier: Optional[str] = None, scanner_name: Optional[str] = None) -> str:
-        """Use traditional template to get answer"""
-        try:
-            # Define risk level priority
-            risk_priority = {
-                "high_risk": 3,
-                "medium_risk": 2,
-                "low_risk": 1,
-                "no_risk": 0
-            }
-
-            # Risk level mapping (must match RISK_LEVEL_MAPPING in guardrail_service.py)
-            risk_level_mapping = {
-                'S2': 'high_risk', 'S3': 'high_risk', 'S5': 'high_risk', 'S9': 'high_risk',
-                'S15': 'high_risk', 'S17': 'high_risk',  # Weapons of Mass Destruction, Sexual Crimes
-                'S4': 'medium_risk', 'S7': 'medium_risk', 'S16': 'medium_risk',  # Harm to Minors, Pornography, Self-Harm
-                'S1': 'low_risk', 'S6': 'low_risk', 'S8': 'low_risk', 'S10': 'low_risk',
-                'S11': 'low_risk', 'S12': 'low_risk', 'S13': 'low_risk', 'S14': 'low_risk',
-                'S18': 'low_risk', 'S19': 'low_risk', 'S20': 'low_risk', 'S21': 'low_risk',
-            }
-
-            # Category name mapping (must match CATEGORY_NAMES in guardrail_service.py)
-            category_names = {
-                'S1': 'General Political Topics',
-                'S2': 'Sensitive Political Topics',
-                'S3': 'Insult to National Symbols or Leaders',
-                'S4': 'Harm to Minors',
-                'S5': 'Violent Crime',
-                'S6': 'Non-Violent Crime',
-                'S7': 'Pornography',
-                'S8': 'Hate & Discrimination',
-                'S9': 'Prompt Attacks',
-                'S10': 'Profanity',
-                'S11': 'Privacy Invasion',
-                'S12': 'Commercial Violations',
-                'S13': 'Intellectual Property Infringement',
-                'S14': 'Harassment',
-                'S15': 'Weapons of Mass Destruction',
-                'S16': 'Self-Harm',
-                'S17': 'Sexual Crimes',
-                'S18': 'Threats',
-                'S19': 'Professional Financial Advice',
-                'S20': 'Professional Medical Advice',
-                'S21': 'Professional Legal Advice',
-            }
-
-            # Convert category name to category code, and calculate risk level
-            category_risk_mapping = []
-            for category in categories:
-                category_key = None
-                for key, name in category_names.items():
-                    if name == category:
-                        category_key = key
-                        break
-
-                if category_key:
-                    risk_level = risk_level_mapping.get(category_key, "low_risk")
-                    priority = risk_priority.get(risk_level, 0)
-                    category_risk_mapping.append((category_key, risk_level, priority))
-
-            # Sort by risk level, higher priority first
-            category_risk_mapping.sort(key=lambda x: x[2], reverse=True)
-
-            # Priority 1: If scanner_type and scanner_identifier provided, search by scanner info first
-            if scanner_type and scanner_identifier:
-                # Build scanner cache key: "scanner_type:scanner_identifier"
-                scanner_key = f"{scanner_type}:{scanner_identifier}"
-
-                # Search in application cache
-                app_cache = self._template_cache.get(str(application_id or "__none__"), {})
-                if scanner_key in app_cache:
-                    templates = app_cache[scanner_key]
-                    if False in templates:  # Non-default template
-                        answer = self._get_localized_content(templates[False], user_language)
-                        if scanner_name and '{scanner_name}' in answer:
-                            answer = answer.replace('{scanner_name}', scanner_name)
-                        return answer
-                    if True in templates:  # Default template
-                        answer = self._get_localized_content(templates[True], user_language)
-                        if scanner_name and '{scanner_name}' in answer:
-                            answer = answer.replace('{scanner_name}', scanner_name)
-                        return answer
-
-                # Search in global cache
-                global_cache = self._template_cache.get("__global__", {})
-                if scanner_key in global_cache:
-                    templates = global_cache[scanner_key]
-                    if True in templates:
-                        answer = self._get_localized_content(templates[True], user_language)
-                        if scanner_name and '{scanner_name}' in answer:
-                            answer = answer.replace('{scanner_name}', scanner_name)
-                        return answer
-
-            # Priority 2: Find template by highest risk level (legacy category-based lookup)
-            for category_key, risk_level, priority in category_risk_mapping:
-                # First find template for "current application" (non-default priority), if not found, fallback to global default
-                app_cache = self._template_cache.get(str(application_id or "__none__"), {})
-                if category_key in app_cache:
-                    templates = app_cache[category_key]
-                    if False in templates:  # Non-default template
-                        answer = self._get_localized_content(templates[False], user_language)
-                        if scanner_name and '{scanner_name}' in answer:
-                            answer = answer.replace('{scanner_name}', scanner_name)
-                        return answer
-                    if True in templates:  # Default template
-                        answer = self._get_localized_content(templates[True], user_language)
-                        if scanner_name and '{scanner_name}' in answer:
-                            answer = answer.replace('{scanner_name}', scanner_name)
-                        return answer
-
-                # Fallback to "global default" None template (for system-level default template)
-                global_cache = self._template_cache.get("__global__", {})
-                if category_key in global_cache:
-                    templates = global_cache[category_key]
-                    if True in templates:
-                        answer = self._get_localized_content(templates[True], user_language)
-                        if scanner_name and '{scanner_name}' in answer:
-                            answer = answer.replace('{scanner_name}', scanner_name)
-                        return answer
-
-            return self._get_default_answer(application_id, user_language, scanner_name)
-
-        except Exception as e:
-            logger.error(f"Get template answer error: {e}")
-            return self._get_default_answer(application_id, user_language, scanner_name)
-
-    def _get_localized_content(self, content: any, user_language: Optional[str] = None) -> str:
+    async def _search_and_generate_proxy_answer(
+        self,
+        user_query: str,
+        tenant_id: Optional[str],
+        application_id: str,
+        scanner_type: Optional[str],
+        scanner_identifier: Optional[str],
+        scanner_name: str,
+        categories: List[str],
+        user_language: str
+    ) -> Optional[str]:
         """
-        Get localized content from template content
+        Search knowledge base and generate proxy answer if hit.
+
         Args:
-            content: Template content (can be str or dict)
+            user_query: User's original question
+            tenant_id: Tenant ID
+            application_id: Application ID
+            scanner_type: Scanner type
+            scanner_identifier: Scanner identifier
+            scanner_name: Human-readable scanner name
+            categories: Risk categories
             user_language: User's preferred language
+
         Returns:
-            Localized string
+            Generated proxy answer or None if no KB hit
         """
-        # If content is already a string (backward compatibility), return as-is
-        if isinstance(content, str):
-            return content
+        # Search knowledge base
+        kb_content = await self._search_knowledge_base(
+            user_query=user_query,
+            tenant_id=tenant_id,
+            application_id=application_id,
+            scanner_type=scanner_type,
+            scanner_identifier=scanner_identifier,
+            categories=categories
+        )
 
-        # If content is a dict (new JSON format)
-        if isinstance(content, dict):
-            # Determine language to use
-            lang = user_language or 'en'  # Default to English
+        if not kb_content:
+            logger.debug(f"No KB hit for query: {user_query[:50]}...")
+            return None
 
-            # Try exact match first
-            if lang in content:
-                return content[lang]
+        # Generate proxy answer using guardrail model
+        logger.info(f"KB hit, generating proxy answer for scanner: {scanner_name}")
 
-            # Fallback to English
-            if 'en' in content:
-                return content['en']
+        proxy_answer = await proxy_answer_service.generate_proxy_answer(
+            user_query=user_query,
+            kb_reference=kb_content,
+            scanner_name=scanner_name,
+            risk_level="medium_risk",  # Could be passed from caller
+            user_language=user_language
+        )
 
-            # Fallback to first available language
-            if content:
-                return next(iter(content.values()))
+        return proxy_answer
 
-        # Fallback to generic message
-        return "Sorry, I can't answer this question. If you have any questions, please contact customer service."
+    async def _search_knowledge_base(
+        self,
+        user_query: str,
+        tenant_id: Optional[str],
+        application_id: str,
+        scanner_type: Optional[str],
+        scanner_identifier: Optional[str],
+        categories: List[str]
+    ) -> Optional[str]:
+        """
+        Search knowledge base for similar content.
 
-    def _get_default_answer(self, application_id: Optional[str] = None, user_language: Optional[str] = None, scanner_name: Optional[str] = None) -> str:
-        """Get default answer"""
-        # First find application-defined default
-        app_cache = self._template_cache.get(str(application_id or "__none__"), {})
-        if "default" in app_cache and True in app_cache["default"]:
-            answer = self._get_localized_content(app_cache["default"][True], user_language)
-            # Replace {scanner_name} variable if provided
-            if scanner_name and '{scanner_name}' in answer:
-                answer = answer.replace('{scanner_name}', scanner_name)
-            return answer
-        # Then fallback to global default
-        global_cache = self._template_cache.get("__global__", {})
-        if "default" in global_cache and True in global_cache["default"]:
-            answer = self._get_localized_content(global_cache["default"][True], user_language)
-            # Replace {scanner_name} variable if provided
-            if scanner_name and '{scanner_name}' in answer:
-                answer = answer.replace('{scanner_name}', scanner_name)
-            return answer
+        Returns:
+            KB answer content if found, None otherwise
+        """
+        try:
+            app_cache = self._knowledge_base_cache.get(str(application_id), {})
 
-        # Final fallback with multilingual support
-        default_messages = {
-            'en': "Sorry, I can't provide content involving {scanner_name}." if scanner_name else "Sorry, I can't answer this question. If you have any questions, please contact customer service.",
-            'zh': f"抱歉,我无法提供涉及{scanner_name}的内容。" if scanner_name else "抱歉，我无法回答这个问题。如有任何疑问，请联系客服。"
+            # Priority 1: Search by scanner_type:scanner_identifier
+            if scanner_type and scanner_identifier:
+                scanner_key = f"{scanner_type}:{scanner_identifier}"
+                kb_ids = self._get_kb_ids_for_key(scanner_key, app_cache, tenant_id)
+
+                if kb_ids:
+                    result = await self._search_kb_ids(kb_ids, user_query)
+                    if result:
+                        return result
+
+            # Priority 2: Search by category
+            for category in categories:
+                # Try to map category name to code
+                category_key = self._get_category_key(category)
+                if category_key:
+                    kb_ids = self._get_kb_ids_for_key(category_key, app_cache, tenant_id)
+                    if kb_ids:
+                        result = await self._search_kb_ids(kb_ids, user_query)
+                        if result:
+                            return result
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Knowledge base search error: {e}", exc_info=True)
+            return None
+
+    def _get_kb_ids_for_key(
+        self,
+        cache_key: str,
+        app_cache: Dict[str, List[int]],
+        tenant_id: Optional[str]
+    ) -> List[int]:
+        """Get KB IDs for a cache key, including global KBs"""
+        kb_ids = app_cache.get(cache_key, []).copy()
+        global_kb_ids = self._global_knowledge_base_cache.get(cache_key, [])
+
+        # Filter out disabled global KBs for this tenant
+        disabled_kb_ids = self._tenant_disabled_kb_cache.get(str(tenant_id), set()) if tenant_id else set()
+        filtered_global_kb_ids = [kb_id for kb_id in global_kb_ids if kb_id not in disabled_kb_ids]
+
+        kb_ids.extend(filtered_global_kb_ids)
+        return list(set(kb_ids))
+
+    async def _search_kb_ids(self, kb_ids: List[int], user_query: str) -> Optional[str]:
+        """Search through KB IDs and return first matching answer"""
+        db = get_db_session()
+        try:
+            for kb_id in kb_ids:
+                try:
+                    results = knowledge_base_service.search_similar_questions(
+                        user_query,
+                        kb_id,
+                        top_k=1,
+                        db=db
+                    )
+                    if results:
+                        logger.info(f"KB {kb_id} hit with similarity: {results[0]['similarity_score']:.3f}")
+                        return results[0]['answer']
+                except Exception as e:
+                    logger.warning(f"Error searching KB {kb_id}: {e}")
+                    continue
+            return None
+        finally:
+            db.close()
+
+    def _get_category_key(self, category: str) -> Optional[str]:
+        """Map category name to category key (S1-S21)"""
+        category_mapping = {
+            'General Political Topics': 'S1',
+            'Sensitive Political Topics': 'S2',
+            'Insult to National Symbols or Leaders': 'S3',
+            'Harm to Minors': 'S4',
+            'Violent Crime': 'S5',
+            'Non-Violent Crime': 'S6',
+            'Pornography': 'S7',
+            'Hate & Discrimination': 'S8',
+            'Prompt Attacks': 'S9',
+            'Profanity': 'S10',
+            'Privacy Invasion': 'S11',
+            'Commercial Violations': 'S12',
+            'Intellectual Property Infringement': 'S13',
+            'Harassment': 'S14',
+            'Weapons of Mass Destruction': 'S15',
+            'Self-Harm': 'S16',
+            'Sexual Crimes': 'S17',
+            'Threats': 'S18',
+            'Professional Financial Advice': 'S19',
+            'Professional Medical Advice': 'S20',
+            'Professional Legal Advice': 'S21',
         }
+        return category_mapping.get(category)
+
+    def _get_fixed_answer(self, scanner_name: str, language: str) -> str:
+        """
+        Get fixed answer (据答) using generic template.
+
+        Args:
+            scanner_name: Human-readable scanner name
+            language: User's preferred language
+
+        Returns:
+            Fixed answer with scanner_name filled in
+        """
+        try:
+            template = get_translation(language, 'guardrail', 'responseTemplates', 'securityRisk')
+        except KeyError:
+            try:
+                template = get_translation(language, 'guardrail', 'responseTemplates', 'default')
+            except KeyError:
+                if language == 'zh':
+                    template = "请求已被OpenGuardrails拦截，原因：可能违反了与{scanner_name}有关的策略要求。"
+                else:
+                    template = "Request blocked by OpenGuardrails due to possible violation of policy related to {scanner_name}."
+
+        if '{scanner_name}' in template:
+            return template.replace('{scanner_name}', scanner_name)
+        return template
+
+    async def get_data_leakage_answer(
+        self,
+        entity_types: List[str],
+        user_language: Optional[str] = None
+    ) -> str:
+        """
+        Get suggested answer for data leakage risk using generic template.
+
+        Args:
+            entity_types: List of detected entity type names
+            user_language: User's preferred language
+
+        Returns:
+            Answer with entity types filled in
+        """
         lang = user_language or 'en'
-        answer = default_messages.get(lang, default_messages['en'])
-        # Replace {scanner_name} variable if provided
-        if scanner_name and '{scanner_name}' in answer:
-            answer = answer.replace('{scanner_name}', scanner_name)
-        return answer
+
+        try:
+            template = get_translation(lang, 'guardrail', 'responseTemplates', 'dataLeakageRisk')
+        except KeyError:
+            if lang == 'zh':
+                template = "请求已被OpenGuardrails拦截，原因：可能包含敏感数据（{entity_type_names}）。"
+            else:
+                template = "Request blocked by OpenGuardrails due to possible sensitive data ({entity_type_names})."
+
+        # Format entity type names list
+        if entity_types:
+            if lang == 'zh':
+                entity_type_names_str = '、'.join(entity_types)
+            else:
+                entity_type_names_str = ', '.join(entity_types)
+        else:
+            entity_type_names_str = 'sensitive data' if lang != 'zh' else '敏感数据'
+
+        return template.replace('{entity_type_names}', entity_type_names_str)
 
     async def _ensure_cache_fresh(self):
         """Ensure cache is fresh"""
         current_time = time.time()
-
         if current_time - self._cache_timestamp > self._cache_ttl:
             async with self._lock:
-                # Double check lock
                 if current_time - self._cache_timestamp > self._cache_ttl:
                     await self._refresh_cache()
 
     async def _refresh_cache(self):
-        """Refresh cache"""
+        """Refresh knowledge base cache"""
         try:
             db = get_db_session()
             try:
-                # 1. Load all enabled response templates
-                templates = db.query(ResponseTemplate).filter_by(is_active=True).all()
-                new_template_cache: Dict[str, Dict[str, Dict[bool, str]]] = {}
-
-                for template in templates:
-                    # Use application_id as cache key (application-scoped), consistent with knowledge bases
-                    app_key = str(template.application_id) if template.application_id is not None else "__global__"
-                    is_default = template.is_default
-                    content = template.template_content
-
-                    # Support both new scanner_type/scanner_identifier and legacy category field
-                    cache_key = None
-                    if template.scanner_type and template.scanner_identifier:
-                        # New format: "scanner_type:scanner_identifier"
-                        cache_key = f"{template.scanner_type}:{template.scanner_identifier}"
-                    elif template.category:
-                        # Legacy format: use category as-is
-                        cache_key = template.category
-
-                    if cache_key:
-                        if app_key not in new_template_cache:
-                            new_template_cache[app_key] = {}
-                        if cache_key not in new_template_cache[app_key]:
-                            new_template_cache[app_key][cache_key] = {}
-                        new_template_cache[app_key][cache_key][is_default] = content
-
-                # 2. Load all enabled knowledge bases
+                # Load all enabled knowledge bases
                 knowledge_bases = db.query(KnowledgeBase).filter_by(is_active=True).all()
                 new_kb_cache: Dict[str, Dict[str, List[int]]] = {}
-                # Global knowledge base cache: {category: [knowledge_base_ids]}
                 global_kb_cache: Dict[str, List[int]] = {}
 
                 for kb in knowledge_bases:
-                    # Use application_id as cache key (application-scoped)
                     app_key = str(kb.application_id) if kb.application_id else None
                     if not app_key:
-                        # Skip entries without application_id (shouldn't happen after migration)
-                        logger.warning(f"Knowledge base {kb.id} has no application_id, skipping")
                         continue
 
-                    # Support both new scanner_type/scanner_identifier and legacy category field
+                    # Build cache key
                     cache_key = None
                     if kb.scanner_type and kb.scanner_identifier:
-                        # New format: "scanner_type:scanner_identifier"
                         cache_key = f"{kb.scanner_type}:{kb.scanner_identifier}"
                     elif kb.category:
-                        # Legacy format: use category as-is
                         cache_key = kb.category
 
                     if not cache_key:
-                        logger.warning(f"Knowledge base {kb.id} has neither scanner info nor category, skipping")
                         continue
 
-                    # Application's own knowledge base
+                    # Application's own KB
                     if app_key not in new_kb_cache:
                         new_kb_cache[app_key] = {}
                     if cache_key not in new_kb_cache[app_key]:
                         new_kb_cache[app_key][cache_key] = []
                     new_kb_cache[app_key][cache_key].append(kb.id)
 
-                    # Global knowledge base
+                    # Global KB
                     if kb.is_global:
                         if cache_key not in global_kb_cache:
                             global_kb_cache[cache_key] = []
                         global_kb_cache[cache_key].append(kb.id)
 
-                # Save global knowledge base cache
                 self._global_knowledge_base_cache = global_kb_cache
 
-                # 3. Load tenant disabled KB records
+                # Load tenant disabled KB records
                 tenant_disabled_kb_cache: Dict[str, set] = {}
                 disabled_records = db.query(TenantKnowledgeBaseDisable).all()
                 for record in disabled_records:
@@ -559,62 +395,45 @@ class EnhancedTemplateService:
                         tenant_disabled_kb_cache[tenant_key] = set()
                     tenant_disabled_kb_cache[tenant_key].add(record.kb_id)
 
-                # Save tenant disabled KB cache
                 self._tenant_disabled_kb_cache = tenant_disabled_kb_cache
-
-                # 4. Atomic update cache
-                self._template_cache = new_template_cache
                 self._knowledge_base_cache = new_kb_cache
                 self._cache_timestamp = time.time()
 
-                template_count = sum(
-                    sum(len(templates) for templates in user_categories.values())
-                    for user_categories in new_template_cache.values()
-                )
                 kb_count = sum(
-                    sum(len(kb_ids) for kb_ids in user_categories.values())
-                    for user_categories in new_kb_cache.values()
+                    sum(len(kb_ids) for kb_ids in app_kbs.values())
+                    for app_kbs in new_kb_cache.values()
                 )
-
-                logger.debug(
-                    f"Enhanced template cache refreshed - Applications: {len(new_template_cache)}, "
-                    f"Templates: {template_count}, Knowledge Bases: {kb_count}"
-                )
+                logger.debug(f"KB cache refreshed: {kb_count} knowledge bases")
 
             finally:
                 db.close()
 
         except Exception as e:
-            logger.error(f"Failed to refresh enhanced template cache: {e}")
+            logger.error(f"Failed to refresh KB cache: {e}", exc_info=True)
 
     async def invalidate_cache(self):
-        """Immediately invalidate cache"""
+        """Invalidate cache"""
         async with self._lock:
             self._cache_timestamp = 0
             logger.info("Enhanced template cache invalidated")
 
     def get_cache_info(self) -> dict:
         """Get cache statistics"""
-        template_count = sum(
-            sum(len(templates) for templates in user_categories.values())
-            for user_categories in self._template_cache.values()
-        )
-
         kb_count = sum(
-            sum(len(kb_ids) for kb_ids in user_categories.values())
-            for user_categories in self._knowledge_base_cache.values()
+            sum(len(kb_ids) for kb_ids in app_kbs.values())
+            for app_kbs in self._knowledge_base_cache.values()
         )
-
         global_kb_count = sum(len(kb_ids) for kb_ids in self._global_knowledge_base_cache.values())
 
         return {
-            "applications": len(self._template_cache),
-            "templates": template_count,
+            "applications": len(self._knowledge_base_cache),
+            "templates": 0,  # Not used in new design
             "knowledge_bases": kb_count,
             "global_knowledge_bases": global_kb_count,
             "last_refresh": self._cache_timestamp,
             "cache_age_seconds": time.time() - self._cache_timestamp if self._cache_timestamp > 0 else 0
         }
 
-# Global enhanced template service instance
-enhanced_template_service = EnhancedTemplateService(cache_ttl=600)  # 10 minutes cache
+
+# Global instance
+enhanced_template_service = EnhancedTemplateService(cache_ttl=600)

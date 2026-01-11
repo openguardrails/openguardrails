@@ -407,10 +407,10 @@ async def get_application_policy(
             db.commit()
             db.refresh(app_policy)
 
-        # Resolve values (use override if present, else tenant default)
-        input_high_risk_action = app_policy.input_high_risk_action or tenant_policy.default_input_high_risk_action
-        input_medium_risk_action = app_policy.input_medium_risk_action or tenant_policy.default_input_medium_risk_action
-        input_low_risk_action = app_policy.input_low_risk_action or tenant_policy.default_input_low_risk_action
+        # Resolve values (use override if present, else tenant default, else system default)
+        input_high_risk_action = app_policy.input_high_risk_action or tenant_policy.default_input_high_risk_action or 'block'
+        input_medium_risk_action = app_policy.input_medium_risk_action or tenant_policy.default_input_medium_risk_action or 'anonymize'
+        input_low_risk_action = app_policy.input_low_risk_action or tenant_policy.default_input_low_risk_action or 'pass'
 
         output_high_risk_anonymize = app_policy.output_high_risk_anonymize if app_policy.output_high_risk_anonymize is not None else tenant_policy.default_output_high_risk_anonymize
         output_medium_risk_anonymize = app_policy.output_medium_risk_anonymize if app_policy.output_medium_risk_anonymize is not None else tenant_policy.default_output_medium_risk_anonymize

@@ -3,10 +3,8 @@ import OfficialScannersManagement from './OfficialScannersManagement'
 import CustomScannersManagement from './CustomScannersManagement'
 import SensitivityThresholdManagement from './SensitivityThresholdManagement'
 import DataSecurity from '../DataSecurity'
-import BlacklistManagement from './BlacklistManagement'
-import WhitelistManagement from './WhitelistManagement'
-import ResponseTemplateManagement from './ResponseTemplateManagement'
-import KnowledgeBaseManagement from './KnowledgeBaseManagement'
+import KeywordListManagement from './KeywordListManagement'
+import AnswerManagement from './AnswerManagement'
 
 const Config: React.FC = () => {
   const location = useLocation()
@@ -26,17 +24,12 @@ const Config: React.FC = () => {
     if (path.includes('/data-security')) {
       return <DataSecurity />
     }
-    if (path.includes('/blacklist')) {
-      return <BlacklistManagement />
+    if (path.includes('/keyword-list') || path.includes('/blacklist') || path.includes('/whitelist')) {
+      return <KeywordListManagement />
     }
-    if (path.includes('/whitelist')) {
-      return <WhitelistManagement />
-    }
-    if (path.includes('/responses') || path.includes('/response-templates')) {
-      return <ResponseTemplateManagement />
-    }
-    if (path.includes('/knowledge-bases')) {
-      return <KnowledgeBaseManagement />
+    // Unified answer management page (combines response templates and knowledge bases)
+    if (path.includes('/answers') || path.includes('/responses') || path.includes('/response-templates') || path.includes('/knowledge-bases')) {
+      return <AnswerManagement />
     }
 
     return <OfficialScannersManagement />

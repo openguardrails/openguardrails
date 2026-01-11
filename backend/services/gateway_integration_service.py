@@ -23,7 +23,7 @@ from cryptography.fernet import Fernet
 from services.detection_guardrail_service import detection_guardrail_service
 from services.data_leakage_disposal_service import DataLeakageDisposalService
 from services.ban_policy_service import BanPolicyService
-from services.restore_anonymization_service import get_restore_anonymization_service
+from services.unified_anonymization_service import get_unified_anonymization_service
 from database.models import (
     Application, UpstreamApiConfig, Tenant,
     DataSecurityEntityType, ApplicationDataLeakagePolicy
@@ -243,11 +243,24 @@ class GatewayIntegrationService:
                     )
 
                     if private_model:
-                        return self._create_switch_model_response(
+                        # Proxy request to private model and return response directly
+                        proxy_result = await self._proxy_to_private_model(
                             request_id=request_id,
                             private_model=private_model,
-                            detection_result=result_info
+                            messages=messages,
+                            stream=stream,
+                            original_request_body=None  # Will be reconstructed from messages
                         )
+                        if proxy_result:
+                            return proxy_result
+                        else:
+                            # Fallback: return switch_private_model for gateway to handle
+                            logger.warning(f"[{request_id}] Private model proxy failed, returning switch action")
+                            return self._create_switch_model_response(
+                                request_id=request_id,
+                                private_model=private_model,
+                                detection_result=result_info
+                            )
                     else:
                         # No private model available, fallback to block
                         logger.warning(f"[{request_id}] No private model available, falling back to block")
@@ -260,14 +273,15 @@ class GatewayIntegrationService:
                         )
 
                 elif disposal_action in ("anonymize", "anonymize_restore"):
-                    # Perform anonymization
-                    # Enable restore by default for gateway integration (needed for output restoration)
-                    anonymized_messages, session_id = self._anonymize_messages(
+                    # Perform anonymization using the disposal action directly
+                    # 'anonymize' uses entity type's configured method
+                    # 'anonymize_restore' uses __entity_type_N__ placeholders for restoration
+                    anonymized_messages, session_id, restore_mapping = self._anonymize_messages(
                         messages=messages,
                         detected_entities=detected_entities,
                         application_id=application_id,
                         tenant_id=tenant_id,
-                        enable_restore=True  # Always enable restore for gateway integration
+                        action=disposal_action
                     )
 
                     return {
@@ -275,7 +289,8 @@ class GatewayIntegrationService:
                         "request_id": request_id,
                         "detection_result": result_info,
                         "anonymized_messages": anonymized_messages,
-                        "session_id": session_id
+                        "session_id": session_id,
+                        "restore_mapping": restore_mapping  # Include mapping for gateway to pass back
                     }
 
             # 5. No risk or pass action
@@ -303,11 +318,19 @@ class GatewayIntegrationService:
         tenant_id: str,
         content: str,
         session_id: Optional[str] = None,
+        restore_mapping: Optional[Dict[str, str]] = None,
         is_streaming: bool = False,
-        chunk_index: int = 0
+        chunk_index: int = 0,
+        input_messages: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
         """
         Process LLM output through detection and optionally restore anonymized data.
+
+        Args:
+            restore_mapping: Mapping of placeholders to original values (preferred over session_id).
+                           This is passed directly from the gateway, avoiding in-memory session issues.
+            input_messages: Optional input messages to provide context for output detection.
+                           This helps the model understand the conversation context.
         """
         request_id = f"gw-out-{uuid.uuid4().hex[:12]}"
 
@@ -315,22 +338,42 @@ class GatewayIntegrationService:
         language = self._get_language(tenant_id)
 
         try:
-            # 1. Restore anonymized data if session exists
+            # 1. Restore anonymized data using restore_mapping (preferred) or session
             restored_content = content
             has_restoration = False
+            effective_mapping = None
 
-            if session_id:
+            # Prefer restore_mapping passed directly from gateway (avoids multi-process issues)
+            if restore_mapping:
+                effective_mapping = restore_mapping
+                logger.info(f"[{request_id}] Using restore_mapping from request: {len(restore_mapping)} entries")
+            elif session_id:
+                # Fallback to session-based lookup (may fail in multi-worker setup)
                 session = self._get_session(session_id)
                 if session and session.get("mapping"):
-                    restored_content = self._restore_content(
-                        content=content,
-                        mapping=session["mapping"]
-                    )
-                    has_restoration = True
+                    effective_mapping = session["mapping"]
+                    logger.info(f"[{request_id}] Using mapping from session: {len(effective_mapping)} entries")
+                else:
+                    logger.warning(f"[{request_id}] Session {session_id} not found or has no mapping (multi-worker issue?)")
+
+            if effective_mapping:
+                restored_content = self._restore_content(
+                    content=content,
+                    mapping=effective_mapping
+                )
+                has_restoration = True
 
             # 2. Run output detection (optional, based on config)
-            # For now, we detect on the restored content
-            messages = [{"role": "assistant", "content": restored_content}]
+            # Include input messages as context if provided
+            messages = []
+            if input_messages:
+                # Add input messages as context (copy to avoid modifying original)
+                messages.extend(input_messages)
+                logger.info(f"[{request_id}] Output detection with {len(input_messages)} input messages as context")
+            # Append the assistant's response
+            messages.append({"role": "assistant", "content": restored_content})
+
+            logger.info(f"[{request_id}] Output detection: total messages={len(messages)}, output_len={len(restored_content)}")
 
             detection_result = await detection_guardrail_service.detect_messages(
                 messages=messages,
@@ -469,78 +512,44 @@ class GatewayIntegrationService:
         detected_entities: List[Dict[str, Any]],
         application_id: str,
         tenant_id: str,
-        enable_restore: bool = True
-    ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+        action: str = 'anonymize_restore'
+    ) -> Tuple[List[Dict[str, Any]], Optional[str], Optional[Dict[str, str]]]:
         """
-        Anonymize messages and optionally create restore session.
+        Anonymize messages using UnifiedAnonymizationService.
 
-        Returns: (anonymized_messages, session_id)
+        Args:
+            messages: List of message dicts
+            detected_entities: List of detected entities
+            application_id: Application ID
+            tenant_id: Tenant ID
+            action: 'anonymize' (uses configured method) or 'anonymize_restore' (uses __placeholder__)
+
+        Returns: (anonymized_messages, session_id, restore_mapping)
         """
         if not detected_entities:
-            return messages, None
+            return messages, None, None
 
-        # Build replacement map
-        restore_mapping = {}
-        entity_counters = {}
-
-        # Sort by length (longest first) to avoid partial replacements
-        sorted_entities = sorted(
-            detected_entities,
-            key=lambda x: len(x.get('text', '')),
-            reverse=True
+        # Use unified anonymization service
+        anonymization_service = get_unified_anonymization_service()
+        anonymized_messages, restore_mapping = anonymization_service.anonymize_messages(
+            messages=messages,
+            detected_entities=detected_entities,
+            action=action,
+            application_id=application_id,
+            tenant_id=tenant_id
         )
 
-        replacements = {}
-
-        for entity in sorted_entities:
-            original_text = entity.get('text', '')
-            if not original_text or original_text in replacements:
-                continue
-
-            entity_type = entity.get('entity_type', 'UNKNOWN').lower()
-
-            if enable_restore:
-                # Generate numbered placeholder for restoration
-                counter = entity_counters.get(entity_type, 0) + 1
-                entity_counters[entity_type] = counter
-                placeholder = f"[{entity_type}_{counter}]"
-
-                replacements[original_text] = placeholder
-                restore_mapping[placeholder] = original_text
-            else:
-                # Use pre-computed anonymized value
-                anonymized = entity.get('anonymized_value')
-                if anonymized:
-                    replacements[original_text] = anonymized
-                else:
-                    replacements[original_text] = f"<{entity_type.upper()}>"
-
-        # Apply replacements to messages
-        anonymized_messages = []
-        for msg in messages:
-            new_msg = msg.copy()
-            content = msg.get('content', '')
-
-            if isinstance(content, str) and msg.get('role') == 'user':
-                for original, replacement in sorted(
-                    replacements.items(),
-                    key=lambda x: len(x[0]),
-                    reverse=True
-                ):
-                    content = content.replace(original, replacement)
-                new_msg['content'] = content
-
-            anonymized_messages.append(new_msg)
-
-        # Create session if restore is enabled
+        # Create session if we have a restore mapping (anonymize_restore action)
+        # Note: Session is kept for backward compatibility, but restore_mapping
+        # should be preferred for multi-worker deployments
         session_id = None
-        if enable_restore and restore_mapping:
+        if restore_mapping:
             session_id = self._create_session(
                 mapping=restore_mapping,
                 tenant_id=tenant_id
             )
 
-        return anonymized_messages, session_id
+        return anonymized_messages, session_id, restore_mapping
 
     def _create_session(self, mapping: Dict[str, str], tenant_id: str) -> str:
         """Create a new restore session"""
@@ -586,18 +595,12 @@ class GatewayIntegrationService:
             logger.debug(f"Cleaned up {len(expired)} expired sessions")
 
     def _restore_content(self, content: str, mapping: Dict[str, str]) -> str:
-        """Restore anonymized placeholders in content"""
-        result = content
+        """Restore anonymized placeholders in content using UnifiedAnonymizationService"""
+        if not mapping or not content:
+            return content
 
-        # Sort by placeholder length (longest first) to avoid partial matches
-        for placeholder, original in sorted(
-            mapping.items(),
-            key=lambda x: len(x[0]),
-            reverse=True
-        ):
-            result = result.replace(placeholder, original)
-
-        return result
+        anonymization_service = get_unified_anonymization_service()
+        return anonymization_service.restore_content(content, mapping)
 
     def _anonymize_output_content(
         self,
@@ -605,7 +608,10 @@ class GatewayIntegrationService:
         detected_entities: List[Dict[str, Any]]
     ) -> str:
         """
-        Anonymize sensitive data in output content.
+        Anonymize sensitive data in output content using UnifiedAnonymizationService.
+
+        For output, we always use 'anonymize' action (one-way, using configured method).
+        Output does not support 'anonymize_restore' since there's no opportunity to restore.
 
         Args:
             content: The content to anonymize
@@ -617,30 +623,13 @@ class GatewayIntegrationService:
         if not detected_entities:
             return content
 
-        result = content
-
-        # Sort by text length (longest first) to avoid partial replacements
-        sorted_entities = sorted(
-            detected_entities,
-            key=lambda x: len(x.get('text', '')),
-            reverse=True
+        anonymization_service = get_unified_anonymization_service()
+        anonymized_content, _ = anonymization_service.anonymize_content(
+            content=content,
+            detected_entities=detected_entities,
+            action='anonymize'  # Output always uses one-way anonymization
         )
-
-        for entity in sorted_entities:
-            original_text = entity.get('text', '')
-            if not original_text:
-                continue
-
-            entity_type = entity.get('entity_type', 'UNKNOWN').upper()
-
-            # Use pre-computed anonymized value if available, otherwise use placeholder
-            anonymized = entity.get('anonymized_value')
-            if not anonymized:
-                anonymized = f"<{entity_type}>"
-
-            result = result.replace(original_text, anonymized)
-
-        return result
+        return anonymized_content
 
     def _create_block_response(
         self,
@@ -704,6 +693,133 @@ class GatewayIntegrationService:
                 })
             }
         }
+
+    async def _proxy_to_private_model(
+        self,
+        request_id: str,
+        private_model: UpstreamApiConfig,
+        messages: List[Dict[str, Any]],
+        stream: bool = False,
+        original_request_body: Optional[Dict[str, Any]] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Proxy request to private model and return the response.
+
+        This allows OG to directly forward requests to private models
+        instead of returning switch_private_model action for gateway to handle.
+
+        Returns:
+            Dict with action='proxy_response' and the model's response,
+            or None if proxy fails.
+        """
+        import httpx
+
+        try:
+            # Build API URL first (needed for model detection)
+            api_base = private_model.api_base_url.rstrip('/')
+
+            # Decrypt API key
+            decrypted_key = ""
+            if private_model.api_key_encrypted:
+                try:
+                    cipher = _get_cipher_suite()
+                    decrypted_key = cipher.decrypt(private_model.api_key_encrypted.encode()).decode()
+                except Exception as e:
+                    logger.error(f"[{request_id}] Failed to decrypt private model API key: {e}")
+
+            # Build request body
+            model_name = private_model.default_private_model_name
+
+            # If no default model name configured, fetch first available model from the API
+            if not model_name:
+                try:
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        models_url = f"{api_base}/models"
+                        models_headers = {"Content-Type": "application/json"}
+                        if decrypted_key:
+                            models_headers["Authorization"] = f"Bearer {decrypted_key}"
+                        models_response = await client.get(models_url, headers=models_headers)
+                        if models_response.status_code == 200:
+                            models_data = models_response.json()
+                            if models_data.get("data") and len(models_data["data"]) > 0:
+                                model_name = models_data["data"][0].get("id")
+                                logger.info(f"[{request_id}] Auto-detected private model name: {model_name}")
+                except Exception as e:
+                    logger.warning(f"[{request_id}] Failed to auto-detect model name: {e}")
+
+            # Final fallback
+            if not model_name:
+                model_name = "gpt-4"
+                logger.warning(f"[{request_id}] Using fallback model name: {model_name}")
+
+            request_body = {
+                "model": model_name,
+                "messages": messages,
+                "stream": stream
+            }
+
+            # Add additional parameters from original request if available
+            if original_request_body:
+                for key in ["temperature", "max_tokens", "top_p", "frequency_penalty", "presence_penalty"]:
+                    if key in original_request_body:
+                        request_body[key] = original_request_body[key]
+
+            # Build API URL
+            api_url = f"{api_base}/chat/completions"
+
+            # Prepare headers
+            headers = {
+                "Content-Type": "application/json"
+            }
+            if decrypted_key:
+                headers["Authorization"] = f"Bearer {decrypted_key}"
+
+            logger.info(f"[{request_id}] Proxying to private model: url={api_url}, model={model_name}")
+
+            # Send request to private model (non-streaming only for now)
+            if stream:
+                # For streaming, we can't easily proxy through OG
+                # Return None to fallback to switch_private_model action
+                logger.warning(f"[{request_id}] Streaming not supported for private model proxy, falling back")
+                return None
+
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                response = await client.post(
+                    api_url,
+                    json=request_body,
+                    headers=headers
+                )
+
+                if response.status_code != 200:
+                    logger.error(f"[{request_id}] Private model returned error: {response.status_code} {response.text}")
+                    # Log more details for debugging
+                    logger.error(f"[{request_id}] Request was: url={api_url}, model={model_name}, messages_count={len(messages)}")
+                    return None
+
+                response_data = response.json()
+
+                logger.info(f"[{request_id}] Private model response received successfully")
+
+                # Return proxy_response action with the model's response
+                return {
+                    "action": "proxy_response",
+                    "request_id": request_id,
+                    "proxy_response": {
+                        "code": 200,
+                        "content_type": "application/json",
+                        "body": json.dumps(response_data)
+                    }
+                }
+
+        except httpx.TimeoutException as e:
+            logger.error(f"[{request_id}] Private model request timeout: {e}")
+            return None
+        except httpx.RequestError as e:
+            logger.error(f"[{request_id}] Private model request error: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"[{request_id}] Private model proxy error: {e}")
+            return None
 
     def _create_switch_model_response(
         self,

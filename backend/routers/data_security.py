@@ -59,11 +59,10 @@ async def get_entity_types(
                 "is_active": et.is_active,
                 "source_type": et.source_type,
                 "is_system_template": (et.source_type == 'system_template'),
-                # Restore anonymization fields
-                "restore_enabled": et.restore_enabled or False,
-                "restore_natural_desc": et.restore_natural_desc,
-                "restore_code": et.restore_code,
-                "has_restore_code": bool(et.restore_code),
+                # GenAI code anonymization fields (for anonymization_method='genai_code')
+                "genai_code_desc": et.restore_natural_desc,  # Natural language description for genai_code
+                "genai_code": et.restore_code,  # Generated Python code for genai_code
+                "has_genai_code": bool(et.restore_code),
                 "created_at": et.created_at.isoformat() if et.created_at else None,
                 "updated_at": et.updated_at.isoformat() if et.updated_at else None
             })
@@ -181,8 +180,7 @@ async def create_entity_type(
             check_output=data.get("check_output", True),
             is_global=False,
             source_type='custom',
-            restore_enabled=data.get("restore_enabled", False),
-            restore_natural_desc=data.get("restore_natural_desc")
+            restore_natural_desc=data.get("genai_code_desc") or data.get("restore_natural_desc")  # Support both old and new field names
         )
         
         logger.info(f"Entity type created: {data.get('entity_type')} for user: {current_user.email}, app: {application_id}")
@@ -248,10 +246,10 @@ async def update_entity_type(
         if "is_active" in data:
             update_kwargs["is_active"] = data["is_active"]
 
-        # Restore anonymization fields
-        if "restore_enabled" in data:
-            update_kwargs["restore_enabled"] = data["restore_enabled"]
-        if "restore_natural_desc" in data:
+        # GenAI code anonymization fields (for anonymization_method='genai_code')
+        if "genai_code_desc" in data:
+            update_kwargs["restore_natural_desc"] = data["genai_code_desc"]
+        elif "restore_natural_desc" in data:  # Support old field name for backwards compatibility
             update_kwargs["restore_natural_desc"] = data["restore_natural_desc"]
 
         result = service.update_entity_type(
@@ -683,17 +681,154 @@ async def test_entity_definition(
         raise HTTPException(status_code=500, detail=f"Failed to test entity definition: {str(e)}")
 
 
-# ============== Restore Anonymization APIs ==============
+# ============== GenAI Code Anonymization APIs ==============
+# These endpoints configure the 'genai_code' anonymization method which uses
+# AI-generated Python code to perform custom anonymization logic.
 
-@router.post("/config/data-security/entity-types/{entity_type_id}/generate-restore-code")
-async def generate_restore_code(
+@router.post("/config/data-security/generate-genai-code")
+async def generate_genai_code_standalone(
+    data: dict,
+    request: Request,
+    db: Session = Depends(get_admin_db)
+):
+    """
+    Generate Python code for genai_code anonymization method based on natural language description.
+
+    This is a standalone endpoint that doesn't require an existing entity type.
+    The generated code can be tested immediately and saved later with the entity type.
+
+    Input:
+        {
+            "natural_description": "Keep first 3 and last 4 characters, replace middle with asterisks",
+            "sample_data": "1234567890"
+        }
+
+    Output:
+        {
+            "success": true,
+            "code_generated": true,
+            "genai_code": "def anonymize(text): ...",
+            "message": "Code generated successfully"
+        }
+    """
+    from services.restore_anonymization_service import get_restore_anonymization_service, CodeGenerationError
+
+    try:
+        current_user, application_id = get_current_user_and_application_from_request(request, db)
+
+        natural_description = data.get("natural_description", "")
+        sample_data = data.get("sample_data", "")
+
+        if not natural_description:
+            raise HTTPException(status_code=400, detail="Natural language description is required")
+
+        # Generate code without needing entity type
+        service = get_restore_anonymization_service()
+        result = await service.generate_genai_anonymization_code(
+            natural_description=natural_description,
+            sample_data=sample_data
+        )
+
+        logger.info(f"Generated genai code by user {current_user.email}")
+
+        return {
+            "success": True,
+            "code_generated": True,
+            "genai_code": result['code'],
+            "message": "Code generated successfully"
+        }
+
+    except CodeGenerationError as e:
+        logger.error(f"Code generation error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Generate genai code error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to generate code: {str(e)}")
+
+
+@router.post("/config/data-security/test-genai-code")
+async def test_genai_code_standalone(
+    data: dict,
+    request: Request,
+    db: Session = Depends(get_admin_db)
+):
+    """
+    Test the provided genai_code anonymization with user-provided test input.
+
+    This is a standalone endpoint that tests the code directly without needing
+    an existing entity type.
+
+    Input:
+        {
+            "code": "def anonymize(text): return text[:3] + '***' + text[-4:]",
+            "test_input": "1234567890"
+        }
+
+    Output:
+        {
+            "success": true,
+            "anonymized_text": "123***7890",
+            "processing_time_ms": 5.2
+        }
+    """
+    from services.restore_anonymization_service import get_restore_anonymization_service
+    import time
+
+    try:
+        current_user, application_id = get_current_user_and_application_from_request(request, db)
+
+        code = data.get("code", "")
+        test_input = data.get("test_input", "")
+
+        if not code:
+            raise HTTPException(status_code=400, detail="Code is required")
+        if not test_input:
+            raise HTTPException(status_code=400, detail="Test input is required")
+
+        start_time = time.time()
+
+        # Test the code
+        service = get_restore_anonymization_service()
+        result = service.execute_genai_code(
+            code=code,
+            text=test_input
+        )
+
+        processing_time_ms = (time.time() - start_time) * 1000
+
+        logger.info(f"Tested genai code by user {current_user.email}")
+
+        return {
+            "success": True,
+            "anonymized_text": result,
+            "processing_time_ms": processing_time_ms
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Test genai code error: {e}", exc_info=True)
+        return {
+            "success": False,
+            "anonymized_text": "",
+            "error": str(e),
+            "processing_time_ms": 0
+        }
+
+
+@router.post("/config/data-security/entity-types/{entity_type_id}/generate-genai-code")
+async def generate_genai_code(
     entity_type_id: str,
     data: dict,
     request: Request,
     db: Session = Depends(get_admin_db)
 ):
     """
-    Generate Python code for restore-enabled anonymization based on natural language description.
+    Generate Python code for genai_code anonymization method based on natural language description.
+
+    This is used when anonymization_method='genai_code' to generate custom anonymization logic.
 
     Input:
         {
@@ -704,7 +839,7 @@ async def generate_restore_code(
     Output:
         {
             "success": true,
-            "placeholder_format": "[email_N]",
+            "placeholder_format": "__email_N__",
             "message": "Code generated successfully"
         }
     """
@@ -767,15 +902,15 @@ async def generate_restore_code(
         raise HTTPException(status_code=500, detail=f"Failed to generate restore code: {str(e)}")
 
 
-@router.post("/config/data-security/entity-types/{entity_type_id}/test-restore-anonymization")
-async def test_restore_anonymization(
+@router.post("/config/data-security/entity-types/{entity_type_id}/test-genai-code")
+async def test_genai_code(
     entity_type_id: str,
     data: dict,
     request: Request,
     db: Session = Depends(get_admin_db)
 ):
     """
-    Test the generated anonymization code with user-provided test input.
+    Test the generated genai_code anonymization with user-provided test input.
 
     Input:
         {
@@ -785,10 +920,10 @@ async def test_restore_anonymization(
     Output:
         {
             "success": true,
-            "anonymized_text": "Contact [email_1] and [email_2]",
+            "anonymized_text": "Contact __email_1__ and __email_2__",
             "mapping": {
-                "[email_1]": "alice@gmail.com",
-                "[email_2]": "bob@company.com"
+                "__email_1__": "alice@gmail.com",
+                "__email_2__": "bob@company.com"
             },
             "placeholder_count": 2
         }
@@ -838,32 +973,33 @@ async def test_restore_anonymization(
         raise HTTPException(status_code=500, detail=f"Failed to test restore anonymization: {str(e)}")
 
 
-@router.put("/config/data-security/entity-types/{entity_type_id}/restore-config")
-async def save_restore_config(
+@router.put("/config/data-security/entity-types/{entity_type_id}/genai-code-config")
+async def save_genai_code_config(
     entity_type_id: str,
     data: dict,
     request: Request,
     db: Session = Depends(get_admin_db)
 ):
     """
-    Save the restore anonymization configuration.
+    Save the genai_code anonymization configuration.
+
+    When anonymization_method='genai_code', use this endpoint to save the
+    natural language description that was used to generate the code.
 
     Input:
         {
-            "restore_enabled": true,
             "natural_description": "Replace email addresses with placeholders"
         }
 
     Output:
         {
             "success": true,
-            "message": "Restore configuration saved"
+            "message": "GenAI code configuration saved"
         }
     """
     try:
         current_user, application_id = get_current_user_and_application_from_request(request, db)
 
-        restore_enabled = data.get("restore_enabled", False)
         natural_description = data.get("natural_description", "")
 
         # Get the entity type
@@ -879,29 +1015,21 @@ async def save_restore_config(
         if str(entity_type.tenant_id) != str(current_user.id) and not current_user.is_super_admin:
             raise HTTPException(status_code=403, detail="Access denied")
 
-        # If enabling restore, ensure code exists
-        if restore_enabled and not entity_type.restore_code:
-            raise HTTPException(
-                status_code=400,
-                detail="Cannot enable restore without generated code. Please generate code first."
-            )
-
-        # Update configuration
-        entity_type.restore_enabled = restore_enabled
+        # Update natural description for genai_code method
         if natural_description:
             entity_type.restore_natural_desc = natural_description
 
         db.commit()
 
-        logger.info(f"Saved restore config for entity type {entity_type_id} by user {current_user.email}")
+        logger.info(f"Saved genai-code config for entity type {entity_type_id} by user {current_user.email}")
 
         return {
             "success": True,
-            "message": "Restore configuration saved"
+            "message": "GenAI code configuration saved"
         }
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Save restore config error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to save restore config: {str(e)}")
+        logger.error(f"Save genai-code config error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to save genai-code config: {str(e)}")

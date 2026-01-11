@@ -26,7 +26,9 @@
     "approvedMessage": "Appeal approved, content added to whitelist. Same content will not be blocked in the future.",
     "pendingReviewAiRejected": "AI considers the content risky. Sent to final reviewer for human review.",
     "rejectedMessage": "Appeal rejected",
-    "systemError": "System error, please try again later"
+    "systemError": "System error, please try again later",
+    "whitelistName": "False positive appeal whitelist",
+    "whitelistDescription": "Auto-generated whitelist from approved false positive appeals"
   },
   "email": {
     "verification": {
@@ -84,31 +86,9 @@
     "responseBlockedSecurity": "Response blocked due to security policy.",
     "cannotProvideInformation": "I cannot provide this information.",
     "responseTemplates": {
-      "S1": "Request blocked by OpenGuardrails due to content potentially involving general political topics.",
-      "S2": "Request blocked by OpenGuardrails due to content potentially involving sensitive political topics.",
-      "S3": "Request blocked by OpenGuardrails due to content potentially involving insult to national symbols or leaders.",
-      "S4": "Request blocked by OpenGuardrails due to content potentially involving harm to minors.",
-      "S5": "Request blocked by OpenGuardrails due to content potentially involving violent crime.",
-      "S6": "Request blocked by OpenGuardrails due to content potentially involving non-violent crime.",
-      "S7": "Request blocked by OpenGuardrails due to content potentially involving pornography.",
-      "S8": "Request blocked by OpenGuardrails due to content potentially involving hate and discrimination.",
-      "S9": "Request blocked by OpenGuardrails due to content potentially involving prompt injection attacks.",
-      "S10": "Request blocked by OpenGuardrails due to content potentially involving profanity.",
-      "S11": "Request blocked by OpenGuardrails due to content potentially involving privacy invasion.",
-      "S12": "Request blocked by OpenGuardrails due to content potentially involving commercial violations.",
-      "S13": "Request blocked by OpenGuardrails due to content potentially involving intellectual property infringement.",
-      "S14": "Request blocked by OpenGuardrails due to content potentially involving harassment.",
-      "S15": "Request blocked by OpenGuardrails due to content potentially involving weapons of mass destruction.",
-      "S16": "Request blocked by OpenGuardrails due to content potentially involving self-harm.",
-      "S17": "Request blocked by OpenGuardrails due to content potentially involving sexual crimes.",
-      "S18": "Request blocked by OpenGuardrails due to content potentially involving threats.",
-      "S19": "Request blocked by OpenGuardrails due to content potentially involving professional financial advice.",
-      "S20": "Request blocked by OpenGuardrails due to content potentially involving professional medical advice.",
-      "S21": "Request blocked by OpenGuardrails due to content potentially involving professional legal advice.",
-      "default": "Request blocked by OpenGuardrails due to policy violation.",
-      "blacklist": "Request blocked by OpenGuardrails due to blacklist policy: {name}.",
-      "customScanner": "Request blocked by OpenGuardrails due to: {name}.",
-      "marketplaceScanner": "Request blocked by OpenGuardrails. Detected by: {name}."
+      "securityRisk": "Request blocked by OpenGuardrails due to possible violation of policy related to {scanner_name}.",
+      "dataLeakageRisk": "Request blocked by OpenGuardrails due to possible sensitive data ({entity_type_names}).",
+      "default": "Request blocked by OpenGuardrails due to policy violation."
     }
   }
 }

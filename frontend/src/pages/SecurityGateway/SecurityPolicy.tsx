@@ -164,6 +164,7 @@ const SecurityPolicy: React.FC = () => {
     { value: 'block', label: t('gateway.actionBlock'), description: t('gateway.actionBlockDesc') },
     { value: 'switch_private_model', label: t('gateway.actionSwitchPrivate'), description: t('gateway.actionSwitchPrivateDesc') },
     { value: 'anonymize', label: t('gateway.actionAnonymize'), description: t('gateway.actionAnonymizeDesc') },
+    { value: 'anonymize_restore', label: t('gateway.actionAnonymizeRestore'), description: t('gateway.actionAnonymizeRestoreDesc') },
     { value: 'pass', label: t('gateway.actionPass'), description: t('gateway.actionPassDesc') },
   ]
 

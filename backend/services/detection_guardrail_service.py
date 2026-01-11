@@ -749,7 +749,7 @@ class DetectionGuardrailService:
             suggest_answer = await self._get_suggest_answer(all_categories, tenant_id, application_id, user_query, matched_scanners)
             logger.info(f"Using template answer for general risk: {general_risk_level}")
 
-        # Case 2: Only DLP risk (no general risk) - use fixed i18n message
+        # Case 2: Only DLP risk (no general risk) - use data leakage template with entity types
         elif data_result.risk_level != "no_risk":
             # Get user's language preference for i18n
             user_language = 'en'  # Default to English
@@ -766,9 +766,22 @@ class DetectionGuardrailService:
                 except Exception as e:
                     logger.warning(f"Failed to get user language for DLP message: {e}")
 
-            # Use fixed i18n message for DLP risk (not anonymized text)
-            suggest_answer = get_translation(user_language, 'guardrail', 'sensitiveDataPolicyViolation')
-            logger.info(f"Using fixed i18n message for DLP risk: {data_result.risk_level}")
+            # Use data leakage template with detected entity type names (not codes)
+            from services.enhanced_template_service import enhanced_template_service
+            # Extract entity_type_name from detected_entities for user-friendly display
+            entity_type_names = []
+            if data_result.detected_entities:
+                seen_names = set()
+                for entity in data_result.detected_entities:
+                    name = entity.get('entity_type_name') or entity.get('entity_type', '')
+                    if name and name not in seen_names:
+                        entity_type_names.append(name)
+                        seen_names.add(name)
+            # Fallback to categories (codes) if no entity_type_name available
+            if not entity_type_names:
+                entity_type_names = data_result.categories if data_result.categories else []
+            suggest_answer = await enhanced_template_service.get_data_leakage_answer(entity_type_names, user_language)
+            logger.info(f"Using data leakage template for DLP risk: {data_result.risk_level}, entity_type_names={entity_type_names}")
 
         # Determine action based on general risk level (DLP handling is done in proxy layer)
         if general_risk_level == "high_risk":

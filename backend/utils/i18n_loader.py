@@ -49,6 +49,12 @@ def load_translations(language: str) -> Dict[str, Any]:
     except json.JSONDecodeError as e:
         raise Exception(f"Invalid JSON in translation file {file_path}: {e}")
 
+def clear_translations_cache():
+    """Clear the translations cache to force reload from files"""
+    global _translations_cache
+    _translations_cache = {}
+
+
 def get_translation(language: str, *keys: str) -> str:
     """
     Get a specific translation by nested keys

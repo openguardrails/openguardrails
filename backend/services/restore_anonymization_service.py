@@ -104,6 +104,234 @@ class RestoreAnonymizationService:
             logger.error(f"Failed to generate restore code: {e}")
             raise CodeGenerationError(f"Code generation failed: {str(e)}")
 
+    async def generate_genai_anonymization_code(
+        self,
+        natural_description: str,
+        sample_data: str = None
+    ) -> Dict[str, Any]:
+        """
+        Generate Python anonymization code using AI based on natural language description.
+
+        This is a standalone method that doesn't require entity type information.
+        The generated code should define an `anonymize(text)` function.
+
+        Args:
+            natural_description: Natural language description of the anonymization rule
+            sample_data: Optional sample data for context
+
+        Returns:
+            Dict containing:
+                - code: The generated Python code
+        """
+        prompt = self._build_genai_code_prompt(natural_description, sample_data)
+
+        try:
+            messages = [
+                {"role": "system", "content": "You are a Python code generator specialized in data anonymization. Generate only valid Python code, no explanations."},
+                {"role": "user", "content": prompt}
+            ]
+
+            response = await self.model_service.check_messages(messages)
+            code = self._parse_code_response(response)
+
+            # Validate the code is safe
+            if not self._validate_code_safety(code):
+                raise CodeGenerationError("Generated code contains unsafe operations")
+
+            return {
+                "code": code
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to generate genai code: {e}")
+            raise CodeGenerationError(f"Code generation failed: {str(e)}")
+
+    def execute_genai_code(
+        self,
+        code: str,
+        text: str
+    ) -> str:
+        """
+        Execute genai anonymization code to transform input text.
+
+        Args:
+            code: Python code defining an `anonymize(text)` function
+            text: Input text to anonymize
+
+        Returns:
+            Anonymized text
+        """
+        if not self._validate_code_safety(code):
+            raise CodeExecutionError("Code contains unsafe operations")
+
+        try:
+            result = self._safe_execute_simple(code, text)
+            return result
+        except Exception as e:
+            raise CodeExecutionError(f"Code execution failed: {str(e)}")
+
+    def _build_genai_code_prompt(
+        self,
+        natural_description: str,
+        sample_data: str = None
+    ) -> str:
+        """Build prompt for genai code generation."""
+        sample_section = ""
+        if sample_data:
+            sample_section = f"""
+Sample input data:
+{sample_data}
+"""
+
+        return f"""Generate a Python function to anonymize text based on this requirement:
+
+{natural_description}
+{sample_section}
+CRITICAL Requirements:
+1. Define a single function named `anonymize(text)` that takes a string and returns the anonymized string
+2. DO NOT use any import statements - the following modules are already available globally:
+   - re (regex)
+   - string (string constants)
+   - random (random numbers)
+   - hashlib (md5, sha256, etc.)
+   - time (timestamps)
+   - datetime (date/time operations)
+   - base64 (encoding)
+   - uuid (unique identifiers)
+   - math (mathematical functions)
+3. The function should handle any input gracefully (empty strings, special characters, etc.)
+4. Keep the code simple and efficient
+
+Example - Replace with MD5 hash:
+```python
+def anonymize(text):
+    return hashlib.md5(text.encode()).hexdigest()[:8]
+```
+
+Example - Replace digits with random digits:
+```python
+def anonymize(text):
+    result = ''
+    for char in text:
+        if char.isdigit():
+            result += str(random.randint(0, 9))
+        else:
+            result += char
+    return result
+```
+
+Example - Keep first 3 and last 4, replace middle with *:
+```python
+def anonymize(text):
+    if len(text) <= 7:
+        return '*' * len(text)
+    return text[:3] + '*' * (len(text) - 7) + text[-4:]
+```
+
+IMPORTANT: Do NOT write any import statements. The modules are pre-loaded and ready to use.
+Generate ONLY the Python function code, no explanations or markdown."""
+
+    def _safe_execute_simple(
+        self,
+        code: str,
+        text: str
+    ) -> str:
+        """
+        Safely execute anonymization code that defines an `anonymize(text)` function.
+
+        Args:
+            code: Python code with anonymize function
+            text: Input text to process
+
+        Returns:
+            Result of anonymize(text)
+        """
+        import re as re_module
+        import string as string_module
+        import random as random_module
+        import hashlib as hashlib_module
+        import time as time_module
+        import datetime as datetime_module
+        import base64 as base64_module
+        import uuid as uuid_module
+        import math as math_module
+
+        # Create a restricted namespace
+        safe_globals = {
+            '__builtins__': {
+                'len': len,
+                'str': str,
+                'int': int,
+                'float': float,
+                'bool': bool,
+                'list': list,
+                'dict': dict,
+                'tuple': tuple,
+                'range': range,
+                'enumerate': enumerate,
+                'zip': zip,
+                'min': min,
+                'max': max,
+                'sum': sum,
+                'abs': abs,
+                'ord': ord,
+                'chr': chr,
+                'isinstance': isinstance,
+                'sorted': sorted,
+                'reversed': reversed,
+                'map': map,
+                'filter': filter,
+                'hex': hex,
+                'bin': bin,
+                'oct': oct,
+                'round': round,
+                'pow': pow,
+                'divmod': divmod,
+                'any': any,
+                'all': all,
+                'repr': repr,
+                'hash': hash,
+                'set': set,
+                'frozenset': frozenset,
+                'bytes': bytes,
+                'bytearray': bytearray,
+                'slice': slice,
+                'type': type,
+            },
+            're': re_module,
+            'string': string_module,
+            'random': random_module,
+            'hashlib': hashlib_module,
+            'time': time_module,
+            'datetime': datetime_module,
+            'base64': base64_module,
+            'uuid': uuid_module,
+            'math': math_module,
+        }
+
+        safe_locals = {}
+
+        try:
+            # Execute the code to define the function
+            exec(code, safe_globals, safe_locals)
+
+            # Get the anonymize function
+            if 'anonymize' not in safe_locals:
+                raise CodeExecutionError("Code must define an 'anonymize' function")
+
+            anonymize_func = safe_locals['anonymize']
+
+            # Execute with timeout
+            result = anonymize_func(text)
+
+            if not isinstance(result, str):
+                result = str(result)
+
+            return result
+
+        except Exception as e:
+            raise CodeExecutionError(f"Execution error: {str(e)}")
+
     def execute_restore_anonymization(
         self,
         text: str,
@@ -293,7 +521,28 @@ Return ONLY the Python code, no markdown, no explanation."""
         if code.endswith("```"):
             code = code[:-3]
 
-        return code.strip()
+        code = code.strip()
+
+        # Remove import statements for pre-loaded safe modules
+        # These modules are already available in the sandbox environment
+        safe_modules = ['re', 'string', 'random', 'hashlib', 'time', 'datetime', 'base64', 'uuid', 'math']
+        lines = code.split('\n')
+        cleaned_lines = []
+        for line in lines:
+            stripped = line.strip()
+            # Check if it's an import statement for a safe module
+            is_safe_import = False
+            for mod in safe_modules:
+                if stripped == f'import {mod}' or stripped.startswith(f'import {mod} '):
+                    is_safe_import = True
+                    break
+                if stripped.startswith(f'from {mod} import'):
+                    is_safe_import = True
+                    break
+            if not is_safe_import:
+                cleaned_lines.append(line)
+
+        return '\n'.join(cleaned_lines).strip()
 
     def _validate_code_safety(self, code: str) -> bool:
         """
@@ -456,10 +705,12 @@ class StreamingRestoreBuffer:
     Sliding window buffer for detecting and restoring placeholders in streaming output.
 
     Handles cases where placeholders span across multiple chunks:
-    - Chunk 1: "Hello [em"
-    - Chunk 2: "ail_1] world"
+    - Chunk 1: "Hello __em"
+    - Chunk 2: "ail_1__ world"
 
     The buffer holds content until placeholders are complete, then outputs restored text.
+
+    Supports both old format [entity_type_N] and new format __entity_type_N__.
     """
 
     def __init__(self, mapping: Dict[str, str], max_placeholder_length: int = 50):
@@ -473,7 +724,8 @@ class StreamingRestoreBuffer:
         self.mapping = mapping
         self.buffer = ""
         self.max_placeholder_length = max_placeholder_length
-        self.placeholder_pattern = re.compile(r'\[[a-zA-Z_]+_\d+\]')
+        # Support both old [entity_type_N] and new __entity_type_N__ formats
+        self.placeholder_pattern = re.compile(r'(__[a-z_]+_\d+__|\[[a-zA-Z_]+_\d+\])')
 
     def process_chunk(self, chunk: str) -> str:
         """
@@ -499,17 +751,36 @@ class StreamingRestoreBuffer:
             restored = restored.replace(placeholder, original)
 
         # Check for potential partial placeholder at end
-        # Look for '[' without matching ']' in the tail
+        # Look for '__' or '[' that might indicate start of a placeholder
+        last_double_underscore = restored.rfind('__')
         last_bracket = restored.rfind('[')
 
-        if last_bracket != -1:
-            # Check if there's a ']' after the last '['
-            tail = restored[last_bracket:]
-            if ']' not in tail:
+        # Find the last potential placeholder start
+        potential_start = max(last_double_underscore, last_bracket)
+
+        if potential_start != -1:
+            tail = restored[potential_start:]
+            # Check if this could be an incomplete placeholder
+            # For __ format: need closing __
+            # For [] format: need closing ]
+            is_incomplete = False
+
+            if last_double_underscore == potential_start:
+                # Check if __ format is incomplete (no closing __)
+                # Count underscores - if odd count of __, it's incomplete
+                underscore_count = tail.count('__')
+                if underscore_count % 2 == 1:
+                    is_incomplete = True
+            elif last_bracket == potential_start:
+                # Check if [] format is incomplete (no closing ])
+                if ']' not in tail:
+                    is_incomplete = True
+
+            if is_incomplete:
                 # Potential partial placeholder, keep in buffer
                 # But limit buffer size to prevent memory issues
                 if len(tail) <= self.max_placeholder_length:
-                    output = restored[:last_bracket]
+                    output = restored[:potential_start]
                     self.buffer = tail
                     return output
                 else:

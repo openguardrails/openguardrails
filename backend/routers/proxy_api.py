@@ -19,6 +19,7 @@ from services.detection_guardrail_service import detection_guardrail_service
 from services.ban_policy_service import BanPolicyService
 from services.billing_service import billing_service
 from services.data_leakage_disposal_service import DataLeakageDisposalService
+from services.unified_anonymization_service import get_unified_anonymization_service
 from database.connection import get_db
 from utils.i18n import get_language_from_request
 from utils.i18n_loader import get_translation
@@ -75,11 +76,9 @@ def get_detection_mode(model_config, detection_type: str) -> DetectionMode:
 
 
 def _anonymize_all_user_messages(messages: list, detected_entities: list, logger) -> list:
-    """Anonymize sensitive data in all user messages using pre-computed anonymized values.
+    """Anonymize sensitive data in all user messages using UnifiedAnonymizationService.
 
-    This function uses the 'anonymized_value' field from detected_entities, which was
-    pre-computed by data_security_service._anonymize_text(). This avoids redundant
-    re-computation of anonymization.
+    Uses 'anonymize' action which applies the entity type's configured anonymization method.
 
     Args:
         messages: List of message dicts with 'role' and 'content'
@@ -93,51 +92,15 @@ def _anonymize_all_user_messages(messages: list, detected_entities: list, logger
     if not detected_entities:
         return messages
 
-    # Build replacement map using pre-computed anonymized_value
-    entity_replacements = {}
+    anonymization_service = get_unified_anonymization_service()
+    anonymized_messages, _ = anonymization_service.anonymize_messages(
+        messages=messages,
+        detected_entities=detected_entities,
+        action='anonymize'  # Uses pre-computed anonymized_value
+    )
 
-    # Sort by text length (longest first) to avoid partial replacements
-    sorted_entities = sorted(detected_entities, key=lambda x: len(x.get('text', '')), reverse=True)
-
-    for entity in sorted_entities:
-        original_text = entity.get('text', '')
-        if not original_text or original_text in entity_replacements:
-            continue
-
-        # Use pre-computed anonymized_value from data_security_service
-        # Falls back to entity_type placeholder if not available
-        anonymized_value = entity.get('anonymized_value')
-        if anonymized_value is not None:
-            entity_replacements[original_text] = anonymized_value
-        else:
-            # Fallback if anonymized_value not pre-computed (shouldn't happen normally)
-            entity_type = entity.get('entity_type', 'UNKNOWN')
-            entity_replacements[original_text] = f"<{entity_type}>"
-            logger.warning(f"Entity {entity_type} missing anonymized_value, using fallback")
-
-    # Anonymize each user message
-    modified_messages = []
-    for msg in messages:
-        if msg.get('role') == 'user':
-            content = msg.get('content', '')
-            if isinstance(content, str):
-                anonymized_content = content
-                # Sort by length (longest first) to avoid partial replacements
-                for original, replacement in sorted(entity_replacements.items(), key=lambda x: len(x[0]), reverse=True):
-                    anonymized_content = anonymized_content.replace(original, replacement)
-
-                modified_msg = msg.copy()
-                modified_msg['content'] = anonymized_content
-                modified_messages.append(modified_msg)
-                logger.debug(f"Anonymized user message: replaced {len(entity_replacements)} entities using pre-computed values")
-            else:
-                # Non-string content (e.g., multimodal), keep as is for now
-                modified_messages.append(msg.copy())
-        else:
-            # Non-user messages (system, assistant), keep as is
-            modified_messages.append(msg.copy())
-
-    return modified_messages
+    logger.debug(f"Anonymized user messages: {len(detected_entities)} entities using configured methods")
+    return anonymized_messages
 
 
 def _anonymize_all_user_messages_with_restore(
@@ -147,134 +110,38 @@ def _anonymize_all_user_messages_with_restore(
     db,
     logger
 ) -> tuple:
-    """Anonymize sensitive data with numbered placeholders for later restoration.
+    """Anonymize sensitive data with unified placeholders for later restoration.
 
-    This function always generates numbered placeholders (e.g., [email_sys_1], [phone_number_sys_1])
-    for ALL detected entities, ensuring they can be restored in the output.
-
-    Two modes are supported:
-    1. Entities with restore_enabled=True and restore_code: Execute the restore_code to generate
-       custom placeholders (e.g., [email_sys_1]@gmail.com preserving domain)
-    2. Entities without restore_code: Use simple numbered placeholder format [entity_type_N]
+    Uses UnifiedAnonymizationService with 'anonymize_restore' action which generates
+    __entity_type_N__ format placeholders (e.g., __email_1__, __phone_number_1__).
 
     Args:
         messages: List of message dicts with 'role' and 'content'
         detected_entities: List of detected entity dicts from data_security_service
-        application_id: Application ID to get entity type configs
-        db: Database session
+        application_id: Application ID (unused, kept for compatibility)
+        db: Database session (unused, kept for compatibility)
         logger: Logger instance
 
     Returns:
         Tuple of (modified_messages, restore_mapping)
         - modified_messages: List of messages with placeholder content
-        - restore_mapping: Dict of placeholder -> original value (for ALL entities)
+        - restore_mapping: Dict of placeholder -> original value
     """
-    from database.models import DataSecurityEntityType
-
     if not detected_entities:
         return messages, {}
 
-    # Get entity type configs with restore settings
-    entity_type_codes = list(set(e.get('entity_type', '') for e in detected_entities))
-    entity_type_configs = {}
+    anonymization_service = get_unified_anonymization_service()
+    anonymized_messages, restore_mapping = anonymization_service.anonymize_messages(
+        messages=messages,
+        detected_entities=detected_entities,
+        action='anonymize_restore',  # Uses __entity_type_N__ placeholders
+        application_id=application_id
+    )
 
-    try:
-        entity_types = db.query(DataSecurityEntityType).filter(
-            DataSecurityEntityType.application_id == application_id,
-            DataSecurityEntityType.entity_type.in_(entity_type_codes),
-            DataSecurityEntityType.is_active == True
-        ).all()
+    if restore_mapping:
+        logger.debug(f"Anonymized with restore: {len(restore_mapping)} placeholders created")
 
-        for et in entity_types:
-            entity_type_configs[et.entity_type] = {
-                'restore_enabled': et.restore_enabled,
-                'restore_code': et.restore_code,
-                'restore_code_hash': et.restore_code_hash
-            }
-    except Exception as e:
-        logger.error(f"Failed to get entity type configs: {e}")
-
-    # Build mapping for restoration and replacement map
-    restore_mapping = {}
-    entity_counters = {}
-    entity_replacements = {}
-
-    # Sort by text length (longest first) to avoid partial replacements
-    sorted_entities = sorted(detected_entities, key=lambda x: len(x.get('text', '')), reverse=True)
-
-    # Import restore service for entities with restore_code
-    from services.restore_anonymization_service import get_restore_anonymization_service
-    restore_service = get_restore_anonymization_service()
-
-    for entity in sorted_entities:
-        original_text = entity.get('text', '')
-        if not original_text or original_text in entity_replacements:
-            continue
-
-        entity_type = entity.get('entity_type', 'UNKNOWN')
-        config = entity_type_configs.get(entity_type, {})
-
-        # Check if this entity type has restore enabled with valid code
-        restore_enabled = config.get('restore_enabled', False)
-        restore_code = config.get('restore_code')
-        restore_code_hash = config.get('restore_code_hash')
-
-        if restore_enabled and restore_code and restore_code_hash:
-            # Execute restore_code to get custom placeholder format
-            try:
-                result_text, new_mapping, new_counters = restore_service.execute_restore_anonymization(
-                    original_text,
-                    entity_type,
-                    restore_code,
-                    restore_code_hash,
-                    restore_mapping,
-                    entity_counters
-                )
-                entity_replacements[original_text] = result_text
-                restore_mapping.update(new_mapping)
-                entity_counters.update(new_counters)
-                logger.debug(f"Executed restore_code for {entity_type}: {original_text} -> {result_text}")
-            except Exception as e:
-                logger.warning(f"Restore code execution failed for {entity_type}: {e}, falling back to simple placeholder")
-                # Fallback to simple placeholder
-                counter_key = entity_type.lower()
-                counter = entity_counters.get(counter_key, 0) + 1
-                entity_counters[counter_key] = counter
-                placeholder = f"[{counter_key}_{counter}]"
-                entity_replacements[original_text] = placeholder
-                restore_mapping[placeholder] = original_text
-        else:
-            # No restore_code configured - use simple numbered placeholder format
-            # This ensures anonymize_restore action always produces restorable placeholders
-            counter_key = entity_type.lower()
-            counter = entity_counters.get(counter_key, 0) + 1
-            entity_counters[counter_key] = counter
-            placeholder = f"[{counter_key}_{counter}]"
-            entity_replacements[original_text] = placeholder
-            restore_mapping[placeholder] = original_text
-            logger.debug(f"Using numbered placeholder for {entity_type}: {original_text} -> {placeholder}")
-
-    # Anonymize each user message
-    modified_messages = []
-    for msg in messages:
-        if msg.get('role') == 'user':
-            content = msg.get('content', '')
-            if isinstance(content, str):
-                anonymized_content = content
-                # Apply all entity replacements
-                for original, replacement in sorted(entity_replacements.items(), key=lambda x: len(x[0]), reverse=True):
-                    anonymized_content = anonymized_content.replace(original, replacement)
-
-                modified_msg = msg.copy()
-                modified_msg['content'] = anonymized_content
-                modified_messages.append(modified_msg)
-                logger.debug(f"Anonymized with restore: replaced {len(entity_replacements)} entities, {len(restore_mapping)} restorable")
-            else:
-                modified_messages.append(msg.copy())
-        else:
-            modified_messages.append(msg.copy())
-
-    return modified_messages, restore_mapping
+    return anonymized_messages, restore_mapping or {}
 
 
 async def perform_input_detection(model_config, input_messages: list, tenant_id: str, request_id: str, user_id: str = None, application_id: str = None):

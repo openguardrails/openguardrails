@@ -253,11 +253,16 @@ async def manual_review_appeal(
                 detail="Invalid action. Must be 'approve' or 'reject'"
             )
 
+        # Get language from Accept-Language header or default to 'zh'
+        accept_language = request.headers.get('Accept-Language', 'zh')
+        language = 'zh' if 'zh' in accept_language else 'en'
+
         result = await appeal_service.manual_review_appeal(
             appeal_id=appeal_id,
             action=review_data.action,
             reviewer_email=reviewer_email,
             reason=review_data.reason,
+            language=language,
             db=db
         )
 

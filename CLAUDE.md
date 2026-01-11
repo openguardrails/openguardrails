@@ -160,11 +160,11 @@ openguardrails/
 
 **Data Leakage Disposal Service** (`backend/services/data_leakage_disposal_service.py`):
 - **Block**: Reject request completely (default for high risk)
-- **Switch Private Model**: Redirect to data-private model (default for medium risk) ⭐ **v5.1.0 Key Feature**
-- **Anonymize**: Replace sensitive entities with placeholders (default for low risk)
+- **Anonymize**: Replace sensitive entities with placeholders (default for medium/low risk)
+- **Switch Private Model**: Redirect to data-private model (optional)
 - **Pass**: Allow request, log only (audit mode)
 
-**Automatic Private Model Switching Flow** (v5.1.0):
+**Data Leakage Policy Flow**:
 ```
 User Request → DLP Detection → Sensitive Data Found → Risk Level Determined
                                                               ↓
@@ -172,10 +172,9 @@ User Request → DLP Detection → Sensitive Data Found → Risk Level Determine
                            ↓                                  ↓                                  ↓
                     High Risk Action              Medium Risk Action                 Low Risk Action
                            ↓                                  ↓                                  ↓
-                  Block (default)          Switch Private Model (default)         Anonymize (default)
+                  Block (default)              Anonymize (default)               Anonymize (default)
                            ↓                                  ↓                                  ↓
-                    Return Error          Route to Private Model             Process & Continue
-                                          (transparent to user)
+                    Return Error           Replace with placeholders         Replace with placeholders
 ```
 
 **Enterprise Value**: Users continue their workflow seamlessly while sensitive data automatically stays within your infrastructure.
@@ -211,7 +210,7 @@ User Request → DLP Detection → Sensitive Data Found → Risk Level Determine
 
 **Default Strategy**:
 - High Risk → `block`
-- Medium Risk → `switch_private_model`
+- Medium Risk → `anonymize`
 - Low Risk → `anonymize`
 
 ### Performance Characteristics

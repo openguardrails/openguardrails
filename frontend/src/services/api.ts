@@ -92,7 +92,17 @@ api.interceptors.response.use(
       return Promise.reject(error);
     }
     
-    const errorMessage = error.response?.data?.detail || error.message || 'Request failed';
+    // Handle error message - ensure it's a string for toast
+    let errorMessage = 'Request failed';
+    const detail = error.response?.data?.detail;
+    if (typeof detail === 'string') {
+      errorMessage = detail;
+    } else if (Array.isArray(detail) && detail.length > 0) {
+      // Pydantic validation error format: [{type, loc, msg, ...}]
+      errorMessage = detail.map((e: any) => e.msg || JSON.stringify(e)).join('; ');
+    } else if (error.message) {
+      errorMessage = error.message;
+    }
     toast.error(errorMessage);
     return Promise.reject(error);
   }
@@ -667,31 +677,30 @@ export const dataSecurityApi = {
   }> =>
     api.post('/api/v1/config/data-security/test-entity-definition', data).then(res => res.data),
 
-  // Generate restore anonymization code using AI
-  generateRestoreCode: (entityTypeId: string, data: {
+  // Generate genai_code anonymization code using AI
+  generateGenaiCode: (data: {
     natural_description: string
     sample_data?: string
   }): Promise<{
     success: boolean
     code_generated: boolean
-    restore_code?: string
-    placeholder_format?: string
+    genai_code?: string
     message: string
     error?: string
   }> =>
-    api.post(`/api/v1/config/data-security/entity-types/${entityTypeId}/generate-restore-code`, data).then(res => res.data),
+    api.post('/api/v1/config/data-security/generate-genai-code', data).then(res => res.data),
 
-  // Test restore anonymization
-  testRestoreAnonymization: (entityTypeId: string, data: {
+  // Test genai_code anonymization
+  testGenaiCode: (data: {
+    code: string
     test_input: string
   }): Promise<{
     success: boolean
     anonymized_text: string
-    mapping: Record<string, string>
     error?: string
     processing_time_ms: number
   }> =>
-    api.post(`/api/v1/config/data-security/entity-types/${entityTypeId}/test-restore-anonymization`, data).then(res => res.data),
+    api.post('/api/v1/config/data-security/test-genai-code', data).then(res => res.data),
 
   // Save restore anonymization config
   saveRestoreConfig: (entityTypeId: string, data: {

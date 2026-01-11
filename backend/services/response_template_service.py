@@ -109,13 +109,8 @@ class ResponseTemplateService:
             logger.info(f"Template for custom scanner {scanner.tag} already exists (ID: {existing.id})")
             return None
 
-        # Use i18n for default content
-        en_template = get_translation('en', 'guardrail', 'responseTemplates', 'customScanner')
-        zh_template = get_translation('zh', 'guardrail', 'responseTemplates', 'customScanner')
-        default_content = {
-            "en": en_template.format(name=scanner.name),
-            "zh": zh_template.format(name=scanner.name)
-        }
+        # Use generic securityRisk template with scanner_name
+        default_content = self._get_default_content_for_scanner(scanner.name)
 
         template = ResponseTemplate(
             tenant_id=tenant_id,
@@ -172,13 +167,8 @@ class ResponseTemplateService:
             logger.info(f"Template for marketplace scanner {scanner.tag} already exists (ID: {existing.id})")
             return None
 
-        # Use i18n for default content
-        en_template = get_translation('en', 'guardrail', 'responseTemplates', 'marketplaceScanner')
-        zh_template = get_translation('zh', 'guardrail', 'responseTemplates', 'marketplaceScanner')
-        default_content = {
-            "en": en_template.format(name=scanner.name),
-            "zh": zh_template.format(name=scanner.name)
-        }
+        # Use generic securityRisk template with scanner_name
+        default_content = self._get_default_content_for_scanner(scanner.name)
 
         template = ResponseTemplate(
             tenant_id=tenant_id,
@@ -235,13 +225,8 @@ class ResponseTemplateService:
             logger.info(f"Template for blacklist '{blacklist.name}' already exists (ID: {existing.id})")
             return None
 
-        # Use i18n for default content
-        en_template = get_translation('en', 'guardrail', 'responseTemplates', 'blacklist')
-        zh_template = get_translation('zh', 'guardrail', 'responseTemplates', 'blacklist')
-        default_content = {
-            "en": en_template.format(name=blacklist.name),
-            "zh": zh_template.format(name=blacklist.name)
-        }
+        # Use generic securityRisk template with blacklist name
+        default_content = self._get_default_content_for_scanner(blacklist.name)
 
         template = ResponseTemplate(
             tenant_id=tenant_id,
@@ -336,29 +321,72 @@ class ResponseTemplateService:
         )
         return True
 
-    def _get_default_content_for_official_scanner(self, tag: str) -> Dict[str, str]:
+    def _get_default_content_for_scanner(self, scanner_name: str) -> Dict[str, str]:
         """
-        Get default multilingual content for official scanners (S1-S21) using i18n.
+        Get default multilingual content for any scanner using the generic securityRisk template.
 
         Args:
-            tag: Scanner tag (S1, S2, etc.)
+            scanner_name: Human-readable scanner name (e.g., "Hate & Discrimination", "Custom Scanner")
 
         Returns:
-            Dictionary with multilingual content
+            Dictionary with multilingual content with {scanner_name} replaced
         """
-        # Use i18n to get translations for both languages
+        # Use the generic securityRisk template from i18n
         try:
-            en_content = get_translation('en', 'guardrail', 'responseTemplates', tag)
+            en_template = get_translation('en', 'guardrail', 'responseTemplates', 'securityRisk')
         except KeyError:
-            en_content = get_translation('en', 'guardrail', 'responseTemplates', 'default')
+            en_template = get_translation('en', 'guardrail', 'responseTemplates', 'default')
 
         try:
-            zh_content = get_translation('zh', 'guardrail', 'responseTemplates', tag)
+            zh_template = get_translation('zh', 'guardrail', 'responseTemplates', 'securityRisk')
         except KeyError:
-            zh_content = get_translation('zh', 'guardrail', 'responseTemplates', 'default')
+            zh_template = get_translation('zh', 'guardrail', 'responseTemplates', 'default')
+
+        # Replace {scanner_name} variable
+        en_content = en_template.replace('{scanner_name}', scanner_name) if '{scanner_name}' in en_template else en_template
+        zh_content = zh_template.replace('{scanner_name}', scanner_name) if '{scanner_name}' in zh_template else zh_template
 
         return {
             'en': en_content,
             'zh': zh_content
         }
+
+    def _get_default_content_for_official_scanner(self, tag: str) -> Dict[str, str]:
+        """
+        Get default multilingual content for official scanners (S1-S21).
+        Now uses the generic securityRisk template with scanner_name variable.
+
+        Args:
+            tag: Scanner tag (S1, S2, etc.) - used to look up scanner name
+
+        Returns:
+            Dictionary with multilingual content
+        """
+        # Scanner name mapping for official scanners
+        scanner_names = {
+            'S1': 'General Political Topics',
+            'S2': 'Sensitive Political Topics',
+            'S3': 'Insult to National Symbols or Leaders',
+            'S4': 'Harm to Minors',
+            'S5': 'Violent Crime',
+            'S6': 'Non-Violent Crime',
+            'S7': 'Pornography',
+            'S8': 'Hate & Discrimination',
+            'S9': 'Prompt Attacks',
+            'S10': 'Profanity',
+            'S11': 'Privacy Invasion',
+            'S12': 'Commercial Violations',
+            'S13': 'Intellectual Property Infringement',
+            'S14': 'Harassment',
+            'S15': 'Weapons of Mass Destruction',
+            'S16': 'Self-Harm',
+            'S17': 'Sexual Crimes',
+            'S18': 'Threats',
+            'S19': 'Professional Financial Advice',
+            'S20': 'Professional Medical Advice',
+            'S21': 'Professional Legal Advice',
+        }
+
+        scanner_name = scanner_names.get(tag, tag)
+        return self._get_default_content_for_scanner(scanner_name)
 

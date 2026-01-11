@@ -68,7 +68,9 @@ Please determine if this is a false positive based on the above information and 
 class AppealService:
     """Service for handling false positive appeals"""
 
-    APPEAL_WHITELIST_NAME = "False positive appeal whitelist"
+    # Legacy name (English) - kept for backwards compatibility when searching
+    APPEAL_WHITELIST_NAME_EN = "False positive appeal whitelist"
+    APPEAL_WHITELIST_NAME_ZH = "误报申诉白名单"
 
     def __init__(self):
         self.model_service = ModelService()
@@ -356,6 +358,7 @@ class AppealService:
                         application_id=application_id,
                         tenant_id=tenant_id,
                         content=detection.content,
+                        language=language,
                         db=db
                     )
                     appeal_record.whitelist_id = whitelist_id
@@ -593,6 +596,7 @@ class AppealService:
         application_id: str,
         tenant_id: str,
         content: str,
+        language: str,
         db: Session
     ) -> Tuple[int, str]:
         """
@@ -611,10 +615,14 @@ class AppealService:
             if last_space > 50:
                 keyword = keyword[:last_space]
 
-        # Find or create the appeal whitelist
+        # Find existing appeal whitelist (check both English and Chinese names for backwards compatibility)
+        from sqlalchemy import or_
         whitelist = db.query(Whitelist).filter(
             Whitelist.application_id == app_uuid,
-            Whitelist.name == self.APPEAL_WHITELIST_NAME
+            or_(
+                Whitelist.name == self.APPEAL_WHITELIST_NAME_EN,
+                Whitelist.name == self.APPEAL_WHITELIST_NAME_ZH
+            )
         ).first()
 
         if whitelist:
@@ -626,13 +634,15 @@ class AppealService:
                 # Mark JSON field as modified so SQLAlchemy detects the change
                 flag_modified(whitelist, 'keywords')
         else:
-            # Create new whitelist
+            # Create new whitelist with localized name and description
+            whitelist_name = t(language, 'whitelistName')
+            whitelist_description = t(language, 'whitelistDescription')
             whitelist = Whitelist(
                 tenant_id=tenant_uuid,
                 application_id=app_uuid,
-                name=self.APPEAL_WHITELIST_NAME,
+                name=whitelist_name,
                 keywords=[keyword],
-                description="False positive appeal whitelist",
+                description=whitelist_description,
                 is_active=True
             )
             db.add(whitelist)
@@ -720,6 +730,7 @@ class AppealService:
         action: str,
         reviewer_email: str,
         reason: Optional[str] = None,
+        language: str = 'zh',
         db: Session = None
     ) -> dict:
         """
@@ -763,6 +774,7 @@ class AppealService:
                         application_id=str(appeal_record.application_id),
                         tenant_id=str(appeal_record.tenant_id),
                         content=appeal_record.original_content,
+                        language=language,
                         db=db
                     )
                     appeal_record.whitelist_id = whitelist_id

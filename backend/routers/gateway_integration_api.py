@@ -47,15 +47,18 @@ class ProcessInputRequest(BaseModel):
 class ProcessOutputRequest(BaseModel):
     """Request model for process-output endpoint"""
     content: str = Field(..., description="LLM response content")
-    session_id: Optional[str] = Field(default=None, description="Session ID from process-input for restoration")
+    session_id: Optional[str] = Field(default=None, description="Session ID from process-input for restoration (deprecated, use restore_mapping instead)")
+    restore_mapping: Optional[Dict[str, str]] = Field(default=None, description="Mapping of placeholders to original values (e.g., {'__email_1__': 'john@example.com'})")
     is_streaming: bool = Field(default=False, description="Whether this is a streaming chunk")
     chunk_index: int = Field(default=0, description="Chunk index for streaming (0-based)")
+    messages: Optional[List[Dict[str, Any]]] = Field(default=None, description="Input messages as context for output detection")
 
     class Config:
         json_schema_extra = {
             "example": {
-                "content": "I have received your email [email_1]",
-                "session_id": "sess_abc123def456"
+                "content": "I have received your email __email_1__",
+                "restore_mapping": {"__email_1__": "john@example.com"},
+                "messages": [{"role": "user", "content": "My email is john@example.com"}]
             }
         }
 
@@ -183,8 +186,10 @@ async def process_output(
         tenant_id=tenant_id,
         content=body.content,
         session_id=body.session_id,
+        restore_mapping=body.restore_mapping,
         is_streaming=body.is_streaming,
-        chunk_index=body.chunk_index
+        chunk_index=body.chunk_index,
+        input_messages=body.messages
     )
 
     # Add timing info

@@ -58,12 +58,10 @@ interface EntityType {
   is_global: boolean
   source_type?: string // 'system_template', 'system_copy', 'custom'
   template_id?: string
-  // Restore anonymization fields
-  restore_enabled?: boolean
-  restore_code?: string // AI-generated Python code for anonymization
-  restore_code_hash?: string
-  restore_natural_desc?: string
-  has_restore_code?: boolean
+  // GenAI code anonymization fields (for anonymization_method='genai_code')
+  genai_code_desc?: string // Natural language description for genai_code
+  genai_code?: string // AI-generated Python code for genai_code method
+  has_genai_code?: boolean
   created_at: string
   updated_at: string
 }
@@ -77,10 +75,11 @@ const EntityTypeManagement: React.FC = () => {
     { value: 'low', label: t('entityType.lowRisk'), color: 'outline' as const },
   ]
 
-  // Anonymization methods for "only anonymize" mode
+  // Anonymization methods
   const ANONYMIZATION_METHODS = [
     { value: 'regex_replace', label: t('entityType.regexReplace') },
-    { value: 'genai', label: t('entityType.genaiAnonymize') },
+    { value: 'genai_natural', label: t('entityType.genaiNatural') },
+    { value: 'genai_code', label: t('entityType.genaiCode') },
     { value: 'replace', label: t('entityType.replace') },
     { value: 'mask', label: t('entityType.mask') },
     { value: 'hash', label: t('entityType.hash') },
@@ -116,15 +115,15 @@ const EntityTypeManagement: React.FC = () => {
     matches: string[]
     error?: string
   } | null>(null)
-  // State for restore anonymization
-  const [generatingRestoreCode, setGeneratingRestoreCode] = useState(false)
-  const [testingRestoreAnonymization, setTestingRestoreAnonymization] = useState(false)
-  const [restoreTestResult, setRestoreTestResult] = useState<{
+  // State for genai_code anonymization
+  const [generatingGenaiCode, setGeneratingGenaiCode] = useState(false)
+  const [generatedGenaiCode, setGeneratedGenaiCode] = useState<string | null>(null)
+  const [testingGenaiCode, setTestingGenaiCode] = useState(false)
+  const [genaiCodeTestResult, setGenaiCodeTestResult] = useState<{
     anonymized_text: string
-    mapping: Record<string, string>
     error?: string
   } | null>(null)
-  const [showRestoreCode, setShowRestoreCode] = useState(false)
+  const [showGenaiCode, setShowGenaiCode] = useState(false)
   const { user, onUserSwitch } = useAuth()
   const { currentApplicationId } = useApplication()
 
@@ -138,9 +137,8 @@ const EntityTypeManagement: React.FC = () => {
     recognition_method: z.string().default('regex'),
     pattern: z.string().optional(),
     entity_definition: z.string().optional(),
-    // Anonymization mode: 'only_anonymize' or 'anonymize_restore'
-    anonymization_mode: z.string().default('only_anonymize'),
-    anonymization_method: z.string().default('replace'),
+    // Anonymization method (no more anonymization_mode, use disposal action in policy instead)
+    anonymization_method: z.string().default('regex_replace'),
     // Regex masking configuration
     replace_text: z.string().optional(), // replace method replacement content
     mask_keep_prefix: z.string().optional(), // mask method keep prefix
@@ -159,9 +157,9 @@ const EntityTypeManagement: React.FC = () => {
     entity_definition_test_input: z.string().optional(), // test input for GenAI entity definition testing
     // Test input for anonymization
     test_input: z.string().optional(), // sample data for testing
-    // Restore anonymization configuration (for anonymize_restore mode)
-    restore_natural_desc: z.string().optional(), // natural language description for restore code generation
-    restore_test_input: z.string().optional(), // test input for restore anonymization testing
+    // GenAI code anonymization configuration (for genai_code method)
+    genai_code_desc: z.string().optional(), // natural language description for genai_code generation
+    genai_code_test_input: z.string().optional(), // test input for genai_code testing
     check_input: z.boolean().default(true),
     check_output: z.boolean().default(true),
     is_active: z.boolean().default(true),
@@ -184,15 +182,21 @@ const EntityTypeManagement: React.FC = () => {
         })
       }
     }
-    // Validate anonymization method is required only for only_anonymize mode
-    if (data.anonymization_mode === 'only_anonymize') {
-      if (!data.anonymization_method || data.anonymization_method.length === 0) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: t('entityType.anonymizationMethodRequired'),
-          path: ['anonymization_method'],
-        })
-      }
+    // Validate anonymization method is always required
+    if (!data.anonymization_method || data.anonymization_method.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: t('entityType.anonymizationMethodRequired'),
+        path: ['anonymization_method'],
+      })
+    }
+    // Validate genai_code requires genai_code_desc
+    if (data.anonymization_method === 'genai_code' && (!data.genai_code_desc || data.genai_code_desc.length === 0)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: t('entityType.genaiCodeDescRequired'),
+        path: ['genai_code_desc'],
+      })
     }
   })
 
@@ -203,8 +207,7 @@ const EntityTypeManagement: React.FC = () => {
       is_active: true,
       check_input: true,
       check_output: true,
-      anonymization_mode: 'only_anonymize',
-      anonymization_method: 'replace',
+      anonymization_method: 'regex_replace',
       is_global: false,
       mask_char: '*',
       mask_keep_prefix: '',
@@ -218,8 +221,8 @@ const EntityTypeManagement: React.FC = () => {
       recognition_test_input: '',
       entity_definition_test_input: '',
       test_input: '',
-      restore_natural_desc: '',
-      restore_test_input: '',
+      genai_code_desc: '',
+      genai_code_test_input: '',
     },
   })
 
@@ -254,14 +257,15 @@ const EntityTypeManagement: React.FC = () => {
     setTestResult(null)
     setRecognitionTestResult(null)
     setEntityDefinitionTestResult(null)
-    setRestoreTestResult(null)
+    setGenaiCodeTestResult(null)
+    setGeneratedGenaiCode(null)
+    setShowGenaiCode(false)
     form.reset({
       recognition_method: 'regex',
       is_active: true,
       check_input: true,
       check_output: true,
-      anonymization_mode: 'only_anonymize',
-      anonymization_method: 'replace',
+      anonymization_method: 'regex_replace',
       is_global: false,
       mask_char: '*',
       mask_keep_prefix: '',
@@ -275,8 +279,8 @@ const EntityTypeManagement: React.FC = () => {
       recognition_test_input: '',
       entity_definition_test_input: '',
       test_input: '',
-      restore_natural_desc: '',
-      restore_test_input: '',
+      genai_code_desc: '',
+      genai_code_test_input: '',
     })
     setModalVisible(true)
   }
@@ -286,7 +290,9 @@ const EntityTypeManagement: React.FC = () => {
     setTestResult(null)
     setRecognitionTestResult(null)
     setEntityDefinitionTestResult(null)
-    setRestoreTestResult(null)
+    setGenaiCodeTestResult(null)
+    setGeneratedGenaiCode(record.genai_code || null)
+    setShowGenaiCode(false)
     const recognitionMethod = record.recognition_method || 'regex'
     const config = record.anonymization_config || {}
 
@@ -312,12 +318,9 @@ const EntityTypeManagement: React.FC = () => {
       regex_natural_desc = config.natural_language_desc || ''
       regex_pattern = config.regex_pattern || ''
       regex_replacement = config.replacement_template || ''
-    } else if (anonymizationMethod === 'genai') {
+    } else if (anonymizationMethod === 'genai' || anonymizationMethod === 'genai_natural') {
       genai_anonymization_prompt = config.anonymization_prompt || ''
     }
-
-    // Determine anonymization mode: if restore_enabled is true, it's 'anonymize_restore'
-    const anonymizationMode = record.restore_enabled ? 'anonymize_restore' : 'only_anonymize'
 
     form.reset({
       entity_type: record.entity_type,
@@ -326,7 +329,6 @@ const EntityTypeManagement: React.FC = () => {
       recognition_method: recognitionMethod,
       pattern: record.pattern,
       entity_definition: record.entity_definition,
-      anonymization_mode: anonymizationMode,
       anonymization_method: anonymizationMethod,
       replace_text,
       mask_keep_prefix,
@@ -343,8 +345,8 @@ const EntityTypeManagement: React.FC = () => {
       check_output: record.check_output,
       is_active: record.is_active,
       test_input: '',
-      restore_natural_desc: record.restore_natural_desc || '',
-      restore_test_input: '',
+      genai_code_desc: record.genai_code_desc || '',
+      genai_code_test_input: '',
     })
     setModalVisible(true)
   }
@@ -368,48 +370,41 @@ const EntityTypeManagement: React.FC = () => {
 
   const handleSubmit = async (values: z.infer<typeof formSchema>) => {
     const recognitionMethod = values.recognition_method || 'regex'
-    const anonymizationMode = values.anonymization_mode || 'only_anonymize'
-    const anonymizationMethod = values.anonymization_method || 'replace'
+    const anonymizationMethod = values.anonymization_method || 'regex_replace'
 
-    // Build anonymization configuration based on mode and method
+    // Build anonymization configuration based on method
     let anonymization_config: any = {}
-    let restore_enabled = false
 
-    if (anonymizationMode === 'anonymize_restore') {
-      // For restore mode, use replace method with placeholder
-      restore_enabled = true
-      anonymization_config = {
-        replacement: `<${values.entity_type}>`,
-      }
-    } else {
-      // For only_anonymize mode
-      switch (anonymizationMethod) {
-        case 'replace':
-          anonymization_config = {
-            replacement: values.replace_text || `<${values.entity_type}>`,
-          }
-          break
-        case 'mask':
-          anonymization_config = {
-            mask_char: values.mask_char || '*',
-            keep_prefix: values.mask_keep_prefix ? parseInt(values.mask_keep_prefix) : 0,
-            keep_suffix: values.mask_keep_suffix ? parseInt(values.mask_keep_suffix) : 0,
-          }
-          break
-        case 'regex_replace':
-          anonymization_config = {
-            regex_pattern: values.regex_pattern || '',
-            replacement_template: values.regex_replacement || '***',
-            natural_language_desc: values.regex_natural_desc || '',
-          }
-          break
-        case 'genai':
-          anonymization_config = {
-            anonymization_prompt: values.genai_anonymization_prompt || '',
-          }
-          break
-        // hash, encrypt, shuffle, random - no configuration needed
-      }
+    switch (anonymizationMethod) {
+      case 'replace':
+        anonymization_config = {
+          replacement: values.replace_text || `<${values.entity_type}>`,
+        }
+        break
+      case 'mask':
+        anonymization_config = {
+          mask_char: values.mask_char || '*',
+          keep_prefix: values.mask_keep_prefix ? parseInt(values.mask_keep_prefix) : 0,
+          keep_suffix: values.mask_keep_suffix ? parseInt(values.mask_keep_suffix) : 0,
+        }
+        break
+      case 'regex_replace':
+        anonymization_config = {
+          regex_pattern: values.regex_pattern || '',
+          replacement_template: values.regex_replacement || '***',
+          natural_language_desc: values.regex_natural_desc || '',
+        }
+        break
+      case 'genai':
+      case 'genai_natural':
+        anonymization_config = {
+          anonymization_prompt: values.genai_anonymization_prompt || '',
+        }
+        break
+      case 'genai_code':
+        // genai_code uses separate fields (genai_code_desc), no config needed here
+        break
+      // hash, encrypt, shuffle, random - no configuration needed
     }
 
     const data: any = {
@@ -417,13 +412,13 @@ const EntityTypeManagement: React.FC = () => {
       entity_type_name: values.entity_type_name,
       category: values.risk_level,
       recognition_method: recognitionMethod,
-      anonymization_method: anonymizationMode === 'anonymize_restore' ? 'replace' : anonymizationMethod,
+      anonymization_method: anonymizationMethod,
       anonymization_config,
       check_input: values.check_input !== undefined ? values.check_input : true,
       check_output: values.check_output !== undefined ? values.check_output : true,
       is_active: values.is_active !== undefined ? values.is_active : true,
-      restore_enabled,
-      restore_natural_desc: values.restore_natural_desc || '',
+      genai_code_desc: values.genai_code_desc || '',
+      genai_code: anonymizationMethod === 'genai_code' ? generatedGenaiCode : null,
     }
 
     // Add pattern or entity_definition based on recognition method
@@ -521,6 +516,7 @@ const EntityTypeManagement: React.FC = () => {
         }
         break
       case 'genai':
+      case 'genai_natural':
         config = {
           anonymization_prompt: form.getValues('genai_anonymization_prompt'),
         }
@@ -672,90 +668,79 @@ const EntityTypeManagement: React.FC = () => {
     }
   }
 
-  // Generate restore anonymization code using AI
-  const handleGenerateRestoreCode = async () => {
-    if (!editingEntity) {
-      toast.error(t('entityType.saveFirstForRestoreCode'))
-      return
-    }
-
-    const naturalDesc = form.getValues('restore_natural_desc')
-    const testInput = form.getValues('restore_test_input')
+  // Generate genai_code anonymization code using AI
+  const handleGenerateGenaiCode = async () => {
+    const naturalDesc = form.getValues('genai_code_desc')
+    const testInput = form.getValues('genai_code_test_input')
 
     if (!naturalDesc) {
-      toast.error(t('entityType.pleaseEnterRestoreDescription'))
+      toast.error(t('entityType.pleaseEnterGenaiCodeDescription'))
       return
     }
 
-    setGeneratingRestoreCode(true)
+    setGeneratingGenaiCode(true)
+    setGenaiCodeTestResult(null)
     try {
-      const result = await dataSecurityApi.generateRestoreCode(editingEntity.id, {
+      const result = await dataSecurityApi.generateGenaiCode({
         natural_description: naturalDesc,
         sample_data: testInput || undefined,
       })
 
       if (result.success && result.code_generated) {
-        toast.success(result.message || t('entityType.generateRestoreCodeSuccess'))
-        // Update editingEntity with the generated code
-        if (result.restore_code) {
-          setEditingEntity({
-            ...editingEntity,
-            restore_code: result.restore_code,
-            has_restore_code: true,
-          })
+        toast.success(result.message || t('entityType.generateGenaiCodeSuccess'))
+        if (result.genai_code) {
+          setGeneratedGenaiCode(result.genai_code)
+          setShowGenaiCode(true)
         }
-        // Refresh entity list
-        loadEntityTypes()
       } else {
-        toast.error(result.error || result.message || t('entityType.generateRestoreCodeFailed'))
+        toast.error(result.error || result.message || t('entityType.generateGenaiCodeFailed'))
       }
     } catch (error) {
-      console.error('Generate restore code error:', error)
-      toast.error(t('entityType.generateRestoreCodeFailed'))
+      console.error('Generate genai code error:', error)
+      toast.error(t('entityType.generateGenaiCodeFailed'))
     } finally {
-      setGeneratingRestoreCode(false)
+      setGeneratingGenaiCode(false)
     }
   }
 
-  // Test restore anonymization
-  const handleTestRestoreAnonymization = async () => {
-    if (!editingEntity) {
-      toast.error(t('entityType.saveFirstForRestoreTest'))
-      return
-    }
-
-    const testInput = form.getValues('restore_test_input')
+  // Test genai_code anonymization
+  const handleTestGenaiCode = async () => {
+    const testInput = form.getValues('genai_code_test_input')
 
     if (!testInput) {
-      toast.error(t('entityType.pleaseEnterRestoreTestInput'))
+      toast.error(t('entityType.pleaseEnterGenaiCodeTestInput'))
       return
     }
 
-    setTestingRestoreAnonymization(true)
-    setRestoreTestResult(null)
+    if (!generatedGenaiCode) {
+      toast.error(t('entityType.pleaseGenerateCodeFirst'))
+      return
+    }
+
+    setTestingGenaiCode(true)
+    setGenaiCodeTestResult(null)
 
     try {
-      const result = await dataSecurityApi.testRestoreAnonymization(editingEntity.id, {
+      const result = await dataSecurityApi.testGenaiCode({
+        code: generatedGenaiCode,
         test_input: testInput,
       })
 
       if (result.success) {
-        setRestoreTestResult({
+        setGenaiCodeTestResult({
           anonymized_text: result.anonymized_text,
-          mapping: result.mapping,
         })
       } else {
-        setRestoreTestResult({
+        setGenaiCodeTestResult({
           anonymized_text: '',
-          mapping: {},
           error: result.error,
         })
       }
     } catch (error) {
-      console.error('Test restore anonymization error:', error)
-      toast.error(t('entityType.testRestoreAnonymizationFailed'))
+      console.error('Test genai code error:', error)
+      toast.error(t('entityType.testGenaiCodeFailed'))
     } finally {
-      setTestingRestoreAnonymization(false)
+      setTestingGenaiCode(false)
     }
   }
 
@@ -1326,43 +1311,8 @@ const EntityTypeManagement: React.FC = () => {
                   <h3 className="font-medium text-sm">{t('entityType.sectionAnonymization')}</h3>
                 </div>
 
-                {/* Anonymization Mode Selection (Select Dropdown) */}
-                <FormField
-                  control={form.control}
-                  name="anonymization_mode"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>{t('entityType.anonymizationModeLabel')}</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
-                        <FormControl>
-                          <SelectTrigger className="w-[280px]">
-                            <SelectValue placeholder={t('entityType.anonymizationModePlaceholder')} />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="only_anonymize">
-                            {t('entityType.onlyAnonymize')}
-                          </SelectItem>
-                          <SelectItem value="anonymize_restore">
-                            {t('entityType.anonymizeRestore')}
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
-                      {field.value && (
-                        <p className="text-xs text-gray-500 mt-1">
-                          {field.value === 'only_anonymize'
-                            ? t('entityType.onlyAnonymizeDesc')
-                            : t('entityType.anonymizeRestoreDesc')}
-                        </p>
-                      )}
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                {/* Only Anonymize Mode Configuration */}
-                {form.watch('anonymization_mode') === 'only_anonymize' && (
-                  <div className="space-y-4 p-4 border rounded-lg bg-purple-50/30">
+                {/* Anonymization Method Configuration */}
+                <div className="space-y-4 p-4 border rounded-lg bg-purple-50/30">
                     <FormField
                       control={form.control}
                       name="anonymization_method"
@@ -1474,8 +1424,8 @@ const EntityTypeManagement: React.FC = () => {
                       </div>
                     )}
 
-                    {/* genai anonymization configuration */}
-                    {form.watch('anonymization_method') === 'genai' && (
+                    {/* genai_natural anonymization configuration */}
+                    {form.watch('anonymization_method') === 'genai_natural' && (
                       <div className="space-y-4">
                         <FormField control={form.control} name="genai_anonymization_prompt" render={({ field }) => (
                           <FormItem>
@@ -1499,6 +1449,120 @@ const EntityTypeManagement: React.FC = () => {
                       </div>
                     )}
 
+                    {/* genai_code anonymization configuration */}
+                    {form.watch('anonymization_method') === 'genai_code' && (
+                      <div className="space-y-4">
+                        {/* Description */}
+                        <div className="flex items-start gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                          <Info className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
+                          <div className="text-sm text-blue-800">
+                            <p className="font-medium mb-1">{t('entityType.genaiCodeIntro')}</p>
+                            <p>{t('entityType.genaiCodeIntroDesc')}</p>
+                          </div>
+                        </div>
+
+                        <FormField
+                          control={form.control}
+                          name="genai_code_desc"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>{t('entityType.genaiCodeDesc')}</FormLabel>
+                              <FormControl>
+                                <Textarea {...field} rows={3} placeholder={t('entityType.genaiCodeDescPlaceholder')} />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={handleGenerateGenaiCode}
+                          disabled={generatingGenaiCode || !form.getValues('genai_code_desc')}
+                          className="w-full"
+                        >
+                          {generatingGenaiCode ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Wand2 className="h-4 w-4 mr-2" />}
+                          {t('entityType.generateGenaiCode')}
+                        </Button>
+
+                        {/* Generated code preview */}
+                        {generatedGenaiCode && (
+                          <div className="border rounded-lg overflow-hidden">
+                            <button
+                              type="button"
+                              onClick={() => setShowGenaiCode(!showGenaiCode)}
+                              className="w-full flex items-center justify-between p-3 bg-gray-50 hover:bg-gray-100 transition-colors"
+                            >
+                              <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                                <Code className="h-4 w-4" />
+                                {t('entityType.viewGeneratedCode')}
+                              </div>
+                              {showGenaiCode ? (
+                                <ChevronDown className="h-4 w-4 text-gray-500" />
+                              ) : (
+                                <ChevronRight className="h-4 w-4 text-gray-500" />
+                              )}
+                            </button>
+                            {showGenaiCode && (
+                              <div className="p-3 bg-gray-900 overflow-x-auto">
+                                <pre className="text-xs text-gray-100 font-mono whitespace-pre-wrap">
+                                  {generatedGenaiCode}
+                                </pre>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Test section */}
+                        {generatedGenaiCode && (
+                          <>
+                            <FormField
+                              control={form.control}
+                              name="genai_code_test_input"
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>{t('entityType.genaiCodeTestInput')}</FormLabel>
+                                  <div className="flex gap-2">
+                                    <FormControl>
+                                      <Input {...field} placeholder={t('entityType.genaiCodeTestInputPlaceholder')} />
+                                    </FormControl>
+                                    <Button type="button" variant="outline" onClick={handleTestGenaiCode} disabled={testingGenaiCode}>
+                                      {testingGenaiCode ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                                      <span className="ml-1">{t('entityType.test')}</span>
+                                    </Button>
+                                  </div>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+
+                            {genaiCodeTestResult && (
+                              <div className={`p-3 border rounded-lg ${genaiCodeTestResult.error ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'}`}>
+                                {genaiCodeTestResult.error ? (
+                                  <p className="text-sm text-red-700">{genaiCodeTestResult.error}</p>
+                                ) : (
+                                  <div>
+                                    <p className="text-sm font-medium text-green-700 mb-1">{t('entityType.genaiCodeAnonymizedResult')}</p>
+                                    <code className="text-sm bg-white/50 text-green-800 px-2 py-1 rounded block">{genaiCodeTestResult.anonymized_text}</code>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </>
+                        )}
+
+                        <Card className="bg-purple-50 border-purple-200">
+                          <CardContent className="p-3">
+                            <p className="text-xs font-semibold text-purple-900 mb-2">{t('entityType.genaiCodeExamplesTitle')}</p>
+                            <ul className="text-xs text-purple-800 space-y-1 list-none">
+                              <li>• {t('entityType.genaiCodeExample1')}</li>
+                            </ul>
+                          </CardContent>
+                        </Card>
+                      </div>
+                    )}
+
                     {/* hash/encrypt/shuffle/random - no config needed */}
                     {['hash', 'encrypt', 'shuffle', 'random'].includes(form.watch('anonymization_method') || '') && (
                       <p className="text-xs text-gray-500">
@@ -1509,7 +1573,7 @@ const EntityTypeManagement: React.FC = () => {
                     {/* Test anonymization */}
                     <div className="pt-4 border-t">
                       {/* Warning banner for AI-generated anonymization rules */}
-                      {['regex_replace', 'genai'].includes(form.watch('anonymization_method') || '') && (
+                      {['regex_replace', 'genai_natural'].includes(form.watch('anonymization_method') || '') && (
                         <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg mb-4">
                           <Info className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
                           <div className="text-sm space-y-1">
@@ -1550,156 +1614,7 @@ const EntityTypeManagement: React.FC = () => {
                       )}
                     </div>
                   </div>
-                )}
-
-                {/* Anonymize + Restore Mode Configuration */}
-                {form.watch('anonymization_mode') === 'anonymize_restore' && (
-                  <div className="space-y-4 p-4 border rounded-lg bg-amber-50/30">
-                    {/* Anonymization Method - Fixed to Numbered Placeholder (same visual style as only_anonymize mode) */}
-                    <FormItem>
-                      <FormLabel>{t('entityType.anonymizationMethodSelectLabel')}</FormLabel>
-                      <div className="flex items-center gap-2">
-                        <div className="w-[200px] h-9 px-3 py-2 border rounded-md bg-gray-100 text-sm text-gray-700 flex items-center">
-                          {t('entityType.numberedPlaceholder')}
-                        </div>
-                        <span className="text-xs text-gray-500">{t('entityType.numberedPlaceholderDesc')}</span>
-                      </div>
-                    </FormItem>
-
-                    <FormField
-                      control={form.control}
-                      name="restore_natural_desc"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>{t('entityType.restoreNaturalDesc')}</FormLabel>
-                          <FormControl>
-                            <Textarea {...field} rows={2} placeholder={t('entityType.restoreNaturalDescPlaceholder')} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={handleGenerateRestoreCode}
-                      disabled={generatingRestoreCode || !editingEntity}
-                      className="w-full"
-                    >
-                      {generatingRestoreCode ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Wand2 className="h-4 w-4 mr-2" />}
-                      {t('entityType.generateRestoreCode')}
-                    </Button>
-
-                    {!editingEntity && (
-                      <p className="text-xs text-amber-600 bg-amber-100 p-2 rounded">{t('entityType.saveFirstForRestoreCodeHint')}</p>
-                    )}
-
-                    {/* Warning banner for AI-generated restore code */}
-                    {editingEntity?.has_restore_code && (
-                      <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                        <Info className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
-                        <div className="text-sm space-y-1">
-                          <p className="font-medium text-amber-900">{t('entityType.testInputWarning')}</p>
-                          <p className="text-amber-800">{t('entityType.testInputHint')}</p>
-                          <ul className="text-amber-800 space-y-0.5 pl-4">
-                            <li>{t('entityType.testInputHintRegenerate')}</li>
-                            <li>{t('entityType.testInputHintManual')}</li>
-                          </ul>
-                        </div>
-                      </div>
-                    )}
-
-                    <FormField
-                      control={form.control}
-                      name="restore_test_input"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>{t('entityType.restoreTestInput')}</FormLabel>
-                          <div className="flex gap-2">
-                            <FormControl>
-                              <Input {...field} placeholder={t('entityType.restoreTestInputPlaceholder')} />
-                            </FormControl>
-                            <Button type="button" variant="outline" onClick={handleTestRestoreAnonymization} disabled={testingRestoreAnonymization || !editingEntity}>
-                              {testingRestoreAnonymization ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                              <span className="ml-1">{t('entityType.test')}</span>
-                            </Button>
-                          </div>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    {restoreTestResult && (
-                      <div className={`p-3 border rounded-lg ${restoreTestResult.error ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'}`}>
-                        {restoreTestResult.error ? (
-                          <p className="text-sm text-red-700">{restoreTestResult.error}</p>
-                        ) : (
-                          <div className="space-y-3">
-                            <div>
-                              <p className="text-sm font-medium text-green-700 mb-1">{t('entityType.restoreAnonymizedResult')}</p>
-                              <code className="text-sm bg-white/50 text-green-800 px-2 py-1 rounded block">{restoreTestResult.anonymized_text}</code>
-                            </div>
-                            {Object.keys(restoreTestResult.mapping).length > 0 && (
-                              <div>
-                                <p className="text-sm font-medium text-green-700 mb-1">{t('entityType.restoreMappingResult')}</p>
-                                <div className="bg-white/50 rounded p-2 space-y-1">
-                                  {Object.entries(restoreTestResult.mapping).map(([placeholder, original]) => (
-                                    <div key={placeholder} className="flex items-center text-xs">
-                                      <code className="bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">{placeholder}</code>
-                                      <span className="mx-2 text-gray-400">→</span>
-                                      <code className="bg-green-100 text-green-800 px-1.5 py-0.5 rounded">{original}</code>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Collapsible code preview */}
-                    {editingEntity?.restore_code && (
-                      <div className="border rounded-lg overflow-hidden">
-                        <button
-                          type="button"
-                          onClick={() => setShowRestoreCode(!showRestoreCode)}
-                          className="w-full flex items-center justify-between p-3 bg-gray-50 hover:bg-gray-100 transition-colors"
-                        >
-                          <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
-                            <Code className="h-4 w-4" />
-                            {t('entityType.viewGeneratedCode')}
-                          </div>
-                          {showRestoreCode ? (
-                            <ChevronDown className="h-4 w-4 text-gray-500" />
-                          ) : (
-                            <ChevronRight className="h-4 w-4 text-gray-500" />
-                          )}
-                        </button>
-                        {showRestoreCode && (
-                          <div className="p-3 bg-gray-900 overflow-x-auto">
-                            <pre className="text-xs text-gray-100 font-mono whitespace-pre-wrap">
-                              {editingEntity.restore_code}
-                            </pre>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    <Card className="bg-amber-50 border-amber-200">
-                      <CardContent className="p-3">
-                        <p className="text-xs font-semibold text-amber-900 mb-2">{t('entityType.restoreExamplesTitle')}</p>
-                        <ul className="text-xs text-amber-800 space-y-1 list-none">
-                          <li>• {t('entityType.restoreExampleEmail')}</li>
-                          <li>• {t('entityType.restoreExamplePhone')}</li>
-                          <li>• {t('entityType.restoreExampleName')}</li>
-                        </ul>
-                      </CardContent>
-                    </Card>
-                  </div>
-                )}
-              </div>
+                </div>
 
               {/* ========== Section 4: Other Settings ========== */}
               <div className="space-y-4">

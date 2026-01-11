@@ -141,20 +141,12 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           label: t('config.dataSecurity'),
         },
         {
-          key: '/config/blacklist',
-          label: t('config.blacklist'),
+          key: '/config/keyword-list',
+          label: t('config.keywordList'),
         },
         {
-          key: '/config/whitelist',
-          label: t('config.whitelist'),
-        },
-        {
-          key: '/config/responses',
-          label: t('config.template'),
-        },
-        {
-          key: '/config/knowledge-bases',
-          label: t('config.knowledge'),
+          key: '/config/answers',
+          label: t('config.answers'),
         },
         {
           key: '/config/sensitivity-thresholds',
