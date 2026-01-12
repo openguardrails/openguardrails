@@ -560,7 +560,13 @@
     "proxyAnswerTitle": "Proxy Answer Knowledge Base (Intelligent Response)",
     "proxyAnswerDesc": "When a risk is detected and the proxy answer knowledge base matches, the system uses the knowledge base content as reference context and calls the guardrail model to generate a safe, positive response.",
     "proxyAnswerNote": "How It Works",
-    "proxyAnswerNoteDesc": "When the knowledge base is matched, instead of returning KB content directly, it's used as reference context along with risk warnings, and the guardrail model generates a positive response that focuses on user well-being and adheres to laws and ethics."
+    "proxyAnswerNoteDesc": "When the knowledge base is matched, instead of returning KB content directly, it's used as reference context along with risk warnings, and the guardrail model generates a positive response that focuses on user well-being and adheres to laws and ethics.",
+    "editSecurityRiskTemplate": "Edit Security Risk Template",
+    "editDataLeakageTemplate": "Edit Data Leakage Template",
+    "templateContent": "Template Content",
+    "securityRiskPlaceholder": "Enter template... Use {scanner_name} as placeholder",
+    "dataLeakagePlaceholder": "Enter template... Use {entity_type_names} as placeholder",
+    "editLanguageHint": "You are editing the {{language}} version. To edit other languages, please switch the interface language first."
   },
   "template": {
     "title": "Answer Template Management",

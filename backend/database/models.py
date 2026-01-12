@@ -877,6 +877,39 @@ class ApplicationDataLeakagePolicy(Base):
     )
 
 
+class ApplicationSettings(Base):
+    """Application-level settings including fixed answer templates"""
+    __tablename__ = "application_settings"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    application_id = Column(UUID(as_uuid=True), ForeignKey("applications.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Fixed Answer Templates (stored as JSONB with language keys)
+    # Format: {"en": "English template", "zh": "中文模板"}
+    security_risk_template = Column(JSON, default={
+        "en": "Request blocked by OpenGuardrails due to possible violation of policy related to {scanner_name}.",
+        "zh": "请求已被OpenGuardrails拦截，原因：可能违反了与{scanner_name}有关的策略要求。"
+    })
+    data_leakage_template = Column(JSON, default={
+        "en": "Request blocked by OpenGuardrails due to possible sensitive data ({entity_type_names}).",
+        "zh": "请求已被OpenGuardrails拦截，原因：可能包含敏感数据（{entity_type_names}）。"
+    })
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    tenant = relationship("Tenant")
+    application = relationship("Application")
+
+    # Constraints
+    __table_args__ = (
+        UniqueConstraint('application_id', name='uq_application_settings_app'),
+    )
+
+
 class PackagePurchase(Base):
     """
     Package purchase tracking.

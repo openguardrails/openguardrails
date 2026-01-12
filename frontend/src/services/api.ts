@@ -953,4 +953,21 @@ export const gatewayPolicyApi = {
     }).then(res => res.data),
 };
 
+// Fixed Answer Templates API
+export const fixedAnswerTemplatesApi = {
+  // Get fixed answer templates for current application
+  get: (): Promise<{
+    security_risk_template: { en: string; zh: string };
+    data_leakage_template: { en: string; zh: string };
+  }> =>
+    api.get('/api/v1/config/fixed-answer-templates').then(res => res.data),
+
+  // Update fixed answer templates
+  update: (templates: {
+    security_risk_template?: { en?: string; zh?: string };
+    data_leakage_template?: { en?: string; zh?: string };
+  }): Promise<{ success: boolean; message: string }> =>
+    api.put('/api/v1/config/fixed-answer-templates', templates).then(res => res.data),
+};
+
 export default api;

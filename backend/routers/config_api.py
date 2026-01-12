@@ -7,7 +7,7 @@ from database.connection import get_admin_db
 from database.models import (
     Blacklist, Whitelist, ResponseTemplate, KnowledgeBase, Tenant,
     TenantKnowledgeBaseDisable, Application, Scanner, ScannerPackage, CustomScanner,
-    PackagePurchase
+    PackagePurchase, ApplicationSettings
 )
 from models.requests import BlacklistRequest, WhitelistRequest, ResponseTemplateRequest, KnowledgeBaseRequest
 from models.responses import (
@@ -1318,3 +1318,109 @@ async def get_system_info():
         "app_name": settings.app_name,
         "api_domain": settings.api_domain
     }
+
+
+# Fixed Answer Templates API
+# Default templates used when no custom templates are configured
+DEFAULT_TEMPLATES = {
+    "security_risk_template": {
+        "en": "Request blocked by OpenGuardrails due to possible violation of policy related to {scanner_name}.",
+        "zh": "请求已被OpenGuardrails拦截，原因：可能违反了与{scanner_name}有关的策略要求。"
+    },
+    "data_leakage_template": {
+        "en": "Request blocked by OpenGuardrails due to possible sensitive data ({entity_type_names}).",
+        "zh": "请求已被OpenGuardrails拦截，原因：可能包含敏感数据（{entity_type_names}）。"
+    }
+}
+
+
+@router.get("/config/fixed-answer-templates")
+async def get_fixed_answer_templates(
+    request: Request,
+    db: Session = Depends(get_admin_db)
+):
+    """Get fixed answer templates for the current application"""
+    try:
+        current_user, application_id = get_current_user_and_application_from_request(request, db)
+
+        # Find or create settings for this application
+        app_settings = db.query(ApplicationSettings).filter(
+            ApplicationSettings.application_id == application_id
+        ).first()
+
+        if app_settings:
+            return {
+                "security_risk_template": app_settings.security_risk_template or DEFAULT_TEMPLATES["security_risk_template"],
+                "data_leakage_template": app_settings.data_leakage_template or DEFAULT_TEMPLATES["data_leakage_template"]
+            }
+        else:
+            # Return defaults if no settings exist
+            return DEFAULT_TEMPLATES
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get fixed answer templates error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get fixed answer templates")
+
+
+@router.put("/config/fixed-answer-templates")
+async def update_fixed_answer_templates(
+    request: Request,
+    db: Session = Depends(get_admin_db)
+):
+    """Update fixed answer templates for the current application"""
+    try:
+        current_user, application_id = get_current_user_and_application_from_request(request, db)
+
+        # Parse request body
+        body = await request.json()
+
+        # Find or create settings for this application
+        app_settings = db.query(ApplicationSettings).filter(
+            ApplicationSettings.application_id == application_id
+        ).first()
+
+        if not app_settings:
+            # Create new settings record
+            app_settings = ApplicationSettings(
+                tenant_id=current_user.id,
+                application_id=application_id,
+                security_risk_template=DEFAULT_TEMPLATES["security_risk_template"],
+                data_leakage_template=DEFAULT_TEMPLATES["data_leakage_template"]
+            )
+            db.add(app_settings)
+
+        # Update templates if provided
+        if "security_risk_template" in body:
+            # Merge with existing template to preserve other languages
+            existing = app_settings.security_risk_template or DEFAULT_TEMPLATES["security_risk_template"]
+            if isinstance(existing, dict) and isinstance(body["security_risk_template"], dict):
+                existing.update(body["security_risk_template"])
+                app_settings.security_risk_template = existing
+            else:
+                app_settings.security_risk_template = body["security_risk_template"]
+
+        if "data_leakage_template" in body:
+            # Merge with existing template to preserve other languages
+            existing = app_settings.data_leakage_template or DEFAULT_TEMPLATES["data_leakage_template"]
+            if isinstance(existing, dict) and isinstance(body["data_leakage_template"], dict):
+                existing.update(body["data_leakage_template"])
+                app_settings.data_leakage_template = existing
+            else:
+                app_settings.data_leakage_template = body["data_leakage_template"]
+
+        db.commit()
+
+        # Invalidate enhanced template cache so new templates are used immediately
+        await enhanced_template_service.invalidate_cache()
+
+        logger.info(f"Fixed answer templates updated for application: {application_id}, user: {current_user.email}")
+        return ApiResponse(success=True, message="Fixed answer templates updated successfully")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Update fixed answer templates error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update fixed answer templates")

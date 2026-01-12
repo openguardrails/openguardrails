@@ -780,7 +780,7 @@ class DetectionGuardrailService:
             # Fallback to categories (codes) if no entity_type_name available
             if not entity_type_names:
                 entity_type_names = data_result.categories if data_result.categories else []
-            suggest_answer = await enhanced_template_service.get_data_leakage_answer(entity_type_names, user_language)
+            suggest_answer = await enhanced_template_service.get_data_leakage_answer(entity_type_names, user_language, application_id)
             logger.info(f"Using data leakage template for DLP risk: {data_result.risk_level}, entity_type_names={entity_type_names}")
 
         # Determine action based on general risk level (DLP handling is done in proxy layer)

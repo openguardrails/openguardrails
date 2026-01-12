@@ -556,7 +556,13 @@
     "proxyAnswerTitle": "代答知识库（智能回复）",
     "proxyAnswerDesc": "当检测到风险且代答知识库命中时，系统会将知识库内容作为参考上下文，调用护栏大模型生成安全、正向的回复。",
     "proxyAnswerNote": "工作原理",
-    "proxyAnswerNoteDesc": "代答知识库命中后，不会直接返回知识库内容，而是将其作为参考上下文，结合风险提示，让护栏模型生成一个关注用户健康、遵守法律道德的正向回复。"
+    "proxyAnswerNoteDesc": "代答知识库命中后，不会直接返回知识库内容，而是将其作为参考上下文，结合风险提示，让护栏模型生成一个关注用户健康、遵守法律道德的正向回复。",
+    "editSecurityRiskTemplate": "编辑安全风险模板",
+    "editDataLeakageTemplate": "编辑数据泄漏模板",
+    "templateContent": "模板内容",
+    "securityRiskPlaceholder": "请输入模板内容... 使用 {scanner_name} 作为占位符",
+    "dataLeakagePlaceholder": "请输入模板内容... 使用 {entity_type_names} 作为占位符",
+    "editLanguageHint": "您正在编辑{{language}}版本。如需编辑其他语言版本，请先切换界面语言。"
   },
   "template": {
     "title": "代答模板管理",

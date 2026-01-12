@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Plus, Edit2, Trash2, RefreshCw, Crown, Lock, ChevronDown } from 'lucide-react'
+import { Plus, Edit2, Trash2, RefreshCw, Crown, Lock, ChevronDown, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { customScannersApi } from '../../services/api'
 import { useApplication } from '../../contexts/ApplicationContext'
@@ -44,6 +44,8 @@ interface CustomScanner {
   is_enabled?: boolean
 }
 
+const PREMIUM_BANNER_DISMISSED_KEY = 'customScanners.premiumBannerDismissed'
+
 const CustomScannersManagement: React.FC = () => {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -56,6 +58,14 @@ const CustomScannersManagement: React.FC = () => {
   const [isSubscribed, setIsSubscribed] = useState<boolean | null>(null)
   const [subscriptionLoading, setSubscriptionLoading] = useState(true)
   const [guideOpen, setGuideOpen] = useState(false)
+  const [premiumBannerDismissed, setPremiumBannerDismissed] = useState(() => {
+    return localStorage.getItem(PREMIUM_BANNER_DISMISSED_KEY) === 'true'
+  })
+
+  const handleDismissPremiumBanner = () => {
+    localStorage.setItem(PREMIUM_BANNER_DISMISSED_KEY, 'true')
+    setPremiumBannerDismissed(true)
+  }
 
   useEffect(() => {
     // In enterprise mode, all features are available
@@ -426,13 +436,20 @@ const CustomScannersManagement: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      {features.showSubscription() && (
-        <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
-          <div className="flex items-center gap-2 text-green-900 font-semibold mb-1">
+      {features.showSubscription() && !premiumBannerDismissed && (
+        <div className="p-4 bg-green-50 border border-green-200 rounded-lg relative">
+          <button
+            onClick={handleDismissPremiumBanner}
+            className="absolute top-2 right-2 p-1 text-green-600 hover:text-green-800 hover:bg-green-100 rounded"
+            title={t('common.close')}
+          >
+            <X className="h-4 w-4" />
+          </button>
+          <div className="flex items-center gap-2 text-green-900 font-semibold mb-1 pr-6">
             <Crown className="h-5 w-5 text-yellow-500" />
             <span>{t('customScanners.premiumActiveMessage')}</span>
           </div>
-          <p className="text-sm text-green-800">{t('customScanners.premiumActiveDesc')}</p>
+          <p className="text-sm text-green-800 pr-6">{t('customScanners.premiumActiveDesc')}</p>
         </div>
       )}
 

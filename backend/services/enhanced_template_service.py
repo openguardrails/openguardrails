@@ -22,12 +22,24 @@ import asyncio
 from typing import Dict, Optional, List
 from sqlalchemy.orm import Session
 
-from database.models import KnowledgeBase, TenantKnowledgeBaseDisable
+from database.models import KnowledgeBase, TenantKnowledgeBaseDisable, ApplicationSettings
 from database.connection import get_db_session
 from services.knowledge_base_service import knowledge_base_service
 from services.proxy_answer_service import proxy_answer_service
 from utils.logger import setup_logger
 from utils.i18n_loader import get_translation
+
+# Default templates (same as in config_api.py)
+DEFAULT_TEMPLATES = {
+    "security_risk_template": {
+        "en": "Request blocked by OpenGuardrails due to possible violation of policy related to {scanner_name}.",
+        "zh": "请求已被OpenGuardrails拦截，原因：可能违反了与{scanner_name}有关的策略要求。"
+    },
+    "data_leakage_template": {
+        "en": "Request blocked by OpenGuardrails due to possible sensitive data ({entity_type_names}).",
+        "zh": "请求已被OpenGuardrails拦截，原因：可能包含敏感数据（{entity_type_names}）。"
+    }
+}
 
 logger = setup_logger()
 
@@ -42,6 +54,8 @@ class EnhancedTemplateService:
         self._global_knowledge_base_cache: Dict[str, List[int]] = {}
         # Tenant disabled KB cache: {tenant_id: set(kb_ids)}
         self._tenant_disabled_kb_cache: Dict[str, set] = {}
+        # Application settings cache: {application_id: ApplicationSettings}
+        self._application_settings_cache: Dict[str, dict] = {}
         self._cache_timestamp = 0
         self._cache_ttl = cache_ttl
         self._lock = asyncio.Lock()
@@ -109,7 +123,7 @@ class EnhancedTemplateService:
                 logger.error(f"Proxy answer generation failed: {e}", exc_info=True)
 
         # Fallback to fixed answer (据答)
-        return self._get_fixed_answer(scanner_name, lang)
+        return self._get_fixed_answer(scanner_name, lang, application_id)
 
     async def _search_and_generate_proxy_answer(
         self,
@@ -276,27 +290,31 @@ class EnhancedTemplateService:
         }
         return category_mapping.get(category)
 
-    def _get_fixed_answer(self, scanner_name: str, language: str) -> str:
+    def _get_fixed_answer(self, scanner_name: str, language: str, application_id: Optional[str] = None) -> str:
         """
-        Get fixed answer (据答) using generic template.
+        Get fixed answer (据答) using user-configured or default template.
 
         Args:
             scanner_name: Human-readable scanner name
             language: User's preferred language
+            application_id: Application ID for user-configured templates
 
         Returns:
             Fixed answer with scanner_name filled in
         """
-        try:
-            template = get_translation(language, 'guardrail', 'responseTemplates', 'securityRisk')
-        except KeyError:
-            try:
-                template = get_translation(language, 'guardrail', 'responseTemplates', 'default')
-            except KeyError:
-                if language == 'zh':
-                    template = "请求已被OpenGuardrails拦截，原因：可能违反了与{scanner_name}有关的策略要求。"
-                else:
-                    template = "Request blocked by OpenGuardrails due to possible violation of policy related to {scanner_name}."
+        template = None
+
+        # First, try to get user-configured template from cache
+        if application_id:
+            app_settings = self._application_settings_cache.get(str(application_id))
+            if app_settings and app_settings.get('security_risk_template'):
+                template_dict = app_settings['security_risk_template']
+                if isinstance(template_dict, dict):
+                    template = template_dict.get(language) or template_dict.get('en')
+
+        # Fallback to default template
+        if not template:
+            template = DEFAULT_TEMPLATES["security_risk_template"].get(language) or DEFAULT_TEMPLATES["security_risk_template"]["en"]
 
         if '{scanner_name}' in template:
             return template.replace('{scanner_name}', scanner_name)
@@ -305,27 +323,35 @@ class EnhancedTemplateService:
     async def get_data_leakage_answer(
         self,
         entity_types: List[str],
-        user_language: Optional[str] = None
+        user_language: Optional[str] = None,
+        application_id: Optional[str] = None
     ) -> str:
         """
-        Get suggested answer for data leakage risk using generic template.
+        Get suggested answer for data leakage risk using user-configured or default template.
 
         Args:
             entity_types: List of detected entity type names
             user_language: User's preferred language
+            application_id: Application ID for user-configured templates
 
         Returns:
             Answer with entity types filled in
         """
+        await self._ensure_cache_fresh()
         lang = user_language or 'en'
+        template = None
 
-        try:
-            template = get_translation(lang, 'guardrail', 'responseTemplates', 'dataLeakageRisk')
-        except KeyError:
-            if lang == 'zh':
-                template = "请求已被OpenGuardrails拦截，原因：可能包含敏感数据（{entity_type_names}）。"
-            else:
-                template = "Request blocked by OpenGuardrails due to possible sensitive data ({entity_type_names})."
+        # First, try to get user-configured template from cache
+        if application_id:
+            app_settings = self._application_settings_cache.get(str(application_id))
+            if app_settings and app_settings.get('data_leakage_template'):
+                template_dict = app_settings['data_leakage_template']
+                if isinstance(template_dict, dict):
+                    template = template_dict.get(lang) or template_dict.get('en')
+
+        # Fallback to default template
+        if not template:
+            template = DEFAULT_TEMPLATES["data_leakage_template"].get(lang) or DEFAULT_TEMPLATES["data_leakage_template"]["en"]
 
         # Format entity type names list
         if entity_types:
@@ -397,13 +423,25 @@ class EnhancedTemplateService:
 
                 self._tenant_disabled_kb_cache = tenant_disabled_kb_cache
                 self._knowledge_base_cache = new_kb_cache
+
+                # Load application settings (fixed answer templates)
+                application_settings_cache: Dict[str, dict] = {}
+                app_settings_records = db.query(ApplicationSettings).all()
+                for settings in app_settings_records:
+                    app_key = str(settings.application_id)
+                    application_settings_cache[app_key] = {
+                        'security_risk_template': settings.security_risk_template,
+                        'data_leakage_template': settings.data_leakage_template
+                    }
+                self._application_settings_cache = application_settings_cache
+
                 self._cache_timestamp = time.time()
 
                 kb_count = sum(
                     sum(len(kb_ids) for kb_ids in app_kbs.values())
                     for app_kbs in new_kb_cache.values()
                 )
-                logger.debug(f"KB cache refreshed: {kb_count} knowledge bases")
+                logger.debug(f"KB cache refreshed: {kb_count} knowledge bases, {len(application_settings_cache)} app settings")
 
             finally:
                 db.close()
@@ -427,6 +465,7 @@ class EnhancedTemplateService:
 
         return {
             "applications": len(self._knowledge_base_cache),
+            "application_settings": len(self._application_settings_cache),
             "templates": 0,  # Not used in new design
             "knowledge_bases": kb_count,
             "global_knowledge_bases": global_kb_count,

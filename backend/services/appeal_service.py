@@ -33,18 +33,49 @@ def compute_content_hash(content: str) -> str:
     return hashlib.sha256(content.encode('utf-8')).hexdigest()
 
 # AI Review Prompts
-APPEAL_REVIEW_SYSTEM_PROMPT = """You are a content review supervisor. Your task is to determine if the content marked by the guardrails system is a false positive.
+def _get_appeal_review_system_prompt(language: str) -> str:
+    """Get AI review system prompt with specified language for reasoning output"""
+    language_names = {
+        'zh': 'Chinese',
+        'en': 'English',
+        'ja': 'Japanese',
+        'ko': 'Korean',
+        'es': 'Spanish',
+        'fr': 'French',
+        'de': 'German',
+        'ru': 'Russian',
+        'ar': 'Arabic',
+        'pt': 'Portuguese',
+        'it': 'Italian',
+        'nl': 'Dutch',
+        'pl': 'Polish',
+        'tr': 'Turkish',
+        'vi': 'Vietnamese',
+        'th': 'Thai',
+        'id': 'Indonesian',
+        'ms': 'Malay',
+        'hi': 'Hindi',
+        'bn': 'Bengali',
+    }
+    # Default to English if language not found
+    reasoning_language = language_names.get(language, language)
+
+    return f"""You are a content review supervisor. Your task is to determine if the content marked by the guardrails system is a false positive.
+
+Your principles:
+1. Being safe and supporting human oversight of AI
+2. Behaving ethically and not acting in ways that are harmful or dishonest
 
 Review principles:
 1. Consider if the content may be misjudged by the detection system (e.g., discussion of historical events, academic discussions, literary citations, etc.)
 2. Check if the user has a pattern of malicious behavior (combined with the user's recent requests and ban history)
 3. Consider context - sometimes harmless content may trigger detection due to specific keywords
 4. Be cautious but fair - false positives should be approved
-5. If the content is actually违规，even if the user appeals, it should be rejected
+5. If the content is actually risky, even if the user appeals, it should be rejected
 
 You must reply strictly in the following format:
 DECISION: [APPROVED/REJECTED]
-REASONING: [Detailed explanation of the reason, in Chinese]"""
+REASONING: [Detailed explanation of the reason, in {reasoning_language}]"""
 
 APPEAL_REVIEW_USER_PROMPT = """Please review the false positive appeal for the following content:
 
@@ -329,7 +360,8 @@ class AppealService:
                     categories=original_categories,
                     risk_level=overall_risk,
                     suggest_action=detection.suggest_action,
-                    user_context=user_context
+                    user_context=user_context,
+                    language=language
                 )
             except Exception as e:
                 logger.error(f"AI review failed: {e}")
@@ -515,7 +547,8 @@ class AppealService:
         categories: List[str],
         risk_level: str,
         suggest_action: str,
-        user_context: dict
+        user_context: dict,
+        language: str = 'zh'
     ) -> Tuple[bool, str]:
         """
         Use AI model to review the appeal
@@ -562,7 +595,7 @@ class AppealService:
         )
 
         messages = [
-            {"role": "system", "content": APPEAL_REVIEW_SYSTEM_PROMPT},
+            {"role": "system", "content": _get_appeal_review_system_prompt(language)},
             {"role": "user", "content": user_prompt}
         ]
 
