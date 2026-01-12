@@ -2317,6 +2317,7 @@
     "keyToggleSuccess": "API密钥状态更新成功",
     "keyToggleError": "更新API密钥状态失败",
     "copiedToClipboard": "已复制到剪贴板",
+    "copyToClipboardFailed": "复制到剪贴板失败",
     "keyNamePlaceholder": "请输入密钥名称（可选）",
     "fetchKeysError": "获取API密钥列表失败",
     "protectionSummary": "防护配置",

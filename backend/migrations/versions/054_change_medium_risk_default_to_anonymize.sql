@@ -23,14 +23,4 @@ SET default_input_medium_risk_action = 'anonymize',
     updated_at = CURRENT_TIMESTAMP
 WHERE default_input_medium_risk_action IN ('switch_private_model', 'switch_safe_model');
 
--- ============================================================================
--- Step 3: Log migration
--- ============================================================================
-
-INSERT INTO schema_migrations (version, description, success, executed_at)
-VALUES ('054', 'Change medium risk default action to anonymize', TRUE, CURRENT_TIMESTAMP)
-ON CONFLICT (version) DO UPDATE SET
-    success = TRUE,
-    executed_at = CURRENT_TIMESTAMP;
-
 COMMIT;

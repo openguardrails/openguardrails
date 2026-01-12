@@ -2320,6 +2320,7 @@
     "keyToggleSuccess": "API key status updated successfully",
     "keyToggleError": "Failed to update API key status",
     "copiedToClipboard": "Copied to clipboard",
+    "copyToClipboardFailed": "Failed to copy to clipboard",
     "keyNamePlaceholder": "Enter key name (optional)",
     "fetchKeysError": "Failed to fetch API keys",
     "protectionSummary": "Protection Configuration",
