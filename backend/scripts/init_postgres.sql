@@ -184,7 +184,7 @@ CREATE TABLE IF NOT EXISTS data_security_entity_types (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE,
     entity_type VARCHAR(100) NOT NULL,
-    display_name VARCHAR(200) NOT NULL,
+    entity_type_name VARCHAR(200) NOT NULL,
     category VARCHAR(50) NOT NULL,
     recognition_method VARCHAR(20) NOT NULL,
     recognition_config JSONB NOT NULL,

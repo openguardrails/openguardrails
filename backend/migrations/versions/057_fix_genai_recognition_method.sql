@@ -1,6 +1,6 @@
 -- Migration: Fix recognition_method for genai entity types
--- Version: 029
--- Date: 2026-01-04
+-- Version: 057
+-- Date: 2026-01-04 (renumbered from 029 to fix duplicate version)
 -- Description: Correct recognition_method from 'regex' to 'genai' for entities that have:
 --              1. anonymization_method = 'genai', OR
 --              2. entity_definition in recognition_config but no pattern
@@ -18,7 +18,7 @@ BEGIN
 
     -- Fix entities where anonymization_method is 'genai' but recognition_method is 'regex'
     FOR entity_record IN
-        SELECT id, entity_type, display_name, recognition_method, anonymization_method, recognition_config
+        SELECT id, entity_type, entity_type_name, recognition_method, anonymization_method, recognition_config
         FROM data_security_entity_types
         WHERE recognition_method = 'regex'
           AND anonymization_method = 'genai'
@@ -31,7 +31,7 @@ BEGIN
 
         fixed_count := fixed_count + 1;
         RAISE NOTICE 'Fixed entity: % (%) - changed recognition_method from regex to genai',
-            entity_record.entity_type, entity_record.display_name;
+            entity_record.entity_type, entity_record.entity_type_name;
     END LOOP;
 
     RAISE NOTICE 'Fixed % entities with mismatched recognition_method', fixed_count;
@@ -52,7 +52,7 @@ BEGIN
 
     -- Fix entities where recognition_config has entity_definition but recognition_method is 'regex'
     FOR entity_record IN
-        SELECT id, entity_type, display_name, recognition_method, recognition_config
+        SELECT id, entity_type, entity_type_name, recognition_method, recognition_config
         FROM data_security_entity_types
         WHERE recognition_method = 'regex'
           AND recognition_config IS NOT NULL
@@ -74,7 +74,7 @@ BEGIN
 
             fixed_count := fixed_count + 1;
             RAISE NOTICE 'Fixed entity: % (%) - changed to genai based on entity_definition',
-                entity_record.entity_type, entity_record.display_name;
+                entity_record.entity_type, entity_record.entity_type_name;
         END IF;
     END LOOP;
 
@@ -100,7 +100,7 @@ BEGIN
     FROM data_security_entity_types
     WHERE recognition_method = 'regex' AND anonymization_method = 'genai';
 
-    RAISE NOTICE '=== Migration 029 Complete ===';
+    RAISE NOTICE '=== Migration 057 Complete ===';
     RAISE NOTICE 'Total genai entities: %', genai_count;
     RAISE NOTICE 'Remaining mismatches: %', mismatched_count;
 

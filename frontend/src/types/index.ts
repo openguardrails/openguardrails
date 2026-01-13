@@ -179,7 +179,7 @@ export interface SimilarQuestionResult {
 export interface DataSecurityEntityType {
   id: string;
   entity_type: string;
-  display_name: string;
+  entity_type_name: string;
   risk_level: string;  // Low, medium, high
   pattern: string;
   anonymization_method: string;

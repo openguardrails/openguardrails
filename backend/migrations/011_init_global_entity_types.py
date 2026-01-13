@@ -71,15 +71,15 @@ def upgrade():
 
             # Step 4: Verify creation
             result = conn.execute(text("""
-                SELECT entity_type, display_name, category
+                SELECT entity_type, entity_type_name, category
                 FROM data_security_entity_types
                 WHERE is_global = true
             """))
             global_types = result.fetchall()
 
             logger.info(f"Verification: Found {len(global_types)} global entity types:")
-            for entity_type, display_name, category in global_types:
-                logger.info(f"  - {entity_type}: {display_name} (risk: {category})")
+            for entity_type, entity_type_name, category in global_types:
+                logger.info(f"  - {entity_type}: {entity_type_name} (risk: {category})")
 
             conn.commit()
             logger.info("Migration 011 completed successfully!")

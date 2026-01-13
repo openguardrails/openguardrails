@@ -1,6 +1,6 @@
 -- Migration: Fix application_id constraint for global system templates in data_security_entity_types
--- Version: 028
--- Date: 2025-11-19
+-- Version: 056
+-- Date: 2025-11-19 (renumbered from 028 to fix duplicate version)
 -- Description: Allow NULL application_id for global system templates (source_type='system_template')
 --              This fixes the constraint violation that prevents creation of global entity types
 
@@ -70,7 +70,7 @@ BEGIN
         tenant_id,
         application_id,  -- NULL for global templates
         entity_type,
-        display_name,
+        entity_type_name,
         category,
         recognition_method,
         recognition_config,
@@ -110,7 +110,7 @@ BEGIN
         tenant_id,
         application_id,  -- NULL for global templates
         entity_type,
-        display_name,
+        entity_type_name,
         category,
         recognition_method,
         recognition_config,
@@ -149,7 +149,7 @@ BEGIN
         tenant_id,
         application_id,  -- NULL for global templates
         entity_type,
-        display_name,
+        entity_type_name,
         category,
         recognition_method,
         recognition_config,
@@ -188,7 +188,7 @@ BEGIN
         tenant_id,
         application_id,  -- NULL for global templates
         entity_type,
-        display_name,
+        entity_type_name,
         category,
         recognition_method,
         recognition_config,
@@ -243,7 +243,7 @@ BEGIN
     FROM data_security_entity_types
     WHERE is_global = true;
 
-    RAISE NOTICE '=== Migration 028 Complete ===';
+    RAISE NOTICE '=== Migration 056 Complete ===';
     RAISE NOTICE 'System templates: %', template_count;
     RAISE NOTICE 'Global entity types: %', global_count;
     RAISE NOTICE 'application_id constraint now allows NULL for global templates';

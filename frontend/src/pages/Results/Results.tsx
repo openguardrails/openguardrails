@@ -688,7 +688,7 @@ const Results: React.FC = () => {
                     .filter((et) => et.is_active)
                     .map((et) => (
                       <SelectItem key={et.entity_type} value={et.entity_type}>
-                        {et.display_name || et.entity_type}
+                        {et.entity_type_name || et.entity_type}
                       </SelectItem>
                     ))}
                 </SelectContent>
