@@ -450,8 +450,29 @@ class EnhancedTemplateService:
             logger.error(f"Failed to refresh KB cache: {e}", exc_info=True)
 
     async def invalidate_cache(self):
-        """Invalidate cache"""
+        """Invalidate cache and force immediate refresh of application settings"""
         async with self._lock:
+            # Immediately refresh application settings cache (fixed answer templates)
+            # so user-configured templates take effect immediately
+            try:
+                db = get_db_session()
+                try:
+                    application_settings_cache: Dict[str, dict] = {}
+                    app_settings_records = db.query(ApplicationSettings).all()
+                    for settings in app_settings_records:
+                        app_key = str(settings.application_id)
+                        application_settings_cache[app_key] = {
+                            'security_risk_template': settings.security_risk_template,
+                            'data_leakage_template': settings.data_leakage_template
+                        }
+                    self._application_settings_cache = application_settings_cache
+                    logger.info(f"Application settings cache refreshed: {len(application_settings_cache)} settings")
+                finally:
+                    db.close()
+            except Exception as e:
+                logger.error(f"Failed to refresh application settings cache: {e}", exc_info=True)
+
+            # Mark other caches as stale (will refresh on next access)
             self._cache_timestamp = 0
             logger.info("Enhanced template cache invalidated")
 

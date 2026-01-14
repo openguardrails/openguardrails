@@ -179,9 +179,17 @@ async def check_input_guardrails(
         # Get user context
         auth_context = getattr(request.state, 'auth_context', None)
         tenant_id = None
+        application_id = None
         if auth_context:
             tenant_id = str(auth_context['data'].get('tenant_id'))
-        
+            application_id = auth_context['data'].get('application_id')
+
+        # Also check for X-Application-ID header (for frontend/online test)
+        header_app_id = request.headers.get('x-application-id') or request.headers.get('X-Application-ID')
+        if header_app_id:
+            application_id = header_app_id
+            logger.info(f"Using application_id from header: {application_id}")
+
         if not tenant_id:
             raise HTTPException(status_code=401, detail="User ID not found in auth context")
 
@@ -213,13 +221,14 @@ async def check_input_guardrails(
             guardrail_request,
             ip_address=ip_address,
             user_agent=user_agent,
-            tenant_id=tenant_id
+            tenant_id=tenant_id,
+            application_id=application_id
         )
 
         logger.info(f"Input detection completed: {result.id}, action: {result.suggest_action}")
 
         return result
-        
+
     except Exception as e:
         logger.error(f"Input detection API error: {e}")
         raise HTTPException(status_code=500, detail="Detection service error")
@@ -238,23 +247,31 @@ async def check_output_guardrails(
             Message(role="user", content=request_data.input),
             Message(role="assistant", content=request_data.output)
         ]
-        
+
         # Construct standard GuardrailRequest
         guardrail_request = GuardrailRequest(
             model="OpenGuardrails-Text",
             messages=messages
         )
-        
+
         # Get client information
         ip_address = request.client.host if request.client else None
         user_agent = request.headers.get("user-agent")
-        
+
         # Get user context
         auth_context = getattr(request.state, 'auth_context', None)
         tenant_id = None
+        application_id = None
         if auth_context:
             tenant_id = str(auth_context['data'].get('tenant_id'))
-        
+            application_id = auth_context['data'].get('application_id')
+
+        # Also check for X-Application-ID header (for frontend/online test)
+        header_app_id = request.headers.get('x-application-id') or request.headers.get('X-Application-ID')
+        if header_app_id:
+            application_id = header_app_id
+            logger.info(f"Using application_id from header: {application_id}")
+
         if not tenant_id:
             raise HTTPException(status_code=401, detail="User ID not found in auth context")
 
@@ -280,15 +297,16 @@ async def check_output_guardrails(
 
         # Create detection service (no database connection)
         guardrail_service = DetectionGuardrailService()
-        
+
         # Execute detection (only write log file)
         result = await guardrail_service.check_guardrails(
-            guardrail_request, 
+            guardrail_request,
             ip_address=ip_address,
             user_agent=user_agent,
-            tenant_id=tenant_id
+            tenant_id=tenant_id,
+            application_id=application_id
         )
-        
+
         logger.info(f"Output detection completed: {result.id}, action: {result.suggest_action}")
         
         return result

@@ -869,6 +869,42 @@ pluginConfig:
   log_level: "debug"
 ```
 
+## LiteLLM Native Guardrail Integration
+
+For LiteLLM users, we provide a **native guardrail plugin** that integrates directly with LiteLLM's guardrail system. This is the recommended approach for LiteLLM deployments.
+
+### Quick Start
+
+1. The OpenGuardrails guardrail is included in `thirdparty-gateways/litellm/` directory
+2. Add to your LiteLLM `config.yaml`:
+
+```yaml
+guardrails:
+  - guardrail_name: "openguardrails"
+    litellm_params:
+      guardrail: openguardrails
+      mode: [pre_call, post_call]  # Full protection
+      api_key: os.environ/OPENGUARDRAILS_API_KEY
+      api_base: http://localhost:5001
+      default_on: true
+```
+
+3. Set environment variable:
+```bash
+export OPENGUARDRAILS_API_KEY="sk-xxai-your-key"
+```
+
+### Features
+
+- **Pre-call hook**: Input detection, anonymization, model switching
+- **Post-call hook**: Output detection, data restoration
+- **Automatic discovery**: Plugin auto-registers with LiteLLM's guardrail system
+- **Full API support**: Block, replace, anonymize, switch_private_model, pass
+
+### Documentation
+
+See `thirdparty-gateways/litellm/litellm/proxy/guardrails/guardrail_hooks/openguardrails/README.md` for full documentation.
+
 ## Roadmap
 
 ### Gateway Support (Priority Order)
@@ -876,7 +912,7 @@ pluginConfig:
 | Priority | Gateway | Status | Description |
 |----------|---------|--------|-------------|
 | 1 | **Higress** | 🚧 In Progress | Rust WASM plugin, first-class support |
-| 2 | **LiteLLM** | 📋 Planned | Python middleware integration |
+| 2 | **LiteLLM** | ✅ Complete | Native guardrail plugin |
 | 3 | **Kong** | 📋 Planned | Lua/Go plugin |
 | 4 | **APISIX** | 📋 Planned | Lua plugin |
 | 5 | **Envoy** | 📋 Planned | WASM or ext_proc filter |
@@ -891,6 +927,6 @@ pluginConfig:
 
 ---
 
-**Last Updated**: 2025-01-09
+**Last Updated**: 2026-01-12
 
 **Contact**: thomas@openguardrails.com
