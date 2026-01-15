@@ -21,6 +21,7 @@ from database.connection import get_db
 from sqlalchemy.orm import Session
 from services.gateway_integration_service import get_gateway_integration_service
 from utils.logger import setup_logger
+from utils.bypass_token import verify_bypass_token, BYPASS_TOKEN_HEADER
 
 router = APIRouter(prefix="/v1/gateway", tags=["Gateway Integration"])
 logger = setup_logger()
@@ -113,6 +114,25 @@ async def process_input(
     - **pass**: Forward request as-is
     """
     start_time = time.time()
+
+    # Check for bypass token (skip detection for private model requests)
+    bypass_token = request.headers.get(BYPASS_TOKEN_HEADER)
+    if bypass_token:
+        is_valid, token_tenant_id, token_request_id = verify_bypass_token(bypass_token)
+        if is_valid:
+            logger.info(f"Bypass token valid: tenant={token_tenant_id}, request={token_request_id}, skipping detection")
+            return JSONResponse(content={
+                "action": "pass",
+                "request_id": f"bypass-{token_request_id}",
+                "detection_result": {
+                    "bypassed": True,
+                    "original_request_id": token_request_id,
+                    "overall_risk_level": "no_risk"
+                },
+                "processing_time_ms": round((time.time() - start_time) * 1000, 2)
+            })
+        else:
+            logger.warning(f"Invalid bypass token received, proceeding with normal detection")
 
     # Get tenant_id and application_id from API key
     auth_info = get_auth_info_from_request(request)

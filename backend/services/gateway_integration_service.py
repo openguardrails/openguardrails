@@ -31,6 +31,7 @@ from database.models import (
 from database.connection import get_db_session
 from utils.logger import setup_logger
 from utils.i18n_loader import get_translation
+from utils.bypass_token import generate_bypass_token, BYPASS_TOKEN_HEADER
 
 logger = setup_logger()
 
@@ -243,24 +244,19 @@ class GatewayIntegrationService:
                     )
 
                     if private_model:
-                        # Proxy request to private model and return response directly
-                        proxy_result = await self._proxy_to_private_model(
+                        # Return switch_private_model action for gateway plugin to handle
+                        # This approach supports streaming output and normal output detection flow
+                        # The plugin will:
+                        # 1. Switch upstream to private model (via headers/cluster)
+                        # 2. Add bypass token to skip detection on private model request
+                        # 3. Handle the response normally (streaming + output detection)
+                        logger.info(f"[{request_id}] Returning switch_private_model action for gateway to handle")
+                        return self._create_switch_model_response(
                             request_id=request_id,
                             private_model=private_model,
-                            messages=messages,
-                            stream=stream,
-                            original_request_body=None  # Will be reconstructed from messages
+                            detection_result=result_info,
+                            tenant_id=tenant_id
                         )
-                        if proxy_result:
-                            return proxy_result
-                        else:
-                            # Fallback: return switch_private_model for gateway to handle
-                            logger.warning(f"[{request_id}] Private model proxy failed, returning switch action")
-                            return self._create_switch_model_response(
-                                request_id=request_id,
-                                private_model=private_model,
-                                detection_result=result_info
-                            )
                     else:
                         # No private model available, fallback to block
                         logger.warning(f"[{request_id}] No private model available, falling back to block")
@@ -699,6 +695,7 @@ class GatewayIntegrationService:
         request_id: str,
         private_model: UpstreamApiConfig,
         messages: List[Dict[str, Any]],
+        tenant_id: str,
         stream: bool = False,
         original_request_body: Optional[Dict[str, Any]] = None
     ) -> Optional[Dict[str, Any]]:
@@ -707,6 +704,9 @@ class GatewayIntegrationService:
 
         This allows OG to directly forward requests to private models
         instead of returning switch_private_model action for gateway to handle.
+
+        When the private model is also protected by OG, a bypass token is added
+        to the request headers to skip duplicate detection.
 
         Returns:
             Dict with action='proxy_response' and the model's response,
@@ -774,6 +774,11 @@ class GatewayIntegrationService:
             if decrypted_key:
                 headers["Authorization"] = f"Bearer {decrypted_key}"
 
+            # Add bypass token to skip duplicate detection when private model is also OG-protected
+            bypass_token = generate_bypass_token(tenant_id, request_id)
+            headers[BYPASS_TOKEN_HEADER] = bypass_token
+            logger.info(f"[{request_id}] Added bypass token for private model request")
+
             logger.info(f"[{request_id}] Proxying to private model: url={api_url}, model={model_name}")
 
             # Send request to private model (non-streaming only for now)
@@ -825,9 +830,10 @@ class GatewayIntegrationService:
         self,
         request_id: str,
         private_model: UpstreamApiConfig,
-        detection_result: Dict[str, Any]
+        detection_result: Dict[str, Any],
+        tenant_id: str
     ) -> Dict[str, Any]:
-        """Create a switch private model action response"""
+        """Create a switch private model action response with bypass token"""
         # Decrypt API key for the gateway using shared cipher suite
         decrypted_key = ""
         try:
@@ -837,6 +843,9 @@ class GatewayIntegrationService:
         except Exception as e:
             logger.error(f"Failed to decrypt private model API key: {e}")
             decrypted_key = ""
+
+        # Generate bypass token for the gateway to add when forwarding to private model
+        bypass_token = generate_bypass_token(tenant_id, request_id)
 
         return {
             "action": "switch_private_model",
@@ -848,7 +857,9 @@ class GatewayIntegrationService:
                 "model_name": private_model.default_private_model_name or "gpt-4",
                 "provider": private_model.provider,
                 "higress_cluster": private_model.higress_cluster  # Higress cluster for routing
-            }
+            },
+            "bypass_token": bypass_token,
+            "bypass_header": BYPASS_TOKEN_HEADER
         }
 
 

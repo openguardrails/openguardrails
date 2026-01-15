@@ -1392,23 +1392,24 @@ async def update_fixed_answer_templates(
             db.add(app_settings)
 
         # Update templates if provided
+        # NOTE: Must create new dict to trigger SQLAlchemy change detection for JSON fields
         if "security_risk_template" in body:
             # Merge with existing template to preserve other languages
-            existing = app_settings.security_risk_template or DEFAULT_TEMPLATES["security_risk_template"]
-            if isinstance(existing, dict) and isinstance(body["security_risk_template"], dict):
+            existing = dict(app_settings.security_risk_template or DEFAULT_TEMPLATES["security_risk_template"])
+            if isinstance(body["security_risk_template"], dict):
                 existing.update(body["security_risk_template"])
-                app_settings.security_risk_template = existing
             else:
-                app_settings.security_risk_template = body["security_risk_template"]
+                existing = body["security_risk_template"]
+            app_settings.security_risk_template = existing
 
         if "data_leakage_template" in body:
             # Merge with existing template to preserve other languages
-            existing = app_settings.data_leakage_template or DEFAULT_TEMPLATES["data_leakage_template"]
-            if isinstance(existing, dict) and isinstance(body["data_leakage_template"], dict):
+            existing = dict(app_settings.data_leakage_template or DEFAULT_TEMPLATES["data_leakage_template"])
+            if isinstance(body["data_leakage_template"], dict):
                 existing.update(body["data_leakage_template"])
-                app_settings.data_leakage_template = existing
             else:
-                app_settings.data_leakage_template = body["data_leakage_template"]
+                existing = body["data_leakage_template"]
+            app_settings.data_leakage_template = existing
 
         db.commit()
 
