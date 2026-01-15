@@ -109,12 +109,12 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       label: t('nav.applications'),
       children: [
         {
-          key: '/applications/discovery',
-          label: t('nav.applicationDiscovery'),
-        },
-        {
           key: '/applications/list',
           label: t('nav.applicationList'),
+        },
+        {
+          key: '/applications/discovery',
+          label: t('nav.applicationDiscovery'),
         },
       ],
     },

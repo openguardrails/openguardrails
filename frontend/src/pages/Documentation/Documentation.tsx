@@ -137,6 +137,7 @@ const Documentation: React.FC = () => {
                   { key: 'ban-policy', title: t('docs.banPolicy') },
                   { key: 'knowledge-base', title: t('docs.knowledgeBase') },
                   { key: 'sensitivity-config', title: t('docs.sensitivityConfig') },
+                  { key: 'auto-discovery-how-it-works', title: t('docs.autoDiscoveryHowItWorks') },
                 ],
               },
             ].map((section) => (
@@ -1121,6 +1122,83 @@ response = requests.post(
 
             {/* Include remaining detailed sections following same pattern... */}
             {/* Omitting for brevity but they follow the same transformation pattern */}
+
+            {/* Auto-Discovery How It Works */}
+            <div id="auto-discovery-how-it-works" className="mt-8">
+              <h3 className="text-xl font-semibold mb-3">{t('docs.autoDiscoveryHowItWorks')}</h3>
+              <p className="text-slate-600 mb-4">{t('docs.autoDiscoveryHowItWorksDesc')}</p>
+
+              <div className="space-y-6">
+                {/* Step 1 */}
+                <div className="flex gap-4">
+                  <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-semibold">
+                    1
+                  </div>
+                  <div className="flex-1">
+                    <h4 className="font-medium text-slate-900">
+                      {t('applicationManagement.discovery.step1Title')}
+                    </h4>
+                    <p className="text-slate-600 text-sm mt-1">{t('applicationManagement.discovery.step1')}</p>
+                    <pre className="mt-2 bg-slate-50 p-3 rounded-md text-xs border border-slate-200 overflow-auto">
+{`# og-connector plugin configuration
+og_api_key: "sk-xxai-your-tenant-api-key"
+og_api_base_url: "https://your-og-server.com"`}
+                    </pre>
+                  </div>
+                </div>
+
+                {/* Step 2 */}
+                <div className="flex gap-4">
+                  <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-semibold">
+                    2
+                  </div>
+                  <div className="flex-1">
+                    <h4 className="font-medium text-slate-900">
+                      {t('applicationManagement.discovery.step2Title')}
+                    </h4>
+                    <p className="text-slate-600 text-sm mt-1">{t('applicationManagement.discovery.step2')}</p>
+                    <pre className="mt-2 bg-slate-50 p-3 rounded-md text-xs border border-slate-200 overflow-auto">
+{`# Higress gateway adds consumer header
+x-mse-consumer: "your-app-name"
+
+# OG receives as
+X-OG-Application-ID: "your-app-name"`}
+                    </pre>
+                  </div>
+                </div>
+
+                {/* Step 3 */}
+                <div className="flex gap-4">
+                  <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-semibold">
+                    3
+                  </div>
+                  <div className="flex-1">
+                    <h4 className="font-medium text-slate-900">
+                      {t('applicationManagement.discovery.step3Title')}
+                    </h4>
+                    <p className="text-slate-600 text-sm mt-1">{t('applicationManagement.discovery.step3')}</p>
+                    <div className="flex items-center gap-2 mt-2">
+                      <div className="h-4 w-4 rounded-full bg-green-500 flex items-center justify-center text-white text-xs">✓</div>
+                      <span className="text-sm text-slate-600">
+                        {t('applicationManagement.discovery.step3Result')}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-4 bg-blue-50 border border-blue-200 rounded-md mt-6">
+                <div className="flex items-start gap-2">
+                  <div className="flex-shrink-0 mt-0.5">
+                    <div className="h-5 w-5 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs">i</div>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-blue-900">{t('docs.autoDiscoveryTip')}</p>
+                    <p className="text-sm text-blue-700 mt-1">{t('docs.autoDiscoveryTipDesc')}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
           </section>
 
           <Separator />

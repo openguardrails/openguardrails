@@ -2,10 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import {
-  Zap,
   Settings,
   ArrowRight,
-  CheckCircle,
   Copy,
   Info,
   ExternalLink,
@@ -17,7 +15,6 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
-import { Separator } from '@/components/ui/separator'
 import api from '../../services/api'
 import { authService } from '../../services/auth'
 
@@ -113,82 +110,6 @@ const ApplicationDiscovery: React.FC = () => {
             >
               <Copy className="h-4 w-4" />
             </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* How It Works */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Zap className="h-5 w-5" />
-            {t('applicationManagement.discovery.howItWorks')}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          {/* Step 1 */}
-          <div className="flex gap-4">
-            <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-semibold">
-              1
-            </div>
-            <div className="flex-1">
-              <h4 className="font-medium text-slate-900">
-                {t('applicationManagement.discovery.step1Title')}
-              </h4>
-              <p className="text-slate-600 text-sm mt-1">{t('applicationManagement.discovery.step1')}</p>
-              <div className="mt-2 bg-slate-100 rounded-md p-3 font-mono text-xs">
-                <pre className="whitespace-pre-wrap">
-                  {`# og-connector plugin configuration
-og_api_key: "${maskedApiKey || 'sk-xxai-your-tenant-api-key'}"
-og_api_base_url: "https://your-og-server.com"`}
-                </pre>
-              </div>
-            </div>
-          </div>
-
-          <Separator />
-
-          {/* Step 2 */}
-          <div className="flex gap-4">
-            <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-semibold">
-              2
-            </div>
-            <div className="flex-1">
-              <h4 className="font-medium text-slate-900">
-                {t('applicationManagement.discovery.step2Title')}
-              </h4>
-              <p className="text-slate-600 text-sm mt-1">{t('applicationManagement.discovery.step2')}</p>
-              <div className="mt-2 bg-slate-100 rounded-md p-3 font-mono text-xs">
-                <pre className="whitespace-pre-wrap">
-                  {`# Higress gateway adds consumer header
-x-mse-consumer: "your-app-name"
-
-# OG receives as
-X-OG-Application-ID: "your-app-name"`}
-                </pre>
-              </div>
-            </div>
-          </div>
-
-          <Separator />
-
-          {/* Step 3 */}
-          <div className="flex gap-4">
-            <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-semibold">
-              3
-            </div>
-            <div className="flex-1">
-              <h4 className="font-medium text-slate-900">
-                {t('applicationManagement.discovery.step3Title')}
-              </h4>
-              <p className="text-slate-600 text-sm mt-1">{t('applicationManagement.discovery.step3')}</p>
-              <div className="flex items-center gap-2 mt-2">
-                <CheckCircle className="h-4 w-4 text-green-600" />
-                <span className="text-sm text-slate-600">
-                  {t('applicationManagement.discovery.step3Result')}
-                </span>
-              </div>
-            </div>
           </div>
         </CardContent>
       </Card>
