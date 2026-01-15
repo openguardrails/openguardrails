@@ -20,6 +20,7 @@ import { LLMProviders, SecurityPolicy } from './pages/SecurityGateway';
 import Documentation from './pages/Documentation/Documentation';
 import Subscription from './pages/Billing/Subscription';
 import ApplicationManagement from './pages/Config/ApplicationManagement';
+import ApplicationDiscovery from './pages/Config/ApplicationDiscovery';
 import { AccessControl } from './pages/AccessControl';
 import { initSystemConfig, features } from './config';
 
@@ -64,6 +65,8 @@ function App() {
               <Route path="/results" element={<Results />} />
               <Route path="/reports" element={<Reports />} />
               <Route path="/applications" element={<ApplicationManagement />} />
+              <Route path="/applications/list" element={<ApplicationManagement />} />
+              <Route path="/applications/discovery" element={<ApplicationDiscovery />} />
               <Route path="/security-gateway/providers" element={<LLMProviders />} />
               <Route path="/security-gateway/policy" element={<SecurityPolicy />} />
               <Route path="/config/*" element={<Config />} />

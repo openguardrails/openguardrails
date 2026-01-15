@@ -3,6 +3,7 @@ import {
   ColumnDef,
   flexRender,
   getCoreRowModel,
+  getPaginationRowModel,
   useReactTable,
   PaginationState,
 } from "@tanstack/react-table"
@@ -60,47 +61,68 @@ export function DataTable<TData, TValue>({
     pageSize: pageSize,
   })
 
-  // Update pagination state when props change
+  // Determine if we're using client-side pagination (no onPageChange provided)
+  const isClientSidePagination = !onPageChange
+
+  // Update pagination state when props change (for server-side pagination)
   React.useEffect(() => {
-    setPaginationState({
-      pageIndex: currentPage - 1,
-      pageSize: pageSize,
-    })
-  }, [currentPage, pageSize])
+    if (!isClientSidePagination) {
+      setPaginationState({
+        pageIndex: currentPage - 1,
+        pageSize: pageSize,
+      })
+    }
+  }, [currentPage, pageSize, isClientSidePagination])
 
   const table = useReactTable({
     data,
     columns,
-    pageCount: pageCount,
+    pageCount: isClientSidePagination ? undefined : pageCount,
     state: {
       pagination: paginationState,
     },
     onPaginationChange: setPaginationState,
     getCoreRowModel: getCoreRowModel(),
-    manualPagination: true,
+    // Use client-side pagination when no onPageChange is provided
+    ...(isClientSidePagination
+      ? { getPaginationRowModel: getPaginationRowModel() }
+      : { manualPagination: true }
+    ),
   })
 
   // Handle page changes
   const handlePageChange = (newPage: number) => {
-    if (onPageChange) {
+    if (isClientSidePagination) {
+      // Client-side pagination - update local state
+      setPaginationState(prev => ({ ...prev, pageIndex: newPage - 1 }))
+    } else if (onPageChange) {
       onPageChange(newPage)
     }
   }
 
   const handlePageSizeChange = (newPageSize: string) => {
     const size = parseInt(newPageSize)
-    if (onPageSizeChange) {
-      onPageSizeChange(size)
-    }
-    // Reset to first page when changing page size
-    if (onPageChange) {
-      onPageChange(1)
+    if (isClientSidePagination) {
+      // Client-side pagination - update local state and reset to first page
+      setPaginationState({ pageIndex: 0, pageSize: size })
+    } else {
+      if (onPageSizeChange) {
+        onPageSizeChange(size)
+      }
+      // Reset to first page when changing page size
+      if (onPageChange) {
+        onPageChange(1)
+      }
     }
   }
 
-  const totalPages = pageCount || 1
-  const canGoPrevious = currentPage > 1
-  const canGoNext = currentPage < totalPages
+  // Calculate pagination info
+  const actualCurrentPage = isClientSidePagination ? paginationState.pageIndex + 1 : currentPage
+  const totalPages = isClientSidePagination
+    ? Math.ceil(data.length / paginationState.pageSize)
+    : (pageCount || 1)
+  const canGoPrevious = actualCurrentPage > 1
+  const canGoNext = actualCurrentPage < totalPages
 
   // Helper to determine if a column is the last one (for sticky positioning)
   const isLastColumn = (index: number, total: number) => stickyLastColumn && index === total - 1
@@ -194,16 +216,16 @@ export function DataTable<TData, TValue>({
         </Table>
       </div>
 
-      {pagination && pageCount > 0 && (
+      {pagination && totalPages > 0 && (
         <div className={fillHeight ? "flex-shrink-0 flex items-center justify-between px-2 py-4 border-t bg-white" : "flex items-center justify-between px-2"}>
           <div className="flex items-center space-x-2">
             <p className="text-sm font-medium">Rows per page</p>
             <Select
-              value={`${pageSize}`}
+              value={`${paginationState.pageSize}`}
               onValueChange={handlePageSizeChange}
             >
               <SelectTrigger className="h-8 w-[70px]">
-                <SelectValue placeholder={pageSize} />
+                <SelectValue placeholder={paginationState.pageSize} />
               </SelectTrigger>
               <SelectContent side="top">
                 {[10, 20, 30, 50, 100].map((size) => (
@@ -217,13 +239,13 @@ export function DataTable<TData, TValue>({
 
           <div className="flex items-center space-x-6 lg:space-x-8">
             <div className="flex w-[100px] items-center justify-center text-sm font-medium">
-              Page {currentPage} of {totalPages}
+              Page {actualCurrentPage} of {totalPages}
             </div>
             <div className="flex items-center space-x-2">
               <Button
                 variant="outline"
                 className="h-8 w-8 p-0"
-                onClick={() => handlePageChange(currentPage - 1)}
+                onClick={() => handlePageChange(actualCurrentPage - 1)}
                 disabled={!canGoPrevious || loading}
               >
                 <span className="sr-only">Go to previous page</span>
@@ -232,7 +254,7 @@ export function DataTable<TData, TValue>({
               <Button
                 variant="outline"
                 className="h-8 w-8 p-0"
-                onClick={() => handlePageChange(currentPage + 1)}
+                onClick={() => handlePageChange(actualCurrentPage + 1)}
                 disabled={!canGoNext || loading}
               >
                 <span className="sr-only">Go to next page</span>

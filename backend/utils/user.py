@@ -145,16 +145,16 @@ def verify_user_email(db: Session, email: str, verification_code: str) -> bool:
 
     # Then try to create default configurations (these are not critical for user activation)
     if tenant:
-        # Create default application and API key for new tenant
-        try:
-            result = create_default_application_and_key(db, tenant.id, tenant.email)
-            if result:
-                logger.info(f"Created default application ({result['application_id']}) and API key for tenant {tenant.email}")
-            else:
-                logger.error(f"Failed to create default application for tenant {tenant.email}")
-        except Exception as e:
-            logger.error(f"Failed to create default application for tenant {tenant.email}: {e}")
-            # Not affect tenant activation process, just record error
+        # NOTE: As of v5.2+, we NO LONGER create a default application for new tenants
+        # This supports the new auto-discovery mode where applications are created automatically
+        # when using tenant API key with X-OG-Consumer-ID header from third-party gateways (e.g., Higress)
+        #
+        # Users can create applications in two ways:
+        # 1. Manually via UI (AI Applications page)
+        # 2. Automatically via third-party gateway consumer headers (auto-discovery)
+        #
+        # For backward compatibility, existing tenants with applications are not affected.
+        logger.info(f"User {tenant.email} verified. No default application created (auto-discovery mode enabled).")
 
         # Create default reply templates for new tenant
         try:
@@ -337,26 +337,102 @@ def emergency_clear_rate_limit(db: Session, email: str = None, ip_address: str =
     """Emergency clear rate limit (used to solve the problem of accidental blocking)"""
     from database.models import LoginAttempt
     from datetime import datetime, timedelta
-    
+
     cutoff_time = datetime.utcnow() - timedelta(minutes=time_window_minutes)
-    
+
     try:
         query = db.query(LoginAttempt).filter(
             LoginAttempt.attempted_at >= cutoff_time,
             LoginAttempt.success == False
         )
-        
+
         if email:
             query = query.filter(LoginAttempt.email == email)
         if ip_address:
             query = query.filter(LoginAttempt.ip_address == ip_address)
-            
+
         deleted_count = query.delete()
         db.commit()
-        
+
         logger.info(f"Emergency cleared {deleted_count} failed login attempts for email={email}, ip={ip_address}")
         return deleted_count
     except Exception as e:
         logger.error(f"Failed to emergency clear rate limit: {e}")
         db.rollback()
         return 0
+
+
+def get_or_create_application_by_external_id(db: Session, tenant_id: Union[str, uuid.UUID], external_id: str) -> Optional[dict]:
+    """
+    Get or create an application by external ID (for third-party gateway auto-discovery).
+
+    When using tenant API key with X-OG-Application-ID header from third-party gateways (e.g., Higress),
+    this function finds or creates the corresponding application.
+
+    Args:
+        db: Database session
+        tenant_id: Tenant UUID
+        external_id: External application identifier (e.g., gateway consumer name like "tester1")
+
+    Returns:
+        dict with keys: application_id, application_name, is_new
+        None if creation failed
+    """
+    from database.models import Application
+
+    if isinstance(tenant_id, str):
+        try:
+            tenant_id = uuid.UUID(tenant_id)
+        except ValueError:
+            logger.error(f"Invalid tenant_id format: {tenant_id}")
+            return None
+
+    # 1. Find existing application by external_id
+    app = db.query(Application).filter(
+        Application.tenant_id == tenant_id,
+        Application.external_id == external_id,
+        Application.is_active == True
+    ).first()
+
+    if app:
+        logger.debug(f"Found existing application for external_id '{external_id}': app_id={app.id}")
+        return {
+            "application_id": str(app.id),
+            "application_name": app.name,
+            "is_new": False
+        }
+
+    # 2. Auto-create new application
+    try:
+        new_app = Application(
+            tenant_id=tenant_id,
+            name=external_id,  # Use external_id as application name
+            description=f"Auto-discovered from gateway: {external_id}",
+            external_id=external_id,
+            source='auto_discovery',
+            is_active=True
+        )
+        db.add(new_app)
+        db.flush()  # Get the app ID
+
+        # 3. Initialize application configurations
+        try:
+            from routers.applications import initialize_application_configs
+            initialize_application_configs(db, str(new_app.id), str(tenant_id))
+            logger.info(f"Initialized configs for auto-discovered application '{external_id}'")
+        except Exception as e:
+            logger.warning(f"Failed to initialize configs for auto-discovered app '{external_id}': {e}")
+            # Continue anyway - the app is created
+
+        db.commit()
+        logger.info(f"Auto-created application '{external_id}' for tenant {tenant_id}: app_id={new_app.id}")
+
+        return {
+            "application_id": str(new_app.id),
+            "application_name": new_app.name,
+            "is_new": True
+        }
+    except Exception as e:
+        logger.error(f"Failed to auto-create application for external_id '{external_id}': {e}")
+        db.rollback()
+        return None

@@ -107,6 +107,16 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       key: '/applications',
       icon: Grid3x3,
       label: t('nav.applications'),
+      children: [
+        {
+          key: '/applications/discovery',
+          label: t('nav.applicationDiscovery'),
+        },
+        {
+          key: '/applications/list',
+          label: t('nav.applicationList'),
+        },
+      ],
     },
     {
       key: '/security-gateway',
@@ -231,7 +241,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
   const getSelectedKeys = () => {
     const path = location.pathname
-    if (path.startsWith('/config') || path.startsWith('/admin') || path.startsWith('/security-gateway') || path.startsWith('/access-control')) {
+    if (path.startsWith('/config') || path.startsWith('/admin') || path.startsWith('/security-gateway') || path.startsWith('/access-control') || path.startsWith('/applications')) {
       return [path]
     }
     if (path === '/' || path === '/') {
@@ -250,6 +260,9 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     }
     if (path.startsWith('/admin')) {
       return ['/admin']
+    }
+    if (path.startsWith('/applications')) {
+      return ['/applications']
     }
     return []
   }

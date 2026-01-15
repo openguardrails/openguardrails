@@ -1,0 +1,258 @@
+import React, { useState, useEffect, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
+import { useNavigate } from 'react-router-dom'
+import {
+  Zap,
+  Settings,
+  ArrowRight,
+  CheckCircle,
+  Copy,
+  Info,
+  ExternalLink,
+  RefreshCw,
+} from 'lucide-react'
+import { toast } from 'sonner'
+
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
+import { Separator } from '@/components/ui/separator'
+import api from '../../services/api'
+import { authService } from '../../services/auth'
+
+interface Application {
+  id: string
+  name: string
+  source?: string
+  external_id?: string
+  created_at: string
+}
+
+const ApplicationDiscovery: React.FC = () => {
+  const { t } = useTranslation()
+  const navigate = useNavigate()
+  const [tenantApiKey, setTenantApiKey] = useState<string>('')
+  const [recentDiscoveredApps, setRecentDiscoveredApps] = useState<Application[]>([])
+  const [loading, setLoading] = useState(true)
+
+  const fetchData = useCallback(async () => {
+    try {
+      setLoading(true)
+      // Fetch tenant API key using auth service
+      const userInfo = await authService.getCurrentUser()
+      if (userInfo?.api_key) {
+        setTenantApiKey(userInfo.api_key)
+      }
+
+      // Fetch recent auto-discovered applications
+      const appsResponse = await api.get('/api/v1/applications')
+      if (Array.isArray(appsResponse.data)) {
+        const discovered = appsResponse.data
+          .filter((app: Application) => app.source === 'auto_discovery')
+          .sort(
+            (a: Application, b: Application) =>
+              new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+          )
+          .slice(0, 5)
+        setRecentDiscoveredApps(discovered)
+      }
+    } catch (error) {
+      console.error('Failed to fetch data:', error)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchData()
+  }, [fetchData])
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text)
+    toast.success(t('common.copied'))
+  }
+
+  const maskedApiKey = tenantApiKey
+    ? `${tenantApiKey.substring(0, 12)}${'*'.repeat(20)}${tenantApiKey.substring(tenantApiKey.length - 8)}`
+    : ''
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div>
+        <h1 className="text-2xl font-bold text-slate-900">{t('applicationManagement.discovery.title')}</h1>
+        <p className="text-slate-600 mt-1">{t('applicationManagement.discovery.description')}</p>
+      </div>
+
+      {/* Overview Alert */}
+      <Alert className="bg-blue-50 border-blue-200">
+        <Info className="h-5 w-5 text-blue-600" />
+        <AlertDescription className="text-blue-800">
+          {t('applicationManagement.discovery.overview')}
+        </AlertDescription>
+      </Alert>
+
+      {/* Tenant API Key Card */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Settings className="h-5 w-5" />
+            {t('applicationManagement.discovery.tenantApiKey')}
+          </CardTitle>
+          <CardDescription>{t('applicationManagement.discovery.tenantApiKeyDesc')}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center gap-2 bg-slate-100 rounded-md p-3 font-mono text-sm">
+            <code className="flex-1 break-all">{maskedApiKey || t('common.loading')}</code>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => copyToClipboard(tenantApiKey)}
+              disabled={!tenantApiKey}
+            >
+              <Copy className="h-4 w-4" />
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* How It Works */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Zap className="h-5 w-5" />
+            {t('applicationManagement.discovery.howItWorks')}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* Step 1 */}
+          <div className="flex gap-4">
+            <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-semibold">
+              1
+            </div>
+            <div className="flex-1">
+              <h4 className="font-medium text-slate-900">
+                {t('applicationManagement.discovery.step1Title')}
+              </h4>
+              <p className="text-slate-600 text-sm mt-1">{t('applicationManagement.discovery.step1')}</p>
+              <div className="mt-2 bg-slate-100 rounded-md p-3 font-mono text-xs">
+                <pre className="whitespace-pre-wrap">
+                  {`# og-connector plugin configuration
+og_api_key: "${maskedApiKey || 'sk-xxai-your-tenant-api-key'}"
+og_api_base_url: "https://your-og-server.com"`}
+                </pre>
+              </div>
+            </div>
+          </div>
+
+          <Separator />
+
+          {/* Step 2 */}
+          <div className="flex gap-4">
+            <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-semibold">
+              2
+            </div>
+            <div className="flex-1">
+              <h4 className="font-medium text-slate-900">
+                {t('applicationManagement.discovery.step2Title')}
+              </h4>
+              <p className="text-slate-600 text-sm mt-1">{t('applicationManagement.discovery.step2')}</p>
+              <div className="mt-2 bg-slate-100 rounded-md p-3 font-mono text-xs">
+                <pre className="whitespace-pre-wrap">
+                  {`# Higress gateway adds consumer header
+x-mse-consumer: "your-app-name"
+
+# OG receives as
+X-OG-Application-ID: "your-app-name"`}
+                </pre>
+              </div>
+            </div>
+          </div>
+
+          <Separator />
+
+          {/* Step 3 */}
+          <div className="flex gap-4">
+            <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-semibold">
+              3
+            </div>
+            <div className="flex-1">
+              <h4 className="font-medium text-slate-900">
+                {t('applicationManagement.discovery.step3Title')}
+              </h4>
+              <p className="text-slate-600 text-sm mt-1">{t('applicationManagement.discovery.step3')}</p>
+              <div className="flex items-center gap-2 mt-2">
+                <CheckCircle className="h-4 w-4 text-green-600" />
+                <span className="text-sm text-slate-600">
+                  {t('applicationManagement.discovery.step3Result')}
+                </span>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Recent Auto-Discovered Apps */}
+      {recentDiscoveredApps.length > 0 && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <div>
+              <CardTitle>{t('applicationManagement.discovery.recentDiscovered')}</CardTitle>
+              <CardDescription>{t('applicationManagement.discovery.recentDiscoveredDesc')}</CardDescription>
+            </div>
+            <Button variant="ghost" size="sm" onClick={fetchData} disabled={loading}>
+              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            </Button>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {recentDiscoveredApps.map((app) => (
+                <div
+                  key={app.id}
+                  className="flex items-center justify-between p-3 bg-slate-50 rounded-md"
+                >
+                  <div className="flex items-center gap-3">
+                    <Badge variant="secondary" className="bg-blue-100 text-blue-700">
+                      {t('applicationManagement.sourceAutoDiscovery')}
+                    </Badge>
+                    <span className="font-medium">{app.name}</span>
+                    {app.external_id && (
+                      <span className="text-xs text-slate-500">({app.external_id})</span>
+                    )}
+                  </div>
+                  <span className="text-xs text-slate-500">
+                    {new Date(app.created_at).toLocaleDateString()}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Actions */}
+      <div className="flex gap-4">
+        <Button variant="outline" onClick={() => navigate('/applications/list')}>
+          {t('applicationManagement.discovery.viewAllApps')}
+          <ArrowRight className="h-4 w-4 ml-2" />
+        </Button>
+        <Button
+          variant="link"
+          className="text-blue-600"
+          onClick={() =>
+            window.open(
+              'https://github.com/openguardrails/openguardrails/blob/main/docs/THIRD_PARTY_GATEWAY_INTEGRATION.md',
+              '_blank'
+            )
+          }
+        >
+          <ExternalLink className="h-4 w-4 mr-2" />
+          {t('applicationManagement.discovery.viewDocs')}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+export default ApplicationDiscovery

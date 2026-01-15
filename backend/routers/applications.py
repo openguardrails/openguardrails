@@ -49,6 +49,10 @@ class ApplicationResponse(BaseModel):
     name: str
     description: Optional[str]
     is_active: bool
+    # Source of application creation: 'manual' (UI/API) or 'auto_discovery' (gateway consumer)
+    source: str = 'manual'
+    # External identifier for auto-discovered apps (e.g., gateway consumer name)
+    external_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     api_keys_count: int = 0
@@ -289,6 +293,8 @@ async def list_applications(
             "name": app.name,
             "description": app.description,
             "is_active": app.is_active,
+            "source": getattr(app, 'source', 'manual') or 'manual',  # Default to 'manual' for backward compatibility
+            "external_id": getattr(app, 'external_id', None),
             "created_at": app.created_at,
             "updated_at": app.updated_at,
             "api_keys_count": key_count,
@@ -316,12 +322,13 @@ async def create_application(
     if existing:
         raise HTTPException(status_code=400, detail="Application name already exists")
 
-    # Create application
+    # Create application (source='manual' for UI-created apps)
     app = Application(
         tenant_id=tenant_id,
         name=data.name,
         description=data.description,
-        is_active=True
+        is_active=True,
+        source='manual'
     )
     db.add(app)
     db.commit()
@@ -347,6 +354,8 @@ async def create_application(
         name=app.name,
         description=app.description,
         is_active=app.is_active,
+        source=getattr(app, 'source', 'manual') or 'manual',
+        external_id=getattr(app, 'external_id', None),
         created_at=app.created_at,
         updated_at=app.updated_at,
         api_keys_count=0
@@ -388,6 +397,8 @@ async def update_application(
         name=app.name,
         description=app.description,
         is_active=app.is_active,
+        source=getattr(app, 'source', 'manual') or 'manual',
+        external_id=getattr(app, 'external_id', None),
         created_at=app.created_at,
         updated_at=app.updated_at,
         api_keys_count=key_count

@@ -39,6 +39,10 @@ class Application(Base):
     name = Column(String(100), nullable=False)
     description = Column(Text)
     is_active = Column(Boolean, default=True, nullable=False, index=True)
+    # Source of application creation: 'manual' (UI/API) or 'auto_discovery' (gateway consumer)
+    source = Column(String(32), default='manual', nullable=False)
+    # External identifier for auto-discovered apps (e.g., gateway consumer name)
+    external_id = Column(String(255), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

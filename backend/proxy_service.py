@@ -30,7 +30,7 @@ from middleware.concurrent_limit_middleware import ConcurrentLimitMiddleware
 
 class AuthContextMiddleware(BaseHTTPMiddleware):
     """Authentication context middleware - proxy service version"""
-    
+
     async def dispatch(self, request: Request, call_next):
         # Handle OpenAI compatible API routes
         if request.url.path.startswith('/v1/'):
@@ -49,7 +49,8 @@ class AuthContextMiddleware(BaseHTTPMiddleware):
 
                 if token:
                     try:
-                        auth_context = await self._get_auth_context(token)
+                        # Pass request to access X-OG-Application-ID header for auto-discovery
+                        auth_context = await self._get_auth_context(token, request)
                         request.state.auth_context = auth_context
                     except:
                         request.state.auth_context = None
@@ -60,16 +61,20 @@ class AuthContextMiddleware(BaseHTTPMiddleware):
 
         response = await call_next(request)
         return response
-    
-    async def _get_auth_context(self, token: str):
-        """Get authentication context (proxy service with application support)"""
+
+    async def _get_auth_context(self, token: str, request: Request = None):
+        """Get authentication context (proxy service with application support and auto-discovery)"""
         from utils.auth_cache import auth_cache
         from utils.auth import verify_token
 
-        # Check cache
-        cached_auth = auth_cache.get(token)
-        if cached_auth:
-            return cached_auth
+        # Get external app ID from header for auto-discovery (don't cache with external app ID as it creates unique apps)
+        external_app_id = request.headers.get('X-OG-Application-ID') if request else None
+
+        # Check cache (only if no external app ID - external app ID requests create new apps)
+        if not external_app_id:
+            cached_auth = auth_cache.get(token)
+            if cached_auth:
+                return cached_auth
 
         auth_context = None
 
@@ -111,43 +116,66 @@ class AuthContextMiddleware(BaseHTTPMiddleware):
             try:
                 from database.connection import get_admin_db_session
                 from database.models import Application
-                from utils.user import get_user_by_api_key, get_application_by_api_key
+                from utils.user import get_user_by_api_key, get_application_by_api_key, get_or_create_application_by_external_id
 
                 db = get_admin_db_session()
                 try:
-                    # Try new multi-application API key
-                    app_data = get_application_by_api_key(db, token)
-                    if app_data:
-                        auth_context = {
-                            "type": "api_key",
-                            "data": {
-                                "tenant_id": app_data["tenant_id"],
-                                "email": app_data["tenant_email"],
-                                "application_id": app_data["application_id"],
-                                "application_name": app_data["application_name"],
-                                "api_key": app_data["api_key"]
-                            }
-                        }
-                    else:
-                        # Fallback to old API key (for backward compatibility)
+                    # API key verification
+                    # When X-OG-Application-ID header is present, prioritize tenant API key for auto-discovery
+                    # This allows the same key to work both ways: as application key (normal) or tenant key (with header)
+                    if external_app_id:
+                        # Auto-discovery mode: check tenant API key FIRST
                         user = get_user_by_api_key(db, token)
                         if user:
-                            # Get the first active application for this tenant
-                            first_app = db.query(Application).filter(
-                                Application.tenant_id == user.id,
-                                Application.is_active == True
-                            ).first()
-
+                            # Auto-discovery mode: get or create application by external app ID
+                            app_info = get_or_create_application_by_external_id(db, str(user.id), external_app_id)
+                            if app_info:
+                                auth_context = {
+                                    "type": "tenant_api_key_with_consumer",
+                                    "data": {
+                                        "tenant_id": str(user.id),
+                                        "email": user.email,
+                                        "api_key": user.api_key,
+                                        "application_id": app_info["application_id"],
+                                        "application_name": app_info["application_name"],
+                                        "is_auto_discovered": app_info["is_new"],
+                                        "external_app_id": external_app_id
+                                    }
+                                }
+                    else:
+                        # Normal mode: check application API key first (new multi-application support)
+                        app_data = get_application_by_api_key(db, token)
+                        if app_data:
                             auth_context = {
-                                "type": "api_key_legacy",
+                                "type": "api_key",
                                 "data": {
-                                    "tenant_id": str(user.id),
-                                    "email": user.email,
-                                    "api_key": user.api_key,
-                                    "application_id": str(first_app.id) if first_app else None,
-                                    "application_name": first_app.name if first_app else None
+                                    "tenant_id": app_data["tenant_id"],
+                                    "email": app_data["tenant_email"],
+                                    "application_id": app_data["application_id"],
+                                    "application_name": app_data["application_name"],
+                                    "api_key": app_data["api_key"]
                                 }
                             }
+                        else:
+                            # Fallback to tenant API key (backward compatible)
+                            user = get_user_by_api_key(db, token)
+                            if user:
+                                # No external app ID - get first active application (backward compatible)
+                                first_app = db.query(Application).filter(
+                                    Application.tenant_id == user.id,
+                                    Application.is_active == True
+                                ).first()
+
+                                auth_context = {
+                                    "type": "api_key_legacy",
+                                    "data": {
+                                        "tenant_id": str(user.id),
+                                        "email": user.email,
+                                        "api_key": user.api_key,
+                                        "application_id": str(first_app.id) if first_app else None,
+                                        "application_name": first_app.name if first_app else None
+                                    }
+                                }
                 finally:
                     db.close()
             except Exception as e:
@@ -156,8 +184,8 @@ class AuthContextMiddleware(BaseHTTPMiddleware):
         # If all verification fails, do not create anonymous user context
         # This will trigger a 401 error, which is expected behavior for the API
 
-        # Cache authentication result
-        if auth_context:
+        # Cache authentication result (only if no external app ID - external app ID creates unique contexts)
+        if auth_context and not external_app_id:
             auth_cache.set(token, auth_context)
 
         return auth_context
