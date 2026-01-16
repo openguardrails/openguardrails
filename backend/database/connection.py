@@ -210,7 +210,37 @@ async def init_db(minimal=False):
                             db.add(response)
                         db.commit()
 
-            # Load built-in scanner packages while holding the advisory lock
+            # Run database migrations BEFORE loading scanner packages
+            # This ensures new columns (like applications.source) exist before they're queried
+            # Critical for upgrades where tables exist but new columns don't
+            if not minimal:
+                logger.info("Running database migrations...")
+                try:
+                    from pathlib import Path
+                    import importlib.util
+
+                    # Import and run migrations module
+                    migrations_path = Path(__file__).parent.parent / "migrations" / "run_migrations.py"
+                    if migrations_path.exists():
+                        spec = importlib.util.spec_from_file_location("run_migrations", migrations_path)
+                        migrations_module = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(migrations_module)
+
+                        # Run migrations (it will use its own advisory lock)
+                        executed, failed = migrations_module.run_migrations(dry_run=False)
+                        if failed > 0:
+                            logger.error(f"Database migrations failed: {failed} migration(s) failed")
+                        else:
+                            logger.info(f"Database migrations completed: {executed} migration(s) executed")
+                    else:
+                        logger.warning("Migrations directory not found, skipping migrations")
+                except Exception as e:
+                    logger.error(f"Failed to run migrations: {e}")
+                    import traceback
+                    traceback.print_exc()
+
+            # Load built-in scanner packages AFTER migrations have run
+            # This ensures columns like applications.source exist before being queried
             if not minimal:
                 from services.builtin_scanner_loader import load_builtin_scanner_packages
 
@@ -232,31 +262,3 @@ async def init_db(minimal=False):
         finally:
             # 3) Release advisory lock (still use independent auto-commit connection)
             lock_conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": lock_key})
-
-    # Run database migrations AFTER the lock is released (only in management service)
-    # This allows migrations to use their own advisory lock and avoid conflicts
-    if not minimal:
-        logger.info("Running database migrations...")
-        try:
-            from pathlib import Path
-            import importlib.util
-
-            # Import and run migrations module
-            migrations_path = Path(__file__).parent.parent / "migrations" / "run_migrations.py"
-            if migrations_path.exists():
-                spec = importlib.util.spec_from_file_location("run_migrations", migrations_path)
-                migrations_module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(migrations_module)
-
-                # Run migrations (it will use its own advisory lock)
-                executed, failed = migrations_module.run_migrations(dry_run=False)
-                if failed > 0:
-                    logger.error(f"Database migrations failed: {failed} migration(s) failed")
-                else:
-                    logger.info(f"Database migrations completed: {executed} migration(s) executed")
-            else:
-                logger.warning("Migrations directory not found, skipping migrations")
-        except Exception as e:
-            logger.error(f"Failed to run migrations: {e}")
-            import traceback
-            traceback.print_exc()

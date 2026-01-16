@@ -8,6 +8,9 @@ import {
   Info,
   ExternalLink,
   RefreshCw,
+  RefreshCw as RotateCcw,
+  Eye,
+  EyeOff,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -32,6 +35,9 @@ const ApplicationDiscovery: React.FC = () => {
   const [tenantApiKey, setTenantApiKey] = useState<string>('')
   const [recentDiscoveredApps, setRecentDiscoveredApps] = useState<Application[]>([])
   const [loading, setLoading] = useState(true)
+  const [showFullKey, setShowFullKey] = useState(false)
+  const [regenerating, setRegenerating] = useState(false)
+  const [newApiKey, setNewApiKey] = useState<string | null>(null)
 
   const fetchData = useCallback(async () => {
     try {
@@ -70,8 +76,26 @@ const ApplicationDiscovery: React.FC = () => {
     toast.success(t('common.copied'))
   }
 
-  const maskedApiKey = tenantApiKey
-    ? `${tenantApiKey.substring(0, 12)}${'*'.repeat(20)}${tenantApiKey.substring(tenantApiKey.length - 8)}`
+  const handleRegenerateApiKey = async () => {
+    setRegenerating(true)
+    try {
+      const response = await authService.regenerateApiKey()
+      const newKey = response.api_key
+      setTenantApiKey(newKey)
+      setNewApiKey(newKey)
+      toast.success(t('common.apiKeyRegenerated'))
+    } catch (error) {
+      console.error('Failed to regenerate API key:', error)
+      toast.error(t('common.apiKeyRegenerateFailed'))
+    } finally {
+      setRegenerating(false)
+    }
+  }
+
+  const displayedApiKey = newApiKey || tenantApiKey
+
+  const maskedApiKey = displayedApiKey
+    ? `${displayedApiKey.substring(0, 12)}${'*'.repeat(20)}${displayedApiKey.substring(displayedApiKey.length - 8)}`
     : ''
 
   return (
@@ -92,21 +116,51 @@ const ApplicationDiscovery: React.FC = () => {
 
       {/* Tenant API Key Card */}
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Settings className="h-5 w-5" />
-            {t('applicationManagement.discovery.tenantApiKey')}
-          </CardTitle>
-          <CardDescription>{t('applicationManagement.discovery.tenantApiKeyDesc')}</CardDescription>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <Settings className="h-5 w-5" />
+              {t('applicationManagement.discovery.tenantApiKey')}
+            </CardTitle>
+            <CardDescription>{t('applicationManagement.discovery.tenantApiKeyDesc')}</CardDescription>
+          </div>
+          {displayedApiKey && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRegenerateApiKey}
+              disabled={regenerating}
+              className="text-red-600 hover:text-red-700 border-red-200 hover:bg-red-50"
+            >
+              <RotateCcw className={`h-4 w-4 mr-2 ${regenerating ? 'animate-spin' : ''}`} />
+              {t('applicationManagement.discovery.regenerateApiKey')}
+            </Button>
+          )}
         </CardHeader>
         <CardContent>
+          {newApiKey && (
+            <Alert className="mb-4 bg-green-50 border-green-200">
+              <AlertDescription className="text-green-800">
+                {t('applicationManagement.discovery.newApiKeyWarning')}
+              </AlertDescription>
+            </Alert>
+          )}
           <div className="flex items-center gap-2 bg-slate-100 rounded-md p-3 font-mono text-sm">
-            <code className="flex-1 break-all">{maskedApiKey || t('common.loading')}</code>
+            <code className="flex-1 break-all">{showFullKey ? displayedApiKey : maskedApiKey || t('common.loading')}</code>
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => copyToClipboard(tenantApiKey)}
-              disabled={!tenantApiKey}
+              onClick={() => setShowFullKey(!showFullKey)}
+              disabled={!displayedApiKey}
+              title={showFullKey ? t('common.hide') : t('common.show')}
+            >
+              {showFullKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => copyToClipboard(displayedApiKey)}
+              disabled={!displayedApiKey}
             >
               <Copy className="h-4 w-4" />
             </Button>

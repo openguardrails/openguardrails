@@ -56,7 +56,11 @@
     "active": "活跃",
     "inactive": "未激活",
     "copied": "已复制到剪贴板",
-    "saving": "保存中..."
+    "saving": "保存中...",
+    "show": "显示",
+    "hide": "隐藏",
+    "apiKeyRegenerated": "API 密钥已重新生成",
+    "apiKeyRegenerateFailed": "API 密钥重新生成失败"
   },
   "risk": {
     "level": {
@@ -1897,6 +1901,9 @@
     "stepFillInfoDesc": "输入邮箱和密码",
     "stepVerifyEmail": "邮箱验证",
     "stepVerifyEmailDesc": "验证邮箱地址",
+    "passwordRequirements": "密码至少8位，且必须包含大写字母、小写字母和数字",
+    "registering": "注册中...",
+    "verifying": "验证中...",
     "enterpriseEmailRequired": "请使用企业邮箱注册，不支持个人邮箱（如 Gmail、QQ、163 等）。",
     "personalEmailNotAllowed": "不支持个人邮箱注册，请使用您的企业邮箱。",
     "copyright": "© 2025 OpenGuardrails. All rights reserved."
@@ -2371,7 +2378,9 @@
       "recentDiscovered": "最近发现的应用",
       "recentDiscoveredDesc": "以下是最近通过自动发现创建的应用",
       "viewAllApps": "查看所有应用",
-      "viewDocs": "查看文档"
+      "viewDocs": "查看文档",
+      "regenerateApiKey": "重新生成密钥",
+      "newApiKeyWarning": "请立即将新密钥配置到您的网关插件中，旧密钥将立即失效"
     },
     "searchPlaceholder": "搜索应用名称...",
     "viewDetails": "详情",

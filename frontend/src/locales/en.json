@@ -56,7 +56,11 @@
     "active": "Active",
     "inactive": "Inactive",
     "copied": "Copied to clipboard",
-    "saving": "Saving..."
+    "saving": "Saving...",
+    "show": "Show",
+    "hide": "Hide",
+    "apiKeyRegenerated": "API key regenerated successfully",
+    "apiKeyRegenerateFailed": "Failed to regenerate API key"
   },
   "risk": {
     "level": {
@@ -1900,6 +1904,9 @@
     "stepFillInfoDesc": "Enter email and password",
     "stepVerifyEmail": "Email Verification",
     "stepVerifyEmailDesc": "Verify email address",
+    "passwordRequirements": "At least 8 characters with uppercase, lowercase, and number",
+    "registering": "Registering...",
+    "verifying": "Verifying...",
     "enterpriseEmailRequired": "Enterprise email required. Personal emails (Gmail, QQ, 163, etc.) are not allowed.",
     "personalEmailNotAllowed": "Personal email addresses are not allowed. Please use your enterprise email.",
     "copyright": "© 2025 OpenGuardrails. All rights reserved."
@@ -2374,7 +2381,9 @@
       "recentDiscovered": "Recently Discovered Applications",
       "recentDiscoveredDesc": "Applications recently created through auto-discovery",
       "viewAllApps": "View All Applications",
-      "viewDocs": "View Documentation"
+      "viewDocs": "View Documentation",
+      "regenerateApiKey": "Regenerate Key",
+      "newApiKeyWarning": "Please configure the new key in your gateway plugin immediately. The old key will be invalidated immediately."
     },
     "searchPlaceholder": "Search by name...",
     "viewDetails": "Details",
