@@ -4,7 +4,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { toast } from 'sonner'
-import { Upload, AlertTriangle } from 'lucide-react'
+import { Upload, AlertTriangle, Crown } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -26,8 +26,21 @@ import {
 } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { dataLeakagePolicyApi } from '../../services/api'
+import { dataLeakagePolicyApi, dataSecurityApi } from '../../services/api'
 import { useApplication } from '../../contexts/ApplicationContext'
+
+interface FeatureAvailability {
+  is_enterprise: boolean
+  is_subscribed: boolean
+  features: {
+    genai_recognition: boolean
+    genai_code_anonymization: boolean
+    natural_language_desc: boolean
+    format_detection: boolean
+    smart_segmentation: boolean
+    custom_scanners: boolean
+  }
+}
 
 const inputPolicySchema = z.object({
   input_high_risk_action: z.enum(['block', 'switch_private_model', 'anonymize', 'anonymize_restore', 'pass']).nullable(),
@@ -78,6 +91,45 @@ const InputPolicyConfig: React.FC<InputPolicyConfigProps> = ({ policy, hasPrivat
   const { t } = useTranslation()
   const [loading, setLoading] = useState(false)
   const { currentApplicationId } = useApplication()
+  const [featureAvailability, setFeatureAvailability] = useState<FeatureAvailability | null>(null)
+
+  // Load premium feature availability
+  useEffect(() => {
+    const loadFeatureAvailability = async () => {
+      try {
+        const availability = await dataSecurityApi.getFeatureAvailability()
+        setFeatureAvailability(availability)
+      } catch (error) {
+        console.error('Failed to load feature availability:', error)
+        // On error, assume all features are available
+        setFeatureAvailability({
+          is_enterprise: true,
+          is_subscribed: true,
+          features: {
+            genai_recognition: true,
+            genai_code_anonymization: true,
+            natural_language_desc: true,
+            format_detection: true,
+            smart_segmentation: true,
+            custom_scanners: true,
+          },
+        })
+      }
+    }
+    loadFeatureAvailability()
+  }, [])
+
+  // Helper to check if a premium feature is available
+  const isPremiumFeatureAvailable = (feature: keyof FeatureAvailability['features']): boolean => {
+    if (!featureAvailability) return true
+    return featureAvailability.features[feature]
+  }
+
+  // Helper to check if subscription upgrade is needed
+  const needsSubscription = (): boolean => {
+    if (!featureAvailability) return false
+    return !featureAvailability.is_enterprise && !featureAvailability.is_subscribed
+  }
 
   const form = useForm<InputPolicyFormData>({
     resolver: zodResolver(inputPolicySchema),
@@ -376,14 +428,27 @@ const InputPolicyConfig: React.FC<InputPolicyConfigProps> = ({ policy, hasPrivat
               <CardTitle>{t('dataLeakagePolicy.featureToggles')}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-6">
+              {/* Premium feature notice */}
+              {needsSubscription() && (
+                <Alert className="bg-amber-50 border-amber-200">
+                  <Crown className="h-4 w-4 text-amber-600" />
+                  <AlertDescription className="text-amber-800">
+                    {t('dataLeakagePolicy.premiumFeatureDescription')}
+                  </AlertDescription>
+                </Alert>
+              )}
+
               <FormField
                 control={form.control}
                 name="enable_format_detection"
                 render={({ field }) => (
                   <FormItem className="flex flex-row items-start justify-between space-y-0 rounded-lg border p-4">
                     <div className="space-y-0.5 flex-1">
-                      <FormLabel className="text-base">
+                      <FormLabel className="text-base flex items-center gap-2">
                         {t('dataLeakagePolicy.enableFormatDetection')}
+                        {!isPremiumFeatureAvailable('format_detection') && (
+                          <Crown className="h-4 w-4 text-amber-500" />
+                        )}
                         {policy && field.value === null && (
                           <span className="text-xs text-muted-foreground ml-2">
                             ({t('dataLeakagePolicy.usingDefault')}: {policy.enable_format_detection ? 'ON' : 'OFF'})
@@ -408,7 +473,14 @@ const InputPolicyConfig: React.FC<InputPolicyConfigProps> = ({ policy, hasPrivat
                         )}
                         <Switch
                           checked={field.value !== null ? field.value : policy?.enable_format_detection || false}
-                          onCheckedChange={(checked) => field.onChange(checked)}
+                          disabled={!isPremiumFeatureAvailable('format_detection')}
+                          onCheckedChange={(checked) => {
+                            if (!isPremiumFeatureAvailable('format_detection') && checked) {
+                              toast.error(t('dataLeakagePolicy.premiumFeatureRequired'))
+                              return
+                            }
+                            field.onChange(checked)
+                          }}
                         />
                       </div>
                     </FormControl>
@@ -422,8 +494,11 @@ const InputPolicyConfig: React.FC<InputPolicyConfigProps> = ({ policy, hasPrivat
                 render={({ field }) => (
                   <FormItem className="flex flex-row items-start justify-between space-y-0 rounded-lg border p-4">
                     <div className="space-y-0.5 flex-1">
-                      <FormLabel className="text-base">
+                      <FormLabel className="text-base flex items-center gap-2">
                         {t('dataLeakagePolicy.enableSmartSegmentation')}
+                        {!isPremiumFeatureAvailable('smart_segmentation') && (
+                          <Crown className="h-4 w-4 text-amber-500" />
+                        )}
                         {policy && field.value === null && (
                           <span className="text-xs text-muted-foreground ml-2">
                             ({t('dataLeakagePolicy.usingDefault')}: {policy.enable_smart_segmentation ? 'ON' : 'OFF'})
@@ -448,7 +523,14 @@ const InputPolicyConfig: React.FC<InputPolicyConfigProps> = ({ policy, hasPrivat
                         )}
                         <Switch
                           checked={field.value !== null ? field.value : policy?.enable_smart_segmentation || false}
-                          onCheckedChange={(checked) => field.onChange(checked)}
+                          disabled={!isPremiumFeatureAvailable('smart_segmentation')}
+                          onCheckedChange={(checked) => {
+                            if (!isPremiumFeatureAvailable('smart_segmentation') && checked) {
+                              toast.error(t('dataLeakagePolicy.premiumFeatureRequired'))
+                              return
+                            }
+                            field.onChange(checked)
+                          }}
                         />
                       </div>
                     </FormControl>

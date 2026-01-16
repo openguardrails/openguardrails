@@ -8,6 +8,12 @@ from database.connection import get_admin_db
 from services.data_security_service import DataSecurityService
 from routers.config_api import get_current_user_and_application_from_request
 from utils.logger import setup_logger
+from utils.subscription_check import (
+    require_subscription_for_feature,
+    SubscriptionFeature,
+    get_feature_availability
+)
+from config import settings
 
 logger = setup_logger()
 router = APIRouter(tags=["Data Security"])
@@ -150,6 +156,13 @@ async def create_entity_type(
 ):
     """
     Create custom entity type
+
+    **Premium Features (SaaS mode only - requires subscription)**:
+    - GenAI recognition method (`recognition_method='genai'`)
+    - GenAI code anonymization (`anonymization_method='genai_code'`)
+    - Natural language description for anonymization
+
+    In enterprise/private deployment mode, all features are available.
     """
     try:
         current_user, application_id = get_current_user_and_application_from_request(request, db)
@@ -163,6 +176,34 @@ async def create_entity_type(
 
         # 允许用户自定义脱敏方法，GenAI识别也可以使用任何脱敏方法
         anonymization_method = data.get("anonymization_method", "mask")
+
+        # Check subscription for premium features (SaaS mode only)
+        # GenAI recognition requires subscription
+        if recognition_method == "genai":
+            require_subscription_for_feature(
+                tenant_id=str(current_user.id),
+                db=db,
+                feature=SubscriptionFeature.GENAI_RECOGNITION,
+                language=settings.default_language
+            )
+
+        # GenAI code anonymization requires subscription
+        if anonymization_method == "genai_code":
+            require_subscription_for_feature(
+                tenant_id=str(current_user.id),
+                db=db,
+                feature=SubscriptionFeature.GENAI_CODE_ANONYMIZATION,
+                language=settings.default_language
+            )
+
+        # Natural language description for anonymization requires subscription
+        if data.get("genai_code_desc") or data.get("restore_natural_desc"):
+            require_subscription_for_feature(
+                tenant_id=str(current_user.id),
+                db=db,
+                feature=SubscriptionFeature.NATURAL_LANGUAGE_DESC,
+                language=settings.default_language
+            )
 
         service = DataSecurityService(db)
         entity_type = service.create_entity_type(
@@ -207,6 +248,13 @@ async def update_entity_type(
 ):
     """
     Update entity type
+
+    **Premium Features (SaaS mode only - requires subscription)**:
+    - GenAI recognition method (`recognition_method='genai'`)
+    - GenAI code anonymization (`anonymization_method='genai_code'`)
+    - Natural language description for anonymization
+
+    In enterprise/private deployment mode, all features are available.
     """
     try:
         current_user, application_id = get_current_user_and_application_from_request(request, db)
@@ -226,6 +274,16 @@ async def update_entity_type(
             recognition_method = "genai"
             logger.info(f"Auto-corrected recognition_method to 'genai' based on entity_definition presence")
 
+        # Check subscription for premium features (SaaS mode only)
+        # GenAI recognition requires subscription
+        if recognition_method == "genai":
+            require_subscription_for_feature(
+                tenant_id=str(current_user.id),
+                db=db,
+                feature=SubscriptionFeature.GENAI_RECOGNITION,
+                language=settings.default_language
+            )
+
         if recognition_method is not None:
             update_kwargs["recognition_method"] = recognition_method
         if "pattern" in data:
@@ -236,6 +294,14 @@ async def update_entity_type(
         # 允许用户自定义脱敏方法，GenAI识别也可以使用任何脱敏方法
         if "anonymization_method" in data:
             update_kwargs["anonymization_method"] = data["anonymization_method"]
+            # GenAI code anonymization requires subscription
+            if data["anonymization_method"] == "genai_code":
+                require_subscription_for_feature(
+                    tenant_id=str(current_user.id),
+                    db=db,
+                    feature=SubscriptionFeature.GENAI_CODE_ANONYMIZATION,
+                    language=settings.default_language
+                )
 
         if "anonymization_config" in data:
             update_kwargs["anonymization_config"] = data["anonymization_config"]
@@ -248,8 +314,21 @@ async def update_entity_type(
 
         # GenAI code anonymization fields (for anonymization_method='genai_code')
         if "genai_code_desc" in data:
+            # Natural language description requires subscription
+            require_subscription_for_feature(
+                tenant_id=str(current_user.id),
+                db=db,
+                feature=SubscriptionFeature.NATURAL_LANGUAGE_DESC,
+                language=settings.default_language
+            )
             update_kwargs["restore_natural_desc"] = data["genai_code_desc"]
         elif "restore_natural_desc" in data:  # Support old field name for backwards compatibility
+            require_subscription_for_feature(
+                tenant_id=str(current_user.id),
+                db=db,
+                feature=SubscriptionFeature.NATURAL_LANGUAGE_DESC,
+                language=settings.default_language
+            )
             update_kwargs["restore_natural_desc"] = data["restore_natural_desc"]
 
         result = service.update_entity_type(
@@ -635,6 +714,10 @@ async def test_entity_definition(
     """
     Test GenAI entity definition
 
+    **Premium Feature (SaaS mode only - requires subscription)**:
+    GenAI entity recognition testing requires a subscribed plan.
+    In enterprise/private deployment mode, all features are available.
+
     Input:
         {
             "entity_definition": "11-digit phone number for contact",
@@ -653,6 +736,14 @@ async def test_entity_definition(
     """
     try:
         current_user, application_id = get_current_user_and_application_from_request(request, db)
+
+        # GenAI recognition testing requires subscription
+        require_subscription_for_feature(
+            tenant_id=str(current_user.id),
+            db=db,
+            feature=SubscriptionFeature.GENAI_RECOGNITION,
+            language=settings.default_language
+        )
 
         entity_definition = data.get("entity_definition", "")
         entity_type_name = data.get("entity_type_name", "")
@@ -694,6 +785,10 @@ async def generate_genai_code_standalone(
     """
     Generate Python code for genai_code anonymization method based on natural language description.
 
+    **Premium Feature (SaaS mode only - requires subscription)**:
+    GenAI code generation requires a subscribed plan.
+    In enterprise/private deployment mode, all features are available.
+
     This is a standalone endpoint that doesn't require an existing entity type.
     The generated code can be tested immediately and saved later with the entity type.
 
@@ -715,6 +810,14 @@ async def generate_genai_code_standalone(
 
     try:
         current_user, application_id = get_current_user_and_application_from_request(request, db)
+
+        # GenAI code anonymization requires subscription
+        require_subscription_for_feature(
+            tenant_id=str(current_user.id),
+            db=db,
+            feature=SubscriptionFeature.GENAI_CODE_ANONYMIZATION,
+            language=settings.default_language
+        )
 
         natural_description = data.get("natural_description", "")
         sample_data = data.get("sample_data", "")
@@ -757,6 +860,10 @@ async def test_genai_code_standalone(
     """
     Test the provided genai_code anonymization with user-provided test input.
 
+    **Premium Feature (SaaS mode only - requires subscription)**:
+    GenAI code testing requires a subscribed plan.
+    In enterprise/private deployment mode, all features are available.
+
     This is a standalone endpoint that tests the code directly without needing
     an existing entity type.
 
@@ -778,6 +885,14 @@ async def test_genai_code_standalone(
 
     try:
         current_user, application_id = get_current_user_and_application_from_request(request, db)
+
+        # GenAI code anonymization requires subscription
+        require_subscription_for_feature(
+            tenant_id=str(current_user.id),
+            db=db,
+            feature=SubscriptionFeature.GENAI_CODE_ANONYMIZATION,
+            language=settings.default_language
+        )
 
         code = data.get("code", "")
         test_input = data.get("test_input", "")
@@ -828,6 +943,10 @@ async def generate_genai_code(
     """
     Generate Python code for genai_code anonymization method based on natural language description.
 
+    **Premium Feature (SaaS mode only - requires subscription)**:
+    GenAI code generation requires a subscribed plan.
+    In enterprise/private deployment mode, all features are available.
+
     This is used when anonymization_method='genai_code' to generate custom anonymization logic.
 
     Input:
@@ -847,6 +966,14 @@ async def generate_genai_code(
 
     try:
         current_user, application_id = get_current_user_and_application_from_request(request, db)
+
+        # GenAI code anonymization requires subscription
+        require_subscription_for_feature(
+            tenant_id=str(current_user.id),
+            db=db,
+            feature=SubscriptionFeature.GENAI_CODE_ANONYMIZATION,
+            language=settings.default_language
+        )
 
         natural_description = data.get("natural_description", "")
         sample_data = data.get("sample_data", "")
@@ -912,6 +1039,10 @@ async def test_genai_code(
     """
     Test the generated genai_code anonymization with user-provided test input.
 
+    **Premium Feature (SaaS mode only - requires subscription)**:
+    GenAI code testing requires a subscribed plan.
+    In enterprise/private deployment mode, all features are available.
+
     Input:
         {
             "test_input": "Contact alice@gmail.com and bob@company.com"
@@ -932,6 +1063,14 @@ async def test_genai_code(
 
     try:
         current_user, application_id = get_current_user_and_application_from_request(request, db)
+
+        # GenAI code anonymization requires subscription
+        require_subscription_for_feature(
+            tenant_id=str(current_user.id),
+            db=db,
+            feature=SubscriptionFeature.GENAI_CODE_ANONYMIZATION,
+            language=settings.default_language
+        )
 
         test_input = data.get("test_input", "")
         if not test_input:
@@ -983,6 +1122,10 @@ async def save_genai_code_config(
     """
     Save the genai_code anonymization configuration.
 
+    **Premium Feature (SaaS mode only - requires subscription)**:
+    GenAI code configuration requires a subscribed plan.
+    In enterprise/private deployment mode, all features are available.
+
     When anonymization_method='genai_code', use this endpoint to save the
     natural language description that was used to generate the code.
 
@@ -999,6 +1142,14 @@ async def save_genai_code_config(
     """
     try:
         current_user, application_id = get_current_user_and_application_from_request(request, db)
+
+        # GenAI code anonymization requires subscription
+        require_subscription_for_feature(
+            tenant_id=str(current_user.id),
+            db=db,
+            feature=SubscriptionFeature.GENAI_CODE_ANONYMIZATION,
+            language=settings.default_language
+        )
 
         natural_description = data.get("natural_description", "")
 
@@ -1033,3 +1184,56 @@ async def save_genai_code_config(
     except Exception as e:
         logger.error(f"Save genai-code config error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to save genai-code config: {str(e)}")
+
+
+# ============== Premium Feature Availability API ==============
+
+@router.get("/config/data-security/feature-availability")
+async def get_premium_feature_availability(
+    request: Request,
+    db: Session = Depends(get_admin_db)
+):
+    """
+    Get availability status for premium data security features.
+
+    Returns whether the current user can access premium features like:
+    - GenAI entity recognition
+    - GenAI code-based anonymization
+    - Natural language anonymization description
+    - Auto format detection
+    - Smart content segmentation
+
+    In enterprise/private deployment mode, all features are enabled.
+    In SaaS mode, requires a subscribed plan for premium features.
+
+    Output:
+        {
+            "is_enterprise": bool,  // True if running in enterprise mode
+            "is_subscribed": bool,  // True if user has subscription access
+            "features": {
+                "genai_recognition": bool,
+                "genai_code_anonymization": bool,
+                "natural_language_desc": bool,
+                "format_detection": bool,
+                "smart_segmentation": bool,
+                "custom_scanners": bool
+            }
+        }
+    """
+    try:
+        current_user, application_id = get_current_user_and_application_from_request(request, db)
+
+        availability = get_feature_availability(
+            tenant_id=str(current_user.id),
+            db=db
+        )
+
+        logger.debug(f"Feature availability check for user {current_user.email}: {availability}")
+
+        return availability
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get feature availability error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get feature availability: {str(e)}")

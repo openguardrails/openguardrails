@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Plus, Edit, Trash2, Globe, User, Info, Loader2, Wand2, Play, FileText, Search, Shield, Settings, ChevronDown, ChevronRight, Code } from 'lucide-react'
+import { Plus, Edit, Trash2, Globe, User, Info, Loader2, Wand2, Play, FileText, Search, Shield, Settings, ChevronDown, ChevronRight, Code, Lock, Crown } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { useForm } from 'react-hook-form'
@@ -8,6 +8,7 @@ import * as z from 'zod'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import {
   Dialog,
   DialogContent,
@@ -124,6 +125,19 @@ const EntityTypeManagement: React.FC = () => {
     error?: string
   } | null>(null)
   const [showGenaiCode, setShowGenaiCode] = useState(false)
+  // State for premium feature availability (subscription check)
+  const [featureAvailability, setFeatureAvailability] = useState<{
+    is_enterprise: boolean
+    is_subscribed: boolean
+    features: {
+      genai_recognition: boolean
+      genai_code_anonymization: boolean
+      natural_language_desc: boolean
+      format_detection: boolean
+      smart_segmentation: boolean
+      custom_scanners: boolean
+    }
+  } | null>(null)
   const { user, onUserSwitch } = useAuth()
   const { currentApplicationId } = useApplication()
 
@@ -229,6 +243,7 @@ const EntityTypeManagement: React.FC = () => {
   useEffect(() => {
     if (currentApplicationId) {
       loadEntityTypes()
+      loadFeatureAvailability()
     }
   }, [currentApplicationId])
 
@@ -236,9 +251,45 @@ const EntityTypeManagement: React.FC = () => {
   useEffect(() => {
     const unsubscribe = onUserSwitch(() => {
       loadEntityTypes()
+      loadFeatureAvailability()
     })
     return unsubscribe
   }, [onUserSwitch])
+
+  // Load premium feature availability status
+  const loadFeatureAvailability = async () => {
+    try {
+      const availability = await dataSecurityApi.getFeatureAvailability()
+      setFeatureAvailability(availability)
+    } catch (error) {
+      // On error, assume all features are available (fail open)
+      console.error('Failed to load feature availability:', error)
+      setFeatureAvailability({
+        is_enterprise: true,
+        is_subscribed: true,
+        features: {
+          genai_recognition: true,
+          genai_code_anonymization: true,
+          natural_language_desc: true,
+          format_detection: true,
+          smart_segmentation: true,
+          custom_scanners: true,
+        },
+      })
+    }
+  }
+
+  // Helper to check if a premium feature is available
+  const isPremiumFeatureAvailable = (feature: keyof typeof featureAvailability.features): boolean => {
+    if (!featureAvailability) return true // Loading state, assume available
+    return featureAvailability.features[feature]
+  }
+
+  // Helper to check if subscription upgrade is needed
+  const needsSubscription = (): boolean => {
+    if (!featureAvailability) return false
+    return !featureAvailability.is_enterprise && !featureAvailability.is_subscribed
+  }
 
   const loadEntityTypes = async () => {
     setLoading(true)
@@ -1129,7 +1180,17 @@ const EntityTypeManagement: React.FC = () => {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>{t('entityType.recognitionMethodLabel')}</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
+                      <Select
+                        onValueChange={(value) => {
+                          // Check subscription for GenAI recognition
+                          if (value === 'genai' && !isPremiumFeatureAvailable('genai_recognition')) {
+                            toast.error(t('entityType.premiumFeatureRequired'))
+                            return
+                          }
+                          field.onChange(value)
+                        }}
+                        value={field.value}
+                      >
                         <FormControl>
                           <SelectTrigger className="w-[200px]">
                             <SelectValue placeholder={t('entityType.recognitionMethodPlaceholder')} />
@@ -1137,13 +1198,31 @@ const EntityTypeManagement: React.FC = () => {
                         </FormControl>
                         <SelectContent>
                           <SelectItem value="regex">{t('entityType.recognitionMethodRegex')}</SelectItem>
-                          <SelectItem value="genai">{t('entityType.recognitionMethodGenai')}</SelectItem>
+                          <SelectItem value="genai" disabled={!isPremiumFeatureAvailable('genai_recognition')}>
+                            <span className="flex items-center gap-2">
+                              {t('entityType.recognitionMethodGenai')}
+                              {!isPremiumFeatureAvailable('genai_recognition') && (
+                                <Crown className="h-3 w-3 text-amber-500" />
+                              )}
+                            </span>
+                          </SelectItem>
                         </SelectContent>
                       </Select>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
+
+                {/* Premium feature notice for GenAI recognition */}
+                {needsSubscription() && (
+                  <Alert className="bg-amber-50 border-amber-200">
+                    <Crown className="h-4 w-4 text-amber-600" />
+                    <AlertTitle className="text-amber-900">{t('entityType.premiumFeatureTitle')}</AlertTitle>
+                    <AlertDescription className="text-amber-800">
+                      {t('entityType.premiumFeatureDescription')}
+                    </AlertDescription>
+                  </Alert>
+                )}
 
                 {form.watch('recognition_method') === 'regex' ? (
                   <div className="space-y-4 p-4 border rounded-lg bg-blue-50/30">
@@ -1319,16 +1398,37 @@ const EntityTypeManagement: React.FC = () => {
                       render={({ field }) => (
                         <FormItem>
                           <FormLabel>{t('entityType.anonymizationMethodSelectLabel')}</FormLabel>
-                          <Select onValueChange={field.onChange} value={field.value}>
+                          <Select
+                            onValueChange={(value) => {
+                              // Check subscription for GenAI code anonymization
+                              if ((value === 'genai_code' || value === 'genai_natural') && !isPremiumFeatureAvailable('genai_code_anonymization')) {
+                                toast.error(t('entityType.premiumFeatureRequired'))
+                                return
+                              }
+                              field.onChange(value)
+                            }}
+                            value={field.value}
+                          >
                             <FormControl>
                               <SelectTrigger className="w-[200px]">
                                 <SelectValue placeholder={t('entityType.anonymizationMethodSelectPlaceholder')} />
                               </SelectTrigger>
                             </FormControl>
                             <SelectContent>
-                              {ANONYMIZATION_METHODS.map((method) => (
-                                <SelectItem key={method.value} value={method.value}>{method.label}</SelectItem>
-                              ))}
+                              {ANONYMIZATION_METHODS.map((method) => {
+                                const isPremium = method.value === 'genai_code' || method.value === 'genai_natural'
+                                const isAvailable = !isPremium || isPremiumFeatureAvailable('genai_code_anonymization')
+                                return (
+                                  <SelectItem key={method.value} value={method.value} disabled={!isAvailable}>
+                                    <span className="flex items-center gap-2">
+                                      {method.label}
+                                      {isPremium && !isAvailable && (
+                                        <Crown className="h-3 w-3 text-amber-500" />
+                                      )}
+                                    </span>
+                                  </SelectItem>
+                                )
+                              })}
                             </SelectContent>
                           </Select>
                           <FormMessage />

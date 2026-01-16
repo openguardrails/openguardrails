@@ -997,7 +997,9 @@
     "usingDefault": "Using Default",
     "resetToDefault": "Reset",
     "noPrivateModelsAvailable": "No private models available",
-    "selectAction": "Select an action"
+    "selectAction": "Select an action",
+    "premiumFeatureRequired": "This feature requires a subscription. Please upgrade your plan to access this feature.",
+    "premiumFeatureDescription": "Format detection and smart segmentation are premium features. Upgrade your plan to unlock these advanced capabilities."
   },
   "banPolicy": {
     "title": "Ban Policy",
@@ -1515,7 +1517,10 @@
     "testInputWarning": "💡 Testing Tips",
     "testInputHint": "AI-generated rules may not be perfect. Please test multiple different input samples. If test results are incorrect:",
     "testInputHintRegenerate": "• Modify the natural language description and regenerate",
-    "testInputHintManual": "• Or manually adjust the regex/anonymization configuration"
+    "testInputHintManual": "• Or manually adjust the regex/anonymization configuration",
+    "premiumFeatureRequired": "This feature requires a subscription. Please upgrade your plan to access this feature.",
+    "premiumFeatureTitle": "Premium Feature",
+    "premiumFeatureDescription": "AI recognition, AI code anonymization, and natural language features require a subscription. Upgrade your plan to unlock these advanced capabilities."
   },
   "account": {
     "title": "Account Management",

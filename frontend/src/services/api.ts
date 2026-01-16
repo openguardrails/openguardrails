@@ -720,6 +720,22 @@ export const dataSecurityApi = {
   // Get single detection result detail
   getDetectionResult: (requestId: string): Promise<any> =>
     api.get(`/api/v1/results/${requestId}`).then(res => res.data),
+
+  // Get premium feature availability status
+  // Returns which premium features the user can access (based on subscription or enterprise mode)
+  getFeatureAvailability: (): Promise<{
+    is_enterprise: boolean
+    is_subscribed: boolean
+    features: {
+      genai_recognition: boolean
+      genai_code_anonymization: boolean
+      natural_language_desc: boolean
+      format_detection: boolean
+      smart_segmentation: boolean
+      custom_scanners: boolean
+    }
+  }> =>
+    api.get('/api/v1/config/data-security/feature-availability').then(res => res.data),
 };
 
 // Scanner Package System API

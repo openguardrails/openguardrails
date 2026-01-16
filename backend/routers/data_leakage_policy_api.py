@@ -21,6 +21,13 @@ from database.models import (
 )
 from services.data_leakage_disposal_service import DataLeakageDisposalService
 from utils.logger import setup_logger
+from utils.subscription_check import (
+    require_subscription_for_feature,
+    check_subscription_for_feature,
+    SubscriptionFeature,
+    is_enterprise_mode
+)
+from config import settings
 
 logger = setup_logger()
 
@@ -287,10 +294,35 @@ async def update_tenant_default_policy(
     Update tenant's default data leakage prevention policy
 
     Changes apply to all applications that don't have specific overrides.
+
+    **Premium Features (SaaS mode only - requires subscription)**:
+    - Format detection (`default_enable_format_detection`)
+    - Smart segmentation (`default_enable_smart_segmentation`)
+
+    In enterprise/private deployment mode, all features are available.
     """
     try:
         current_user = get_current_user(request)
         tenant_id = UUID(current_user['tenant_id'])
+
+        # Check subscription for premium features (SaaS mode only)
+        # Format detection requires subscription
+        if policy_update.default_enable_format_detection:
+            require_subscription_for_feature(
+                tenant_id=current_user['tenant_id'],
+                db=db,
+                feature=SubscriptionFeature.FORMAT_DETECTION,
+                language=settings.default_language
+            )
+
+        # Smart segmentation requires subscription
+        if policy_update.default_enable_smart_segmentation:
+            require_subscription_for_feature(
+                tenant_id=current_user['tenant_id'],
+                db=db,
+                feature=SubscriptionFeature.SMART_SEGMENTATION,
+                language=settings.default_language
+            )
 
         # Get or create tenant policy
         tenant_policy = db.query(TenantDataLeakagePolicy).filter(
@@ -498,10 +530,35 @@ async def update_application_policy(
     Update application's data leakage policy overrides
 
     NULL values mean "use tenant default". Set a field to explicitly override.
+
+    **Premium Features (SaaS mode only - requires subscription)**:
+    - Format detection (`enable_format_detection`)
+    - Smart segmentation (`enable_smart_segmentation`)
+
+    In enterprise/private deployment mode, all features are available.
     """
     try:
         current_user = get_current_user(request)
         tenant_id = UUID(current_user['tenant_id'])
+
+        # Check subscription for premium features (SaaS mode only)
+        # Format detection requires subscription (only check if explicitly enabling, not NULL)
+        if policy_update.enable_format_detection is True:
+            require_subscription_for_feature(
+                tenant_id=current_user['tenant_id'],
+                db=db,
+                feature=SubscriptionFeature.FORMAT_DETECTION,
+                language=settings.default_language
+            )
+
+        # Smart segmentation requires subscription (only check if explicitly enabling, not NULL)
+        if policy_update.enable_smart_segmentation is True:
+            require_subscription_for_feature(
+                tenant_id=current_user['tenant_id'],
+                db=db,
+                feature=SubscriptionFeature.SMART_SEGMENTATION,
+                language=settings.default_language
+            )
 
         # Verify application belongs to tenant
         application = db.query(Application).filter(
