@@ -39,6 +39,89 @@ def validate_email(email: str) -> bool:
     pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     return bool(re.match(pattern, email))
 
+
+# Personal email domains blacklist
+PERSONAL_EMAIL_DOMAINS = {
+    # Google
+    'gmail.com', 'googlemail.com',
+    # Microsoft
+    'hotmail.com', 'outlook.com', 'live.com', 'msn.com',
+    # Yahoo
+    'yahoo.com', 'yahoo.cn', 'yahoo.co.jp', 'yahoo.co.uk',
+    # Apple
+    'icloud.com', 'me.com', 'mac.com',
+    # Chinese personal email providers
+    'qq.com', 'foxmail.com',
+    '163.com', '126.com', 'yeah.net',
+    'sina.com', 'sina.cn',
+    'sohu.com',
+    'aliyun.com',
+    '139.com',
+    '189.cn',
+    # Other common personal email providers
+    'aol.com',
+    'protonmail.com', 'proton.me',
+    'zoho.com',
+    'mail.com',
+    'gmx.com', 'gmx.net',
+    'yandex.com', 'yandex.ru',
+    'mail.ru',
+    'tutanota.com',
+    'fastmail.com',
+    # disposable email providers
+    'protectsmail.net',
+    'spamgourmet.com',
+    'dropmeon.com',
+    'feanzier.com',
+}
+
+
+def is_personal_email(email: str) -> bool:
+    """
+    Check if the email is from a personal email provider.
+
+    Args:
+        email: Email address to check
+
+    Returns:
+        True if it's a personal email, False if it's an enterprise email
+    """
+    if not email or '@' not in email:
+        return True
+
+    domain = email.lower().split('@')[-1]
+    return domain in PERSONAL_EMAIL_DOMAINS
+
+
+def validate_enterprise_email(email: str) -> dict:
+    """
+    Validate that the email is from an enterprise domain.
+
+    Args:
+        email: Email address to validate
+
+    Returns:
+        dict with keys:
+        - is_valid: bool
+        - error: error message if invalid
+    """
+    if not validate_email(email):
+        return {
+            "is_valid": False,
+            "error": "Invalid email format"
+        }
+
+    if is_personal_email(email):
+        return {
+            "is_valid": False,
+            "error": "Personal email addresses are not allowed. Please use your enterprise email."
+        }
+
+    return {
+        "is_valid": True,
+        "error": None
+    }
+
 def sanitize_input(text: str) -> str:
     """Clean input text"""
     if not text:

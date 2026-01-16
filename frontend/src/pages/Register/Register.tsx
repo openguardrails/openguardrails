@@ -180,6 +180,9 @@ const Register: React.FC = () => {
                 </div>
               </FormControl>
               <FormMessage />
+              <p className="text-xs text-muted-foreground mt-1">
+                {t('register.enterpriseEmailRequired') || 'Enterprise email required. Personal emails (Gmail, QQ, 163, etc.) are not allowed.'}
+              </p>
             </FormItem>
           )}
         />

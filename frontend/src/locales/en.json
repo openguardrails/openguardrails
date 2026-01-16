@@ -1900,6 +1900,8 @@
     "stepFillInfoDesc": "Enter email and password",
     "stepVerifyEmail": "Email Verification",
     "stepVerifyEmailDesc": "Verify email address",
+    "enterpriseEmailRequired": "Enterprise email required. Personal emails (Gmail, QQ, 163, etc.) are not allowed.",
+    "personalEmailNotAllowed": "Personal email addresses are not allowed. Please use your enterprise email.",
     "copyright": "© 2025 OpenGuardrails. All rights reserved."
   },
   "docs": {

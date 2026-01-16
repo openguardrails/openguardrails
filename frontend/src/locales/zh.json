@@ -1897,6 +1897,8 @@
     "stepFillInfoDesc": "输入邮箱和密码",
     "stepVerifyEmail": "邮箱验证",
     "stepVerifyEmailDesc": "验证邮箱地址",
+    "enterpriseEmailRequired": "请使用企业邮箱注册，不支持个人邮箱（如 Gmail、QQ、163 等）。",
+    "personalEmailNotAllowed": "不支持个人邮箱注册，请使用您的企业邮箱。",
     "copyright": "© 2025 OpenGuardrails. All rights reserved."
   },
   "docs": {

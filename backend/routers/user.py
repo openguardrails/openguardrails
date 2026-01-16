@@ -89,6 +89,15 @@ def get_current_user_from_token(credentials: HTTPAuthorizationCredentials, db: S
 @router.post("/register")
 async def register_user(register_data: RegisterRequest, db: Session = Depends(get_admin_db)):
     """Tenant registration"""
+    # Validate enterprise email (reject personal emails)
+    from utils.validators import validate_enterprise_email
+    email_validation = validate_enterprise_email(register_data.email)
+    if not email_validation["is_valid"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=email_validation["error"]
+        )
+
     # Check if email already exists
     existing_tenant = get_user_by_email(db, register_data.email)
     if existing_tenant:
