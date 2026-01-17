@@ -73,6 +73,11 @@ PERSONAL_EMAIL_DOMAINS = {
     'spamgourmet.com',
     'dropmeon.com',
     'feanzier.com',
+    'awsl.uk',
+    'yopmail.com',
+    'mail.nuox.eu.org',
+    'obeamb.com',
+    'nespj.com',
 }
 
 
