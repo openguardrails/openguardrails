@@ -51,7 +51,11 @@ def create_user(db: Session, email: str, password: str) -> Tenant:
 
 def create_default_application_and_key(db: Session, tenant_id: Union[str, uuid.UUID], tenant_email: str) -> Optional[dict]:
     """
-    Create default application and API key for new user
+    Create default application and API key for new user.
+
+    The application API key is separate from the tenant API key:
+    - Tenant API key: Used for auto-discovery mode (with X-OG-Application-ID header)
+    - Application API key: Used for direct API calls to this specific application
 
     Returns:
         dict with keys: application_id, api_key
@@ -66,12 +70,13 @@ def create_default_application_and_key(db: Session, tenant_id: Union[str, uuid.U
             tenant_id=tenant_id,
             name="Default Application",
             description="Default application created automatically",
-            is_active=True
+            is_active=True,
+            source='manual'
         )
         db.add(app)
         db.flush()  # Flush to get the app.id
 
-        # Generate unique API key
+        # Generate unique API key (different from tenant API key)
         api_key = generate_api_key()
         while db.query(ApiKey).filter(ApiKey.key == api_key).first():
             api_key = generate_api_key()
@@ -87,21 +92,16 @@ def create_default_application_and_key(db: Session, tenant_id: Union[str, uuid.U
         db.add(key)
         db.flush()
 
-        # Update tenant.api_key for backward compatibility (v4.0.0 migration)
-        # The old tenants.api_key field is maintained for backward compatibility
-        try:
-            tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-            if tenant:
-                tenant.api_key = api_key
-                db.flush()
-        except Exception as e:
-            logger.warning(f"Failed to update tenant.api_key for backward compatibility: {e}")
+        # NOTE: We intentionally do NOT update tenant.api_key here.
+        # The tenant API key and application API key serve different purposes:
+        # - Tenant API key: For auto-discovery mode (tenant API key + X-OG-Application-ID header)
+        # - Application API key: For direct API calls to this specific application
 
         # Initialize application configurations (risk config, ban policy, entity types)
         try:
             from routers.applications import initialize_application_configs
             initialize_application_configs(db, str(app.id), str(tenant_id))
-            logger.info(f"Created default application and API key for tenant {tenant_email}")
+            logger.info(f"Created default application '{app.name}' with API key for tenant {tenant_email}")
         except Exception as e:
             logger.error(f"Failed to initialize configs for default application: {e}")
             # Continue anyway - the app and key are created
@@ -110,6 +110,7 @@ def create_default_application_and_key(db: Session, tenant_id: Union[str, uuid.U
 
         return {
             "application_id": str(app.id),
+            "application_name": app.name,
             "api_key": api_key
         }
 
@@ -145,16 +146,19 @@ def verify_user_email(db: Session, email: str, verification_code: str) -> bool:
 
     # Then try to create default configurations (these are not critical for user activation)
     if tenant:
-        # NOTE: As of v5.2+, we NO LONGER create a default application for new tenants
-        # This supports the new auto-discovery mode where applications are created automatically
-        # when using tenant API key with X-OG-Consumer-ID header from third-party gateways (e.g., Higress)
-        #
-        # Users can create applications in two ways:
-        # 1. Manually via UI (AI Applications page)
-        # 2. Automatically via third-party gateway consumer headers (auto-discovery)
-        #
-        # For backward compatibility, existing tenants with applications are not affected.
-        logger.info(f"User {tenant.email} verified. No default application created (auto-discovery mode enabled).")
+        # Create default application and API key for new user
+        # The default application API key is different from the tenant API key:
+        # - Tenant API key: Used for auto-discovery mode (tenant API key + X-OG-Application-ID header)
+        # - Application API key: Used for direct API calls to this specific application
+        try:
+            result = create_default_application_and_key(db, tenant.id, tenant.email)
+            if result:
+                logger.info(f"Created default application for tenant {tenant.email}: app_id={result['application_id']}")
+            else:
+                logger.warning(f"Failed to create default application for tenant {tenant.email}")
+        except Exception as e:
+            logger.error(f"Error creating default application for tenant {tenant.email}: {e}")
+            # Not critical for user activation, continue
 
         # Create default reply templates for new tenant
         try:

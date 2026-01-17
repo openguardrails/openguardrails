@@ -25,8 +25,12 @@ CREATE INDEX IF NOT EXISTS idx_upstream_api_configs_is_default_private_model ON 
 -- Part 2: Create application_data_leakage_policies table
 -- ============================================================================
 
+-- Drop the table if it exists to ensure clean schema (fresh install scenario)
+-- This is safe because this table is first created in this migration
+DROP TABLE IF EXISTS application_data_leakage_policies CASCADE;
+
 -- Create table with DEFAULT gen_random_uuid() for id column
-CREATE TABLE IF NOT EXISTS application_data_leakage_policies (
+CREATE TABLE application_data_leakage_policies (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     application_id UUID NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
