@@ -78,6 +78,7 @@ PERSONAL_EMAIL_DOMAINS = {
     'mail.nuox.eu.org',
     'obeamb.com',
     'nespj.com',
+    'hotmail.be',
 }
 
 
