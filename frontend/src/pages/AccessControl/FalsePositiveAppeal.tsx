@@ -109,7 +109,7 @@ const FalsePositiveAppeal: React.FC = () => {
     resolver: zodResolver(appealConfigSchema),
     defaultValues: {
       enabled: false,
-      message_template: '如果您认为这是误报，请点击此链接申诉: {appeal_url}',
+      message_template: t('appealConfig.templatePlaceholder'),
       appeal_base_url: '',
       final_reviewer_email: user?.email || '',
     },
@@ -131,7 +131,7 @@ const FalsePositiveAppeal: React.FC = () => {
       // If no config exists, set default with user's email
       appealForm.reset({
         enabled: false,
-        message_template: '如果您认为这是误报，请点击此链接申诉: {appeal_url}',
+        message_template: t('appealConfig.templatePlaceholder'),
         appeal_base_url: '',
         final_reviewer_email: user?.email || '',
       })
