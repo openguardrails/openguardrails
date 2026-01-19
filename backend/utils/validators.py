@@ -2,7 +2,7 @@ import re
 from typing import List, Optional
 from pydantic import BaseModel, validator
 import httpx
-from backend.config import settings
+from config import settings
 
 class MessageValidator(BaseModel):
     """Message validator"""
