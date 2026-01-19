@@ -201,6 +201,10 @@ class Settings(BaseSettings):
     free_user_monthly_quota: int = 1000  # Monthly quota for free users
     paid_user_monthly_quota: int = 100000  # Monthly quota for paid/subscribed users
 
+    # VerifyMail.io API configuration for disposable email verification
+    # If not configured, disposable email verification will be skipped
+    verifymail_api_key: Optional[str] = None
+
     class Config:
         # Ensure we load the .env file next to this config module,
         # regardless of the current working directory
