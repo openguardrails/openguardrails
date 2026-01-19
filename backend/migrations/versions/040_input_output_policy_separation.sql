@@ -37,6 +37,16 @@ CREATE TABLE IF NOT EXISTS tenant_data_leakage_policies (
     default_general_medium_risk_action VARCHAR(50) NOT NULL DEFAULT 'replace',
     default_general_low_risk_action VARCHAR(50) NOT NULL DEFAULT 'pass',
 
+    -- General Risk Policy - Input Defaults
+    default_general_input_high_risk_action VARCHAR(50) NOT NULL DEFAULT 'block',
+    default_general_input_medium_risk_action VARCHAR(50) NOT NULL DEFAULT 'replace',
+    default_general_input_low_risk_action VARCHAR(50) NOT NULL DEFAULT 'pass',
+
+    -- General Risk Policy - Output Defaults
+    default_general_output_high_risk_action VARCHAR(50) NOT NULL DEFAULT 'block',
+    default_general_output_medium_risk_action VARCHAR(50) NOT NULL DEFAULT 'replace',
+    default_general_output_low_risk_action VARCHAR(50) NOT NULL DEFAULT 'pass',
+
     -- Note: Default private model is determined by upstream_api_configs.is_default_private_model = true
     -- (No column needed here as it's stored in upstream_api_configs)
 
@@ -435,6 +445,12 @@ INSERT INTO tenant_data_leakage_policies (
     default_general_high_risk_action,
     default_general_medium_risk_action,
     default_general_low_risk_action,
+    default_general_input_high_risk_action,
+    default_general_input_medium_risk_action,
+    default_general_input_low_risk_action,
+    default_general_output_high_risk_action,
+    default_general_output_medium_risk_action,
+    default_general_output_low_risk_action,
     default_enable_format_detection,
     default_enable_smart_segmentation
 )
@@ -453,6 +469,12 @@ SELECT DISTINCT ON (tenant_id)
     'block',     -- default_general_high_risk_action
     'replace',   -- default_general_medium_risk_action
     'pass',      -- default_general_low_risk_action
+    'block',     -- default_general_input_high_risk_action
+    'replace',   -- default_general_input_medium_risk_action
+    'pass',      -- default_general_input_low_risk_action
+    'block',     -- default_general_output_high_risk_action
+    'replace',   -- default_general_output_medium_risk_action
+    'pass',      -- default_general_output_low_risk_action
     COALESCE(enable_format_detection, TRUE),
     COALESCE(enable_smart_segmentation, TRUE)
 FROM application_data_leakage_policies
@@ -476,6 +498,12 @@ INSERT INTO tenant_data_leakage_policies (
     default_general_high_risk_action,
     default_general_medium_risk_action,
     default_general_low_risk_action,
+    default_general_input_high_risk_action,
+    default_general_input_medium_risk_action,
+    default_general_input_low_risk_action,
+    default_general_output_high_risk_action,
+    default_general_output_medium_risk_action,
+    default_general_output_low_risk_action,
     default_enable_format_detection,
     default_enable_smart_segmentation
 )
@@ -494,6 +522,12 @@ SELECT
     'block',              -- default_general_high_risk_action
     'replace',            -- default_general_medium_risk_action
     'pass',               -- default_general_low_risk_action
+    'block',              -- default_general_input_high_risk_action
+    'replace',            -- default_general_input_medium_risk_action
+    'pass',               -- default_general_input_low_risk_action
+    'block',              -- default_general_output_high_risk_action
+    'replace',            -- default_general_output_medium_risk_action
+    'pass',               -- default_general_output_low_risk_action
     TRUE,                 -- default_enable_format_detection
     TRUE                  -- default_enable_smart_segmentation
 FROM tenants

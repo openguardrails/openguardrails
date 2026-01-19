@@ -17,7 +17,7 @@ ALTER TABLE scanner_packages DROP CONSTRAINT IF EXISTS chk_package_type;
 -- Add the new constraint with updated values
 ALTER TABLE scanner_packages
 ADD CONSTRAINT chk_package_type
-CHECK (package_type IN ('basic', 'purchasable', 'custom'));
+CHECK (package_type IN ('basic', 'builtin', 'purchasable', 'custom'));
 
 -- Note: 'basic' = basic/free packages (formerly 'builtin')
 --       'purchasable' = premium/paid packages

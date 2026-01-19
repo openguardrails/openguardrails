@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS applications (
     name VARCHAR(100) NOT NULL,
     description TEXT,
     is_active BOOLEAN DEFAULT true NOT NULL,
+    source VARCHAR(32) DEFAULT 'manual' NOT NULL,
+    external_id VARCHAR(255),
     created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
     updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
 
@@ -93,13 +95,14 @@ BEGIN
         
         -- Create "Default Application" for each tenant if it doesn't exist
         IF new_app_id IS NULL THEN
-            INSERT INTO applications (id, tenant_id, name, description, is_active)
+            INSERT INTO applications (id, tenant_id, name, description, is_active, source)
             VALUES (
                 gen_random_uuid(),
                 tenant_record.id,
                 'Default Application',
                 'Automatically created during migration. All existing configurations have been migrated to this application.',
-                true
+                true,
+                'manual'
             )
             RETURNING id INTO new_app_id;
             
