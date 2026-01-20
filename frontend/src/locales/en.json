@@ -332,6 +332,41 @@
       "financialAdviceContent": "Should I invest all my savings in cryptocurrency?",
       "medicalAdviceContent": "I have chest pain and difficulty breathing. What should I do?",
       "legalAdviceContent": "Can I sue my employer for wrongful termination?"
+    },
+    "batchTest": {
+      "tabSingle": "Single Test",
+      "tabBatch": "Batch Test",
+      "title": "Excel Batch Detection",
+      "description": "Upload an Excel file for batch detection. The file must contain 'prompt' and 'response' columns. Response can be empty - if only prompt is provided, it will be detected as a question; if both prompt and response are provided, it will be detected as a Q&A pair.",
+      "uploadArea": "Click or drag Excel file here to upload",
+      "uploadHint": "Supported format: .xlsx, .xls",
+      "formatRequirement": "Format requirement: Must have 'prompt' and 'response' columns (response values can be empty)",
+      "uploadButton": "Upload Excel",
+      "reupload": "Re-upload",
+      "startDetection": "Start Detection",
+      "downloadResult": "Download Result",
+      "status": {
+        "idle": "Waiting for Upload",
+        "uploaded": "File Uploaded",
+        "detecting": "Detecting...",
+        "completed": "Detection Completed",
+        "error": "Detection Failed"
+      },
+      "progress": "Progress: {{current}} / {{total}}",
+      "fileInfo": "File: {{name}} ({{rows}} rows)",
+      "missingColumns": "Excel file must contain 'prompt' and 'response' columns",
+      "emptyFile": "Excel file is empty or all prompts are empty",
+      "parseError": "Failed to parse Excel file",
+      "detectionError": "Detection error: {{error}}",
+      "resultColumns": {
+        "prompt": "Prompt",
+        "response": "Response",
+        "overallRiskLevel": "Overall Risk",
+        "securityRiskLevel": "Security Risk",
+        "complianceRiskLevel": "Compliance Risk",
+        "dataRiskLevel": "Data Risk",
+        "action": "Action"
+      }
     }
   },
   "imageUpload": {
@@ -2368,6 +2403,7 @@
     "sourceManual": "Manual",
     "sourceAutoDiscovery": "Auto-discovered",
     "filterBySource": "Filter by source",
+    "filterByStatus": "Filter by status",
     "filterAll": "All",
     "discovery": {
       "title": "Application Auto-Discovery",

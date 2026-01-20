@@ -329,6 +329,41 @@
       "financialAdviceContent": "我是否应该把所有积蓄投资到加密货币？",
       "medicalAdviceContent": "我胸口疼痛并且呼吸困难，我该怎么办？",
       "legalAdviceContent": "我能因为不当解雇而起诉我的雇主吗？"
+    },
+    "batchTest": {
+      "tabSingle": "单条测试",
+      "tabBatch": "批量测试",
+      "title": "Excel 批量检测",
+      "description": "上传 Excel 文件进行批量检测。文件必须包含 'prompt' 和 'response' 列。response 可以为空 - 如果只有 prompt，将按问题模式检测；如果同时有 prompt 和 response，将按问答对模式检测。",
+      "uploadArea": "点击或拖拽 Excel 文件到此处上传",
+      "uploadHint": "支持格式：.xlsx, .xls",
+      "formatRequirement": "格式要求：必须有 'prompt' 和 'response' 列（response 值可以为空）",
+      "uploadButton": "上传 Excel",
+      "reupload": "重新上传",
+      "startDetection": "开始检测",
+      "downloadResult": "下载结果",
+      "status": {
+        "idle": "等待上传",
+        "uploaded": "文件已上传",
+        "detecting": "检测中...",
+        "completed": "检测完成",
+        "error": "检测失败"
+      },
+      "progress": "进度：{{current}} / {{total}}",
+      "fileInfo": "文件：{{name}}（{{rows}} 行）",
+      "missingColumns": "Excel 文件必须包含 'prompt' 和 'response' 列",
+      "emptyFile": "Excel 文件为空或所有 prompt 为空",
+      "parseError": "解析 Excel 文件失败",
+      "detectionError": "检测错误：{{error}}",
+      "resultColumns": {
+        "prompt": "提示词",
+        "response": "响应",
+        "overallRiskLevel": "综合风险",
+        "securityRiskLevel": "安全风险",
+        "complianceRiskLevel": "合规风险",
+        "dataRiskLevel": "数据风险",
+        "action": "建议操作"
+      }
     }
   },
   "imageUpload": {
@@ -2365,6 +2400,7 @@
     "sourceManual": "手动创建",
     "sourceAutoDiscovery": "自动发现",
     "filterBySource": "按来源筛选",
+    "filterByStatus": "按状态筛选",
     "filterAll": "全部",
     "discovery": {
       "title": "应用自动发现",

@@ -77,3 +77,4 @@ frontend/public/logo_dark.png
 frontend/public/logo.png
 thirdparty-gateways/
 integrations/og-connector-higress/target/
+backend/openguardrails-data

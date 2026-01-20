@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { Copy, ShieldCheck, Lock } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { copyToClipboard } from '@/utils/clipboard'
 import { toast } from 'sonner'
 import { useSearchParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
@@ -132,7 +133,7 @@ const Account: React.FC = () => {
   const handleCopyDifyEndpoint = async () => {
     const endpoint = 'https://api.openguardrails.com/v1/dify/moderation'
     try {
-      await navigator.clipboard.writeText(endpoint)
+      await copyToClipboard(endpoint)
       toast.success(t('account.copied'))
     } catch {
       toast.error(t('account.copyFailed'))
@@ -213,10 +214,14 @@ const Account: React.FC = () => {
                   </div>
                   <Button
                     variant="outline"
-                    onClick={() => {
+                    onClick={async () => {
                       if (user?.id) {
-                        navigator.clipboard.writeText(user.id)
-                        toast.success(t('account.uuidCopied'))
+                        try {
+                          await copyToClipboard(user.id)
+                          toast.success(t('account.uuidCopied'))
+                        } catch {
+                          toast.error(t('account.copyFailed'))
+                        }
                       }
                     }}
                   >
@@ -358,10 +363,14 @@ const Account: React.FC = () => {
                         <Button
                           variant="outline"
                           disabled={!hasAccess}
-                          onClick={() => {
+                          onClick={async () => {
                             if (user?.model_api_key && hasAccess) {
-                              navigator.clipboard.writeText(user.model_api_key)
-                              toast.success(t('account.copied'))
+                              try {
+                                await copyToClipboard(user.model_api_key)
+                                toast.success(t('account.copied'))
+                              } catch {
+                                toast.error(t('account.copyFailed'))
+                              }
                             }
                           }}
                         >

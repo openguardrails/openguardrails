@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
+import { copyToClipboard } from '@/utils/clipboard'
 import { Plus, Edit2, Trash2, Eye, Server, Copy, Check } from 'lucide-react'
 import { proxyModelsApi } from '../../services/api'
 import { useAuth } from '../../contexts/AuthContext'
@@ -305,10 +306,14 @@ const ProxyModelManagement: React.FC = () => {
   }
 
   // Copy to clipboard helper
-  const copyToClipboard = (text: string, id: string) => {
-    navigator.clipboard.writeText(text)
-    setCopiedId(id)
-    setTimeout(() => setCopiedId(null), 2000)
+  const handleCopyToClipboard = async (text: string, id: string) => {
+    try {
+      await copyToClipboard(text)
+      setCopiedId(id)
+      setTimeout(() => setCopiedId(null), 2000)
+    } catch (error) {
+      console.error('Failed to copy to clipboard:', error)
+    }
   }
 
   const columns: ColumnDef<ProxyModel>[] = [
@@ -336,7 +341,7 @@ const ProxyModelManagement: React.FC = () => {
             variant="ghost"
             size="sm"
             className="h-6 w-6 p-0"
-            onClick={() => copyToClipboard(row.original.id, row.original.id)}
+            onClick={() => handleCopyToClipboard(row.original.id, row.original.id)}
           >
             {copiedId === row.original.id ? (
               <Check className="h-3 w-3 text-green-600" />
@@ -628,7 +633,7 @@ completion = client.chat.completions.create(
                     variant="ghost"
                     size="sm"
                     className="h-6 w-6 p-0"
-                    onClick={() => copyToClipboard(viewingModel.id, viewingModel.id)}
+                    onClick={() => handleCopyToClipboard(viewingModel.id, viewingModel.id)}
                   >
                     {copiedId === viewingModel.id ? (
                       <Check className="h-3 w-3 text-green-600" />

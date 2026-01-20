@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import api, { testModelsApi } from '../../services/api'
-import { PlayCircle, X, Settings } from 'lucide-react'
+import { PlayCircle, X, Settings, Upload, Download, FileSpreadsheet, Loader2 } from 'lucide-react'
 import { Button } from '../../components/ui/button'
 import { Textarea } from '../../components/ui/textarea'
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card'
@@ -12,6 +12,8 @@ import { Input } from '../../components/ui/input'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../../components/ui/collapsible'
 import { toast } from 'sonner'
 import { Separator } from '../../components/ui/separator'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/tabs'
+import * as XLSX from 'xlsx'
 
 interface TestModel {
   id: string
@@ -63,6 +65,28 @@ interface TestResult {
   original_responses: Record<string, ModelResponse>
 }
 
+// Batch test interfaces
+interface ExcelRow {
+  prompt: string
+  response: string
+}
+
+interface BatchTestResult {
+  prompt: string
+  response: string
+  compliance_risk_level: string
+  compliance_categories: string
+  security_risk_level: string
+  security_categories: string
+  data_risk_level: string
+  data_categories: string
+  overall_risk_level: string
+  suggest_action: string
+  suggest_answer: string
+}
+
+type BatchTestStatus = 'idle' | 'uploaded' | 'detecting' | 'completed' | 'error'
+
 const OnlineTest: React.FC = () => {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -83,6 +107,15 @@ const OnlineTest: React.FC = () => {
   const [testResult, setTestResult] = useState<TestResult | null>(null)
   const [models, setModels] = useState<TestModel[]>([])
   const [selectedCategory, setSelectedCategory] = useState('security')
+
+  // Batch test states
+  const [batchStatus, setBatchStatus] = useState<BatchTestStatus>('idle')
+  const [batchFile, setBatchFile] = useState<File | null>(null)
+  const [batchData, setBatchData] = useState<ExcelRow[]>([])
+  const [batchResults, setBatchResults] = useState<BatchTestResult[]>([])
+  const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 })
+  const [batchError, setBatchError] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const loadModels = async () => {
     try {
@@ -379,11 +412,222 @@ const OnlineTest: React.FC = () => {
     }
   }
 
+  // Batch test functions
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    setBatchFile(file)
+    setBatchStatus('idle')
+    setBatchError(null)
+    setBatchResults([])
+
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      try {
+        const data = e.target?.result
+        const workbook = XLSX.read(data, { type: 'binary' })
+        const sheetName = workbook.SheetNames[0]
+        const sheet = workbook.Sheets[sheetName]
+        // Use defval to preserve empty cells, otherwise columns with empty values in first row are skipped
+        const jsonData = XLSX.utils.sheet_to_json<Record<string, any>>(sheet, { defval: '' })
+
+        if (jsonData.length === 0) {
+          toast.error(t('onlineTest.batchTest.emptyFile'))
+          setBatchFile(null)
+          return
+        }
+
+        // Check for required columns (case-insensitive)
+        const firstRow = jsonData[0]
+        const keys = Object.keys(firstRow)
+        const promptKey = keys.find(k => k.toLowerCase() === 'prompt')
+        const responseKey = keys.find(k => k.toLowerCase() === 'response')
+
+        if (!promptKey || !responseKey) {
+          toast.error(t('onlineTest.batchTest.missingColumns'))
+          setBatchFile(null)
+          return
+        }
+
+        // Map data - filter out rows with empty prompt
+        const mappedData: ExcelRow[] = jsonData.map((row: any) => ({
+          prompt: String(row[promptKey] || '').trim(),
+          response: String(row[responseKey] || '').trim(),
+        })).filter(row => row.prompt !== '')
+
+        if (mappedData.length === 0) {
+          toast.error(t('onlineTest.batchTest.emptyFile'))
+          setBatchFile(null)
+          return
+        }
+
+        setBatchData(mappedData)
+        setBatchStatus('uploaded')
+        toast.success(t('onlineTest.batchTest.fileInfo', { name: file.name, rows: mappedData.length }))
+      } catch (error) {
+        console.error('Failed to parse Excel:', error)
+        toast.error(t('onlineTest.batchTest.parseError'))
+        setBatchFile(null)
+      }
+    }
+    reader.readAsBinaryString(file)
+  }
+
+  const runBatchDetection = async () => {
+    if (batchData.length === 0) return
+
+    setBatchStatus('detecting')
+    setBatchProgress({ current: 0, total: batchData.length })
+    setBatchResults([])
+    setBatchError(null)
+
+    const results: BatchTestResult[] = []
+
+    for (let i = 0; i < batchData.length; i++) {
+      const row = batchData[i]
+      try {
+        // Determine input type: if response is not empty, use qa_pair format
+        let content = row.prompt
+        let inputTypeForRequest: 'question' | 'qa_pair' = 'question'
+
+        if (row.response) {
+          content = `Q: ${row.prompt}\nA: ${row.response}`
+          inputTypeForRequest = 'qa_pair'
+        }
+
+        const response = await api.post('/api/v1/test/online', {
+          content: content,
+          input_type: inputTypeForRequest,
+        })
+
+        const guardrail = response.data.guardrail
+        results.push({
+          prompt: row.prompt,
+          response: row.response,
+          compliance_risk_level: guardrail.compliance?.risk_level || 'no_risk',
+          compliance_categories: (guardrail.compliance?.categories || []).join(', '),
+          security_risk_level: guardrail.security?.risk_level || 'no_risk',
+          security_categories: (guardrail.security?.categories || []).join(', '),
+          data_risk_level: guardrail.data?.risk_level || 'no_risk',
+          data_categories: (guardrail.data?.categories || []).join(', '),
+          overall_risk_level: guardrail.overall_risk_level || 'no_risk',
+          suggest_action: guardrail.suggest_action || 'pass',
+          suggest_answer: guardrail.suggest_answer || '',
+        })
+      } catch (error: any) {
+        console.error(`Detection failed for row ${i + 1}:`, error)
+        results.push({
+          prompt: row.prompt,
+          response: row.response,
+          compliance_risk_level: 'error',
+          compliance_categories: '',
+          security_risk_level: 'error',
+          security_categories: '',
+          data_risk_level: 'error',
+          data_categories: '',
+          overall_risk_level: 'error',
+          suggest_action: 'error',
+          suggest_answer: error?.message || 'Detection failed',
+        })
+      }
+
+      setBatchProgress({ current: i + 1, total: batchData.length })
+    }
+
+    setBatchResults(results)
+    setBatchStatus('completed')
+    toast.success(t('onlineTest.batchTest.status.completed'))
+  }
+
+  const downloadResults = () => {
+    if (batchResults.length === 0) return
+
+    // Prepare data for Excel - results already have the correct structure
+    const excelData = batchResults.map(result => ({
+      prompt: result.prompt,
+      response: result.response,
+      compliance_risk_level: result.compliance_risk_level,
+      compliance_categories: result.compliance_categories,
+      security_risk_level: result.security_risk_level,
+      security_categories: result.security_categories,
+      data_risk_level: result.data_risk_level,
+      data_categories: result.data_categories,
+      overall_risk_level: result.overall_risk_level,
+      suggest_action: result.suggest_action,
+      suggest_answer: result.suggest_answer,
+    }))
+
+    // Create workbook and worksheet
+    const wb = XLSX.utils.book_new()
+    const ws = XLSX.utils.json_to_sheet(excelData)
+
+    // Set column widths
+    ws['!cols'] = [
+      { wch: 50 }, // prompt
+      { wch: 50 }, // response
+      { wch: 18 }, // compliance_risk_level
+      { wch: 25 }, // compliance_categories
+      { wch: 18 }, // security_risk_level
+      { wch: 25 }, // security_categories
+      { wch: 15 }, // data_risk_level
+      { wch: 25 }, // data_categories
+      { wch: 18 }, // overall_risk_level
+      { wch: 15 }, // suggest_action
+      { wch: 50 }, // suggest_answer
+    ]
+
+    XLSX.utils.book_append_sheet(wb, ws, 'Detection Results')
+
+    // Generate filename with timestamp
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+    const filename = `detection_results_${timestamp}.xlsx`
+
+    // Download
+    XLSX.writeFile(wb, filename)
+  }
+
+  const resetBatchTest = () => {
+    setBatchStatus('idle')
+    setBatchFile(null)
+    setBatchData([])
+    setBatchResults([])
+    setBatchProgress({ current: 0, total: 0 })
+    setBatchError(null)
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }
+
+  const getStatusColor = (status: BatchTestStatus) => {
+    switch (status) {
+      case 'idle':
+        return 'bg-gray-100 text-gray-800'
+      case 'uploaded':
+        return 'bg-blue-100 text-blue-800'
+      case 'detecting':
+        return 'bg-yellow-100 text-yellow-800'
+      case 'completed':
+        return 'bg-green-100 text-green-800'
+      case 'error':
+        return 'bg-red-100 text-red-800'
+      default:
+        return 'bg-gray-100 text-gray-800'
+    }
+  }
+
   return (
     <div className="max-w-5xl mx-auto">
       <h1 className="text-2xl font-bold mb-2">{t('onlineTest.title')}</h1>
       <p className="text-slate-600 mb-6">{t('onlineTest.description')}</p>
 
+      <Tabs defaultValue="single" className="w-full">
+        <TabsList className="mb-4">
+          <TabsTrigger value="single">{t('onlineTest.batchTest.tabSingle')}</TabsTrigger>
+          <TabsTrigger value="batch">{t('onlineTest.batchTest.tabBatch')}</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="single">
       <div className="space-y-6">
         {/* Test input area */}
         <Card>
@@ -763,6 +1007,179 @@ const OnlineTest: React.FC = () => {
           </Card>
         )}
       </div>
+        </TabsContent>
+
+        <TabsContent value="batch">
+          <div className="space-y-6">
+            {/* Batch test description */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <FileSpreadsheet className="h-5 w-5" />
+                  {t('onlineTest.batchTest.title')}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <p className="text-sm text-slate-600">{t('onlineTest.batchTest.description')}</p>
+                <p className="text-xs text-slate-500">{t('onlineTest.batchTest.formatRequirement')}</p>
+
+                {/* File upload area */}
+                <div className="space-y-4">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".xlsx,.xls"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                    id="excel-upload"
+                  />
+
+                  {batchStatus === 'idle' && !batchFile ? (
+                    <label
+                      htmlFor="excel-upload"
+                      className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-slate-300 rounded-lg cursor-pointer bg-slate-50 hover:bg-slate-100 transition-colors"
+                    >
+                      <Upload className="h-8 w-8 text-slate-400 mb-2" />
+                      <span className="text-sm text-slate-600">{t('onlineTest.batchTest.uploadArea')}</span>
+                      <span className="text-xs text-slate-400 mt-1">{t('onlineTest.batchTest.uploadHint')}</span>
+                    </label>
+                  ) : (
+                    <div className="p-4 bg-slate-50 rounded-lg border border-slate-200">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <FileSpreadsheet className="h-8 w-8 text-green-600" />
+                          <div>
+                            <p className="text-sm font-medium text-slate-700">{batchFile?.name}</p>
+                            <p className="text-xs text-slate-500">
+                              {batchData.length} {t('onlineTest.batchTest.resultColumns.prompt').toLowerCase()}
+                            </p>
+                          </div>
+                        </div>
+                        <span className={`px-3 py-1 text-xs font-medium rounded-full ${getStatusColor(batchStatus)}`}>
+                          {t(`onlineTest.batchTest.status.${batchStatus}`)}
+                        </span>
+                      </div>
+
+                      {/* Progress display */}
+                      {batchStatus === 'detecting' && (
+                        <div className="mt-4">
+                          <div className="flex items-center justify-between text-sm text-slate-600 mb-2">
+                            <span>{t('onlineTest.batchTest.progress', { current: batchProgress.current, total: batchProgress.total })}</span>
+                            <span>{Math.round((batchProgress.current / batchProgress.total) * 100)}%</span>
+                          </div>
+                          <div className="w-full bg-slate-200 rounded-full h-2">
+                            <div
+                              className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                              style={{ width: `${(batchProgress.current / batchProgress.total) * 100}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Action buttons */}
+                  <div className="flex gap-2">
+                    {batchStatus === 'uploaded' && (
+                      <Button onClick={runBatchDetection} className="bg-blue-600 hover:bg-blue-700">
+                        <PlayCircle className="h-4 w-4 mr-2" />
+                        {t('onlineTest.batchTest.startDetection')}
+                      </Button>
+                    )}
+
+                    {batchStatus === 'detecting' && (
+                      <Button disabled className="bg-blue-600">
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        {t('onlineTest.batchTest.status.detecting')}
+                      </Button>
+                    )}
+
+                    {batchStatus === 'completed' && (
+                      <Button onClick={downloadResults} className="bg-green-600 hover:bg-green-700">
+                        <Download className="h-4 w-4 mr-2" />
+                        {t('onlineTest.batchTest.downloadResult')}
+                      </Button>
+                    )}
+
+                    {(batchStatus === 'uploaded' || batchStatus === 'completed' || batchStatus === 'error') && (
+                      <Button variant="outline" onClick={resetBatchTest}>
+                        <X className="h-4 w-4 mr-2" />
+                        {t('onlineTest.batchTest.reupload')}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Results preview */}
+            {batchResults.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>{t('onlineTest.testResult')}</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-slate-200">
+                          <th className="text-left py-2 px-3 font-medium text-slate-700">#</th>
+                          <th className="text-left py-2 px-3 font-medium text-slate-700">{t('onlineTest.batchTest.resultColumns.prompt')}</th>
+                          <th className="text-left py-2 px-3 font-medium text-slate-700">{t('onlineTest.batchTest.resultColumns.response')}</th>
+                          <th className="text-left py-2 px-3 font-medium text-slate-700">{t('onlineTest.batchTest.resultColumns.overallRiskLevel')}</th>
+                          <th className="text-left py-2 px-3 font-medium text-slate-700">{t('onlineTest.batchTest.resultColumns.securityRiskLevel')}</th>
+                          <th className="text-left py-2 px-3 font-medium text-slate-700">{t('onlineTest.batchTest.resultColumns.complianceRiskLevel')}</th>
+                          <th className="text-left py-2 px-3 font-medium text-slate-700">{t('onlineTest.batchTest.resultColumns.dataRiskLevel')}</th>
+                          <th className="text-left py-2 px-3 font-medium text-slate-700">{t('onlineTest.batchTest.resultColumns.action')}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {batchResults.slice(0, 50).map((result, index) => (
+                          <tr key={index} className="border-b border-slate-100 hover:bg-slate-50">
+                            <td className="py-2 px-3 text-slate-500">{index + 1}</td>
+                            <td className="py-2 px-3 max-w-[200px] truncate" title={result.prompt}>{result.prompt}</td>
+                            <td className="py-2 px-3 max-w-[200px] truncate" title={result.response || '-'}>{result.response || '-'}</td>
+                            <td className="py-2 px-3">
+                              <span className={`px-2 py-0.5 text-xs rounded border ${getRiskColor(result.overall_risk_level)}`}>
+                                {translateRiskLevel(result.overall_risk_level)}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3">
+                              <span className={`px-2 py-0.5 text-xs rounded border ${getRiskColor(result.security_risk_level)}`}>
+                                {translateRiskLevel(result.security_risk_level)}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3">
+                              <span className={`px-2 py-0.5 text-xs rounded border ${getRiskColor(result.compliance_risk_level)}`}>
+                                {translateRiskLevel(result.compliance_risk_level)}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3">
+                              <span className={`px-2 py-0.5 text-xs rounded border ${getRiskColor(result.data_risk_level)}`}>
+                                {translateRiskLevel(result.data_risk_level)}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3">
+                              <span className={`px-2 py-0.5 text-xs rounded border ${getActionColor(result.suggest_action)}`}>
+                                {result.suggest_action}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {batchResults.length > 50 && (
+                      <p className="text-sm text-slate-500 mt-2 text-center">
+                        ... {t('onlineTest.batchTest.progress', { current: 50, total: batchResults.length })} ...
+                      </p>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

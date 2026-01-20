@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { Plus, Edit, Trash2, Key, Copy, Eye, EyeOff, Info, Search, X } from 'lucide-react'
+import { Plus, Edit, Trash2, Key, Copy, Eye, EyeOff, Info, Search, X, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { copyToClipboard } from '@/utils/clipboard'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -113,18 +114,27 @@ const ApplicationManagement: React.FC = () => {
   const [visibleKeys, setVisibleKeys] = useState<Set<string>>(new Set())
   // Filter by application source: 'all', 'manual', or 'auto_discovery'
   const [sourceFilter, setSourceFilter] = useState<'all' | 'manual' | 'auto_discovery'>('all')
+  // Filter by application status: 'all', 'active', or 'inactive'
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
   // Search by application name
   const [searchText, setSearchText] = useState('')
+  // Sort configuration: field and direction
+  const [sortField, setSortField] = useState<'created_at' | 'name'>('created_at')
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc')
   // Detail drawer state
   const [detailDrawerVisible, setDetailDrawerVisible] = useState(false)
   const [selectedApp, setSelectedApp] = useState<Application | null>(null)
 
-  // Filter applications based on source and search text
+  // Filter and sort applications
   const filteredApplications = useMemo(() => {
     let result = applications
     // Filter by source
     if (sourceFilter !== 'all') {
       result = result.filter((app) => (app.source || 'manual') === sourceFilter)
+    }
+    // Filter by status
+    if (statusFilter !== 'all') {
+      result = result.filter((app) => statusFilter === 'active' ? app.is_active : !app.is_active)
     }
     // Filter by search text (name or external_id)
     if (searchText.trim()) {
@@ -134,8 +144,28 @@ const ApplicationManagement: React.FC = () => {
         (app.external_id && app.external_id.toLowerCase().includes(search))
       )
     }
+    // Sort applications
+    result = [...result].sort((a, b) => {
+      let comparison = 0
+      if (sortField === 'created_at') {
+        comparison = new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      } else if (sortField === 'name') {
+        comparison = a.name.localeCompare(b.name)
+      }
+      return sortDirection === 'asc' ? comparison : -comparison
+    })
     return result
-  }, [applications, sourceFilter, searchText])
+  }, [applications, sourceFilter, statusFilter, searchText, sortField, sortDirection])
+
+  // Toggle sort direction or change sort field
+  const handleSort = (field: 'created_at' | 'name') => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortField(field)
+      setSortDirection(field === 'created_at' ? 'desc' : 'asc')
+    }
+  }
 
   const form = useForm<ApplicationFormData>({
     resolver: zodResolver(applicationSchema),
@@ -291,9 +321,9 @@ const ApplicationManagement: React.FC = () => {
     }
   }
 
-  const copyToClipboard = async (text: string) => {
+  const handleCopyToClipboard = async (text: string) => {
     try {
-      await navigator.clipboard.writeText(text)
+      await copyToClipboard(text)
       toast.success(t('applicationManagement.copiedToClipboard'))
     } catch (error) {
       console.error('Failed to copy to clipboard:', error)
@@ -327,11 +357,30 @@ const ApplicationManagement: React.FC = () => {
     setDetailDrawerVisible(true)
   }
 
+  // Helper to render sort icon
+  const SortIcon = ({ field }: { field: 'created_at' | 'name' }) => {
+    if (sortField !== field) {
+      return <ArrowUpDown className="ml-1 h-3 w-3 text-gray-400" />
+    }
+    return sortDirection === 'asc'
+      ? <ArrowUp className="ml-1 h-3 w-3" />
+      : <ArrowDown className="ml-1 h-3 w-3" />
+  }
+
   // Column order: name, description, protection, source, status, created_at, actions
   const columns: ColumnDef<Application>[] = [
     {
       accessorKey: 'name',
-      header: t('applicationManagement.name'),
+      header: () => (
+        <Button
+          variant="ghost"
+          className="h-auto p-0 font-medium hover:bg-transparent"
+          onClick={() => handleSort('name')}
+        >
+          {t('applicationManagement.name')}
+          <SortIcon field="name" />
+        </Button>
+      ),
     },
     {
       accessorKey: 'description',
@@ -397,7 +446,16 @@ const ApplicationManagement: React.FC = () => {
     },
     {
       accessorKey: 'created_at',
-      header: t('applicationManagement.createdAt'),
+      header: () => (
+        <Button
+          variant="ghost"
+          className="h-auto p-0 font-medium hover:bg-transparent"
+          onClick={() => handleSort('created_at')}
+        >
+          {t('applicationManagement.createdAt')}
+          <SortIcon field="created_at" />
+        </Button>
+      ),
       cell: ({ row }) => {
         const time = row.getValue('created_at') as string
         return format(new Date(time), 'yyyy-MM-dd HH:mm:ss')
@@ -460,7 +518,7 @@ const ApplicationManagement: React.FC = () => {
             >
               {visibleKeys.has(record.id) ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
             </Button>
-            <Button variant="link" size="sm" onClick={() => copyToClipboard(key)} className="h-auto p-0">
+            <Button variant="link" size="sm" onClick={() => handleCopyToClipboard(key)} className="h-auto p-0">
               <Copy className="h-4 w-4" />
             </Button>
           </div>
@@ -546,6 +604,20 @@ const ApplicationManagement: React.FC = () => {
                 <SelectItem value="all">{t('applicationManagement.filterAll')}</SelectItem>
                 <SelectItem value="manual">{t('applicationManagement.sourceManual')}</SelectItem>
                 <SelectItem value="auto_discovery">{t('applicationManagement.sourceAutoDiscovery')}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {/* Status filter */}
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">{t('applicationManagement.filterByStatus')}:</span>
+            <Select value={statusFilter} onValueChange={(value: 'all' | 'active' | 'inactive') => setStatusFilter(value)}>
+              <SelectTrigger className="w-[120px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t('applicationManagement.filterAll')}</SelectItem>
+                <SelectItem value="active">{t('applicationManagement.active')}</SelectItem>
+                <SelectItem value="inactive">{t('applicationManagement.inactive')}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -810,7 +882,7 @@ const ApplicationManagement: React.FC = () => {
                           <div className="flex-1 min-w-0">
                             <div className="font-medium truncate">{apiKey.name || t('applicationManagement.unnamed')}</div>
                             <div className="flex items-center gap-1 mt-1">
-                              <code className="text-xs bg-gray-200 px-1 py-0.5 rounded truncate max-w-[200px]">
+                              <code className={`text-xs bg-gray-200 px-1 py-0.5 rounded ${visibleKeys.has(apiKey.id) ? 'break-all' : 'truncate max-w-[200px]'}`}>
                                 {visibleKeys.has(apiKey.id) ? apiKey.key : maskApiKey(apiKey.key)}
                               </code>
                               <Button
@@ -824,7 +896,7 @@ const ApplicationManagement: React.FC = () => {
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => copyToClipboard(apiKey.key)}
+                                onClick={() => handleCopyToClipboard(apiKey.key)}
                                 className="h-6 w-6 p-0"
                               >
                                 <Copy className="h-3 w-3" />

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { User, Edit, Trash2, Plus, RefreshCw, Mail, Key, Copy, TrendingUp, Clock, Users } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { copyToClipboard } from '@/utils/clipboard'
 import { toast } from 'sonner'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -265,9 +266,14 @@ const UserManagement: React.FC = () => {
     }
   }
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text)
-    toast.success(t('common.copied'))
+  const handleCopyToClipboard = async (text: string) => {
+    try {
+      await copyToClipboard(text)
+      toast.success(t('common.copied'))
+    } catch (error) {
+      console.error('Failed to copy to clipboard:', error)
+      toast.error(t('common.copyFailed'))
+    }
   }
 
   const columns: ColumnDef<UserType>[] = [
@@ -334,7 +340,7 @@ const UserManagement: React.FC = () => {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => copyToClipboard(id)}
+              onClick={() => handleCopyToClipboard(id)}
               title={t('common.copy')}
             >
               <Copy className="h-3 w-3" />
@@ -868,7 +874,7 @@ const UserManagement: React.FC = () => {
                             type="button"
                             variant="outline"
                             size="sm"
-                            onClick={() => copyToClipboard(editingUser.api_key)}
+                            onClick={() => handleCopyToClipboard(editingUser.api_key)}
                             title={t('common.copy')}
                             className="flex-shrink-0"
                           >

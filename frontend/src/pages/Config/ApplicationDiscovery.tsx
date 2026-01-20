@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
+import { copyToClipboard } from '@/utils/clipboard'
 import { useNavigate } from 'react-router-dom'
 import {
   Settings,
@@ -71,9 +72,14 @@ const ApplicationDiscovery: React.FC = () => {
     fetchData()
   }, [fetchData])
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text)
-    toast.success(t('common.copied'))
+  const handleCopyToClipboard = async (text: string) => {
+    try {
+      await copyToClipboard(text)
+      toast.success(t('common.copied'))
+    } catch (error) {
+      console.error('Failed to copy to clipboard:', error)
+      toast.error(t('common.copyFailed'))
+    }
   }
 
   const handleRegenerateApiKey = async () => {
@@ -159,7 +165,7 @@ const ApplicationDiscovery: React.FC = () => {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => copyToClipboard(displayedApiKey)}
+              onClick={() => handleCopyToClipboard(displayedApiKey)}
               disabled={!displayedApiKey}
             >
               <Copy className="h-4 w-4" />
