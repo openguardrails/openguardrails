@@ -930,13 +930,13 @@ async def _handle_gateway_streaming_response(
                                             # If there's a suggest_answer, send it as content chunks first
                                             if suggest_answer:
                                                 logger.info(f"Gateway final detection - Sending suggest_answer as content chunks: {suggest_answer[:50]}...")
-                                                for chunk_str in _yield_suggest_answer_chunks(request_id, suggest_answer):
+                                                for chunk_str in _yield_suggest_answer_chunks(request_id, suggest_answer, model_name):
                                                     yield chunk_str
                                             else:
                                                 logger.warning(f"Gateway final detection - No suggest_answer found in detection_result: {detector.detection_result}")
-                                            
+
                                             # Send risk blocking message
-                                            stop_chunk = _create_stop_chunk(request_id, detector.detection_result)
+                                            stop_chunk = _create_stop_chunk(request_id, detector.detection_result, model_name)
                                             yield f"data: {json.dumps(stop_chunk)}\n\n"
                                             yield "data: [DONE]\n\n"
                                             break
@@ -1029,13 +1029,13 @@ async def _handle_gateway_streaming_response(
                                                 # If there's a suggest_answer, send it as content chunks first
                                                 if suggest_answer:
                                                     logger.info(f"Gateway streaming - Sending suggest_answer as content chunks: {suggest_answer[:50]}...")
-                                                    for chunk_str in _yield_suggest_answer_chunks(request_id, suggest_answer):
+                                                    for chunk_str in _yield_suggest_answer_chunks(request_id, suggest_answer, model_name):
                                                         yield chunk_str
                                                 else:
                                                     logger.warning(f"Gateway streaming - No suggest_answer found in detection_result: {detector.detection_result}")
-                                                
+
                                                 # Send risk blocking message and stop
-                                                stop_chunk = _create_stop_chunk(request_id, detector.detection_result)
+                                                stop_chunk = _create_stop_chunk(request_id, detector.detection_result, model_name)
                                                 yield f"data: {json.dumps(stop_chunk)}\n\n"
                                                 yield "data: [DONE]\n\n"
                                                 break
@@ -1279,17 +1279,17 @@ async def _handle_streaming_chat_completion(
                             # If there's a suggest_answer, send it as content chunks first
                             if suggest_answer:
                                 logger.info(f"Sending suggest_answer as content chunks: {suggest_answer[:50]}...")
-                                for chunk_str in _yield_suggest_answer_chunks(request_id, suggest_answer):
+                                for chunk_str in _yield_suggest_answer_chunks(request_id, suggest_answer, request_data.model):
                                     yield chunk_str
                             else:
                                 logger.warning(f"No suggest_answer found in detection_result: {detector.detection_result}")
-                            
+
                             # Send risk blocking message and stop
-                            stop_chunk = _create_stop_chunk(request_id, detector.detection_result)
+                            stop_chunk = _create_stop_chunk(request_id, detector.detection_result, request_data.model)
                             yield f"data: {json.dumps(stop_chunk)}\n\n"
                             yield "data: [DONE]\n\n"
                             break
-                    
+
                     # In serial mode, keep last chunk; in asynchronous mode, output immediately
                     if detector.detection_mode == DetectionMode.ASYNC_BYPASS:
                         # Asynchronous mode: output all chunks immediately (including tool_calls)
@@ -1325,16 +1325,16 @@ async def _handle_streaming_chat_completion(
                         if suggest_answer:
                             logger.info(f"Final detection - Sending suggest_answer as content chunks: {suggest_answer[:50]}...")
                             chunk_count = 0
-                            for chunk_str in _yield_suggest_answer_chunks(request_id, suggest_answer):
+                            for chunk_str in _yield_suggest_answer_chunks(request_id, suggest_answer, request_data.model):
                                 chunk_count += 1
                                 logger.info(f"Final detection - Yielding suggest_answer chunk {chunk_count}")
                                 yield chunk_str
                             logger.info(f"Final detection - Sent {chunk_count} suggest_answer chunks")
                         else:
                             logger.warning(f"Final detection - No suggest_answer found in detection_result: {detector.detection_result}")
-                        
+
                         # Send risk blocking message
-                        stop_chunk = _create_stop_chunk(request_id, detector.detection_result)
+                        stop_chunk = _create_stop_chunk(request_id, detector.detection_result, request_data.model)
                         yield f"data: {json.dumps(stop_chunk)}\n\n"
                         yield "data: [DONE]\n\n"
                     else:
@@ -1357,7 +1357,7 @@ async def _handle_streaming_chat_completion(
                 error_traceback = traceback.format_exc()
                 logger.error(f"Stream generation error: {e}")
                 logger.error(f"Full traceback: {error_traceback}")
-                error_chunk = _create_error_chunk(request_id, str(e))
+                error_chunk = _create_error_chunk(request_id, str(e), request_data.model)
                 yield f"data: {json.dumps(error_chunk)}\n\n"
                 yield "data: [DONE]\n\n"
             
@@ -1449,12 +1449,13 @@ def _chunk_has_tool_calls(chunk: dict) -> bool:
     return False
 
 
-def _create_content_chunk(request_id: str, content: str) -> dict:
+def _create_content_chunk(request_id: str, content: str, model: str = "openguardrails-security") -> dict:
     """Create a content chunk with specified content"""
     return {
         "id": f"chatcmpl-{request_id}",
         "object": "chat.completion.chunk",
         "created": int(time.time()),
+        "model": model,
         "choices": [{
             "index": 0,
             "delta": {"content": content}
@@ -1462,12 +1463,13 @@ def _create_content_chunk(request_id: str, content: str) -> dict:
     }
 
 
-def _create_stop_chunk(request_id: str, detection_result: dict = None) -> dict:
+def _create_stop_chunk(request_id: str, detection_result: dict = None, model: str = "openguardrails-security") -> dict:
     """Create risk blocking chunk, include detailed detection information"""
     chunk = {
         "id": f"chatcmpl-{request_id}",
         "object": "chat.completion.chunk",
         "created": int(time.time()),
+        "model": model,
         "choices": [{
             "index": 0,
             "delta": {},
@@ -1499,29 +1501,30 @@ def _create_stop_chunk(request_id: str, detection_result: dict = None) -> dict:
     return chunk
 
 
-def _yield_suggest_answer_chunks(request_id: str, suggest_answer: str, chunk_size: int = 50):
+def _yield_suggest_answer_chunks(request_id: str, suggest_answer: str, model: str = "openguardrails-security", chunk_size: int = 50):
     """Yield suggest answer content in chunks to match streaming format"""
     if not suggest_answer:
         logger.warning(f"_yield_suggest_answer_chunks called with empty suggest_answer")
         return
-    
+
     logger.info(f"_yield_suggest_answer_chunks: suggest_answer length={len(suggest_answer)}, content={suggest_answer[:100]}")
-    
+
     # Split suggest_answer into chunks for streaming
     for i in range(0, len(suggest_answer), chunk_size):
         chunk_content = suggest_answer[i:i + chunk_size]
-        content_chunk = _create_content_chunk(request_id, chunk_content)
+        content_chunk = _create_content_chunk(request_id, chunk_content, model)
         chunk_str = f"data: {json.dumps(content_chunk)}\n\n"
         logger.debug(f"Yielding suggest_answer chunk {i//chunk_size + 1}: {chunk_content[:50]}...")
         yield chunk_str
 
 
-def _create_error_chunk(request_id: str, error_msg: str) -> dict:
+def _create_error_chunk(request_id: str, error_msg: str, model: str = "openguardrails-security") -> dict:
     """Create error chunk"""
     return {
         "id": f"chatcmpl-{request_id}",
-        "object": "chat.completion.chunk", 
+        "object": "chat.completion.chunk",
         "created": int(time.time()),
+        "model": model,
         "choices": [{
             "index": 0,
             "delta": {"content": f"\n\n[Error: {error_msg}]"},
@@ -1792,7 +1795,7 @@ async def create_gateway_chat_completion(
                         # Send suggest_answer as content chunks
                         if suggest_answer:
                             logger.info(f"Gateway input blocked - Sending suggest_answer as chunks: {suggest_answer[:50]}...")
-                            for chunk_str in _yield_suggest_answer_chunks(request_id, suggest_answer):
+                            for chunk_str in _yield_suggest_answer_chunks(request_id, suggest_answer, request_data.model):
                                 yield chunk_str
 
                         # Send final chunk with content_filter finish_reason
