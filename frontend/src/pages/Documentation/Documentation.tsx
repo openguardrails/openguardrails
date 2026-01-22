@@ -386,7 +386,7 @@ else:
 
 # Configure client with direct model access
 client = OpenAI(
-    base_url="${apiDomain}/v1/",
+    base_url="${apiDomain}/v1/model/",
     api_key="${user?.model_api_key || 'your-model-api-key'}"
 )
 
@@ -695,10 +695,7 @@ ${t('docs.n8nExampleStep6No')}`}
       "role": "user",
       "content": "{{ $json.userInput }}"
     }
-  ],
-  "enable_security": true,
-  "enable_compliance": true,
-  "enable_data_security": true
+  ]
 }`}
                   </pre>
                 </div>
@@ -879,9 +876,7 @@ response = requests.post(
       "role": "assistant",
       "content": "Assistant response"
     }
-  ],
-  "skip_input_guardrails": false,
-  "skip_output_guardrails": false
+  ]
 }`}
                         </pre>
                       </div>
@@ -916,76 +911,6 @@ response = requests.post(
                         </pre>
                       </div>
                     </div>
-                  </CollapsibleContent>
-                </Collapsible>
-
-                <Collapsible>
-                  <CollapsibleTrigger className="w-full">
-                    <div className="p-3 bg-slate-50 hover:bg-slate-100 rounded-md border border-slate-200 transition-colors">
-                      <div className="flex items-center gap-2">
-                        <span className="px-2 py-1 text-xs rounded bg-green-100 text-green-800">POST</span>
-                        <code className="text-sm font-semibold">/v1/guardrails/input</code>
-                        <span className="text-sm text-slate-500">- {t('docs.inputEndpointDesc')}</span>
-                      </div>
-                    </div>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent className="mt-2 p-4 bg-white border border-slate-200 rounded-md">
-                    <p className="text-sm text-slate-600 mb-2">{t('docs.inputEndpointDetail')}</p>
-                    <pre className="bg-slate-50 p-3 rounded text-xs border border-slate-200 overflow-auto">
-                      {`{
-  "input": "User input text to detect",
-  "model": "optional-model-name"
-}`}
-                    </pre>
-                  </CollapsibleContent>
-                </Collapsible>
-
-                <Collapsible>
-                  <CollapsibleTrigger className="w-full">
-                    <div className="p-3 bg-slate-50 hover:bg-slate-100 rounded-md border border-slate-200 transition-colors">
-                      <div className="flex items-center gap-2">
-                        <span className="px-2 py-1 text-xs rounded bg-green-100 text-green-800">POST</span>
-                        <code className="text-sm font-semibold">/v1/guardrails/output</code>
-                        <span className="text-sm text-slate-500">- {t('docs.outputEndpointDesc')}</span>
-                      </div>
-                    </div>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent className="mt-2 p-4 bg-white border border-slate-200 rounded-md">
-                    <p className="text-sm text-slate-600 mb-2">{t('docs.outputEndpointDetail')}</p>
-                    <pre className="bg-slate-50 p-3 rounded text-xs border border-slate-200 overflow-auto">
-                      {`{
-  "output": "Model output text to detect",
-  "model": "optional-model-name"
-}`}
-                    </pre>
-                  </CollapsibleContent>
-                </Collapsible>
-
-                <Collapsible>
-                  <CollapsibleTrigger className="w-full">
-                    <div className="p-3 bg-slate-50 hover:bg-slate-100 rounded-md border border-slate-200 transition-colors">
-                      <div className="flex items-center gap-2">
-                        <span className="px-2 py-1 text-xs rounded bg-blue-100 text-blue-800">GET</span>
-                        <code className="text-sm font-semibold">/api/v1/dashboard/stats</code>
-                        <span className="text-sm text-slate-500">- {t('docs.statsEndpointDesc')}</span>
-                      </div>
-                    </div>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent className="mt-2 p-4 bg-white border border-slate-200 rounded-md">
-                    <p className="text-sm text-slate-600 mb-2">{t('docs.statsEndpointDetail')}</p>
-                    <pre className="bg-slate-50 p-3 rounded text-xs border border-slate-200 overflow-auto">
-                      {`{
-  "total_detections": 12450,
-  "total_blocked": 342,
-  "total_passed": 12108,
-  "risk_distribution": {
-    "no_risk": 11850,
-    "low_risk": 258,
-    "medium_risk": 180,
-    "high_risk": 162
-  }
-}`}
-                    </pre>
                   </CollapsibleContent>
                 </Collapsible>
               </div>

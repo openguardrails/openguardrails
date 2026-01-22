@@ -89,10 +89,7 @@ User Input → Input Check (OpenGuardrails) → IF Pass → LLM Call → Output 
       "role": "user",
       "content": "{{ $json.content }}"
     }
-  ],
-  "enable_security": true,
-  "enable_compliance": true,
-  "enable_data_security": true
+  ]
 }
 ```
 
@@ -173,10 +170,7 @@ For chatbot scenarios with conversation history:
       "role": "user",
       "content": "{{ $json.currentMessage }}"
     }
-  ],
-  "enable_security": true,
-  "enable_compliance": true,
-  "enable_data_security": true
+  ]
 }
 ```
 
@@ -188,10 +182,7 @@ Track specific users for ban policy enforcement:
 {
   "model": "OpenGuardrails-Text",
   "messages": [...],
-  "xxai_app_user_id": "{{ $json.userId }}",
-  "enable_security": true,
-  "enable_compliance": true,
-  "enable_data_security": true
+  "xxai_app_user_id": "{{ $json.userId }}"
 }
 ```
 
@@ -202,10 +193,7 @@ Enable only specific detection types:
 ```json
 {
   "model": "OpenGuardrails-Text",
-  "messages": [...],
-  "enable_security": true,        // Prompt attacks only
-  "enable_compliance": false,      // Skip content safety
-  "enable_data_security": false    // Skip data leak detection
+  "messages": [...]
 }
 ```
 

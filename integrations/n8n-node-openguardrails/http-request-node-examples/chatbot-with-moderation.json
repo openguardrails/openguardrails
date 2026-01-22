@@ -49,18 +49,6 @@
             {
               "name": "xxai_app_user_id",
               "value": "={{ $json.user_id }}"
-            },
-            {
-              "name": "enable_security",
-              "value": true
-            },
-            {
-              "name": "enable_compliance",
-              "value": true
-            },
-            {
-              "name": "enable_data_security",
-              "value": true
             }
           ]
         },
@@ -175,18 +163,6 @@
             {
               "name": "xxai_app_user_id",
               "value": "={{ $json.user_id }}"
-            },
-            {
-              "name": "enable_security",
-              "value": true
-            },
-            {
-              "name": "enable_compliance",
-              "value": true
-            },
-            {
-              "name": "enable_data_security",
-              "value": true
             }
           ]
         },

@@ -282,9 +282,6 @@ Value: Bearer sk-xxai-your-api-key
       "content": "{{ $json.message }}"
     }
   ],
-  "enable_security": true,
-  "enable_compliance": true,
-  "enable_data_security": true,
   "xxai_app_user_id": "{{ $json.user_id }}"
 }
 ```
