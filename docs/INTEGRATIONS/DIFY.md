@@ -154,15 +154,6 @@ POST https://api.openguardrails.com/v1/dify/moderation
 - Enforce brand guidelines
 - Block policy violations
 
-**Configuration**:
-```json
-{
-  "skip_input_guardrails": true,   // Skip input check
-  "enable_compliance": true,       // Content safety
-  "enable_data_security": true     // PII detection
-}
-```
-
 ---
 
 ## Detection Categories
