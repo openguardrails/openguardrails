@@ -33,7 +33,7 @@
         "nodeCredentialType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"model\": \"OpenGuardrails-Text\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"{{ $json.content }}\"\n    }\n  ],\n  \"enable_security\": true,\n  \"enable_compliance\": true,\n  \"enable_data_security\": true\n}",
+        "jsonBody": "={\n  \"model\": \"OpenGuardrails-Text\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"{{ $json.content }}\"\n    }\n  ]\n}",
         "options": {}
       },
       "name": "OpenGuardrails Check",

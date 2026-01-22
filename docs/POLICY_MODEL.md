@@ -225,24 +225,6 @@ This is a **fundamental shift** in how we think about AI safety in enterprise co
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Policy Configuration
-
-Each layer is **independently configurable**:
-
-```python
-{
-    # Layer 1: Safety
-    "enable_security": True,        # Prompt injection, jailbreak
-    "enable_compliance": True,      # Violence, hate, NSFW
-
-    # Layer 2: Compliance (via official scanners)
-    "official_scanners": ["S1", "S2", "S5", "S9"],
-
-    # Layer 3: Business Policy (via custom scanners)
-    "custom_scanners": ["S100", "S101", "S102"]
-}
-```
-
 ---
 
 ## Real-World Examples

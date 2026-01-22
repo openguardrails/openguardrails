@@ -1284,10 +1284,7 @@ curl -X POST http://localhost:5001/v1/guardrails \
         "role": "user",
         "content": "My ID card is 110101199001011234"
       }
-    ],
-    "enable_compliance_detection": false,
-    "enable_security_detection": true,
-    "enable_data_detection": true
+    ]
   }'
 ```
 

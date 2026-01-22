@@ -135,14 +135,6 @@ POST https://api.openguardrails.com/v1/dify/moderation
 - Prevent data leaks in prompts
 - Enforce input policies
 
-**Configuration**:
-```json
-{
-  "enable_security": true,       // Prompt injection detection
-  "enable_compliance": true,     // Content safety
-  "enable_data_security": true   // PII detection
-}
-```
 
 ### Output Moderation
 
@@ -410,43 +402,6 @@ Create different rules for different Dify apps:
 - **Multimodal**: Deploy OpenGuardrails-VL model
 - **Languages**: Use language-specific scanners if needed
 
----
-
-## Examples
-
-### Example 1: Customer Support Bot
-
-**Configuration**:
-```json
-{
-  "input_moderation": {
-    "enable_security": true,      // Block jailbreaks
-    "enable_compliance": false,   // Allow all questions
-    "custom_scanners": ["S100"]   // Support scope control
-  },
-  "output_moderation": {
-    "enable_compliance": true,    // Filter inappropriate responses
-    "custom_scanners": ["S101"]   // Unauthorized promises
-  }
-}
-```
-
-### Example 2: Content Generation Platform
-
-**Configuration**:
-```json
-{
-  "input_moderation": {
-    "enable_security": true,      // Block jailbreaks
-    "custom_scanners": ["S102"]   // Topic restrictions
-  },
-  "output_moderation": {
-    "enable_compliance": true,    // Safety check
-    "enable_data_security": true, // No PII in outputs
-    "custom_scanners": ["S103"]   // Brand guidelines
-  }
-}
-```
 
 ---
 

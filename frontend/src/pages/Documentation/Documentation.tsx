@@ -695,10 +695,7 @@ ${t('docs.n8nExampleStep6No')}`}
       "role": "user",
       "content": "{{ $json.userInput }}"
     }
-  ],
-  "enable_security": true,
-  "enable_compliance": true,
-  "enable_data_security": true
+  ]
 }`}
                   </pre>
                 </div>
