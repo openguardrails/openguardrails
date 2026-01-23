@@ -363,21 +363,59 @@ async def delete_entity_type(
 ):
     """
     Delete entity type
+    
+    Permission rules:
+    - system_template: Only super admin can delete
+    - system_copy: Cannot delete (system will auto-recreate)
+    - custom: Can delete if it belongs to the application/tenant
     """
     try:
         current_user, application_id = get_current_user_and_application_from_request(request, db)
+        
+        # First, check if the entity type exists and get its source_type
+        from database.models import DataSecurityEntityType
+        from sqlalchemy import and_
+        
+        conditions = [DataSecurityEntityType.id == entity_type_id]
+        if application_id:
+            conditions.append(DataSecurityEntityType.application_id == application_id)
+        else:
+            conditions.append(DataSecurityEntityType.tenant_id == current_user.id)
+        
+        entity_type = db.query(DataSecurityEntityType).filter(and_(*conditions)).first()
+        
+        if not entity_type:
+            raise HTTPException(status_code=404, detail="Entity type not found")
+        
+        # Check permissions based on source_type
+        source_type = entity_type.source_type or ('system_template' if entity_type.is_global else 'custom')
+        
+        if source_type == 'system_template':
+            # Only super admin can delete system templates
+            if not current_user.is_super_admin:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Only super administrators can delete system entity type templates"
+                )
+        elif source_type == 'system_copy':
+            # System copies cannot be deleted (they will be auto-recreated)
+            raise HTTPException(
+                status_code=403,
+                detail="System copy entity types cannot be deleted. They are automatically managed by the system."
+            )
+        # custom types can be deleted if they belong to the application/tenant
         
         service = DataSecurityService(db)
         success = service.delete_entity_type(
             entity_type_id=entity_type_id,
             tenant_id=str(current_user.id),
-            application_id=str(application_id)
+            application_id=str(application_id) if application_id else None
         )
         
         if not success:
             raise HTTPException(status_code=404, detail="Entity type not found or delete failed")
         
-        logger.info(f"Entity type deleted: {entity_type_id} for user: {current_user.email}, app: {application_id}")
+        logger.info(f"Entity type deleted: {entity_type_id} (type: {source_type}) for user: {current_user.email}, app: {application_id}")
         
         return {
             "success": True,

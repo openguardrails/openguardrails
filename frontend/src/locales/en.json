@@ -1871,6 +1871,7 @@
     "email": "Email Address",
     "emailPlaceholder": "Enter your registered email address",
     "sendResetLink": "Send Reset Link",
+    "sending": "Sending...",
     "emailSent": "Password Reset Email Sent",
     "emailSentDesc": "If the email exists in our system, we've sent a password reset link to {{email}}. Please check your inbox.",
     "backToLogin": "Back to Login",

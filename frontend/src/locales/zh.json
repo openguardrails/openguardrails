@@ -1868,6 +1868,7 @@
     "email": "邮箱地址",
     "emailPlaceholder": "请输入您注册时使用的邮箱地址",
     "sendResetLink": "发送重置链接",
+    "sending": "发送中...",
     "emailSent": "密码重置邮件已发送",
     "emailSentDesc": "如果邮箱 {{email}} 存在于我们的系统中，我们已向该邮箱发送了密码重置链接。请查收您的邮箱。",
     "backToLogin": "返回登录",
