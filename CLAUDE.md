@@ -230,6 +230,7 @@ User Request → DLP Detection → Sensitive Data Found → Risk Level Determine
 **Auth**: `JWT_SECRET_KEY`, `SUPER_ADMIN_USERNAME/PASSWORD`
 **Models**: `GUARDRAILS_MODEL_API_URL`, `EMBEDDING_API_BASE_URL`
 **Services**: `{ADMIN,DETECTION,PROXY}_{PORT,UVICORN_WORKERS}`
+**Detection**: `MAX_DETECTION_CONTEXT_LENGTH` (default: 7168, should be model max-len - 1000)
 **Other**: `CORS_ORIGINS`, `DEBUG`, `LOG_LEVEL`, `DATA_DIR`
 
 ## API Authentication
@@ -265,13 +266,26 @@ User Request → DLP Detection → Sensitive Data Found → Risk Level Determine
 1. Check ban status (IP/user_id)
 2. Whitelist check (early pass)
 3. Blacklist check (early reject)
-4. Model detection (security/compliance/data risks)
+4. Model detection (security/compliance/data risks) - **with sliding window for long content**
 5. Aggregate risks (highest wins)
 6. Determine action (pass/reject/replace)
 7. Get response (knowledge base or templates)
 8. Log to DB (async)
 
 **Proxy mode**: Run detection on input → forward if pass → run detection on output → return if pass
+
+### Sliding Window Detection (Long Content)
+
+For content exceeding `MAX_DETECTION_CONTEXT_LENGTH`, the system applies sliding window:
+
+- **User-only messages**: Slide window on user content (window size = MAX_DETECTION_CONTEXT_LENGTH)
+- **User+Assistant messages**: Cross-product detection
+  - User window size = 1/2 MAX_DETECTION_CONTEXT_LENGTH
+  - Assistant window size = 1/2 MAX_DETECTION_CONTEXT_LENGTH
+  - Each user window × each assistant window = total detection windows
+- **Window overlap**: 20% overlap to avoid missing content at boundaries
+- **Parallel execution**: All windows detected in parallel for performance
+- **Aggregation**: Scanner matched if it triggers in ANY window (highest sensitivity wins)
 
 ## Deployment
 
