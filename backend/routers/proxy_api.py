@@ -20,7 +20,8 @@ from services.ban_policy_service import BanPolicyService
 from services.billing_service import billing_service
 from services.data_leakage_disposal_service import DataLeakageDisposalService
 from services.unified_anonymization_service import get_unified_anonymization_service
-from database.connection import get_db
+from services.model_route_service import model_route_service
+from database.connection import get_db, get_admin_db_session
 from utils.i18n import get_language_from_request
 from utils.i18n_loader import get_translation
 from utils.logger import setup_logger
@@ -1622,16 +1623,15 @@ async def list_models(request: Request):
             content={"error": {"message": str(e), "type": "internal_error"}}
         )
 
-@router.post("/v1/gateway/{upstream_api_id}/chat/completions")
-async def create_gateway_chat_completion(
-    upstream_api_id: str,
+@router.post("/v1/chat/completions")
+async def create_chat_completion(
     request_data: ChatCompletionRequest,
     request: Request
 ):
-    """Create chat completion via gateway pattern (new design)
+    """Create chat completion with automatic model routing
 
-    URL pattern: /v1/gateway/{upstream_api_id}/chat/completions
-    The model name in request body is passed through directly to upstream API
+    The model name in request body is matched against configured routing rules.
+    Matching priority: application-specific routes > global routes > priority > exact match > prefix match
     """
     try:
         auth_ctx = getattr(request.state, 'auth_context', None)
@@ -1644,10 +1644,9 @@ async def create_gateway_chat_completion(
         # If application_id is not provided, find default application for this tenant
         if not application_id and tenant_id:
             try:
-                from database.connection import get_admin_db_session
                 from database.models import Application
                 import uuid as uuid_module
-                
+
                 db = get_admin_db_session()
                 try:
                     tenant_uuid = uuid_module.UUID(str(tenant_id))
@@ -1655,316 +1654,7 @@ async def create_gateway_chat_completion(
                         Application.tenant_id == tenant_uuid,
                         Application.is_active == True
                     ).order_by(Application.created_at.asc()).first()
-                    
-                    if default_app:
-                        application_id = str(default_app.id)
-                        logger.debug(f"Gateway: Using default application {application_id} for tenant {tenant_id}")
-                    else:
-                        logger.warning(f"Gateway: No active application found for tenant {tenant_id}")
-                finally:
-                    db.close()
-            except (ValueError, Exception) as e:
-                logger.warning(f"Gateway: Failed to find default application for tenant {tenant_id}: {e}")
-        
-        request_id = str(uuid.uuid4())
 
-        # Get user ID
-        user_id = None
-        if request_data.extra_body:
-            user_id = request_data.extra_body.get('xxai_app_user_id')
-
-        # If no user_id, use tenant_id as fallback
-        if not user_id:
-            user_id = tenant_id
-
-        logger.info(f"Gateway chat completion request {request_id} from tenant {tenant_id}, application {application_id}, upstream_api_id: {upstream_api_id}, model: {request_data.model}, user_id: {user_id}")
-
-        # Check if user is banned
-        await check_user_ban_status_proxy(tenant_id, user_id)
-
-        # Check for image detection subscription if images are present
-        has_images = False
-        for msg in request_data.messages:
-            content = msg.content
-            if isinstance(content, list):
-                # Check for image content in multimodal messages
-                for part in content:
-                    if hasattr(part, 'type') and part.type == 'image_url':
-                        has_images = True
-                        break
-
-        if has_images:
-            # Check subscription for image detection
-            subscription = billing_service.get_subscription(tenant_id, None)
-            if not subscription:
-                logger.warning(f"Image detection attempted without subscription for tenant {tenant_id}")
-                return JSONResponse(
-                    status_code=403,
-                    content={
-                        "error": {
-                            "message": "Subscription not found. Please contact support to enable image detection.",
-                            "type": "subscription_required"
-                        }
-                    }
-                )
-
-            if subscription.subscription_type != 'subscribed':
-                logger.warning(f"Image detection attempted by free user for tenant {tenant_id}")
-                return JSONResponse(
-                    status_code=403,
-                    content={
-                        "error": {
-                            "message": "Image detection is only available for subscribed users. Please upgrade your plan to access this feature.",
-                            "type": "subscription_required"
-                        }
-                    }
-                )
-
-        # Get upstream API configuration by ID
-        api_config = await proxy_service.get_upstream_api_config(upstream_api_id, tenant_id)
-        if not api_config:
-            return JSONResponse(
-                status_code=404,
-                content={
-                    "error": {
-                        "message": f"Upstream API configuration '{upstream_api_id}' not found or inactive.",
-                        "type": "upstream_api_not_found"
-                    }
-                }
-            )
-
-        # Construct messages structure for context-aware detection
-        input_messages = [{"role": msg.role, "content": msg.content} for msg in request_data.messages]
-
-        start_time = time.time()
-        input_blocked = False
-        output_blocked = False
-        input_detection_id = None
-        output_detection_id = None
-
-        try:
-            # Input detection - select asynchronous/synchronous mode based on configuration
-            input_detection_result = await perform_input_detection(
-                api_config, input_messages, tenant_id, request_id, user_id, application_id
-            )
-
-            input_detection_id = input_detection_result.get('detection_id')
-            input_blocked = input_detection_result.get('blocked', False)
-            suggest_answer = input_detection_result.get('suggest_answer')
-
-            # NEW: Get modified messages and model config from disposal logic
-            actual_messages = input_detection_result.get('modified_messages', input_messages)
-            actual_api_config = input_detection_result.get('modified_model_config', api_config)
-            disposal_action = input_detection_result.get('disposal_action', 'pass')
-
-            # Determine actual model name to use
-            # When switched to private model, use the private model's model name
-            actual_model_name = request_data.model  # Default: use original model name
-            if disposal_action == 'switch_private_model' and actual_api_config != api_config:
-                # Use private model's default model name, or first available model from private_model_names
-                if actual_api_config.default_private_model_name:
-                    actual_model_name = actual_api_config.default_private_model_name
-                elif actual_api_config.private_model_names and len(actual_api_config.private_model_names) > 0:
-                    actual_model_name = actual_api_config.private_model_names[0]
-                # If neither is set, keep the original model name (may cause error if not supported)
-                logger.info(f"Gateway: Switched from {api_config.config_name} to private model {actual_api_config.config_name}, using model name: {actual_model_name}")
-            elif disposal_action == 'anonymize' and actual_messages != input_messages:
-                logger.info(f"Gateway: Anonymized user message for data safety")
-            elif disposal_action != 'pass':
-                logger.info(f"Gateway: Data leakage disposal action: {disposal_action}")
-
-            # If input is blocked, record log and return
-            if input_blocked:
-                # Record log
-                await proxy_service.log_proxy_request_gateway(
-                        request_id=request_id,
-                        tenant_id=tenant_id,
-                        upstream_api_config_id=str(api_config.id),
-                        model_requested=request_data.model,
-                        model_used=request_data.model,  # Gateway pattern: pass through model name
-                        provider=api_config.provider or "unknown",
-                        input_detection_id=input_detection_id,
-                        input_blocked=True,
-                        status="blocked",
-                        response_time_ms=int((time.time() - start_time) * 1000)
-                )
-
-                # For streaming requests, return streaming response
-                if request_data.stream:
-                    async def blocked_stream_generator():
-                        # Send suggest_answer as content chunks
-                        if suggest_answer:
-                            logger.info(f"Gateway input blocked - Sending suggest_answer as chunks: {suggest_answer[:50]}...")
-                            for chunk_str in _yield_suggest_answer_chunks(request_id, suggest_answer, request_data.model):
-                                yield chunk_str
-
-                        # Send final chunk with content_filter finish_reason
-                        blocked_chunk = {
-                            "id": f"chatcmpl-{request_id}",
-                            "object": "chat.completion.chunk",
-                            "created": int(time.time()),
-                            "model": request_data.model,
-                            "choices": [{
-                                "index": 0,
-                                "delta": {},
-                                "finish_reason": "content_filter"
-                            }]
-                        }
-                        blocked_chunk["detection_info"] = {
-                            "input_blocked": True,
-                            "input_detection_id": input_detection_id,
-                            "suggest_answer": suggest_answer
-                        }
-
-                        yield f"data: {json.dumps(blocked_chunk)}\n\n"
-                        yield "data: [DONE]\n\n"
-
-                    return StreamingResponse(
-                        blocked_stream_generator(),
-                        media_type="text/event-stream",
-                        headers={
-                            "Cache-Control": "no-cache",
-                            "Connection": "keep-alive",
-                            "X-Accel-Buffering": "no"
-                        }
-                    )
-
-                # For non-streaming requests, return JSON response
-                response = {
-                    "id": f"chatcmpl-{request_id}",
-                    "object": "chat.completion",
-                    "created": int(time.time()),
-                    "model": request_data.model,
-                    "choices": [
-                        {
-                            "index": 0,
-                            "message": {
-                                "role": "assistant",
-                                "content": suggest_answer
-                            },
-                            "finish_reason": "content_filter"
-                        }
-                    ],
-                    "usage": {
-                        "prompt_tokens": 0,
-                        "completion_tokens": 0,
-                        "total_tokens": 0
-                    }
-                }
-
-                # Add detection information for debugging and user handling
-                response["detection_info"] = {
-                    "input_blocked": True,
-                    "input_detection_id": input_detection_id
-                }
-
-                return JSONResponse(content=response)
-
-            # Input passes, call upstream API
-            # The model name is passed through directly - this is the key difference from old pattern
-            # Clean messages: only keep role and content, remove name and other fields that vllm doesn't support
-            # Use actual_messages: anonymized for 'anonymize' action, original for 'switch_private_model'
-            clean_messages = [
-                {"role": msg.get('role'), "content": msg.get('content')}
-                if isinstance(msg, dict) else {"role": msg.role, "content": msg.content}
-                for msg in actual_messages
-            ]
-
-            # Handle extra_body: OpenAI SDK unfolds extra_body parameters into the main request body,
-            # while curl sends them as a nested extra_body object. We need to handle both cases.
-            extra_params = {}
-
-            # If extra_body exists, add its parameters
-            if request_data.extra_body:
-                extra_params.update(request_data.extra_body)
-
-            # Also check for any extra fields that might have been unfolded from extra_body
-            # Pydantic stores extra fields in model_extra when extra="allow"
-            if hasattr(request_data, 'model_extra') and request_data.model_extra:
-                for key, value in request_data.model_extra.items():
-                    if key not in ['tenant_id', 'application_id']:  # Skip internal fields
-                        extra_params[key] = value
-                        logger.info(f"Gateway: Found extra field from model_extra '{key}' with value: {value}")
-
-            # Log the extra parameters for debugging
-            if extra_params:
-                logger.info(f"Gateway: Found extra parameters to pass to upstream: {list(extra_params.keys())}")
-
-            # NEW: Use actual_api_config (possibly switched to private model)
-            upstream_response = await proxy_service.call_upstream_api_gateway(
-                api_config=actual_api_config,
-                model_name=actual_model_name,  # Use actual model name (may be switched to private model)
-                messages=clean_messages,  # actual_messages: original for private model, anonymized for anonymize action
-                stream=request_data.stream,
-                temperature=request_data.temperature,
-                max_tokens=request_data.max_tokens,
-                top_p=request_data.top_p,
-                frequency_penalty=request_data.frequency_penalty,
-                presence_penalty=request_data.presence_penalty,
-                stop=request_data.stop,
-                extra_body=extra_params if extra_params else request_data.extra_body
-            )
-
-            # Handle streaming response
-            if request_data.stream:
-                return await _handle_gateway_streaming_response(
-                    upstream_response, actual_api_config, tenant_id, request_id,
-                    input_detection_id, user_id, request_data.model, start_time,
-                    input_messages, application_id
-                )
-            else:
-                # Handle non-streaming response
-                return await _handle_gateway_non_streaming_response(
-                    upstream_response, actual_api_config, tenant_id, request_id,
-                    input_detection_id, user_id, request_data.model, start_time,
-                    input_messages, application_id
-                )
-
-        except Exception as e:
-            logger.error(f"Gateway chat completion error: {e}")
-            return JSONResponse(
-                status_code=500,
-                content={"error": {"message": str(e), "type": "internal_error"}}
-            )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Gateway completion error: {e}")
-        return JSONResponse(
-            status_code=500,
-            content={"error": {"message": str(e), "type": "internal_error"}}
-        )
-
-@router.post("/v1/chat/completions")
-async def create_chat_completion(
-    request_data: ChatCompletionRequest,
-    request: Request
-):
-    """Create chat completion (legacy pattern - model name matches config_name)"""
-    try:
-        auth_ctx = getattr(request.state, 'auth_context', None)
-        if not auth_ctx:
-            raise HTTPException(status_code=401, detail="Authentication required")
-
-        tenant_id = auth_ctx['data'].get('tenant_id') or auth_ctx['data'].get('tenant_id')
-        application_id = auth_ctx['data'].get('application_id')  # Get application_id from auth context
-        
-        # If application_id is not provided, find default application for this tenant
-        if not application_id and tenant_id:
-            try:
-                from database.connection import get_admin_db_session
-                from database.models import Application
-                import uuid as uuid_module
-                
-                db = get_admin_db_session()
-                try:
-                    tenant_uuid = uuid_module.UUID(str(tenant_id))
-                    default_app = db.query(Application).filter(
-                        Application.tenant_id == tenant_uuid,
-                        Application.is_active == True
-                    ).order_by(Application.created_at.asc()).first()
-                    
                     if default_app:
                         application_id = str(default_app.id)
                         logger.debug(f"Legacy proxy: Using default application {application_id} for tenant {tenant_id}")
@@ -2029,18 +1719,30 @@ async def create_chat_completion(
                     }
                 )
 
-        # Get tenant's model configuration
-        model_config = await proxy_service.get_user_model_config(tenant_id, request_data.model)
+        # Get upstream API config via model routing
+        db = get_admin_db_session()
+        try:
+            model_config = model_route_service.find_matching_route(
+                db=db,
+                tenant_id=tenant_id,
+                model_name=request_data.model,
+                application_id=application_id
+            )
+        finally:
+            db.close()
+
         if not model_config:
             return JSONResponse(
                 status_code=404,
                 content={
                     "error": {
-                        "message": f"Model '{request_data.model}' not found. Please configure this model first.",
-                        "type": "model_not_found"
+                        "message": f"No routing rule configured for model '{request_data.model}'. Please configure a model routing rule in Security Gateway > Model Routes.",
+                        "type": "model_route_not_found"
                     }
                 }
             )
+
+        logger.info(f"Model routing: '{request_data.model}' -> upstream config '{model_config.config_name}'")
 
         # Construct messages structure for context-aware detection
         input_messages = [{"role": msg.role, "content": msg.content} for msg in request_data.messages]
@@ -2078,8 +1780,8 @@ async def create_chat_completion(
                         tenant_id=tenant_id,
                         proxy_config_id=str(model_config.id),
                         model_requested=request_data.model,
-                        model_used=model_config.model_name,
-                        provider=get_provider_from_url(model_config.api_base_url),
+                        model_used=request_data.model,
+                        provider=model_config.provider or "unknown",
                         input_detection_id=input_detection_id,
                         input_blocked=True,
                         status="blocked",
@@ -2159,24 +1861,58 @@ async def create_chat_completion(
                 # Non-streaming request returns normal response
                 return response
             
+            # Determine actual model name to use
+            actual_model_name = request_data.model
+            if disposal_action == 'switch_private_model' and actual_model_config != model_config:
+                # Use private model's default model name, or first available model
+                if actual_model_config.default_private_model_name:
+                    actual_model_name = actual_model_config.default_private_model_name
+                elif actual_model_config.private_model_names and len(actual_model_config.private_model_names) > 0:
+                    actual_model_name = actual_model_config.private_model_names[0]
+                logger.info(f"Switched to private model {actual_model_config.config_name}, using model name: {actual_model_name}")
+
+            # Clean messages: only keep role and content
+            clean_messages = [
+                {"role": msg.get('role'), "content": msg.get('content')}
+                if isinstance(msg, dict) else {"role": msg.role, "content": msg.content}
+                for msg in actual_messages
+            ]
+
             # Check if it is a streaming request
             if request_data.stream:
-                # Streaming request handling (input is not blocked)
-                # NEW: Use actual_model_config and actual_messages (possibly modified by disposal)
-                return await _handle_streaming_chat_completion(
-                    actual_model_config, request_data, request_id, tenant_id,
-                    actual_messages, input_detection_id, input_blocked, start_time,
-                    application_id=application_id
+                # Streaming request handling using gateway pattern
+                upstream_response = await proxy_service.call_upstream_api_gateway(
+                    api_config=actual_model_config,
+                    model_name=actual_model_name,
+                    messages=clean_messages,
+                    stream=True,
+                    temperature=request_data.temperature,
+                    max_tokens=request_data.max_tokens,
+                    top_p=request_data.top_p,
+                    frequency_penalty=request_data.frequency_penalty,
+                    presence_penalty=request_data.presence_penalty,
+                    stop=request_data.stop,
+                    extra_body=request_data.extra_body
+                )
+                return await _handle_gateway_streaming_response(
+                    upstream_response, actual_model_config, tenant_id, request_id,
+                    input_detection_id, user_id, request_data.model, start_time,
+                    input_messages, application_id
                 )
 
-            # Forward request to target model
-            # Use actual_model_config (possibly switched to private model)
-            # Use actual_messages: original for switch_private_model, anonymized for anonymize action
-            model_response = await proxy_service.forward_chat_completion(
-                model_config=actual_model_config,
-                request_data=request_data,
-                request_id=request_id,
-                messages=actual_messages  # original for private model, anonymized for anonymize action
+            # Non-streaming request handling using gateway pattern
+            model_response = await proxy_service.call_upstream_api_gateway(
+                api_config=actual_model_config,
+                model_name=actual_model_name,
+                messages=clean_messages,
+                stream=False,
+                temperature=request_data.temperature,
+                max_tokens=request_data.max_tokens,
+                top_p=request_data.top_p,
+                frequency_penalty=request_data.frequency_penalty,
+                presence_penalty=request_data.presence_penalty,
+                stop=request_data.stop,
+                extra_body=request_data.extra_body
             )
             
             # Output detection - select asynchronous/synchronous mode based on configuration
@@ -2222,7 +1958,7 @@ async def create_chat_completion(
                     # Safe to keep original content but update if service modified it
                     if 'content' in message:
                         message['content'] = final_content
-            
+
             # Record successful request log
             usage = model_response.get('usage', {})
             await proxy_service.log_proxy_request(
@@ -2230,8 +1966,8 @@ async def create_chat_completion(
                 tenant_id=tenant_id,
                 proxy_config_id=str(model_config.id),
                 model_requested=request_data.model,
-                model_used=model_config.model_name,
-                provider=get_provider_from_url(model_config.api_base_url),
+                model_used=request_data.model,
+                provider=model_config.provider or "unknown",
                 input_detection_id=input_detection_id,
                 output_detection_id=output_detection_id,
                 input_blocked=input_blocked,
@@ -2242,23 +1978,23 @@ async def create_chat_completion(
                 status="success",
                 response_time_ms=int((time.time() - start_time) * 1000)
             )
-            
+
             return model_response
-            
+
         except Exception as e:
             import traceback
             error_traceback = traceback.format_exc()
             logger.error(f"Proxy request {request_id} failed: {e}")
             logger.error(f"Full traceback: {error_traceback}")
-            
+
             # Record error log
             await proxy_service.log_proxy_request(
                 request_id=request_id,
                 tenant_id=tenant_id,
                 proxy_config_id=str(model_config.id),
                 model_requested=request_data.model,
-                model_used=model_config.model_name,
-                provider=get_provider_from_url(model_config.api_base_url),
+                model_used=request_data.model,
+                provider=model_config.provider or "unknown",
                 input_detection_id=input_detection_id,
                 output_detection_id=output_detection_id,
                 input_blocked=input_blocked,
@@ -2267,7 +2003,7 @@ async def create_chat_completion(
                 error_message=str(e),
                 response_time_ms=int((time.time() - start_time) * 1000)
             )
-            
+
             return JSONResponse(
                 status_code=500,
                 content={
@@ -2305,10 +2041,9 @@ async def create_completion(
         # If application_id is not provided, find default application for this tenant
         if not application_id and tenant_id:
             try:
-                from database.connection import get_admin_db_session
                 from database.models import Application
                 import uuid as uuid_module
-                
+
                 db = get_admin_db_session()
                 try:
                     tenant_uuid = uuid_module.UUID(str(tenant_id))
@@ -2316,7 +2051,7 @@ async def create_completion(
                         Application.tenant_id == tenant_uuid,
                         Application.is_active == True
                     ).order_by(Application.created_at.asc()).first()
-                    
+
                     if default_app:
                         application_id = str(default_app.id)
                         logger.debug(f"Completion proxy: Using default application {application_id} for tenant {tenant_id}")

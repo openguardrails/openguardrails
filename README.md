@@ -43,7 +43,9 @@ When employees use AI applications (Copilot, ChatGPT, internal AI agents), sensi
 ## How It Works
 
 OpenGuardrails acts as an AI Gateway between your AI applications and LLM providers, automatically detecting and protecting sensitive data:
-
+<p align="center">
+    <img src="frontend/public/arch.png" width="800"/>
+</p>
 ### Strategy 1: Mask & Restore (Anonymization)
 
 Sensitive data is masked before sending to external LLMs, then restored in the response — users see correct results, but external providers never see real data.

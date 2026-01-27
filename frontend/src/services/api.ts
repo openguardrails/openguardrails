@@ -497,6 +497,91 @@ export const proxyModelsApi = {
     api.post(`/api/v1/proxy/upstream-apis/${id}/test`).then(res => res.data),
 };
 
+// Model routes API - automatic model routing for Security Gateway
+export interface ModelRouteApplication {
+  id: string;
+  name: string;
+}
+
+export interface ModelRouteUpstreamApi {
+  id: string;
+  config_name: string;
+  provider?: string;
+}
+
+export interface ModelRoute {
+  id: string;
+  name: string;
+  description?: string;
+  model_pattern: string;
+  match_type: 'exact' | 'prefix';
+  upstream_api_config: ModelRouteUpstreamApi;
+  priority: number;
+  is_active: boolean;
+  applications: ModelRouteApplication[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ModelRouteCreateData {
+  name: string;
+  description?: string;
+  model_pattern: string;
+  match_type: 'exact' | 'prefix';
+  upstream_api_config_id: string;
+  priority?: number;
+  application_ids?: string[];
+}
+
+export interface ModelRouteUpdateData {
+  name?: string;
+  description?: string;
+  model_pattern?: string;
+  match_type?: 'exact' | 'prefix';
+  upstream_api_config_id?: string;
+  priority?: number;
+  is_active?: boolean;
+  application_ids?: string[];
+}
+
+export const modelRoutesApi = {
+  // List all model routes
+  list: (includeInactive = false): Promise<ModelRoute[]> =>
+    api.get(`/api/v1/model-routes?include_inactive=${includeInactive}`).then(res => res.data),
+
+  // Get model route by ID
+  get: (id: string): Promise<ModelRoute> =>
+    api.get(`/api/v1/model-routes/${id}`).then(res => res.data),
+
+  // Create model route
+  create: (data: ModelRouteCreateData): Promise<ModelRoute> =>
+    api.post('/api/v1/model-routes', data).then(res => res.data),
+
+  // Update model route
+  update: (id: string, data: ModelRouteUpdateData): Promise<ModelRoute> =>
+    api.put(`/api/v1/model-routes/${id}`, data).then(res => res.data),
+
+  // Delete model route
+  delete: (id: string): Promise<{ success: boolean; message: string }> =>
+    api.delete(`/api/v1/model-routes/${id}`).then(res => res.data),
+
+  // Test model routing
+  test: (modelName: string, applicationId?: string): Promise<{
+    matched: boolean;
+    model_name: string;
+    message?: string;
+    upstream_api_config?: {
+      id: string;
+      config_name: string;
+      provider?: string;
+      api_base_url: string;
+    };
+  }> => {
+    const params = applicationId ? `?application_id=${applicationId}` : '';
+    return api.get(`/api/v1/model-routes/test/${encodeURIComponent(modelName)}${params}`).then(res => res.data);
+  },
+};
+
 // Knowledge base management API
 export const knowledgeBaseApi = {
   // Get knowledge base list

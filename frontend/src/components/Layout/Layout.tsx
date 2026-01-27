@@ -131,6 +131,10 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           key: '/security-gateway/policy',
           label: t('nav.securityPolicy'),
         },
+        {
+          key: '/security-gateway/model-routes',
+          label: t('nav.modelRoutes'),
+        },
       ],
     },
     {

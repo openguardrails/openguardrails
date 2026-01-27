@@ -442,14 +442,14 @@ print(response.choices[0].message.content)
 
 # Just change base_url and api_key
 client = OpenAI(
-    base_url="${apiDomain}/v1/gateway/<upstream_api_id>/",
+    base_url="${apiDomain.replace(':5001', ':5002')}/v1/",
     api_key="${user?.api_key || 'your-api-key'}"
 )
 
 # Use as normal - automatic safety protection!
-# No need to change the model name - use your original upstream model name
+# Model routing is automatic based on your configured routes
 response = client.chat.completions.create(
-    model="gpt-4",  # Your original upstream model name
+    model="gpt-4",  # The system will route to the correct provider
     messages=[{"role": "user", "content": "Hello"}]
 )
 
@@ -474,13 +474,13 @@ response = client.chat.completions.create(
                 {`from openai import OpenAI
 
 client = OpenAI(
-    base_url="${apiDomain}/v1/gateway/<upstream_api_id>/",
+    base_url="${apiDomain.replace(':5001', ':5002')}/v1/",
     api_key="${user?.api_key || 'your-api-key'}"
 )
 
 def chat_with_openai(prompt, model="gpt-4", system="You are a helpful assistant."):
     completion = client.chat.completions.create(
-        model=model,  # Use your original upstream model name
+        model=model,  # The system will route to the correct provider
         messages=[
             {"role": "system", "content": system},
             {"role": "user", "content": prompt}

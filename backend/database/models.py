@@ -1140,3 +1140,53 @@ class AppealRecord(Base):
     whitelist = relationship("Whitelist")
 
 
+# =====================================================
+# Model Routing System Models
+# =====================================================
+
+class ModelRoute(Base):
+    """Model routing rules for automatic upstream API selection based on model name patterns"""
+    __tablename__ = "model_routes"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String(200), nullable=False)
+    description = Column(Text)
+    model_pattern = Column(String(255), nullable=False)  # Model name pattern (e.g., "gpt-4", "claude")
+    match_type = Column(String(20), nullable=False, default='prefix')  # 'exact' | 'prefix'
+    upstream_api_config_id = Column(UUID(as_uuid=True), ForeignKey("upstream_api_configs.id", ondelete="CASCADE"), nullable=False, index=True)
+    priority = Column(Integer, nullable=False, default=100)  # Priority, higher number = higher priority
+    is_active = Column(Boolean, nullable=False, default=True, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    tenant = relationship("Tenant")
+    upstream_api_config = relationship("UpstreamApiConfig")
+    route_applications = relationship("ModelRouteApplication", back_populates="model_route", cascade="all, delete-orphan")
+
+    # Constraints
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'model_pattern', 'match_type', name='uq_model_routes_tenant_pattern'),
+    )
+
+
+class ModelRouteApplication(Base):
+    """Optional per-application route bindings. Routes without entries here apply to all applications."""
+    __tablename__ = "model_route_applications"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    model_route_id = Column(UUID(as_uuid=True), ForeignKey("model_routes.id", ondelete="CASCADE"), nullable=False, index=True)
+    application_id = Column(UUID(as_uuid=True), ForeignKey("applications.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    model_route = relationship("ModelRoute", back_populates="route_applications")
+    application = relationship("Application")
+
+    # Constraints
+    __table_args__ = (
+        UniqueConstraint('model_route_id', 'application_id', name='uq_model_route_applications'),
+    )
+
+

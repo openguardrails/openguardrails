@@ -16,7 +16,7 @@ from pathlib import Path
 
 from config import settings
 from database.connection import init_db, create_admin_engine
-from routers import dashboard, config_api, results, auth, user, sync, admin, online_test, proxy_management, concurrent_stats, media, billing, applications, scanner_packages_api, scanner_configs_api, custom_scanners_api, purchase_api, risk_config_api, payment_api
+from routers import dashboard, config_api, results, auth, user, sync, admin, online_test, proxy_management, concurrent_stats, media, billing, applications, scanner_packages_api, scanner_configs_api, custom_scanners_api, purchase_api, risk_config_api, payment_api, model_routes_api
 from utils.logger import setup_logger
 from services.admin_service import admin_service
 
@@ -403,6 +403,9 @@ app.include_router(data_leakage_policy_api.router, dependencies=[Depends(verify_
 # Gateway Policy management (unified security policy for Security Gateway)
 from routers import gateway_policy_api
 app.include_router(gateway_policy_api.router, dependencies=[Depends(verify_user_auth)])
+
+# Model Routes management (automatic model routing for Security Gateway)
+app.include_router(model_routes_api.router, dependencies=[Depends(verify_user_auth)])
 
 # Billing and Payment routes (only in SaaS mode)
 if settings.is_saas_mode:

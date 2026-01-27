@@ -371,29 +371,6 @@ const LLMProviders: React.FC = () => {
       ),
     },
     {
-      accessorKey: 'id',
-      header: t('proxy.upstreamApiId'),
-      cell: ({ row }) => (
-        <div className="flex items-center gap-2">
-          <code className="px-2 py-1 bg-gray-100 rounded text-xs font-mono truncate max-w-[120px]">
-            {row.original.id}
-          </code>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 w-6 p-0"
-            onClick={() => handleCopyToClipboard(row.original.id, row.original.id)}
-          >
-            {copiedId === row.original.id ? (
-              <Check className="h-3 w-3 text-green-600" />
-            ) : (
-              <Copy className="h-3 w-3" />
-            )}
-          </Button>
-        </div>
-      ),
-    },
-    {
       accessorKey: 'created_at',
       header: t('proxy.createTime'),
       cell: ({ row }) => new Date(row.original.created_at).toLocaleString('zh-CN'),
@@ -472,12 +449,13 @@ const LLMProviders: React.FC = () => {
 {`from openai import OpenAI
 
 client = OpenAI(
-    base_url="http://localhost:5002/v1/gateway/<upstream_api_id>/",
+    base_url="http://localhost:5002/v1/",
     api_key="sk-xxai-your-proxy-key"
 )
 
+# Model routing is automatic based on your configured routes
 completion = client.chat.completions.create(
-    model="gpt-4",
+    model="gpt-4",  # The system will route to the correct provider
     messages=[
         {"role": "system", "content": "You're a helpful assistant."},
         {"role": "user", "content": "Hello!"}
@@ -719,27 +697,6 @@ completion = client.chat.completions.create(
               <div className="grid grid-cols-3 gap-2 py-2 border-b">
                 <span className="font-medium text-gray-700">{t('gateway.providerType')}</span>
                 <span className="col-span-2">{viewingProvider.provider || '-'}</span>
-              </div>
-
-              <div className="grid grid-cols-3 gap-2 py-2 border-b">
-                <span className="font-medium text-gray-700">{t('proxy.upstreamApiId')}</span>
-                <div className="col-span-2 flex items-center gap-2">
-                  <code className="px-2 py-1 bg-gray-100 rounded text-xs font-mono">
-                    {viewingProvider.id}
-                  </code>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 w-6 p-0"
-                    onClick={() => handleCopyToClipboard(viewingProvider.id, viewingProvider.id)}
-                  >
-                    {copiedId === viewingProvider.id ? (
-                      <Check className="h-3 w-3 text-green-600" />
-                    ) : (
-                      <Copy className="h-3 w-3" />
-                    )}
-                  </Button>
-                </div>
               </div>
 
               <div className="grid grid-cols-3 gap-2 py-2 border-b">
