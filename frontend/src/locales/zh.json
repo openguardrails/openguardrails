@@ -849,7 +849,7 @@
     "enableConfigLabel": "启用此配置",
     "securityConfigLabel": "安全配置",
     "securityConfigDesc": "输入检测和输出检测始终开启，为您提供全面安全防护",
-    "enableReasoningDetection": "启用推理检测（检测模型的推理过程内容）",
+    "enableReasoningDetection": "启用推理检测（检测模型的内容）",
     "streamDetectionIntervalLabel": "流式检测间隔",
     "streamDetectionIntervalTooltip": "流式输出时，每N个chunk检测一次，范围1-500，默认50",
     "streamDetectionIntervalPlaceholder": "输入检测间隔（默认50）",

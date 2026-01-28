@@ -636,19 +636,19 @@ class StreamChunkDetector:
         self.chunks_buffer.append(chunk_content)
         # Only add when reasoning detection is enabled and there is reasoning content
         if reasoning_content.strip() and getattr(model_config, 'enable_reasoning_detection', True):
-            self.chunks_buffer.append(f"[推理过程]{reasoning_content}")
+            self.chunks_buffer.append(f"{reasoning_content}")
         # Always add tool_calls content for security detection (tool prompt attacks)
         if tool_calls_content.strip():
-            self.chunks_buffer.append(f"[工具调用]{tool_calls_content}")
+            self.chunks_buffer.append(f"{tool_calls_content}")
 
         self.chunk_count += 1
         self.full_content += chunk_content
         # Only add when reasoning detection is enabled and there is reasoning content
         if reasoning_content.strip() and getattr(model_config, 'enable_reasoning_detection', True):
-            self.full_content += f"\n[推理过程]{reasoning_content}"
+            self.full_content += f"{reasoning_content}"
         # Always add tool_calls content for security detection
         if tool_calls_content.strip():
-            self.full_content += f"\n[工具调用]{tool_calls_content}"
+            self.full_content += f"{tool_calls_content}"
         
         # Check if detection threshold is reached (using user configured value)
         detection_threshold = getattr(model_config, 'stream_chunk_size', 50)  # Using configured chunk detection interval
