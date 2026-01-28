@@ -415,7 +415,12 @@ PERSONAL_EMAIL_DOMAINS = {
     "zealian.com",
     "zetiv.store",
     "zizo7.com",
-    "zosce.com"
+    "zosce.com",
+    "hanhanmeow.top",
+    "2925.com",
+    "chacuo.net",
+    "juhxs.com",
+    "vip.sina.com"
 }
 
 
