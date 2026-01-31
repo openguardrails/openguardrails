@@ -109,6 +109,7 @@ const Documentation: React.FC = () => {
                   { key: 'quick-test', title: t('docs.quickTest') },
                   { key: 'api-usage', title: t('docs.apiUsage') },
                   { key: 'model-direct-access', title: t('docs.directModelAccess') },
+                  { key: 'content-scanning', title: t('docs.contentScanning') },
                   { key: 'gateway-usage', title: t('docs.gatewayUsage') },
                   { key: 'dify-integration', title: t('docs.difyIntegration') },
                   { key: 'n8n-integration', title: t('docs.n8nIntegration') },
@@ -424,6 +425,108 @@ print(response.choices[0].message.content)
                     <p className="text-sm text-blue-700 mt-1">{t('docs.defaultConfigurationDesc')}</p>
                   </div>
                 </div>
+              </div>
+            </div>
+
+            {/* Content Scanning */}
+            <div id="content-scanning" className="mt-8">
+              <h3 className="text-xl font-semibold mb-3">{t('docs.contentScanning')}</h3>
+              <p className="text-slate-600 mb-4">{t('docs.contentScanningDesc')}</p>
+
+              <div className="p-4 bg-blue-50 border border-blue-200 rounded-md mb-4">
+                <div className="flex items-start gap-2">
+                  <div className="flex-shrink-0 mt-0.5">
+                    <div className="h-5 w-5 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs">i</div>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-blue-900">{t('docs.contentScanningRiskTypes')}</p>
+                    <p className="text-sm text-blue-700 mt-1">{t('docs.contentScanningRiskTypesDesc')}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mb-6">
+                <p className="font-semibold text-sm mb-2">{t('docs.emailScanTitle')}</p>
+                <p className="text-slate-600 text-sm mb-3">{t('docs.emailScanDesc')}</p>
+                <pre className="bg-slate-50 p-4 rounded-md overflow-auto text-xs border border-slate-200">
+                  {`curl -X POST "${apiDomain}/v1/scan/email" \\
+  -H "Authorization: Bearer ${user?.api_key || 'your-api-key'}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "content": "From: admin@bank.com\\nSubject: Urgent\\n\\nClick here to verify your account: http://fake-site.com"
+  }'`}
+                </pre>
+              </div>
+
+              <div className="mb-6">
+                <p className="font-semibold text-sm mb-2">{t('docs.webpageScanTitle')}</p>
+                <p className="text-slate-600 text-sm mb-3">{t('docs.webpageScanDesc')}</p>
+                <pre className="bg-slate-50 p-4 rounded-md overflow-auto text-xs border border-slate-200">
+                  {`curl -X POST "${apiDomain}/v1/scan/webpage" \\
+  -H "Authorization: Bearer ${user?.api_key || 'your-api-key'}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "content": "<html><body><form action=\\"http://evil.com\\"><input type=\\"password\\"></form></body></html>",
+    "url": "https://example.com"
+  }'`}
+                </pre>
+              </div>
+
+              <div>
+                <p className="font-semibold text-sm mb-2">{t('docs.contentScanResponseTitle')}</p>
+                <pre className="bg-slate-50 p-4 rounded-md overflow-auto text-xs border border-slate-200">
+                  {`{
+  "id": "scan-email-abc123def456",
+  "risk_level": "high",
+  "risk_types": ["phishing"],
+  "risk_content": "The following risks were detected in the email content:\\n- phishing: Phishing content detected...",
+  "scan_type": "email",
+  "score": 0.95
+}`}
+                </pre>
+              </div>
+
+              <div className="mt-4">
+                <p className="font-semibold text-sm mb-2">{t('docs.contentScanRiskLevels')}</p>
+                <table className="w-full border-collapse border border-slate-200 text-sm">
+                  <thead>
+                    <tr className="bg-slate-50">
+                      <th className="border border-slate-200 p-3 text-left font-semibold">{t('docs.contentScanRiskType')}</th>
+                      <th className="border border-slate-200 p-3 text-left font-semibold">{t('docs.riskLevel')}</th>
+                      <th className="border border-slate-200 p-3 text-left font-semibold">{t('docs.contentScanDescription')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td className="border border-slate-200 p-3"><code className="text-xs bg-slate-100 px-1 py-0.5 rounded">prompt_injection</code></td>
+                      <td className="border border-slate-200 p-3">
+                        <span className="px-2 py-1 text-xs rounded bg-red-100 text-red-800">{t('docs.highRisk')}</span>
+                      </td>
+                      <td className="border border-slate-200 p-3">{t('docs.riskPromptInjection')}</td>
+                    </tr>
+                    <tr className="bg-slate-50">
+                      <td className="border border-slate-200 p-3"><code className="text-xs bg-slate-100 px-1 py-0.5 rounded">jailbreak</code></td>
+                      <td className="border border-slate-200 p-3">
+                        <span className="px-2 py-1 text-xs rounded bg-red-100 text-red-800">{t('docs.highRisk')}</span>
+                      </td>
+                      <td className="border border-slate-200 p-3">{t('docs.riskJailbreak')}</td>
+                    </tr>
+                    <tr>
+                      <td className="border border-slate-200 p-3"><code className="text-xs bg-slate-100 px-1 py-0.5 rounded">phishing</code></td>
+                      <td className="border border-slate-200 p-3">
+                        <span className="px-2 py-1 text-xs rounded bg-red-100 text-red-800">{t('docs.highRisk')}</span>
+                      </td>
+                      <td className="border border-slate-200 p-3">{t('docs.riskPhishing')}</td>
+                    </tr>
+                    <tr className="bg-slate-50">
+                      <td className="border border-slate-200 p-3"><code className="text-xs bg-slate-100 px-1 py-0.5 rounded">malware</code></td>
+                      <td className="border border-slate-200 p-3">
+                        <span className="px-2 py-1 text-xs rounded bg-red-100 text-red-800">{t('docs.highRisk')}</span>
+                      </td>
+                      <td className="border border-slate-200 p-3">{t('docs.riskMalware')}</td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
             </div>
 
@@ -907,6 +1010,81 @@ response = requests.post(
   "suggest_action": "Decline",
   "suggest_answer": "Sorry, I cannot answer questions involving violent crime.",
   "score": 0.85
+}`}
+                        </pre>
+                      </div>
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+
+                <Collapsible>
+                  <CollapsibleTrigger className="w-full">
+                    <div className="p-3 bg-slate-50 hover:bg-slate-100 rounded-md border border-slate-200 transition-colors">
+                      <div className="flex items-center gap-2">
+                        <span className="px-2 py-1 text-xs rounded bg-green-100 text-green-800">POST</span>
+                        <code className="text-sm font-semibold">/v1/scan/email</code>
+                        <span className="text-sm text-slate-500">- {t('docs.emailScanEndpointDesc')}</span>
+                      </div>
+                    </div>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="mt-2 p-4 bg-white border border-slate-200 rounded-md">
+                    <div className="space-y-4">
+                      <div>
+                        <p className="font-semibold text-sm mb-2">{t('docs.requestBody')}:</p>
+                        <pre className="bg-slate-50 p-3 rounded text-xs border border-slate-200 overflow-auto">
+                          {`{
+  "content": "From: sender@example.com\\nSubject: Important\\n\\nEmail body content here..."
+}`}
+                        </pre>
+                      </div>
+                      <div>
+                        <p className="font-semibold text-sm mb-2">{t('docs.responseExample')}:</p>
+                        <pre className="bg-slate-50 p-3 rounded text-xs border border-slate-200 overflow-auto">
+                          {`{
+  "id": "scan-email-abc123def456",
+  "risk_level": "high",
+  "risk_types": ["phishing"],
+  "risk_content": "The following risks were detected in the email content:\\n- phishing: Phishing content detected...",
+  "scan_type": "email",
+  "score": 0.95
+}`}
+                        </pre>
+                      </div>
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+
+                <Collapsible>
+                  <CollapsibleTrigger className="w-full">
+                    <div className="p-3 bg-slate-50 hover:bg-slate-100 rounded-md border border-slate-200 transition-colors">
+                      <div className="flex items-center gap-2">
+                        <span className="px-2 py-1 text-xs rounded bg-green-100 text-green-800">POST</span>
+                        <code className="text-sm font-semibold">/v1/scan/webpage</code>
+                        <span className="text-sm text-slate-500">- {t('docs.webpageScanEndpointDesc')}</span>
+                      </div>
+                    </div>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="mt-2 p-4 bg-white border border-slate-200 rounded-md">
+                    <div className="space-y-4">
+                      <div>
+                        <p className="font-semibold text-sm mb-2">{t('docs.requestBody')}:</p>
+                        <pre className="bg-slate-50 p-3 rounded text-xs border border-slate-200 overflow-auto">
+                          {`{
+  "content": "<html><body>Webpage content here...</body></html>",
+  "url": "https://example.com"
+}`}
+                        </pre>
+                      </div>
+                      <div>
+                        <p className="font-semibold text-sm mb-2">{t('docs.responseExample')}:</p>
+                        <pre className="bg-slate-50 p-3 rounded text-xs border border-slate-200 overflow-auto">
+                          {`{
+  "id": "scan-webpage-def456abc789",
+  "risk_level": "high",
+  "risk_types": ["malware"],
+  "risk_content": "The following risks were detected in the webpage content:\\n- malware: Malware indicators detected...",
+  "scan_type": "webpage",
+  "score": 0.98
 }`}
                         </pre>
                       </div>

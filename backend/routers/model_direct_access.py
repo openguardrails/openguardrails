@@ -218,6 +218,7 @@ def get_model_config(model_name: str) -> dict:
         }
 
 
+@router.post("/model/")
 @router.post("/model/chat/completions")
 async def model_chat_completions(
     request_data: ChatCompletionRequest,

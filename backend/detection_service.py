@@ -16,7 +16,7 @@ from pathlib import Path
 
 from config import settings
 from database.connection import init_db, create_detection_engine
-from routers import detection_guardrails, dify_moderation, billing, model_direct_access
+from routers import detection_guardrails, dify_moderation, billing, model_direct_access, content_scan
 from services.async_logger import async_detection_logger
 from utils.logger import setup_logger
 
@@ -31,7 +31,7 @@ class AuthContextMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         # Only handle detection API routes (guardrails and dify moderation)
-        if request.url.path.startswith('/v1/guardrails') or request.url.path.startswith('/v1/dify'):
+        if request.url.path.startswith('/v1/guardrails') or request.url.path.startswith('/v1/dify') or request.url.path.startswith('/v1/scan/'):
             auth_header = request.headers.get('authorization')
 
             if auth_header:
@@ -277,6 +277,7 @@ async def verify_user_auth(
 app.include_router(detection_guardrails.router, prefix="/v1", dependencies=[Depends(verify_user_auth)])
 app.include_router(dify_moderation.router, prefix="/v1", dependencies=[Depends(verify_user_auth)])  # Dify API-based Extension
 app.include_router(billing.router, dependencies=[Depends(verify_user_auth)])  # Billing APIs
+app.include_router(content_scan.router, prefix="/v1", dependencies=[Depends(verify_user_auth)])  # Content Scan APIs
 
 # Register direct model access routes (no dependency on verify_user_auth, uses its own auth)
 app.include_router(model_direct_access.router, prefix="/v1")  # Direct Model Access (auth handled internally)
