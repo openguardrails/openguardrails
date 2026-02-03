@@ -987,12 +987,12 @@ async def _handle_gateway_streaming_response(
                                     # Extract content for detection
                                     if 'choices' in chunk_data and len(chunk_data['choices']) > 0:
                                         delta = chunk_data['choices'][0].get('delta', {})
-                                        content = delta.get('content', '')
+                                        content = delta.get('content') or ''
                                         reasoning_content = ""
 
                                         # Extract reasoning content if enabled
                                         if getattr(api_config, 'enable_reasoning_detection', True):
-                                            reasoning_content = delta.get('reasoning_content', '')
+                                            reasoning_content = delta.get('reasoning_content') or ''
 
                                         if content or reasoning_content:
                                             full_content += content
