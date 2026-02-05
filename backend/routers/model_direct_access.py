@@ -171,16 +171,20 @@ async def track_direct_model_access(
 
 def get_model_config(model_name: str) -> dict:
     """
-    Get the complete model configuration (URL, API Key, Model Name) based on the requested model.
-    Maps tenant-requested model names to actual backend model configurations.
+    Get the backend API configuration based on the requested model name.
+    
+    This function determines which backend API endpoint to route to based on model name patterns,
+    but does NOT substitute the model name. The user's requested model name will be passed 
+    through as-is to the upstream API.
 
-    The three backend models are:
-    1. GUARDRAILS_MODEL_NAME - OpenGuardrails-Text (text detection model)
-    2. GUARDRAILS_VL_MODEL_NAME - OpenGuardrails-VL (vision-language model)
-    3. EMBEDDING_MODEL_NAME - OpenGuardrails-Embedding (embedding model)
+    Routing logic:
+    - Text models (openguardrails-text, guardrails-text) → GUARDRAILS_MODEL_API
+    - Vision models (openguardrails-vl, guardrails-vl) → GUARDRAILS_VL_MODEL_API
+    - Embedding models (bge-m3, bge, embedding) → EMBEDDING_API
+    - Other models → Default to GUARDRAILS_MODEL_API
 
     Returns:
-        dict with keys: api_url, api_key, model_name
+        dict with keys: api_url, api_key, model_name (deprecated, not used in direct access)
     """
     model_name_lower = model_name.lower()
 
@@ -231,22 +235,23 @@ async def model_chat_completions(
     PRIVACY NOTICE: This endpoint does NOT store message content.
     Only usage statistics (count, tokens) are tracked for billing.
 
-    Supported models:
-    - OpenGuardrails-Text (guardrails detection model)
-    - bge-m3 (embedding model)
-    - Future: vision models
+    Model routing:
+    - The exact model name you specify will be passed to the upstream API
+    - The system automatically routes to the correct backend based on model name patterns
+    - Example: "OG-Text" → routes to guardrails API, sends "OG-Text" to upstream
+    - Example: "bge-m3" → routes to embedding API, sends "bge-m3" to upstream
 
     Example usage:
     ```python
     from openai import OpenAI
 
     client = OpenAI(
-        base_url="https://api.openguardrails.com/v1/",
+        base_url="https://api.openguardrails.com/v1/model/",
         api_key="sk-xxai-model-..."
     )
 
     response = client.chat.completions.create(
-        model="OpenGuardrails-Text",
+        model="OG-Text",  # Your requested model name is sent as-is to upstream
         messages=[{"role": "user", "content": "Hello"}]
     )
     ```
@@ -264,7 +269,8 @@ async def model_chat_completions(
     model_config = get_model_config(requested_model_name)
     model_api_url = model_config['api_url']
     model_api_key = model_config['api_key']
-    backend_model_name = model_config['model_name']
+    # Note: In direct model access mode, we pass through the user's requested model name
+    # instead of substituting with backend_model_name, allowing users full control
 
     # Prepare auth header for upstream model (use the correct API key for this model)
     upstream_headers = {
@@ -272,9 +278,9 @@ async def model_chat_completions(
         "Content-Type": "application/json"
     }
 
-    # Prepare request for upstream model (use the backend model name)
+    # Prepare request for upstream model (use the user's requested model name as-is)
     upstream_request = {
-        "model": backend_model_name,
+        "model": requested_model_name,
         "messages": [
             {"role": msg.role, "content": msg.content}
             for msg in request_data.messages
