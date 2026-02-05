@@ -420,7 +420,8 @@ PERSONAL_EMAIL_DOMAINS = {
     "2925.com",
     "chacuo.net",
     "juhxs.com",
-    "vip.sina.com"
+    "vip.sina.com",
+    "dnsclick.com",
 }
 
 

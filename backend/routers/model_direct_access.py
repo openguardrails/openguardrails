@@ -387,6 +387,118 @@ async def model_chat_completions(
         )
 
 
+class EmbeddingRequest(BaseModel):
+    """Embedding request (OpenAI-compatible)"""
+    model: str
+    input: Union[str, List[str]]
+    encoding_format: Optional[str] = Field(default="float")
+    dimensions: Optional[int] = None
+    user: Optional[str] = None
+
+
+@router.post("/model/embeddings")
+async def model_embeddings(
+    request_data: EmbeddingRequest,
+    request: Request,
+    auth_context: dict = Depends(verify_model_api_key)
+):
+    """
+    OpenAI-compatible embeddings endpoint for direct model access.
+
+    PRIVACY NOTICE: This endpoint does NOT store input content.
+    Only usage statistics (count) are tracked for billing.
+
+    Example usage:
+    ```python
+    from openai import OpenAI
+
+    client = OpenAI(
+        base_url="https://api.openguardrails.com/v1/model/",
+        api_key="sk-xxai-model-..."
+    )
+
+    response = client.embeddings.create(
+        model="bge-m3",
+        input="Hello, world!"
+    )
+    ```
+    """
+    tenant_id = auth_context["tenant_id"]
+    requested_model_name = request_data.model
+
+    # Extract IP address and user agent for tracking
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get('user-agent')
+
+    logger.info(f"Direct model access (embeddings): tenant={tenant_id}, model={requested_model_name}")
+
+    # Get complete model configuration (URL, API Key)
+    model_config = get_model_config(requested_model_name)
+    model_api_url = model_config['api_url']
+    model_api_key = model_config['api_key']
+
+    # Prepare auth header for upstream model
+    upstream_headers = {
+        "Authorization": f"Bearer {model_api_key}",
+        "Content-Type": "application/json"
+    }
+
+    # Prepare request for upstream model (use the user's requested model name as-is)
+    upstream_request = {
+        "model": requested_model_name,
+        "input": request_data.input,
+    }
+
+    # Add optional parameters
+    if request_data.encoding_format:
+        upstream_request["encoding_format"] = request_data.encoding_format
+    if request_data.dimensions:
+        upstream_request["dimensions"] = request_data.dimensions
+    if request_data.user:
+        upstream_request["user"] = request_data.user
+
+    try:
+        # Make request to upstream embedding API
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(
+                f"{model_api_url}/embeddings",
+                json=upstream_request,
+                headers=upstream_headers
+            )
+            response.raise_for_status()
+            response_data = response.json()
+
+            # Track direct model access
+            await track_direct_model_access(
+                tenant_id=tenant_id,
+                model_name=requested_model_name,
+                request_content="[embeddings]",
+                ip_address=ip_address,
+                user_agent=user_agent
+            )
+
+            return JSONResponse(content=response_data)
+
+    except httpx.HTTPStatusError as e:
+        logger.error(f"Embedding API error: {e.response.status_code} - {e.response.text}")
+        raise HTTPException(
+            status_code=e.response.status_code,
+            detail=f"Embedding API error: {e.response.text}"
+        )
+    except httpx.RequestError as e:
+        logger.error(f"Embedding API request error: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Failed to connect to embedding API: {str(e)}"
+        )
+    except Exception as e:
+        logger.error(f"Unexpected error in embeddings access: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal error: {str(e)}"
+        )
+
+
 @router.get("/model/usage")
 async def get_model_usage(
     request: Request,

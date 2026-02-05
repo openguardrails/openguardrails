@@ -18,7 +18,7 @@ import asyncio
 
 from config import settings
 # Import complete proxy service implementation
-from routers import proxy_api, gateway_integration_api
+from routers import proxy_api, gateway_integration_api, model_direct_access
 from services.async_logger import async_detection_logger
 from utils.logger import setup_logger
 
@@ -267,7 +267,9 @@ async def root():
         "supported_endpoints": [
             "POST /v1/chat/completions",
             "POST /v1/completions", 
-            "GET /v1/models"
+            "GET /v1/models",
+            "POST /v1/model/chat/completions",
+            "POST /v1/model/embeddings"
         ],
         "base_url": f"http://localhost:{settings.proxy_port}",
         "workers": settings.proxy_uvicorn_workers,
@@ -303,6 +305,9 @@ app.include_router(proxy_api.router, dependencies=[Depends(verify_user_auth)])
 # Register gateway integration API (for third-party AI gateways like Higress, LiteLLM, Kong)
 # See docs/THIRD_PARTY_GATEWAY_INTEGRATION.md for full documentation
 app.include_router(gateway_integration_api.router, dependencies=[Depends(verify_user_auth)])
+
+# Register direct model access API (uses its own authentication via model_api_key)
+app.include_router(model_direct_access.router, prefix="/v1")
 
 # Global exception handling
 @app.exception_handler(Exception)
