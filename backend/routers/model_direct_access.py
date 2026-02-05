@@ -178,8 +178,8 @@ def get_model_config(model_name: str) -> dict:
     through as-is to the upstream API.
 
     Routing logic:
-    - Text models (openguardrails-text, guardrails-text) → GUARDRAILS_MODEL_API
-    - Vision models (openguardrails-vl, guardrails-vl) → GUARDRAILS_VL_MODEL_API
+    - Text models (openguardrails-text, guardrails-text, og-text) → GUARDRAILS_MODEL_API
+    - Vision models (openguardrails-vl, guardrails-vl, og-vl) → GUARDRAILS_VL_MODEL_API
     - Embedding models (bge-m3, bge, embedding) → EMBEDDING_API
     - Other models → Default to GUARDRAILS_MODEL_API
 
@@ -189,7 +189,7 @@ def get_model_config(model_name: str) -> dict:
     model_name_lower = model_name.lower()
 
     # OpenGuardrails-Text model (guardrails detection model)
-    if 'openguardrails-text' in model_name_lower or 'guardrails-text' in model_name_lower:
+    if 'openguardrails-text' in model_name_lower or 'guardrails-text' in model_name_lower or 'og-text' in model_name_lower:
         return {
             'api_url': settings.guardrails_model_api_url,
             'api_key': settings.guardrails_model_api_key,
@@ -197,7 +197,7 @@ def get_model_config(model_name: str) -> dict:
         }
 
     # OpenGuardrails-VL model (vision-language model)
-    elif 'openguardrails-vl' in model_name_lower or 'guardrails-vl' in model_name_lower:
+    elif 'openguardrails-vl' in model_name_lower or 'guardrails-vl' in model_name_lower or 'og-vl' in model_name_lower:
         return {
             'api_url': settings.guardrails_vl_model_api_url,
             'api_key': settings.guardrails_vl_model_api_key,
@@ -212,9 +212,8 @@ def get_model_config(model_name: str) -> dict:
             'model_name': settings.embedding_model_name
         }
 
-    # Default to guardrails text model
+    # Default to guardrails text model API (let upstream decide if model is valid)
     else:
-        logger.warning(f"Unknown model '{model_name}', defaulting to guardrails text model")
         return {
             'api_url': settings.guardrails_model_api_url,
             'api_key': settings.guardrails_model_api_key,
@@ -265,12 +264,11 @@ async def model_chat_completions(
 
     logger.info(f"Direct model access: tenant={tenant_id}, model={requested_model_name}, stream={request_data.stream}")
 
-    # Get complete model configuration (URL, API Key, Model Name)
+    # Get complete model configuration (URL, API Key)
     model_config = get_model_config(requested_model_name)
     model_api_url = model_config['api_url']
     model_api_key = model_config['api_key']
-    # Note: In direct model access mode, we pass through the user's requested model name
-    # instead of substituting with backend_model_name, allowing users full control
+    # Note: We pass through the user's requested model name directly to upstream
 
     # Prepare auth header for upstream model (use the correct API key for this model)
     upstream_headers = {
