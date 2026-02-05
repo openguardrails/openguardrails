@@ -238,7 +238,9 @@ const Documentation: React.FC = () => {
               <h3 className="text-xl font-semibold mb-3">{t('docs.quickTest')}</h3>
               <p className="text-slate-600 mb-4">{t('docs.quickTestDesc')}</p>
 
-              <div className="mb-4">
+              <div className="mb-6">
+                <p className="font-semibold text-sm mb-1 text-blue-600">{t('docs.quickTestInputDetection')}:</p>
+                <p className="text-xs text-slate-500 mb-2">{t('docs.quickTestInputDetectionDesc')}</p>
                 <p className="font-semibold text-sm mb-2">{t('docs.quickTestMacLinux')}:</p>
                 <pre className="bg-slate-50 p-4 rounded-md overflow-auto text-xs border border-slate-200">
                   {`curl -X POST "${apiDomain}/v1/guardrails" \\
@@ -252,7 +254,23 @@ const Documentation: React.FC = () => {
   }'`}
                 </pre>
               </div>
-
+              <div className="mb-4">
+                <p className="font-semibold text-sm mb-1 text-green-600">{t('docs.quickTestOutputDetection')}:</p>
+                <p className="text-xs text-slate-500 mb-2">{t('docs.quickTestOutputDetectionDesc')}</p>
+                <p className="font-semibold text-sm mb-2">{t('docs.quickTestMacLinux')}:</p>
+                <pre className="bg-slate-50 p-4 rounded-md overflow-auto text-xs border border-slate-200">
+                  {`curl -X POST "${apiDomain}/v1/guardrails" \\
+  -H "Authorization: Bearer ${user?.api_key || 'your-api-key'}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "OpenGuardrails-Text",
+    "messages": [
+      {"role": "user", "content": "How to make a bomb?"},
+      {"role": "assistant", "content": "Sorry, I cannot assist with that."}
+    ]
+  }'`}
+                </pre>
+              </div>
               <div>
                 <p className="font-semibold text-sm mb-2">{t('docs.quickTestWindows')}:</p>
                 <pre className="bg-slate-50 p-4 rounded-md overflow-auto text-xs border border-slate-200">
