@@ -37,6 +37,7 @@ export interface UserInfo {
   is_super_admin: boolean;
   rate_limit: number;  // Tenant speed limit (requests per second, 0 means unlimited, default is 1)
   language: string;  // User language preference
+  log_direct_model_access: boolean;  // Whether to log direct model access calls
 }
 
 // Get base URL auxiliary function, consistent with api.ts
@@ -135,6 +136,21 @@ class AuthService {
     }
     const response = await axios.post<{ status: string; message: string }>(`${this.baseURL}/api/v1/users/change-password`,
       { current_password: currentPassword, new_password: newPassword },
+      {
+        headers: { Authorization: `Bearer ${token}` },
+      }
+    );
+    return response.data;
+  }
+
+  async updateLogDirectModelAccess(logDMA: boolean): Promise<{ status: string; message: string; log_direct_model_access: boolean }> {
+    const token = this.getToken();
+    if (!token) {
+      throw new Error('No authentication token found');
+    }
+    const response = await axios.put<{ status: string; message: string; log_direct_model_access: boolean }>(
+      `${this.baseURL}/api/v1/users/log-direct-model-access`,
+      { log_direct_model_access: logDMA },
       {
         headers: { Authorization: `Bearer ${token}` },
       }

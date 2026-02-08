@@ -60,6 +60,8 @@ class DetectionResultResponse(BaseModel):
     image_count: int = 0
     image_paths: List[str] = []
     image_urls: List[str] = []  # Signed image access URLs
+    # Direct Model Access flag
+    is_direct_model_access: bool = False  # Whether this is a direct model access call
 
 class BlacklistResponse(BaseModel):
     """Blacklist response model"""

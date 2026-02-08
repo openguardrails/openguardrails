@@ -412,6 +412,11 @@ const Results: React.FC = () => {
             className="flex items-center gap-2 cursor-pointer text-blue-600 hover:underline"
             onClick={() => showDetail(record)}
           >
+            {record.is_direct_model_access && (
+              <Badge variant="outline" className="shrink-0 !bg-purple-50 !text-purple-700 !border-purple-300">
+                DMA
+              </Badge>
+            )}
             {record.has_image && (
               <Badge variant="secondary" className="shrink-0">
                 <FileImage className="mr-1 h-3 w-3" />
@@ -801,10 +806,15 @@ const Results: React.FC = () => {
                 {/* Request ID */}
                 <div className="grid grid-cols-3 gap-4 border-b pb-3">
                   <div className="font-medium text-gray-600 text-sm">{t('results.requestId')}:</div>
-                  <div className="col-span-2">
+                  <div className="col-span-2 flex items-center gap-2">
                     <code className="text-xs bg-gray-100 px-2 py-1 rounded">
                       {selectedResult.request_id}
                     </code>
+                    {selectedResult.is_direct_model_access && (
+                      <Badge variant="outline" className="!bg-purple-50 !text-purple-700 !border-purple-300 text-xs">
+                        Direct Model Access
+                      </Badge>
+                    )}
                   </div>
                 </div>
 

@@ -54,6 +54,7 @@ class UserInfo(BaseModel):
     is_super_admin: bool
     rate_limit: int  # Speed limit (requests per second, 0 means unlimited, default is 1)
     language: str  # User language preference
+    log_direct_model_access: bool  # Whether to log direct model access calls
 
 class ApiKeyResponse(BaseModel):
     api_key: str
@@ -312,7 +313,8 @@ async def get_current_user_info(
         is_verified=tenant.is_verified,
         is_super_admin=admin_service.is_super_admin(tenant),
         rate_limit=rate_limit,
-        language=tenant.language
+        language=tenant.language,
+        log_direct_model_access=tenant.log_direct_model_access
     )
 
 @router.post("/regenerate-api-key", response_model=ApiKeyResponse)
@@ -427,4 +429,31 @@ async def update_user_language(
         "status": "success",
         "message": "Language updated successfully",
         "language": language_data.language
+    }
+
+class UpdateLogDMARequest(BaseModel):
+    log_direct_model_access: bool
+
+@router.put("/log-direct-model-access", response_model=dict)
+async def update_log_direct_model_access(
+    log_dma_data: UpdateLogDMARequest,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_admin_db)
+):
+    """
+    Update direct model access logging configuration.
+    
+    By default, DMA calls are NOT logged for privacy protection (only usage count is tracked).
+    Enable this option if you want to log full request content for DMA calls.
+    """
+    tenant = get_current_user_from_token(credentials, db)
+
+    # Update the configuration
+    tenant.log_direct_model_access = log_dma_data.log_direct_model_access
+    db.commit()
+
+    return {
+        "status": "success",
+        "message": "Direct model access logging configuration updated successfully",
+        "log_direct_model_access": tenant.log_direct_model_access
     }

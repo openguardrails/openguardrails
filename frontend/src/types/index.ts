@@ -65,6 +65,8 @@ export interface DetectionResult {
   image_count?: number;
   image_paths?: string[];
   image_urls?: string[];  // Signed image access URLs
+  // Direct Model Access flag
+  is_direct_model_access?: boolean;  // Whether this is a direct model access call
 }
 
 // Paginated response type

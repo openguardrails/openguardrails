@@ -17,6 +17,7 @@ class Tenant(Base):
     is_super_admin = Column(Boolean, default=False)  # Whether to be a super admin
     api_key = Column(String(64), unique=True, nullable=False, index=True)  # Deprecated: kept for backward compatibility, use api_keys table instead
     model_api_key = Column(String(64), unique=True, nullable=True, index=True)  # API key for direct model access (format: sk-xxai-model-{52 chars})
+    log_direct_model_access = Column(Boolean, default=False, nullable=False)  # Whether to log direct model access calls (default: False for privacy)
     language = Column(String(10), default='en', nullable=False)  # User language preference
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

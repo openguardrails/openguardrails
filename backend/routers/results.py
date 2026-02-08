@@ -115,7 +115,17 @@ async def get_detection_results(
         filters = []
 
         # Add application filter condition
-        filters.append(DetectionResult.application_id == application_id)
+        # Include:
+        # 1. Records from current application (application_id == application_id)
+        # 2. DMA records from current tenant (application_id is None AND is_direct_model_access = True AND tenant_id = current_user.id)
+        filters.append(or_(
+            DetectionResult.application_id == application_id,
+            and_(
+                DetectionResult.application_id.is_(None),
+                DetectionResult.is_direct_model_access == True,
+                DetectionResult.tenant_id == str(current_user.id)
+            )
+        ))
         
         # Risk level filter - support overall risk level or specific type risk level
         if risk_level:
@@ -242,7 +252,8 @@ async def get_detection_results(
                 has_image=result.has_image if hasattr(result, 'has_image') else False,
                 image_count=result.image_count if hasattr(result, 'image_count') else 0,
                 image_paths=result.image_paths if hasattr(result, 'image_paths') else [],
-                image_urls=image_urls  # New signed URLs
+                image_urls=image_urls,  # New signed URLs
+                is_direct_model_access=result.is_direct_model_access if hasattr(result, 'is_direct_model_access') else False
             ))
         
         pages = (total + per_page - 1) // per_page
@@ -283,7 +294,17 @@ async def export_detection_results(
         filters = []
 
         # Add application filter condition
-        filters.append(DetectionResult.application_id == application_id)
+        # Include:
+        # 1. Records from current application (application_id == application_id)
+        # 2. DMA records from current tenant (application_id is None AND is_direct_model_access = True AND tenant_id = current_user.id)
+        filters.append(or_(
+            DetectionResult.application_id == application_id,
+            and_(
+                DetectionResult.application_id.is_(None),
+                DetectionResult.is_direct_model_access == True,
+                DetectionResult.tenant_id == str(current_user.id)
+            )
+        ))
 
         if risk_level:
             if risk_level == "no_risk":
@@ -449,8 +470,15 @@ async def get_detection_result(result_id: int, request: Request, db: Session = D
         if not result:
             raise HTTPException(status_code=404, detail="Detection result not found")
 
-        # Permission check: can only view application's own records
-        if result.application_id != application_id:
+        # Permission check: can only view application's own records OR tenant's DMA records
+        if result.application_id == application_id:
+            # This is an application-level record, access granted
+            pass
+        elif result.application_id is None and result.is_direct_model_access and str(result.tenant_id) == str(current_user.id):
+            # This is a DMA record from current tenant, access granted
+            pass
+        else:
+            # Not authorized to view this record
             raise HTTPException(status_code=403, detail="Forbidden")
 
         # Generate signed image URLs
@@ -492,7 +520,8 @@ async def get_detection_result(result_id: int, request: Request, db: Session = D
             has_image=result.has_image if hasattr(result, 'has_image') else False,
             image_count=result.image_count if hasattr(result, 'image_count') else 0,
             image_paths=result.image_paths if hasattr(result, 'image_paths') else [],
-            image_urls=image_urls  # New signed URLs
+            image_urls=image_urls,  # New signed URLs
+            is_direct_model_access=result.is_direct_model_access if hasattr(result, 'is_direct_model_access') else False
         )
 
     except HTTPException:

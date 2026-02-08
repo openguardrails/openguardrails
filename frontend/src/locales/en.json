@@ -1740,7 +1740,13 @@
     "privacyNotice2": "Only usage statistics (request count, tokens) are tracked for billing",
     "privacyNotice3": "Ideal for private deployment where you self-host the platform",
     "subscriptionRequiredToViewKey": "Subscription required to view key",
-    "modelApiKeyRegenerated": "Model API Key regenerated successfully"
+    "modelApiKeyRegenerated": "Model API Key regenerated successfully",
+    "dmaLoggingConfig": "DMA Logging Configuration",
+    "dmaLoggingDesc": "By default, Direct Model Access calls are NOT logged for privacy. Enable this option if you want to log full request content.",
+    "enableDmaLogging": "Enable DMA Logging",
+    "enableDmaLoggingDesc": "When enabled, full request content will be stored in detection results",
+    "dmaLoggingUpdated": "DMA logging configuration updated successfully",
+    "dmaLoggingUpdateFailed": "Failed to update DMA logging configuration"
   },
   "admin": {
     "title": "Admin Panel",

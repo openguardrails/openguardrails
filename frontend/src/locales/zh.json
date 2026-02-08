@@ -1737,7 +1737,13 @@
     "privacyNotice2": "仅追踪使用统计（请求次数、token数）用于计费",
     "privacyNotice3": "适合私有化部署，您可以自主托管平台",
     "subscriptionRequiredToViewKey": "需要订阅才能查看密钥",
-    "modelApiKeyRegenerated": "Model API Key 已重新生成"
+    "modelApiKeyRegenerated": "Model API Key 已重新生成",
+    "dmaLoggingConfig": "DMA 日志记录配置",
+    "dmaLoggingDesc": "默认情况下，直接模型访问调用不记录日志以保护隐私。如果您想记录完整的请求内容，请启用此选项。",
+    "enableDmaLogging": "启用 DMA 日志记录",
+    "enableDmaLoggingDesc": "启用后，完整的请求内容将存储在检测结果中",
+    "dmaLoggingUpdated": "DMA 日志记录配置更新成功",
+    "dmaLoggingUpdateFailed": "更新 DMA 日志记录配置失败"
   },
   "admin": {
     "title": "管理员面板",

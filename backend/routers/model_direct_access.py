@@ -126,19 +126,37 @@ async def track_direct_model_access(
     Track direct model access by creating a DetectionResult record with is_direct_model_access=True.
     This merges counting with regular guardrail calls to check against monthly subscription limits.
 
-    For privacy: stores minimal information, primarily for counting usage.
+    For privacy: by default, stores minimal information (model name only).
+    If tenant has enabled log_direct_model_access, stores full request content.
     """
     import uuid
 
     db = next(get_admin_db())
     try:
+        # Check tenant's log_direct_model_access configuration
+        tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        if not tenant:
+            logger.warning(f"Tenant {tenant_id} not found when tracking DMA")
+            return
+
+        # Determine what content to log based on tenant configuration
+        log_enabled = tenant.log_direct_model_access
+        if log_enabled:
+            # Log full content if enabled
+            logged_content = request_content
+            logger.info(f"Logging DMA with full content for tenant={tenant_id} (log_direct_model_access=True)")
+        else:
+            # Log minimal placeholder for privacy (default behavior)
+            logged_content = f"[Direct Model Access: {model_name}]"
+            logger.debug(f"Logging DMA with minimal content for tenant={tenant_id} (log_direct_model_access=False)")
+
         # Create a detection result record for direct model access
         # Note: application_id is nullable since direct model access uses model_api_key (tenant-level)
         detection_result = DetectionResult(
             request_id=str(uuid.uuid4()),
             tenant_id=tenant_id,
             application_id=None,  # Direct model access is tenant-level, not application-specific
-            content=f"[Direct Model Access: {model_name}]",  # Minimal placeholder, not actual content for privacy
+            content=logged_content,  # Full content if logging enabled, minimal placeholder otherwise
             is_direct_model_access=True,  # Mark as direct model access
             suggest_action='pass',  # Not a guardrail check, always "pass"
             suggest_answer=None,
@@ -159,7 +177,7 @@ async def track_direct_model_access(
 
         db.add(detection_result)
         db.commit()
-        logger.info(f"Tracked direct model access: tenant={tenant_id}, model={model_name}")
+        logger.info(f"Tracked direct model access: tenant={tenant_id}, model={model_name}, logged={log_enabled}")
 
     except Exception as e:
         db.rollback()
@@ -333,10 +351,12 @@ async def model_chat_completions(
                                     pass
 
                 # Track direct model access after streaming completes
+                # Pass the actual messages content for logging (will be filtered based on tenant config)
+                messages_content = " ".join([f"{msg.role}: {msg.content}" for msg in request_data.messages])
                 await track_direct_model_access(
                     tenant_id=tenant_id,
                     model_name=requested_model_name,
-                    request_content="[streaming]",
+                    request_content=f"[Streaming] {messages_content}",
                     ip_address=ip_address,
                     user_agent=user_agent
                 )
@@ -357,10 +377,12 @@ async def model_chat_completions(
                 response_data = response.json()
 
                 # Track direct model access
+                # Pass the actual messages content for logging (will be filtered based on tenant config)
+                messages_content = " ".join([f"{msg.role}: {msg.content}" for msg in request_data.messages])
                 await track_direct_model_access(
                     tenant_id=tenant_id,
                     model_name=requested_model_name,
-                    request_content="[non-streaming]",
+                    request_content=messages_content,
                     ip_address=ip_address,
                     user_agent=user_agent
                 )
@@ -469,10 +491,12 @@ async def model_embeddings(
             response_data = response.json()
 
             # Track direct model access
+            # Pass the actual input for logging (will be filtered based on tenant config)
+            input_content = str(request_data.input)
             await track_direct_model_access(
                 tenant_id=tenant_id,
                 model_name=requested_model_name,
-                request_content="[embeddings]",
+                request_content=f"[Embeddings] {input_content}",
                 ip_address=ip_address,
                 user_agent=user_agent
             )
