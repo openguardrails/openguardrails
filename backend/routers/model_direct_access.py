@@ -119,6 +119,7 @@ async def track_direct_model_access(
     tenant_id: str,
     model_name: str,
     request_content: str,
+    response_content: str = None,
     ip_address: str = None,
     user_agent: str = None
 ):
@@ -127,7 +128,11 @@ async def track_direct_model_access(
     This merges counting with regular guardrail calls to check against monthly subscription limits.
 
     For privacy: by default, stores minimal information (model name only).
-    If tenant has enabled log_direct_model_access, stores full request content.
+    If tenant has enabled log_direct_model_access, stores full request and response content.
+    
+    For OG-Text model, parses response to detect injection attacks:
+    - Response format: {"isInjection": true/false, "confidence": 0.0-1.0, "reason": "...", "findings": [...]}
+    - Maps isInjection to security_risk_level (prompt attack)
     """
     import uuid
 
@@ -144,11 +149,54 @@ async def track_direct_model_access(
         if log_enabled:
             # Log full content if enabled
             logged_content = request_content
+            logged_response = response_content or ""
             logger.info(f"Logging DMA with full content for tenant={tenant_id} (log_direct_model_access=True)")
         else:
             # Log minimal placeholder for privacy (default behavior)
             logged_content = f"[Direct Model Access: {model_name}]"
+            logged_response = ""
             logger.debug(f"Logging DMA with minimal content for tenant={tenant_id} (log_direct_model_access=False)")
+
+        # Parse DMA response for risk detection (for OG-Text model)
+        security_risk_level = 'no_risk'
+        security_categories = []
+        suggest_action = 'pass'
+        
+        if response_content and model_name and 'og-text' in model_name.lower():
+            try:
+                # Try to parse the response as JSON
+                response_json = json.loads(response_content)
+                
+                if 'isInjection' in response_json:
+                    is_injection = response_json.get('isInjection', False)
+                    confidence = response_json.get('confidence', 0.0)
+                    reason = response_json.get('reason', '')
+                    findings = response_json.get('findings', [])
+                    
+                    if is_injection:
+                        # Map isInjection=true to high_risk prompt attack
+                        security_risk_level = 'high_risk'
+                        security_categories = ['Prompt Attacks']
+                        suggest_action = 'reject'
+                        
+                        # Extract suspicious content from findings
+                        if findings:
+                            for finding in findings[:3]:  # Limit to first 3 findings
+                                suspicious = finding.get('suspiciousContent', '')
+                                if suspicious:
+                                    security_categories.append(f"Suspicious: {suspicious[:50]}")
+                        
+                        logger.info(f"DMA detected injection: confidence={confidence}, reason={reason}")
+                    else:
+                        security_risk_level = 'no_risk'
+                        security_categories = []
+                        suggest_action = 'pass'
+                        logger.debug(f"DMA: No injection detected (confidence={confidence})")
+                        
+            except json.JSONDecodeError:
+                logger.debug(f"DMA response is not JSON, treating as safe content")
+            except Exception as e:
+                logger.warning(f"Failed to parse DMA response for risk detection: {e}")
 
         # Create a detection result record for direct model access
         # Note: application_id is nullable since direct model access uses model_api_key (tenant-level)
@@ -158,12 +206,12 @@ async def track_direct_model_access(
             application_id=None,  # Direct model access is tenant-level, not application-specific
             content=logged_content,  # Full content if logging enabled, minimal placeholder otherwise
             is_direct_model_access=True,  # Mark as direct model access
-            suggest_action='pass',  # Not a guardrail check, always "pass"
+            suggest_action=suggest_action,  # 'pass' or 'reject' based on risk
             suggest_answer=None,
             hit_keywords=None,
-            model_response=None,
-            security_risk_level='no_risk',
-            security_categories=[],
+            model_response=logged_response,  # Store model response if logging enabled
+            security_risk_level=security_risk_level,  # Parsed from DMA response
+            security_categories=security_categories,  # Parsed from DMA response
             compliance_risk_level='no_risk',
             compliance_categories=[],
             data_risk_level='no_risk',
@@ -177,7 +225,7 @@ async def track_direct_model_access(
 
         db.add(detection_result)
         db.commit()
-        logger.info(f"Tracked direct model access: tenant={tenant_id}, model={model_name}, logged={log_enabled}")
+        logger.info(f"Tracked direct model access: tenant={tenant_id}, model={model_name}, logged={log_enabled}, risk={security_risk_level}")
 
     except Exception as e:
         db.rollback()
@@ -325,6 +373,7 @@ async def model_chat_completions(
             async def stream_response():
                 input_tokens = 0
                 output_tokens = 0
+                accumulated_response = []  # Accumulate response content
 
                 # Create client inside stream_response to keep it alive during streaming
                 async with httpx.AsyncClient(timeout=120.0) as client:
@@ -340,6 +389,9 @@ async def model_chat_completions(
                             if chunk.strip():
                                 yield chunk
 
+                                # Accumulate response content
+                                accumulated_response.append(chunk)
+
                                 # Try to extract token usage from chunk
                                 try:
                                     if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
@@ -353,10 +405,13 @@ async def model_chat_completions(
                 # Track direct model access after streaming completes
                 # Pass the actual messages content for logging (will be filtered based on tenant config)
                 messages_content = " ".join([f"{msg.role}: {msg.content}" for msg in request_data.messages])
+                response_content = "".join(accumulated_response)
+                
                 await track_direct_model_access(
                     tenant_id=tenant_id,
                     model_name=requested_model_name,
                     request_content=f"[Streaming] {messages_content}",
+                    response_content=response_content,
                     ip_address=ip_address,
                     user_agent=user_agent
                 )
@@ -376,6 +431,17 @@ async def model_chat_completions(
                 response.raise_for_status()
                 response_data = response.json()
 
+                # Extract response content for logging and risk analysis
+                response_content = ""
+                try:
+                    # Extract the assistant's message content from response
+                    if "choices" in response_data and len(response_data["choices"]) > 0:
+                        choice = response_data["choices"][0]
+                        if "message" in choice and "content" in choice["message"]:
+                            response_content = choice["message"]["content"]
+                except Exception as e:
+                    logger.warning(f"Failed to extract response content: {e}")
+
                 # Track direct model access
                 # Pass the actual messages content for logging (will be filtered based on tenant config)
                 messages_content = " ".join([f"{msg.role}: {msg.content}" for msg in request_data.messages])
@@ -383,6 +449,7 @@ async def model_chat_completions(
                     tenant_id=tenant_id,
                     model_name=requested_model_name,
                     request_content=messages_content,
+                    response_content=response_content,
                     ip_address=ip_address,
                     user_agent=user_agent
                 )
@@ -493,10 +560,12 @@ async def model_embeddings(
             # Track direct model access
             # Pass the actual input for logging (will be filtered based on tenant config)
             input_content = str(request_data.input)
+            # For embeddings, response is just vectors, not useful for risk analysis
             await track_direct_model_access(
                 tenant_id=tenant_id,
                 model_name=requested_model_name,
                 request_content=f"[Embeddings] {input_content}",
+                response_content="[Embedding vectors]",
                 ip_address=ip_address,
                 user_agent=user_agent
             )

@@ -422,6 +422,7 @@ PERSONAL_EMAIL_DOMAINS = {
     "juhxs.com",
     "vip.sina.com",
     "dnsclick.com",
+    "desiys.com"
 }
 
 
