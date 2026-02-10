@@ -534,6 +534,7 @@ Text:
 
         # Remove overlapping entities where one is completely contained within another
         # Keep the longer entity (prefer mask over replace for same-length overlapping entities)
+        # When same text matches multiple entity types at same position, keep only one
         filtered_entities = []
         for i, entity1 in enumerate(detected_entities):
             is_contained = False
@@ -557,6 +558,12 @@ Text:
                           entity1.get('anonymization_method') == 'replace' and
                           entity2.get('anonymization_method') == 'mask'):
                         is_contained = True  # entity1 (replace) should be ignored in favor of entity2 (mask)
+                        break
+                    # Same range, same length, other method combinations - keep earlier entity
+                    elif (entity1['start'] == entity2['start'] and
+                          entity1['end'] == entity2['end'] and
+                          i > j):
+                        is_contained = True
                         break
             if not is_contained:
                 filtered_entities.append(entity1)
@@ -596,23 +603,13 @@ Text:
                     # No prompt, use default format
                     replacement = f"[REDACTED_{entity.get('entity_type_name', entity['entity_type']).upper().replace(' ', '_')}]"
             elif method == 'genai_code':
-                # GenAI Code Logic anonymization - execute AI-generated Python code
+                # GenAI Code Logic anonymization - execute AI-generated simple anonymize(text) code
                 restore_code = entity.get('restore_code')
-                restore_code_hash = entity.get('restore_code_hash')
-                if restore_code and restore_code_hash:
+                if restore_code:
                     from services.restore_anonymization_service import get_restore_anonymization_service
                     restore_service = get_restore_anonymization_service()
                     try:
-                        # Execute the stored code (for anonymize action, we ignore the mapping)
-                        result_text, _, _ = restore_service.execute_restore_anonymization(
-                            original_text,
-                            entity['entity_type'],
-                            restore_code,
-                            restore_code_hash,
-                            {},  # Empty mapping for anonymize-only
-                            {}   # Empty counters for anonymize-only
-                        )
-                        replacement = result_text
+                        replacement = restore_service.execute_genai_code(restore_code, original_text)
                     except Exception as e:
                         logger.error(f"GenAI code execution failed for {entity['entity_type']}: {e}")
                         replacement = f"<{entity['entity_type']}>"
@@ -699,6 +696,12 @@ Text:
                           entity2.get('anonymization_method') == 'mask'):
                         is_contained = True
                         break
+                    # Same range, same length, other method combinations - keep earlier entity
+                    elif (entity1['start'] == entity2['start'] and
+                          entity1['end'] == entity2['end'] and
+                          i > j):
+                        is_contained = True
+                        break
             if not is_contained:
                 filtered_entities.append(entity1)
 
@@ -737,22 +740,13 @@ Text:
                 else:
                     replacement = f"[REDACTED_{entity.get('entity_type_name', entity_type_code).upper().replace(' ', '_')}]"
             elif method == 'genai_code':
-                # GenAI Code Logic anonymization - execute AI-generated Python code
+                # GenAI Code Logic anonymization - execute AI-generated simple anonymize(text) code
                 restore_code = entity.get('restore_code')
-                restore_code_hash = entity.get('restore_code_hash')
-                if restore_code and restore_code_hash:
+                if restore_code:
                     from services.restore_anonymization_service import get_restore_anonymization_service
                     restore_service = get_restore_anonymization_service()
                     try:
-                        result_text, _, _ = restore_service.execute_restore_anonymization(
-                            original_text,
-                            entity_type_code,
-                            restore_code,
-                            restore_code_hash,
-                            {},
-                            {}
-                        )
-                        replacement = result_text
+                        replacement = restore_service.execute_genai_code(restore_code, original_text)
                     except Exception as e:
                         logger.error(f"GenAI code execution failed for {entity_type_code}: {e}")
                         replacement = f"<{entity_type_code}>"
@@ -915,8 +909,8 @@ Text:
             entity_type_code = entity.get('entity_type', '')
             config = entity_type_configs.get(entity_type_code, {})
 
-            # Check if this entity type uses genai_code method with valid code
-            if config.get('anonymization_method') == 'genai_code' and config.get('restore_code') and config.get('restore_code_hash'):
+            # Check if this entity type uses restore-pattern code (not genai_code which uses simple anonymize(text))
+            if config.get('anonymization_method') != 'genai_code' and config.get('restore_code') and config.get('restore_code_hash'):
                 restore_entities.append((entity, config))
             else:
                 normal_entities.append(entity)
@@ -1431,6 +1425,14 @@ Return JSON only, no markdown:
                     result = self._genai_anonymize_sync(test_input, anonymization_prompt, 'TEST_ENTITY')
                 else:
                     result = '[REDACTED_TEST_ENTITY]'
+            elif method == 'genai_code':
+                genai_code = config.get('genai_code', '')
+                if genai_code:
+                    from services.restore_anonymization_service import get_restore_anonymization_service
+                    restore_service = get_restore_anonymization_service()
+                    result = restore_service.execute_genai_code(genai_code, test_input)
+                else:
+                    result = '<GENAI_CODE_NOT_CONFIGURED>'
             elif method == 'mask':
                 mask_char = config.get('mask_char', '*')
                 keep_prefix = config.get('keep_prefix', 0)
@@ -1623,6 +1625,10 @@ Return JSON only, no markdown:
         # GenAI code anonymization fields (for genai_code method)
         if 'restore_natural_desc' in kwargs:
             entity_type.restore_natural_desc = kwargs['restore_natural_desc']
+        if 'restore_code' in kwargs:
+            entity_type.restore_code = kwargs['restore_code']
+        if 'restore_code_hash' in kwargs:
+            entity_type.restore_code_hash = kwargs['restore_code_hash']
 
         entity_type.updated_at = datetime.utcnow()
         self.db.commit()

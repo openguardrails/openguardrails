@@ -1670,7 +1670,8 @@ const EntityTypeManagement: React.FC = () => {
                       </p>
                     )}
 
-                    {/* Test anonymization */}
+                    {/* Test anonymization - hide for genai_code which has its own test section above */}
+                    {form.watch('anonymization_method') !== 'genai_code' && (
                     <div className="pt-4 border-t">
                       {/* Warning banner for AI-generated anonymization rules */}
                       {['regex_replace', 'genai_natural'].includes(form.watch('anonymization_method') || '') && (
@@ -1713,6 +1714,7 @@ const EntityTypeManagement: React.FC = () => {
                         </div>
                       )}
                     </div>
+                    )}
                   </div>
                 </div>
 

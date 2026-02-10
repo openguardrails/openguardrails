@@ -1,6 +1,7 @@
 """
 Data Security Entity Types API Router
 """
+import hashlib
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
@@ -223,9 +224,16 @@ async def create_entity_type(
             source_type='custom',
             restore_natural_desc=data.get("genai_code_desc") or data.get("restore_natural_desc")  # Support both old and new field names
         )
-        
+
+        # Save genai_code to restore_code/restore_code_hash if provided
+        genai_code = data.get("genai_code")
+        if genai_code and anonymization_method == "genai_code":
+            entity_type.restore_code = genai_code
+            entity_type.restore_code_hash = hashlib.sha256(genai_code.encode()).hexdigest()
+            db.commit()
+
         logger.info(f"Entity type created: {data.get('entity_type')} for user: {current_user.email}, app: {application_id}")
-        
+
         return {
             "success": True,
             "message": "Entity type created successfully",
@@ -330,6 +338,12 @@ async def update_entity_type(
                 language=settings.default_language
             )
             update_kwargs["restore_natural_desc"] = data["restore_natural_desc"]
+
+        # Save genai_code to restore_code/restore_code_hash if provided
+        genai_code = data.get("genai_code")
+        if genai_code and data.get("anonymization_method") == "genai_code":
+            update_kwargs["restore_code"] = genai_code
+            update_kwargs["restore_code_hash"] = hashlib.sha256(genai_code.encode()).hexdigest()
 
         result = service.update_entity_type(
             entity_type_id=entity_type_id,

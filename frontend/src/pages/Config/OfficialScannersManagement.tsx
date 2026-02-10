@@ -19,7 +19,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { toast } from 'sonner'
 import { confirmDialog } from '@/utils/confirm-dialog'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { ColumnDef } from '@tanstack/react-table'
 
 interface ScannerConfig {
@@ -513,12 +513,14 @@ const OfficialScannersManagement: React.FC = () => {
             {t(`risk.level.${row.original.risk_level}`)}
           </Badge>
           {row.original.has_risk_level_override && (
-            <Tooltip>
-              <TooltipTrigger>
-                <Info className="h-4 w-4 text-blue-600" />
-              </TooltipTrigger>
-              <TooltipContent>{t('scannerPackages.hasOverrides')}</TooltipContent>
-            </Tooltip>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger>
+                  <Info className="h-4 w-4 text-blue-600" />
+                </TooltipTrigger>
+                <TooltipContent>{t('scannerPackages.hasOverrides')}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           )}
         </div>
       ),
@@ -541,12 +543,14 @@ const OfficialScannersManagement: React.FC = () => {
             disabled={saving}
           />
           {row.original.has_scan_prompt_override && (
-            <Tooltip>
-              <TooltipTrigger>
-                <Info className="h-3 w-3 text-blue-600" />
-              </TooltipTrigger>
-              <TooltipContent>{t('scannerPackages.hasOverrides')}</TooltipContent>
-            </Tooltip>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger>
+                  <Info className="h-3 w-3 text-blue-600" />
+                </TooltipTrigger>
+                <TooltipContent>{t('scannerPackages.hasOverrides')}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           )}
         </div>
       ),
@@ -562,12 +566,14 @@ const OfficialScannersManagement: React.FC = () => {
             disabled={saving}
           />
           {row.original.has_scan_response_override && (
-            <Tooltip>
-              <TooltipTrigger>
-                <Info className="h-3 w-3 text-blue-600" />
-              </TooltipTrigger>
-              <TooltipContent>{t('scannerPackages.hasOverrides')}</TooltipContent>
-            </Tooltip>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger>
+                  <Info className="h-3 w-3 text-blue-600" />
+                </TooltipTrigger>
+                <TooltipContent>{t('scannerPackages.hasOverrides')}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           )}
         </div>
       ),

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Plus, Edit2, Trash2, Route, TestTube } from 'lucide-react'
+import { Plus, Edit2, Trash2, Route, TestTube, ChevronsUpDown, Search, Check, X } from 'lucide-react'
 import api, { modelRoutesApi, proxyModelsApi, ModelRoute, ModelRouteCreateData, ModelRouteUpdateData } from '../../services/api'
 import { useAuth } from '../../contexts/AuthContext'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { toast } from 'sonner'
 import { confirmDialog } from '@/utils/confirm-dialog'
 import { useForm } from 'react-hook-form'
@@ -57,6 +58,8 @@ const ModelRoutes: React.FC = () => {
   const [testModelName, setTestModelName] = useState('')
   const [testApplicationId, setTestApplicationId] = useState<string | undefined>()
   const [testResult, setTestResult] = useState<any>(null)
+  const [appSearchQuery, setAppSearchQuery] = useState('')
+  const [appPopoverOpen, setAppPopoverOpen] = useState(false)
   const { onUserSwitch } = useAuth()
 
   const form = useForm<FormData>({
@@ -129,6 +132,7 @@ const ModelRoutes: React.FC = () => {
     setEditingRoute(null)
     setSelectedApplicationIds([])
     setIsActive(true)
+    setAppSearchQuery('')
     form.reset({
       name: '',
       description: '',
@@ -145,6 +149,7 @@ const ModelRoutes: React.FC = () => {
     setEditingRoute(route)
     setSelectedApplicationIds(route.applications.map(a => a.id))
     setIsActive(route.is_active)
+    setAppSearchQuery('')
     form.reset({
       name: route.name,
       description: route.description || '',
@@ -484,21 +489,89 @@ const ModelRoutes: React.FC = () => {
                 <p className="text-sm text-muted-foreground mb-2">
                   {t('modelRoutes.applicationsHelp')}
                 </p>
-                <div className="flex flex-wrap gap-2 p-3 border rounded-md min-h-[60px]">
-                  {applications.map(app => (
-                    <Badge
-                      key={app.id}
-                      variant={selectedApplicationIds.includes(app.id) ? 'default' : 'outline'}
-                      className="cursor-pointer"
-                      onClick={() => toggleApplicationSelection(app.id)}
+                <Popover open={appPopoverOpen} onOpenChange={setAppPopoverOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      role="combobox"
+                      aria-expanded={appPopoverOpen}
+                      className="w-full justify-between font-normal"
                     >
-                      {app.name}
-                    </Badge>
-                  ))}
-                  {applications.length === 0 && (
-                    <span className="text-sm text-muted-foreground">{t('modelRoutes.noApplications')}</span>
-                  )}
-                </div>
+                      <span className="truncate">
+                        {selectedApplicationIds.length === 0
+                          ? t('modelRoutes.allApplications')
+                          : t('modelRoutes.selectedCount', { count: selectedApplicationIds.length })}
+                      </span>
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                    <div className="flex items-center border-b px-3 py-2">
+                      <Search className="mr-2 h-4 w-4 shrink-0 opacity-50" />
+                      <input
+                        className="flex h-8 w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                        placeholder={t('modelRoutes.searchApps')}
+                        value={appSearchQuery}
+                        onChange={e => setAppSearchQuery(e.target.value)}
+                      />
+                      {appSearchQuery && (
+                        <button onClick={() => setAppSearchQuery('')} className="ml-1 opacity-50 hover:opacity-100">
+                          <X className="h-3 w-3" />
+                        </button>
+                      )}
+                    </div>
+                    <div className="max-h-[240px] overflow-y-auto p-1">
+                      {applications
+                        .filter(app => app.name.toLowerCase().includes(appSearchQuery.toLowerCase()))
+                        .map(app => (
+                          <div
+                            key={app.id}
+                            className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm cursor-pointer hover:bg-accent hover:text-accent-foreground"
+                            onClick={() => toggleApplicationSelection(app.id)}
+                          >
+                            <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border ${selectedApplicationIds.includes(app.id) ? 'bg-primary border-primary text-primary-foreground' : 'border-muted-foreground/30'}`}>
+                              {selectedApplicationIds.includes(app.id) && <Check className="h-3 w-3" />}
+                            </div>
+                            <span className="truncate">{app.name}</span>
+                          </div>
+                        ))}
+                      {applications.filter(app => app.name.toLowerCase().includes(appSearchQuery.toLowerCase())).length === 0 && (
+                        <p className="py-4 text-center text-sm text-muted-foreground">
+                          {t('modelRoutes.noApplications')}
+                        </p>
+                      )}
+                    </div>
+                    {selectedApplicationIds.length > 0 && (
+                      <div className="border-t px-3 py-2">
+                        <button
+                          className="text-xs text-muted-foreground hover:text-foreground"
+                          onClick={() => setSelectedApplicationIds([])}
+                        >
+                          {t('modelRoutes.clearSelection')}
+                        </button>
+                      </div>
+                    )}
+                  </PopoverContent>
+                </Popover>
+                {selectedApplicationIds.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-2 max-h-[52px] overflow-y-auto">
+                    {selectedApplicationIds.map(id => {
+                      const app = applications.find(a => a.id === id)
+                      return app ? (
+                        <Badge key={id} variant="secondary" className="text-xs gap-1">
+                          {app.name}
+                          <button
+                            type="button"
+                            onClick={() => toggleApplicationSelection(id)}
+                            className="ml-0.5 rounded-full hover:bg-muted-foreground/20"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </Badge>
+                      ) : null
+                    })}
+                  </div>
+                )}
               </div>
 
               {editingRoute && (
