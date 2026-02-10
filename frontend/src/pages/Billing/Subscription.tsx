@@ -13,7 +13,7 @@ import { confirmDialog } from '@/utils/confirm-dialog'
 import { billingService } from '../../services/billing'
 import { configApi } from '../../services/api'
 import paymentService, { PaymentConfig, SubscriptionStatus } from '../../services/payment'
-import { PaymentButton } from '../../components/Payment'
+import { PaymentButton, TierSelector, QuotaPurchaseCard } from '../../components/Payment'
 import { usePaymentSuccess } from '../../hooks/usePaymentSuccess'
 import type { Subscription as SubscriptionType, UsageInfo } from '../../types/billing'
 
@@ -108,7 +108,7 @@ const Subscription: React.FC = () => {
 
   // Handle payment success with polling verification
   const handlePaymentSuccess = React.useCallback((result: any) => {
-    if (result.order_type === 'subscription') {
+    if (result.order_type === 'subscription' || result.order_type === 'quota_purchase') {
       fetchSubscription()
       fetchSubscriptionStatus()
       fetchUsageInfo()
@@ -182,6 +182,9 @@ const Subscription: React.FC = () => {
     (resetDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)
   )
 
+  const isAlipay = paymentConfig?.provider === 'alipay'
+  const hasQuotaPurchase = isAlipay && paymentConfig?.quota_purchase
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -214,8 +217,43 @@ const Subscription: React.FC = () => {
               </div>
             </div>
 
-            {/* Upgrade Prompt */}
-            {subscription.subscription_type === 'free' && paymentConfig && (
+            {/* Alipay Quota Purchase (replaces tier selector for Chinese users) */}
+            {hasQuotaPurchase && (
+              <QuotaPurchaseCard
+                quotaConfig={paymentConfig!.quota_purchase!}
+                currentQuota={subscription.purchased_quota || 0}
+                quotaExpiresAt={subscription.purchased_quota_expires_at || null}
+                onSuccess={() => {
+                  fetchSubscription()
+                  fetchSubscriptionStatus()
+                  fetchUsageInfo()
+                }}
+              />
+            )}
+
+            {/* Upgrade Prompt with Tier Selection (Stripe users only) */}
+            {!isAlipay && subscription.subscription_type === 'free' && paymentConfig && paymentConfig.tiers && paymentConfig.tiers.length > 0 && (
+              <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg space-y-4">
+                <div>
+                  <p className="font-semibold text-blue-900">{t('billing.upgradeAvailable')}</p>
+                  <p className="text-sm text-blue-800 mt-1">{t('billing.upgradeDescription')}</p>
+                </div>
+                <TierSelector
+                  tiers={paymentConfig.tiers}
+                  currency={paymentConfig.currency}
+                  provider={paymentConfig.provider}
+                  currentTier={subscription.subscription_tier || 0}
+                  onSuccess={() => {
+                    fetchSubscription()
+                    fetchSubscriptionStatus()
+                    fetchUsageInfo()
+                  }}
+                />
+              </div>
+            )}
+
+            {/* Fallback: single-tier upgrade for when tiers are not configured (Stripe users only) */}
+            {!isAlipay && subscription.subscription_type === 'free' && paymentConfig && (!paymentConfig.tiers || paymentConfig.tiers.length === 0) && (
               <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
                 <p className="font-semibold text-blue-900">{t('billing.upgradeAvailable')}</p>
                 <div className="mt-2 space-y-2">
@@ -245,43 +283,60 @@ const Subscription: React.FC = () => {
               </div>
             )}
 
-            {/* Subscription Active Info */}
-            {subscription.subscription_type === 'subscribed' && subscriptionStatus && (
-              <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
-                <div className="flex items-start gap-3">
-                  <CheckCircle className="h-5 w-5 text-green-600 mt-0.5" />
-                  <div className="flex-1 space-y-2">
-                    <p className="font-semibold text-green-900">
-                      {t('billing.subscriptionActive')}
-                    </p>
-                    {subscriptionStatus.expires_at && (
-                      <p className="text-sm text-green-800">
-                        {subscriptionStatus.cancel_at_period_end
-                          ? t('billing.expiresOn', {
-                              date: new Date(subscriptionStatus.expires_at).toLocaleDateString(),
-                            })
-                          : t('billing.nextBillingDate', {
-                              date: new Date(subscriptionStatus.expires_at).toLocaleDateString(),
-                            })}
+            {/* Subscription Active Info (Stripe users only - no subscriptions for Alipay) */}
+            {!isAlipay && subscription.subscription_type === 'subscribed' && subscriptionStatus && (
+              <div className="space-y-4">
+                <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+                  <div className="flex items-start gap-3">
+                    <CheckCircle className="h-5 w-5 text-green-600 mt-0.5" />
+                    <div className="flex-1 space-y-2">
+                      <p className="font-semibold text-green-900">
+                        {t('billing.subscriptionActive')}
                       </p>
-                    )}
-                    <div className="flex gap-2">
-                      {!subscriptionStatus.cancel_at_period_end && (
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          disabled={cancelLoading}
-                          onClick={handleCancelSubscription}
-                        >
-                          {t('payment.button.cancelSubscription')}
-                        </Button>
+                      {subscriptionStatus.expires_at && (
+                        <p className="text-sm text-green-800">
+                          {subscriptionStatus.cancel_at_period_end
+                            ? t('billing.expiresOn', {
+                                date: new Date(subscriptionStatus.expires_at).toLocaleDateString(),
+                              })
+                            : t('billing.nextBillingDate', {
+                                date: new Date(subscriptionStatus.expires_at).toLocaleDateString(),
+                              })}
+                        </p>
                       )}
-                      {subscriptionStatus.cancel_at_period_end && (
-                        <Badge variant="secondary">{t('billing.cancelledAtPeriodEnd')}</Badge>
-                      )}
+                      <div className="flex gap-2">
+                        {!subscriptionStatus.cancel_at_period_end && (
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            disabled={cancelLoading}
+                            onClick={handleCancelSubscription}
+                          >
+                            {t('payment.button.cancelSubscription')}
+                          </Button>
+                        )}
+                        {subscriptionStatus.cancel_at_period_end && (
+                          <Badge variant="secondary">{t('billing.cancelledAtPeriodEnd')}</Badge>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
+
+                {/* Change Tier for subscribed users */}
+                {paymentConfig && paymentConfig.tiers && paymentConfig.tiers.length > 0 && !subscriptionStatus.cancel_at_period_end && (
+                  <TierSelector
+                    tiers={paymentConfig.tiers}
+                    currency={paymentConfig.currency}
+                    provider={paymentConfig.provider}
+                    currentTier={subscription.subscription_tier || 0}
+                    onSuccess={() => {
+                      fetchSubscription()
+                      fetchSubscriptionStatus()
+                      fetchUsageInfo()
+                    }}
+                  />
+                )}
               </div>
             )}
           </div>
@@ -347,6 +402,49 @@ const Subscription: React.FC = () => {
                 </div>
               </div>
             </div>
+
+            {/* Purchased Quota Status */}
+            {subscription.purchased_quota > 0 && (
+              <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-sm font-medium text-green-700">{t('billing.purchasedQuota')}</p>
+                    <p className="text-2xl font-bold text-green-600 mt-1">
+                      {subscription.purchased_quota.toLocaleString()} <span className="text-sm font-normal">{t('billing.calls')}</span>
+                    </p>
+                  </div>
+                  {subscription.purchased_quota_expires_at && (
+                    <div>
+                      <p className="text-sm font-medium text-green-700">{t('billing.quotaExpiresOn', {
+                        date: new Date(subscription.purchased_quota_expires_at).toLocaleDateString(),
+                      })}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Usage Breakdown */}
+            {subscription.usage_breakdown && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 bg-gray-50 rounded-lg">
+                <div>
+                  <p className="text-sm font-medium text-gray-600">
+                    {t('billing.guardrailsProxyCalls')}
+                  </p>
+                  <p className="text-xl font-bold mt-1">
+                    {subscription.usage_breakdown.guardrails_proxy.toLocaleString()}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-gray-600">
+                    {t('billing.directModelAccessCalls')}
+                  </p>
+                  <p className="text-xl font-bold mt-1">
+                    {subscription.usage_breakdown.direct_model_access.toLocaleString()}
+                  </p>
+                </div>
+              </div>
+            )}
 
             <Separator />
 
@@ -446,7 +544,7 @@ const Subscription: React.FC = () => {
               </div>
             </div>
 
-            {subscription.subscription_type === 'free' && paymentConfig && (
+            {!isAlipay && subscription.subscription_type === 'free' && paymentConfig && (
               <>
                 <Separator />
                 <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
@@ -461,17 +559,31 @@ const Subscription: React.FC = () => {
                       <li>{t('billing.feature4')}</li>
                       <li>{t('billing.feature5')}</li>
                     </ul>
-                    <PaymentButton
-                      type="subscription"
-                      amount={paymentConfig.subscription_price}
-                      currency={paymentConfig.currency}
-                      provider={paymentConfig.provider}
-                      buttonText={`${t('payment.button.upgradeNow')} - ${paymentService.formatPrice(paymentConfig.subscription_price, paymentConfig.currency)}/${t('billing.month')}`}
-                      onSuccess={() => {
-                        fetchSubscription()
-                        fetchSubscriptionStatus()
-                      }}
-                    />
+                    {paymentConfig.tiers && paymentConfig.tiers.length > 0 ? (
+                      <TierSelector
+                        tiers={paymentConfig.tiers}
+                        currency={paymentConfig.currency}
+                        provider={paymentConfig.provider}
+                        currentTier={subscription.subscription_tier || 0}
+                        onSuccess={() => {
+                          fetchSubscription()
+                          fetchSubscriptionStatus()
+                          fetchUsageInfo()
+                        }}
+                      />
+                    ) : (
+                      <PaymentButton
+                        type="subscription"
+                        amount={paymentConfig.subscription_price}
+                        currency={paymentConfig.currency}
+                        provider={paymentConfig.provider}
+                        buttonText={`${t('payment.button.upgradeNow')} - ${paymentService.formatPrice(paymentConfig.subscription_price, paymentConfig.currency)}/${t('billing.month')}`}
+                        onSuccess={() => {
+                          fetchSubscription()
+                          fetchSubscriptionStatus()
+                        }}
+                      />
+                    )}
                   </div>
                 </div>
               </>

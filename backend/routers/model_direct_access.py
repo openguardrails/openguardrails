@@ -15,7 +15,7 @@ from datetime import date
 from config import settings
 from utils.logger import setup_logger
 from database.connection import get_admin_db
-from database.models import Tenant, DetectionResult
+from database.models import Tenant, DetectionResult, Application
 from sqlalchemy import func
 from services.billing_service import BillingService
 
@@ -100,6 +100,14 @@ async def verify_model_api_key(request: Request) -> dict:
                     raise HTTPException(
                         status_code=403,
                         detail="Your subscription has expired. Please renew your subscription to continue using direct model access."
+                    )
+
+                # Check and increment usage quota for DMA calls
+                is_allowed, error_msg = billing_service.check_and_increment_usage(str(tenant.id), db)
+                if not is_allowed:
+                    raise HTTPException(
+                        status_code=429,
+                        detail=error_msg
                     )
 
                 logger.info(f"Subscription verified for tenant {tenant.email} (SaaS mode)")
@@ -198,12 +206,33 @@ async def track_direct_model_access(
             except Exception as e:
                 logger.warning(f"Failed to parse DMA response for risk detection: {e}")
 
+        # Get or create dedicated DMA application for this tenant
+        application_id = None
+        try:
+            dma_app = db.query(Application).filter(
+                Application.tenant_id == tenant_id,
+                Application.source == 'direct_model_access'
+            ).first()
+            if not dma_app:
+                dma_app = Application(
+                    tenant_id=tenant_id,
+                    name='Direct Model Access',
+                    description='Auto-created application for direct model access calls',
+                    source='direct_model_access',
+                    is_active=True
+                )
+                db.add(dma_app)
+                db.flush()
+                logger.info(f"DMA: Created dedicated application {dma_app.id} for tenant {tenant_id}")
+            application_id = dma_app.id
+        except Exception as e:
+            logger.warning(f"DMA: Failed to get/create DMA application for tenant {tenant_id}: {e}")
+
         # Create a detection result record for direct model access
-        # Note: application_id is nullable since direct model access uses model_api_key (tenant-level)
         detection_result = DetectionResult(
             request_id=str(uuid.uuid4()),
             tenant_id=tenant_id,
-            application_id=None,  # Direct model access is tenant-level, not application-specific
+            application_id=application_id,
             content=logged_content,  # Full content if logging enabled, minimal placeholder otherwise
             is_direct_model_access=True,  # Mark as direct model access
             suggest_action=suggest_action,  # 'pass' or 'reject' based on risk

@@ -58,7 +58,7 @@
         "name": "Profanity",
         "definition": "Content containing profane language, vulgar expressions, offensive slurs, or obscene speech",
         "risk_level": "low_risk",
-        "scan_prompt": true,
+        "scan_prompt": false,
         "scan_response": true
         },
         {

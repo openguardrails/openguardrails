@@ -187,7 +187,8 @@ class Settings(BaseSettings):
     stripe_secret_key: str = ""
     stripe_publishable_key: str = ""
     stripe_webhook_secret: str = ""
-    stripe_price_id_monthly: str = ""  # Stripe Price ID for monthly subscription ($19/month)
+    stripe_price_id_monthly: str = ""  # Stripe Price ID for monthly subscription (legacy single-tier)
+    stripe_price_ids: str = ""  # JSON mapping of tier_number to Stripe Price IDs, e.g. {"1":"price_xxx","2":"price_yyy"}
     stripe_subscription_success_url: str = ""  # e.g., http://localhost:3000/platform/subscription?payment=success&session_id={CHECKOUT_SESSION_ID}
     stripe_subscription_cancel_url: str = ""   # e.g., http://localhost:3000/platform/subscription?payment=cancelled
     stripe_package_success_url: str = ""       # e.g., http://localhost:3000/platform/config/scanner-packages?payment=success&session_id={CHECKOUT_SESSION_ID}
@@ -196,6 +197,11 @@ class Settings(BaseSettings):
     # Subscription pricing
     subscription_price_cny: float = 19.0  # Monthly price in CNY
     subscription_price_usd: float = 19.0  # Monthly price in USD
+
+    # Quota purchase pricing (pay-per-use for Chinese users via Alipay)
+    quota_price_cny: float = 50.0  # Price per unit in CNY (¥50 per 10,000 calls)
+    quota_calls_per_unit: int = 10000  # Number of API calls per purchase unit
+    quota_validity_days: int = 365  # Purchased quota validity in days
 
     # Subscription quota limits
     free_user_monthly_quota: int = 1000  # Monthly quota for free users

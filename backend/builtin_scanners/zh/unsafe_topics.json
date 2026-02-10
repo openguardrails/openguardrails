@@ -58,7 +58,7 @@
       "name": "辱骂",
       "definition": "辱骂，包括淫秽语言、粗俗表达、侮辱性言语或淫秽言论",
       "risk_level": "low_risk",
-      "scan_prompt": true,
+      "scan_prompt": false,
       "scan_response": true
     },
     {

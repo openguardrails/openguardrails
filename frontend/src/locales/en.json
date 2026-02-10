@@ -2380,7 +2380,28 @@
     "subscriptionActive": "Subscription Active",
     "nextBillingDate": "Next billing date: {{date}}",
     "expiresOn": "Subscription expires on: {{date}}",
-    "cancelledAtPeriodEnd": "Cancelled - Active until period end"
+    "cancelledAtPeriodEnd": "Cancelled - Active until period end",
+    "guardrailsProxyCalls": "Guardrails & Proxy Calls",
+    "directModelAccessCalls": "Direct Model Access Calls",
+    "tierSelector": "Select Plan",
+    "currentTier": "Current Plan",
+    "selectTier": "Select",
+    "callsPerMonth": "calls/month",
+    "changeTier": "Change Plan",
+    "tierUpdated": "Plan updated successfully",
+    "purchasedQuota": "Purchased Quota",
+    "quotaExpiresOn": "Expires on {{date}}",
+    "purchaseQuota": "Purchase API Quota",
+    "quotaPriceInfo": "{{price}} per {{calls}} API calls",
+    "quotaUnits": "Units",
+    "quotaTotalCalls": "Total calls",
+    "quotaTotalPrice": "Total price",
+    "quotaValidityNote": "Purchased quota is valid for {{days}} days from purchase date",
+    "quotaNoRefund": "All purchases are final. No refunds.",
+    "quotaStackNote": "Multiple purchases stack. Each purchase extends expiry to 1 year from latest purchase.",
+    "buyQuota": "Buy Quota",
+    "noPurchasedQuota": "No purchased quota",
+    "quotaExpired": "Purchased quota has expired"
   },
   "payment": {
     "success": "Payment completed successfully!",
@@ -2398,6 +2419,8 @@
       "subscriptionContent": "You will be charged {{price}} per month. You can cancel anytime.",
       "packageTitle": "Confirm Purchase",
       "packageContent": "You are purchasing {{name}} for {{price}}. This is a one-time payment.",
+      "quotaTitle": "Confirm Quota Purchase",
+      "quotaContent": "You will be charged {{price}} for API call quota. This is a one-time, non-refundable payment. Quota is valid for 1 year.",
       "proceed": "Proceed to Payment"
     },
     "button": {

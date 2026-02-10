@@ -2,11 +2,29 @@ import api from './api';
 
 const API_BASE = '/api/v1/payment';
 
+export interface SubscriptionTier {
+  tier_number: number;
+  tier_name: string;
+  monthly_quota: number;
+  price: number;
+  display_order: number;
+}
+
+export interface QuotaPurchaseConfig {
+  price_per_unit: number;
+  calls_per_unit: number;
+  min_units: number;
+  validity_days: number;
+  currency: string;
+}
+
 export interface PaymentConfig {
   provider: 'alipay' | 'stripe';
   currency: string;
   subscription_price: number;
   stripe_publishable_key?: string;
+  tiers?: SubscriptionTier[];
+  quota_purchase?: QuotaPurchaseConfig;
 }
 
 export interface PaymentResponse {
@@ -69,8 +87,26 @@ export const paymentService = {
   /**
    * Create a subscription payment
    */
-  async createSubscriptionPayment(): Promise<PaymentResponse> {
-    const response = await api.post(`${API_BASE}/subscription/create`, {});
+  async createSubscriptionPayment(tierNumber?: number): Promise<PaymentResponse> {
+    const response = await api.post(`${API_BASE}/subscription/create`, {
+      tier_number: tierNumber || null
+    });
+    return response.data;
+  },
+
+  /**
+   * Get available subscription tiers
+   */
+  async getTiers(): Promise<{ tiers: SubscriptionTier[]; currency: string }> {
+    const response = await api.get(`${API_BASE}/tiers`);
+    return response.data;
+  },
+
+  /**
+   * Create a quota purchase payment (Alipay only)
+   */
+  async createQuotaPurchasePayment(units: number): Promise<PaymentResponse> {
+    const response = await api.post(`${API_BASE}/quota/create`, { units });
     return response.data;
   },
 

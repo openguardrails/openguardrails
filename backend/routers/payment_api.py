@@ -73,7 +73,12 @@ def get_current_user(request: Request, db: Session) -> Tenant:
 # Request/Response models
 class CreateSubscriptionPaymentRequest(BaseModel):
     """Request to create a subscription payment"""
-    pass  # No additional fields needed
+    tier_number: Optional[int] = None  # Subscription tier (1-9). If None, uses legacy pricing.
+
+
+class CreateQuotaPurchaseRequest(BaseModel):
+    """Request to create a quota purchase payment"""
+    units: int  # Number of units to purchase (each unit = 10,000 calls)
 
 
 class CreatePackagePaymentRequest(BaseModel):
@@ -95,29 +100,64 @@ class PaymentResponse(BaseModel):
     error: Optional[str] = None
 
 
+class SubscriptionTierResponse(BaseModel):
+    """Subscription tier info"""
+    tier_number: int
+    tier_name: str
+    monthly_quota: int
+    price: float
+    display_order: int
+
+
 class PaymentConfigResponse(BaseModel):
     """Payment configuration response"""
     provider: str
     currency: str
     subscription_price: float
     stripe_publishable_key: Optional[str] = None
+    tiers: list = []
 
 
 # Endpoints
 
-@router.get("/config", response_model=PaymentConfigResponse)
-async def get_payment_config():
+@router.get("/config")
+async def get_payment_config(db: Session = Depends(get_admin_db)):
     """
     Get payment configuration for frontend
-    Returns provider type and necessary keys
+    Returns provider type, necessary keys, and available tiers
     """
-    config = payment_service.get_payment_config()
-    return PaymentConfigResponse(**config)
+    config = payment_service.get_payment_config(db=db)
+    return config
+
+
+@router.get("/tiers")
+async def get_subscription_tiers(db: Session = Depends(get_admin_db)):
+    """
+    Get all available subscription tiers
+    """
+    tiers = billing_service.get_all_tiers(db)
+    provider = payment_service.get_payment_provider()
+    price_key = 'price_cny' if provider == 'alipay' else 'price_usd'
+
+    return {
+        "tiers": [
+            {
+                'tier_number': t['tier_number'],
+                'tier_name': t['tier_name'],
+                'monthly_quota': t['monthly_quota'],
+                'price': t[price_key],
+                'display_order': t['display_order']
+            }
+            for t in tiers
+        ],
+        "currency": payment_service.get_currency()
+    }
 
 
 @router.post("/subscription/create", response_model=PaymentResponse)
 async def create_subscription_payment(
     request: Request,
+    payment_request: CreateSubscriptionPaymentRequest = None,
     db: Session = Depends(get_admin_db)
 ):
     """
@@ -126,14 +166,15 @@ async def create_subscription_payment(
     """
     try:
         current_user = get_current_user(request, db)
-        logger.info(f"Creating subscription payment for tenant: {current_user.id}, email: {current_user.email}")
+        tier_number = payment_request.tier_number if payment_request else None
+        logger.info(f"Creating subscription payment for tenant: {current_user.id}, email: {current_user.email}, tier: {tier_number}")
 
-        # Check if already subscribed
+        # Check if already subscribed (allow tier changes for existing subscribers)
         subscription = db.query(TenantSubscription).filter(
             TenantSubscription.tenant_id == current_user.id
         ).first()
 
-        if subscription and subscription.subscription_type == 'subscribed':
+        if subscription and subscription.subscription_type == 'subscribed' and tier_number is None:
             logger.info(f"Tenant {current_user.id} is already subscribed")
             return PaymentResponse(
                 success=False,
@@ -144,7 +185,8 @@ async def create_subscription_payment(
         result = await payment_service.create_subscription_payment(
             db=db,
             tenant_id=str(current_user.id),
-            email=current_user.email
+            email=current_user.email,
+            tier_number=tier_number
         )
         logger.info(f"Payment creation successful for tenant {current_user.id}")
 
@@ -189,6 +231,41 @@ async def create_package_payment(
         return PaymentResponse(success=False, error=str(e))
     except Exception as e:
         logger.error(f"Package payment creation error: {str(e)}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Payment creation failed: {str(e)}")
+
+
+@router.post("/quota/create", response_model=PaymentResponse)
+async def create_quota_purchase_payment(
+    request: Request,
+    payment_request: CreateQuotaPurchaseRequest,
+    db: Session = Depends(get_admin_db)
+):
+    """
+    Create a quota purchase payment order (Alipay only)
+    Returns payment URL for redirect
+    """
+    try:
+        current_user = get_current_user(request, db)
+
+        if payment_request.units < 1:
+            return PaymentResponse(success=False, error="Minimum purchase is 1 unit")
+
+        logger.info(f"Creating quota purchase for tenant: {current_user.id}, units: {payment_request.units}")
+
+        result = await payment_service.create_quota_purchase_payment(
+            db=db,
+            tenant_id=str(current_user.id),
+            email=current_user.email,
+            units=payment_request.units
+        )
+
+        return PaymentResponse(**result)
+
+    except ValueError as e:
+        logger.error(f"Quota purchase creation failed: {e}")
+        return PaymentResponse(success=False, error=str(e))
+    except Exception as e:
+        logger.error(f"Quota purchase creation error: {str(e)}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Payment creation failed: {str(e)}")
 
 
@@ -353,6 +430,11 @@ async def verify_payment_session(
                 ).first()
                 if package_purchase:
                     details['purchase_status'] = package_purchase.status
+        elif order.provider_order_id.startswith('quota_'):
+            order_type = 'quota_purchase'
+            if order.order_metadata:
+                details['units'] = order.order_metadata.get('units')
+                details['calls'] = order.order_metadata.get('calls')
 
         # FALLBACK MECHANISM: If order is still pending and provider is Stripe, check Stripe API
         if order.status == 'pending' and order.payment_provider == 'stripe':
@@ -464,6 +546,14 @@ async def alipay_webhook(request: Request, db: Session = Depends(get_admin_db)):
                 transaction_id=callback_data['transaction_id'],
                 paid_at=callback_data.get('paid_at')
             )
+        elif order_id.startswith('quota_'):
+            # Quota purchase payment
+            result = await payment_service.handle_quota_purchase_paid(
+                db=db,
+                order_id=order_id,
+                transaction_id=callback_data['transaction_id'],
+                paid_at=callback_data.get('paid_at')
+            )
         else:
             logger.error(f"Unknown order type: {order_id}")
             return "fail"
@@ -570,6 +660,56 @@ async def stripe_webhook(
 
                     db.commit()
 
+        elif event_type == 'invoice.payment_failed':
+            # Recurring payment failed - log warning (expiry enforcement will handle downgrade)
+            invoice_data = stripe_service.parse_invoice_paid(event)
+            subscription_id = invoice_data.get('subscription_id')
+
+            if subscription_id:
+                from database.models import SubscriptionPayment
+                sub_payment = db.query(SubscriptionPayment).filter(
+                    SubscriptionPayment.stripe_subscription_id == subscription_id
+                ).first()
+
+                if sub_payment:
+                    logger.warning(
+                        f"Stripe payment failed for tenant {sub_payment.tenant_id}, "
+                        f"subscription {subscription_id}. "
+                        f"Subscription will expire if not resolved."
+                    )
+
+        elif event_type == 'customer.subscription.updated':
+            # Subscription changed (e.g., plan change via Stripe Dashboard)
+            subscription_data = event['data']['object']
+            subscription_id = subscription_data.get('id')
+            status = subscription_data.get('status')
+
+            if subscription_id and status:
+                from database.models import SubscriptionPayment
+                sub_payment = db.query(SubscriptionPayment).filter(
+                    SubscriptionPayment.stripe_subscription_id == subscription_id
+                ).first()
+
+                if sub_payment:
+                    # Update cancel_at_period_end if changed
+                    cancel_at_period_end = subscription_data.get('cancel_at_period_end', False)
+                    sub_payment.cancel_at_period_end = cancel_at_period_end
+
+                    # Update expiry from current_period_end
+                    current_period_end = subscription_data.get('current_period_end')
+                    if current_period_end:
+                        subscription = db.query(TenantSubscription).filter(
+                            TenantSubscription.tenant_id == sub_payment.tenant_id
+                        ).first()
+                        if subscription:
+                            subscription.subscription_expires_at = datetime.fromtimestamp(current_period_end)
+
+                    db.commit()
+                    logger.info(
+                        f"Stripe subscription updated: {subscription_id}, "
+                        f"status={status}, cancel_at_period_end={cancel_at_period_end}"
+                    )
+
         elif event_type == 'customer.subscription.deleted':
             # Subscription cancelled
             subscription_data = event['data']['object']
@@ -592,6 +732,7 @@ async def stripe_webhook(
                 if subscription:
                     subscription.subscription_type = 'free'
                     subscription.monthly_quota = billing_service.SUBSCRIPTION_CONFIGS['free']['monthly_quota']
+                    subscription.subscription_tier = 0
 
                 db.commit()
 
@@ -600,6 +741,73 @@ async def stripe_webhook(
     except Exception as e:
         logger.error(f"Stripe webhook error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/webhook/alipay/agreement")
+async def alipay_agreement_webhook(request: Request, db: Session = Depends(get_admin_db)):
+    """
+    Handle Alipay recurring billing agreement callbacks (签约/解约通知)
+    """
+    try:
+        form_data = await request.form()
+        params = dict(form_data)
+
+        logger.info(f"Received Alipay agreement webhook: {params}")
+
+        # Verify signature
+        if not alipay_service.verify_callback(params):
+            logger.error("Alipay agreement webhook signature verification failed")
+            return "fail"
+
+        notify_type = params.get('notify_type', '')
+
+        if notify_type == 'dut_user_sign':
+            # User signed agreement (签约成功)
+            agreement_no = params.get('agreement_no')
+            external_agreement_no = params.get('external_agreement_no')  # Our order_id
+            status = params.get('status')
+
+            if status == 'NORMAL' and agreement_no and external_agreement_no:
+                # Find the payment order and tenant
+                from database.models import PaymentOrder
+                order = db.query(PaymentOrder).filter(
+                    PaymentOrder.provider_order_id == external_agreement_no
+                ).first()
+
+                if order:
+                    # Save agreement_no to tenant subscription
+                    subscription = db.query(TenantSubscription).filter(
+                        TenantSubscription.tenant_id == order.tenant_id
+                    ).first()
+
+                    if subscription:
+                        subscription.alipay_agreement_no = agreement_no
+                        db.commit()
+                        logger.info(f"Alipay agreement signed: tenant={order.tenant_id}, agreement={agreement_no}")
+
+        elif notify_type == 'dut_user_unsign':
+            # User cancelled agreement (解约)
+            agreement_no = params.get('agreement_no')
+
+            if agreement_no:
+                # Find subscription by agreement_no and downgrade
+                subscription = db.query(TenantSubscription).filter(
+                    TenantSubscription.alipay_agreement_no == agreement_no
+                ).first()
+
+                if subscription:
+                    subscription.subscription_type = 'free'
+                    subscription.monthly_quota = billing_service.SUBSCRIPTION_CONFIGS['free']['monthly_quota']
+                    subscription.subscription_tier = 0
+                    subscription.alipay_agreement_no = None
+                    db.commit()
+                    logger.info(f"Alipay agreement unsigned: tenant={subscription.tenant_id}, agreement={agreement_no}")
+
+        return "success"
+
+    except Exception as e:
+        logger.error(f"Alipay agreement webhook error: {e}")
+        return "fail"
 
 
 # Import datetime for webhook handlers

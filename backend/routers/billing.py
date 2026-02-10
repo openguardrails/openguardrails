@@ -5,7 +5,7 @@ Billing Router - Subscription and usage management APIs
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from typing import Optional
+from typing import Dict, Optional
 
 from database.connection import get_admin_db
 from services.billing_service import billing_service
@@ -66,15 +66,26 @@ def get_current_user(request: Request, db: Session) -> Tenant:
 
 
 # Response models
+class UsageBreakdown(BaseModel):
+    guardrails_proxy: int = 0
+    direct_model_access: int = 0
+
+
 class SubscriptionResponse(BaseModel):
     id: str
     tenant_id: str
     subscription_type: str
+    subscription_tier: int = 0
     monthly_quota: int
     current_month_usage: int
     usage_reset_at: str
     usage_percentage: float
     plan_name: str
+    usage_breakdown: Optional[UsageBreakdown] = None
+    billing_period_start: Optional[str] = None
+    billing_period_end: Optional[str] = None
+    purchased_quota: int = 0
+    purchased_quota_expires_at: Optional[str] = None
 
 
 class UpdateSubscriptionRequest(BaseModel):

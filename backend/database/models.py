@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, JSON, ForeignKey, UniqueConstraint, Float
+from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, JSON, ForeignKey, UniqueConstraint, Float, Numeric
 from sqlalchemy.dialects.postgresql import UUID
 import uuid
 from sqlalchemy.sql import func
@@ -635,9 +635,17 @@ class TenantSubscription(Base):
     current_month_usage = Column(Integer, nullable=False, default=0)  # Current month usage
     usage_reset_at = Column(DateTime(timezone=True), nullable=False)  # Next reset date (1st of next month)
 
+    # Tier info
+    subscription_tier = Column(Integer, default=0, index=True)  # tier 0 = free, 1-9 = paid tiers
+
     # Payment provider IDs
     stripe_customer_id = Column(String(255), index=True)  # Stripe customer ID
     alipay_user_id = Column(String(255), index=True)  # Alipay user ID
+    alipay_agreement_no = Column(String(255))  # Alipay recurring billing agreement number (周期扣款)
+
+    # Purchased quota (pay-per-use for Chinese users)
+    purchased_quota = Column(Integer, default=0, nullable=False)
+    purchased_quota_expires_at = Column(DateTime(timezone=True))
 
     # Subscription dates
     subscription_started_at = Column(DateTime(timezone=True))  # When subscription started
@@ -648,6 +656,22 @@ class TenantSubscription(Base):
 
     # Association relationships
     tenant = relationship("Tenant")
+
+
+class SubscriptionTier(Base):
+    """Subscription tier reference table - defines available pricing tiers"""
+    __tablename__ = "subscription_tiers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tier_number = Column(Integer, unique=True, nullable=False, index=True)
+    tier_name = Column(String(100), nullable=False)
+    monthly_quota = Column(Integer, nullable=False)
+    price_usd = Column(Numeric(10, 2), nullable=False)
+    price_cny = Column(Numeric(10, 2), nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    display_order = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 # =====================================================

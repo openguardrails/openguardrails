@@ -282,6 +282,188 @@ class AlipayService:
             logger.error(f"Signature verification failed: {traceback.format_exc()}")
             return False
 
+    async def create_subscription_agreement(
+        self,
+        order_id: str,
+        amount: float,
+        tier_name: str = "订阅服务"
+    ) -> Dict[str, Any]:
+        """
+        Create Alipay recurring billing agreement (周期扣款签约)
+        Uses alipay.user.agreement.page.sign API
+
+        Args:
+            order_id: Unique order/external agreement ID
+            amount: Monthly deduction amount in CNY
+            tier_name: Tier name for display
+
+        Returns:
+            Dict containing signing page URL
+        """
+        try:
+            client = self._get_client()
+
+            from alipay.aop.api.domain.AlipayUserAgreementPageSignModel import AlipayUserAgreementPageSignModel
+            from alipay.aop.api.request.AlipayUserAgreementPageSignRequest import AlipayUserAgreementPageSignRequest
+            from alipay.aop.api.domain.PeriodRuleParams import PeriodRuleParams
+
+            model = AlipayUserAgreementPageSignModel()
+            model.personal_product_code = "CYCLE_PAY_AUTH"
+            model.sign_scene = "INDUSTRY|DIGITAL_MEDIA"
+            model.external_agreement_no = order_id
+            model.access_params = {"channel": "ALIPAYAPP"}
+
+            # Period rule: monthly deduction
+            period_rule = PeriodRuleParams()
+            period_rule.period_type = "MONTH"
+            period_rule.period = 1
+            period_rule.single_amount = f"{amount:.2f}"
+            period_rule.total_amount = f"{amount * 12:.2f}"  # Max 12 months
+            period_rule.total_payments = 12
+            period_rule.execute_time = datetime.now().strftime("%Y-%m-%d")
+            model.period_rule_params = period_rule
+
+            model.product_code = "GENERAL_WITHHOLDING"
+
+            request = AlipayUserAgreementPageSignRequest(biz_model=model)
+            request.return_url = self.return_url
+            request.notify_url = self.notify_url
+
+            signing_url = client.page_execute(request, http_method="GET")
+
+            logger.info(f"Created Alipay agreement signing: order={order_id}, amount={amount}, tier={tier_name}")
+
+            return {
+                "order_id": order_id,
+                "signing_url": signing_url,
+                "amount": amount
+            }
+
+        except ImportError:
+            logger.warning("Alipay agreement signing SDK classes not available, falling back to page pay")
+            # Fallback to regular page pay if SDK doesn't support agreement signing
+            return await self.create_subscription_order(
+                order_id=order_id,
+                amount=amount,
+                subject=f"象信AI安全护栏 - {tier_name}",
+                body=f"订阅套餐: {tier_name}"
+            )
+        except Exception as e:
+            logger.error(f"Failed to create Alipay agreement: {traceback.format_exc()}")
+            raise
+
+    async def execute_agreement_pay(
+        self,
+        agreement_no: str,
+        amount: float,
+        order_id: str
+    ) -> Dict[str, Any]:
+        """
+        Execute recurring deduction using agreement (代扣执行)
+
+        Args:
+            agreement_no: Alipay agreement number
+            amount: Deduction amount
+            order_id: Unique order ID for this deduction
+
+        Returns:
+            Payment result
+        """
+        try:
+            client = self._get_client()
+
+            from alipay.aop.api.domain.AlipayTradePayModel import AlipayTradePayModel
+            from alipay.aop.api.request.AlipayTradePayRequest import AlipayTradePayRequest
+            from alipay.aop.api.response.AlipayTradePayResponse import AlipayTradePayResponse
+
+            model = AlipayTradePayModel()
+            model.out_trade_no = order_id
+            model.total_amount = f"{amount:.2f}"
+            model.subject = "象信AI安全护栏月度订阅续费"
+            model.product_code = "GENERAL_WITHHOLDING"
+            model.agreement_params = {"agreement_no": agreement_no}
+
+            request = AlipayTradePayRequest(biz_model=model)
+            response_content = client.execute(request)
+
+            if not response_content:
+                return {"success": False, "error": "No response from Alipay"}
+
+            response = AlipayTradePayResponse()
+            response.parse_response_content(response_content)
+
+            if response.is_success():
+                logger.info(f"Agreement pay executed: order={order_id}, agreement={agreement_no}")
+                return {
+                    "success": True,
+                    "trade_no": response.trade_no,
+                    "out_trade_no": response.out_trade_no
+                }
+            else:
+                logger.warning(f"Agreement pay failed: {response.sub_code} - {response.sub_msg}")
+                return {
+                    "success": False,
+                    "code": response.code,
+                    "msg": response.msg,
+                    "sub_code": response.sub_code,
+                    "sub_msg": response.sub_msg
+                }
+
+        except ImportError:
+            logger.error("Alipay agreement pay SDK classes not available")
+            return {"success": False, "error": "Agreement pay not supported"}
+        except Exception as e:
+            logger.error(f"Failed to execute agreement pay: {traceback.format_exc()}")
+            return {"success": False, "error": str(e)}
+
+    async def unsign_agreement(self, agreement_no: str) -> Dict[str, Any]:
+        """
+        Cancel recurring billing agreement (解约)
+
+        Args:
+            agreement_no: Alipay agreement number
+
+        Returns:
+            Unsign result
+        """
+        try:
+            client = self._get_client()
+
+            from alipay.aop.api.domain.AlipayUserAgreementUnsignModel import AlipayUserAgreementUnsignModel
+            from alipay.aop.api.request.AlipayUserAgreementUnsignRequest import AlipayUserAgreementUnsignRequest
+            from alipay.aop.api.response.AlipayUserAgreementUnsignResponse import AlipayUserAgreementUnsignResponse
+
+            model = AlipayUserAgreementUnsignModel()
+            model.agreement_no = agreement_no
+            model.personal_product_code = "CYCLE_PAY_AUTH"
+
+            request = AlipayUserAgreementUnsignRequest(biz_model=model)
+            response_content = client.execute(request)
+
+            if not response_content:
+                return {"success": False, "error": "No response from Alipay"}
+
+            response = AlipayUserAgreementUnsignResponse()
+            response.parse_response_content(response_content)
+
+            if response.is_success():
+                logger.info(f"Agreement unsigned: {agreement_no}")
+                return {"success": True}
+            else:
+                logger.warning(f"Agreement unsign failed: {response.sub_code} - {response.sub_msg}")
+                return {
+                    "success": False,
+                    "code": response.code,
+                    "msg": response.msg
+                }
+
+        except ImportError:
+            logger.error("Alipay agreement unsign SDK classes not available")
+            return {"success": False, "error": "Agreement unsign not supported"}
+        except Exception as e:
+            logger.error(f"Failed to unsign agreement: {traceback.format_exc()}")
+            return {"success": False, "error": str(e)}
+
     def parse_callback(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
         Parse Alipay callback notification

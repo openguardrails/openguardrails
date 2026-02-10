@@ -7,9 +7,11 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import paymentService, { PaymentResponse } from '../../services/payment';
 
 interface PaymentButtonProps {
-  type: 'subscription' | 'package';
+  type: 'subscription' | 'package' | 'quota_purchase';
   packageId?: string;
   packageName?: string;
+  tierNumber?: number;
+  units?: number;
   amount?: number;
   currency?: string;
   provider?: 'alipay' | 'stripe';
@@ -26,6 +28,8 @@ const PaymentButton: React.FC<PaymentButtonProps> = ({
   type,
   packageId,
   packageName,
+  tierNumber,
+  units,
   amount,
   currency = 'USD',
   provider = 'stripe',
@@ -49,11 +53,13 @@ const PaymentButton: React.FC<PaymentButtonProps> = ({
       let response: PaymentResponse;
 
       if (type === 'subscription') {
-        response = await paymentService.createSubscriptionPayment();
+        response = await paymentService.createSubscriptionPayment(tierNumber);
       } else if (type === 'package' && packageId) {
         response = await paymentService.createPackagePayment(packageId);
+      } else if (type === 'quota_purchase' && units) {
+        response = await paymentService.createQuotaPurchasePayment(units);
       } else {
-        throw new Error('Invalid payment type or missing package ID');
+        throw new Error('Invalid payment type or missing required parameters');
       }
 
       if (response.success) {
@@ -138,13 +144,17 @@ const PaymentButton: React.FC<PaymentButtonProps> = ({
                 <DialogTitle>
                   {type === 'subscription'
                     ? t('payment.confirm.subscriptionTitle')
-                    : t('payment.confirm.packageTitle')
+                    : type === 'quota_purchase'
+                      ? t('payment.confirm.quotaTitle')
+                      : t('payment.confirm.packageTitle')
                   }
                 </DialogTitle>
                 <DialogDescription>
                   {type === 'subscription'
                     ? t('payment.confirm.subscriptionContent', { price: priceDisplay })
-                    : t('payment.confirm.packageContent', { name: packageName, price: priceDisplay })
+                    : type === 'quota_purchase'
+                      ? t('payment.confirm.quotaContent', { price: priceDisplay })
+                      : t('payment.confirm.packageContent', { name: packageName, price: priceDisplay })
                   }
                 </DialogDescription>
               </DialogHeader>

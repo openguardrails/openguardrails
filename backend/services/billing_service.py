@@ -4,9 +4,9 @@ Billing Service - Manages tenant subscriptions and monthly quota limits
 
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 from sqlalchemy.orm import Session
-from sqlalchemy import text, func
+from sqlalchemy import text, func, and_
 from uuid import UUID
 from database.models import TenantSubscription, DetectionResult, Tenant
 from utils.logger import setup_logger
@@ -31,6 +31,52 @@ class BillingService:
         # Cache for tenant subscriptions {tenant_id: (subscription, cached_time)}
         self._subscription_cache: Dict[str, Tuple[TenantSubscription, float]] = {}
         self._cache_ttl = 60  # 60 seconds cache TTL
+        # Cache for subscription tiers
+        self._tier_cache: Dict = {}
+        self._tier_cache_time: float = 0
+        self._tier_cache_ttl: int = 300  # 5 minutes
+
+    def _check_and_handle_expiry(self, subscription: TenantSubscription, db: Session) -> bool:
+        """
+        Check if subscription has expired and auto-downgrade if so.
+
+        Returns:
+            True if subscription was expired and downgraded, False otherwise
+        """
+        if subscription.subscription_type != 'subscribed':
+            return False
+        if subscription.subscription_expires_at is None:
+            return False
+
+        current_time = get_current_utc_time()
+        if current_time <= subscription.subscription_expires_at:
+            return False
+
+        # Subscription has expired - downgrade to free
+        tenant_id = str(subscription.tenant_id)
+        old_quota = subscription.monthly_quota
+        free_config = self.SUBSCRIPTION_CONFIGS.get('free', {})
+        free_quota = free_config.get('monthly_quota', 1000)
+
+        subscription.subscription_type = 'free'
+        subscription.monthly_quota = free_quota
+        if hasattr(subscription, 'subscription_tier'):
+            subscription.subscription_tier = 0
+        subscription.updated_at = current_time
+
+        try:
+            db.commit()
+            # Clear cache
+            self._subscription_cache.pop(tenant_id, None)
+            logger.warning(
+                f"Subscription expired for tenant {tenant_id}: "
+                f"auto-downgraded to free (quota {old_quota} -> {free_quota})"
+            )
+            return True
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Failed to downgrade expired subscription for tenant {tenant_id}: {e}")
+            return False
 
     def get_subscription(self, tenant_id: str, db: Session) -> Optional[TenantSubscription]:
         """Get tenant subscription with caching"""
@@ -67,6 +113,8 @@ class BillingService:
             ).first()
 
             if subscription:
+                # Check and handle expiry before caching
+                self._check_and_handle_expiry(subscription, db)
                 # Update cache
                 self._subscription_cache[tenant_id] = (subscription, current_time)
 
@@ -107,6 +155,9 @@ class BillingService:
                     logger.error(f"Failed to auto-create subscription for tenant {tenant_id}: {create_error}")
                     return False, "Subscription not found. Please contact support."
 
+            # Check and handle subscription expiry
+            self._check_and_handle_expiry(subscription, db)
+
             # Check if we need to reset the quota (BEFORE checking quota availability)
             needs_reset = current_time >= subscription.usage_reset_at
 
@@ -127,6 +178,25 @@ class BillingService:
                 logger.info(f"Quota reset for tenant {tenant_id}, next reset: {next_reset}")
 
                 # After reset, continue to check quota availability for this request
+
+            # Check purchased quota first (pay-per-use, consumed before monthly quota)
+            if subscription.purchased_quota > 0:
+                if subscription.purchased_quota_expires_at and current_time > subscription.purchased_quota_expires_at:
+                    # Purchased quota expired - reset to 0
+                    subscription.purchased_quota = 0
+                    subscription.purchased_quota_expires_at = None
+                    subscription.updated_at = current_time
+                    db.commit()
+                    self._subscription_cache.pop(tenant_id, None)
+                    logger.info(f"Purchased quota expired for tenant {tenant_id}, reset to 0")
+                else:
+                    # Decrement purchased quota
+                    subscription.purchased_quota -= 1
+                    subscription.updated_at = current_time
+                    db.commit()
+                    self._subscription_cache.pop(tenant_id, None)
+                    logger.debug(f"Used purchased quota for tenant {tenant_id}: {subscription.purchased_quota} remaining")
+                    return True, None
 
             # Check if quota is available (AFTER potential reset)
             if subscription.current_month_usage >= subscription.monthly_quota:
@@ -171,6 +241,9 @@ class BillingService:
                 if not subscription:
                     return None
 
+            # Check and handle subscription expiry
+            self._check_and_handle_expiry(subscription, db)
+
             # Check if reset is needed
             current_time = get_current_utc_time()
             if current_time >= subscription.usage_reset_at:
@@ -181,15 +254,72 @@ class BillingService:
 
             usage_percentage = (subscription.current_month_usage / subscription.monthly_quota * 100) if subscription.monthly_quota > 0 else 0
 
+            # Calculate billing period start based on usage_reset_at (period_start = previous reset date)
+            period_end = subscription.usage_reset_at
+            # Period start is approximately one month before period_end
+            if period_end.month == 1:
+                period_start = period_end.replace(year=period_end.year - 1, month=12)
+            else:
+                try:
+                    period_start = period_end.replace(month=period_end.month - 1)
+                except ValueError:
+                    # Handle months with different day counts
+                    period_start = period_end.replace(month=period_end.month - 1, day=28)
+
+            # Query usage breakdown for current billing period
+            usage_breakdown = {'guardrails_proxy': 0, 'direct_model_access': 0}
+            try:
+                dma_count = db.query(func.count(DetectionResult.id)).filter(
+                    and_(
+                        DetectionResult.tenant_id == tenant_uuid,
+                        DetectionResult.is_direct_model_access == True,
+                        DetectionResult.created_at >= period_start,
+                        DetectionResult.created_at < period_end
+                    )
+                ).scalar() or 0
+
+                total_count = db.query(func.count(DetectionResult.id)).filter(
+                    and_(
+                        DetectionResult.tenant_id == tenant_uuid,
+                        DetectionResult.created_at >= period_start,
+                        DetectionResult.created_at < period_end
+                    )
+                ).scalar() or 0
+
+                usage_breakdown = {
+                    'guardrails_proxy': total_count - dma_count,
+                    'direct_model_access': dma_count
+                }
+            except Exception as breakdown_err:
+                logger.warning(f"Failed to get usage breakdown for tenant {tenant_id}: {breakdown_err}")
+
+            # Get tier info
+            subscription_tier = getattr(subscription, 'subscription_tier', 0) or 0
+
+            # Get purchased quota info
+            purchased_quota = getattr(subscription, 'purchased_quota', 0) or 0
+            purchased_quota_expires_at = getattr(subscription, 'purchased_quota_expires_at', None)
+
+            # Check if purchased quota is expired
+            if purchased_quota > 0 and purchased_quota_expires_at and current_time > purchased_quota_expires_at:
+                purchased_quota = 0
+                purchased_quota_expires_at = None
+
             return {
                 'id': str(subscription.id),
                 'tenant_id': str(subscription.tenant_id),
                 'subscription_type': subscription.subscription_type,
+                'subscription_tier': subscription_tier,
                 'monthly_quota': subscription.monthly_quota,
                 'current_month_usage': subscription.current_month_usage,
                 'usage_reset_at': subscription.usage_reset_at.isoformat(),
                 'usage_percentage': round(usage_percentage, 2),
-                'plan_name': self.SUBSCRIPTION_CONFIGS.get(subscription.subscription_type, {}).get('name', 'Unknown')
+                'plan_name': self.SUBSCRIPTION_CONFIGS.get(subscription.subscription_type, {}).get('name', 'Unknown'),
+                'usage_breakdown': usage_breakdown,
+                'billing_period_start': period_start.isoformat(),
+                'billing_period_end': period_end.isoformat(),
+                'purchased_quota': purchased_quota,
+                'purchased_quota_expires_at': purchased_quota_expires_at.isoformat() if purchased_quota_expires_at else None
             }
 
         except Exception as e:
@@ -409,6 +539,145 @@ class BillingService:
 
         except Exception as e:
             logger.error(f"Failed to list subscriptions: {e}")
+            raise
+
+    # =====================================================
+    # Tier Management
+    # =====================================================
+
+    def _load_stripe_price_ids_from_env(self) -> Dict[int, str]:
+        """Load Stripe price ID mapping from STRIPE_PRICE_IDS env var (JSON string)"""
+        import json
+        raw = settings.stripe_price_ids
+        if not raw:
+            return {}
+        try:
+            mapping = json.loads(raw)
+            # Keys may be strings like "1", "2" - convert to int
+            return {int(k): v for k, v in mapping.items() if v}
+        except Exception as e:
+            logger.warning(f"Failed to parse STRIPE_PRICE_IDS env var: {e}")
+            return {}
+
+    def get_all_tiers(self, db: Session) -> list:
+        """Get all active subscription tiers with caching"""
+        from database.models import SubscriptionTier
+
+        current_time = time.time()
+        if self._tier_cache and (current_time - self._tier_cache_time < self._tier_cache_ttl):
+            return list(self._tier_cache.values())
+
+        tiers = db.query(SubscriptionTier).filter(
+            SubscriptionTier.is_active == True
+        ).order_by(SubscriptionTier.display_order).all()
+
+        # Load Stripe price IDs from env var (sole source for Stripe price IDs)
+        env_price_ids = self._load_stripe_price_ids_from_env()
+
+        self._tier_cache = {}
+        for tier in tiers:
+            self._tier_cache[tier.tier_number] = {
+                'tier_number': tier.tier_number,
+                'tier_name': tier.tier_name,
+                'monthly_quota': tier.monthly_quota,
+                'price_usd': float(tier.price_usd),
+                'price_cny': float(tier.price_cny),
+                'stripe_price_id': env_price_ids.get(tier.tier_number),
+                'display_order': tier.display_order
+            }
+        self._tier_cache_time = current_time
+
+        return list(self._tier_cache.values())
+
+    def get_tier_config(self, tier_number: int, db: Session) -> Optional[dict]:
+        """Get configuration for a specific tier"""
+        # Ensure cache is populated
+        self.get_all_tiers(db)
+        return self._tier_cache.get(tier_number)
+
+    def update_subscription_tier(self, tenant_id: str, tier_number: int, db: Session) -> TenantSubscription:
+        """Update tenant subscription to a specific tier"""
+        try:
+            tenant_uuid = UUID(tenant_id)
+            tier_config = self.get_tier_config(tier_number, db)
+
+            if not tier_config:
+                raise ValueError(f"Invalid tier number: {tier_number}")
+
+            subscription = db.query(TenantSubscription).filter(
+                TenantSubscription.tenant_id == tenant_uuid
+            ).first()
+
+            if not subscription:
+                raise ValueError(f"Subscription not found for tenant {tenant_id}")
+
+            old_tier = getattr(subscription, 'subscription_tier', 0) or 0
+            subscription.subscription_type = 'subscribed'
+            subscription.subscription_tier = tier_number
+            subscription.monthly_quota = tier_config['monthly_quota']
+            subscription.updated_at = get_current_utc_time()
+
+            db.commit()
+            db.refresh(subscription)
+
+            # Clear cache
+            self._subscription_cache.pop(tenant_id, None)
+
+            logger.info(
+                f"Updated tenant {tenant_id} subscription tier: "
+                f"{old_tier} -> {tier_number} ({tier_config['tier_name']}, quota={tier_config['monthly_quota']})"
+            )
+            return subscription
+
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Failed to update subscription tier for tenant {tenant_id}: {e}")
+            raise
+
+    def add_purchased_quota(self, tenant_id: str, units: int, db: Session) -> TenantSubscription:
+        """
+        Add purchased quota to tenant subscription (pay-per-use).
+        If existing quota is expired, resets to 0 before adding.
+        Each purchase extends expiry to 1 year from now.
+        """
+        try:
+            tenant_uuid = UUID(tenant_id)
+            current_time = get_current_utc_time()
+
+            subscription = db.query(TenantSubscription).filter(
+                TenantSubscription.tenant_id == tenant_uuid
+            ).first()
+
+            if not subscription:
+                raise ValueError(f"Subscription not found for tenant {tenant_id}")
+
+            # If existing quota is expired, reset to 0
+            if (subscription.purchased_quota_expires_at and
+                    current_time > subscription.purchased_quota_expires_at):
+                subscription.purchased_quota = 0
+
+            # Add new quota
+            calls_to_add = units * settings.quota_calls_per_unit
+            subscription.purchased_quota = (subscription.purchased_quota or 0) + calls_to_add
+            subscription.purchased_quota_expires_at = current_time + timedelta(days=settings.quota_validity_days)
+            subscription.updated_at = current_time
+
+            db.commit()
+            db.refresh(subscription)
+
+            # Clear cache
+            self._subscription_cache.pop(tenant_id, None)
+
+            logger.info(
+                f"Added {calls_to_add} purchased quota for tenant {tenant_id} "
+                f"({units} units). Total: {subscription.purchased_quota}, "
+                f"expires: {subscription.purchased_quota_expires_at}"
+            )
+            return subscription
+
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Failed to add purchased quota for tenant {tenant_id}: {e}")
             raise
 
     def _calculate_next_reset_date(self, current_time: datetime, from_date: datetime = None) -> datetime:

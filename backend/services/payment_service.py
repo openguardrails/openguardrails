@@ -47,11 +47,22 @@ class PaymentService:
             return settings.subscription_price_cny
         return settings.subscription_price_usd
 
+    def get_tier_price(self, tier_number: int, db: Session) -> float:
+        """Get price for a specific tier based on payment provider"""
+        tier_config = billing_service.get_tier_config(tier_number, db)
+        if not tier_config:
+            raise ValueError(f"Invalid tier number: {tier_number}")
+
+        if self.get_payment_provider() == 'alipay':
+            return tier_config['price_cny']
+        return tier_config['price_usd']
+
     async def create_subscription_payment(
         self,
         db: Session,
         tenant_id: str,
-        email: str
+        email: str,
+        tier_number: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Create a subscription payment order
@@ -60,18 +71,34 @@ class PaymentService:
             db: Database session
             tenant_id: Tenant ID
             email: Tenant email
+            tier_number: Subscription tier (1-9). If None, uses legacy single-tier pricing.
 
         Returns:
             Payment creation result with redirect URL
         """
         provider = self.get_payment_provider()
         currency = self.get_currency()
-        amount = self.get_subscription_price()
+
+        # Determine amount and tier config
+        tier_config = None
+        if tier_number is not None:
+            tier_config = billing_service.get_tier_config(tier_number, db)
+            if not tier_config:
+                raise ValueError(f"Invalid tier number: {tier_number}")
+            amount = tier_config['price_cny'] if provider == 'alipay' else tier_config['price_usd']
+        else:
+            amount = self.get_subscription_price()
 
         logger.info(f"Creating subscription payment: provider={provider}, currency={currency}, amount={amount}, tenant_id={tenant_id}")
 
         # Generate order ID
         order_id = f"sub_{uuid.uuid4().hex[:16]}"
+
+        # Build order metadata
+        order_meta = {'email': email}
+        if tier_number is not None:
+            order_meta['tier_number'] = tier_number
+            order_meta['tier_name'] = tier_config['tier_name'] if tier_config else None
 
         # Create payment order in database
         payment_order = PaymentOrder(
@@ -82,7 +109,7 @@ class PaymentService:
             payment_provider=provider,
             status='pending',
             provider_order_id=order_id,
-            order_metadata={'email': email}
+            order_metadata=order_meta
         )
         db.add(payment_order)
         db.commit()
@@ -144,11 +171,18 @@ class PaymentService:
                 else:
                     cancel_url = f"{settings.frontend_url}/platform/subscription?payment=cancelled"
 
+                # Determine Stripe price_id: tier-specific or legacy
+                stripe_price_id = None
+                if tier_config and tier_config.get('stripe_price_id'):
+                    stripe_price_id = tier_config['stripe_price_id']
+
                 result = await stripe_service.create_subscription_checkout(
                     customer_id=customer_id,
                     success_url=success_url,
                     cancel_url=cancel_url,
-                    tenant_id=tenant_id
+                    tenant_id=tenant_id,
+                    price_id=stripe_price_id,
+                    tier_number=tier_number
                 )
 
                 # Update order with session ID
@@ -368,7 +402,23 @@ class PaymentService:
         if subscription:
             now = datetime.utcnow()
             subscription.subscription_type = 'subscribed'
-            subscription.monthly_quota = billing_service.SUBSCRIPTION_CONFIGS['subscribed']['monthly_quota']
+
+            # Determine quota based on tier or legacy config
+            tier_number = None
+            if payment_order.order_metadata and 'tier_number' in payment_order.order_metadata:
+                tier_number = payment_order.order_metadata['tier_number']
+
+            if tier_number is not None:
+                tier_config = billing_service.get_tier_config(tier_number, db)
+                if tier_config:
+                    subscription.monthly_quota = tier_config['monthly_quota']
+                    subscription.subscription_tier = tier_number
+                else:
+                    # Fallback to legacy
+                    subscription.monthly_quota = billing_service.SUBSCRIPTION_CONFIGS['subscribed']['monthly_quota']
+            else:
+                subscription.monthly_quota = billing_service.SUBSCRIPTION_CONFIGS['subscribed']['monthly_quota']
+
             subscription.subscription_started_at = now
             subscription.subscription_expires_at = now + timedelta(days=30)
 
@@ -465,6 +515,136 @@ class PaymentService:
             "package_id": str(payment_order.package_id)
         }
 
+    async def create_quota_purchase_payment(
+        self,
+        db: Session,
+        tenant_id: str,
+        email: str,
+        units: int
+    ) -> Dict[str, Any]:
+        """
+        Create a quota purchase payment order (Alipay only, for Chinese users)
+
+        Args:
+            db: Database session
+            tenant_id: Tenant ID
+            email: Tenant email
+            units: Number of units to purchase (each unit = quota_calls_per_unit calls)
+
+        Returns:
+            Payment creation result with redirect URL
+        """
+        if units < 1:
+            raise ValueError("Minimum purchase is 1 unit")
+
+        amount = units * settings.quota_price_cny
+        currency = 'CNY'
+
+        logger.info(f"Creating quota purchase payment: units={units}, amount={amount}, tenant_id={tenant_id}")
+
+        # Generate order ID with quota_ prefix
+        order_id = f"quota_{uuid.uuid4().hex[:16]}"
+
+        # Create payment order in database
+        payment_order = PaymentOrder(
+            tenant_id=tenant_id,
+            order_type='quota_purchase',
+            amount=amount,
+            currency=currency,
+            payment_provider='alipay',
+            status='pending',
+            provider_order_id=order_id,
+            order_metadata={
+                'email': email,
+                'units': units,
+                'calls': units * settings.quota_calls_per_unit,
+                'price_per_unit': settings.quota_price_cny,
+                'validity_days': settings.quota_validity_days
+            }
+        )
+        db.add(payment_order)
+        db.commit()
+        db.refresh(payment_order)
+
+        try:
+            # Create Alipay payment
+            result = await alipay_service.create_subscription_order(
+                order_id=order_id,
+                amount=amount,
+                subject=f"象信AI安全护栏额度充值 - {units * settings.quota_calls_per_unit}次调用",
+                body=f"购买API调用额度 {units * settings.quota_calls_per_unit} 次，有效期{settings.quota_validity_days}天"
+            )
+            return {
+                "success": True,
+                "payment_id": str(payment_order.id),
+                "order_id": order_id,
+                "provider": "alipay",
+                "payment_url": result["payment_url"],
+                "amount": amount,
+                "currency": currency
+            }
+        except Exception as e:
+            logger.error(f"Failed to create quota purchase payment: {e}")
+            payment_order.status = 'failed'
+            db.commit()
+            raise
+
+    async def handle_quota_purchase_paid(
+        self,
+        db: Session,
+        order_id: str,
+        transaction_id: str,
+        paid_at: Optional[datetime] = None
+    ) -> Dict[str, Any]:
+        """
+        Handle successful quota purchase payment
+
+        Args:
+            db: Database session
+            order_id: Provider order ID
+            transaction_id: Provider transaction ID
+            paid_at: Payment timestamp
+
+        Returns:
+            Processing result
+        """
+        # Find payment order
+        payment_order = db.query(PaymentOrder).filter(
+            PaymentOrder.provider_order_id == order_id
+        ).first()
+
+        if not payment_order:
+            logger.error(f"Payment order not found: {order_id}")
+            return {"success": False, "error": "Order not found"}
+
+        if payment_order.status == 'paid':
+            logger.info(f"Order already processed: {order_id}")
+            return {"success": True, "message": "Already processed"}
+
+        # Update payment order
+        payment_order.status = 'paid'
+        payment_order.provider_transaction_id = transaction_id
+        payment_order.paid_at = paid_at or datetime.utcnow()
+
+        # Get units from order metadata
+        units = payment_order.order_metadata.get('units', 1) if payment_order.order_metadata else 1
+
+        # Add purchased quota
+        billing_service.add_purchased_quota(
+            str(payment_order.tenant_id),
+            units,
+            db
+        )
+
+        logger.info(f"Quota purchase completed for tenant: {payment_order.tenant_id}, units: {units}")
+
+        return {
+            "success": True,
+            "tenant_id": str(payment_order.tenant_id),
+            "units": units,
+            "calls_added": units * settings.quota_calls_per_unit
+        }
+
     async def cancel_subscription(
         self,
         db: Session,
@@ -556,23 +736,51 @@ class PaymentService:
             for order in orders
         ]
 
-    def get_payment_config(self) -> Dict[str, Any]:
+    def get_payment_config(self, db: Session = None) -> Dict[str, Any]:
         """
         Get payment configuration for frontend
 
         Returns:
-            Payment configuration
+            Payment configuration including tiers
         """
         provider = self.get_payment_provider()
 
         config = {
             "provider": provider,
             "currency": self.get_currency(),
-            "subscription_price": self.get_subscription_price()
+            "subscription_price": self.get_subscription_price(),
+            "tiers": []
         }
 
         if provider == 'stripe':
             config["stripe_publishable_key"] = stripe_service.get_publishable_key()
+
+        if provider == 'alipay':
+            config["quota_purchase"] = {
+                "price_per_unit": settings.quota_price_cny,
+                "calls_per_unit": settings.quota_calls_per_unit,
+                "min_units": 1,
+                "validity_days": settings.quota_validity_days,
+                "currency": "CNY"
+            }
+
+        # Include tier information if db session is available
+        if db:
+            try:
+                tiers = billing_service.get_all_tiers(db)
+                price_key = 'price_cny' if provider == 'alipay' else 'price_usd'
+                config["tiers"] = [
+                    {
+                        'tier_number': t['tier_number'],
+                        'tier_name': t['tier_name'],
+                        'monthly_quota': t['monthly_quota'],
+                        'price': t[price_key],
+                        'display_order': t['display_order']
+                    }
+                    for t in tiers
+                ]
+            except Exception as e:
+                logger.warning(f"Failed to load tiers for payment config: {e}")
 
         return config
 

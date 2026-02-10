@@ -89,7 +89,9 @@ class StripeService:
         customer_id: str,
         success_url: str,
         cancel_url: str,
-        tenant_id: str
+        tenant_id: str,
+        price_id: Optional[str] = None,
+        tier_number: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Create a Stripe Checkout session for subscription
@@ -99,6 +101,8 @@ class StripeService:
             success_url: URL to redirect after successful payment
             cancel_url: URL to redirect after cancelled payment
             tenant_id: Tenant ID for metadata
+            price_id: Optional tier-specific Stripe Price ID (overrides default)
+            tier_number: Optional tier number for metadata
 
         Returns:
             Dict containing checkout session URL
@@ -106,7 +110,9 @@ class StripeService:
         if not self.secret_key:
             raise ValueError("Stripe is not configured")
 
-        if not self.price_id_monthly:
+        # Use tier-specific price_id if provided, otherwise fall back to default
+        effective_price_id = price_id or self.price_id_monthly
+        if not effective_price_id:
             raise ValueError("Stripe price ID not configured")
 
         # Strip any surrounding quotes from URLs (in case .env file has quoted values)
@@ -124,20 +130,24 @@ class StripeService:
             success_url_encoded = quote(success_url, safe=':/?#[]@!$&\'()*+,;=')
             cancel_url_encoded = quote(cancel_url, safe=':/?#[]@!$&\'()*+,;=')
 
+        checkout_metadata = {
+            "tenant_id": str(tenant_id),
+            "order_type": "subscription"
+        }
+        if tier_number is not None:
+            checkout_metadata["tier_number"] = str(tier_number)
+
         session = stripe.checkout.Session.create(
             customer=customer_id,
             payment_method_types=['card'],
             line_items=[{
-                'price': self.price_id_monthly,
+                'price': effective_price_id,
                 'quantity': 1,
             }],
             mode='subscription',
             success_url=success_url_encoded,
             cancel_url=cancel_url_encoded,
-            metadata={
-                "tenant_id": str(tenant_id),
-                "order_type": "subscription"
-            }
+            metadata=checkout_metadata
         )
 
         logger.info(f"Created Stripe checkout session: {session.id}")

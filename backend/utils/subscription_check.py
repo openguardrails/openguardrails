@@ -5,6 +5,7 @@ Provides helper functions to check subscription status for premium features.
 Supports enterprise mode bypass (all features enabled for private deployments).
 """
 
+from datetime import datetime, timezone
 from typing import Tuple, Optional
 from uuid import UUID
 from sqlalchemy.orm import Session
@@ -115,6 +116,18 @@ def check_subscription_for_feature(
             logger.info(f"Feature '{feature}' denied for tenant {tenant_id}: not subscribed")
             return False, error_msg
 
+        # Check if subscription has expired
+        if subscription.subscription_expires_at:
+            current_time = datetime.now(timezone.utc)
+            if current_time > subscription.subscription_expires_at:
+                feature_desc = FEATURE_DESCRIPTIONS.get(feature, {}).get(language, feature)
+                if language == "zh":
+                    error_msg = f"您的订阅已过期。「{feature_desc}」是高级功能，请续费后使用。"
+                else:
+                    error_msg = f"Your subscription has expired. '{feature_desc}' is a premium feature. Please renew your subscription."
+                logger.info(f"Feature '{feature}' denied for tenant {tenant_id}: subscription expired")
+                return False, error_msg
+
         logger.debug(f"Subscription check passed for tenant {tenant_id}, feature '{feature}'")
         return True, None
 
@@ -214,10 +227,17 @@ def get_feature_availability(
             TenantSubscription.tenant_id == tenant_uuid
         ).first()
 
-        is_subscribed = (
-            is_super_admin or
-            (subscription and subscription.subscription_type == 'subscribed')
+        # Check subscription status including expiry
+        subscription_active = (
+            subscription and
+            subscription.subscription_type == 'subscribed'
         )
+        if subscription_active and subscription.subscription_expires_at:
+            current_time = datetime.now(timezone.utc)
+            if current_time > subscription.subscription_expires_at:
+                subscription_active = False
+
+        is_subscribed = is_super_admin or subscription_active
 
         result["is_subscribed"] = is_subscribed
 

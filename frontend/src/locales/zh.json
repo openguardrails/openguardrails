@@ -2377,7 +2377,28 @@
     "subscriptionActive": "订阅已激活",
     "nextBillingDate": "下次扣费日期：{{date}}",
     "expiresOn": "订阅到期日期：{{date}}",
-    "cancelledAtPeriodEnd": "已取消 - 在当前周期结束前仍可使用"
+    "cancelledAtPeriodEnd": "已取消 - 在当前周期结束前仍可使用",
+    "guardrailsProxyCalls": "安全检测 & 代理调用",
+    "directModelAccessCalls": "直接模型访问调用",
+    "tierSelector": "选择套餐",
+    "currentTier": "当前套餐",
+    "selectTier": "选择",
+    "callsPerMonth": "次/月",
+    "changeTier": "更改套餐",
+    "tierUpdated": "套餐更新成功",
+    "purchasedQuota": "已购额度",
+    "quotaExpiresOn": "有效期至 {{date}}",
+    "purchaseQuota": "购买API调用额度",
+    "quotaPriceInfo": "{{price}} / {{calls}} 次API调用",
+    "quotaUnits": "购买份数",
+    "quotaTotalCalls": "总调用次数",
+    "quotaTotalPrice": "总价",
+    "quotaValidityNote": "购买的额度自购买之日起 {{days}} 天内有效",
+    "quotaNoRefund": "所有购买均为最终交易，不支持退款。",
+    "quotaStackNote": "多次购买的额度可叠加。每次购买将有效期延长至最新购买后1年。",
+    "buyQuota": "购买额度",
+    "noPurchasedQuota": "暂无已购额度",
+    "quotaExpired": "已购额度已过期"
   },
   "payment": {
     "success": "支付成功！",
@@ -2395,6 +2416,8 @@
       "subscriptionContent": "每月将收取 {{price}}。您可以随时取消。",
       "packageTitle": "确认购买",
       "packageContent": "您正在购买 {{name}}，价格为 {{price}}。这是一次性付款。",
+      "quotaTitle": "确认购买额度",
+      "quotaContent": "将收取 {{price}} 用于购买API调用额度。此为一次性付款，不支持退款。额度有效期1年。",
       "proceed": "继续支付"
     },
     "button": {
