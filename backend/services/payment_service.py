@@ -414,10 +414,28 @@ class PaymentService:
                     subscription.monthly_quota = tier_config['monthly_quota']
                     subscription.subscription_tier = tier_number
                 else:
-                    # Fallback to legacy
-                    subscription.monthly_quota = billing_service.SUBSCRIPTION_CONFIGS['subscribed']['monthly_quota']
+                    logger.error(f"Invalid tier_number {tier_number} for payment order {order_id}")
+                    # Fallback to tier 0 (legacy) for backwards compatibility
+                    tier_config = billing_service.get_tier_config(0, db)
+                    if tier_config:
+                        subscription.monthly_quota = tier_config['monthly_quota']
+                        subscription.subscription_tier = 0
+                    else:
+                        # Ultimate fallback
+                        subscription.monthly_quota = billing_service.SUBSCRIPTION_CONFIGS['subscribed']['monthly_quota']
+                        subscription.subscription_tier = 0
             else:
-                subscription.monthly_quota = billing_service.SUBSCRIPTION_CONFIGS['subscribed']['monthly_quota']
+                # Legacy order without tier_number (old $19/month subscriptions)
+                # Use tier 0 (Legacy tier)
+                logger.info(f"Payment order {order_id} has no tier_number, treating as legacy subscription")
+                tier_config = billing_service.get_tier_config(0, db)
+                if tier_config:
+                    subscription.monthly_quota = tier_config['monthly_quota']
+                    subscription.subscription_tier = 0
+                else:
+                    # Fallback to legacy config if tier 0 doesn't exist
+                    subscription.monthly_quota = billing_service.SUBSCRIPTION_CONFIGS['subscribed']['monthly_quota']
+                    subscription.subscription_tier = 0
 
             subscription.subscription_started_at = now
             subscription.subscription_expires_at = now + timedelta(days=30)
