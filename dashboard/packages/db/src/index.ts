@@ -1,0 +1,10 @@
+export { db, type Database } from "./client.js";
+export { getDialect, type Dialect } from "./dialect.js";
+export * from "./schema/index.js";
+export { insertReturning, updateReturning } from "./helpers.js";
+export { agentQueries } from "./queries/agents.js";
+export { scannerQueries } from "./queries/scanners.js";
+export { policyQueries } from "./queries/policies.js";
+export { usageQueries } from "./queries/usage.js";
+export { detectionResultQueries } from "./queries/detection-results.js";
+export { settingsQueries } from "./queries/settings.js";

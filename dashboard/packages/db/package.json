@@ -1,0 +1,34 @@
+{
+  "name": "@og/db",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "db:generate:sqlite": "drizzle-kit generate --config=drizzle.config.sqlite.ts",
+    "db:generate:mysql": "drizzle-kit generate --config=drizzle.config.mysql.ts",
+    "db:generate:pg": "drizzle-kit generate --config=drizzle.config.pg.ts",
+    "db:migrate": "tsx src/migrate.ts",
+    "db:seed": "tsx src/seed.ts"
+  },
+  "dependencies": {
+    "@og/shared": "workspace:*",
+    "better-sqlite3": "^11.0.0",
+    "drizzle-orm": "^0.36.0"
+  },
+  "optionalDependencies": {
+    "mysql2": "^3.11.0",
+    "postgres": "^3.4.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^22.0.0",
+    "dotenv": "^17.3.1",
+    "drizzle-kit": "^0.30.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

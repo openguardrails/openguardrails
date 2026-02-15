@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "index.ts",
+    "gateway-manager.ts",
+    "gateway/**/*.ts",
+    "agent/**/*.ts",
+    "memory/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "openclaw"
+  ]
+}

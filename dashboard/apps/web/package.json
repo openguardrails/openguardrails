@@ -1,0 +1,31 @@
+{
+  "name": "@og/web",
+  "version": "0.2.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --port 3000",
+    "build": "next build",
+    "build:export": "DASHBOARD_MODE=embedded next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "@og/shared": "workspace:*",
+    "next": "^14.2.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "recharts": "^2.14.0",
+    "lucide-react": "^0.460.0",
+    "clsx": "^2.1.0",
+    "tailwind-merge": "^2.6.0",
+    "class-variance-authority": "^0.7.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "autoprefixer": "^10.4.0",
+    "postcss": "^8.4.0",
+    "tailwindcss": "^3.4.0",
+    "typescript": "^5.7.0"
+  }
+}

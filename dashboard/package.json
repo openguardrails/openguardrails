@@ -1,0 +1,15 @@
+{
+  "name": "dashboard",
+  "private": true,
+  "scripts": {
+    "dev": "turbo dev --filter=!@openguardrails/cli",
+    "build": "turbo build",
+    "db:generate": "turbo db:generate --filter=@og/db",
+    "db:migrate": "turbo db:migrate --filter=@og/db",
+    "db:seed": "turbo db:seed --filter=@og/db"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0"
+  },
+  "packageManager": "pnpm@9.15.0"
+}

@@ -1,0 +1,30 @@
+{
+  "name": "@openguardrails/cli",
+  "version": "0.1.0",
+  "description": "CLI for OpenGuardrails Dashboard - one-command install and management",
+  "type": "module",
+  "bin": {
+    "openguardrails": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@og/db": "workspace:*",
+    "@og/shared": "workspace:*",
+    "commander": "^12.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  },
+  "files": [
+    "dist/"
+  ],
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

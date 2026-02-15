@@ -1,0 +1,42 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:16
+    ports:
+      - "54321:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: og_dashboard
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    profiles: [db]
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+    ports:
+      - "3001:3001"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/og_dashboard
+      - OG_CORE_URL=${OG_CORE_URL:-http://host.docker.internal:3002}
+    env_file:
+      - ../.env
+    depends_on:
+      - postgres
+
+  web:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.web
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:3001
+    depends_on:
+      - api
+
+volumes:
+  pgdata:

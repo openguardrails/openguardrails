@@ -1,0 +1,256 @@
+/**
+ * Agent Runner - Multi-backend analysis
+ *
+ * Supports two detection backends:
+ * 1. Dashboard (preferred) - Routes through local/remote dashboard → core
+ * 2. MoltGuard API (legacy) - Direct MoltGuard API call
+ *
+ * Content is always sanitized locally before being sent to any API.
+ */
+
+import type {
+  AnalysisTarget,
+  AnalysisVerdict,
+  Finding,
+  Logger,
+  MoltGuardApiResponse,
+} from "./types.js";
+import {
+  DEFAULT_API_BASE_URL,
+  loadApiKey,
+  registerApiKey,
+} from "./config.js";
+import { sanitizeContent } from "./sanitizer.js";
+
+// =============================================================================
+// Runner Config
+// =============================================================================
+
+export type RunnerConfig = {
+  apiKey: string;
+  timeoutMs: number;
+  autoRegister: boolean;
+  apiBaseUrl: string;
+  /** Dashboard URL - when set, uses dashboard for detection */
+  dashboardUrl?: string;
+  /** Dashboard session token */
+  dashboardSessionToken?: string;
+};
+
+// =============================================================================
+// Dashboard Detection
+// =============================================================================
+
+type DashboardDetectResult = {
+  success: boolean;
+  data?: {
+    safe: boolean;
+    verdict: string;
+    categories: string[];
+    sensitivity_score: number;
+    findings: Array<{ scanner: string; name: string; description: string }>;
+    latency_ms: number;
+    request_id: string;
+    policy_action?: string;
+  };
+  blocked?: boolean;
+  error?: string;
+};
+
+async function runViaDashboard(
+  sanitizedContent: string,
+  config: RunnerConfig,
+  log: Logger,
+): Promise<AnalysisVerdict> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), config.timeoutMs);
+
+  try {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+
+    if (config.dashboardSessionToken) {
+      headers["Authorization"] = `Bearer ${config.dashboardSessionToken}`;
+    }
+
+    const response = await fetch(`${config.dashboardUrl}/api/detect`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        messages: [{ role: "user", content: sanitizedContent }],
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Dashboard API error: ${response.status} ${text}`);
+    }
+
+    const result = (await response.json()) as DashboardDetectResult;
+
+    if (!result.success || !result.data) {
+      throw new Error(`Dashboard error: ${result.error ?? "unknown"}`);
+    }
+
+    const data = result.data;
+
+    const findings: Finding[] = data.findings.map((f) => ({
+      suspiciousContent: f.name,
+      reason: f.description,
+      confidence: data.sensitivity_score,
+    }));
+
+    return {
+      isInjection: !data.safe,
+      confidence: data.sensitivity_score,
+      reason: data.safe ? "No issues detected" : `Detected: ${data.categories.join(", ")}`,
+      findings,
+      chunksAnalyzed: 1,
+    };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+// =============================================================================
+// MoltGuard API Detection (Legacy)
+// =============================================================================
+
+async function ensureApiKey(
+  configKey: string,
+  autoRegister: boolean,
+  apiBaseUrl: string,
+  log: Logger,
+): Promise<string> {
+  if (configKey) return configKey;
+
+  const savedKey = loadApiKey();
+  if (savedKey) return savedKey;
+
+  if (!autoRegister) {
+    throw new Error(
+      "No API key configured and autoRegister is disabled. " +
+      "Please set apiKey in your MoltGuard plugin config or enable autoRegister.",
+    );
+  }
+
+  log.info("No API key found — registering with MoltGuard...");
+
+  try {
+    const newKey = await registerApiKey("openclaw-agent", apiBaseUrl);
+    log.info("Registered with MoltGuard. API key saved to ~/.openclaw/credentials/moltguard/credentials.json");
+    return newKey;
+  } catch (error) {
+    throw new Error(
+      `Failed to auto-register API key: ${error instanceof Error ? error.message : String(error)}. ` +
+      "Please check your network connection or set apiKey manually in config."
+    );
+  }
+}
+
+export function mapApiResponseToVerdict(apiResponse: MoltGuardApiResponse): AnalysisVerdict {
+  const verdict = apiResponse.verdict;
+
+  const findings: Finding[] = (verdict.findings ?? []).map((f) => ({
+    suspiciousContent: f.suspiciousContent,
+    reason: f.reason,
+    confidence: f.confidence,
+  }));
+
+  return {
+    isInjection: verdict.isInjection,
+    confidence: verdict.confidence,
+    reason: verdict.reason,
+    findings,
+    chunksAnalyzed: 1,
+  };
+}
+
+async function runViaMoltGuard(
+  sanitizedContent: string,
+  config: RunnerConfig,
+  log: Logger,
+): Promise<AnalysisVerdict> {
+  const baseUrl = config.apiBaseUrl || DEFAULT_API_BASE_URL;
+  const apiKey = await ensureApiKey(config.apiKey, config.autoRegister, baseUrl, log);
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), config.timeoutMs);
+
+  try {
+    const response = await fetch(`${baseUrl}/api/check/tool-call`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({ content: sanitizedContent, async: false }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`MoltGuard API error: ${response.status} ${response.statusText}`);
+    }
+
+    const apiResponse = (await response.json()) as MoltGuardApiResponse;
+
+    if (!apiResponse.ok) {
+      throw new Error(`MoltGuard API returned error: ${apiResponse.error ?? "unknown"}`);
+    }
+
+    return mapApiResponseToVerdict(apiResponse);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+// =============================================================================
+// Main Analysis Function
+// =============================================================================
+
+export async function runGuardAgent(
+  target: AnalysisTarget,
+  config: RunnerConfig,
+  log: Logger,
+): Promise<AnalysisVerdict> {
+  const startTime = Date.now();
+
+  log.info(`Analyzing content: ${target.content.length} chars`);
+
+  // Always sanitize locally first
+  const { sanitized, redactions, totalRedactions } = sanitizeContent(target.content);
+  if (totalRedactions > 0) {
+    log.info(`Sanitized ${totalRedactions} sensitive items: ${Object.entries(redactions).map(([k, v]) => `${v} ${k}`).join(", ")}`);
+  }
+
+  try {
+    let verdict: AnalysisVerdict;
+
+    // Route to dashboard if configured, otherwise fall back to MoltGuard
+    if (config.dashboardUrl) {
+      log.info("Using dashboard for detection");
+      verdict = await runViaDashboard(sanitized, config, log);
+    } else {
+      verdict = await runViaMoltGuard(sanitized, config, log);
+    }
+
+    const durationMs = Date.now() - startTime;
+    log.info(`Analysis complete in ${durationMs}ms: ${verdict.isInjection ? "INJECTION DETECTED" : "SAFE"}`);
+
+    return verdict;
+  } catch (error) {
+    if ((error as Error).name === "AbortError") {
+      log.warn("Analysis timed out");
+      return {
+        isInjection: false,
+        confidence: 0,
+        reason: "Timeout",
+        findings: [],
+        chunksAnalyzed: 0,
+      };
+    }
+    throw error;
+  }
+}
