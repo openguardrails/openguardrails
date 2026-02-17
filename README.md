@@ -44,8 +44,7 @@ openguardrails/
       shared/             # Types, config, utilities
       db/                 # Drizzle ORM (SQLite/PostgreSQL/MySQL)
       cli/                # CLI for one-command setup
-  integrations/
-    openclaw-plugin/      # OpenClaw plugin with local PII gateway
+  openclaw-security/      # OpenClaw security plugin with local security gateway
 ```
 
 ### dashboard
@@ -56,7 +55,7 @@ The management hub. Register agents, configure scanners, set security policies, 
 - **5-tier model**: free / starter / pro / business / enterprise
 - **Policy engine**: block, alert, or log based on scanner results
 
-### integrations/openclaw-plugin
+### openclaw-security
 
 Client-side plugin for OpenClaw agents. Runs a local PII sanitization gateway (port 8900) that intercepts prompts before they reach LLMs, plus a monitoring dashboard (port 8901).
 

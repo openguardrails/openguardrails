@@ -8,7 +8,8 @@ export const policiesRouter = Router();
 // GET /api/policies
 policiesRouter.get("/", async (_req, res, next) => {
   try {
-    const data = await policies.findAll();
+    const tenantId = res.locals.tenantId as string;
+    const data = await policies.findAll(tenantId);
     res.json({ success: true, data });
   } catch (err) {
     next(err);
@@ -18,6 +19,7 @@ policiesRouter.get("/", async (_req, res, next) => {
 // POST /api/policies
 policiesRouter.post("/", async (req, res, next) => {
   try {
+    const tenantId = res.locals.tenantId as string;
     const { name, description, scannerIds, action, sensitivityThreshold } = req.body;
     if (!name || !scannerIds || !action) {
       res.status(400).json({ success: false, error: "name, scannerIds, and action are required" });
@@ -30,6 +32,7 @@ policiesRouter.post("/", async (req, res, next) => {
       scannerIds,
       action,
       sensitivityThreshold,
+      tenantId,
     });
 
     res.status(201).json({ success: true, data: policy });
@@ -41,7 +44,8 @@ policiesRouter.post("/", async (req, res, next) => {
 // PUT /api/policies/:id
 policiesRouter.put("/:id", async (req, res, next) => {
   try {
-    const policy = await policies.update(req.params.id as string, req.body);
+    const tenantId = res.locals.tenantId as string;
+    const policy = await policies.update(req.params.id as string, req.body, tenantId);
     if (!policy) {
       res.status(404).json({ success: false, error: "Policy not found" });
       return;
@@ -55,7 +59,8 @@ policiesRouter.put("/:id", async (req, res, next) => {
 // DELETE /api/policies/:id
 policiesRouter.delete("/:id", async (req, res, next) => {
   try {
-    await policies.delete(req.params.id as string);
+    const tenantId = res.locals.tenantId as string;
+    await policies.delete(req.params.id as string, tenantId);
     res.json({ success: true });
   } catch (err) {
     next(err);

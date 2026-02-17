@@ -8,13 +8,14 @@ export const resultsRouter = Router();
 // GET /api/results
 resultsRouter.get("/", async (req, res, next) => {
   try {
+    const tenantId = res.locals.tenantId as string;
     const limit = parseInt(req.query.limit as string) || 50;
     const offset = parseInt(req.query.offset as string) || 0;
     const agentId = req.query.agentId as string | undefined;
 
     const data = agentId
-      ? await results.findByAgentId(agentId, { limit, offset })
-      : await results.findAll({ limit, offset });
+      ? await results.findByAgentId(agentId, { limit, offset, tenantId })
+      : await results.findAll({ limit, offset, tenantId });
 
     res.json({ success: true, data });
   } catch (err) {

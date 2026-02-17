@@ -1,9 +1,21 @@
+// ─── Dashboard Mode ─────────────────────────────────────────────
+export type DashboardMode = "embedded" | "selfhosted" | "saas";
+
+// ─── Gateway Mode ───────────────────────────────────────────────
+export type GatewayMode = "embedded" | "selfhosted" | "saas";
+
+export interface TenantContext {
+  tenantId: string;
+  mode: DashboardMode;
+}
+
 // ─── Agents ─────────────────────────────────────────────────────
 export type AgentStatus = "active" | "inactive" | "disconnected";
 export type AgentProvider = "openclaw" | "langchain" | "crewai" | "autogen" | "custom";
 
 export interface Agent {
   id: string;
+  tenantId: string;
   name: string;
   description: string | null;
   provider: AgentProvider;
@@ -19,6 +31,7 @@ export type PolicyAction = "block" | "alert" | "log";
 
 export interface Policy {
   id: string;
+  tenantId: string;
   name: string;
   description: string | null;
   scannerIds: string[];
@@ -32,6 +45,7 @@ export interface Policy {
 // ─── Detection Results ──────────────────────────────────────────
 export interface DetectionResult {
   id: string;
+  tenantId: string;
   agentId: string | null;
   safe: boolean;
   categories: string[];
@@ -45,6 +59,7 @@ export interface DetectionResult {
 // ─── Usage ──────────────────────────────────────────────────────
 export interface UsageLog {
   id: string;
+  tenantId: string;
   agentId: string | null;
   endpoint: string;
   statusCode: number;
@@ -64,6 +79,7 @@ export interface UsageSummary {
 // ─── Scanners ───────────────────────────────────────────────────
 export interface ScannerDefinition {
   id: string;
+  tenantId: string;
   scannerId: string;
   name: string;
   description: string;
@@ -108,3 +124,19 @@ export interface ApiResponse<T = unknown> {
 
 // ─── Feature Types ──────────────────────────────────────────────
 export type Feature = "discovery" | "detection" | "protection";
+
+// ─── Tiers ─────────────────────────────────────────────────────
+export type TierId = "free" | "starter" | "pro" | "business" | "enterprise";
+
+export interface TierConfig {
+  features: Feature[];
+  maxAgents: number;
+}
+
+export const TIERS: Record<TierId, TierConfig> = {
+  free: { features: ["discovery", "detection"], maxAgents: 1 },
+  starter: { features: ["discovery", "detection"], maxAgents: 3 },
+  pro: { features: ["discovery", "detection"], maxAgents: 5 },
+  business: { features: ["discovery", "detection", "protection"], maxAgents: 10 },
+  enterprise: { features: ["discovery", "detection", "protection"], maxAgents: 100 },
+};

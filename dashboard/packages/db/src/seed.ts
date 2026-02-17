@@ -10,7 +10,7 @@ config({ path: resolve(__dirname, "../../../.env") });
 async function seed() {
   const { db } = await import("./client.js");
   const { scannerDefinitions } = await import("./schema/index.js");
-  const { DEFAULT_SCANNERS } = await import("@og/shared");
+  const { DEFAULT_SCANNERS, DEFAULT_TENANT_ID } = await import("@og/shared");
   const { getDialect } = await import("./dialect.js");
   const { eq } = await import("drizzle-orm");
 
@@ -25,6 +25,7 @@ async function seed() {
       description: scanner.description,
       isEnabled: true,
       isDefault: true,
+      tenantId: DEFAULT_TENANT_ID,
     };
 
     try {

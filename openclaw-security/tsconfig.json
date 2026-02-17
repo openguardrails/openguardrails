@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022"],
+    "types": ["node"],
+    "outDir": "./dist",
+    "rootDir": ".",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "resolveJsonModule": true
+  },
+  "include": [
+    "./index.ts",
+    "./gateway-manager.ts",
+    "./agent/**/*.ts",
+    "./memory/**/*.ts",
+    "./platform-client/**/*.ts",
+    "./dashboard/**/*.ts"
+  ],
+  "exclude": ["node_modules", "dist", "openclaw", "dashboard/public"]
+}

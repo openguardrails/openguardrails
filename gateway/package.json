@@ -1,0 +1,55 @@
+{
+  "name": "@openguardrails/gateway",
+  "version": "1.0.0",
+  "description": "AI Security Gateway — secure proxy for LLM APIs with PII sanitization, credential detection, and content security",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "og-gateway": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx test/sanitizer.test.ts"
+  },
+  "keywords": [
+    "ai-security",
+    "ai-gateway",
+    "llm-proxy",
+    "pii-sanitization",
+    "credential-detection",
+    "openguardrails",
+    "anthropic",
+    "openai",
+    "gemini"
+  ],
+  "author": "OpenGuardrails",
+  "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/openguardrails/openguardrails.git",
+    "directory": "gateway"
+  },
+  "bugs": {
+    "url": "https://github.com/openguardrails/openguardrails/issues"
+  },
+  "homepage": "https://github.com/openguardrails/openguardrails/tree/main/gateway#readme",
+  "files": [
+    "dist/",
+    "src/"
+  ],
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

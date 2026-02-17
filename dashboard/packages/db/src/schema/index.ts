@@ -16,3 +16,5 @@ export const scannerDefinitions = mod.scannerDefinitions;
 export const policies = mod.policies;
 export const usageLogs = mod.usageLogs;
 export const detectionResults = mod.detectionResults;
+export const toolCallObservations = mod.toolCallObservations;
+export const agentCapabilities = mod.agentCapabilities;

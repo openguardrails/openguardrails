@@ -23,6 +23,7 @@ export const agents = pgTable(
   "agents",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: varchar("tenant_id", { length: 64 }).notNull().default("default"),
     name: varchar("name", { length: 255 }).notNull(),
     description: text("description"),
     provider: varchar("provider", { length: 50 }).notNull().default("custom"),
@@ -34,6 +35,7 @@ export const agents = pgTable(
   },
   (table) => ({
     statusIdx: index("idx_agents_status").on(table.status),
+    tenantIdIdx: index("idx_agents_tenant_id").on(table.tenantId),
   })
 );
 
@@ -42,6 +44,7 @@ export const scannerDefinitions = pgTable(
   "scanner_definitions",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: varchar("tenant_id", { length: 64 }).notNull().default("default"),
     scannerId: varchar("scanner_id", { length: 10 }).notNull(),
     name: varchar("name", { length: 255 }).notNull(),
     description: text("description").notNull(),
@@ -51,27 +54,36 @@ export const scannerDefinitions = pgTable(
   },
   (table) => ({
     scannerIdIdx: index("idx_scanner_defs_scanner_id").on(table.scannerId),
+    tenantIdIdx: index("idx_scanner_defs_tenant_id").on(table.tenantId),
   })
 );
 
 // ─── Policies ───────────────────────────────────────────────────
-export const policies = pgTable("policies", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  name: varchar("name", { length: 255 }).notNull(),
-  description: text("description"),
-  scannerIds: jsonb("scanner_ids").notNull().default([]),
-  action: varchar("action", { length: 50 }).notNull().default("log"),
-  sensitivityThreshold: real("sensitivity_threshold").notNull().default(0.5),
-  isEnabled: boolean("is_enabled").notNull().default(true),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const policies = pgTable(
+  "policies",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: varchar("tenant_id", { length: 64 }).notNull().default("default"),
+    name: varchar("name", { length: 255 }).notNull(),
+    description: text("description"),
+    scannerIds: jsonb("scanner_ids").notNull().default([]),
+    action: varchar("action", { length: 50 }).notNull().default("log"),
+    sensitivityThreshold: real("sensitivity_threshold").notNull().default(0.5),
+    isEnabled: boolean("is_enabled").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    tenantIdIdx: index("idx_policies_tenant_id").on(table.tenantId),
+  })
+);
 
 // ─── Usage Logs ─────────────────────────────────────────────────
 export const usageLogs = pgTable(
   "usage_logs",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: varchar("tenant_id", { length: 64 }).notNull().default("default"),
     agentId: uuid("agent_id"),
     endpoint: varchar("endpoint", { length: 255 }).notNull(),
     statusCode: integer("status_code").notNull(),
@@ -84,6 +96,7 @@ export const usageLogs = pgTable(
   (table) => ({
     agentIdIdx: index("idx_usage_logs_agent_id").on(table.agentId),
     createdAtIdx: index("idx_usage_logs_created_at").on(table.createdAt),
+    tenantIdIdx: index("idx_usage_logs_tenant_id").on(table.tenantId),
   })
 );
 
@@ -92,6 +105,7 @@ export const detectionResults = pgTable(
   "detection_results",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: varchar("tenant_id", { length: 64 }).notNull().default("default"),
     agentId: uuid("agent_id"),
     safe: boolean("safe").notNull(),
     categories: jsonb("categories").notNull().default([]),
@@ -104,5 +118,58 @@ export const detectionResults = pgTable(
   (table) => ({
     agentIdIdx: index("idx_detection_results_agent_id").on(table.agentId),
     createdAtIdx: index("idx_detection_results_created_at").on(table.createdAt),
+    tenantIdIdx: index("idx_detection_results_tenant_id").on(table.tenantId),
+  })
+);
+
+// ─── Tool Call Observations ─────────────────────────────────────
+export const toolCallObservations = pgTable(
+  "tool_call_observations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: varchar("tenant_id", { length: 64 }).notNull().default("default"),
+    agentId: uuid("agent_id").notNull(),
+    sessionKey: varchar("session_key", { length: 255 }),
+    toolName: varchar("tool_name", { length: 255 }).notNull(),
+    category: varchar("category", { length: 64 }),
+    accessPattern: varchar("access_pattern", { length: 32 }),
+    paramsJson: jsonb("params_json"),
+    phase: varchar("phase", { length: 16 }).notNull(),
+    resultJson: jsonb("result_json"),
+    error: text("error"),
+    durationMs: integer("duration_ms"),
+    blocked: boolean("blocked").notNull().default(false),
+    blockReason: text("block_reason"),
+    timestamp: timestamp("timestamp", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    agentIdIdx: index("idx_tool_obs_agent_id").on(table.agentId),
+    toolNameIdx: index("idx_tool_obs_tool_name").on(table.toolName),
+    timestampIdx: index("idx_tool_obs_timestamp").on(table.timestamp),
+    tenantIdIdx: index("idx_tool_obs_tenant_id").on(table.tenantId),
+  })
+);
+
+// ─── Agent Capabilities ────────────────────────────────────────
+export const agentCapabilities = pgTable(
+  "agent_capabilities",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: varchar("tenant_id", { length: 64 }).notNull().default("default"),
+    agentId: uuid("agent_id").notNull(),
+    toolName: varchar("tool_name", { length: 255 }).notNull(),
+    category: varchar("category", { length: 64 }),
+    accessPattern: varchar("access_pattern", { length: 32 }),
+    targetsJson: jsonb("targets_json").notNull().default([]),
+    callCount: integer("call_count").notNull().default(0),
+    errorCount: integer("error_count").notNull().default(0),
+    firstSeen: timestamp("first_seen", { withTimezone: true }).notNull().defaultNow(),
+    lastSeen: timestamp("last_seen", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    agentIdIdx: index("idx_agent_caps_agent_id").on(table.agentId),
+    toolNameIdx: index("idx_agent_caps_tool_name").on(table.toolName),
+    tenantIdIdx: index("idx_agent_caps_tenant_id").on(table.tenantId),
+    uniqueAgentTool: index("idx_agent_caps_unique").on(table.tenantId, table.agentId, table.toolName),
   })
 );

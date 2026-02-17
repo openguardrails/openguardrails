@@ -5,9 +5,9 @@ Guard Agent for AI Agents. Open source (Apache 2.0).
 ## Repository Layout
 
 ```
+gateway/            # AI Security Gateway (@openguardrails/gateway)
 dashboard/          # Management dashboard (pnpm + Turborepo monorepo)
-integrations/       # Client plugins
-  openclaw-plugin/  # OpenClaw plugin with local PII gateway
+openclaw-security/  # OpenClaw security plugin with guard agent and monitoring
 ```
 
 ## dashboard
@@ -29,9 +29,24 @@ pnpm dev
 
 Database: SQLite at `dashboard/data/openguardrails.db` by default. Set `DATABASE_URL` for PG/MySQL.
 
-## integrations/openclaw-plugin
+## gateway
 
-OpenClaw plugin (@openguardrails/moltguard). Local PII sanitization gateway on port 8900, monitoring dashboard on port 8901.
+AI Security Gateway (@openguardrails/gateway). Secure proxy for LLM API calls — sanitizes PII, credentials, and sensitive data before sending to providers, restores in responses. Zero npm dependencies.
+
+Supports Anthropic, OpenAI (+ compatible: Kimi, DeepSeek), and Gemini.
+
+```bash
+cd gateway
+npm run dev          # Start on port 8900
+npm run typecheck    # Type-check
+npm run test         # Run sanitizer tests
+```
+
+Config: `~/.openguardrails/gateway.json` or environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GATEWAY_PORT`).
+
+## openclaw-security
+
+OpenClaw plugin (@openguardrails/openguardrails). Guard agent for prompt injection detection, monitoring dashboard on port 8901. Uses `gateway/` for AI Security Gateway.
 
 ## Conventions
 

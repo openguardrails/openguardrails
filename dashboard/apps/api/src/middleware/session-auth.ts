@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import { db, settingsQueries } from "@og/db";
-import { SESSION_COOKIE_NAME, SESSION_TOKEN_PREFIX } from "@og/shared";
+import { SESSION_COOKIE_NAME, SESSION_TOKEN_PREFIX, DEFAULT_TENANT_ID } from "@og/shared";
 import { generateSessionToken } from "@og/shared";
 
 const settings = settingsQueries(db);
@@ -35,6 +35,8 @@ export async function sessionAuth(req: Request, res: Response, next: NextFunctio
     res.status(401).json({ success: false, error: "Invalid session token" });
     return;
   }
+
+  res.locals.tenantId = DEFAULT_TENANT_ID;
 
   next();
 }

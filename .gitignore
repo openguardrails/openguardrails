@@ -71,3 +71,7 @@ data/
 #*.json
 *.xlsx
 tests
+docs/
+openclaw_dir/
+openclaw/
+dashboard/.turbo

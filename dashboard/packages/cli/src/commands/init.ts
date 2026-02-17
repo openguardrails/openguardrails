@@ -27,16 +27,16 @@ export async function initCommand(options: { ogCoreKey?: string }) {
   // 4. Run migrations + seed
   console.log("\nSetting up database...");
   try {
-    const { runMigrations } = await import("@og/db");
-    await runMigrations();
+    const dbModule: any = await import("@og/db");
+    await dbModule.runMigrations();
     console.log("Migrations complete.");
   } catch (err) {
     console.log("Migrations skipped (will run on first start).");
   }
 
   try {
-    const { seed } = await import("@og/db");
-    await seed();
+    const dbModule2: any = await import("@og/db");
+    await dbModule2.seed();
     console.log("Default scanners seeded.");
   } catch (err) {
     console.log("Seed skipped (will run on first start).");

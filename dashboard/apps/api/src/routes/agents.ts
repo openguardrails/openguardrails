@@ -9,7 +9,8 @@ export const agentsRouter = Router();
 // GET /api/agents
 agentsRouter.get("/", async (_req, res, next) => {
   try {
-    const data = await agents.findAll();
+    const tenantId = res.locals.tenantId as string;
+    const data = await agents.findAll(tenantId);
     res.json({ success: true, data });
   } catch (err) {
     next(err);
@@ -19,13 +20,14 @@ agentsRouter.get("/", async (_req, res, next) => {
 // POST /api/agents
 agentsRouter.post("/", async (req, res, next) => {
   try {
+    const tenantId = res.locals.tenantId as string;
     const { name, description, provider, metadata } = req.body;
     if (!name) {
       res.status(400).json({ success: false, error: "name is required" });
       return;
     }
 
-    const currentCount = await agents.countAll();
+    const currentCount = await agents.countAll(tenantId);
     if (currentCount >= MAX_AGENTS) {
       res.status(403).json({
         success: false,
@@ -39,6 +41,7 @@ agentsRouter.post("/", async (req, res, next) => {
       description: description || null,
       provider: provider || "custom",
       metadata: metadata || {},
+      tenantId,
     });
 
     res.status(201).json({ success: true, data: agent });
@@ -50,6 +53,7 @@ agentsRouter.post("/", async (req, res, next) => {
 // PUT /api/agents/:id
 agentsRouter.put("/:id", async (req, res, next) => {
   try {
+    const tenantId = res.locals.tenantId as string;
     const { name, description, provider, status, metadata } = req.body;
     const agent = await agents.update(req.params.id as string, {
       ...(name && { name }),
@@ -57,7 +61,7 @@ agentsRouter.put("/:id", async (req, res, next) => {
       ...(provider && { provider }),
       ...(status && { status }),
       ...(metadata && { metadata }),
-    });
+    }, tenantId);
 
     if (!agent) {
       res.status(404).json({ success: false, error: "Agent not found" });
@@ -73,7 +77,8 @@ agentsRouter.put("/:id", async (req, res, next) => {
 // DELETE /api/agents/:id
 agentsRouter.delete("/:id", async (req, res, next) => {
   try {
-    await agents.delete(req.params.id as string);
+    const tenantId = res.locals.tenantId as string;
+    await agents.delete(req.params.id as string, tenantId);
     res.json({ success: true });
   } catch (err) {
     next(err);
@@ -83,7 +88,8 @@ agentsRouter.delete("/:id", async (req, res, next) => {
 // POST /api/agents/:id/heartbeat
 agentsRouter.post("/:id/heartbeat", async (req, res, next) => {
   try {
-    await agents.heartbeat(req.params.id as string);
+    const tenantId = res.locals.tenantId as string;
+    await agents.heartbeat(req.params.id as string, tenantId);
     res.json({ success: true });
   } catch (err) {
     next(err);

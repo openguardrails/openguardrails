@@ -8,7 +8,8 @@ export const scannersRouter = Router();
 // GET /api/scanners
 scannersRouter.get("/", async (_req, res, next) => {
   try {
-    const data = await scanners.getAll();
+    const tenantId = res.locals.tenantId as string;
+    const data = await scanners.getAll(tenantId);
     res.json({ success: true, data });
   } catch (err) {
     next(err);
@@ -18,6 +19,7 @@ scannersRouter.get("/", async (_req, res, next) => {
 // PUT /api/scanners
 scannersRouter.put("/", async (req, res, next) => {
   try {
+    const tenantId = res.locals.tenantId as string;
     const updates = req.body as Array<{
       scannerId: string;
       name: string;
@@ -36,10 +38,11 @@ scannersRouter.put("/", async (req, res, next) => {
         name: update.name,
         description: update.description,
         isEnabled: update.isEnabled,
+        tenantId,
       });
     }
 
-    const data = await scanners.getAll();
+    const data = await scanners.getAll(tenantId);
     res.json({ success: true, data });
   } catch (err) {
     next(err);

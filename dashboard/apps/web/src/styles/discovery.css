@@ -1,0 +1,1126 @@
+/* ===========================================
+   Discovery — Agent Cards
+   =========================================== */
+
+.agents-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+}
+
+.agent-card {
+  border: 1px solid var(--border);
+  background: var(--card);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  cursor: pointer;
+  transition:
+    border-color var(--duration-normal) var(--ease-out),
+    box-shadow var(--duration-normal) var(--ease-out),
+    transform var(--duration-normal) var(--ease-out);
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 1px 0 var(--card-highlight);
+  animation: rise 0.35s var(--ease-out) backwards;
+  text-decoration: none;
+  color: inherit;
+  display: block;
+}
+
+.agent-card:hover {
+  border-color: var(--accent);
+  box-shadow:
+    var(--shadow-md),
+    inset 0 1px 0 var(--card-highlight);
+  transform: translateY(-2px);
+  text-decoration: none;
+}
+
+.agent-card__header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.agent-card__avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--accent-subtle);
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.agent-card__avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+}
+
+.agent-card__info {
+  min-width: 0;
+}
+
+.agent-card__name {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-strong);
+}
+
+.agent-card__creature {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.agent-card__model {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.agent-card__channels {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.agent-card__owner {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.channel-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border);
+  background: var(--secondary);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.agent-card__skills {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.skill-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border);
+  background: var(--secondary);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.skill-pill.overflow {
+  color: var(--muted);
+  border-style: dashed;
+}
+
+.agent-card__footer {
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ===========================================
+   Discovery — Agent Profile (Waterfall)
+   =========================================== */
+
+.profile-waterfall {
+  display: grid;
+  gap: 20px;
+  max-width: 800px;
+  animation: rise 0.35s var(--ease-out) backwards;
+}
+
+/* Hero banner */
+.profile-hero {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  border-radius: var(--radius-lg);
+  padding: 28px 24px;
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 1px 0 var(--card-highlight);
+}
+
+.profile-hero__avatar {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: var(--accent-subtle);
+  display: grid;
+  place-items: center;
+  font-size: 32px;
+  flex-shrink: 0;
+  border: 3px solid var(--accent);
+  overflow: hidden;
+}
+
+.profile-hero__avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+}
+
+.profile-hero__info {
+  min-width: 0;
+}
+
+.profile-hero__name {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  color: var(--text-strong);
+  margin: 0;
+}
+
+.profile-hero__creature {
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 500;
+  margin-top: 4px;
+}
+
+.profile-hero__vibe {
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 4px;
+  font-style: italic;
+}
+
+.profile-hero__model {
+  margin-top: 10px;
+  color: var(--muted);
+}
+
+.profile-hero__owner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.profile-hero__owner-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.profile-hero__owner-name {
+  font-weight: 500;
+  color: var(--text-strong);
+}
+
+.profile-hero__owner-tz {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border);
+  background: var(--secondary);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.profile-hero__channels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.profile-card__path {
+  margin-top: 16px;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  background: var(--secondary);
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  word-break: break-all;
+  text-align: left;
+}
+
+/* Profile sections */
+.profile-section {
+  border: 1px solid var(--border);
+  background: var(--card);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 1px 0 var(--card-highlight);
+}
+
+.profile-section__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-strong);
+  margin-bottom: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.profile-section__grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+}
+
+.profile-section__pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.profile-section__list {
+  display: grid;
+  gap: 8px;
+}
+
+.profile-section__list-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--secondary);
+  font-size: 13px;
+}
+
+.profile-section__list-item .mono {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* LLM Summary */
+.profile-summary__content {
+  margin-top: 12px;
+  padding: 16px;
+  border-radius: var(--radius-md);
+  border: 1px dashed var(--border-strong);
+  background: var(--secondary);
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--text);
+  white-space: pre-wrap;
+}
+
+.profile-summary__content.loading {
+  background: linear-gradient(90deg, var(--secondary) 25%, var(--bg-hover) 50%, var(--secondary) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  min-height: 80px;
+}
+
+.profile-summary__empty {
+  text-align: center;
+  padding: 24px;
+  color: var(--muted);
+}
+
+/* Profile back link */
+.profile-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  margin-bottom: 8px;
+  transition: color var(--duration-fast) ease;
+}
+
+.profile-back:hover {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+/* ===========================================
+   Discovery — Identities
+   =========================================== */
+
+.identity-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+}
+
+.identity-card {
+  border: 1px solid var(--border);
+  background: var(--card);
+  border-radius: var(--radius-lg);
+  padding: 0;
+  overflow: hidden;
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 1px 0 var(--card-highlight);
+  animation: rise 0.35s var(--ease-out) backwards;
+  transition:
+    border-color var(--duration-normal) var(--ease-out),
+    box-shadow var(--duration-normal) var(--ease-out);
+}
+
+.identity-card:hover {
+  border-color: var(--border-strong);
+  box-shadow:
+    var(--shadow-md),
+    inset 0 1px 0 var(--card-highlight);
+}
+
+.identity-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 16px 20px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+  transition: background var(--duration-fast) ease;
+}
+
+.identity-card__header:hover {
+  background: var(--bg-hover);
+}
+
+.identity-card__title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.identity-card__name {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-strong);
+}
+
+.identity-card__category {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.identity-card__chevron {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.identity-card__stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  padding: 0 20px 14px;
+}
+
+.identity-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.identity-stat__label {
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.identity-stat__value {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.identity-card__pills {
+  padding: 0 20px 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.identity-card__targets {
+  padding: 0 20px 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.identity-card__detail {
+  border-top: 1px solid var(--border);
+  padding: 16px 20px;
+  display: grid;
+  gap: 16px;
+  animation: rise 0.2s var(--ease-out);
+}
+
+.identity-detail__section {
+  display: grid;
+  gap: 8px;
+}
+
+.identity-detail__heading {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.identity-detail__agents {
+  display: grid;
+  gap: 6px;
+}
+
+.identity-agent-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--secondary);
+  font-size: 13px;
+}
+
+.identity-agent-row__avatar {
+  font-size: 16px;
+}
+
+.identity-agent-row__name {
+  font-weight: 500;
+}
+
+.identity-detail__tools {
+  display: grid;
+  gap: 4px;
+}
+
+.identity-tool-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--secondary);
+  font-size: 12px;
+}
+
+.identity-tool-row__count {
+  margin-left: auto;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+/* ===========================================
+   Discovery — Capabilities Table
+   =========================================== */
+
+.cap-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 1px 0 var(--card-highlight);
+  animation: rise 0.35s var(--ease-out) backwards;
+}
+
+.profile-section .cap-table-wrap {
+  border: none;
+  box-shadow: none;
+  animation: none;
+  border-radius: 0;
+}
+
+.cap-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.cap-th {
+  padding: 10px 14px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition: color var(--duration-fast) ease;
+}
+
+.cap-th:hover {
+  color: var(--text-strong);
+}
+
+.cap-row {
+  transition: background var(--duration-fast) ease;
+}
+
+.cap-row:hover {
+  background: var(--bg-hover);
+}
+
+.cap-td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.cap-td--num {
+  text-align: right;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.cap-td--date {
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.cap-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.cap-targets {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* ===========================================
+   Access Pattern Pills
+   =========================================== */
+
+.access-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.access-pill.read {
+  color: var(--info);
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+}
+
+.access-pill.write {
+  color: var(--warn);
+  background: var(--warn-subtle);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+
+.access-pill.admin {
+  color: var(--danger);
+  background: var(--danger-subtle);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+.access-pill.unknown {
+  color: var(--muted);
+  background: var(--secondary);
+  border: 1px solid var(--border);
+}
+
+/* ===========================================
+   Anomaly Badge
+   =========================================== */
+
+.anomaly-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+  animation: pulse-subtle 2s ease-in-out infinite;
+}
+
+/* ===========================================
+   Agent Profile — Tab Bar
+   =========================================== */
+
+.profile-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--card);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  overflow: hidden;
+}
+
+.profile-tab {
+  flex: 1;
+  padding: 12px 20px;
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition:
+    color var(--duration-fast) ease,
+    border-color var(--duration-fast) ease,
+    background var(--duration-fast) ease;
+  text-align: center;
+  letter-spacing: 0.02em;
+}
+
+.profile-tab:hover {
+  color: var(--text-strong);
+  background: var(--bg-hover);
+}
+
+.profile-tab--active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+/* ===========================================
+   Agent Profile — Sub-tab Toggle (Pill)
+   =========================================== */
+
+.profile-subtab-toggle {
+  display: inline-flex;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border);
+  background: var(--secondary);
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+
+.profile-subtab {
+  padding: 6px 16px;
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  transition:
+    color var(--duration-fast) ease,
+    background var(--duration-fast) ease;
+}
+
+.profile-subtab:hover {
+  color: var(--text-strong);
+}
+
+.profile-subtab--active {
+  background: var(--accent);
+  color: var(--text-on-accent, #fff);
+  border-radius: var(--radius-full);
+}
+
+/* ===========================================
+   Agent Profile — Cover Banner
+   =========================================== */
+
+.profile-hero-cover {
+  height: 48px;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  background: linear-gradient(135deg, var(--accent-subtle) 0%, var(--bg-elevated, var(--card)) 100%);
+  margin-bottom: -12px;
+}
+
+/* ===========================================
+   Agent Profile — Tab Content
+   =========================================== */
+
+.profile-tab-content {
+  display: grid;
+  gap: 16px;
+}
+
+.profile-view,
+.tasks-view,
+.identities-view {
+  display: grid;
+  gap: 16px;
+}
+
+/* ===========================================
+   Agent Profile — Persona (LinkedIn-style)
+   =========================================== */
+
+.persona-about {
+  /* inherits profile-section */
+}
+
+.persona-headline {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-strong);
+  line-height: 1.4;
+  margin-bottom: 16px;
+}
+
+.persona-section {
+  margin-top: 14px;
+}
+
+.persona-section__label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.persona-traits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.persona-trait-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 12px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border);
+  background: var(--secondary);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.persona-boundaries {
+  margin: 0;
+  padding-left: 20px;
+  list-style: disc;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text);
+}
+
+.persona-boundaries li {
+  margin-bottom: 4px;
+}
+
+/* ===========================================
+   Agent Profile — Skills Grid
+   =========================================== */
+
+.skill-category {
+  margin-bottom: 16px;
+}
+
+.skill-category:last-child {
+  margin-bottom: 0;
+}
+
+.skill-category__label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.skill-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.skill-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border);
+  background: var(--secondary);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text);
+  transition:
+    border-color var(--duration-fast) ease,
+    background var(--duration-fast) ease;
+  cursor: default;
+}
+
+.skill-card:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+}
+
+.skill-card--workspace {
+  background: var(--accent-subtle);
+  border-color: var(--accent);
+}
+
+.skill-card__emoji {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.skill-card__name {
+  white-space: nowrap;
+}
+
+.skill-card__badge {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  padding: 1px 5px;
+  border-radius: var(--radius-full);
+  background: rgba(var(--accent-rgb, 99, 102, 241), 0.1);
+}
+
+.profile-section__count {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+  margin-left: 8px;
+}
+
+.profile-section__subtitle {
+  font-size: 11px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--muted);
+  margin-left: 10px;
+}
+
+/* ===========================================
+   Agent Profile — Possessed Ability
+   =========================================== */
+
+.possessed-subsection {
+  margin-top: 16px;
+}
+
+.possessed-subsection__label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-strong);
+  margin-bottom: 10px;
+}
+
+.possessed-hierarchy-hint {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+  margin-bottom: 12px;
+  letter-spacing: 0.02em;
+}
+
+/* ===========================================
+   Tooltip (data-tip)
+   =========================================== */
+
+[data-tip] {
+  position: relative;
+}
+
+[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  background: var(--text-strong);
+  color: var(--bg, #fff);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  white-space: normal;
+  max-width: 300px;
+  width: max-content;
+  text-transform: none;
+  letter-spacing: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--duration-fast) ease;
+  z-index: 100;
+  box-shadow: var(--shadow-md);
+}
+
+[data-tip]:hover::after {
+  opacity: 1;
+}
+
+/* Arrow */
+[data-tip]::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 3px);
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: var(--text-strong);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--duration-fast) ease;
+  z-index: 100;
+}
+
+[data-tip]:hover::before {
+  opacity: 1;
+}
+
+/* Hide empty tooltips */
+[data-tip=""]::after,
+[data-tip=""]::before {
+  display: none;
+}
+
+/* ===========================================
+   Agent Profile — Raw File Viewer
+   =========================================== */
+
+.raw-files-list {
+  display: grid;
+  gap: 8px;
+}
+
+.raw-file-viewer {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.raw-file-viewer__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 10px 14px;
+  border: none;
+  background: var(--secondary);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-strong);
+  text-align: left;
+  transition: background var(--duration-fast) ease;
+}
+
+.raw-file-viewer__header:hover {
+  background: var(--bg-hover);
+}
+
+.raw-file-viewer__chevron {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.raw-file-viewer__content {
+  max-height: 400px;
+  overflow-y: auto;
+  padding: 14px;
+  background: var(--card);
+  border-top: 1px solid var(--border);
+}
+
+.raw-file-viewer__content pre {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ===========================================
+   Responsive
+   =========================================== */
+
+@media (max-width: 900px) {
+  .agents-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .identity-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .identity-card__stats {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+
+  .profile-hero {
+    flex-direction: column;
+    text-align: center;
+  }
+
+  .profile-tabs {
+    overflow-x: auto;
+  }
+
+  .profile-tab {
+    white-space: nowrap;
+    padding: 10px 14px;
+    font-size: 12px;
+  }
+}

@@ -1,3 +1,6 @@
+// ─── Tenant ─────────────────────────────────────────────────────
+export const DEFAULT_TENANT_ID = "default";
+
 // ─── Dashboard Limits ───────────────────────────────────────────
 export const MAX_AGENTS = 10;
 

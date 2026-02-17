@@ -24,6 +24,8 @@ export const detectionRouter = Router();
  */
 detectionRouter.post("/", async (req, res, next) => {
   try {
+    const tenantId = res.locals.tenantId as string;
+
     // 1. Check core key
     const coreKey = await settings.get("og_core_key");
     if (!coreKey) {
@@ -35,8 +37,8 @@ detectionRouter.post("/", async (req, res, next) => {
     }
 
     // 2. Get scanner config
-    const allScanners = await scanners.getAll();
-    const coreScanners: CoreScannerDef[] = allScanners.map((s) => ({
+    const allScanners = await scanners.getAll(tenantId);
+    const coreScanners: CoreScannerDef[] = allScanners.map((s: { scannerId: string; name: string; description: string; isEnabled: boolean }) => ({
       scannerId: s.scannerId,
       name: s.name,
       description: s.description,
@@ -56,7 +58,7 @@ detectionRouter.post("/", async (req, res, next) => {
     // 4. Evaluate policies
     let policyAction: string | null = null;
     if (!coreResult.safe) {
-      const enabledPolicies = await policies.getEnabled();
+      const enabledPolicies = await policies.getEnabled(tenantId);
       for (const policy of enabledPolicies) {
         const policyScannerIds = policy.scannerIds as string[];
         const matchesCategory = coreResult.categories.some((c: string) => policyScannerIds.includes(c));
@@ -76,6 +78,7 @@ detectionRouter.post("/", async (req, res, next) => {
       categories: coreResult.categories,
       latencyMs: coreResult.latency_ms,
       requestId: coreResult.request_id,
+      tenantId,
     });
 
     await detectionResults.create({
@@ -86,6 +89,7 @@ detectionRouter.post("/", async (req, res, next) => {
       findings: coreResult.findings,
       latencyMs: coreResult.latency_ms,
       requestId: coreResult.request_id,
+      tenantId,
     });
 
     // 6. Return response with policy action

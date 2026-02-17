@@ -8,11 +8,12 @@ export const usageRouter = Router();
 // GET /api/usage/summary
 usageRouter.get("/summary", async (req, res, next) => {
   try {
+    const tenantId = res.locals.tenantId as string;
     // Default to last 30 days
     const end = new Date();
     const start = new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
 
-    const stats = await usage.summary(start.toISOString(), end.toISOString());
+    const stats = await usage.summary(start.toISOString(), end.toISOString(), tenantId);
 
     res.json({
       success: true,
@@ -32,10 +33,11 @@ usageRouter.get("/summary", async (req, res, next) => {
 // GET /api/usage/daily
 usageRouter.get("/daily", async (req, res, next) => {
   try {
+    const tenantId = res.locals.tenantId as string;
     const end = new Date();
     const start = new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
 
-    const data = await usage.daily(start.toISOString(), end.toISOString());
+    const data = await usage.daily(start.toISOString(), end.toISOString(), tenantId);
     res.json({ success: true, data });
   } catch (err) {
     next(err);
