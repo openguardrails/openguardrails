@@ -150,9 +150,9 @@ export const toolCallObservations = pgTable(
   })
 );
 
-// ─── Agent Capabilities ────────────────────────────────────────
-export const agentCapabilities = pgTable(
-  "agent_capabilities",
+// ─── Agent Permissions ────────────────────────────────────────
+export const agentPermissions = pgTable(
+  "agent_permissions",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     tenantId: varchar("tenant_id", { length: 64 }).notNull().default("default"),
@@ -167,9 +167,9 @@ export const agentCapabilities = pgTable(
     lastSeen: timestamp("last_seen", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
-    agentIdIdx: index("idx_agent_caps_agent_id").on(table.agentId),
-    toolNameIdx: index("idx_agent_caps_tool_name").on(table.toolName),
-    tenantIdIdx: index("idx_agent_caps_tenant_id").on(table.tenantId),
-    uniqueAgentTool: index("idx_agent_caps_unique").on(table.tenantId, table.agentId, table.toolName),
+    agentIdIdx: index("idx_agent_perms_agent_id").on(table.agentId),
+    toolNameIdx: index("idx_agent_perms_tool_name").on(table.toolName),
+    tenantIdIdx: index("idx_agent_perms_tenant_id").on(table.tenantId),
+    uniqueAgentTool: index("idx_agent_perms_unique").on(table.tenantId, table.agentId, table.toolName),
   })
 );

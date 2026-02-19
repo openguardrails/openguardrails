@@ -19,7 +19,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "AI Agents", to: "/discovery/agents", icon: <Bot size={16} /> },
       { label: "Identities", to: "/discovery/identities", icon: <Fingerprint size={16} /> },
-      { label: "Capabilities", to: "/discovery/capabilities", icon: <Zap size={16} /> },
+      { label: "Permissions", to: "/discovery/permissions", icon: <Zap size={16} /> },
     ],
   },
   {

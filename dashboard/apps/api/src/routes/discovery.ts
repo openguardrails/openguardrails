@@ -2,6 +2,9 @@ import { Router } from "express";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { scanAgents, getAgent, getAgentProfile } from "../services/discovery.js";
+import { db, agentQueries } from "@og/db";
+
+const agents = agentQueries(db);
 
 export const discoveryRouter = Router();
 
@@ -64,14 +67,30 @@ discoveryRouter.get("/agents/:id/avatar", (req, res, next) => {
 });
 
 // GET /api/discovery/agents/:id/profile — enriched profile for detail page
-discoveryRouter.get("/agents/:id/profile", (req, res, next) => {
+discoveryRouter.get("/agents/:id/profile", async (req, res, next) => {
   try {
     const profile = getAgentProfile(req.params.id);
     if (!profile) {
       res.status(404).json({ success: false, error: "Agent not found" });
       return;
     }
-    res.json({ success: true, data: profile });
+    // Look up registered agent to get the UUID used in observations.
+    // The openclaw-security plugin stores the OpenClaw agent ID (e.g. "main")
+    // in metadata.openclawId during registration. Match on that first,
+    // then fall back to name match.
+    let registeredAgentId: string | null = null;
+    try {
+      const allRegistered = await agents.findAll();
+      const discoveryId = req.params.id;
+      const match = allRegistered.find((a: { metadata: unknown }) => {
+        const meta = a.metadata as Record<string, unknown> | null;
+        return meta?.openclawId === discoveryId;
+      }) ?? allRegistered.find((a: { name: string }) => a.name === profile.name);
+      registeredAgentId = match?.id ?? null;
+    } catch {
+      // DB lookup failed — continue without it
+    }
+    res.json({ success: true, data: { ...profile, registeredAgentId } });
   } catch (err) {
     next(err);
   }

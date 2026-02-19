@@ -19,7 +19,7 @@ CREATE INDEX `idx_tool_obs_agent_id` ON `tool_call_observations` (`agent_id`);--
 CREATE INDEX `idx_tool_obs_tool_name` ON `tool_call_observations` (`tool_name`);--> statement-breakpoint
 CREATE INDEX `idx_tool_obs_timestamp` ON `tool_call_observations` (`timestamp`);--> statement-breakpoint
 CREATE INDEX `idx_tool_obs_tenant_id` ON `tool_call_observations` (`tenant_id`);--> statement-breakpoint
-CREATE TABLE `agent_capabilities` (
+CREATE TABLE `agent_permissions` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text DEFAULT 'default' NOT NULL,
 	`agent_id` text NOT NULL,
@@ -32,7 +32,7 @@ CREATE TABLE `agent_capabilities` (
 	`first_seen` text NOT NULL,
 	`last_seen` text NOT NULL
 );--> statement-breakpoint
-CREATE INDEX `idx_agent_caps_agent_id` ON `agent_capabilities` (`agent_id`);--> statement-breakpoint
-CREATE INDEX `idx_agent_caps_tool_name` ON `agent_capabilities` (`tool_name`);--> statement-breakpoint
-CREATE INDEX `idx_agent_caps_tenant_id` ON `agent_capabilities` (`tenant_id`);--> statement-breakpoint
-CREATE INDEX `idx_agent_caps_unique` ON `agent_capabilities` (`tenant_id`, `agent_id`, `tool_name`);
+CREATE INDEX `idx_agent_perms_agent_id` ON `agent_permissions` (`agent_id`);--> statement-breakpoint
+CREATE INDEX `idx_agent_perms_tool_name` ON `agent_permissions` (`tool_name`);--> statement-breakpoint
+CREATE INDEX `idx_agent_perms_tenant_id` ON `agent_permissions` (`tenant_id`);--> statement-breakpoint
+CREATE INDEX `idx_agent_perms_unique` ON `agent_permissions` (`tenant_id`, `agent_id`, `tool_name`);

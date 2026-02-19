@@ -139,9 +139,9 @@ export const toolCallObservations = sqliteTable(
   })
 );
 
-// ─── Agent Capabilities ────────────────────────────────────────
-export const agentCapabilities = sqliteTable(
-  "agent_capabilities",
+// ─── Agent Permissions ────────────────────────────────────────
+export const agentPermissions = sqliteTable(
+  "agent_permissions",
   {
     id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
     tenantId: text("tenant_id").notNull().default("default"),
@@ -156,9 +156,9 @@ export const agentCapabilities = sqliteTable(
     lastSeen: text("last_seen").notNull().$defaultFn(() => new Date().toISOString()),
   },
   (table) => ({
-    agentIdIdx: index("idx_agent_caps_agent_id").on(table.agentId),
-    toolNameIdx: index("idx_agent_caps_tool_name").on(table.toolName),
-    tenantIdIdx: index("idx_agent_caps_tenant_id").on(table.tenantId),
-    uniqueAgentTool: index("idx_agent_caps_unique").on(table.tenantId, table.agentId, table.toolName),
+    agentIdIdx: index("idx_agent_perms_agent_id").on(table.agentId),
+    toolNameIdx: index("idx_agent_perms_tool_name").on(table.toolName),
+    tenantIdIdx: index("idx_agent_perms_tenant_id").on(table.tenantId),
+    uniqueAgentTool: index("idx_agent_perms_unique").on(table.tenantId, table.agentId, table.toolName),
   })
 );

@@ -149,9 +149,9 @@ export const toolCallObservations = mysqlTable(
   })
 );
 
-// ─── Agent Capabilities ────────────────────────────────────────
-export const agentCapabilities = mysqlTable(
-  "agent_capabilities",
+// ─── Agent Permissions ────────────────────────────────────────
+export const agentPermissions = mysqlTable(
+  "agent_permissions",
   {
     id: varchar("id", { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
     tenantId: varchar("tenant_id", { length: 64 }).notNull().default("default"),
@@ -166,9 +166,9 @@ export const agentCapabilities = mysqlTable(
     lastSeen: datetime("last_seen").notNull().$defaultFn(() => new Date()),
   },
   (table) => ({
-    agentIdIdx: index("idx_agent_caps_agent_id").on(table.agentId),
-    toolNameIdx: index("idx_agent_caps_tool_name").on(table.toolName),
-    tenantIdIdx: index("idx_agent_caps_tenant_id").on(table.tenantId),
-    uniqueAgentTool: index("idx_agent_caps_unique").on(table.tenantId, table.agentId, table.toolName),
+    agentIdIdx: index("idx_agent_perms_agent_id").on(table.agentId),
+    toolNameIdx: index("idx_agent_perms_tool_name").on(table.toolName),
+    tenantIdIdx: index("idx_agent_perms_tenant_id").on(table.tenantId),
+    uniqueAgentTool: index("idx_agent_perms_unique").on(table.tenantId, table.agentId, table.toolName),
   })
 );

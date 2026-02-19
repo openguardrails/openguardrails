@@ -56,7 +56,7 @@ export type ToolCallObservationRequest = {
   blockReason?: string;
 };
 
-export type AgentCapability = {
+export type AgentPermission = {
   id: string;
   agentId: string;
   toolName: string;

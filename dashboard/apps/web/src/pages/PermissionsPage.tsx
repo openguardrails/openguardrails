@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { api, type AgentCapability, type DiscoveredAgent } from "../lib/api";
+import { api, type AgentPermission, type AgentLookup, buildAgentMap } from "../lib/api";
 
 type SortField = "toolName" | "category" | "callCount" | "errorRate" | "lastSeen" | "firstSeen";
 type SortDir = "asc" | "desc";
@@ -24,9 +24,9 @@ function formatDate(iso: string): string {
   });
 }
 
-export function CapabilitiesPage() {
-  const [capabilities, setCapabilities] = useState<AgentCapability[]>([]);
-  const [agents, setAgents] = useState<DiscoveredAgent[]>([]);
+export function PermissionsPage() {
+  const [permissions, setPermissions] = useState<AgentPermission[]>([]);
+  const [agentMap, setAgentMap] = useState<Map<string, AgentLookup>>(new Map());
   const [anomalyIds, setAnomalyIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -35,20 +35,20 @@ export function CapabilitiesPage() {
 
   useEffect(() => {
     Promise.all([
-      api.getAllCapabilities(),
+      api.getAllPermissions(),
       api.listDiscoveryAgents(),
+      api.listAgents(),
       api.getAnomalies(),
-    ]).then(([capRes, agentRes, anomRes]) => {
-      if (capRes.success) setCapabilities(capRes.data);
-      if (agentRes.success) setAgents(agentRes.data);
+    ]).then(([permRes, discoveryRes, registeredRes, anomRes]) => {
+      if (permRes.success) setPermissions(permRes.data);
+      const discovery = discoveryRes.success ? discoveryRes.data : [];
+      const registered = registeredRes.success ? registeredRes.data : [];
+      setAgentMap(buildAgentMap(discovery, registered));
       if (anomRes.success) {
         setAnomalyIds(new Set(anomRes.data.map((a) => a.id)));
       }
-      setLoading(false);
-    });
+    }).catch(() => {}).finally(() => setLoading(false));
   }, []);
-
-  const agentMap = new Map(agents.map((a) => [a.id, a]));
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -65,7 +65,7 @@ export function CapabilitiesPage() {
   };
 
   const filtered = useMemo(() => {
-    let items = capabilities;
+    let items = permissions;
     if (search) {
       const q = search.toLowerCase();
       items = items.filter(
@@ -73,7 +73,7 @@ export function CapabilitiesPage() {
           c.toolName.toLowerCase().includes(q) ||
           (c.category || "").toLowerCase().includes(q) ||
           (c.accessPattern || "").toLowerCase().includes(q) ||
-          (agentMap.get(c.agentId)?.name || "").toLowerCase().includes(q),
+          (agentMap.get(c.agentId)?.name || c.agentId).toLowerCase().includes(q),
       );
     }
     return [...items].sort((a, b) => {
@@ -98,15 +98,15 @@ export function CapabilitiesPage() {
           return 0;
       }
     });
-  }, [capabilities, search, sortField, sortDir, agentMap]);
+  }, [permissions, search, sortField, sortDir, agentMap]);
 
-  const uniqueTools = new Set(capabilities.map((c) => c.toolName)).size;
+  const uniqueTools = new Set(permissions.map((c) => c.toolName)).size;
 
   return (
     <>
       <div className="content-header">
         <div>
-          <h1 className="page-title">Capabilities</h1>
+          <h1 className="page-title">Permissions</h1>
           <p className="page-sub">
             All observed tool actions across your agents
           </p>
@@ -129,17 +129,17 @@ export function CapabilitiesPage() {
           </span>
         </div>
         <div className="pill">
-          <span>{capabilities.length} entr{capabilities.length !== 1 ? "ies" : "y"}</span>
+          <span>{permissions.length} entr{permissions.length !== 1 ? "ies" : "y"}</span>
         </div>
       </div>
 
       {loading ? (
         <div className="card">
-          <div className="card-sub">Loading capability data...</div>
+          <div className="card-sub">Loading permission data...</div>
         </div>
       ) : filtered.length === 0 ? (
         <div className="card">
-          <div className="card-title">No capabilities observed</div>
+          <div className="card-title">No permissions observed</div>
           <div className="card-sub">
             {search
               ? "Try a different search term"
@@ -147,78 +147,78 @@ export function CapabilitiesPage() {
           </div>
         </div>
       ) : (
-        <div className="cap-table-wrap">
-          <table className="cap-table">
+        <div className="perm-table-wrap">
+          <table className="perm-table">
             <thead>
               <tr>
                 <th />
-                <th className="cap-th" onClick={() => handleSort("toolName")}>
+                <th className="perm-th" onClick={() => handleSort("toolName")}>
                   Tool{sortIndicator("toolName")}
                 </th>
-                <th className="cap-th" onClick={() => handleSort("category")}>
+                <th className="perm-th" onClick={() => handleSort("category")}>
                   Category{sortIndicator("category")}
                 </th>
-                <th className="cap-th">Access</th>
-                <th className="cap-th">Agent</th>
-                <th className="cap-th" onClick={() => handleSort("callCount")}>
+                <th className="perm-th">Access</th>
+                <th className="perm-th">Agent</th>
+                <th className="perm-th" onClick={() => handleSort("callCount")}>
                   Calls{sortIndicator("callCount")}
                 </th>
-                <th className="cap-th" onClick={() => handleSort("errorRate")}>
+                <th className="perm-th" onClick={() => handleSort("errorRate")}>
                   Errors{sortIndicator("errorRate")}
                 </th>
-                <th className="cap-th" onClick={() => handleSort("firstSeen")}>
+                <th className="perm-th" onClick={() => handleSort("firstSeen")}>
                   First seen{sortIndicator("firstSeen")}
                 </th>
-                <th className="cap-th" onClick={() => handleSort("lastSeen")}>
+                <th className="perm-th" onClick={() => handleSort("lastSeen")}>
                   Last seen{sortIndicator("lastSeen")}
                 </th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((cap) => {
-                const agent = agentMap.get(cap.agentId);
-                const isAnomaly = anomalyIds.has(cap.id);
+              {filtered.map((perm) => {
+                const agentInfo = agentMap.get(perm.agentId);
+                const isAnomaly = anomalyIds.has(perm.id);
                 const errorRate =
-                  cap.callCount > 0
-                    ? Math.round((cap.errorCount / cap.callCount) * 100)
+                  perm.callCount > 0
+                    ? Math.round((perm.errorCount / perm.callCount) * 100)
                     : 0;
                 return (
-                  <tr key={cap.id} className="cap-row">
-                    <td className="cap-td" style={{ width: 28 }}>
+                  <tr key={perm.id} className="perm-row">
+                    <td className="perm-td" style={{ width: 28 }}>
                       {isAnomaly && <span className="anomaly-dot" title="First-seen tool" />}
                     </td>
-                    <td className="cap-td">
-                      <span className="mono">{cap.toolName}</span>
+                    <td className="perm-td">
+                      <span className="mono">{perm.toolName}</span>
                     </td>
-                    <td className="cap-td">
-                      <span className="chip">{cap.category || "unknown"}</span>
+                    <td className="perm-td">
+                      <span className="chip">{perm.category || "unknown"}</span>
                     </td>
-                    <td className="cap-td">
-                      <span className={`access-pill ${cap.accessPattern}`}>
-                        {cap.accessPattern || "unknown"}
+                    <td className="perm-td">
+                      <span className={`access-pill ${perm.accessPattern}`}>
+                        {perm.accessPattern || "unknown"}
                       </span>
                     </td>
-                    <td className="cap-td">
-                      <span className="cap-agent">
-                        <span>{agent?.emoji || "\uD83E\uDD16"}</span>
-                        <span>{agent?.name || cap.agentId}</span>
+                    <td className="perm-td">
+                      <span className="perm-agent">
+                        <span>{agentInfo?.emoji || "\uD83E\uDD16"}</span>
+                        <span>{agentInfo?.name || perm.agentId}</span>
                       </span>
                     </td>
-                    <td className="cap-td cap-td--num">{cap.callCount}</td>
-                    <td className="cap-td cap-td--num">
-                      {cap.errorCount > 0 ? (
+                    <td className="perm-td perm-td--num">{perm.callCount}</td>
+                    <td className="perm-td perm-td--num">
+                      {perm.errorCount > 0 ? (
                         <span style={{ color: "var(--danger)" }}>
-                          {cap.errorCount} ({errorRate}%)
+                          {perm.errorCount} ({errorRate}%)
                         </span>
                       ) : (
                         <span style={{ color: "var(--muted)" }}>0</span>
                       )}
                     </td>
-                    <td className="cap-td cap-td--date">
-                      {formatDate(cap.firstSeen)}
+                    <td className="perm-td perm-td--date">
+                      {formatDate(perm.firstSeen)}
                     </td>
-                    <td className="cap-td cap-td--date">
-                      {formatTime(cap.lastSeen)}
+                    <td className="perm-td perm-td--date">
+                      {formatTime(perm.lastSeen)}
                     </td>
                   </tr>
                 );

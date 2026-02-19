@@ -5,7 +5,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { AgentsPage } from "./pages/AgentsPage";
 import { AgentProfilePage } from "./pages/AgentProfilePage";
 import { IdentitiesPage } from "./pages/IdentitiesPage";
-import { CapabilitiesPage } from "./pages/CapabilitiesPage";
+import { PermissionsPage } from "./pages/PermissionsPage";
 import { PlaceholderPage } from "./pages/PlaceholderPage";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -31,7 +31,7 @@ export default function App() {
         <Route path="discovery/agents" element={<AgentsPage />} />
         <Route path="discovery/agents/:id" element={<AgentProfilePage />} />
         <Route path="discovery/identities" element={<IdentitiesPage />} />
-        <Route path="discovery/capabilities" element={<CapabilitiesPage />} />
+        <Route path="discovery/permissions" element={<PermissionsPage />} />
         <Route path="secure" element={<PlaceholderPage section="Secure" />} />
         <Route path="deploy" element={<PlaceholderPage section="Deploy" />} />
         <Route path="governance" element={<PlaceholderPage section="Governance" />} />

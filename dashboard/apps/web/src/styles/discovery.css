@@ -555,10 +555,256 @@
 }
 
 /* ===========================================
-   Discovery — Capabilities Table
+   Discovery — Identity Graph (React Flow)
    =========================================== */
 
-.cap-table-wrap {
+.ig-wrap {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--secondary);
+  height: 480px;
+  overflow: hidden;
+}
+
+.ig-wrap--empty {
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: none;
+  height: auto;
+}
+
+/* React Flow overrides */
+.ig-flow .react-flow__pane {
+  cursor: grab;
+}
+
+.ig-flow .react-flow__edge-path {
+  stroke: var(--border, #334155) !important;
+  stroke-width: 1.5;
+}
+
+.ig-handle {
+  opacity: 0 !important;
+  width: 1px !important;
+  height: 1px !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+}
+
+/* ---- Card Nodes (shared) ---- */
+
+.ig-node {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 14px 12px;
+  border-radius: 12px;
+  background: var(--card, #1e293b);
+  border: 1.5px solid var(--border, #334155);
+  box-shadow:
+    0 2px 6px rgba(0,0,0,0.25),
+    0 0 0 1px rgba(255,255,255,0.03) inset;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+  color: var(--text, #cbd5e1);
+  font-size: 12px;
+}
+
+.ig-node:hover {
+  border-color: var(--accent, #6366f1);
+  box-shadow:
+    0 4px 14px rgba(0,0,0,0.35),
+    0 0 0 1px rgba(255,255,255,0.04) inset;
+}
+
+/* ---- Tag labels (top of card) ---- */
+
+.ig-tag {
+  display: inline-block;
+  align-self: flex-start;
+  padding: 1px 8px;
+  border-radius: 20px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  line-height: 1.5;
+  border: 1px solid;
+  margin-bottom: 2px;
+}
+
+.ig-tag--agent {
+  background: rgba(99,102,241,0.15);
+  color: rgb(129,140,248);
+  border-color: rgba(99,102,241,0.3);
+}
+
+.ig-tag--owner {
+  background: rgba(148,163,184,0.12);
+  color: var(--muted, #94a3b8);
+  border-color: rgba(148,163,184,0.25);
+}
+
+.ig-tag--system {
+  background: rgba(59,130,246,0.12);
+  color: rgb(96,165,250);
+  border-color: rgba(59,130,246,0.25);
+}
+
+.ig-tag--tool {
+  background: rgba(148,163,184,0.08);
+  color: var(--muted, #94a3b8);
+  border-color: rgba(148,163,184,0.2);
+}
+
+/* ---- Row layout inside cards ---- */
+
+.ig-node__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ig-node__body {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.ig-node__name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-strong, #e2e8f0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+
+.ig-node__sub {
+  font-size: 10px;
+  color: var(--muted, #64748b);
+  margin-top: 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- Icons ---- */
+
+.ig-node__icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.ig-node__icon--agent {
+  background: var(--accent-subtle, rgba(99,102,241,0.12));
+  border: 1.5px solid var(--accent, #6366f1);
+}
+
+.ig-node__icon--owner {
+  background: rgba(148,163,184,0.1);
+  border: 1.5px solid var(--border, #334155);
+}
+
+.ig-node__icon--system {
+  background: rgba(59,130,246,0.1);
+  border: 1.5px solid rgba(59,130,246,0.25);
+}
+
+.ig-node__icon--tool {
+  width: 24px;
+  height: 24px;
+  font-size: 12px;
+  background: rgba(148,163,184,0.08);
+  border: 1px solid var(--border, #334155);
+}
+
+/* ---- Footer row ---- */
+
+.ig-node__footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+/* ---- Risk badges ---- */
+
+.ig-risk {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  flex-shrink: 0;
+}
+
+.ig-risk--high {
+  background: rgba(239,68,68,0.15);
+  color: rgb(248,113,113);
+}
+
+.ig-risk--medium {
+  background: rgba(245,158,11,0.15);
+  color: rgb(251,191,36);
+}
+
+.ig-risk--low {
+  background: rgba(34,197,94,0.15);
+  color: rgb(74,222,128);
+}
+
+/* ---- Type-specific sizing ---- */
+
+.ig-node--agent {
+  width: 220px;
+  border-color: var(--accent, #6366f1);
+  border-width: 2px;
+}
+
+.ig-node--owner {
+  width: 170px;
+}
+
+.ig-node--system {
+  width: 190px;
+}
+
+.ig-node--tool {
+  width: 155px;
+  padding: 8px 10px 8px;
+  gap: 4px;
+}
+
+.ig-node--overflow {
+  border-style: dashed;
+  opacity: 0.65;
+}
+
+.ig-node__tool-name {
+  font-size: 10px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+
+/* ===========================================
+   Discovery — Permissions Table
+   =========================================== */
+
+.perm-table-wrap {
   overflow-x: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -569,20 +815,20 @@
   animation: rise 0.35s var(--ease-out) backwards;
 }
 
-.profile-section .cap-table-wrap {
+.profile-section .perm-table-wrap {
   border: none;
   box-shadow: none;
   animation: none;
   border-radius: 0;
 }
 
-.cap-table {
+.perm-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
 }
 
-.cap-th {
+.perm-th {
   padding: 10px 14px;
   text-align: left;
   font-size: 11px;
@@ -597,44 +843,44 @@
   transition: color var(--duration-fast) ease;
 }
 
-.cap-th:hover {
+.perm-th:hover {
   color: var(--text-strong);
 }
 
-.cap-row {
+.perm-row {
   transition: background var(--duration-fast) ease;
 }
 
-.cap-row:hover {
+.perm-row:hover {
   background: var(--bg-hover);
 }
 
-.cap-td {
+.perm-td {
   padding: 10px 14px;
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
 }
 
-.cap-td--num {
+.perm-td--num {
   text-align: right;
   font-family: var(--mono);
   font-size: 12px;
 }
 
-.cap-td--date {
+.perm-td--date {
   white-space: nowrap;
   font-size: 12px;
   color: var(--muted);
 }
 
-.cap-agent {
+.perm-agent {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   font-size: 12px;
 }
 
-.cap-targets {
+.perm-targets {
   display: inline-flex;
   flex-wrap: wrap;
   gap: 4px;
@@ -774,12 +1020,7 @@
    Agent Profile — Cover Banner
    =========================================== */
 
-.profile-hero-cover {
-  height: 48px;
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-  background: linear-gradient(135deg, var(--accent-subtle) 0%, var(--bg-elevated, var(--card)) 100%);
-  margin-bottom: -12px;
-}
+/* profile-hero-cover removed — was creating blank space at top */
 
 /* ===========================================
    Agent Profile — Tab Content

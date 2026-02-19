@@ -43,7 +43,14 @@ async function handleRequest(
     return;
   }
 
-  // Only allow POST
+  // Health check (allow GET)
+  if (url === "/health") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ status: "ok", version: "1.0.0" }));
+    return;
+  }
+
+  // Only allow POST for API endpoints
   if (method !== "POST") {
     res.writeHead(405, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "Method not allowed" }));
@@ -68,10 +75,6 @@ async function handleRequest(
         res.writeHead(404, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Model name required" }));
       }
-    } else if (url === "/health") {
-      // Health check endpoint
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ status: "ok", version: "1.0.0" }));
     } else {
       // Unknown endpoint
       res.writeHead(404, { "Content-Type": "application/json" });

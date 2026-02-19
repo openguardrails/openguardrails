@@ -58,11 +58,11 @@ observationsRouter.get("/", async (req, res, next) => {
   }
 });
 
-// GET /api/observations/capabilities — All capabilities across all agents
-observationsRouter.get("/capabilities", async (req, res, next) => {
+// GET /api/observations/permissions — All permissions across all agents
+observationsRouter.get("/permissions", async (req, res, next) => {
   try {
     const tenantId = res.locals.tenantId as string;
-    const data = await observations.getAllCapabilities(tenantId);
+    const data = await observations.getAllPermissions(tenantId);
     res.json({ success: true, data });
   } catch (err) {
     next(err);
@@ -93,13 +93,13 @@ observationsRouter.get("/summary", async (req, res, next) => {
   }
 });
 
-// GET /api/agents/:id/capabilities — Capability profile for an agent
-observationsRouter.get("/agents/:id/capabilities", async (req, res, next) => {
+// GET /api/agents/:id/permissions — Permission profile for an agent
+observationsRouter.get("/agents/:id/permissions", async (req, res, next) => {
   try {
     const tenantId = res.locals.tenantId as string;
     const agentId = req.params.id as string;
 
-    const data = await observations.getCapabilities(agentId, tenantId);
+    const data = await observations.getPermissions(agentId, tenantId);
     res.json({ success: true, data });
   } catch (err) {
     next(err);

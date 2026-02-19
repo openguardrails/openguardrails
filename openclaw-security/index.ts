@@ -42,6 +42,10 @@ let globalGatewayManager: GatewayManager | null = null;
 let globalDashboardManager: DashboardManager | null = null;
 let globalDashboardClient: DashboardClient | null = null;
 let globalAnalysisStore: AnalysisStore | null = null;
+/** Maps OpenClaw agent ID (e.g. "main", "杰诺斯") → dashboard UUID */
+let globalAgentIdMap: Map<string, string> = new Map();
+/** Dashboard UUID of the default/main agent, used as fallback when ctx.agentId is unavailable */
+let globalDefaultAgentId: string | null = null;
 
 function getOrCreateStore(config: ReturnType<typeof resolveConfig>): AnalysisStore {
   if (!globalAnalysisStore) {
@@ -70,6 +74,18 @@ const openClawGuardPlugin = {
       log.debug?.("Plugin disabled via config");
       return;
     }
+
+    // DEBUG: dump everything we receive at registration
+    log.info(`━━━ PLUGIN REGISTER: dumping api context ━━━`);
+    log.info(`  api.id: ${api.id}`);
+    log.info(`  api.name: ${api.name}`);
+    log.info(`  api.version: ${api.version}`);
+    log.info(`  api.source: ${api.source}`);
+    log.info(`  api.pluginConfig: ${JSON.stringify(api.pluginConfig, null, 2)}`);
+    log.info(`  api.config.agents: ${JSON.stringify(api.config?.agents, null, 2)?.slice(0, 1000)}`);
+    log.info(`  api.runtime: ${JSON.stringify((api as any).runtime, null, 2)?.slice(0, 500)}`);
+    log.info(`  resolved config: ${JSON.stringify(config, null, 2)}`);
+    log.info(`━━━ END PLUGIN REGISTER DUMP ━━━`);
 
     // ─── Service initialization ─────────────────────────────────────
 
@@ -103,16 +119,61 @@ const openClawGuardPlugin = {
                 sessionToken,
               });
 
-              globalDashboardClient.registerAgent({
-                name: config.agentName,
-                provider: "openclaw",
-                metadata: { embedded: true },
-              }).then(() => {
-                log.info(`Agent "${config.agentName}" registered with dashboard`);
-                globalDashboardClient!.startHeartbeat();
-              }).catch((err) => {
-                log.warn(`Failed to register agent: ${err}`);
-              });
+              // Register each OpenClaw agent individually with the dashboard.
+              // Register the default/main agent LAST so that
+              // DashboardClient.agentId (set as side-effect) points to it.
+              const openclawAgents = api.config?.agents?.list;
+
+              if (openclawAgents && openclawAgents.length > 0) {
+                // Sort: default/main agent last so its UUID becomes the client fallback
+                const sorted = [...openclawAgents].sort((a, b) => {
+                  const aIsDefault = a.default || a.id === "main" ? 1 : 0;
+                  const bIsDefault = b.default || b.id === "main" ? 1 : 0;
+                  return aIsDefault - bIsDefault;
+                });
+
+                // Register sequentially to ensure deterministic order
+                (async () => {
+                  for (const agent of sorted) {
+                    const agentName = agent.identity?.name || agent.name || agent.id;
+                    const agentEmoji = agent.identity?.emoji;
+                    try {
+                      const res = await globalDashboardClient!.registerAgent({
+                        name: agentName,
+                        provider: "openclaw",
+                        metadata: { embedded: true, openclawId: agent.id, ...(agentEmoji ? { emoji: agentEmoji } : {}) },
+                      });
+                      if (res.success && res.data?.id) {
+                        globalAgentIdMap.set(agent.id, res.data.id);
+                        if (agent.default || agent.id === "main") {
+                          globalDefaultAgentId = res.data.id;
+                        }
+                        log.info(`Agent "${agentName}" (${agent.id}) registered with dashboard`);
+                      }
+                    } catch (err) {
+                      log.warn(`Failed to register agent "${agentName}": ${err}`);
+                    }
+                  }
+                  // If no explicit default, use the first agent
+                  if (!globalDefaultAgentId && globalAgentIdMap.size > 0) {
+                    globalDefaultAgentId = globalAgentIdMap.values().next().value!;
+                  }
+                  globalDashboardClient!.startHeartbeat();
+                })();
+              } else {
+                // Fallback: register with configured name
+                globalDashboardClient!.registerAgent({
+                  name: config.agentName,
+                  provider: "openclaw",
+                  metadata: { embedded: true },
+                }).then(() => {
+                  globalDefaultAgentId = globalDashboardClient!.agentId || null;
+                  log.info(`Agent "${config.agentName}" registered with dashboard`);
+                  globalDashboardClient!.startHeartbeat();
+                }).catch((err) => {
+                  log.warn(`Failed to register agent: ${err}`);
+                });
+              }
 
               log.info(`Dashboard: ${dashboardUrl}?session=${sessionToken}`);
             } else {
@@ -148,12 +209,147 @@ const openClawGuardPlugin = {
     // ─── Start services immediately on plugin load ───────────────────
     ensureInitialized();
 
+    // ─── DEBUG: Dump all hook data ─────────────────────────────────
+    // Temporary verbose logging to see every piece of data we can get.
+
+    function truncate(val: unknown, maxLen = 500): string {
+      const s = JSON.stringify(val, null, 2);
+      if (s && s.length > maxLen) return s.slice(0, maxLen) + `... [truncated, total ${s.length} chars]`;
+      return s ?? "undefined";
+    }
+
+    // --- before_agent_start ---
+    api.on("before_agent_start", async (event, ctx) => {
+      log.info(`━━━ HOOK: before_agent_start ━━━`);
+      log.info(`  event.prompt: ${truncate(event.prompt, 300)}`);
+      log.info(`  event.messages: ${truncate(event.messages, 500)}`);
+      log.info(`  ctx.agentId: ${ctx.agentId}`);
+      log.info(`  ctx.sessionKey: ${ctx.sessionKey}`);
+      log.info(`  ctx.workspaceDir: ${(ctx as any).workspaceDir}`);
+      log.info(`  ctx.messageProvider: ${(ctx as any).messageProvider}`);
+      log.info(`  ctx (full): ${truncate(ctx)}`);
+    });
+
+    // --- agent_end ---
+    api.on("agent_end", async (event, ctx) => {
+      log.info(`━━━ HOOK: agent_end ━━━`);
+      log.info(`  event.success: ${event.success}`);
+      log.info(`  event.error: ${event.error}`);
+      log.info(`  event.durationMs: ${event.durationMs}`);
+      log.info(`  event.messages count: ${Array.isArray(event.messages) ? event.messages.length : "N/A"}`);
+      log.info(`  ctx.agentId: ${ctx.agentId}`);
+      log.info(`  ctx.sessionKey: ${ctx.sessionKey}`);
+      log.info(`  ctx (full): ${truncate(ctx)}`);
+    });
+
+    // --- session_start ---
+    api.on("session_start", async (event, ctx) => {
+      log.info(`━━━ HOOK: session_start ━━━`);
+      log.info(`  event.sessionId: ${event.sessionId}`);
+      log.info(`  event.resumedFrom: ${(event as any).resumedFrom}`);
+      log.info(`  ctx (full): ${truncate(ctx)}`);
+    });
+
+    // --- session_end ---
+    api.on("session_end", async (event, ctx) => {
+      log.info(`━━━ HOOK: session_end ━━━`);
+      log.info(`  event.sessionId: ${event.sessionId}`);
+      log.info(`  event.messageCount: ${event.messageCount}`);
+      log.info(`  event.durationMs: ${(event as any).durationMs}`);
+      log.info(`  ctx (full): ${truncate(ctx)}`);
+    });
+
+    // --- message_received ---
+    api.on("message_received", async (event, ctx) => {
+      log.info(`━━━ HOOK: message_received ━━━`);
+      log.info(`  event.from: ${event.from}`);
+      log.info(`  event.content: ${truncate(event.content, 300)}`);
+      log.info(`  event.timestamp: ${event.timestamp}`);
+      log.info(`  event.metadata: ${truncate(event.metadata)}`);
+      log.info(`  ctx.channelId: ${ctx.channelId}`);
+      log.info(`  ctx.accountId: ${(ctx as any).accountId}`);
+      log.info(`  ctx.conversationId: ${(ctx as any).conversationId}`);
+      log.info(`  ctx (full): ${truncate(ctx)}`);
+    });
+
+    // --- message_sending ---
+    api.on("message_sending", async (event, ctx) => {
+      log.info(`━━━ HOOK: message_sending ━━━`);
+      log.info(`  event.to: ${event.to}`);
+      log.info(`  event.content: ${truncate(event.content, 300)}`);
+      log.info(`  event.metadata: ${truncate((event as any).metadata)}`);
+      log.info(`  ctx (full): ${truncate(ctx)}`);
+    });
+
+    // --- message_sent ---
+    api.on("message_sent", async (event, ctx) => {
+      log.info(`━━━ HOOK: message_sent ━━━`);
+      log.info(`  event.to: ${event.to}`);
+      log.info(`  event.content: ${truncate(event.content, 300)}`);
+      log.info(`  event.success: ${event.success}`);
+      log.info(`  event.error: ${event.error}`);
+      log.info(`  ctx (full): ${truncate(ctx)}`);
+    });
+
+    // --- before_compaction ---
+    api.on("before_compaction", async (event, ctx) => {
+      log.info(`━━━ HOOK: before_compaction ━━━`);
+      log.info(`  event.messageCount: ${event.messageCount}`);
+      log.info(`  event.tokenCount: ${(event as any).tokenCount}`);
+      log.info(`  ctx (full): ${truncate(ctx)}`);
+    });
+
+    // --- after_compaction ---
+    api.on("after_compaction", async (event, ctx) => {
+      log.info(`━━━ HOOK: after_compaction ━━━`);
+      log.info(`  event.messageCount: ${event.messageCount}`);
+      log.info(`  event.tokenCount: ${(event as any).tokenCount}`);
+      log.info(`  event.compactedCount: ${event.compactedCount}`);
+      log.info(`  ctx (full): ${truncate(ctx)}`);
+    });
+
+    // --- tool_result_persist ---
+    api.on("tool_result_persist", (event, ctx) => {
+      log.info(`━━━ HOOK: tool_result_persist ━━━`);
+      log.info(`  event.toolName: ${(event as any).toolName}`);
+      log.info(`  event.toolCallId: ${(event as any).toolCallId}`);
+      log.info(`  event.isSynthetic: ${(event as any).isSynthetic}`);
+      log.info(`  event.message: ${truncate((event as any).message, 500)}`);
+      log.info(`  ctx (full): ${truncate(ctx)}`);
+    });
+
+    // --- gateway_start ---
+    api.on("gateway_start", async (event, ctx) => {
+      log.info(`━━━ HOOK: gateway_start ━━━`);
+      log.info(`  event (full): ${truncate(event)}`);
+      log.info(`  ctx (full): ${truncate(ctx)}`);
+    });
+
+    // --- gateway_stop ---
+    api.on("gateway_stop", async (event, ctx) => {
+      log.info(`━━━ HOOK: gateway_stop ━━━`);
+      log.info(`  event (full): ${truncate(event)}`);
+      log.info(`  ctx (full): ${truncate(ctx)}`);
+    });
+
     // ─── Tool Call Observation Hooks ─────────────────────────────────
-    // Observe every tool call to build an agent capability profile.
+    // Observe every tool call to build an agent permission profile.
     // Reports to dashboard when available, falls back to local JSONL.
 
     api.on("before_tool_call", async (event, ctx) => {
-      const agentId = globalDashboardClient?.agentId || ctx.agentId || "unknown";
+      const agentId = (ctx.agentId && globalAgentIdMap.get(ctx.agentId)) || ctx.agentId || globalDefaultAgentId || globalDashboardClient?.agentId || "unknown";
+
+      // DEBUG: dump everything
+      log.info(`━━━ HOOK: before_tool_call ━━━`);
+      log.info(`  event.toolName: ${event.toolName}`);
+      log.info(`  event.params: ${truncate(event.params)}`);
+      log.info(`  ctx.agentId (raw): ${ctx.agentId}`);
+      log.info(`  ctx.sessionKey: ${ctx.sessionKey}`);
+      log.info(`  ctx.toolName: ${ctx.toolName}`);
+      log.info(`  resolved agentId: ${agentId}`);
+      log.info(`  globalAgentIdMap: ${truncate(Object.fromEntries(globalAgentIdMap))}`);
+      log.info(`  globalDefaultAgentId: ${globalDefaultAgentId}`);
+
       const observation = {
         agentId,
         sessionKey: ctx.sessionKey,
@@ -176,7 +372,20 @@ const openClawGuardPlugin = {
     }, { priority: 100 });
 
     api.on("after_tool_call", async (event, ctx) => {
-      const agentId = globalDashboardClient?.agentId || ctx.agentId || "unknown";
+      const agentId = (ctx.agentId && globalAgentIdMap.get(ctx.agentId)) || ctx.agentId || globalDefaultAgentId || globalDashboardClient?.agentId || "unknown";
+
+      // DEBUG: dump everything
+      log.info(`━━━ HOOK: after_tool_call ━━━`);
+      log.info(`  event.toolName: ${event.toolName}`);
+      log.info(`  event.params: ${truncate(event.params)}`);
+      log.info(`  event.result: ${truncate(event.result)}`);
+      log.info(`  event.error: ${event.error}`);
+      log.info(`  event.durationMs: ${event.durationMs}`);
+      log.info(`  ctx.agentId (raw): ${ctx.agentId}`);
+      log.info(`  ctx.sessionKey: ${ctx.sessionKey}`);
+      log.info(`  ctx.toolName: ${ctx.toolName}`);
+      log.info(`  resolved agentId: ${agentId}`);
+
       const observation = {
         agentId,
         sessionKey: ctx.sessionKey,
@@ -353,20 +562,14 @@ const openClawGuardPlugin = {
   },
 
   async unregister() {
-    if (globalGatewayManager) {
-      try {
-        await globalGatewayManager.stop();
-      } catch (error) {
-        console.error("[openguardrails] Failed to stop gateway during cleanup:", error);
-      }
-    }
-    if (globalDashboardManager) {
-      try {
-        await globalDashboardManager.stop();
-      } catch (error) {
-        console.error("[openguardrails] Failed to stop dashboard during cleanup:", error);
-      }
-    }
+    // Don't stop services — they run detached and survive plugin/agent restarts.
+    // Users can explicitly stop them via /og_gateway_stop or similar commands.
+    globalGatewayManager = null;
+    globalDashboardManager = null;
+    globalDashboardClient = null;
+    globalAnalysisStore = null;
+    globalAgentIdMap = new Map();
+    globalDefaultAgentId = null;
   },
 };
 

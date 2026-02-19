@@ -11,6 +11,11 @@ export function agentQueries(db: Database) {
       return result[0] ?? null;
     },
 
+    async findByName(name: string, tenantId: string = DEFAULT_TENANT_ID) {
+      const result = await db.select().from(agents).where(and(eq(agents.name, name), eq(agents.tenantId, tenantId))).limit(1);
+      return result[0] ?? null;
+    },
+
     async findAll(tenantId: string = DEFAULT_TENANT_ID) {
       return db.select().from(agents).where(eq(agents.tenantId, tenantId)).orderBy(agents.createdAt);
     },

@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
-import { api, type AgentCapability, type DiscoveredAgent } from "../lib/api";
+import { api, type AgentPermission, type AgentLookup, buildAgentMap } from "../lib/api";
 
 interface IdentityGroup {
   category: string;
-  capabilities: AgentCapability[];
+  permissions: AgentPermission[];
   agents: Set<string>;
   targets: Set<string>;
   totalCalls: number;
@@ -48,46 +48,47 @@ function formatTime(iso: string): string {
 }
 
 export function IdentitiesPage() {
-  const [capabilities, setCapabilities] = useState<AgentCapability[]>([]);
-  const [agents, setAgents] = useState<DiscoveredAgent[]>([]);
+  const [permissions, setPermissions] = useState<AgentPermission[]>([]);
+  const [agentMap, setAgentMap] = useState<Map<string, AgentLookup>>(new Map());
   const [loading, setLoading] = useState(true);
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([api.getAllCapabilities(), api.listDiscoveryAgents()]).then(
-      ([capRes, agentRes]) => {
-        if (capRes.success) setCapabilities(capRes.data);
-        if (agentRes.success) setAgents(agentRes.data);
-        setLoading(false);
-      },
-    );
+    Promise.all([
+      api.getAllPermissions(),
+      api.listDiscoveryAgents(),
+      api.listAgents(),
+    ]).then(([permRes, discoveryRes, registeredRes]) => {
+      if (permRes.success) setPermissions(permRes.data);
+      const discovery = discoveryRes.success ? discoveryRes.data : [];
+      const registered = registeredRes.success ? registeredRes.data : [];
+      setAgentMap(buildAgentMap(discovery, registered));
+    }).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
-  const agentMap = new Map(agents.map((a) => [a.id, a]));
-
-  // Group capabilities by category
+  // Group permissions by category
   const groupMap = new Map<string, IdentityGroup>();
-  for (const cap of capabilities) {
-    const cat = cap.category || "unknown";
+  for (const perm of permissions) {
+    const cat = perm.category || "unknown";
     let group = groupMap.get(cat);
     if (!group) {
       group = {
         category: cat,
-        capabilities: [],
+        permissions: [],
         agents: new Set(),
         targets: new Set(),
         totalCalls: 0,
-        lastSeen: cap.lastSeen,
+        lastSeen: perm.lastSeen,
         accessPatterns: new Set(),
       };
       groupMap.set(cat, group);
     }
-    group.capabilities.push(cap);
-    group.agents.add(cap.agentId);
-    group.totalCalls += cap.callCount;
-    if (cap.accessPattern) group.accessPatterns.add(cap.accessPattern);
-    if (cap.lastSeen > group.lastSeen) group.lastSeen = cap.lastSeen;
-    const targets = cap.targetsJson || [];
+    group.permissions.push(perm);
+    group.agents.add(perm.agentId);
+    group.totalCalls += perm.callCount;
+    if (perm.accessPattern) group.accessPatterns.add(perm.accessPattern);
+    if (perm.lastSeen > group.lastSeen) group.lastSeen = perm.lastSeen;
+    const targets = perm.targetsJson || [];
     for (const t of targets) group.targets.add(t);
   }
 
@@ -170,7 +171,7 @@ export function IdentitiesPage() {
                   <div className="identity-stat">
                     <span className="identity-stat__label">Tools</span>
                     <span className="identity-stat__value">
-                      {group.capabilities.length}
+                      {group.permissions.length}
                     </span>
                   </div>
                   <div className="identity-stat">
@@ -212,18 +213,18 @@ export function IdentitiesPage() {
                       </div>
                       <div className="identity-detail__agents">
                         {[...group.agents].map((agentId) => {
-                          const agent = agentMap.get(agentId);
+                          const agentInfo = agentMap.get(agentId);
                           return (
                             <div key={agentId} className="identity-agent-row">
                               <span className="identity-agent-row__avatar">
-                                {agent?.emoji || "\uD83E\uDD16"}
+                                {agentInfo?.emoji || "\uD83E\uDD16"}
                               </span>
                               <span className="identity-agent-row__name">
-                                {agent?.name || agentId}
+                                {agentInfo?.name || agentId}
                               </span>
                               <span className="mono" style={{ color: "var(--muted)", marginLeft: "auto" }}>
                                 {
-                                  group.capabilities.filter(
+                                  group.permissions.filter(
                                     (c) => c.agentId === agentId,
                                   ).length
                                 }{" "}
@@ -240,14 +241,14 @@ export function IdentitiesPage() {
                         Tools observed
                       </div>
                       <div className="identity-detail__tools">
-                        {group.capabilities.map((cap) => (
-                          <div key={cap.id} className="identity-tool-row">
-                            <span className="mono">{cap.toolName}</span>
-                            <span className={`access-pill ${cap.accessPattern}`}>
-                              {cap.accessPattern}
+                        {group.permissions.map((perm) => (
+                          <div key={perm.id} className="identity-tool-row">
+                            <span className="mono">{perm.toolName}</span>
+                            <span className={`access-pill ${perm.accessPattern}`}>
+                              {perm.accessPattern}
                             </span>
                             <span className="identity-tool-row__count">
-                              {cap.callCount}x
+                              {perm.callCount}x
                             </span>
                           </div>
                         ))}

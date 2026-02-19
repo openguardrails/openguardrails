@@ -2,10 +2,11 @@ import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import {
   api,
-  type AgentCapability,
+  type AgentPermission,
   type AgentProfile,
   type AgentSkill,
 } from "../lib/api";
+import { IdentityGraph } from "../components/IdentityGraph";
 
 // ---- Helpers ----
 
@@ -140,7 +141,7 @@ function groupSkillsByCategory(skills: AgentSkill[]): Record<string, AgentSkill[
 
 // ---- Tabs ----
 
-type TopTab = "profile" | "tasks" | "identities" | "capabilities";
+type TopTab = "profile" | "tasks" | "identities" | "identity-graph" | "permissions";
 
 // ---- Components ----
 
@@ -170,18 +171,29 @@ export function AgentProfilePage() {
   const [profile, setProfile] = useState<AgentProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TopTab>("profile");
-  const [capabilities, setCapabilities] = useState<AgentCapability[]>([]);
+  const [permissions, setPermissions] = useState<AgentPermission[]>([]);
 
   useEffect(() => {
     if (!id) return;
-    Promise.all([
-      api.getAgentProfile(id),
-      api.getAgentCapabilities(id),
-    ]).then(([profileRes, capRes]) => {
-      if (profileRes.success) setProfile(profileRes.data);
-      if (capRes.success) setCapabilities(capRes.data);
-      setLoading(false);
-    });
+    let cancelled = false;
+    (async () => {
+      try {
+        const profileRes = await api.getAgentProfile(id);
+        if (cancelled) return;
+        if (profileRes.success) {
+          setProfile(profileRes.data);
+          // Use registered agent UUID for permissions (observations are stored under UUID)
+          const permId = profileRes.data.registeredAgentId || id;
+          const permRes = await api.getAgentPermissions(permId);
+          if (!cancelled && permRes.success) setPermissions(permRes.data);
+        }
+      } catch {
+        // ignore
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
   }, [id]);
 
   if (loading) {
@@ -212,7 +224,8 @@ export function AgentProfilePage() {
     { key: "profile", label: "Profile" },
     { key: "tasks", label: "Bot Tasks" },
     { key: "identities", label: "Identities" },
-    { key: "capabilities", label: "Capabilities" },
+    { key: "identity-graph", label: "Identity Graph" },
+    { key: "permissions", label: "Permissions" },
   ];
 
   return (
@@ -222,8 +235,6 @@ export function AgentProfilePage() {
       </Link>
 
       <div className="profile-waterfall">
-        {/* Cover banner + Hero */}
-        <div className="profile-hero-cover" />
         <div className="profile-hero">
           <div className="profile-hero__avatar">
             {profile.avatarUrl ? (
@@ -293,11 +304,15 @@ export function AgentProfilePage() {
         )}
 
         {activeTab === "identities" && (
-          <IdentitiesView profile={profile} />
+          <IdentitiesView profile={profile} permissions={permissions} />
         )}
 
-        {activeTab === "capabilities" && (
-          <CapabilitiesView capabilities={capabilities} formatDate={formatDate} />
+        {activeTab === "identity-graph" && (
+          <IdentityGraphView profile={profile} permissions={permissions} />
+        )}
+
+        {activeTab === "permissions" && (
+          <PermissionsView permissions={permissions} formatDate={formatDate} />
         )}
       </div>
     </>
@@ -548,34 +563,178 @@ function BotTasksView({ profile }: { profile: AgentProfile }) {
 
 // ---- Identities Tab ----
 
-function IdentitiesView({ profile }: { profile: AgentProfile }) {
+function IdentitiesView({ profile, permissions }: { profile: AgentProfile; permissions: AgentPermission[] }) {
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  // Group permissions by category → systems
+  const groupMap = new Map<string, {
+    category: string;
+    perms: AgentPermission[];
+    targets: Set<string>;
+    totalCalls: number;
+    lastSeen: string;
+    accessPatterns: Set<string>;
+  }>();
+
+  for (const perm of permissions) {
+    const cat = perm.category || "unknown";
+    let group = groupMap.get(cat);
+    if (!group) {
+      group = { category: cat, perms: [], targets: new Set(), totalCalls: 0, lastSeen: perm.lastSeen, accessPatterns: new Set() };
+      groupMap.set(cat, group);
+    }
+    group.perms.push(perm);
+    group.totalCalls += perm.callCount;
+    if (perm.accessPattern) group.accessPatterns.add(perm.accessPattern);
+    if (perm.lastSeen > group.lastSeen) group.lastSeen = perm.lastSeen;
+    for (const t of (perm.targetsJson || [])) group.targets.add(t);
+  }
+
+  const groups = [...groupMap.values()].sort((a, b) => b.totalCalls - a.totalCalls);
+
+  if (groups.length === 0) {
+    return (
+      <div className="identities-view">
+        <div className="profile-section">
+          <div className="profile-section__title">Identities</div>
+          <div className="profile-summary__empty">
+            No identity data available. Tool call observations will appear here once the agent starts making API calls.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const fmtCategory = (cat: string) => {
+    const labels: Record<string, string> = {
+      github: "GitHub", slack: "Slack", gmail: "Gmail", filesystem: "Filesystem",
+      shell: "Shell", jira: "Jira", notion: "Notion", docker: "Docker",
+      postgres: "PostgreSQL", redis: "Redis", aws: "AWS", exec: "Exec",
+    };
+    return labels[cat] || cat.charAt(0).toUpperCase() + cat.slice(1);
+  };
+
+  const fmtTime = (iso: string) => {
+    const diff = Date.now() - new Date(iso).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return "Just now";
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    return `${Math.floor(hrs / 24)}d ago`;
+  };
+
   return (
     <div className="identities-view">
-      <div className="profile-section">
-        <div className="profile-section__title">Identities</div>
-        <div className="profile-summary__empty">
-          No identity data available.
-        </div>
+      <div className="identity-grid">
+        {groups.map((group) => {
+          const isExpanded = expanded === group.category;
+          return (
+            <div key={group.category} className="identity-card">
+              <button
+                className="identity-card__header"
+                onClick={() => setExpanded(isExpanded ? null : group.category)}
+              >
+                <div className="identity-card__title">
+                  <span className="identity-card__name">{fmtCategory(group.category)}</span>
+                  <span className="identity-card__category mono">{group.category}</span>
+                </div>
+                <span className="identity-card__chevron">{isExpanded ? "\u25B2" : "\u25BC"}</span>
+              </button>
+
+              <div className="identity-card__stats">
+                <div className="identity-stat">
+                  <span className="identity-stat__label">Calls</span>
+                  <span className="identity-stat__value">{group.totalCalls}</span>
+                </div>
+                <div className="identity-stat">
+                  <span className="identity-stat__label">Tools</span>
+                  <span className="identity-stat__value">{group.perms.length}</span>
+                </div>
+                <div className="identity-stat">
+                  <span className="identity-stat__label">Targets</span>
+                  <span className="identity-stat__value">{group.targets.size}</span>
+                </div>
+                <div className="identity-stat">
+                  <span className="identity-stat__label">Last seen</span>
+                  <span className="identity-stat__value">{fmtTime(group.lastSeen)}</span>
+                </div>
+              </div>
+
+              <div className="identity-card__pills">
+                {[...group.accessPatterns].map((ap) => (
+                  <span key={ap} className={`access-pill ${ap}`}>{ap}</span>
+                ))}
+              </div>
+
+              {group.targets.size > 0 && (
+                <div className="identity-card__targets">
+                  {[...group.targets].slice(0, 6).map((t) => (
+                    <span key={t} className="chip">{t}</span>
+                  ))}
+                  {group.targets.size > 6 && (
+                    <span className="chip" style={{ borderStyle: "dashed", color: "var(--muted)" }}>
+                      +{group.targets.size - 6}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {isExpanded && (
+                <div className="identity-card__detail">
+                  <div className="identity-detail__section">
+                    <div className="identity-detail__heading">Tools observed</div>
+                    <div className="identity-detail__tools">
+                      {group.perms.map((perm) => (
+                        <div key={perm.id} className="identity-tool-row">
+                          <span className="mono">{perm.toolName}</span>
+                          <span className={`access-pill ${perm.accessPattern}`}>{perm.accessPattern}</span>
+                          <span className="identity-tool-row__count">{perm.callCount}x</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-// ---- Capabilities Tab ----
+// ---- Identity Graph Tab ----
 
-function CapabilitiesView({
-  capabilities,
+function IdentityGraphView({ profile, permissions }: { profile: AgentProfile; permissions: AgentPermission[] }) {
+  return (
+    <div className="identities-view">
+      <div className="profile-section">
+        <div className="profile-section__title">
+          Identity Graph
+          <span className="profile-section__subtitle">Owner, agent, systems, and tool connections</span>
+        </div>
+        <IdentityGraph profile={profile} permissions={permissions} />
+      </div>
+    </div>
+  );
+}
+
+// ---- Permissions Tab ----
+
+function PermissionsView({
+  permissions,
   formatDate,
 }: {
-  capabilities: AgentCapability[];
+  permissions: AgentPermission[];
   formatDate: (iso: string | null) => string;
 }) {
-  if (capabilities.length === 0) {
+  if (permissions.length === 0) {
     return (
       <div className="profile-section">
-        <div className="profile-section__title">Capabilities</div>
+        <div className="profile-section__title">Permissions</div>
         <div className="profile-summary__empty">
-          No capabilities observed yet.
+          No permissions observed yet.
         </div>
       </div>
     );
@@ -584,46 +743,46 @@ function CapabilitiesView({
   return (
     <div className="profile-section">
       <div className="profile-section__title">
-        Capabilities
+        Permissions
         <span className="profile-section__subtitle">Proven — observed runtime tool usage</span>
       </div>
-      <div className="cap-table-wrap">
-        <table className="cap-table">
+      <div className="perm-table-wrap">
+        <table className="perm-table">
           <thead>
             <tr>
               <th />
-              <th className="cap-th">Tool</th>
-              <th className="cap-th">Category</th>
-              <th className="cap-th">Access</th>
-              <th className="cap-th">Calls</th>
-              <th className="cap-th">Targets</th>
-              <th className="cap-th">Last seen</th>
+              <th className="perm-th">Tool</th>
+              <th className="perm-th">Category</th>
+              <th className="perm-th">Access</th>
+              <th className="perm-th">Calls</th>
+              <th className="perm-th">Targets</th>
+              <th className="perm-th">Last seen</th>
             </tr>
           </thead>
           <tbody>
-            {capabilities.map((cap) => {
-              const isNew = cap.callCount === 1;
-              const targets = cap.targetsJson || [];
+            {permissions.map((perm) => {
+              const isNew = perm.callCount === 1;
+              const targets = perm.targetsJson || [];
               return (
-                <tr key={cap.id} className="cap-row">
-                  <td className="cap-td" style={{ width: 28 }}>
+                <tr key={perm.id} className="perm-row">
+                  <td className="perm-td" style={{ width: 28 }}>
                     {isNew && <span className="anomaly-dot" title="First-seen tool" />}
                   </td>
-                  <td className="cap-td">
-                    <span className="mono">{cap.toolName}</span>
+                  <td className="perm-td">
+                    <span className="mono">{perm.toolName}</span>
                   </td>
-                  <td className="cap-td">
-                    <span className="chip">{cap.category || "unknown"}</span>
+                  <td className="perm-td">
+                    <span className="chip">{perm.category || "unknown"}</span>
                   </td>
-                  <td className="cap-td">
-                    <span className={`access-pill ${cap.accessPattern}`}>
-                      {cap.accessPattern || "unknown"}
+                  <td className="perm-td">
+                    <span className={`access-pill ${perm.accessPattern}`}>
+                      {perm.accessPattern || "unknown"}
                     </span>
                   </td>
-                  <td className="cap-td cap-td--num">{cap.callCount}</td>
-                  <td className="cap-td">
+                  <td className="perm-td perm-td--num">{perm.callCount}</td>
+                  <td className="perm-td">
                     {targets.length > 0 ? (
-                      <span className="cap-targets">
+                      <span className="perm-targets">
                         {targets.slice(0, 3).map((t) => (
                           <span key={t} className="chip">{t}</span>
                         ))}
@@ -637,7 +796,7 @@ function CapabilitiesView({
                       <span style={{ color: "var(--muted)" }}>&mdash;</span>
                     )}
                   </td>
-                  <td className="cap-td cap-td--date">{formatDate(cap.lastSeen)}</td>
+                  <td className="perm-td perm-td--date">{formatDate(perm.lastSeen)}</td>
                 </tr>
               );
             })}

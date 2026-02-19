@@ -9,6 +9,7 @@ import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, openSync, closeSync } from "node:fs";
 import type { Logger } from "./agent/types.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -26,10 +27,19 @@ export class DashboardManager {
   private log: Logger;
   private isReady = false;
   private sessionToken: string | null = null;
+  private stateFilePath: string;
+  private logFilePath: string;
+  private adopted = false;
 
   constructor(options: DashboardOptions, logger: Logger) {
     this.port = options.port;
     this.log = logger;
+    const stateDir = join(
+      process.env.HOME || process.env.USERPROFILE || ".",
+      ".openclaw", "extensions", "openguardrails",
+    );
+    this.stateFilePath = join(stateDir, "dashboard.state.json");
+    this.logFilePath = join(stateDir, "dashboard.log");
 
     // Try to find the API entry point
     if (options.apiEntryPoint) {
@@ -62,8 +72,17 @@ export class DashboardManager {
   }
 
   async start(): Promise<void> {
-    if (this.process) {
+    if (this.process || this.adopted) {
       this.log.warn("Dashboard already running");
+      return;
+    }
+
+    // Check if an existing dashboard is already serving on the port
+    if (await this.healthCheck()) {
+      this.log.info(`Dashboard already running on port ${this.port} (adopted existing process)`);
+      this.adopted = true;
+      this.isReady = true;
+      this.loadState();
       return;
     }
 
@@ -86,6 +105,12 @@ export class DashboardManager {
         args = [this.apiEntryPoint];
       }
 
+      // Write stdout/stderr to a log file instead of pipes.
+      // Pipes break when the parent exits, causing EPIPE crashes in the child.
+      const logDir = dirname(this.logFilePath);
+      mkdirSync(logDir, { recursive: true });
+      const logFd = openSync(this.logFilePath, "w");
+
       this.process = spawn(
         runtime,
         args,
@@ -103,33 +128,13 @@ export class DashboardManager {
               ".openclaw", "extensions", "openguardrails", "openguardrails.db"
             ),
           },
-          stdio: ["ignore", "pipe", "pipe"],
+          stdio: ["ignore", logFd, logFd],
+          detached: true,
         },
       );
 
-      this.process.stdout?.on("data", (data) => {
-        const output = data.toString().trim();
-        if (output) {
-          this.log.info(`[dashboard] ${output}`);
-
-          // Capture session token from startup output
-          const tokenMatch = output.match(/Session token: (og-session-\w+)/);
-          if (tokenMatch) {
-            this.sessionToken = tokenMatch[1]!;
-          }
-
-          if (output.includes("running on port") || output.includes("OpenGuardrails API")) {
-            this.isReady = true;
-          }
-        }
-      });
-
-      this.process.stderr?.on("data", (data) => {
-        const output = data.toString().trim();
-        if (output) {
-          this.log.error(`[dashboard] ${output}`);
-        }
-      });
+      // Close the fd from parent side — child keeps its own copy
+      closeSync(logFd);
 
       this.process.on("exit", (code, signal) => {
         this.log.warn(`Dashboard process exited (code: ${code}, signal: ${signal})`);
@@ -143,9 +148,17 @@ export class DashboardManager {
         this.isReady = false;
       });
 
-      const ready = await this.waitForReady(15000);
-      if (!ready) {
-        this.log.warn("Dashboard started but ready signal not received within timeout");
+      // Allow parent to exit without waiting for this child
+      this.process.unref();
+
+      // Poll health endpoint for readiness instead of parsing stdout
+      const ready = await this.waitForHealthy(15000);
+      if (ready) {
+        // Capture session token from log file
+        this.captureSessionToken();
+        this.saveState();
+      } else {
+        this.log.warn("Dashboard started but health check not passing within timeout");
       }
     } catch (error) {
       this.log.error(`Failed to start dashboard: ${error}`);
@@ -154,34 +167,43 @@ export class DashboardManager {
   }
 
   async stop(): Promise<void> {
-    if (!this.process) {
-      return;
-    }
-
     this.log.info("Stopping dashboard...");
 
-    return new Promise((resolve) => {
-      if (!this.process) {
-        resolve();
-        return;
-      }
-
-      this.process.once("exit", () => {
-        this.log.info("Dashboard stopped");
-        this.process = null;
-        this.isReady = false;
-        resolve();
+    if (this.process) {
+      await new Promise<void>((resolve) => {
+        this.process!.once("exit", () => {
+          this.log.info("Dashboard stopped");
+          this.process = null;
+          resolve();
+        });
+        this.process!.kill("SIGTERM");
+        setTimeout(() => {
+          if (this.process) {
+            this.log.warn("Dashboard did not stop gracefully, forcing kill");
+            this.process.kill("SIGKILL");
+          }
+        }, 5000);
       });
-
-      this.process.kill("SIGTERM");
-
-      setTimeout(() => {
-        if (this.process) {
-          this.log.warn("Dashboard did not stop gracefully, forcing kill");
-          this.process.kill("SIGKILL");
+    } else {
+      // Kill by PID from state file (adopted or orphaned process)
+      const state = this.readState();
+      if (state?.pid && this.isProcessAlive(state.pid)) {
+        try {
+          process.kill(state.pid, "SIGTERM");
+          await new Promise((r) => setTimeout(r, 2000));
+          if (this.isProcessAlive(state.pid)) {
+            process.kill(state.pid, "SIGKILL");
+          }
+          this.log.info("Dashboard stopped (by PID)");
+        } catch {
+          this.log.warn("Failed to kill dashboard process by PID");
         }
-      }, 5000);
-    });
+      }
+    }
+
+    this.isReady = false;
+    this.adopted = false;
+    this.removeState();
   }
 
   async restart(): Promise<void> {
@@ -194,30 +216,97 @@ export class DashboardManager {
   }
 
   isRunning(): boolean {
-    return this.process !== null && this.isReady;
+    return (this.process !== null || this.adopted) && this.isReady;
   }
 
   getStatus(): { running: boolean; port: number; ready: boolean; sessionToken: string | null } {
     return {
-      running: this.process !== null,
+      running: this.process !== null || this.adopted,
       port: this.port,
       ready: this.isReady,
       sessionToken: this.sessionToken,
     };
   }
 
-  private waitForReady(timeoutMs: number): Promise<boolean> {
-    return new Promise((resolve) => {
-      const startTime = Date.now();
-      const checkInterval = setInterval(() => {
-        if (this.isReady) {
-          clearInterval(checkInterval);
-          resolve(true);
-        } else if (Date.now() - startTime > timeoutMs) {
-          clearInterval(checkInterval);
-          resolve(false);
-        }
-      }, 100);
-    });
+  private async waitForHealthy(timeoutMs: number): Promise<boolean> {
+    const startTime = Date.now();
+    while (Date.now() - startTime < timeoutMs) {
+      if (await this.healthCheck()) {
+        this.isReady = true;
+        return true;
+      }
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    return false;
+  }
+
+  private captureSessionToken(): void {
+    try {
+      if (!existsSync(this.logFilePath)) return;
+      const logContent = readFileSync(this.logFilePath, "utf-8");
+      const tokenMatch = logContent.match(/Session token: (og-session-\w+)/);
+      if (tokenMatch) {
+        this.sessionToken = tokenMatch[1]!;
+        this.log.info(`[dashboard] Session token captured`);
+      }
+    } catch {}
+  }
+
+  private async healthCheck(): Promise<boolean> {
+    try {
+      const http = await import("node:http");
+      return new Promise((resolve) => {
+        const req = http.get(`http://127.0.0.1:${this.port}/health`, { timeout: 2000 }, (res) => {
+          resolve(res.statusCode === 200);
+        });
+        req.on("error", () => resolve(false));
+        req.on("timeout", () => { req.destroy(); resolve(false); });
+      });
+    } catch {
+      return false;
+    }
+  }
+
+  private isProcessAlive(pid: number): boolean {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private saveState(): void {
+    try {
+      const dir = dirname(this.stateFilePath);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(this.stateFilePath, JSON.stringify({
+        pid: this.process?.pid,
+        port: this.port,
+        sessionToken: this.sessionToken,
+      }));
+    } catch {}
+  }
+
+  private readState(): { pid?: number; port?: number; sessionToken?: string } | null {
+    try {
+      if (!existsSync(this.stateFilePath)) return null;
+      return JSON.parse(readFileSync(this.stateFilePath, "utf-8"));
+    } catch {
+      return null;
+    }
+  }
+
+  private loadState(): void {
+    const state = this.readState();
+    if (state?.sessionToken) {
+      this.sessionToken = state.sessionToken;
+    }
+  }
+
+  private removeState(): void {
+    try {
+      if (existsSync(this.stateFilePath)) unlinkSync(this.stateFilePath);
+    } catch {}
   }
 }

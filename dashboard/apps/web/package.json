@@ -9,7 +9,9 @@
     "preview": "vite preview --port 3000"
   },
   "dependencies": {
+    "@dagrejs/dagre": "^2.0.4",
     "@og/shared": "workspace:*",
+    "@xyflow/react": "^12.10.0",
     "lucide-react": "^0.564.0",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",

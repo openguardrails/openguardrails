@@ -15,7 +15,7 @@ import type {
   DashboardDetectResponse,
   AgentRegisterRequest,
   ToolCallObservationRequest,
-  AgentCapability,
+  AgentPermission,
 } from "./types.js";
 
 export class DashboardClient {
@@ -144,12 +144,12 @@ export class DashboardClient {
     });
   }
 
-  /** Get observed capabilities for an agent */
-  async getCapabilities(agentId?: string): Promise<AgentCapability[]> {
+  /** Get observed permissions for an agent */
+  async getPermissions(agentId?: string): Promise<AgentPermission[]> {
     const id = agentId || this.config.agentId;
     if (!id) return [];
-    const result = await this.request<{ success: boolean; data: AgentCapability[] }>(
-      `/api/observations/agents/${id}/capabilities`,
+    const result = await this.request<{ success: boolean; data: AgentPermission[] }>(
+      `/api/observations/agents/${id}/permissions`,
     );
     return result.data ?? [];
   }
@@ -176,7 +176,7 @@ export {
   type DashboardDetectRequest,
   type DashboardDetectResponse,
   type ToolCallObservationRequest,
-  type AgentCapability,
+  type AgentPermission,
   type PlatformClientConfig,
   type PlatformDetectRequest,
   type PlatformDetectResponse,

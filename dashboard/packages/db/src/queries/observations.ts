@@ -1,6 +1,6 @@
 import { eq, and, desc, count, sql } from "drizzle-orm";
 import type { Database } from "../client.js";
-import { toolCallObservations, agentCapabilities } from "../schema/index.js";
+import { toolCallObservations, agentPermissions } from "../schema/index.js";
 import { DEFAULT_TENANT_ID } from "@og/shared";
 
 // ─── Tool name → category / access pattern inference ────────────
@@ -88,9 +88,9 @@ export function observationQueries(db: Database) {
         tenantId,
       });
 
-      // Upsert capability on "after" phase (or "before" if blocked)
+      // Upsert permission on "after" phase (or "before" if blocked)
       if (data.phase === "after" || data.blocked) {
-        await this.upsertCapability({
+        await this.upsertPermission({
           agentId: data.agentId,
           toolName: data.toolName,
           category,
@@ -103,9 +103,9 @@ export function observationQueries(db: Database) {
     },
 
     /**
-     * Upsert an agent capability entry based on observed tool call.
+     * Upsert an agent permission entry based on observed tool call.
      */
-    async upsertCapability(data: {
+    async upsertPermission(data: {
       agentId: string;
       toolName: string;
       category: string;
@@ -116,37 +116,37 @@ export function observationQueries(db: Database) {
     }) {
       const now = new Date().toISOString();
 
-      // Check if capability already exists
+      // Check if permission already exists
       const existing = await db
         .select()
-        .from(agentCapabilities)
+        .from(agentPermissions)
         .where(
           and(
-            eq(agentCapabilities.tenantId, data.tenantId),
-            eq(agentCapabilities.agentId, data.agentId),
-            eq(agentCapabilities.toolName, data.toolName),
+            eq(agentPermissions.tenantId, data.tenantId),
+            eq(agentPermissions.agentId, data.agentId),
+            eq(agentPermissions.toolName, data.toolName),
           ),
         )
         .limit(1);
 
       if (existing.length > 0) {
-        const cap = existing[0]!;
-        const targets = (cap.targetsJson as string[]) || [];
+        const perm = existing[0]!;
+        const targets = (perm.targetsJson as string[]) || [];
         const newTargets = extractTargets(data.params);
         const mergedTargets = mergeTargets(targets, newTargets);
 
         await db
-          .update(agentCapabilities)
+          .update(agentPermissions)
           .set({
-            callCount: (cap.callCount ?? 0) + 1,
-            errorCount: (cap.errorCount ?? 0) + (data.hasError ? 1 : 0),
+            callCount: (perm.callCount ?? 0) + 1,
+            errorCount: (perm.errorCount ?? 0) + (data.hasError ? 1 : 0),
             lastSeen: now,
             targetsJson: mergedTargets,
           })
-          .where(eq(agentCapabilities.id, cap.id));
+          .where(eq(agentPermissions.id, perm.id));
       } else {
         const targets = extractTargets(data.params);
-        await db.insert(agentCapabilities).values({
+        await db.insert(agentPermissions).values({
           tenantId: data.tenantId,
           agentId: data.agentId,
           toolName: data.toolName,
@@ -186,46 +186,46 @@ export function observationQueries(db: Database) {
     },
 
     /**
-     * Get the aggregated capability profile for an agent.
+     * Get the aggregated permission profile for an agent.
      */
-    async getCapabilities(agentId: string, tenantId: string = DEFAULT_TENANT_ID) {
+    async getPermissions(agentId: string, tenantId: string = DEFAULT_TENANT_ID) {
       return db
         .select()
-        .from(agentCapabilities)
+        .from(agentPermissions)
         .where(
           and(
-            eq(agentCapabilities.tenantId, tenantId),
-            eq(agentCapabilities.agentId, agentId),
+            eq(agentPermissions.tenantId, tenantId),
+            eq(agentPermissions.agentId, agentId),
           ),
         )
-        .orderBy(desc(agentCapabilities.callCount));
+        .orderBy(desc(agentPermissions.callCount));
     },
 
     /**
-     * Get capabilities for all agents (overview).
+     * Get permissions for all agents (overview).
      */
-    async getAllCapabilities(tenantId: string = DEFAULT_TENANT_ID) {
+    async getAllPermissions(tenantId: string = DEFAULT_TENANT_ID) {
       return db
         .select()
-        .from(agentCapabilities)
-        .where(eq(agentCapabilities.tenantId, tenantId))
-        .orderBy(agentCapabilities.agentId, desc(agentCapabilities.callCount));
+        .from(agentPermissions)
+        .where(eq(agentPermissions.tenantId, tenantId))
+        .orderBy(agentPermissions.agentId, desc(agentPermissions.callCount));
     },
 
     /**
-     * Find first-seen tool calls (anomalies) — capabilities with callCount = 1.
+     * Find first-seen tool calls (anomalies) — permissions with callCount = 1.
      */
     async findAnomalies(tenantId: string = DEFAULT_TENANT_ID, limit: number = 20) {
       return db
         .select()
-        .from(agentCapabilities)
+        .from(agentPermissions)
         .where(
           and(
-            eq(agentCapabilities.tenantId, tenantId),
-            eq(agentCapabilities.callCount, 1),
+            eq(agentPermissions.tenantId, tenantId),
+            eq(agentPermissions.callCount, 1),
           ),
         )
-        .orderBy(desc(agentCapabilities.firstSeen))
+        .orderBy(desc(agentPermissions.firstSeen))
         .limit(limit);
     },
 

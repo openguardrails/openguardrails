@@ -8,6 +8,7 @@ import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, openSync, closeSync } from "node:fs";
 import type { Logger } from "./agent/types.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -23,24 +24,41 @@ export class GatewayManager {
   private autoStart: boolean;
   private log: Logger;
   private isReady = false;
+  private stateFilePath: string;
+  private logFilePath: string;
+  private adopted = false;
 
   constructor(options: GatewayOptions, logger: Logger) {
     this.port = options.port;
     this.autoStart = options.autoStart;
     this.log = logger;
+    const stateDir = join(
+      process.env.HOME || process.env.USERPROFILE || ".",
+      ".openclaw", "extensions", "openguardrails",
+    );
+    this.stateFilePath = join(stateDir, "gateway.state.json");
+    this.logFilePath = join(stateDir, "gateway.log");
   }
 
   /**
    * Start the gateway process
    */
   async start(): Promise<void> {
-    if (this.process) {
+    if (this.process || this.adopted) {
       this.log.warn("Gateway already running");
       return;
     }
 
     if (!this.autoStart) {
       this.log.info("Gateway autoStart disabled, skipping");
+      return;
+    }
+
+    // Check if an existing gateway is already serving on the port
+    if (await this.healthCheck()) {
+      this.log.info(`Gateway already running on port ${this.port} (adopted existing process)`);
+      this.adopted = true;
+      this.isReady = true;
       return;
     }
 
@@ -92,6 +110,12 @@ export class GatewayManager {
         args = [gatewayPath];
       }
 
+      // Write stdout/stderr to a log file instead of pipes.
+      // Pipes break when the parent exits, causing EPIPE crashes in the child.
+      const logDir = dirname(this.stateFilePath);
+      mkdirSync(logDir, { recursive: true });
+      const logFd = openSync(this.logFilePath, "w");
+
       this.process = spawn(
         runtime,
         args,
@@ -101,30 +125,13 @@ export class GatewayManager {
             GATEWAY_PORT: String(this.port),
             GATEWAY_MODE: "embedded",
           },
-          stdio: ["ignore", "pipe", "pipe"],
+          stdio: ["ignore", logFd, logFd],
+          detached: true,
         },
       );
 
-      // Handle stdout
-      this.process.stdout?.on("data", (data) => {
-        const output = data.toString().trim();
-        if (output) {
-          this.log.info(`[gateway] ${output}`);
-
-          // Check if gateway is ready
-          if (output.includes("Ready to proxy requests")) {
-            this.isReady = true;
-          }
-        }
-      });
-
-      // Handle stderr
-      this.process.stderr?.on("data", (data) => {
-        const output = data.toString().trim();
-        if (output) {
-          this.log.error(`[gateway] ${output}`);
-        }
-      });
+      // Close the fd from parent side — child keeps its own copy
+      closeSync(logFd);
 
       // Handle process exit
       this.process.on("exit", (code, signal) => {
@@ -140,12 +147,16 @@ export class GatewayManager {
         this.isReady = false;
       });
 
-      // Wait for gateway to be ready (with timeout)
-      const ready = await this.waitForReady(10000);
+      // Allow parent to exit without waiting for this child
+      this.process.unref();
+
+      // Poll health endpoint for readiness instead of parsing stdout
+      const ready = await this.waitForHealthy(10000);
       if (ready) {
+        this.saveState();
         this.log.info(`AI Security Gateway started successfully on http://127.0.0.1:${this.port}`);
       } else {
-        this.log.warn("AI Security Gateway started but ready signal not received within timeout");
+        this.log.warn("AI Security Gateway started but health check not passing within timeout");
       }
     } catch (error) {
       this.log.error(`Failed to start gateway: ${error}`);
@@ -157,37 +168,43 @@ export class GatewayManager {
    * Stop the gateway process
    */
   async stop(): Promise<void> {
-    if (!this.process) {
-      this.log.info("Gateway not running");
-      return;
-    }
-
     this.log.info("Stopping gateway...");
 
-    return new Promise((resolve) => {
-      if (!this.process) {
-        resolve();
-        return;
-      }
-
-      this.process.once("exit", () => {
-        this.log.info("Gateway stopped");
-        this.process = null;
-        this.isReady = false;
-        resolve();
+    if (this.process) {
+      await new Promise<void>((resolve) => {
+        this.process!.once("exit", () => {
+          this.log.info("Gateway stopped");
+          this.process = null;
+          resolve();
+        });
+        this.process!.kill("SIGTERM");
+        setTimeout(() => {
+          if (this.process) {
+            this.log.warn("Gateway did not stop gracefully, forcing kill");
+            this.process.kill("SIGKILL");
+          }
+        }, 5000);
       });
-
-      // Send SIGTERM
-      this.process.kill("SIGTERM");
-
-      // Force kill after 5 seconds
-      setTimeout(() => {
-        if (this.process) {
-          this.log.warn("Gateway did not stop gracefully, forcing kill");
-          this.process.kill("SIGKILL");
+    } else {
+      // Kill by PID from state file (adopted or orphaned process)
+      const state = this.readState();
+      if (state?.pid && this.isProcessAlive(state.pid)) {
+        try {
+          process.kill(state.pid, "SIGTERM");
+          await new Promise((r) => setTimeout(r, 2000));
+          if (this.isProcessAlive(state.pid)) {
+            process.kill(state.pid, "SIGKILL");
+          }
+          this.log.info("Gateway stopped (by PID)");
+        } catch {
+          this.log.warn("Failed to kill gateway process by PID");
         }
-      }, 5000);
-    });
+      }
+    }
+
+    this.isReady = false;
+    this.adopted = false;
+    this.removeState();
   }
 
   /**
@@ -202,7 +219,7 @@ export class GatewayManager {
    * Check if gateway is running
    */
   isRunning(): boolean {
-    return this.process !== null && this.isReady;
+    return (this.process !== null || this.adopted) && this.isReady;
   }
 
   /**
@@ -210,27 +227,71 @@ export class GatewayManager {
    */
   getStatus(): { running: boolean; port: number; ready: boolean } {
     return {
-      running: this.process !== null,
+      running: this.process !== null || this.adopted,
       port: this.port,
       ready: this.isReady,
     };
   }
 
-  /**
-   * Wait for gateway to be ready
-   */
-  private waitForReady(timeoutMs: number): Promise<boolean> {
-    return new Promise((resolve) => {
-      const startTime = Date.now();
-      const checkInterval = setInterval(() => {
-        if (this.isReady) {
-          clearInterval(checkInterval);
-          resolve(true);
-        } else if (Date.now() - startTime > timeoutMs) {
-          clearInterval(checkInterval);
-          resolve(false);
-        }
-      }, 100);
-    });
+  private async waitForHealthy(timeoutMs: number): Promise<boolean> {
+    const startTime = Date.now();
+    while (Date.now() - startTime < timeoutMs) {
+      if (await this.healthCheck()) {
+        this.isReady = true;
+        return true;
+      }
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    return false;
+  }
+
+  private async healthCheck(): Promise<boolean> {
+    try {
+      const http = await import("node:http");
+      return new Promise((resolve) => {
+        const req = http.get(`http://127.0.0.1:${this.port}/health`, { timeout: 2000 }, (res) => {
+          resolve(res.statusCode === 200);
+        });
+        req.on("error", () => resolve(false));
+        req.on("timeout", () => { req.destroy(); resolve(false); });
+      });
+    } catch {
+      return false;
+    }
+  }
+
+  private isProcessAlive(pid: number): boolean {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private saveState(): void {
+    try {
+      const dir = dirname(this.stateFilePath);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(this.stateFilePath, JSON.stringify({
+        pid: this.process?.pid,
+        port: this.port,
+      }));
+    } catch {}
+  }
+
+  private readState(): { pid?: number; port?: number } | null {
+    try {
+      if (!existsSync(this.stateFilePath)) return null;
+      return JSON.parse(readFileSync(this.stateFilePath, "utf-8"));
+    } catch {
+      return null;
+    }
+  }
+
+  private removeState(): void {
+    try {
+      if (existsSync(this.stateFilePath)) unlinkSync(this.stateFilePath);
+    } catch {}
   }
 }
