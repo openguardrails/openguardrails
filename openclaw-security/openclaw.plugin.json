@@ -1,7 +1,7 @@
 {
   "id": "openguardrails",
   "name": "OpenGuardrails",
-  "description": "Local prompt sanitization and prompt injection detection.",
+  "description": "Behavioral anomaly detection for OpenClaw agents.",
   "version": "6.0.3",
   "configSchema": {
     "type": "object",
@@ -11,21 +11,9 @@
         "type": "boolean",
         "description": "Enable or disable the guard (default: true)"
       },
-      "gatewayEnabled": {
-        "type": "boolean",
-        "description": "Enable AI Security Gateway (default: true)"
-      },
-      "gatewayPort": {
-        "type": "number",
-        "description": "Port for the AI Security Gateway (default: 28900)"
-      },
-      "gatewayAutoStart": {
-        "type": "boolean",
-        "description": "Automatically start the gateway when plugin loads (default: true)"
-      },
       "blockOnRisk": {
         "type": "boolean",
-        "description": "Block tool calls when injection is detected (default: true)"
+        "description": "Block tool calls when behavioral risk is detected (default: true)"
       },
       "apiKey": {
         "type": "string",
@@ -33,44 +21,30 @@
       },
       "timeoutMs": {
         "type": "number",
-        "description": "Timeout for analysis in milliseconds (default: 60000)"
+        "description": "Timeout for cloud assessment in milliseconds (default: 60000)"
       },
-      "logPath": {
+      "agentName": {
         "type": "string",
-        "description": "Path to directory for JSONL log files (default: ~/.openclaw/logs)"
+        "description": "Agent name used during registration (default: OpenClaw Agent)"
       },
-      "autoRegister": {
-        "type": "boolean",
-        "description": "Automatically register an API key if apiKey is missing (default: true)"
+      "platformUrl": {
+        "type": "string",
+        "description": "Platform URL for core API — registration and behavioral detection (default: https://platform.openguardrails.com)"
       },
       "apiBaseUrl": {
         "type": "string",
-        "description": "OpenGuardrails API base URL (default: https://api.openguardrails.com)"
+        "description": "Deprecated — use platformUrl"
       }
     }
   },
   "uiHints": {
     "enabled": {
       "label": "Enable Guard",
-      "help": "Enable or disable prompt injection detection"
-    },
-    "gatewayEnabled": {
-      "label": "AI Security Gateway",
-      "help": "Enable AI Security Gateway to protect sensitive data (bank cards, passwords, etc.) before sending to LLM."
-    },
-    "gatewayPort": {
-      "label": "Gateway Port",
-      "help": "Port for the AI Security Gateway",
-      "advanced": true
-    },
-    "gatewayAutoStart": {
-      "label": "Auto-start Gateway",
-      "help": "Automatically start the gateway process when OpenClaw starts",
-      "advanced": true
+      "help": "Enable or disable behavioral anomaly detection"
     },
     "blockOnRisk": {
       "label": "Block on Risk",
-      "help": "Block tool calls when prompt injection is detected"
+      "help": "Block tool calls when behavioral risk is detected"
     },
     "apiKey": {
       "label": "API Key",
@@ -79,22 +53,22 @@
     },
     "timeoutMs": {
       "label": "Timeout (ms)",
-      "help": "Maximum time for analysis",
+      "help": "Maximum time for cloud assessment",
       "advanced": true
     },
-    "logPath": {
-      "label": "Log Directory",
-      "help": "Custom path for the JSONL analysis log files",
+    "agentName": {
+      "label": "Agent Name",
+      "help": "Name shown in the OpenGuardrails dashboard for this agent.",
       "advanced": true
     },
-    "autoRegister": {
-      "label": "Auto-register API Key",
-      "help": "If enabled and apiKey is empty, OpenGuardrails will register a key on first use. Disable for strict no-network/managed deployments.",
+    "platformUrl": {
+      "label": "Platform URL",
+      "help": "Override the core API endpoint — useful for local development (e.g. http://localhost:3002).",
       "advanced": true
     },
     "apiBaseUrl": {
-      "label": "API Base URL",
-      "help": "Override the OpenGuardrails API endpoint (e.g. staging or self-hosted).",
+      "label": "API Base URL (deprecated)",
+      "help": "Deprecated — use platformUrl instead.",
       "advanced": true
     }
   }

@@ -23,5 +23,12 @@
       "tag": "0002_agent_capability_observation",
       "breakpoints": true
     }
+    ,{
+      "idx": 3,
+      "version": "6",
+      "when": 1771300000000,
+      "tag": "0003_auth_magic_link",
+      "breakpoints": true
+    }
   ]
 }

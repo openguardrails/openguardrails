@@ -16,9 +16,9 @@ import type {
   OpenGuardrailsApiResponse,
 } from "./types.js";
 import {
-  DEFAULT_API_BASE_URL,
-  loadApiKey,
-  registerApiKey,
+  DEFAULT_PLATFORM_URL,
+  loadCoreCredentials,
+  registerWithCore,
 } from "./config.js";
 import { sanitizeContent } from "./sanitizer.js";
 
@@ -126,7 +126,7 @@ async function ensureApiKey(
 ): Promise<string> {
   if (configKey) return configKey;
 
-  const savedKey = loadApiKey();
+  const savedKey = loadCoreCredentials()?.apiKey;
   if (savedKey) return savedKey;
 
   if (!autoRegister) {
@@ -139,9 +139,9 @@ async function ensureApiKey(
   log.info("No API key found — registering with OpenGuardrails...");
 
   try {
-    const newKey = await registerApiKey("openclaw-agent", apiBaseUrl);
+    const creds = await registerWithCore("openclaw-agent", "OpenClaw AI Agent", apiBaseUrl);
     log.info("Registered with OpenGuardrails. API key saved to ~/.openclaw/credentials/openguardrails/credentials.json");
-    return newKey;
+    return creds.apiKey;
   } catch (error) {
     throw new Error(
       `Failed to auto-register API key: ${error instanceof Error ? error.message : String(error)}. ` +
@@ -173,7 +173,7 @@ async function runViaApi(
   config: RunnerConfig,
   log: Logger,
 ): Promise<AnalysisVerdict> {
-  const baseUrl = config.apiBaseUrl || DEFAULT_API_BASE_URL;
+  const baseUrl = config.apiBaseUrl || DEFAULT_PLATFORM_URL;
   const apiKey = await ensureApiKey(config.apiKey, config.autoRegister, baseUrl, log);
 
   const controller = new AbortController();

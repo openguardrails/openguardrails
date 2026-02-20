@@ -139,6 +139,41 @@ export const toolCallObservations = sqliteTable(
   })
 );
 
+// ─── Magic Links ─────────────────────────────────────────────
+// One-time login tokens sent via email (15-min TTL)
+export const magicLinks = sqliteTable(
+  "magic_links",
+  {
+    id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    email: text("email").notNull(),
+    token: text("token").notNull().unique(),
+    expiresAt: text("expires_at").notNull(),
+    usedAt: text("used_at"),
+    createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => ({
+    tokenIdx: index("idx_magic_links_token").on(table.token),
+    emailIdx: index("idx_magic_links_email").on(table.email),
+  })
+);
+
+// ─── User Sessions ────────────────────────────────────────────
+// Persistent sessions created after magic link verification (30-day TTL)
+export const userSessions = sqliteTable(
+  "user_sessions",
+  {
+    id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    email: text("email").notNull(),
+    token: text("token").notNull().unique(),
+    expiresAt: text("expires_at").notNull(),
+    createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => ({
+    tokenIdx: index("idx_user_sessions_token").on(table.token),
+    emailIdx: index("idx_user_sessions_email").on(table.email),
+  })
+);
+
 // ─── Agent Permissions ────────────────────────────────────────
 export const agentPermissions = sqliteTable(
   "agent_permissions",

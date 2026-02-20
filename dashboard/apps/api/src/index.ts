@@ -5,8 +5,8 @@ import morgan from "morgan";
 import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { sessionAuth, ensureSessionToken } from "./middleware/session-auth.js";
-import { sessionRouter } from "./routes/session.js";
+import { sessionAuth } from "./middleware/session-auth.js";
+import { authRouter } from "./routes/auth.js";
 import { settingsRouter } from "./routes/settings.js";
 import { agentsRouter } from "./routes/agents.js";
 import { scannersRouter } from "./routes/scanners.js";
@@ -37,7 +37,7 @@ app.use(express.json());
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", service: "openguardrails-api", timestamp: new Date().toISOString() });
 });
-app.use("/api/session", sessionRouter);
+app.use("/api/auth", authRouter); // /request, /verify/:token, /me, /logout
 
 // Serve static web app in embedded mode (before auth middleware)
 if (DASHBOARD_MODE === "embedded") {
@@ -75,11 +75,8 @@ app.use("/api/observations", observationsRouter);
 
 app.use(errorHandler);
 
-// Ensure session token exists on startup
-ensureSessionToken().then((token) => {
-  app.listen(PORT, () => {
-    console.log(`OpenGuardrails API running on port ${PORT}`);
-    console.log(`DashboardMode: ${DASHBOARD_MODE}`);
-    console.log(`Session token: ${token}`);
-  });
+app.listen(PORT, () => {
+  console.log(`OpenGuardrails API running on port ${PORT}`);
+  console.log(`DashboardMode: ${DASHBOARD_MODE}`);
+  console.log(`Auth: POST /api/auth/request — send magic link`);
 });

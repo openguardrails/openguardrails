@@ -1,17 +1,24 @@
 /**
  * OpenGuardrails Plugin for OpenClaw
  *
- * Manages the AI Security Gateway and embedded monitoring dashboard.
- * The gateway handles content sanitization — no local hook-based analysis needed.
+ * Responsibilities:
+ *   1. Load credentials from disk on startup (no network)
+ *   2. Detect behavioral anomalies at before_tool_call (block / alert)
+ *   3. Expose /og_status and /og_activate commands
+ *      - /og_activate triggers registration if not yet registered
  */
 
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { OpenClawGuardConfig, Logger } from "./agent/types.js";
-import { resolveConfig, saveDashboardConfig } from "./agent/config.js";
-import { GatewayManager } from "./gateway-manager.js";
-import { DashboardManager } from "./dashboard-manager.js";
-import { DashboardClient } from "./platform-client/index.js";
-import { AnalysisStore } from "./memory/store.js";
+import {
+  resolveConfig,
+  loadCoreCredentials,
+  saveCoreCredentials,
+  registerWithCore,
+  pollAccountEmail,
+  type CoreCredentials,
+} from "./agent/config.js";
+import { BehaviorDetector } from "./agent/behavior-detector.js";
 
 // =============================================================================
 // Constants
@@ -19,6 +26,7 @@ import { AnalysisStore } from "./memory/store.js";
 
 const PLUGIN_ID = "openguardrails";
 const PLUGIN_NAME = "OpenGuardrails";
+const PLUGIN_VERSION = "6.0.3";
 const LOG_PREFIX = `[${PLUGIN_ID}]`;
 
 // =============================================================================
@@ -35,541 +43,294 @@ function createLogger(baseLogger: Logger): Logger {
 }
 
 // =============================================================================
-// Plugin Definition
+// Plugin state (module-level — survives plugin re-registration within a process)
 // =============================================================================
 
-let globalGatewayManager: GatewayManager | null = null;
-let globalDashboardManager: DashboardManager | null = null;
-let globalDashboardClient: DashboardClient | null = null;
-let globalAnalysisStore: AnalysisStore | null = null;
-/** Maps OpenClaw agent ID (e.g. "main", "杰诺斯") → dashboard UUID */
-let globalAgentIdMap: Map<string, string> = new Map();
-/** Dashboard UUID of the default/main agent, used as fallback when ctx.agentId is unavailable */
-let globalDefaultAgentId: string | null = null;
+let globalCoreCredentials: CoreCredentials | null = null;
+let globalBehaviorDetector: BehaviorDetector | null = null;
+let emailPollTimer: ReturnType<typeof setInterval> | null = null;
 
-function getOrCreateStore(config: ReturnType<typeof resolveConfig>): AnalysisStore {
-  if (!globalAnalysisStore) {
-    const logPath = config.logPath || `${process.env.HOME || "~"}/.openclaw/logs`;
-    globalAnalysisStore = new AnalysisStore(logPath, {
-      info: () => {},
-      warn: () => {},
-      error: () => {},
-    });
-  }
-  return globalAnalysisStore;
-}
+// =============================================================================
+// Plugin Definition
+// =============================================================================
 
 const openClawGuardPlugin = {
   id: PLUGIN_ID,
   name: PLUGIN_NAME,
-  description:
-    "AI Security Gateway and monitoring dashboard for OpenClaw agents",
+  description: "Behavioral anomaly detection for OpenClaw agents",
 
   register(api: OpenClawPluginApi) {
     const pluginConfig = (api.pluginConfig ?? {}) as OpenClawGuardConfig;
     const config = resolveConfig(pluginConfig);
     const log = createLogger(api.logger);
 
-    if (!config.gatewayEnabled && !config.dashboardEnabled) {
-      log.debug?.("Plugin disabled via config");
+    if (config.enabled === false) {
+      log.info("Plugin disabled via config");
       return;
     }
 
-    // DEBUG: dump everything we receive at registration
-    log.info(`━━━ PLUGIN REGISTER: dumping api context ━━━`);
-    log.info(`  api.id: ${api.id}`);
-    log.info(`  api.name: ${api.name}`);
-    log.info(`  api.version: ${api.version}`);
-    log.info(`  api.source: ${api.source}`);
-    log.info(`  api.pluginConfig: ${JSON.stringify(api.pluginConfig, null, 2)}`);
-    log.info(`  api.config.agents: ${JSON.stringify(api.config?.agents, null, 2)?.slice(0, 1000)}`);
-    log.info(`  api.runtime: ${JSON.stringify((api as any).runtime, null, 2)?.slice(0, 500)}`);
-    log.info(`  resolved config: ${JSON.stringify(config, null, 2)}`);
-    log.info(`━━━ END PLUGIN REGISTER DUMP ━━━`);
+    // ── Local initialization (no network) ────────────────────────
 
-    // ─── Service initialization ─────────────────────────────────────
-
-    let initialized = false;
-    let initPromise: Promise<void> | null = null;
-
-    function ensureInitialized(): Promise<void> {
-      if (initPromise) return initPromise;
-      initialized = true;
-
-      const tasks: Promise<void>[] = [];
-
-      // ─── Start Embedded Dashboard ─────────────────────────────────
-      if (config.dashboardEnabled) {
-        globalDashboardManager = new DashboardManager(
-          { port: config.dashboardPort || 28901 },
-          log,
-        );
-
-        tasks.push(
-          globalDashboardManager.start().then(() => {
-            const sessionToken = globalDashboardManager!.getSessionToken();
-            const port = config.dashboardPort || 28901;
-            const dashboardUrl = `http://127.0.0.1:${port}`;
-
-            if (sessionToken) {
-              saveDashboardConfig({ url: dashboardUrl, sessionToken });
-
-              globalDashboardClient = new DashboardClient({
-                dashboardUrl,
-                sessionToken,
-              });
-
-              // Register each OpenClaw agent individually with the dashboard.
-              // Register the default/main agent LAST so that
-              // DashboardClient.agentId (set as side-effect) points to it.
-              const openclawAgents = api.config?.agents?.list;
-
-              if (openclawAgents && openclawAgents.length > 0) {
-                // Sort: default/main agent last so its UUID becomes the client fallback
-                const sorted = [...openclawAgents].sort((a, b) => {
-                  const aIsDefault = a.default || a.id === "main" ? 1 : 0;
-                  const bIsDefault = b.default || b.id === "main" ? 1 : 0;
-                  return aIsDefault - bIsDefault;
-                });
-
-                // Register sequentially to ensure deterministic order
-                (async () => {
-                  for (const agent of sorted) {
-                    const agentName = agent.identity?.name || agent.name || agent.id;
-                    const agentEmoji = agent.identity?.emoji;
-                    try {
-                      const res = await globalDashboardClient!.registerAgent({
-                        name: agentName,
-                        provider: "openclaw",
-                        metadata: { embedded: true, openclawId: agent.id, ...(agentEmoji ? { emoji: agentEmoji } : {}) },
-                      });
-                      if (res.success && res.data?.id) {
-                        globalAgentIdMap.set(agent.id, res.data.id);
-                        if (agent.default || agent.id === "main") {
-                          globalDefaultAgentId = res.data.id;
-                        }
-                        log.info(`Agent "${agentName}" (${agent.id}) registered with dashboard`);
-                      }
-                    } catch (err) {
-                      log.warn(`Failed to register agent "${agentName}": ${err}`);
-                    }
-                  }
-                  // If no explicit default, use the first agent
-                  if (!globalDefaultAgentId && globalAgentIdMap.size > 0) {
-                    globalDefaultAgentId = globalAgentIdMap.values().next().value!;
-                  }
-                  globalDashboardClient!.startHeartbeat();
-                })();
-              } else {
-                // Fallback: register with configured name
-                globalDashboardClient!.registerAgent({
-                  name: config.agentName,
-                  provider: "openclaw",
-                  metadata: { embedded: true },
-                }).then(() => {
-                  globalDefaultAgentId = globalDashboardClient!.agentId || null;
-                  log.info(`Agent "${config.agentName}" registered with dashboard`);
-                  globalDashboardClient!.startHeartbeat();
-                }).catch((err) => {
-                  log.warn(`Failed to register agent: ${err}`);
-                });
-              }
-
-              log.info(`Dashboard: ${dashboardUrl}?session=${sessionToken}`);
-            } else {
-              log.info(`Dashboard: ${dashboardUrl}`);
-            }
-          }).catch((error) => {
-            log.error(`Failed to start dashboard: ${error}`);
-          }),
-        );
-      }
-
-      // ─── Start AI Security Gateway ────────────────────────────────
-      if (config.gatewayEnabled) {
-        globalGatewayManager = new GatewayManager(
-          {
-            port: config.gatewayPort || 28900,
-            autoStart: config.gatewayAutoStart ?? true,
-          },
-          log,
-        );
-
-        tasks.push(
-          globalGatewayManager.start().catch((error) => {
-            log.error(`Failed to start gateway: ${error}`);
-          }),
-        );
-      }
-
-      initPromise = Promise.all(tasks).then(() => {});
-      return initPromise;
+    if (!globalBehaviorDetector) {
+      globalBehaviorDetector = new BehaviorDetector(
+        {
+          platformUrl: config.platformUrl,
+          assessTimeoutMs: Math.min(config.timeoutMs, 3000),
+          blockOnRisk: config.blockOnRisk,
+          pluginVersion: PLUGIN_VERSION,
+        },
+        log,
+      );
     }
 
-    // ─── Start services immediately on plugin load ───────────────────
-    ensureInitialized();
-
-    // ─── DEBUG: Dump all hook data ─────────────────────────────────
-    // Temporary verbose logging to see every piece of data we can get.
-
-    function truncate(val: unknown, maxLen = 500): string {
-      const s = JSON.stringify(val, null, 2);
-      if (s && s.length > maxLen) return s.slice(0, maxLen) + `... [truncated, total ${s.length} chars]`;
-      return s ?? "undefined";
-    }
-
-    // --- before_agent_start ---
-    api.on("before_agent_start", async (event, ctx) => {
-      log.info(`━━━ HOOK: before_agent_start ━━━`);
-      log.info(`  event.prompt: ${truncate(event.prompt, 300)}`);
-      log.info(`  event.messages: ${truncate(event.messages, 500)}`);
-      log.info(`  ctx.agentId: ${ctx.agentId}`);
-      log.info(`  ctx.sessionKey: ${ctx.sessionKey}`);
-      log.info(`  ctx.workspaceDir: ${(ctx as any).workspaceDir}`);
-      log.info(`  ctx.messageProvider: ${(ctx as any).messageProvider}`);
-      log.info(`  ctx (full): ${truncate(ctx)}`);
-    });
-
-    // --- agent_end ---
-    api.on("agent_end", async (event, ctx) => {
-      log.info(`━━━ HOOK: agent_end ━━━`);
-      log.info(`  event.success: ${event.success}`);
-      log.info(`  event.error: ${event.error}`);
-      log.info(`  event.durationMs: ${event.durationMs}`);
-      log.info(`  event.messages count: ${Array.isArray(event.messages) ? event.messages.length : "N/A"}`);
-      log.info(`  ctx.agentId: ${ctx.agentId}`);
-      log.info(`  ctx.sessionKey: ${ctx.sessionKey}`);
-      log.info(`  ctx (full): ${truncate(ctx)}`);
-    });
-
-    // --- session_start ---
-    api.on("session_start", async (event, ctx) => {
-      log.info(`━━━ HOOK: session_start ━━━`);
-      log.info(`  event.sessionId: ${event.sessionId}`);
-      log.info(`  event.resumedFrom: ${(event as any).resumedFrom}`);
-      log.info(`  ctx (full): ${truncate(ctx)}`);
-    });
-
-    // --- session_end ---
-    api.on("session_end", async (event, ctx) => {
-      log.info(`━━━ HOOK: session_end ━━━`);
-      log.info(`  event.sessionId: ${event.sessionId}`);
-      log.info(`  event.messageCount: ${event.messageCount}`);
-      log.info(`  event.durationMs: ${(event as any).durationMs}`);
-      log.info(`  ctx (full): ${truncate(ctx)}`);
-    });
-
-    // --- message_received ---
-    api.on("message_received", async (event, ctx) => {
-      log.info(`━━━ HOOK: message_received ━━━`);
-      log.info(`  event.from: ${event.from}`);
-      log.info(`  event.content: ${truncate(event.content, 300)}`);
-      log.info(`  event.timestamp: ${event.timestamp}`);
-      log.info(`  event.metadata: ${truncate(event.metadata)}`);
-      log.info(`  ctx.channelId: ${ctx.channelId}`);
-      log.info(`  ctx.accountId: ${(ctx as any).accountId}`);
-      log.info(`  ctx.conversationId: ${(ctx as any).conversationId}`);
-      log.info(`  ctx (full): ${truncate(ctx)}`);
-    });
-
-    // --- message_sending ---
-    api.on("message_sending", async (event, ctx) => {
-      log.info(`━━━ HOOK: message_sending ━━━`);
-      log.info(`  event.to: ${event.to}`);
-      log.info(`  event.content: ${truncate(event.content, 300)}`);
-      log.info(`  event.metadata: ${truncate((event as any).metadata)}`);
-      log.info(`  ctx (full): ${truncate(ctx)}`);
-    });
-
-    // --- message_sent ---
-    api.on("message_sent", async (event, ctx) => {
-      log.info(`━━━ HOOK: message_sent ━━━`);
-      log.info(`  event.to: ${event.to}`);
-      log.info(`  event.content: ${truncate(event.content, 300)}`);
-      log.info(`  event.success: ${event.success}`);
-      log.info(`  event.error: ${event.error}`);
-      log.info(`  ctx (full): ${truncate(ctx)}`);
-    });
-
-    // --- before_compaction ---
-    api.on("before_compaction", async (event, ctx) => {
-      log.info(`━━━ HOOK: before_compaction ━━━`);
-      log.info(`  event.messageCount: ${event.messageCount}`);
-      log.info(`  event.tokenCount: ${(event as any).tokenCount}`);
-      log.info(`  ctx (full): ${truncate(ctx)}`);
-    });
-
-    // --- after_compaction ---
-    api.on("after_compaction", async (event, ctx) => {
-      log.info(`━━━ HOOK: after_compaction ━━━`);
-      log.info(`  event.messageCount: ${event.messageCount}`);
-      log.info(`  event.tokenCount: ${(event as any).tokenCount}`);
-      log.info(`  event.compactedCount: ${event.compactedCount}`);
-      log.info(`  ctx (full): ${truncate(ctx)}`);
-    });
-
-    // --- tool_result_persist ---
-    api.on("tool_result_persist", (event, ctx) => {
-      log.info(`━━━ HOOK: tool_result_persist ━━━`);
-      log.info(`  event.toolName: ${(event as any).toolName}`);
-      log.info(`  event.toolCallId: ${(event as any).toolCallId}`);
-      log.info(`  event.isSynthetic: ${(event as any).isSynthetic}`);
-      log.info(`  event.message: ${truncate((event as any).message, 500)}`);
-      log.info(`  ctx (full): ${truncate(ctx)}`);
-    });
-
-    // --- gateway_start ---
-    api.on("gateway_start", async (event, ctx) => {
-      log.info(`━━━ HOOK: gateway_start ━━━`);
-      log.info(`  event (full): ${truncate(event)}`);
-      log.info(`  ctx (full): ${truncate(ctx)}`);
-    });
-
-    // --- gateway_stop ---
-    api.on("gateway_stop", async (event, ctx) => {
-      log.info(`━━━ HOOK: gateway_stop ━━━`);
-      log.info(`  event (full): ${truncate(event)}`);
-      log.info(`  ctx (full): ${truncate(ctx)}`);
-    });
-
-    // ─── Tool Call Observation Hooks ─────────────────────────────────
-    // Observe every tool call to build an agent permission profile.
-    // Reports to dashboard when available, falls back to local JSONL.
-
-    api.on("before_tool_call", async (event, ctx) => {
-      const agentId = (ctx.agentId && globalAgentIdMap.get(ctx.agentId)) || ctx.agentId || globalDefaultAgentId || globalDashboardClient?.agentId || "unknown";
-
-      // DEBUG: dump everything
-      log.info(`━━━ HOOK: before_tool_call ━━━`);
-      log.info(`  event.toolName: ${event.toolName}`);
-      log.info(`  event.params: ${truncate(event.params)}`);
-      log.info(`  ctx.agentId (raw): ${ctx.agentId}`);
-      log.info(`  ctx.sessionKey: ${ctx.sessionKey}`);
-      log.info(`  ctx.toolName: ${ctx.toolName}`);
-      log.info(`  resolved agentId: ${agentId}`);
-      log.info(`  globalAgentIdMap: ${truncate(Object.fromEntries(globalAgentIdMap))}`);
-      log.info(`  globalDefaultAgentId: ${globalDefaultAgentId}`);
-
-      const observation = {
-        agentId,
-        sessionKey: ctx.sessionKey,
-        toolName: event.toolName,
-        params: event.params,
-        phase: "before" as const,
-        timestamp: new Date().toISOString(),
-      };
-
-      // Report to dashboard (non-blocking)
-      if (globalDashboardClient) {
-        globalDashboardClient.reportToolCall(observation).catch((err) => {
-          log.debug?.(`Failed to report tool call to dashboard: ${err}`);
-          // Fallback: log locally
-          getOrCreateStore(config).logToolCall(observation);
-        });
+    if (!globalCoreCredentials) {
+      if (config.apiKey) {
+        globalCoreCredentials = {
+          apiKey: config.apiKey,
+          agentId: "configured",
+          claimUrl: "",
+          verificationCode: "",
+        };
+        globalBehaviorDetector.setCredentials(globalCoreCredentials);
+        log.info("Platform: using configured API key");
       } else {
-        getOrCreateStore(config).logToolCall(observation);
+        globalCoreCredentials = loadCoreCredentials();
+        if (globalCoreCredentials) {
+          // If email is set, activation is complete — clean up stale claim fields
+          if (globalCoreCredentials.email && globalCoreCredentials.claimUrl) {
+            globalCoreCredentials.claimUrl = "";
+            globalCoreCredentials.verificationCode = "";
+            saveCoreCredentials(globalCoreCredentials);
+          }
+          globalBehaviorDetector.setCredentials(globalCoreCredentials);
+          if (globalCoreCredentials.claimUrl) {
+            log.info(
+              `Platform: registered, pending activation (${globalCoreCredentials.agentId}) — run /og_activate`,
+            );
+          } else {
+            log.info(`Platform: active (${globalCoreCredentials.agentId})`);
+          }
+        } else {
+          log.info("Platform: not registered — run /og_activate to enable behavioral detection");
+        }
+      }
+    }
+
+    // ── Email polling ─────────────────────────────────────────────
+    // If credentials exist but no email, poll Core immediately + every 60s
+
+    if (globalCoreCredentials && !globalCoreCredentials.email && !emailPollTimer) {
+      const creds = globalCoreCredentials;
+      const checkEmail = async () => {
+        const result = await pollAccountEmail(creds.apiKey, config.platformUrl);
+        if (result?.email) {
+          creds.email = result.email;
+          creds.claimUrl = "";
+          creds.verificationCode = "";
+          saveCoreCredentials(creds);
+          log.info(`Platform: activated — ${result.email}`);
+          if (emailPollTimer) {
+            clearInterval(emailPollTimer);
+            emailPollTimer = null;
+          }
+        }
+      };
+      // Immediate check (non-blocking), then every 60s
+      checkEmail();
+      emailPollTimer = setInterval(checkEmail, 60_000);
+    }
+
+    // ── Hooks ────────────────────────────────────────────────────
+
+    // Capture initial user prompt as intent for overlap scoring
+    api.on("before_agent_start", async (event, ctx) => {
+      if (globalBehaviorDetector && event.prompt) {
+        const text = typeof event.prompt === "string" ? event.prompt : JSON.stringify(event.prompt);
+        globalBehaviorDetector.setUserIntent(ctx.sessionKey ?? "", text);
+      }
+    });
+
+    // Capture ongoing user messages
+    api.on("message_received", async (event, ctx) => {
+      if (globalBehaviorDetector && event.from === "user") {
+        const text =
+          typeof event.content === "string"
+            ? event.content
+            : Array.isArray(event.content)
+              ? (event.content as Array<{ text?: string }>).map((c) => c.text ?? "").join(" ")
+              : String(event.content ?? "");
+        globalBehaviorDetector.setUserIntent((ctx as any).sessionKey ?? "", text);
+      }
+    });
+
+    // Clear behavioral state when session ends
+    api.on("session_end", async (event, ctx) => {
+      globalBehaviorDetector?.clearSession((ctx as any).sessionKey ?? event.sessionId ?? "");
+    });
+
+    // Core detection hook — may block the tool call
+    api.on("before_tool_call", async (event, ctx) => {
+      log.debug?.(`before_tool_call: ${event.toolName}`);
+
+      if (globalBehaviorDetector) {
+        const decision = await globalBehaviorDetector.onBeforeToolCall(
+          { sessionKey: ctx.sessionKey ?? "", agentId: ctx.agentId },
+          { toolName: event.toolName, params: event.params as Record<string, unknown> },
+        );
+        if (decision?.block) {
+          log.warn(`BLOCKED "${event.toolName}": ${decision.blockReason}`);
+          return { block: true, blockReason: decision.blockReason };
+        }
       }
     }, { priority: 100 });
 
+    // Record completed tool for chain history
     api.on("after_tool_call", async (event, ctx) => {
-      const agentId = (ctx.agentId && globalAgentIdMap.get(ctx.agentId)) || ctx.agentId || globalDefaultAgentId || globalDashboardClient?.agentId || "unknown";
+      log.debug?.(`after_tool_call: ${event.toolName} (${event.durationMs}ms)`);
 
-      // DEBUG: dump everything
-      log.info(`━━━ HOOK: after_tool_call ━━━`);
-      log.info(`  event.toolName: ${event.toolName}`);
-      log.info(`  event.params: ${truncate(event.params)}`);
-      log.info(`  event.result: ${truncate(event.result)}`);
-      log.info(`  event.error: ${event.error}`);
-      log.info(`  event.durationMs: ${event.durationMs}`);
-      log.info(`  ctx.agentId (raw): ${ctx.agentId}`);
-      log.info(`  ctx.sessionKey: ${ctx.sessionKey}`);
-      log.info(`  ctx.toolName: ${ctx.toolName}`);
-      log.info(`  resolved agentId: ${agentId}`);
-
-      const observation = {
-        agentId,
-        sessionKey: ctx.sessionKey,
-        toolName: event.toolName,
-        params: event.params,
-        phase: "after" as const,
-        result: event.result,
-        error: event.error,
-        durationMs: event.durationMs,
-        timestamp: new Date().toISOString(),
-      };
-
-      // Report to dashboard (non-blocking)
-      if (globalDashboardClient) {
-        globalDashboardClient.reportToolCall(observation).catch((err) => {
-          log.debug?.(`Failed to report tool result to dashboard: ${err}`);
-          getOrCreateStore(config).logToolCall(observation);
-        });
-      } else {
-        getOrCreateStore(config).logToolCall(observation);
-      }
+      globalBehaviorDetector?.onAfterToolCall(
+        { sessionKey: ctx.sessionKey ?? "" },
+        {
+          toolName: event.toolName,
+          params: event.params as Record<string, unknown>,
+          result: event.result,
+          error: event.error,
+          durationMs: event.durationMs,
+        },
+      );
     });
 
-    // ─── Register Commands ──────────────────────────────────────────
+    // ── Commands ─────────────────────────────────────────────────
 
     api.registerCommand({
       name: "og_status",
       description: "Show OpenGuardrails status",
       requireAuth: true,
       handler: async () => {
-        await ensureInitialized();
+        const creds = globalCoreCredentials;
+        const lines = ["**OpenGuardrails Status**", ""];
 
-        const dashboardStatus = globalDashboardManager?.getStatus();
-        const gatewayStatus = globalGatewayManager?.getStatus();
-
-        function serviceLabel(s: { running: boolean; ready: boolean; port: number } | undefined, name: string): string {
-          if (!s) return `${name}: disabled`;
-          if (s.ready) return `${name}: running on port ${s.port}`;
-          if (s.running) return `${name}: starting on port ${s.port}...`;
-          return `${name}: failed to start`;
+        if (creds) {
+          lines.push(`- Agent ID:  ${creds.agentId}`);
+          lines.push(`- API Key:   ${creds.apiKey.slice(0, 12)}...`);
+          if (creds.email) {
+            lines.push(`- Email:     ${creds.email}`);
+          }
+          lines.push(`- Platform:  ${config.platformUrl}`);
+          if (creds.claimUrl) {
+            lines.push("- Status:    pending activation — run `/og_activate`");
+          } else {
+            lines.push("- Status:    active");
+          }
+        } else {
+          lines.push("- Status:    not registered — run `/og_activate` to register");
+          lines.push(`- Platform:  ${config.platformUrl}`);
         }
 
-        const statusLines = [
-          "**OpenGuardrails Status**",
-          "",
-          `- ${serviceLabel(dashboardStatus, "Dashboard")}`,
-          `- ${serviceLabel(gatewayStatus, "Gateway")}`,
-        ];
+        lines.push("");
+        lines.push(`- blockOnRisk: ${config.blockOnRisk}`);
 
-        if (dashboardStatus?.sessionToken) {
-          statusLines.push(
-            "",
-            `**Dashboard URL**: http://127.0.0.1:${dashboardStatus.port}?session=${dashboardStatus.sessionToken}`,
-          );
-        }
-
-        return { text: statusLines.join("\n") };
+        return { text: lines.join("\n") };
       },
     });
 
     api.registerCommand({
-      name: "og_dashboard",
-      description: "Open the OpenGuardrails dashboard in your browser",
+      name: "og_activate",
+      description: "Register and show activation instructions",
       requireAuth: true,
       handler: async () => {
-        await ensureInitialized();
+        // Already registered — show current status
+        if (globalCoreCredentials) {
+          const { agentId, claimUrl, verificationCode, apiKey } = globalCoreCredentials;
 
-        const dashboardStatus = globalDashboardManager?.getStatus();
-        if (!dashboardStatus) {
-          return { text: "Dashboard is disabled in plugin config." };
-        }
-        if (!dashboardStatus.ready) {
-          return { text: `Dashboard failed to start on port ${dashboardStatus.port}. Check logs for details.` };
-        }
-
-        const port = dashboardStatus.port;
-        const token = dashboardStatus.sessionToken;
-        const url = token
-          ? `http://127.0.0.1:${port}?session=${token}`
-          : `http://127.0.0.1:${port}`;
-
-        const { exec } = await import("node:child_process");
-        const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
-        exec(`${cmd} "${url}"`);
-
-        return { text: `Opening dashboard: ${url}` };
-      },
-    });
-
-    // ─── Gateway Management Commands ────────────────────────────────
-
-    if (config.gatewayEnabled) {
-      api.registerCommand({
-        name: "og_gateway_status",
-        description: "Show AI Security Gateway status",
-        requireAuth: true,
-        handler: async () => {
-          const status = globalGatewayManager?.getStatus();
-          if (!status) {
-            return { text: "Gateway not initialized. It will start with the next agent session." };
+          if (!claimUrl) {
+            return {
+              text: [
+                "**OpenGuardrails: Active**",
+                "",
+                `Agent ID: ${agentId}`,
+                `API Key:  ${apiKey.slice(0, 12)}...`,
+                "",
+                "Behavioral detection is active.",
+              ].join("\n"),
+            };
           }
+
           return {
             text: [
-              "**AI Security Gateway Status**",
+              "**OpenGuardrails: Claim Your Agent**",
               "",
-              `- Running: ${status.running ? "Yes" : "No"}`,
-              `- Ready: ${status.ready ? "Yes" : "No"}`,
-              `- Port: ${status.port}`,
-              `- Endpoint: http://127.0.0.1:${status.port}`,
+              `Agent ID: ${agentId}`,
+              "",
+              "Complete these steps to activate behavioral detection:",
+              "",
+              `  1. Visit:  ${claimUrl}`,
+              `  2. Code:   ${verificationCode}`,
+              `  3. Email:  your email becomes your dashboard login`,
+              `             (magic link, no password needed)`,
+              "",
+              "After claiming you get **100,000 free** detections.",
+              `Dashboard: ${config.platformUrl}`,
             ].join("\n"),
           };
-        },
-      });
+        }
 
-      api.registerCommand({
-        name: "og_gateway_start",
-        description: "Start the AI Security Gateway",
-        requireAuth: true,
-        handler: async () => {
-          await ensureInitialized();
-          try {
-            if (!globalGatewayManager) {
-              return { text: "Gateway not configured." };
-            }
-            await globalGatewayManager.start();
-            return { text: "Gateway started successfully" };
-          } catch (error) {
-            return {
-              text: `Failed to start gateway: ${error instanceof Error ? error.message : String(error)}`,
-            };
-          }
-        },
-      });
+        // Not registered yet — register now
+        try {
+          log.info(`Registering with ${config.platformUrl}...`);
+          globalCoreCredentials = await registerWithCore(
+            config.agentName,
+            "OpenClaw AI Agent secured by OpenGuardrails",
+            config.platformUrl,
+          );
+          globalBehaviorDetector!.setCredentials(globalCoreCredentials);
+          log.info("Registration successful!");
+        } catch (err) {
+          return {
+            text: [
+              "**OpenGuardrails: Registration Failed**",
+              "",
+              `Could not reach ${config.platformUrl}.`,
+              `Error: ${err}`,
+              "",
+              "Possible fixes:",
+              "- Check that the platform is running",
+              "- Set `platformUrl` in plugin config to point to your local instance",
+              "- Or set `apiKey` directly in plugin config to skip registration",
+            ].join("\n"),
+          };
+        }
 
-      api.registerCommand({
-        name: "og_gateway_stop",
-        description: "Stop the AI Security Gateway",
-        requireAuth: true,
-        handler: async () => {
-          if (!globalGatewayManager) {
-            return { text: "Gateway not running." };
-          }
-          try {
-            await globalGatewayManager.stop();
-            return { text: "Gateway stopped" };
-          } catch (error) {
-            return {
-              text: `Failed to stop gateway: ${error instanceof Error ? error.message : String(error)}`,
-            };
-          }
-        },
-      });
+        const { agentId, claimUrl, verificationCode } = globalCoreCredentials;
 
-      api.registerCommand({
-        name: "og_gateway_restart",
-        description: "Restart the AI Security Gateway",
-        requireAuth: true,
-        handler: async () => {
-          await ensureInitialized();
-          if (!globalGatewayManager) {
-            return { text: "Gateway not configured." };
-          }
-          try {
-            await globalGatewayManager.restart();
-            return { text: "Gateway restarted successfully" };
-          } catch (error) {
-            return {
-              text: `Failed to restart gateway: ${error instanceof Error ? error.message : String(error)}`,
-            };
-          }
-        },
-      });
-    }
+        return {
+          text: [
+            "**OpenGuardrails: Claim Your Agent**",
+            "",
+            `Agent ID: ${agentId}`,
+            "",
+            "Complete these steps to activate behavioral detection:",
+            "",
+            `  1. Visit:  ${claimUrl}`,
+            `  2. Code:   ${verificationCode}`,
+            `  3. Email:  your email becomes your dashboard login`,
+            `             (magic link, no password needed)`,
+            "",
+            "After claiming you get **100,000 free** detections.",
+            `Dashboard: ${config.platformUrl}`,
+          ].join("\n"),
+        };
+      },
+    });
   },
 
   async unregister() {
-    // Don't stop services — they run detached and survive plugin/agent restarts.
-    // Users can explicitly stop them via /og_gateway_stop or similar commands.
-    globalGatewayManager = null;
-    globalDashboardManager = null;
-    globalDashboardClient = null;
-    globalAnalysisStore = null;
-    globalAgentIdMap = new Map();
-    globalDefaultAgentId = null;
+    if (emailPollTimer) {
+      clearInterval(emailPollTimer);
+      emailPollTimer = null;
+    }
+    globalCoreCredentials = null;
+    globalBehaviorDetector = null;
   },
 };
 

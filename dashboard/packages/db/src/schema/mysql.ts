@@ -172,3 +172,36 @@ export const agentPermissions = mysqlTable(
     uniqueAgentTool: index("idx_agent_perms_unique").on(table.tenantId, table.agentId, table.toolName),
   })
 );
+
+// ─── Magic Links ─────────────────────────────────────────────
+export const magicLinks = mysqlTable(
+  "magic_links",
+  {
+    id: varchar("id", { length: 36 }).primaryKey(),
+    email: varchar("email", { length: 255 }).notNull(),
+    token: text("token").notNull(),
+    expiresAt: varchar("expires_at", { length: 32 }).notNull(),
+    usedAt: varchar("used_at", { length: 32 }),
+    createdAt: varchar("created_at", { length: 32 }).notNull(),
+  },
+  (table) => ({
+    tokenIdx: index("idx_magic_links_token").on(table.token),
+    emailIdx: index("idx_magic_links_email").on(table.email),
+  })
+);
+
+// ─── User Sessions ────────────────────────────────────────────
+export const userSessions = mysqlTable(
+  "user_sessions",
+  {
+    id: varchar("id", { length: 36 }).primaryKey(),
+    email: varchar("email", { length: 255 }).notNull(),
+    token: text("token").notNull(),
+    expiresAt: varchar("expires_at", { length: 32 }).notNull(),
+    createdAt: varchar("created_at", { length: 32 }).notNull(),
+  },
+  (table) => ({
+    tokenIdx: index("idx_user_sessions_token").on(table.token),
+    emailIdx: index("idx_user_sessions_email").on(table.email),
+  })
+);

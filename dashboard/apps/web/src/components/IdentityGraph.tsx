@@ -97,7 +97,7 @@ function OwnerNode({ data }: NodeProps) {
         <div className="ig-node__icon ig-node__icon--owner">{"\uD83D\uDC64"}</div>
         <div className="ig-node__body">
           <div className="ig-node__name">{data.label as string}</div>
-          {data.sublabel && <div className="ig-node__sub">{data.sublabel as string}</div>}
+          {!!data.sublabel && <div className="ig-node__sub">{data.sublabel as string}</div>}
         </div>
       </div>
       <Handle type="source" position={Position.Right} className="ig-handle" />

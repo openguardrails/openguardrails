@@ -8,26 +8,21 @@
 
 export type OpenClawGuardConfig = {
   enabled?: boolean;
-  /** Enable AI Security Gateway */
-  gatewayEnabled?: boolean;
-  gatewayPort?: number;
-  gatewayAutoStart?: boolean;
   blockOnRisk?: boolean;
+  /** sk-og-xxx API key for platform.openguardrails.com. Auto-registered if empty. */
   apiKey?: string;
   timeoutMs?: number;
-  logPath?: string;
-  autoRegister?: boolean;
+  /** Platform URL for core API (registration + behavior detection).
+   *  Default: https://platform.openguardrails.com */
+  platformUrl?: string;
+  /** @deprecated use platformUrl */
   apiBaseUrl?: string;
-  /** Dashboard URL (local embedded or remote standalone) */
-  dashboardUrl?: string;
-  /** Dashboard session token for auth */
-  dashboardSessionToken?: string;
-  /** Agent name for registration with dashboard */
+  /** Agent name for registration */
   agentName?: string;
-  /** Enable embedded dashboard on dashboardPort */
-  dashboardEnabled?: boolean;
-  /** Dashboard port (default: 28901) */
-  dashboardPort?: number;
+  /** Dashboard URL (standalone, for optional reporting) */
+  dashboardUrl?: string;
+  /** Dashboard session token */
+  dashboardSessionToken?: string;
 };
 
 // =============================================================================
@@ -113,4 +108,85 @@ export type SanitizeResult = {
   sanitized: string;
   redactions: Record<string, number>;
   totalRedactions: number;
+};
+
+// =============================================================================
+// Behavioral Detection Types (mirrors core/src/types.ts contract)
+// =============================================================================
+
+export type SensitivePathCategory =
+  | "SSH_KEY"
+  | "AWS_CREDS"
+  | "GPG_KEY"
+  | "ENV_FILE"
+  | "CRYPTO_CERT"
+  | "SYSTEM_AUTH"
+  | "BROWSER_COOKIE"
+  | "KEYCHAIN";
+
+export type RiskTag =
+  | "READ_SENSITIVE_WRITE_NETWORK"
+  | "MULTI_CRED_ACCESS"
+  | "SHELL_EXEC_AFTER_WEB_FETCH"
+  | "DATA_EXFIL_PATTERN"
+  | "INTENT_ACTION_MISMATCH"
+  | "UNUSUAL_TOOL_SEQUENCE";
+
+export type RiskLevel = "no_risk" | "low" | "medium" | "high" | "critical";
+export type AssessAction = "allow" | "alert" | "block";
+
+export type ToolChainEntry = {
+  seq: number;
+  toolName: string;
+  sanitizedParams: Record<string, string>;
+  outcome: "success" | "error" | "timeout";
+  durationMs: number;
+  resultCategory: "text_small" | "text_large" | "binary" | "empty" | "error";
+  resultSizeBytes: number;
+  dataFlowFrom?: string;
+};
+
+export type LocalSignals = {
+  sensitivePathsAccessed: SensitivePathCategory[];
+  externalDomainsContacted: string[];
+  patterns: {
+    readThenExfil: boolean;
+    credentialAccess: boolean;
+    shellEscapeAttempt: boolean;
+    crossAgentDataFlow: boolean;
+  };
+  intentToolOverlapScore: number;
+  riskTags: RiskTag[];
+};
+
+export type BehaviorAssessRequest = {
+  agentId: string;
+  sessionKey: string;
+  runId: string;
+  userIntent: string;
+  toolChain: ToolChainEntry[];
+  localSignals: LocalSignals;
+  context: {
+    messageHistoryLength: number;
+    recentUserMessages: string[];
+  };
+  /**
+   * Client-supplied metadata for server-side correlation.
+   * Server merges these with its own fields (sourceIp, apiKey ref, serverTimestamp)
+   * before storing in behavior_events and surfacing in the dashboard.
+   */
+  meta: {
+    pluginVersion: string;
+    clientTimestamp: string; // ISO 8601
+  };
+};
+
+export type BehaviorAssessResponse = {
+  behaviorId: string;
+  riskLevel: RiskLevel;
+  anomalyTypes: string[];
+  confidence: number;
+  action: AssessAction;
+  explanation: string;
+  affectedTools: number[];
 };

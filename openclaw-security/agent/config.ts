@@ -3,93 +3,130 @@
  */
 
 import type { OpenClawGuardConfig } from "./types.js";
-import path from "node:path";
 import os from "node:os";
+import path from "node:path";
 import fs from "node:fs";
 
 // =============================================================================
-// API Configuration
+// Constants
 // =============================================================================
 
-export const DEFAULT_API_BASE_URL = "https://api.openguardrails.com";
+export const DEFAULT_PLATFORM_URL =
+  process.env.OG_PLATFORM_URL ?? "https://platform.openguardrails.com";
 
 const CREDENTIALS_DIR = path.join(os.homedir(), ".openclaw/credentials/openguardrails");
 const CREDENTIALS_FILE = path.join(CREDENTIALS_DIR, "credentials.json");
 
 // =============================================================================
-// API Key Management
+// Core Credentials
 // =============================================================================
 
-export function loadApiKey(): string | null {
+export type CoreCredentials = {
+  apiKey: string;
+  agentId: string;
+  claimUrl: string;
+  verificationCode: string;
+  email?: string;
+};
+
+export function loadCoreCredentials(): CoreCredentials | null {
   try {
-    if (!fs.existsSync(CREDENTIALS_FILE)) {
-      return null;
-    }
+    if (!fs.existsSync(CREDENTIALS_FILE)) return null;
     const data = JSON.parse(fs.readFileSync(CREDENTIALS_FILE, "utf-8"));
-    return typeof data.apiKey === "string" ? data.apiKey : null;
+    if (typeof data.apiKey === "string" && typeof data.agentId === "string") {
+      return data as CoreCredentials;
+    }
+    return null;
   } catch {
     return null;
   }
 }
 
-export function saveApiKey(apiKey: string): void {
+export function saveCoreCredentials(creds: CoreCredentials): void {
   if (!fs.existsSync(CREDENTIALS_DIR)) {
     fs.mkdirSync(CREDENTIALS_DIR, { recursive: true });
   }
-  fs.writeFileSync(
-    CREDENTIALS_FILE,
-    JSON.stringify({ apiKey }, null, 2),
-    "utf-8",
-  );
+  fs.writeFileSync(CREDENTIALS_FILE, JSON.stringify(creds, null, 2), "utf-8");
 }
 
-export async function registerApiKey(agentName: string, baseUrl: string = DEFAULT_API_BASE_URL): Promise<string> {
-  const response = await fetch(`${baseUrl}/api/register`, {
+/** @deprecated Use loadCoreCredentials().apiKey instead */
+export function loadApiKey(): string | null {
+  return loadCoreCredentials()?.apiKey ?? null;
+}
+
+export async function registerWithCore(
+  name: string,
+  description: string,
+  platformUrl: string = DEFAULT_PLATFORM_URL,
+): Promise<CoreCredentials> {
+  const response = await fetch(`${platformUrl}/api/v1/agents/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ agentName }),
+    body: JSON.stringify({ name, description }),
   });
 
   if (!response.ok) {
-    throw new Error(`Registration failed: ${response.status} ${response.statusText}`);
+    const text = await response.text().catch(() => "");
+    throw new Error(
+      `Registration failed: ${response.status} ${response.statusText}${text ? ` — ${text}` : ""}`,
+    );
   }
 
-  const data = (await response.json()) as { apiKey: string };
-  if (!data.apiKey) {
-    throw new Error("Registration response missing apiKey");
+  const json = (await response.json()) as {
+    success: boolean;
+    agent?: {
+      id: string;
+      api_key: string;
+      claim_url: string;
+      verification_code: string;
+    };
+    error?: string;
+  };
+
+  if (!json.success || !json.agent) {
+    throw new Error(`Registration error: ${json.error ?? "unknown"}`);
   }
 
-  saveApiKey(data.apiKey);
-  return data.apiKey;
+  const creds: CoreCredentials = {
+    apiKey: json.agent.api_key,
+    agentId: json.agent.id,
+    claimUrl: json.agent.claim_url,
+    verificationCode: json.agent.verification_code,
+  };
+
+  saveCoreCredentials(creds);
+  return creds;
 }
 
 // =============================================================================
-// Dashboard Session Token Management
+// Account Email Polling
 // =============================================================================
 
-const EXTENSION_DIR = path.join(os.homedir(), ".openclaw/extensions/openguardrails");
-const DASHBOARD_CONFIG_DIR = path.join(EXTENSION_DIR, "dashboard");
-const DASHBOARD_CONFIG_FILE = path.join(DASHBOARD_CONFIG_DIR, "config.json");
-
-export function loadDashboardConfig(): { url?: string; sessionToken?: string } {
+/**
+ * Polls Core `/api/v1/account` to learn the agent's verified email.
+ * Returns `{ email, status }` if the agent is active, null otherwise.
+ */
+export async function pollAccountEmail(
+  apiKey: string,
+  platformUrl: string = DEFAULT_PLATFORM_URL,
+): Promise<{ email: string; status: string } | null> {
   try {
-    if (!fs.existsSync(DASHBOARD_CONFIG_FILE)) return {};
-    return JSON.parse(fs.readFileSync(DASHBOARD_CONFIG_FILE, "utf-8"));
+    const res = await fetch(`${platformUrl}/api/v1/account`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      success: boolean;
+      email?: string | null;
+      status?: string;
+    };
+    if (data.success && data.email && data.status === "active") {
+      return { email: data.email, status: data.status };
+    }
+    return null;
   } catch {
-    return {};
+    return null;
   }
-}
-
-export function saveDashboardConfig(config: { url?: string; sessionToken?: string }): void {
-  if (!fs.existsSync(DASHBOARD_CONFIG_DIR)) {
-    fs.mkdirSync(DASHBOARD_CONFIG_DIR, { recursive: true });
-  }
-  const existing = loadDashboardConfig();
-  fs.writeFileSync(
-    DASHBOARD_CONFIG_FILE,
-    JSON.stringify({ ...existing, ...config }, null, 2),
-    "utf-8",
-  );
 }
 
 // =============================================================================
@@ -98,21 +135,14 @@ export function saveDashboardConfig(config: { url?: string; sessionToken?: strin
 
 export const DEFAULT_CONFIG: Required<OpenClawGuardConfig> = {
   enabled: true,
-  gatewayEnabled: true,
-  gatewayPort: 28900,
-  gatewayAutoStart: true,
   blockOnRisk: true,
-  apiKey: "",
+  apiKey: process.env.OG_API_KEY ?? "",
   timeoutMs: 60000,
-  logPath: path.join(os.homedir(), ".openclaw", "logs"),
-  autoRegister: true,
-  apiBaseUrl: DEFAULT_API_BASE_URL,
-  // Dashboard config
-  dashboardUrl: process.env.OG_DASHBOARD_URL || "http://localhost:28901",
-  dashboardSessionToken: process.env.OG_SESSION_TOKEN || "",
-  dashboardEnabled: true,
-  dashboardPort: 28901,
+  apiBaseUrl: DEFAULT_PLATFORM_URL,
+  platformUrl: DEFAULT_PLATFORM_URL,
   agentName: "OpenClaw Agent",
+  dashboardUrl: process.env.OG_DASHBOARD_URL ?? "",
+  dashboardSessionToken: process.env.OG_SESSION_TOKEN ?? "",
 };
 
 // =============================================================================
@@ -120,24 +150,15 @@ export const DEFAULT_CONFIG: Required<OpenClawGuardConfig> = {
 // =============================================================================
 
 export function resolveConfig(config?: Partial<OpenClawGuardConfig>): Required<OpenClawGuardConfig> {
-  // Also check saved dashboard config
-  const saved = loadDashboardConfig();
-
   return {
     enabled: config?.enabled ?? DEFAULT_CONFIG.enabled,
-    gatewayEnabled: config?.gatewayEnabled ?? DEFAULT_CONFIG.gatewayEnabled,
-    gatewayPort: config?.gatewayPort ?? DEFAULT_CONFIG.gatewayPort,
-    gatewayAutoStart: config?.gatewayAutoStart ?? DEFAULT_CONFIG.gatewayAutoStart,
     blockOnRisk: config?.blockOnRisk ?? DEFAULT_CONFIG.blockOnRisk,
     apiKey: config?.apiKey ?? DEFAULT_CONFIG.apiKey,
     timeoutMs: config?.timeoutMs ?? DEFAULT_CONFIG.timeoutMs,
-    logPath: config?.logPath ?? DEFAULT_CONFIG.logPath,
-    autoRegister: config?.autoRegister ?? DEFAULT_CONFIG.autoRegister,
     apiBaseUrl: config?.apiBaseUrl ?? DEFAULT_CONFIG.apiBaseUrl,
-    dashboardUrl: config?.dashboardUrl ?? saved.url ?? DEFAULT_CONFIG.dashboardUrl,
-    dashboardSessionToken: config?.dashboardSessionToken ?? saved.sessionToken ?? DEFAULT_CONFIG.dashboardSessionToken,
-    dashboardEnabled: config?.dashboardEnabled ?? DEFAULT_CONFIG.dashboardEnabled,
-    dashboardPort: config?.dashboardPort ?? DEFAULT_CONFIG.dashboardPort,
+    platformUrl: config?.platformUrl ?? config?.apiBaseUrl ?? DEFAULT_CONFIG.platformUrl,
     agentName: config?.agentName ?? DEFAULT_CONFIG.agentName,
+    dashboardUrl: config?.dashboardUrl ?? DEFAULT_CONFIG.dashboardUrl,
+    dashboardSessionToken: config?.dashboardSessionToken ?? DEFAULT_CONFIG.dashboardSessionToken,
   };
 }

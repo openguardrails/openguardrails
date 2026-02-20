@@ -173,3 +173,36 @@ export const agentPermissions = pgTable(
     uniqueAgentTool: index("idx_agent_perms_unique").on(table.tenantId, table.agentId, table.toolName),
   })
 );
+
+// ─── Magic Links ─────────────────────────────────────────────
+export const magicLinks = pgTable(
+  "magic_links",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    email: varchar("email", { length: 255 }).notNull(),
+    token: text("token").notNull().unique(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    tokenIdx: index("idx_magic_links_token").on(table.token),
+    emailIdx: index("idx_magic_links_email").on(table.email),
+  })
+);
+
+// ─── User Sessions ────────────────────────────────────────────
+export const userSessions = pgTable(
+  "user_sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    email: varchar("email", { length: 255 }).notNull(),
+    token: text("token").notNull().unique(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    tokenIdx: index("idx_user_sessions_token").on(table.token),
+    emailIdx: index("idx_user_sessions_email").on(table.email),
+  })
+);

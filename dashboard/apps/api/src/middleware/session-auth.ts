@@ -1,51 +1,75 @@
 import type { Request, Response, NextFunction } from "express";
-import { db, settingsQueries } from "@og/db";
-import { SESSION_COOKIE_NAME, SESSION_TOKEN_PREFIX, DEFAULT_TENANT_ID } from "@og/shared";
-import { generateSessionToken } from "@og/shared";
 
-const settings = settingsQueries(db);
+const CORE_URL = process.env.OG_CORE_URL || "http://localhost:3002";
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
-/** Ensure a session token exists in the database */
-export async function ensureSessionToken(): Promise<string> {
-  let token = await settings.get("session_token");
-  if (!token) {
-    token = generateSessionToken();
-    await settings.set("session_token", token);
-    console.log(`Session token generated: ${token}`);
-  }
-  return token;
+interface CachedSession {
+  email: string;
+  agentId: string;
+  cachedAt: number;
 }
 
-/** Session authentication middleware */
-export async function sessionAuth(req: Request, res: Response, next: NextFunction) {
-  // Check cookie first
-  const cookieToken = parseCookies(req.headers.cookie || "")[SESSION_COOKIE_NAME];
-  // Then check Authorization header
-  const headerToken = req.headers.authorization?.replace("Bearer ", "");
+// In-memory cache: apiKey → validated session info
+const sessionCache = new Map<string, CachedSession>();
 
-  const token = cookieToken || headerToken;
+/**
+ * Session authentication middleware.
+ *
+ * Expects: Authorization: Bearer sk-og-xxx
+ * Validates the API key against the core (cached for 5 minutes).
+ * Sets res.locals.tenantId = email and res.locals.coreApiKey = apiKey.
+ */
+export async function sessionAuth(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  const apiKey = req.headers.authorization?.replace("Bearer ", "");
 
-  if (!token) {
-    res.status(401).json({ success: false, error: "Session token required" });
+  if (!apiKey?.startsWith("sk-og-")) {
+    res.status(401).json({ success: false, error: "Not authenticated" });
     return;
   }
 
-  const validToken = await settings.get("session_token");
-  if (!validToken || token !== validToken) {
-    res.status(401).json({ success: false, error: "Invalid session token" });
+  // Check in-memory cache
+  const cached = sessionCache.get(apiKey);
+  if (cached && Date.now() - cached.cachedAt < CACHE_TTL_MS) {
+    res.locals.tenantId = cached.email;
+    res.locals.userEmail = cached.email;
+    res.locals.coreApiKey = apiKey;
+    next();
     return;
   }
 
-  res.locals.tenantId = DEFAULT_TENANT_ID;
+  // Validate with core
+  try {
+    const coreRes = await fetch(`${CORE_URL}/api/v1/account`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
 
-  next();
-}
+    if (!coreRes.ok) {
+      res.status(401).json({ success: false, error: "Invalid or inactive API key" });
+      return;
+    }
 
-function parseCookies(cookieHeader: string): Record<string, string> {
-  const cookies: Record<string, string> = {};
-  for (const pair of cookieHeader.split(";")) {
-    const [key, ...rest] = pair.trim().split("=");
-    if (key) cookies[key] = rest.join("=");
+    const data = await coreRes.json() as {
+      success: boolean;
+      email: string | null;
+      agentId: string;
+    };
+
+    if (!data.success || !data.email) {
+      res.status(401).json({ success: false, error: "Agent not activated" });
+      return;
+    }
+
+    // Cache and populate locals
+    sessionCache.set(apiKey, { email: data.email, agentId: data.agentId, cachedAt: Date.now() });
+    res.locals.tenantId = data.email;
+    res.locals.userEmail = data.email;
+    res.locals.coreApiKey = apiKey;
+    next();
+  } catch {
+    res.status(503).json({ success: false, error: "Core service unavailable" });
   }
-  return cookies;
 }

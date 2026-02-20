@@ -18,3 +18,5 @@ export const usageLogs = mod.usageLogs;
 export const detectionResults = mod.detectionResults;
 export const toolCallObservations = mod.toolCallObservations;
 export const agentPermissions = mod.agentPermissions;
+export const magicLinks = mod.magicLinks;
+export const userSessions = mod.userSessions;
