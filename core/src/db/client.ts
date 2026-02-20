@@ -27,7 +27,7 @@ if (isNew) {
       email TEXT,
       email_token TEXT,
       status TEXT NOT NULL DEFAULT 'pending_claim',
-      quota_total INTEGER NOT NULL DEFAULT 100000,
+      quota_total INTEGER NOT NULL DEFAULT 30000,
       quota_used INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -57,10 +57,25 @@ if (isNew) {
     CREATE INDEX IF NOT EXISTS idx_beh_events_risk_level ON behavior_events(risk_level);
     CREATE INDEX IF NOT EXISTS idx_beh_events_created_at ON behavior_events(created_at);
 
+    CREATE TABLE IF NOT EXISTS accounts (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL UNIQUE,
+      plan TEXT NOT NULL DEFAULT 'free',
+      quota_total INTEGER NOT NULL DEFAULT 30000,
+      quota_used INTEGER NOT NULL DEFAULT 0,
+      stripe_customer_id TEXT,
+      stripe_subscription_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_accounts_email ON accounts(email);
+    CREATE INDEX IF NOT EXISTS idx_accounts_stripe_customer ON accounts(stripe_customer_id);
+
     CREATE TABLE IF NOT EXISTS usage_logs (
       id TEXT PRIMARY KEY,
       agent_id TEXT NOT NULL,
       endpoint TEXT NOT NULL,
+      model TEXT,
       latency_ms INTEGER NOT NULL,
       created_at TEXT NOT NULL
     );
@@ -68,6 +83,33 @@ if (isNew) {
     CREATE INDEX IF NOT EXISTS idx_usage_created_at ON usage_logs(created_at);
   `);
   console.log("[core] Database initialized:", DB_PATH);
+}
+
+// ─── Incremental migrations (idempotent) ────────────────────────
+sqlite.exec(`
+  CREATE TABLE IF NOT EXISTS accounts (
+    id TEXT PRIMARY KEY,
+    email TEXT NOT NULL UNIQUE,
+    plan TEXT NOT NULL DEFAULT 'free',
+    quota_total INTEGER NOT NULL DEFAULT 30000,
+    quota_used INTEGER NOT NULL DEFAULT 0,
+    stripe_customer_id TEXT,
+    stripe_subscription_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_accounts_email ON accounts(email);
+  CREATE INDEX IF NOT EXISTS idx_accounts_stripe_customer ON accounts(stripe_customer_id);
+  CREATE INDEX IF NOT EXISTS idx_reg_agents_email ON registered_agents(email);
+`);
+
+// Add model column to usage_logs if missing
+const usageCols = sqlite
+  .prepare("PRAGMA table_info(usage_logs)")
+  .all() as Array<{ name: string }>;
+const usageColNames = new Set(usageCols.map((c) => c.name));
+if (!usageColNames.has("model")) {
+  sqlite.exec("ALTER TABLE usage_logs ADD COLUMN model TEXT");
 }
 
 export const db = drizzle(sqlite, { schema });

@@ -32,7 +32,7 @@ export function LoginPage() {
   }, [searchParams, setSearchParams, authenticated, login]);
 
   if (authenticated) {
-    return <Navigate to="/discovery/agents" replace />;
+    return <Navigate to="/inventory/agents" replace />;
   }
 
   const handleSubmit = async (e: FormEvent) => {

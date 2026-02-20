@@ -18,7 +18,7 @@ export const registeredAgents = sqliteTable(
     // pending_claim → active (after email verified) → suspended
     status: text("status").notNull().default("pending_claim"),
     // quota
-    quotaTotal: integer("quota_total").notNull().default(100000), // free tier
+    quotaTotal: integer("quota_total").notNull().default(30000), // free tier
     quotaUsed: integer("quota_used").notNull().default(0),
     createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
     updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
@@ -28,6 +28,28 @@ export const registeredAgents = sqliteTable(
     claimTokenIdx: index("idx_reg_agents_claim_token").on(t.claimToken),
     statusIdx: index("idx_reg_agents_status").on(t.status),
     emailIdx: index("idx_reg_agents_email").on(t.email),
+  }),
+);
+
+// ─── Accounts ───────────────────────────────────────────────────
+// One row per email — aggregates all agents under one billing identity
+
+export const accounts = sqliteTable(
+  "accounts",
+  {
+    id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    email: text("email").notNull().unique(),
+    plan: text("plan").notNull().default("free"), // free | starter | pro | business
+    quotaTotal: integer("quota_total").notNull().default(30000),
+    quotaUsed: integer("quota_used").notNull().default(0),
+    stripeCustomerId: text("stripe_customer_id"),
+    stripeSubscriptionId: text("stripe_subscription_id"),
+    createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+    updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (t) => ({
+    emailIdx: index("idx_accounts_email").on(t.email),
+    stripeCustomerIdx: index("idx_accounts_stripe_customer").on(t.stripeCustomerId),
   }),
 );
 
@@ -74,6 +96,7 @@ export const usageLogs = sqliteTable(
     id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
     agentId: text("agent_id").notNull(),
     endpoint: text("endpoint").notNull(),   // "assess" | "detect"
+    model: text("model"),
     latencyMs: integer("latency_ms").notNull(),
     createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   },

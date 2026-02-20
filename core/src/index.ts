@@ -11,12 +11,24 @@ import { assessRouter } from "./routes/assess.js";
 import { accountRouter } from "./routes/account.js";
 import { accountsRouter } from "./routes/accounts.js";
 import { portalRouter } from "./routes/portal.js";
+import { billingRouter, handleStripeWebhook } from "./routes/billing.js";
 import { apiKeyAuth } from "./middleware/api-key-auth.js";
 
 const app = express();
 const PORT = parseInt(process.env.PORT || "3002", 10);
 
 // ─── Middleware ──────────────────────────────────────────────────
+
+// Stripe webhook needs raw body — must be before json parser
+app.post("/api/v1/billing/webhook", express.raw({ type: "application/json" }), async (req, res) => {
+  const sig = req.headers["stripe-signature"] as string;
+  const result = await handleStripeWebhook(req.body as Buffer, sig);
+  if (!result.ok) {
+    res.status(400).json({ success: false, error: "Invalid webhook" });
+    return;
+  }
+  res.json({ success: true, event: result.event });
+});
 
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({
@@ -59,6 +71,9 @@ app.use("/api/v1/account", accountRouter);
 
 // All agents by email — multi-agent dashboard view
 app.use("/api/v1/accounts", accountsRouter);
+
+// Billing — Stripe checkout + portal
+app.use("/api/v1/billing", billingRouter);
 
 // Behavioral anomaly detection
 app.use("/api/v1/behavior/assess", assessRouter);

@@ -108,7 +108,7 @@ assessRouter.post(
       const agent = res.locals.agent;
       if (agent) {
         const latencyMs = Date.now() - startTime;
-        recordUsage(agent.id, "assess", latencyMs).catch(() => {});
+        recordUsage(agent.id, "assess", latencyMs, body.meta?.model).catch(() => {});
       }
 
       res.json({ success: true, data: result });

@@ -21,7 +21,7 @@ sqlite.exec(`
     email TEXT,
     email_token TEXT,
     status TEXT NOT NULL DEFAULT 'pending_claim',
-    quota_total INTEGER NOT NULL DEFAULT 100000,
+    quota_total INTEGER NOT NULL DEFAULT 30000,
     quota_used INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -91,6 +91,15 @@ if (!behaviorColNames.has("client_timestamp")) {
 sqlite.exec(
   "CREATE INDEX IF NOT EXISTS idx_beh_events_session_key ON behavior_events(session_key)",
 );
+
+// Add model column to usage_logs if missing
+const usageCols = sqlite
+  .prepare("PRAGMA table_info(usage_logs)")
+  .all() as Array<{ name: string }>;
+const usageColNames = new Set(usageCols.map((c) => c.name));
+if (!usageColNames.has("model")) {
+  sqlite.exec("ALTER TABLE usage_logs ADD COLUMN model TEXT");
+}
 
 console.log("✅ Core database migrated:", DB_PATH);
 sqlite.close();

@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { Bot, Fingerprint, Zap, ShieldCheck, Rocket, ScrollText } from "lucide-react";
+import { Bot, Fingerprint, Zap, AlertTriangle, GitFork } from "lucide-react";
 import type { ReactNode } from "react";
 
 interface NavItem {
@@ -15,29 +15,18 @@ interface NavGroup {
 
 const NAV_GROUPS: NavGroup[] = [
   {
-    title: "Discovery",
+    title: "Inventory",
     items: [
-      { label: "AI Agents", to: "/discovery/agents", icon: <Bot size={16} /> },
-      { label: "Identities", to: "/discovery/identities", icon: <Fingerprint size={16} /> },
-      { label: "Permissions", to: "/discovery/permissions", icon: <Zap size={16} /> },
+      { label: "AI Agents", to: "/inventory/agents", icon: <Bot size={16} /> },
+      { label: "Identities", to: "/inventory/identities", icon: <Fingerprint size={16} /> },
+      { label: "Permissions", to: "/inventory/permissions", icon: <Zap size={16} /> },
     ],
   },
   {
     title: "Secure",
     items: [
-      { label: "Overview", to: "/secure", icon: <ShieldCheck size={16} /> },
-    ],
-  },
-  {
-    title: "Deploy",
-    items: [
-      { label: "Overview", to: "/deploy", icon: <Rocket size={16} /> },
-    ],
-  },
-  {
-    title: "Governance",
-    items: [
-      { label: "Overview", to: "/governance", icon: <ScrollText size={16} /> },
+      { label: "Risk", to: "/secure/risk", icon: <AlertTriangle size={16} /> },
+      { label: "Graph", to: "/secure/graph", icon: <GitFork size={16} /> },
     ],
   },
 ];

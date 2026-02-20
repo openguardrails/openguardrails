@@ -82,7 +82,7 @@ claimRouter.post("/:claimToken", async (req, res, next) => {
 
     const emailToken = generateEmailToken();
     await agents.setEmailPending(agent.id, email.toLowerCase().trim(), emailToken);
-    await sendVerificationEmail({ email, agentName: agent.name, emailToken, apiKeyMasked: maskApiKey(agent.apiKey) });
+    await sendVerificationEmail({ email, agentName: agent.name, emailToken, apiKey: agent.apiKey });
 
     res.send(claimPage({ emailSent: true, email, agentName: agent.name }));
   } catch (err) {
@@ -116,7 +116,7 @@ function claimPage(opts: {
         <h2>📧 Check your email</h2>
         <p>We sent a verification link to <strong>${esc(email ?? "")}</strong>.</p>
         <p>Click the link in the email to activate your agent <strong>${esc(agentName ?? "")}</strong>
-           and unlock your 100,000 free security checks.</p>
+           and unlock your 30,000 free security checks.</p>
       </div>`;
   } else {
     body = `
@@ -180,7 +180,3 @@ function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-function maskApiKey(apiKey: string): string {
-  if (apiKey.length <= 16) return apiKey.slice(0, 6) + "...";
-  return apiKey.slice(0, 12) + "..." + apiKey.slice(-4);
-}

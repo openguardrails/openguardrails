@@ -111,6 +111,6 @@ export function quotaCheck(endpoint: string) {
 /**
  * Call after sending the response to record usage.
  */
-export async function recordUsage(agentId: string, endpoint: string, latencyMs: number): Promise<void> {
-  await agentQueries(db).consumeQuota(agentId, endpoint, latencyMs);
+export async function recordUsage(agentId: string, endpoint: string, latencyMs: number, model?: string): Promise<void> {
+  await agentQueries(db).consumeQuota(agentId, endpoint, latencyMs, model);
 }

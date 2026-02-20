@@ -17,6 +17,22 @@ export interface RegisteredAgent {
   updatedAt: string;
 }
 
+// ─── Account ────────────────────────────────────────────────────
+
+export type AccountPlan = "free" | "starter" | "pro" | "business";
+
+export interface Account {
+  id: string;
+  email: string;
+  plan: AccountPlan;
+  quotaTotal: number;
+  quotaUsed: number;
+  stripeCustomerId: string | null;
+  stripeSubscriptionId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // ─── Behavior Assessment ─────────────────────────────────────────
 
 export type SensitivePathCategory =
@@ -78,6 +94,7 @@ export interface BehaviorAssessRequest {
   meta?: {
     pluginVersion?: string;
     clientTimestamp?: string; // ISO 8601
+    model?: string;
   };
 }
 

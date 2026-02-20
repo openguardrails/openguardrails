@@ -55,7 +55,7 @@ export function AgentsPage() {
     <>
       <div className="content-header">
         <div>
-          <h1 className="page-title">Discovery</h1>
+          <h1 className="page-title">Inventory</h1>
           <p className="page-sub">AI agents detected in your environment</p>
         </div>
         <div className="page-meta">
@@ -98,7 +98,7 @@ export function AgentsPage() {
           {filtered.map((agent, i) => (
             <Link
               key={agent.id}
-              to={`/discovery/agents/${agent.id}`}
+              to={`/inventory/agents/${agent.id}`}
               className={`agent-card stagger-${Math.min(i + 1, 6)}`}
             >
               <div className="agent-card__header">

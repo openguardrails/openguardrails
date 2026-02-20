@@ -6,7 +6,6 @@ import {
   type AgentProfile,
   type AgentSkill,
 } from "../lib/api";
-import { IdentityGraph } from "../components/IdentityGraph";
 
 // ---- Helpers ----
 
@@ -141,7 +140,7 @@ function groupSkillsByCategory(skills: AgentSkill[]): Record<string, AgentSkill[
 
 // ---- Tabs ----
 
-type TopTab = "profile" | "tasks" | "identities" | "identity-graph" | "permissions";
+type TopTab = "profile" | "tasks" | "identities" | "permissions";
 
 // ---- Components ----
 
@@ -209,7 +208,7 @@ export function AgentProfilePage() {
       <div className="card">
         <div className="card-title">Agent not found</div>
         <div className="card-sub">
-          <Link to="/discovery/agents">Back to agents</Link>
+          <Link to="/inventory/agents">Back to agents</Link>
         </div>
       </div>
     );
@@ -224,13 +223,12 @@ export function AgentProfilePage() {
     { key: "profile", label: "Profile" },
     { key: "tasks", label: "Bot Tasks" },
     { key: "identities", label: "Identities" },
-    { key: "identity-graph", label: "Identity Graph" },
     { key: "permissions", label: "Permissions" },
   ];
 
   return (
     <>
-      <Link to="/discovery/agents" className="profile-back">
+      <Link to="/inventory/agents" className="profile-back">
         &larr; Back to Agents
       </Link>
 
@@ -305,10 +303,6 @@ export function AgentProfilePage() {
 
         {activeTab === "identities" && (
           <IdentitiesView profile={profile} permissions={permissions} />
-        )}
-
-        {activeTab === "identity-graph" && (
-          <IdentityGraphView profile={profile} permissions={permissions} />
         )}
 
         {activeTab === "permissions" && (
@@ -699,22 +693,6 @@ function IdentitiesView({ profile, permissions }: { profile: AgentProfile; permi
             </div>
           );
         })}
-      </div>
-    </div>
-  );
-}
-
-// ---- Identity Graph Tab ----
-
-function IdentityGraphView({ profile, permissions }: { profile: AgentProfile; permissions: AgentPermission[] }) {
-  return (
-    <div className="identities-view">
-      <div className="profile-section">
-        <div className="profile-section__title">
-          Identity Graph
-          <span className="profile-section__subtitle">Owner, agent, systems, and tool connections</span>
-        </div>
-        <IdentityGraph profile={profile} permissions={permissions} />
       </div>
     </div>
   );

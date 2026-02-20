@@ -1336,6 +1336,65 @@
    Responsive
    =========================================== */
 
+/* ===========================================
+   Secure — Risk Table
+   =========================================== */
+
+.risk-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 1px 0 var(--card-highlight);
+  animation: rise 0.35s var(--ease-out) backwards;
+}
+
+.access-pill.risk-high {
+  color: var(--danger);
+  background: var(--danger-subtle);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+.access-pill.risk-medium {
+  color: var(--warn);
+  background: var(--warn-subtle);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+
+.access-pill.risk-low {
+  color: var(--info);
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+}
+
+/* ===========================================
+   Secure — Graph Page
+   =========================================== */
+
+.graph-page-wrap {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 1px 0 var(--card-highlight);
+  animation: rise 0.35s var(--ease-out) backwards;
+  overflow: hidden;
+}
+
+.graph-page-wrap .ig-wrap {
+  height: 560px;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* ===========================================
+   Responsive
+   =========================================== */
+
 @media (max-width: 900px) {
   .agents-grid {
     grid-template-columns: 1fr;

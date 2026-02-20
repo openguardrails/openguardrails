@@ -10,17 +10,18 @@ Behavioral anomaly detection for OpenClaw agents. Monitors tool call sequences a
 
 ## How It Works
 
-The plugin hooks into every `before_tool_call` event. It tracks each session's tool chain and computes local signals (sensitive file reads, external network calls, shell escapes). High-risk patterns are blocked immediately; borderline cases are sent to the cloud API for a second opinion.
+The plugin hooks into `before_tool_call` and `after_tool_call` events. It tracks each session's tool chain and computes local signals (sensitive file reads, external network calls, shell escapes). Critical patterns are blocked instantly on the local fast path; medium-risk signals are sent to the cloud API for assessment.
 
 ```
 Agent calls tool
       ↓
-[openguardrails] checks local signals
-  • sensitive file read → then network call?  → BLOCK
-  • shell escape in params ($(), backtick)?   → BLOCK
-  • unusual sequence for stated intent?       → ask cloud
+[openguardrails] classifies tool + updates session state
+  • sensitive file read → then network call?      → BLOCK (local)
+  • shell escape in params ($(), backtick)?        → BLOCK (local)
+  • credential access + low intent overlap?        → assess via cloud
+  • external domains + intent mismatch?            → assess via cloud
       ↓
-Allow or block with reason
+Allow, alert, or block — with explanation
 ```
 
 No content is sent externally until the plugin is registered and activated.
@@ -51,7 +52,7 @@ Expected output when not yet registered:
 ```
 OpenGuardrails Status
 
-- Not registered (autoRegister: true)
+- Status:    not registered — run `/og_activate` to register
 - Platform:  https://platform.openguardrails.com
 
 - blockOnRisk: true
@@ -61,13 +62,13 @@ OpenGuardrails Status
 
 ## Step 2: Register
 
-Registration happens automatically on the first tool call (if `autoRegister: true`, the default). It calls `POST /api/v1/agents/register` on the platform and saves credentials to:
+Registration is triggered by running `/og_activate`. It calls `POST /api/v1/agents/register` on the platform and saves credentials to:
 
 ```
 ~/.openclaw/credentials/openguardrails/credentials.json
 ```
 
-To register immediately without waiting for a tool call, run:
+Run:
 
 ```bash
 /og_activate
@@ -78,15 +79,15 @@ If the platform is reachable, you'll see:
 ```
 OpenGuardrails: Claim Your Agent
 
-Agent ID: <id>
+Agent ID: <uuid>
 
 Complete these steps to activate behavioral detection:
 
   1. Visit:  https://platform.openguardrails.com/claim/<token>
-  2. Code:   <6-digit code>
-  3. Email:  provide address for alerts and quota notifications
+  2. Code:   <word-XXXX>  (e.g. reef-X4B2)
+  3. Email:  your email becomes your dashboard login
 
-You get 100,000 free detections after verification.
+After claiming you get 30,000 free detections.
 ```
 
 ### Pointing to a local platform
@@ -116,7 +117,7 @@ cd openguardrails/core && npm run db:migrate && npm run dev
 
 ### Using an existing API key
 
-If you already have a key (e.g. from a previous registration or from the dashboard), set it directly — no `/og_activate` needed:
+If you already have a key (e.g. from a previous registration or from the account portal), set it directly — no `/og_activate` needed:
 
 ```json
 {
@@ -136,7 +137,14 @@ If you already have a key (e.g. from a previous registration or from the dashboa
 
 ## Step 3: Activate
 
-After registration, visit the claim URL shown by `/og_activate` and enter the verification code. Once claimed, behavioral detection is fully active.
+After registration, complete these steps to activate:
+
+1. **Visit the claim URL** shown by `/og_activate`
+2. **Enter the verification code** (the `word-XXXX` code displayed in the terminal)
+3. **Enter your email** — this becomes your account identity
+4. **Click the verification link** sent to your email
+
+Once your email is verified, the agent status changes to `active` and behavioral detection begins. The plugin polls for activation status automatically — no restart needed.
 
 Check status anytime:
 
@@ -148,8 +156,9 @@ Active output:
 ```
 OpenGuardrails Status
 
-- Agent ID:  <id>
+- Agent ID:  <uuid>
 - API Key:   sk-og-xxxxxxxxxxxx...
+- Email:     you@example.com
 - Platform:  https://platform.openguardrails.com
 - Status:    active
 
@@ -158,12 +167,40 @@ OpenGuardrails Status
 
 ---
 
+## Account & Portal
+
+After activation, sign in to the account portal with your **email + API key**:
+
+```
+https://platform.openguardrails.com/login
+```
+
+The portal shows:
+
+- **Account overview** — plan, quota usage, all agents under your email
+- **Agent management** — view API keys, regenerate keys
+- **Usage logs** — per-agent request history with latency and endpoint breakdown
+- **Plan upgrades** — upgrade from Free to Starter, Pro, or Business
+
+### Plans
+
+| Plan | Price | Detections/mo |
+|------|-------|---------------|
+| Free | $0 | 30,000 |
+| Starter | $19/mo | 100,000 |
+| Pro | $49/mo | 300,000 |
+| Business | $199/mo | 2,000,000 |
+
+If you register multiple agents with the same email, they all share one account and quota.
+
+---
+
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `/og_status` | Show registration status, platform URL, blockOnRisk setting |
-| `/og_activate` | Show claim URL and activation instructions (or confirm active) |
+| `/og_status` | Show registration status, email, platform URL, blockOnRisk setting |
+| `/og_activate` | Register (if needed) and show claim URL and activation instructions |
 
 ---
 
@@ -186,22 +223,41 @@ All options go in `~/.openclaw/openclaw.json` under `plugins.entries.openguardra
 
 ### Fast-path blocks (local, no cloud round-trip)
 
-| Pattern | Example |
-|---------|---------|
-| Read sensitive file → network call | Read `~/.ssh/id_rsa`, then call `WebFetch` |
-| Read credentials → network call | Read `~/.aws/credentials`, then `Bash curl ...` |
-| Shell escape in params | `Bash` with `` `cmd` ``, `$(cmd)`, or newline injection |
+| Pattern | Example | Block reason |
+|---------|---------|--------------|
+| Read sensitive file → network call | Read `~/.ssh/id_rsa`, then `WebFetch` to external URL | `sensitive file read followed by network call to <domain>` |
+| Read credentials → network call | Read `~/.aws/credentials`, then `Bash curl ...` | `sensitive file read followed by network call to <domain>` |
+| Shell escape in params | `Bash` with `` `cmd` ``, `$(cmd)`, `;`, `&&`, `\|`, or newline injection | `suspicious shell command detected — potential command injection` |
 
 ### Cloud-assessed patterns
 
-| Tag | Description |
-|-----|-------------|
-| `READ_SENSITIVE_WRITE_NETWORK` | Sensitive read followed by outbound call |
-| `MULTI_CRED_ACCESS` | Multiple credential files accessed in one session |
-| `SHELL_EXEC_AFTER_WEB_FETCH` | Shell command executed after fetching external content |
-| `DATA_EXFIL_PATTERN` | Large data read, then sent externally |
-| `INTENT_ACTION_MISMATCH` | Tool sequence doesn't match stated user goal |
-| `UNUSUAL_TOOL_SEQUENCE` | Statistical anomaly in tool ordering |
+| Tag | Risk | Action | Description |
+|-----|------|--------|-------------|
+| `READ_SENSITIVE_WRITE_NETWORK` | critical | block | Sensitive read followed by outbound call |
+| `DATA_EXFIL_PATTERN` | critical | block | Large data read, then sent externally |
+| `MULTI_CRED_ACCESS` | high | block | Multiple credential files accessed in one session |
+| `SHELL_EXEC_AFTER_WEB_FETCH` | high | block | Shell command executed after fetching external content |
+| `INTENT_ACTION_MISMATCH` | medium | alert | Tool sequence doesn't match stated user goal |
+| `UNUSUAL_TOOL_SEQUENCE` | medium | alert | Statistical anomaly in tool ordering |
+
+### Risk levels and actions
+
+| Risk Level | Action | Meaning |
+|------------|--------|---------|
+| critical | **block** | Tool call is blocked, agent sees block reason |
+| high | **block** | Tool call is blocked, agent sees block reason |
+| medium | **alert** | Tool call is allowed, warning logged |
+| low / no_risk | **allow** | Tool call proceeds normally |
+
+### Block reason format
+
+When a tool call is blocked, the agent receives a message like:
+
+```
+OpenGuardrails blocked [critical]: Sensitive file read followed by data
+sent to external server. Agent accessed credentials despite low relevance
+to user intent "fetch weather for user". (confidence: 97%)
+```
 
 ### Sensitive file categories recognized
 
@@ -211,10 +267,12 @@ All options go in `~/.openclaw/openclaw.json` under `plugins.entries.openguardra
 
 ## Privacy
 
-- Tool params are sanitized (PII and secrets stripped) before being sent to the cloud API
+- Tool params are **sanitized** (PII and secrets stripped) before being sent to the cloud API
 - The cloud API receives: sanitized params, tool names, session signals — **not** raw file contents or user messages
 - Credentials are stored locally at `~/.openclaw/credentials/openguardrails/credentials.json`
-- The plugin fails open: if the cloud API is unreachable, the tool call is allowed
+- The plugin **fails open**: if the cloud API is unreachable or times out, the tool call is allowed
+- Only medium+ risk signals trigger a cloud call — low-risk / no-risk tool calls never leave the machine
+- Fast-path blocks (shell escape, read-then-exfil) are fully local — no cloud round-trip
 
 ---
 

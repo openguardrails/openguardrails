@@ -6,7 +6,8 @@ import { AgentsPage } from "./pages/AgentsPage";
 import { AgentProfilePage } from "./pages/AgentProfilePage";
 import { IdentitiesPage } from "./pages/IdentitiesPage";
 import { PermissionsPage } from "./pages/PermissionsPage";
-import { PlaceholderPage } from "./pages/PlaceholderPage";
+import { RiskPage } from "./pages/RiskPage";
+import { GraphPage } from "./pages/GraphPage";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { authenticated, loading } = useAuth();
@@ -27,14 +28,16 @@ export default function App() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<Navigate to="/discovery/agents" replace />} />
-        <Route path="discovery/agents" element={<AgentsPage />} />
-        <Route path="discovery/agents/:id" element={<AgentProfilePage />} />
-        <Route path="discovery/identities" element={<IdentitiesPage />} />
-        <Route path="discovery/permissions" element={<PermissionsPage />} />
-        <Route path="secure" element={<PlaceholderPage section="Secure" />} />
-        <Route path="deploy" element={<PlaceholderPage section="Deploy" />} />
-        <Route path="governance" element={<PlaceholderPage section="Governance" />} />
+        <Route index element={<Navigate to="/inventory/agents" replace />} />
+        <Route path="inventory/agents" element={<AgentsPage />} />
+        <Route path="inventory/agents/:id" element={<AgentProfilePage />} />
+        <Route path="inventory/identities" element={<IdentitiesPage />} />
+        <Route path="inventory/permissions" element={<PermissionsPage />} />
+        {/* Legacy /discovery routes redirect to /inventory */}
+        <Route path="discovery/agents/:id" element={<Navigate to="/inventory/agents/:id" replace />} />
+        <Route path="discovery/*" element={<Navigate to="/inventory/agents" replace />} />
+        <Route path="secure/risk" element={<RiskPage />} />
+        <Route path="secure/graph" element={<GraphPage />} />
       </Route>
     </Routes>
   );

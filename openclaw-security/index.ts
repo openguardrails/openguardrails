@@ -269,7 +269,7 @@ const openClawGuardPlugin = {
               `  3. Email:  your email becomes your dashboard login`,
               `             (magic link, no password needed)`,
               "",
-              "After claiming you get **100,000 free** detections.",
+              "After claiming you get **30,000 free** detections.",
               `Dashboard: ${config.platformUrl}`,
             ].join("\n"),
           };
@@ -316,7 +316,7 @@ const openClawGuardPlugin = {
             `  3. Email:  your email becomes your dashboard login`,
             `             (magic link, no password needed)`,
             "",
-            "After claiming you get **100,000 free** detections.",
+            "After claiming you get **30,000 free** detections.",
             `Dashboard: ${config.platformUrl}`,
           ].join("\n"),
         };
