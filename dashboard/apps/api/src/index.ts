@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
+import rateLimit from "express-rate-limit";
 import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,19 +26,43 @@ const app = express();
 const PORT = parseInt(process.env.PORT || process.env.API_PORT || "3001", 10);
 const DASHBOARD_MODE = (process.env.DASHBOARD_MODE || "selfhosted") as DashboardMode;
 
+// In embedded mode the API is accessed via same-origin requests from the bundled web app.
+// Allow localhost origins only; never open with origin:true (which bypasses CORS entirely).
+const corsOrigin =
+  DASHBOARD_MODE === "embedded"
+    ? /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/
+    : (process.env.WEB_ORIGIN || "http://localhost:3000");
+
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({
-  origin: DASHBOARD_MODE === "embedded" ? true : (process.env.WEB_ORIGIN || "http://localhost:3000"),
+  origin: corsOrigin,
   credentials: true,
 }));
 app.use(morgan("short"));
-app.use(express.json());
+// Limit request body size to 1 MB to prevent memory-exhaustion attacks
+app.use(express.json({ limit: "1mb" }));
+
+// Rate limiter for authentication endpoints — 20 requests per 15 min per IP
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// General API rate limiter — 300 requests per minute per IP
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 // Public routes
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", service: "openguardrails-api", timestamp: new Date().toISOString() });
 });
-app.use("/api/auth", authRouter); // /request, /verify/:token, /me, /logout
+app.use("/api/auth", authLimiter, authRouter); // /request, /verify/:token, /me, /logout
 
 // Serve static web app in embedded mode (before auth middleware)
 if (DASHBOARD_MODE === "embedded") {
@@ -62,6 +87,7 @@ if (DASHBOARD_MODE === "embedded") {
 }
 
 // Session-protected routes
+app.use(apiLimiter);
 app.use(sessionAuth);
 app.use("/api/settings", settingsRouter);
 app.use("/api/agents", agentsRouter);

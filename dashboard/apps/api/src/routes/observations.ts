@@ -49,7 +49,7 @@ observationsRouter.get("/", async (req, res, next) => {
   try {
     const tenantId = res.locals.tenantId as string;
     const agentId = req.query.agentId as string | undefined;
-    const limit = parseInt(req.query.limit as string) || 50;
+    const limit = Math.min(Math.max(parseInt(req.query.limit as string, 10) || 50, 1), 200);
 
     const data = await observations.findRecent({ agentId, limit, tenantId });
     res.json({ success: true, data });
@@ -73,7 +73,7 @@ observationsRouter.get("/permissions", async (req, res, next) => {
 observationsRouter.get("/anomalies", async (req, res, next) => {
   try {
     const tenantId = res.locals.tenantId as string;
-    const limit = parseInt(req.query.limit as string) || 20;
+    const limit = Math.min(Math.max(parseInt(req.query.limit as string, 10) || 20, 1), 200);
 
     const data = await observations.findAnomalies(tenantId, limit);
     res.json({ success: true, data });
@@ -111,7 +111,7 @@ observationsRouter.get("/agents/:id/observations", async (req, res, next) => {
   try {
     const tenantId = res.locals.tenantId as string;
     const agentId = req.params.id as string;
-    const limit = parseInt(req.query.limit as string) || 50;
+    const limit = Math.min(Math.max(parseInt(req.query.limit as string, 10) || 50, 1), 200);
 
     const data = await observations.findRecent({ agentId, limit, tenantId });
     res.json({ success: true, data });
