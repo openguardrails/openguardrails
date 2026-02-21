@@ -1,16 +1,22 @@
 ---
 name: openguardrails
-description: "Behavioral anomaly detection for OpenClaw agents. Detects data exfiltration patterns, credential access, shell escapes, and intent-action mismatch. Source: github.com/openguardrails/openguardrails"
+description: "Runtime security for AI agents — guards against data exfiltration, prompt injection, sensitive data leakage to LLMs, credential theft, command injection, and harmful content. Source: github.com/openguardrails/openguardrails"
 metadata: {"openclaw":{"emoji":"🛡️","homepage":"https://github.com/openguardrails/openguardrails"}}
 ---
 
 # OpenGuardrails
 
-Behavioral anomaly detection for OpenClaw agents. Monitors tool call sequences and blocks suspicious patterns (data exfiltration, credential access, shell injection) before they execute.
+Runtime security guard for OpenClaw agents. Protects against the most critical AI agent threats:
+
+- **Data exfiltration defense** — detects and blocks when an agent reads sensitive files then attempts to send them to external servers
+- **Sensitive data leakage prevention** — sanitizes PII, credentials, and secrets before they reach LLM providers
+- **Prompt injection protection** — identifies crafted inputs designed to hijack agent behavior
+- **Command injection blocking** — catches shell escapes, backtick substitution, and command chaining in tool parameters
+- **Content safety** — filters NSFW content and enforces minor protection policies
 
 ## How It Works
 
-The plugin hooks into `before_tool_call` and `after_tool_call` events. It tracks each session's tool chain and computes local signals (sensitive file reads, external network calls, shell escapes). Critical patterns are blocked instantly on the local fast path; medium-risk signals are sent to the cloud API for assessment.
+The plugin hooks into `before_tool_call` and `after_tool_call` events. It classifies every tool call in real time — tracking sensitive file reads, external network calls, credential access, and shell commands across the session. Critical patterns are blocked instantly on the local fast path; borderline signals are assessed via the cloud API.
 
 ```
 Agent calls tool
@@ -21,7 +27,7 @@ Agent calls tool
   • credential access + low intent overlap?        → assess via cloud
   • external domains + intent mismatch?            → assess via cloud
       ↓
-Allow, alert, or block — with explanation
+Allow, alert, or block — with explanation returned to agent
 ```
 
 No content is sent externally until the plugin is registered and activated.
@@ -53,7 +59,7 @@ Expected output when not yet registered:
 OpenGuardrails Status
 
 - Status:    not registered — run `/og_activate` to register
-- Platform:  https://platform.openguardrails.com
+- Platform:  https://www.openguardrails.com/core
 
 - blockOnRisk: true
 ```
@@ -83,36 +89,12 @@ Agent ID: <uuid>
 
 Complete these steps to activate behavioral detection:
 
-  1. Visit:  https://platform.openguardrails.com/claim/<token>
+  1. Visit:  https://www.openguardrails.com/core/claim/<token>
   2. Code:   <word-XXXX>  (e.g. reef-X4B2)
-  3. Email:  your email becomes your dashboard login
+  3. Email:  your email becomes your login for the account portal
 
 After claiming you get 30,000 free detections.
-```
-
-### Pointing to a local platform
-
-For local development, override the platform URL in `~/.openclaw/openclaw.json`:
-
-```json
-{
-  "plugins": {
-    "entries": {
-      "openguardrails": {
-        "enabled": true,
-        "config": {
-          "platformUrl": "http://localhost:3002"
-        }
-      }
-    }
-  }
-}
-```
-
-Then start the platform:
-```bash
-cd openguardrails/core && npm run db:migrate && npm run dev
-# Listening on port 3002
+Platform: https://www.openguardrails.com/core
 ```
 
 ### Using an existing API key
@@ -159,7 +141,7 @@ OpenGuardrails Status
 - Agent ID:  <uuid>
 - API Key:   sk-og-xxxxxxxxxxxx...
 - Email:     you@example.com
-- Platform:  https://platform.openguardrails.com
+- Platform:  https://www.openguardrails.com/core
 - Status:    active
 
 - blockOnRisk: true
@@ -172,7 +154,7 @@ OpenGuardrails Status
 After activation, sign in to the account portal with your **email + API key**:
 
 ```
-https://platform.openguardrails.com/login
+https://www.openguardrails.com/core/login
 ```
 
 The portal shows:
@@ -214,7 +196,7 @@ All options go in `~/.openclaw/openclaw.json` under `plugins.entries.openguardra
 | `blockOnRisk` | `true` | Block the tool call when risk is detected |
 | `apiKey` | `""` | Explicit API key (`sk-og-...`). Run `/og_activate` if empty |
 | `agentName` | `"OpenClaw Agent"` | Name shown in the dashboard |
-| `platformUrl` | `https://platform.openguardrails.com` | Platform API endpoint |
+| `coreUrl` | `https://www.openguardrails.com/core` | Platform API endpoint |
 | `timeoutMs` | `60000` | Cloud assessment timeout (ms). Fails open on timeout |
 
 ---
@@ -279,8 +261,8 @@ to user intent "fetch weather for user". (confidence: 97%)
 ## Uninstall
 
 ```bash
-openclaw plugins uninstall openguardrails
-
+rm -rf ~/.openclaw/extensions/openguardrails
+# Then manually delete openguardrails config in ~/.openclaw/openclaw.json
 # Optionally remove credentials
 rm -rf ~/.openclaw/credentials/openguardrails
 ```

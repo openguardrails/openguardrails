@@ -55,7 +55,7 @@ export function AgentsPage() {
     <>
       <div className="content-header">
         <div>
-          <h1 className="page-title">Inventory</h1>
+          <h1 className="page-title">AI Agents</h1>
           <p className="page-sub">AI agents detected in your environment</p>
         </div>
         <div className="page-meta">

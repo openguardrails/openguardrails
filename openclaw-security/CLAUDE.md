@@ -27,7 +27,8 @@ npm run dashboard      # Start local dashboard
 
 ## Environment
 ```
-OG_PLATFORM_URL=https://platform.openguardrails.com
+OG_CORE_URL=https://www.openguardrails.com/core
+OG_DASHBOARD_URL=https://www.openguardrails.com/dashboard
 OG_API_KEY=sk-og-...
 GATEWAY_PORT=38790
 DASHBOARD_PORT=38789

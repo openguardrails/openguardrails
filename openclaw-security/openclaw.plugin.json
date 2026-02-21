@@ -27,13 +27,17 @@
         "type": "string",
         "description": "Agent name used during registration (default: OpenClaw Agent)"
       },
-      "platformUrl": {
+      "coreUrl": {
         "type": "string",
-        "description": "Platform URL for core API — registration and behavioral detection (default: https://platform.openguardrails.com)"
+        "description": "Core API URL — registration and behavioral detection (default: https://www.openguardrails.com/core)"
       },
-      "apiBaseUrl": {
+      "dashboardUrl": {
         "type": "string",
-        "description": "Deprecated — use platformUrl"
+        "description": "Dashboard URL for observation reporting (default: https://www.openguardrails.com/dashboard). Self-hosted users should change to local address."
+      },
+      "dashboardSessionToken": {
+        "type": "string",
+        "description": "Dashboard session token (optional — falls back to Core API key)"
       }
     }
   },
@@ -61,14 +65,19 @@
       "help": "Name shown in the OpenGuardrails dashboard for this agent.",
       "advanced": true
     },
-    "platformUrl": {
-      "label": "Platform URL",
-      "help": "Override the core API endpoint — useful for local development (e.g. http://localhost:3002).",
+    "coreUrl": {
+      "label": "Core URL",
+      "help": "Core API endpoint (default: https://www.openguardrails.com/core). Self-hosted users should set to local address (e.g. http://localhost:3002).",
       "advanced": true
     },
-    "apiBaseUrl": {
-      "label": "API Base URL (deprecated)",
-      "help": "Deprecated — use platformUrl instead.",
+    "dashboardUrl": {
+      "label": "Dashboard URL",
+      "help": "URL of the OpenGuardrails dashboard for reporting tool call observations (default: https://www.openguardrails.com/dashboard). Self-hosted users should set to local address.",
+      "advanced": true
+    },
+    "dashboardSessionToken": {
+      "label": "Dashboard Token",
+      "help": "Session token for dashboard auth. Leave blank to auto-use your Core API key.",
       "advanced": true
     }
   }

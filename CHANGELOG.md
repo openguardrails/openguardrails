@@ -11,6 +11,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [6.5.0] - 2026-02-21
+
+### Rebuilt for OpenClaw — Guard Agent for AI Agents
+
+OpenGuardrails 6.5.0 is a ground-up rewrite. The platform shifts from an HTTP proxy-based guardrails service to a **Guard Agent** architecture purpose-built for [OpenClaw](https://openclaw.ai) AI agents. It now operates as three independent modules — **Dashboard**, **OpenClaw Plugin**, and **AI Security Gateway** — each deployable standalone or together.
+
+---
+
+### Dashboard (`dashboard/`)
+
+Management dashboard for AI agent security monitoring. pnpm + Turborepo monorepo (Next.js 14 frontend + Express API).
+
+#### Added
+
+- **Agent Discovery** — Automatically scans the local OpenClaw workspace to find, catalog, and profile all running AI agents. Each agent profile includes personality (SOUL.md), skills, plugins, scheduled tasks, and model provider.
+- **Identity Graph** — Network visualization mapping owner → agent → third-party system → tool connections. Shows which agents can access GitHub, Slack, AWS, Gmail, Docker, and 20+ other systems.
+- **Permission Monitoring** — Tracks every tool invocation across all agents. Records tool name, category, access pattern (read/write/admin), call count, error rate, and first-seen timestamp. First-seen tools are flagged as potential anomalies.
+- **Risk Assessment** — Highlights first-seen tools and unusual permission patterns. Risk levels (High/Medium/Low) based on access type (admin/write/read).
+- **Tool Call Observations** — Bulk observation recording from plugins. Stores params, result, duration, blocked flag, and block reason for each tool call.
+- **Detection Proxy** — `POST /api/detect` validates auth, loads scanner config (10 scanners: S01–S10), calls Core for detection, evaluates policies (block/alert/log), and records results.
+- **Policy Engine** — Configurable policies mapping scanner results to actions (block/alert/log) with sensitivity thresholds.
+- **Session Auth** — Email + API key login. Validates against Core, issues local sessions (30-day TTL). Supports auto-login via URL parameters from email verification flow.
+- **CLI** (`@openguardrails/cli`) — `openguardrails init`, `start`, `stop`, `status`, `token` commands for one-command setup and management.
+- **Multi-dialect Database** — Drizzle ORM with SQLite (default), PostgreSQL, and MySQL support.
+- **Subscription Tiers** — 5-tier system (free/starter/pro/business/enterprise) with feature gating: Discovery + Detection (all tiers), Protection (business+), Governance (enterprise).
+
+---
+
+### OpenClaw Plugin (`openclaw-security/`)
+
+Security guard plugin for OpenClaw agents. Hooks into the agent lifecycle to detect and block threats in real time.
+
+#### Added
+
+- **Behavioral Anomaly Detection** — Tracks tool chain history per session (up to 50 entries across 200 concurrent sessions). Routes high-risk tool calls to the Core API for classification. Detects data exfiltration (sensitive file read → network send), multi-credential access, shell execution after web fetch, and intent-action mismatch.
+- **Content Injection Scanner** — Pure regex-based local scanner with 30+ patterns across 8 categories: instruction override, fake system messages, concealment directives, command execution, data exfiltration, mode switching, task hijacking, and role assumption. High-confidence matches trigger immediate redaction; medium-confidence requires 2+ distinct categories.
+- **Automatic Redaction** — Injection patterns in tool results are replaced with `__REDACTED_BY_OPENGUARDRAILS_DUE_TO_{RISK_TYPE}__` markers before the LLM sees the content. Risk types: PROMPT_INJECTION, DATA_EXFILTRATION, COMMAND_EXECUTION.
+- **LLM Security Context Injection** — On `before_agent_start`, injects OpenGuardrails awareness context so the LLM knows about protection and can recognize redaction markers or raw injection attempts.
+- **Shell Escape Detection** — Catches backtick substitution, `$()`, command chaining (`;`, `&&`, `||`), pipe injection, and newline injection in tool parameters. Blocked locally with zero cloud round-trip.
+- **Sensitive File Tracking** — Recognizes reads of SSH keys, AWS credentials, GPG keys, .env files, crypto certificates, system auth files, browser cookies, and keychains. Flags subsequent network calls as potential exfiltration.
+- **Zero-Config Registration** — `/og_activate` command triggers registration with Core. Returns claim URL and verification code. After email verification, behavioral detection activates automatically (polled every 60s). No restart required.
+- **Fail-Open Design** — If the Core API is unreachable or times out (3s cap), tool calls are allowed. No false positives from network issues.
+- **Dashboard Reporting** — Reports tool call observations to the Dashboard API. Supports heartbeat (60s interval), agent registration, and permission analytics.
+- **Embedded Process Management** — `DashboardManager` and `GatewayManager` can spawn and manage embedded Dashboard API and AI Security Gateway processes as detached subprocesses with health checks, log files, and state persistence.
+- **Test Email on Activation** — After email verification, sends a test email containing a realistic prompt injection sample so users can immediately test detection by asking their agent to read it.
+
+---
+
+### AI Security Gateway (`gateway/`)
+
+Local HTTP proxy that sanitizes sensitive data before sending to LLM providers. Zero npm dependencies.
+
+#### Added
+
+- **Multi-Provider Support** — Transparent proxy for Anthropic Messages API, OpenAI Chat Completions API, Gemini generateContent API, and OpenAI-compatible providers (Kimi/Moonshot, DeepSeek).
+- **Lossless Sanitization** — Detects and replaces sensitive data with numbered placeholders (`__email_1__`, `__credit_card_2__`, etc.). Mapping table tracks all substitutions. Responses are restored with original values before reaching the client.
+- **Data Types** — URLs, email addresses, phone numbers (US/international/CN), IP addresses, credit cards, bank cards (16–19 digit), IBAN, SSN, API keys (sk-, pk-, ghp_, AKIA, xox, SG., hf_, etc.), Bearer tokens, and high-entropy tokens (Shannon entropy >= 4.0).
+- **Streaming Support** — Handles SSE (Server-Sent Events) streaming responses. Processes line-by-line with incomplete buffer handling and restores placeholders in each chunk.
+- **Recursive Sanitization** — Handles nested objects, arrays, and complex message structures (Anthropic content blocks, OpenAI multi-turn conversations, Gemini parts).
+- **Zero Dependencies** — Built entirely on Node.js built-ins. No external npm packages in production.
+- **Local-Only** — Binds to `127.0.0.1`. Sensitive data never leaves the machine unsanitized. Placeholder-to-original mappings are ephemeral and discarded after each request.
+- **Configuration** — `~/.openguardrails/gateway.json` or environment variables (`GATEWAY_PORT`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`).
+
+---
+
+### Breaking Changes
+
+- **Architecture**: Complete rewrite from HTTP proxy guardrails to OpenClaw plugin-based guard agent.
+- **Domains**: Production URLs changed to `https://www.openguardrails.com/core` (Core API) and `https://www.openguardrails.com/dashboard` (Dashboard).
+- **Scanners**: Moved from standalone API to Core + Dashboard architecture. Scanner config (S01–S10) now managed in Dashboard database.
+- **Authentication**: API key format unchanged (`sk-og-<32 hex>`), but auth flow now requires email verification for activation.
+
+---
+
 ## [5.1.2] - 2026-01-09
 
 ### 🛡️ Self-Service False Positive Appeal System

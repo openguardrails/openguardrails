@@ -311,7 +311,7 @@ Edit OpenClaw config file (`~/.openclaw/openclaw.json`):
           "apiKey": "",                 // Auto-registered if empty
           "timeoutMs": 60000,           // Analysis timeout
           "autoRegister": true,         // Auto-register API key
-          "apiBaseUrl": "https://api.openguardrails.com"
+          "coreUrl": "https://www.openguardrails.com/core"
         }
       }
     }
@@ -338,7 +338,7 @@ Edit OpenClaw config file (`~/.openclaw/openclaw.json`):
 | `apiKey` | (auto) | API key (auto-registered if empty) |
 | `autoRegister` | `true` | Auto-register API key on first use |
 | `timeoutMs` | `60000` | Analysis timeout in milliseconds |
-| `apiBaseUrl` | `https://api.openguardrails.com` | Detection API endpoint |
+| `coreUrl` | `https://www.openguardrails.com/core` | Core API endpoint |
 
 ### Common Configurations
 
@@ -379,7 +379,7 @@ OpenGuardrails takes a **privacy-first, local-first** approach:
 
 **Gateway** makes zero external network calls. It's a pure localhost proxy (`127.0.0.1`).
 
-**Injection Detection** makes exactly 2 types of calls to `api.openguardrails.com`:
+**Injection Detection** makes exactly 2 types of calls to `www.openguardrails.com/core`:
 1. `POST /api/register` - One-time API key registration (if auto-register enabled)
 2. `POST /api/check/tool-call` - Analysis requests with sanitized content only
 
@@ -400,7 +400,7 @@ All code is open source. Key files:
 OpenGuardrails uses a single API endpoint for detection:
 
 ```
-POST https://api.openguardrails.com/api/check/tool-call
+POST https://www.openguardrails.com/core/api/check/tool-call
 Authorization: Bearer <your-api-key>
 Content-Type: application/json
 

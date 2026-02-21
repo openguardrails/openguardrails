@@ -11,8 +11,11 @@ import fs from "node:fs";
 // Constants
 // =============================================================================
 
-export const DEFAULT_PLATFORM_URL =
-  process.env.OG_PLATFORM_URL ?? "https://platform.openguardrails.com";
+export const DEFAULT_CORE_URL =
+  process.env.OG_CORE_URL ?? "https://www.openguardrails.com/core";
+
+export const DEFAULT_DASHBOARD_URL =
+  process.env.OG_DASHBOARD_URL ?? "https://www.openguardrails.com/dashboard";
 
 const CREDENTIALS_DIR = path.join(os.homedir(), ".openclaw/credentials/openguardrails");
 const CREDENTIALS_FILE = path.join(CREDENTIALS_DIR, "credentials.json");
@@ -57,9 +60,9 @@ export function loadApiKey(): string | null {
 export async function registerWithCore(
   name: string,
   description: string,
-  platformUrl: string = DEFAULT_PLATFORM_URL,
+  coreUrl: string = DEFAULT_CORE_URL,
 ): Promise<CoreCredentials> {
-  const response = await fetch(`${platformUrl}/api/v1/agents/register`, {
+  const response = await fetch(`${coreUrl}/api/v1/agents/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name, description }),
@@ -108,10 +111,10 @@ export async function registerWithCore(
  */
 export async function pollAccountEmail(
   apiKey: string,
-  platformUrl: string = DEFAULT_PLATFORM_URL,
+  coreUrl: string = DEFAULT_CORE_URL,
 ): Promise<{ email: string; status: string } | null> {
   try {
-    const res = await fetch(`${platformUrl}/api/v1/account`, {
+    const res = await fetch(`${coreUrl}/api/v1/account`, {
       headers: { Authorization: `Bearer ${apiKey}` },
     });
     if (!res.ok) return null;
@@ -138,10 +141,9 @@ export const DEFAULT_CONFIG: Required<OpenClawGuardConfig> = {
   blockOnRisk: true,
   apiKey: process.env.OG_API_KEY ?? "",
   timeoutMs: 60000,
-  apiBaseUrl: DEFAULT_PLATFORM_URL,
-  platformUrl: DEFAULT_PLATFORM_URL,
+  coreUrl: DEFAULT_CORE_URL,
   agentName: "OpenClaw Agent",
-  dashboardUrl: process.env.OG_DASHBOARD_URL ?? "",
+  dashboardUrl: DEFAULT_DASHBOARD_URL,
   dashboardSessionToken: process.env.OG_SESSION_TOKEN ?? "",
 };
 
@@ -155,8 +157,7 @@ export function resolveConfig(config?: Partial<OpenClawGuardConfig>): Required<O
     blockOnRisk: config?.blockOnRisk ?? DEFAULT_CONFIG.blockOnRisk,
     apiKey: config?.apiKey ?? DEFAULT_CONFIG.apiKey,
     timeoutMs: config?.timeoutMs ?? DEFAULT_CONFIG.timeoutMs,
-    apiBaseUrl: config?.apiBaseUrl ?? DEFAULT_CONFIG.apiBaseUrl,
-    platformUrl: config?.platformUrl ?? config?.apiBaseUrl ?? DEFAULT_CONFIG.platformUrl,
+    coreUrl: config?.coreUrl ?? DEFAULT_CONFIG.coreUrl,
     agentName: config?.agentName ?? DEFAULT_CONFIG.agentName,
     dashboardUrl: config?.dashboardUrl ?? DEFAULT_CONFIG.dashboardUrl,
     dashboardSessionToken: config?.dashboardSessionToken ?? DEFAULT_CONFIG.dashboardSessionToken,

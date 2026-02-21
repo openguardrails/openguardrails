@@ -15,7 +15,7 @@ interface NavGroup {
 
 const NAV_GROUPS: NavGroup[] = [
   {
-    title: "Inventory",
+    title: "Discovery",
     items: [
       { label: "AI Agents", to: "/inventory/agents", icon: <Bot size={16} /> },
       { label: "Identities", to: "/inventory/identities", icon: <Fingerprint size={16} /> },

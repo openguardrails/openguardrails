@@ -129,7 +129,7 @@ async function runTests() {
           apiKey: "",
           timeoutMs: 60000,
           autoRegister: true,
-          apiBaseUrl: "https://api.openguardrails.com",
+          coreUrl: "https://www.openguardrails.com/core",
         },
         log,
       );

@@ -8,7 +8,7 @@ export {
   loadCoreCredentials,
   saveCoreCredentials,
   registerWithCore,
-  DEFAULT_PLATFORM_URL,
+  DEFAULT_CORE_URL,
   DEFAULT_CONFIG,
   resolveConfig,
   type CoreCredentials,

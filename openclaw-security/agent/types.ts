@@ -9,14 +9,12 @@
 export type OpenClawGuardConfig = {
   enabled?: boolean;
   blockOnRisk?: boolean;
-  /** sk-og-xxx API key for platform.openguardrails.com. Auto-registered if empty. */
+  /** sk-og-xxx API key for www.openguardrails.com/core. Auto-registered if empty. */
   apiKey?: string;
   timeoutMs?: number;
-  /** Platform URL for core API (registration + behavior detection).
-   *  Default: https://platform.openguardrails.com */
-  platformUrl?: string;
-  /** @deprecated use platformUrl */
-  apiBaseUrl?: string;
+  /** Core API URL (registration + behavior detection).
+   *  Default: https://www.openguardrails.com/core */
+  coreUrl?: string;
   /** Agent name for registration */
   agentName?: string;
   /** Dashboard URL (standalone, for optional reporting) */
@@ -114,26 +112,17 @@ export type SanitizeResult = {
 // Behavioral Detection Types (mirrors core/src/types.ts contract)
 // =============================================================================
 
-export type SensitivePathCategory =
-  | "SSH_KEY"
-  | "AWS_CREDS"
-  | "GPG_KEY"
-  | "ENV_FILE"
-  | "CRYPTO_CERT"
-  | "SYSTEM_AUTH"
-  | "BROWSER_COOKIE"
-  | "KEYCHAIN";
-
-export type RiskTag =
-  | "READ_SENSITIVE_WRITE_NETWORK"
-  | "MULTI_CRED_ACCESS"
-  | "SHELL_EXEC_AFTER_WEB_FETCH"
-  | "DATA_EXFIL_PATTERN"
-  | "INTENT_ACTION_MISMATCH"
-  | "UNUSUAL_TOOL_SEQUENCE";
-
 export type RiskLevel = "no_risk" | "low" | "medium" | "high" | "critical";
 export type AssessAction = "allow" | "alert" | "block";
+
+export type DetectionRiskType = "PROMPT_INJECTION" | "DATA_EXFILTRATION" | "COMMAND_EXECUTION";
+
+export type DetectionFinding = {
+  riskLevel: RiskLevel;
+  riskType: DetectionRiskType;
+  riskContent: string;
+  reason: string;
+};
 
 export type ToolChainEntry = {
   seq: number;
@@ -146,17 +135,16 @@ export type ToolChainEntry = {
   dataFlowFrom?: string;
 };
 
-export type LocalSignals = {
-  sensitivePathsAccessed: SensitivePathCategory[];
-  externalDomainsContacted: string[];
-  patterns: {
-    readThenExfil: boolean;
-    credentialAccess: boolean;
-    shellEscapeAttempt: boolean;
-    crossAgentDataFlow: boolean;
-  };
-  intentToolOverlapScore: number;
-  riskTags: RiskTag[];
+export type PendingToolCall = {
+  toolName: string;
+  params: Record<string, string>; // sanitized
+};
+
+export type ContentInjectionFinding = {
+  category: string;
+  confidence: "high" | "medium";
+  matchedText: string;
+  pattern: string;
 };
 
 export type BehaviorAssessRequest = {
@@ -165,7 +153,10 @@ export type BehaviorAssessRequest = {
   runId: string;
   userIntent: string;
   toolChain: ToolChainEntry[];
-  localSignals: LocalSignals;
+  /** The tool call about to execute — Core classifies and evaluates it. */
+  pendingTool?: PendingToolCall;
+  /** Content injection findings from local regex scanner. */
+  contentFindings?: ContentInjectionFinding[];
   context: {
     messageHistoryLength: number;
     recentUserMessages: string[];
@@ -189,4 +180,5 @@ export type BehaviorAssessResponse = {
   action: AssessAction;
   explanation: string;
   affectedTools: number[];
+  findings?: DetectionFinding[];
 };

@@ -1,6 +1,8 @@
 import type { Request, Response, NextFunction } from "express";
+import { DEFAULT_TENANT_ID } from "@og/shared";
 
 const CORE_URL = process.env.OG_CORE_URL || "http://localhost:3002";
+const DASHBOARD_MODE = process.env.DASHBOARD_MODE || "selfhosted";
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 interface CachedSession {
@@ -17,7 +19,10 @@ const sessionCache = new Map<string, CachedSession>();
  *
  * Expects: Authorization: Bearer sk-og-xxx
  * Validates the API key against the core (cached for 5 minutes).
- * Sets res.locals.tenantId = email and res.locals.coreApiKey = apiKey.
+ * Sets res.locals.tenantId and res.locals.coreApiKey.
+ *
+ * In selfhosted/embedded mode, tenantId is always DEFAULT_TENANT_ID ("default")
+ * since the dashboard is single-tenant.
  */
 export async function sessionAuth(
   req: Request,
@@ -31,10 +36,13 @@ export async function sessionAuth(
     return;
   }
 
+  // Single-tenant modes always use DEFAULT_TENANT_ID
+  const isSingleTenant = DASHBOARD_MODE === "selfhosted" || DASHBOARD_MODE === "embedded";
+
   // Check in-memory cache
   const cached = sessionCache.get(apiKey);
   if (cached && Date.now() - cached.cachedAt < CACHE_TTL_MS) {
-    res.locals.tenantId = cached.email;
+    res.locals.tenantId = isSingleTenant ? DEFAULT_TENANT_ID : cached.email;
     res.locals.userEmail = cached.email;
     res.locals.coreApiKey = apiKey;
     next();
@@ -65,7 +73,7 @@ export async function sessionAuth(
 
     // Cache and populate locals
     sessionCache.set(apiKey, { email: data.email, agentId: data.agentId, cachedAt: Date.now() });
-    res.locals.tenantId = data.email;
+    res.locals.tenantId = isSingleTenant ? DEFAULT_TENANT_ID : data.email;
     res.locals.userEmail = data.email;
     res.locals.coreApiKey = apiKey;
     next();
