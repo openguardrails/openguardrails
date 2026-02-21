@@ -138,7 +138,8 @@ Focus on: what this agent does, its capabilities, connected systems and potentia
 
     // Try Anthropic-style call first
     try {
-      const apiKey = process.env.ANTHROPIC_API_KEY || "not-set";
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) throw new Error("ANTHROPIC_API_KEY not configured");
       const response = await fetch(`${gatewayUrl}/v1/messages`, {
         method: "POST",
         headers: {

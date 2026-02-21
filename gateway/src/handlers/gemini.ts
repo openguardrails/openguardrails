@@ -9,6 +9,9 @@ import type { GatewayConfig, MappingTable } from "../types.js";
 import { sanitize } from "../sanitizer.js";
 import { restore } from "../restorer.js";
 
+// Allowlist for Gemini model names: alphanumeric, hyphens, dots, underscores only
+const VALID_MODEL_NAME = /^[a-zA-Z0-9\-_.]+$/;
+
 /**
  * Handle Gemini API request
  */
@@ -19,6 +22,13 @@ export async function handleGeminiRequest(
   modelName: string,
 ): Promise<void> {
   try {
+    // Validate model name to prevent path traversal / SSRF
+    if (!VALID_MODEL_NAME.test(modelName)) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Invalid model name" }));
+      return;
+    }
+
     // 1. Parse request body
     const body = await readBody(req);
     const requestData = JSON.parse(body);
@@ -78,19 +88,27 @@ export async function handleGeminiRequest(
     res.end(
       JSON.stringify({
         error: "Internal gateway error",
-        message: error instanceof Error ? error.message : String(error),
       }),
     );
   }
 }
 
+const MAX_BODY_SIZE = 10 * 1024 * 1024; // 10 MB
+
 /**
- * Read request body as string
+ * Read request body as string with a size limit to prevent DoS
  */
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     let body = "";
+    let size = 0;
     req.on("data", (chunk) => {
+      size += chunk.length;
+      if (size > MAX_BODY_SIZE) {
+        req.destroy();
+        reject(new Error("Request body too large"));
+        return;
+      }
       body += chunk.toString();
     });
     req.on("end", () => resolve(body));

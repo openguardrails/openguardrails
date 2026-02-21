@@ -44,9 +44,10 @@ export function loadCoreCredentials(): CoreCredentials | null {
 
 export function saveCoreCredentials(creds: CoreCredentials): void {
   if (!fs.existsSync(CREDENTIALS_DIR)) {
-    fs.mkdirSync(CREDENTIALS_DIR, { recursive: true });
+    fs.mkdirSync(CREDENTIALS_DIR, { recursive: true, mode: 0o700 });
   }
-  fs.writeFileSync(CREDENTIALS_FILE, JSON.stringify(creds, null, 2), "utf-8");
+  // Write with mode 0600 so only the owner can read credentials
+  fs.writeFileSync(CREDENTIALS_FILE, JSON.stringify(creds, null, 2), { encoding: "utf-8", mode: 0o600 });
 }
 
 /** @deprecated Use loadCoreCredentials().apiKey instead */
@@ -54,12 +55,26 @@ export function loadApiKey(): string | null {
   return loadCoreCredentials()?.apiKey ?? null;
 }
 
+function validateHttpUrl(raw: string, label: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new Error(`${label} is not a valid URL`);
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`${label} must use http or https protocol`);
+  }
+  return parsed.origin;
+}
+
 export async function registerWithCore(
   name: string,
   description: string,
   platformUrl: string = DEFAULT_PLATFORM_URL,
 ): Promise<CoreCredentials> {
-  const response = await fetch(`${platformUrl}/api/v1/agents/register`, {
+  const safeUrl = validateHttpUrl(platformUrl, "platformUrl");
+  const response = await fetch(`${safeUrl}/api/v1/agents/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name, description }),
@@ -111,7 +126,8 @@ export async function pollAccountEmail(
   platformUrl: string = DEFAULT_PLATFORM_URL,
 ): Promise<{ email: string; status: string } | null> {
   try {
-    const res = await fetch(`${platformUrl}/api/v1/account`, {
+    const safeUrl = validateHttpUrl(platformUrl, "platformUrl");
+    const res = await fetch(`${safeUrl}/api/v1/account`, {
       headers: { Authorization: `Bearer ${apiKey}` },
     });
     if (!res.ok) return null;

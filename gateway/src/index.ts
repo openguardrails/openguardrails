@@ -19,6 +19,9 @@ const GATEWAY_MODE = process.env.GATEWAY_MODE || "selfhosted";
 
 let config: GatewayConfig;
 
+// Only allow localhost origins — gateway is a local proxy, not a public service
+const ALLOWED_ORIGIN_PATTERN = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+
 /**
  * Main request handler
  */
@@ -31,8 +34,12 @@ async function handleRequest(
   // Log request
   console.log(`[ai-security-gateway] ${method} ${url}`);
 
-  // CORS headers (for browser-based clients)
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  // CORS headers — restricted to localhost origins for security
+  const origin = req.headers.origin;
+  if (origin && ALLOWED_ORIGIN_PATTERN.test(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-api-key, anthropic-version");
 
@@ -78,7 +85,7 @@ async function handleRequest(
     } else {
       // Unknown endpoint
       res.writeHead(404, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Not found", url }));
+      res.end(JSON.stringify({ error: "Not found" }));
     }
   } catch (error) {
     console.error("[ai-security-gateway] Request handler error:", error);
@@ -86,7 +93,6 @@ async function handleRequest(
     res.end(
       JSON.stringify({
         error: "Internal server error",
-        message: error instanceof Error ? error.message : String(error),
       }),
     );
   }
