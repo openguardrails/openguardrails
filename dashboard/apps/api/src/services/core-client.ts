@@ -47,6 +47,7 @@ export async function callCoreDetect(
     method: "POST",
     headers,
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(30000),
   });
 
   if (!res.ok) {
@@ -66,7 +67,7 @@ export async function callCoreDetect(
 export async function checkCoreHealth(): Promise<boolean> {
   try {
     const coreUrl = await getCoreUrl();
-    const res = await fetch(`${coreUrl}/health`);
+    const res = await fetch(`${coreUrl}/health`, { signal: AbortSignal.timeout(5000) });
     const json = await res.json() as { status: string };
     return json.status === "ok";
   } catch {

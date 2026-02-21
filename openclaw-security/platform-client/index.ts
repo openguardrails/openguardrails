@@ -18,12 +18,25 @@ import type {
   AgentPermission,
 } from "./types.js";
 
+function validateHttpUrl(raw: string, label: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new Error(`${label} is not a valid URL`);
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`${label} must use http or https protocol`);
+  }
+  return parsed.origin + parsed.pathname.replace(/\/$/, "");
+}
+
 export class DashboardClient {
   private config: Required<DashboardClientConfig>;
 
   constructor(config: DashboardClientConfig) {
     this.config = {
-      dashboardUrl: config.dashboardUrl.replace(/\/$/, ""),
+      dashboardUrl: validateHttpUrl(config.dashboardUrl, "dashboardUrl"),
       sessionToken: config.sessionToken,
       agentId: config.agentId ?? "",
       timeoutMs: config.timeoutMs ?? 30000,

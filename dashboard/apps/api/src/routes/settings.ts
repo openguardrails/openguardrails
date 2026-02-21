@@ -35,8 +35,9 @@ settingsRouter.put("/", async (req, res, next) => {
       return;
     }
 
-    // Prevent overwriting session_token via this endpoint
+    // Prevent overwriting read-only / sensitive keys via this endpoint
     delete updates.session_token;
+    delete updates.og_core_key;
 
     for (const [key, value] of Object.entries(updates)) {
       await settings.set(key, value);

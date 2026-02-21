@@ -61,10 +61,11 @@ const ENTITIES: Entity[] = [
     pattern: /\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b/g,
   },
   // Phone numbers (US/intl formats, including +86-xxx-xxxx-xxxx)
+  // Anchored with \b and uses non-optional country code to avoid catastrophic backtracking
   {
     category: "PHONE",
     categoryKey: "phone",
-    pattern: /[+]?[0-9]{1,3}?[-\s.]?[(]?[0-9]{3}[)]?[-\s.][0-9]{3,4}[-\s.][0-9]{4,6}\b/g,
+    pattern: /\b[+]?[0-9]{1,3}[-\s.]?[(]?[0-9]{3}[)]?[-\s.][0-9]{3,4}[-\s.][0-9]{4,6}\b/g,
   },
 ];
 

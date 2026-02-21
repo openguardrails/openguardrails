@@ -26,6 +26,12 @@ policiesRouter.post("/", async (req, res, next) => {
       return;
     }
 
+    const VALID_ACTIONS = ["block", "alert", "log", "allow"] as const;
+    if (!VALID_ACTIONS.includes(action)) {
+      res.status(400).json({ success: false, error: "action must be one of: block, alert, log, allow" });
+      return;
+    }
+
     const policy = await policies.create({
       name,
       description: description || null,

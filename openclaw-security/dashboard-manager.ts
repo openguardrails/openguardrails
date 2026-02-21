@@ -187,12 +187,14 @@ export class DashboardManager {
     } else {
       // Kill by PID from state file (adopted or orphaned process)
       const state = this.readState();
-      if (state?.pid && this.isProcessAlive(state.pid)) {
+      // Validate PID is a positive integer in a reasonable OS range before using it
+      const pid = state?.pid;
+      if (pid && Number.isInteger(pid) && pid > 1 && pid <= 4194304 && this.isProcessAlive(pid)) {
         try {
-          process.kill(state.pid, "SIGTERM");
+          process.kill(pid, "SIGTERM");
           await new Promise((r) => setTimeout(r, 2000));
-          if (this.isProcessAlive(state.pid)) {
-            process.kill(state.pid, "SIGKILL");
+          if (this.isProcessAlive(pid)) {
+            process.kill(pid, "SIGKILL");
           }
           this.log.info("Dashboard stopped (by PID)");
         } catch {
@@ -279,12 +281,12 @@ export class DashboardManager {
   private saveState(): void {
     try {
       const dir = dirname(this.stateFilePath);
-      mkdirSync(dir, { recursive: true });
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
       writeFileSync(this.stateFilePath, JSON.stringify({
         pid: this.process?.pid,
         port: this.port,
         sessionToken: this.sessionToken,
-      }));
+      }), { mode: 0o600 });
     } catch {}
   }
 

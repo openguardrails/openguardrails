@@ -88,7 +88,6 @@ export async function handleOpenAIRequest(
     res.end(
       JSON.stringify({
         error: "Internal gateway error",
-        message: error instanceof Error ? error.message : String(error),
       }),
     );
   }
@@ -173,13 +172,22 @@ async function handleOpenAINonStream(
   res.end(JSON.stringify(restoredData));
 }
 
+const MAX_BODY_SIZE = 10 * 1024 * 1024; // 10 MB
+
 /**
- * Read request body as string
+ * Read request body as string with a size limit to prevent DoS
  */
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     let body = "";
+    let size = 0;
     req.on("data", (chunk) => {
+      size += chunk.length;
+      if (size > MAX_BODY_SIZE) {
+        req.destroy();
+        reject(new Error("Request body too large"));
+        return;
+      }
       body += chunk.toString();
     });
     req.on("end", () => resolve(body));
