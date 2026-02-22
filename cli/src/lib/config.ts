@@ -2,16 +2,13 @@ import fs from "node:fs";
 import { paths } from "./paths.js";
 
 export interface CliConfig {
-  sessionToken: string;
   dashboardPort: number;
   webPort: number;
   gatewayPort: number;
   ogCoreUrl?: string;
-  ogCoreKey?: string;
 }
 
 const DEFAULTS: CliConfig = {
-  sessionToken: "",
   dashboardPort: 53667,
   webPort: 53668,
   gatewayPort: 8900,

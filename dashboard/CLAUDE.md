@@ -31,7 +31,7 @@ pnpm db:seed         # Seed default scanners
 SQLite by default, PostgreSQL/MySQL optional via `DB_DIALECT` env var or `DATABASE_URL` scheme. Drizzle ORM with dialect-specific schemas. Tables: settings, agents, scanner_definitions, policies, usage_logs, detection_results.
 
 ## Environment
-See `.env.example`. Key vars: DATABASE_URL, API_PORT, OG_CORE_URL, OG_CORE_KEY.
+See `.env.example`. Key vars: DATABASE_URL, API_PORT, OG_CORE_URL.
 
 ## Conventions
 - TypeScript strict mode

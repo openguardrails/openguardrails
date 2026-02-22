@@ -1,11 +1,8 @@
 import { Command } from "commander";
-import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import { paths } from "../lib/paths.js";
 import { loadConfig, saveConfig } from "../lib/config.js";
 import { startProcess, stopProcess, isRunning } from "../lib/process-manager.js";
-
-const SESSION_TOKEN_PREFIX = "og-session-";
 
 export function registerDashboardCommands(program: Command): void {
   const dashboard = program
@@ -14,9 +11,8 @@ export function registerDashboardCommands(program: Command): void {
 
   dashboard
     .command("init")
-    .description("Initialize the dashboard (create DB, seed scanners, generate token)")
+    .description("Initialize the dashboard (create DB, seed scanners)")
     .option("--core-url <url>", "Core API URL")
-    .option("--core-key <key>", "Core API key")
     .action(initCommand);
 
   dashboard
@@ -35,15 +31,9 @@ export function registerDashboardCommands(program: Command): void {
     .command("status")
     .description("Show dashboard status")
     .action(statusCommand);
-
-  dashboard
-    .command("token")
-    .description("Show or reset session token")
-    .option("--reset", "Generate a new session token")
-    .action(tokenCommand);
 }
 
-async function initCommand(options: { coreUrl?: string; coreKey?: string }) {
+async function initCommand(options: { coreUrl?: string }) {
   console.log("Initializing OpenGuardrails Dashboard...\n");
 
   // Check Node.js version
@@ -106,23 +96,18 @@ async function initCommand(options: { coreUrl?: string; coreKey?: string }) {
     console.log("Database setup skipped:", (err as Error).message);
   }
 
-  // Generate session token
-  const sessionToken = SESSION_TOKEN_PREFIX + randomBytes(32).toString("hex");
-
   // Save config
-  saveConfig({
-    sessionToken,
-    ...(options.coreUrl && { ogCoreUrl: options.coreUrl }),
-    ...(options.coreKey && { ogCoreKey: options.coreKey }),
-  });
+  if (options.coreUrl) {
+    saveConfig({ ogCoreUrl: options.coreUrl });
+  }
 
   console.log("\n-------------------------------------------");
   console.log("OpenGuardrails Dashboard initialized!");
   console.log("-------------------------------------------");
-  console.log(`Session Token: ${sessionToken}`);
-  console.log(`Database:      ${paths.db}`);
-  console.log(`Config:        ${paths.config}`);
+  console.log(`Database: ${paths.db}`);
+  console.log(`Config:   ${paths.config}`);
   console.log("\nRun 'openguardrails dashboard start' to launch.");
+  console.log("Then open the dashboard in your browser and enter your Core API key to log in.");
 }
 
 async function startCommand(options: { port?: string; webPort?: string }) {
@@ -156,8 +141,6 @@ async function startCommand(options: { port?: string; webPort?: string }) {
   };
 
   if (config.ogCoreUrl) env.OG_CORE_URL = config.ogCoreUrl;
-  if (config.ogCoreKey) env.OG_CORE_KEY = config.ogCoreKey;
-  if (config.sessionToken) env.SESSION_TOKEN = config.sessionToken;
 
   const child = startProcess({
     entry: paths.dashboardApi,
@@ -174,7 +157,7 @@ async function startCommand(options: { port?: string; webPort?: string }) {
   process.on("SIGINT", cleanup);
   process.on("SIGTERM", cleanup);
 
-  console.log(`\nSession Token: ${config.sessionToken}`);
+  console.log(`\nDashboard: http://localhost:${webPort}`);
   console.log("Press Ctrl+C to stop.\n");
 }
 
@@ -203,35 +186,5 @@ async function statusCommand() {
   if (running) {
     console.log(`\n  Dashboard: http://localhost:${config.webPort}`);
     console.log(`  API:       http://localhost:${config.dashboardPort}`);
-  }
-}
-
-async function tokenCommand(options: { reset?: boolean }) {
-  const config = loadConfig();
-
-  if (options.reset) {
-    const newToken = SESSION_TOKEN_PREFIX + randomBytes(32).toString("hex");
-    saveConfig({ sessionToken: newToken });
-
-    // Update DB if possible
-    try {
-      const Database = (await import("better-sqlite3")).default;
-      if (fs.existsSync(paths.db)) {
-        const sqlite = new Database(paths.db);
-        sqlite.prepare(
-          "INSERT OR REPLACE INTO settings (key, value, tenant_id) VALUES ('session_token', ?, 'default')"
-        ).run(newToken);
-        sqlite.close();
-      }
-    } catch {}
-
-    console.log(`Session token reset: ${newToken}`);
-    console.log("\nRestart the dashboard for the new token to take effect.");
-  } else {
-    if (config.sessionToken) {
-      console.log(config.sessionToken);
-    } else {
-      console.log("No session token. Run 'openguardrails dashboard init' first.");
-    }
   }
 }

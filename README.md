@@ -1,17 +1,40 @@
-# OpenGuardrails v6
+# OpenGuardrails
 
 **Runtime Security for AI Agents** — Protect AI agents from data exfiltration, prompt injection, sensitive data leakage, credential theft, command injection, and harmful content.
 
-OpenGuardrails is an open-source security framework for AI agents. It monitors agent behavior in real time, blocks malicious tool call patterns before they execute, sanitizes sensitive data before it reaches LLM providers, and gives you full visibility through an account portal and management dashboard.
+OpenGuardrails is an open-source security framework for AI agents. It monitors agent behavior in real time, blocks malicious tool call patterns before they execute, sanitizes sensitive data before it reaches LLM providers, and gives you full visibility through a management dashboard.
 
-## Versions
+## Quick Start (Recommended)
 
-| Version | Branch | Status | Description |
-|---------|--------|--------|-------------|
-| **v6** | `main` | Active | New architecture — Core platform, Gateway, OpenClaw plugin |
-| **v5** | `v5` | LTS | Stable legacy version |
+### 1. Install the OpenGuardrails skill from ClawHub
 
-v6 is a complete rewrite. If you need the previous version: `git checkout v5`
+Visit [clawhub.ai/ThomasLWang/moltguard](https://clawhub.ai/ThomasLWang/moltguard) and install the skill into OpenClaw.
+
+### 2. Activate
+
+Run in OpenClaw:
+
+```
+/og_activate
+```
+
+OpenClaw will automatically register with the OpenGuardrails Core platform. You'll receive:
+- A **claim URL** — open it in your browser, enter your email and the verification code
+- A **verification email** — click the link to activate your agent
+- **30,000 free security detection calls**
+
+### 3. Try it out
+
+After activation, you'll receive a **test email** designed to demonstrate OpenGuardrails' detection capabilities. Ask OpenClaw to read the email — you'll see OpenGuardrails detect and flag the security risks in real time.
+
+### 4. View your dashboard
+
+Sign in at [openguardrails.com/dashboard](https://www.openguardrails.com/dashboard) to view:
+- **Agents** — all registered AI agents under your account
+- **Identities** — email-based account and agent identity management
+- **Permissions** — agent permission policies
+- **Graph** — visual representation of agent behavior and tool call patterns
+- **Risks** — detected threats, blocked actions, and security alerts
 
 ## What It Protects Against
 
@@ -21,7 +44,7 @@ The Core behavioral engine evaluates tool call sequences against a rule hierarch
 
 | Risk Level | Action | Threats |
 |------------|--------|---------|
-| **Critical** | Block | Sensitive file read followed by network exfiltration, credential access + external domains |
+| **Critical** | Block | Sensitive file read + network exfiltration, credential access + external domains |
 | **High** | Block | Shell escape / command injection, credential access with intent mismatch, shell exec after web fetch |
 | **Medium** | Alert | Sensitive path access without clear intent, external domains outside expected scope |
 
@@ -44,103 +67,64 @@ The Core behavioral engine evaluates tool call sequences against a rule hierarch
 
 The AI Security Gateway sanitizes PII, credentials, and secrets from prompts before they leave the machine, and restores original values in responses. Zero npm dependencies.
 
-## Architecture
+## Self-Hosted Deployment
 
-```
-openguardrails/
-  core/                   # Platform API (port 53666)
-  gateway/                # AI Security Gateway (port 8900)
-  dashboard/              # Management dashboard (pnpm monorepo)
-    apps/
-      api/                #   Express API (port 53667)
-      web/                #   React frontend (port 53668)
-    packages/
-      shared/             #   Types, config, constants
-      db/                 #   Drizzle ORM (SQLite/PG/MySQL)
-      cli/                #   CLI tool
-  openclaw-security/      # OpenClaw plugin
-```
+### Dashboard (Private Deployment)
 
-### core
-
-The platform backend. Handles the full agent lifecycle:
-
-- **Agent registration** — `POST /api/v1/agents/register` returns API key, claim URL, verification code
-- **Claim & activation** — email verification flow, activates agent after email confirmed
-- **Behavioral assessment** — `POST /api/v1/behavior/assess` evaluates tool chains against risk rules
-- **Account portal** — web UI at `/login` and `/account` for managing agents, viewing quota, upgrading plans
-- **Billing** — Stripe integration for paid plans
-- **Quota tracking** — per-account usage metering across all agents
-
-### gateway
-
-AI Security Gateway. A local HTTP proxy that sits between agents and LLM providers:
-
-- Sanitizes PII, credentials, API keys, and secrets from prompts before sending to LLMs
-- Restores original values in LLM responses
-- Supports Anthropic, OpenAI (+ compatible: Kimi, DeepSeek), and Gemini
-- Zero npm dependencies, runs locally
-
-### dashboard
-
-Management UI for detection results, scanner configuration, and security policies:
-
-- **Database**: SQLite by default, PostgreSQL/MySQL optional
-- **Policy engine**: block, alert, or log based on scanner results and sensitivity thresholds
-- **Detection proxy**: routes content through Core's S01-S10 scanners
-
-### openclaw-security
-
-OpenClaw plugin that hooks into agent tool calls:
-
-- Classifies every tool call in real time (file reads, network calls, shell commands)
-- Fast-path blocks critical patterns locally — no cloud round-trip needed
-- Sends medium+ risk signals to Core for behavioral assessment
-- Sanitizes tool params before any data leaves the machine
-- Exposes `/og_status` and `/og_activate` commands
-
-## Quick Start
-
-### Option A: OpenClaw Plugin (recommended)
-
-Install the plugin directly in OpenClaw:
+Deploy the management dashboard locally — no need to use the hosted version:
 
 ```bash
-openclaw plugins install @openguardrails/openclaw-security
+npm install -g openguardrails
+openguardrails dashboard init
+openguardrails dashboard start
 ```
 
-Then activate:
+Open the dashboard in your browser and enter your Core API key to log in. All data is stored locally in SQLite at `~/.openguardrails/`.
+
+### AI Security Gateway (Private Deployment)
+
+Deploy the gateway locally to sanitize sensitive data before it reaches external LLM providers:
+
 ```bash
-/og_activate
+npm install -g @openguardrails/gateway
+openguardrails gateway start
 ```
 
-Follow the claim URL, enter the verification code and your email. After email verification, behavioral detection is active with 30,000 free checks.
+After starting the gateway:
 
-### Option B: Self-hosted Platform
+1. Configure your LLM API keys in `~/.openguardrails/gateway.json`:
+
+```json
+{
+  "port": 8900,
+  "backends": {
+    "anthropic": { "apiKey": "sk-ant-..." },
+    "openai": { "apiKey": "sk-..." },
+    "gemini": { "apiKey": "..." }
+  }
+}
+```
+
+2. Point OpenClaw to use the gateway as its LLM base URL:
+
+```
+Base URL: http://localhost:8900
+```
+
+All prompts are sanitized locally before being sent to LLM providers. PII, credentials, and secrets are stripped on the way out and restored on the way back. Supports Anthropic, OpenAI (+ compatible: Kimi, DeepSeek), and Gemini.
+
+### Self-Hosted Core (Full Private Deployment)
+
+For fully air-gapped or private deployments, you can also self-host the Core platform:
 
 ```bash
-# 1. Clone
-git clone https://github.com/openguardrails/openguardrails.git
-cd openguardrails
-
-# 2. Start Core API (port 53666)
 cd core
 npm install
-npm run db:migrate
-npm run dev
-
-# 3. Start Dashboard (ports 53668 + 53667)
-cd ../dashboard
-pnpm install && pnpm build
-pnpm db:migrate && pnpm db:seed
-pnpm dev
-
-# 4. Start Gateway (port 8900, optional)
-cd ../gateway
-npm run dev
+cp .env.example .env    # Edit as needed
+npm run dev             # Starts on port 53666
 ```
 
-Then point the OpenClaw plugin to your local instance:
+Then point the OpenClaw plugin to your local Core:
 
 ```json
 {
@@ -156,12 +140,20 @@ Then point the OpenClaw plugin to your local instance:
 }
 ```
 
-## User Flow
+## Architecture
 
 ```
-Install plugin → /og_activate → Visit claim URL → Enter code + email
-→ Click email verification link → Agent active (30,000 free checks)
-→ Sign in at /login with email + API key → View account, quota, agents
+openguardrails/
+  core/                   # Platform API (port 53666)
+  gateway/                # AI Security Gateway (port 8900)
+  dashboard/              # Management dashboard (pnpm monorepo)
+    apps/
+      api/                #   Express API (port 53667)
+      web/                #   React frontend (port 53668)
+    packages/
+      shared/             #   Types, config, constants
+      db/                 #   Drizzle ORM (SQLite/PG/MySQL)
+  openclaw-security/      # OpenClaw plugin
 ```
 
 ## Plans
@@ -175,66 +167,13 @@ Install plugin → /og_activate → Visit claim URL → Enter code + email
 
 All agents registered under the same email share one account and quota pool.
 
-## Configuration
+## npm Packages
 
-### Core (`core/.env`)
-
-```bash
-PORT=53666
-CORE_DB_PATH=./data/openguardrails.db
-CORE_URL=http://localhost:53666     # Used in claim URLs and emails
-
-# Email (leave SMTP_HOST blank to log to console in dev)
-SMTP_HOST=smtp.example.com
-SMTP_PORT=587
-SMTP_USER=noreply@example.com
-SMTP_PASS=<password>
-SMTP_FROM=noreply@example.com
-
-# Stripe (optional — leave blank to disable billing)
-STRIPE_SECRET_KEY=sk_...
-STRIPE_WEBHOOK_SECRET=whsec_...
-```
-
-### Gateway (`~/.openguardrails/gateway.json`)
-
-```json
-{
-  "port": 8900,
-  "backends": {
-    "anthropic": { "apiKey": "sk-ant-..." },
-    "openai": { "apiKey": "sk-..." },
-    "gemini": { "apiKey": "..." }
-  }
-}
-```
-
-### OpenClaw Plugin (`~/.openclaw/openclaw.json`)
-
-```json
-{
-  "plugins": {
-    "entries": {
-      "openguardrails": {
-        "config": {
-          "enabled": true,
-          "blockOnRisk": true,
-          "coreUrl": "https://www.openguardrails.com/core",
-          "apiKey": "",
-          "agentName": "OpenClaw Agent",
-          "timeoutMs": 60000
-        }
-      }
-    }
-  }
-}
-```
-
-## API Conventions
-
-- All endpoints return `{ success: boolean, data?, error? }`
-- API key format: `sk-og-<32 hex>`
-- Agent auth: `Authorization: Bearer sk-og-...`
+| Package | Description |
+|---------|-------------|
+| `openguardrails` | CLI — includes bundled dashboard for private deployment |
+| `@openguardrails/gateway` | AI Security Gateway — standalone local proxy |
+| `@openguardrails/openguardrails` | OpenClaw security plugin |
 
 ## License
 

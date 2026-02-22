@@ -8,9 +8,9 @@ async function getCoreUrl(): Promise<string> {
   return (await settings.get("og_core_url")) || process.env.OG_CORE_URL || "http://localhost:53666";
 }
 
-/** Get core key from settings or env */
+/** Get core key from settings */
 async function getCoreKey(): Promise<string> {
-  return (await settings.get("og_core_key")) || process.env.OG_CORE_KEY || "";
+  return (await settings.get("og_core_key")) || "";
 }
 
 /**
