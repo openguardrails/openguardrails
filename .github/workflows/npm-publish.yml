@@ -46,9 +46,7 @@ jobs:
           npm run build
 
       - name: Publish
-        run: cd gateway && npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: cd gateway && npm publish --provenance --access public
 
   # ─── Publish @openguardrails/openclaw-security (OpenClaw plugin) ──
   publish-plugin:
@@ -80,9 +78,7 @@ jobs:
           npm run build
 
       - name: Publish
-        run: cd openclaw-security && npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: cd openclaw-security && npm publish --provenance --access public
 
   # ─── Publish openguardrails (CLI) ──────────────────────────────
   publish-cli:
@@ -122,9 +118,7 @@ jobs:
           bash scripts/build.sh
 
       - name: Publish
-        run: cd cli && npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: cd cli && npm publish --provenance --access public
 
   # ─── Release summary ──────────────────────────────────────────
   summary:
