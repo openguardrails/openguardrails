@@ -28,6 +28,7 @@ echo "  Web frontend built."
 # ─── 3. Build gateway ────────────────────────────────────────────
 echo "[3/6] Building gateway..."
 cd "$REPO_ROOT/gateway"
+npm install
 npm run build
 echo "  Gateway built."
 

@@ -30,7 +30,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
 
       - name: Set version from tag
         if: github.event_name == 'push'
@@ -47,8 +46,6 @@ jobs:
 
       - name: Publish
         run: cd gateway && npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   # ─── Publish @openguardrails/openclaw-security (OpenClaw plugin) ──
   publish-plugin:
@@ -64,7 +61,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
 
       - name: Set version from tag
         if: github.event_name == 'push'
@@ -81,8 +77,6 @@ jobs:
 
       - name: Publish
         run: cd openclaw-security && npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   # ─── Publish openguardrails (CLI) ──────────────────────────────
   publish-cli:
@@ -98,7 +92,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
 
       - uses: pnpm/action-setup@v4
         with:
@@ -123,8 +116,6 @@ jobs:
 
       - name: Publish
         run: cd cli && npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   # ─── Release summary ──────────────────────────────────────────
   summary:
