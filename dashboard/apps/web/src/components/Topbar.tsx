@@ -1,5 +1,8 @@
+import { Link } from "react-router-dom";
 import { ThemeToggle } from "./ThemeToggle";
 import { useAuth } from "../lib/auth-context";
+
+const BASE = (import.meta.env.BASE_URL ?? "/").replace(/\/$/, "") || "";
 
 export function Topbar() {
   const { logout } = useAuth();
@@ -7,12 +10,12 @@ export function Topbar() {
   return (
     <header className="topbar">
       <div className="topbar-left">
-        <a href="/" className="brand">
+        <Link to="/" className="brand">
           <div className="brand-logo">
-            <img src="/logo.svg" alt="OpenGuardrails" />
+            <img src={`${BASE}/logo.svg`} alt="OpenGuardrails" />
           </div>
           <span className="brand-title">OpenGuardrails</span>
-        </a>
+        </Link>
       </div>
       <div className="topbar-status">
         <div className="pill">

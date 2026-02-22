@@ -1,5 +1,8 @@
 import { getStoredApiKey } from "./auth-context";
 
+/** When deployed under /dashboard/, API is at /dashboard/api */
+const API_BASE = typeof import.meta.env.BASE_URL === "string" && import.meta.env.BASE_URL !== "/" ? import.meta.env.BASE_URL.replace(/\/$/, "") : "";
+
 function getToken(): string | null {
   return getStoredApiKey();
 }
@@ -13,7 +16,8 @@ async function request<T = Record<string, unknown>>(path: string, options?: Requ
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
   }
-  const res = await fetch(path, { ...options, headers });
+  const url = path.startsWith("/") ? API_BASE + path : API_BASE + "/" + path;
+  const res = await fetch(url, { ...options, headers });
   return res.json();
 }
 

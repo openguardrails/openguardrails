@@ -12,7 +12,7 @@ import "./styles/login.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <BrowserRouter>
+    <BrowserRouter basename="/dashboard">
       <ThemeProvider>
         <AuthProvider>
           <App />

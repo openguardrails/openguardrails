@@ -2,6 +2,8 @@ import { useState, useEffect, useRef, type FormEvent } from "react";
 import { Navigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../lib/auth-context";
 
+const BASE = (import.meta.env.BASE_URL ?? "/").replace(/\/$/, "") || "";
+
 export function LoginPage() {
   const { authenticated, login } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -53,7 +55,7 @@ export function LoginPage() {
     <div className="login-page">
       <div className="login-card">
         <div className="login-card__logo">
-          <img src="/logo.svg" alt="OpenGuardrails" />
+          <img src={`${BASE}/logo.svg`} alt="OpenGuardrails" />
         </div>
         <h1 className="login-card__title">OpenGuardrails</h1>
         <p className="login-card__sub">Sign in with your email and API key</p>

@@ -1,6 +1,10 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
 
 const API_KEY_STORAGE = "og_api_key";
+const API_BASE =
+  typeof import.meta.env.BASE_URL === "string" && import.meta.env.BASE_URL !== "/"
+    ? import.meta.env.BASE_URL.replace(/\/$/, "")
+    : "";
 
 export function getStoredApiKey(): string | null {
   return localStorage.getItem(API_KEY_STORAGE);
@@ -60,7 +64,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
       return;
     }
-    fetch("/api/auth/me", { headers: { Authorization: `Bearer ${key}` } })
+    fetch(`${API_BASE}/api/auth/me`, { headers: { Authorization: `Bearer ${key}` } })
       .then((r) => r.json())
       .then((data: { success: boolean } & Partial<AccountInfo>) => {
         if (data.success && data.email) {
@@ -84,7 +88,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (apiKey: string, email?: string) => {
     try {
-      const res = await fetch("/api/auth/login", {
+      const res = await fetch(`${API_BASE}/api/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ apiKey, email }),
@@ -115,7 +119,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearStoredApiKey();
     setAuthenticated(false);
     setAccount(null);
-    fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+    fetch(`${API_BASE}/api/auth/logout`, { method: "POST" }).catch(() => {});
   }, []);
 
   return (
