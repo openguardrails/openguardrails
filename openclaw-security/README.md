@@ -24,7 +24,8 @@
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Commands](#commands)
-- [Privacy & Security](#privacy--security)
+- [Privacy & Data Protection](#privacy--data-protection)
+- [Contact](#contact)
 
 ## Quick Start
 
@@ -52,16 +53,18 @@ openclaw gateway restart
 
 ## Feature 1: AI Security Gateway
 
-**NEW in v6.0** - Protect sensitive data in your prompts before sending to LLMs.
+Protect sensitive data in your prompts before sending to LLMs. **Free, no registration required, no usage limits.**
 
 ### What It Does
 
 The AI Security Gateway is a **local HTTP proxy** that automatically:
 
 1. **Intercepts** your prompts before they reach the LLM
-2. **Sanitizes** sensitive data (bank cards, passwords, API keys, etc.)
-3. **Sends** sanitized prompts to the LLM (Claude/GPT/Kimi/etc.)
+2. **Sanitizes** sensitive data (bank cards, passwords, API keys, etc.) locally on your machine
+3. **Sends** sanitized prompts to the LLM (Claude/GPT/Kimi/DeepSeek/etc.)
 4. **Restores** original values in responses before tool execution
+
+The entire process is **transparent** — you use your agent normally, and your sensitive data is protected without any manual steps. The LLM provider never sees your real data; you see the correct, fully restored response.
 
 **Example:**
 
@@ -88,6 +91,8 @@ Tool executes with: "Booking with 6222021234567890"
 | SSN | `__ssn_1__` | 123-45-6789 |
 | IBAN | `__iban_1__` | GB82WEST12345698765432 |
 | URL | `__url_1__` | https://example.com |
+
+More data types will be added based on user needs — [contact us](#contact) if you need a specific type covered.
 
 ### Gateway Setup
 
@@ -161,6 +166,8 @@ Before injection detection analysis, content is **sanitized locally** to remove 
 | API keys & secrets | `<SECRET>` |
 | URLs | `<URL>` |
 | IBANs | `<IBAN>` |
+
+More data types will be added based on user needs. The detection API never sees your raw sensitive data — only these placeholders.
 
 Then the sanitized content is sent to the detection API for analysis:
 
@@ -357,43 +364,64 @@ Edit OpenClaw config file (`~/.openclaw/openclaw.json`):
 }
 ```
 
-## Privacy & Security
+## Privacy & Data Protection
 
-OpenGuardrails takes a **privacy-first, local-first** approach:
+**OpenGuardrails makes money by protecting your data — not by collecting, using, or selling it.**
 
-### Local Processing
+### We do not collect your data
 
-✅ **AI Security Gateway is 100% local** - Sensitive data never leaves your machine. The gateway runs on `localhost` and processes all data locally before forwarding to LLMs.
+OpenGuardrails does **not** need your sensitive data to perform security detection. Before any data leaves your machine, it is **sanitized locally** — PII, credentials, and secrets are replaced with category placeholders. The detection API only sees sanitized tool metadata, never raw content.
 
-✅ **Injection detection sanitization is local** - Before sending content to the detection API for analysis, all PII/secrets are stripped locally and replaced with placeholders. Only sanitized content is sent.
+**We do not use your data for model training.** We have no LLM to train. Our detection engine is rule-driven and runs on structured signals, not on user content.
 
-### Data Storage
+### Local-first sanitization
 
-✅ **API keys stored locally** - Your unique API key is stored at `~/.openclaw/credentials/openguardrails/credentials.json`. No shared or hard-coded keys.
+All sensitive data is sanitized **on your machine** before anything is sent to the cloud API for behavioral assessment:
 
-✅ **Logs stored locally** - Analysis results are stored in local JSONL files at `~/.openclaw/logs/`. Never sent to external servers.
+| Data Type | Placeholder | Examples |
+|-----------|-------------|----------|
+| Email addresses | `<EMAIL>` | `user@example.com` |
+| Credit card numbers | `<CREDIT_CARD>` | `1234-5678-9012-3456` |
+| SSNs | `<SSN>` | `123-45-6789` |
+| IBANs | `<IBAN>` | `GB82WEST12345698765432` |
+| IP addresses | `<IP_ADDRESS>` | `192.168.1.1` |
+| Phone numbers | `<PHONE>` | `+1-555-123-4567` |
+| URLs | `<URL>` | `https://internal.corp/secret-path` |
+| API keys & secrets | `<SECRET>` | `sk-...`, `ghp_...`, `AKIA...`, Bearer tokens |
+| High-entropy tokens | `<SECRET>` | Any 20+ character string with high randomness |
 
-✅ **Gateway mappings are ephemeral** - Placeholder-to-original-value mappings exist only during the request cycle and are immediately discarded after response is restored.
+More data types will be added based on user needs — [contact us](#contact) if you need a specific type covered.
 
-### Network Transparency
+### AI Security Gateway is fully transparent
 
-**Gateway** makes zero external network calls. It's a pure localhost proxy (`127.0.0.1`).
+The gateway runs on localhost (`127.0.0.1`). It sanitizes your prompts before they reach the LLM and restores original values in responses. The LLM provider never sees your real data. You see the correct response. The entire protection process (sanitization and restoration) is transparent to you — no impact on functionality, no manual steps. **The gateway is free with no usage limits.**
 
-**Injection Detection** makes exactly 2 types of calls to `www.openguardrails.com/core`:
-1. `POST /api/register` - One-time API key registration (if auto-register enabled)
-2. `POST /api/check/tool-call` - Analysis requests with sanitized content only
+### What the cloud API receives
 
-**No third-party LLM calls** - Content is never forwarded to OpenAI or other third parties.
+- Sanitized tool parameters (with placeholders, not real values)
+- Tool names and session signals (tool ordering, timing)
+- **Not** raw file contents, user messages, or conversation history
 
-**Content is not stored** - The detection API does not persist content after analysis completes.
+### What stays local
 
-### Open Source & Auditable
+- Prompt injection redaction — fully local regex-based scanning, no cloud round-trip
+- Fast-path blocks (shell escape detection, read-then-exfil patterns) — fully local
+- AI Security Gateway sanitization and restoration — fully local
+- Credentials stored at `~/.openclaw/credentials/openguardrails/credentials.json`
+- Gateway placeholder-to-original mappings — ephemeral, discarded after each request
+- Low-risk / no-risk tool calls — never leave the machine
 
-All code is open source. Key files:
-- `gateway/sanitizer.ts` - Sanitization patterns and logic
-- `gateway/restorer.ts` - Restoration logic
-- `agent/sanitizer.ts` - Injection detection sanitization
-- `agent/runner.ts` - API communication for detection
+### Fail-open design
+
+If the cloud API is unreachable or times out, the tool call is **allowed** — the plugin never blocks your workflow due to network issues.
+
+### Open source & auditable
+
+All code is open source. Audit the sanitization logic yourself:
+- `gateway/src/sanitizer.ts` — AI Security Gateway sanitization
+- `gateway/src/restorer.ts` — AI Security Gateway restoration
+- `agent/sanitizer.ts` — detection API sanitization
+- `agent/content-injection-scanner.ts` — local injection detection patterns
 
 ## Injection Detection API Details
 
@@ -431,6 +459,15 @@ Response:
 ```
 
 API key registration happens automatically via `POST /api/register` on first use.
+
+## Contact
+
+Have questions, feature requests, or need enterprise deployment support?
+
+- **Email**: thomas@openguardrails.com
+- **GitHub**: [github.com/openguardrails/openguardrails](https://github.com/openguardrails/openguardrails)
+
+We welcome feedback on detection accuracy, requests for new sanitized data types, and enterprise inquiries for private deployment, custom rules, and dedicated support.
 
 ## Uninstall
 
