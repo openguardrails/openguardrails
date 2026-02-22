@@ -3,7 +3,7 @@ name: Build and Push Docker Images on Release
 on:
   push:
     tags:
-      - 'v*.*.*'  # Triggers on tags like v1.0.0, v2.1.3, etc.
+      - 'v*.*.*'
 
 env:
   DOCKER_HUB_USERNAME: openguardrails
@@ -29,7 +29,6 @@ jobs:
       - name: Extract version from tag
         id: version
         run: |
-          # Remove 'v' prefix from tag (e.g., v1.0.0 -> 1.0.0)
           VERSION=${GITHUB_REF#refs/tags/v}
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Version: $VERSION"
@@ -46,29 +45,12 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64,linux/arm64
-          build-args: |
-            VITE_BASE=/platform/
 
       - name: Create release summary
         run: |
-          echo "## Docker Images Published" >> $GITHUB_STEP_SUMMARY
+          echo "## Docker Image Published" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "The following Docker image has been built and pushed to Docker Hub:" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### OpenGuardrails Platform (Unified Frontend + Backend)" >> $GITHUB_STEP_SUMMARY
           echo "- \`openguardrails/openguardrails-platform:${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- \`openguardrails/openguardrails-platform:latest\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "This single image contains:" >> $GITHUB_STEP_SUMMARY
-          echo "- Frontend (React + Nginx) on port 80" >> $GITHUB_STEP_SUMMARY
-          echo "- Admin Service on port 5000" >> $GITHUB_STEP_SUMMARY
-          echo "- Detection Service on port 5001" >> $GITHUB_STEP_SUMMARY
-          echo "- Proxy Service on port 5002" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Required Additional Services" >> $GITHUB_STEP_SUMMARY
-          echo "The platform requires these additional Docker containers:" >> $GITHUB_STEP_SUMMARY
-          echo "- PostgreSQL database (\`postgres:16-alpine\`)" >> $GITHUB_STEP_SUMMARY
-          echo "- vLLM Text Model (\`vllm/vllm-openai:latest\`)" >> $GITHUB_STEP_SUMMARY
-          echo "- vLLM Embedding Model (\`vllm/vllm-openai:latest\`)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Use \`docker compose up -d\` for complete deployment." >> $GITHUB_STEP_SUMMARY
+          echo "Contains Core API (port 53666), Dashboard API (port 53667), Dashboard Web (port 53668)." >> $GITHUB_STEP_SUMMARY

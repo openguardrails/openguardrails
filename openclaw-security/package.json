@@ -1,12 +1,9 @@
 {
-  "name": "@openguardrails/openguardrails",
+  "name": "@openguardrails/openclaw-security",
   "version": "6.0.3",
   "description": "AI agent security plugin for OpenClaw: prompt injection detection, PII sanitization, and monitoring dashboard",
   "type": "module",
   "main": "index.ts",
-  "bin": {
-    "openguardrails-gateway": "../../gateway/src/index.ts"
-  },
   "openclaw": {
     "extensions": ["./index.ts"]
   },
@@ -16,7 +13,7 @@
     "typecheck:plugin": "tsc --noEmit -p tsconfig.plugin.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "gateway": "tsx ../../gateway/src/index.ts"
+    "gateway": "og-gateway"
   },
   "keywords": [
     "openclaw",

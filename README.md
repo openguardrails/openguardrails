@@ -48,12 +48,12 @@ The AI Security Gateway sanitizes PII, credentials, and secrets from prompts bef
 
 ```
 openguardrails/
-  core/                   # Platform API (port 3002)
+  core/                   # Platform API (port 53666)
   gateway/                # AI Security Gateway (port 8900)
   dashboard/              # Management dashboard (pnpm monorepo)
     apps/
-      api/                #   Express API (port 3001)
-      web/                #   React frontend (port 3000)
+      api/                #   Express API (port 53667)
+      web/                #   React frontend (port 53668)
     packages/
       shared/             #   Types, config, constants
       db/                 #   Drizzle ORM (SQLite/PG/MySQL)
@@ -123,13 +123,13 @@ Follow the claim URL, enter the verification code and your email. After email ve
 git clone https://github.com/openguardrails/openguardrails.git
 cd openguardrails
 
-# 2. Start Core API (port 3002)
+# 2. Start Core API (port 53666)
 cd core
 npm install
 npm run db:migrate
 npm run dev
 
-# 3. Start Dashboard (ports 3000 + 3001)
+# 3. Start Dashboard (ports 53668 + 53667)
 cd ../dashboard
 pnpm install && pnpm build
 pnpm db:migrate && pnpm db:seed
@@ -148,7 +148,7 @@ Then point the OpenClaw plugin to your local instance:
     "entries": {
       "openguardrails": {
         "config": {
-          "coreUrl": "http://localhost:3002"
+          "coreUrl": "http://localhost:53666"
         }
       }
     }
@@ -180,10 +180,10 @@ All agents registered under the same email share one account and quota pool.
 ### Core (`core/.env`)
 
 ```bash
-PORT=3002
+PORT=53666
 CORE_DB_PATH=./data/openguardrails.db
 OG_INTERNAL_KEY=<secret>           # Internal auth for dashboard→core calls
-CORE_URL=http://localhost:3002      # Used in claim URLs and emails
+CORE_URL=http://localhost:53666     # Used in claim URLs and emails
 
 # Email (leave SMTP_HOST blank to log to console in dev)
 SMTP_HOST=smtp.example.com

@@ -5,7 +5,7 @@ const settings = settingsQueries(db);
 
 /** Get core URL from settings or env */
 async function getCoreUrl(): Promise<string> {
-  return (await settings.get("og_core_url")) || process.env.OG_CORE_URL || "http://localhost:3002";
+  return (await settings.get("og_core_url")) || process.env.OG_CORE_URL || "http://localhost:53666";
 }
 
 /** Get core key from settings or env */

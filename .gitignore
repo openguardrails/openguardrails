@@ -61,6 +61,9 @@ frontend/dist/
 # Docker
 .docker/
 
+# CLI bundled assets (built during publish)
+cli/bundled/
+
 # OS
 .DS_Store
 Thumbs.db

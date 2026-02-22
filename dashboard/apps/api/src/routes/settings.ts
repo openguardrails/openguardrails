@@ -68,7 +68,7 @@ settingsRouter.post("/test-connection", async (_req, res, next) => {
       data: {
         connected: healthy,
         message: healthy ? "Connected to core" : "Failed to connect to core",
-        url: ogCoreUrl || process.env.OG_CORE_URL || "http://localhost:3002",
+        url: ogCoreUrl || process.env.OG_CORE_URL || "http://localhost:53666",
       },
     });
   } catch (err) {

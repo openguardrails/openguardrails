@@ -22,12 +22,12 @@ import type { DashboardMode } from "@og/shared";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
-const PORT = parseInt(process.env.PORT || process.env.API_PORT || "3001", 10);
+const PORT = parseInt(process.env.PORT || process.env.API_PORT || "53667", 10);
 const DASHBOARD_MODE = (process.env.DASHBOARD_MODE || "selfhosted") as DashboardMode;
 
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({
-  origin: DASHBOARD_MODE === "embedded" ? true : (process.env.WEB_ORIGIN || "http://localhost:3000"),
+  origin: DASHBOARD_MODE === "embedded" ? true : (process.env.WEB_ORIGIN || "http://localhost:53668"),
   credentials: true,
 }));
 app.use(morgan("short"));

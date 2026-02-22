@@ -17,8 +17,8 @@ pnpm monorepo. All packages use TypeScript strict mode.
 - `packages/shared` (@og/shared) - Types, 5-tier config, constants
 - `packages/db` (@og/db) - Drizzle ORM, multi-dialect (SQLite default, PG, MySQL)
 - `packages/cli` (@openguardrails/cli) - CLI tool
-- `apps/api` (@og/api) - Express API, port 3001
-- `apps/web` (@og/web) - Next.js 14, port 3000
+- `apps/api` (@og/api) - Express API, port 53667
+- `apps/web` (@og/web) - Next.js 14, port 53668
 
 ```bash
 cd dashboard

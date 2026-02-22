@@ -1,7 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import { DEFAULT_TENANT_ID } from "@og/shared";
 
-const CORE_URL = process.env.OG_CORE_URL || "http://localhost:3002";
+const CORE_URL = process.env.OG_CORE_URL || "http://localhost:53666";
 const DASHBOARD_MODE = process.env.DASHBOARD_MODE || "selfhosted";
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 

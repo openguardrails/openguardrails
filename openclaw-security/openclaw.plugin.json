@@ -67,7 +67,7 @@
     },
     "coreUrl": {
       "label": "Core URL",
-      "help": "Core API endpoint (default: https://www.openguardrails.com/core). Self-hosted users should set to local address (e.g. http://localhost:3002).",
+      "help": "Core API endpoint (default: https://www.openguardrails.com/core). Self-hosted users should set to local address (e.g. http://localhost:53666).",
       "advanced": true
     },
     "dashboardUrl": {

@@ -1,0 +1,62 @@
+{
+  "name": "openguardrails",
+  "version": "6.5.0",
+  "description": "Runtime security for AI agents — behavioral detection, PII sanitization, and management dashboard",
+  "type": "module",
+  "bin": {
+    "openguardrails": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "prepublishOnly": "bash scripts/build.sh"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "better-sqlite3": "^11.0.0",
+    "drizzle-orm": "^0.36.0",
+    "express": "^4.21.0",
+    "cors": "^2.8.5",
+    "helmet": "^8.0.0",
+    "morgan": "^1.10.0",
+    "express-rate-limit": "^7.4.0",
+    "nodemailer": "^8.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/better-sqlite3": "^7.6.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "esbuild": "^0.24.0"
+  },
+  "files": [
+    "dist/",
+    "bundled/"
+  ],
+  "keywords": [
+    "ai-security",
+    "ai-agent",
+    "guardrails",
+    "prompt-injection",
+    "pii-sanitization",
+    "llm-security",
+    "openguardrails"
+  ],
+  "author": "OpenGuardrails",
+  "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/openguardrails/openguardrails.git",
+    "directory": "cli"
+  },
+  "bugs": {
+    "url": "https://github.com/openguardrails/openguardrails/issues"
+  },
+  "homepage": "https://github.com/openguardrails/openguardrails#readme",
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

@@ -23,8 +23,8 @@ program
 program
   .command("start")
   .description("Start the dashboard")
-  .option("-p, --port <port>", "API port (default: 3001)")
-  .option("-w, --web-port <port>", "Web UI port (default: 3000)")
+  .option("-p, --port <port>", "API port (default: 53667)")
+  .option("-w, --web-port <port>", "Web UI port (default: 53668)")
   .action(startCommand);
 
 program
