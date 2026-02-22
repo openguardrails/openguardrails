@@ -156,7 +156,7 @@ async function startCommand(options: { port?: string; webPort?: string }) {
   };
 
   if (config.ogCoreUrl) env.OG_CORE_URL = config.ogCoreUrl;
-  if (config.ogCoreKey) env.OG_CORE_INTERNAL_KEY = config.ogCoreKey;
+  if (config.ogCoreKey) env.OG_CORE_KEY = config.ogCoreKey;
   if (config.sessionToken) env.SESSION_TOKEN = config.sessionToken;
 
   const child = startProcess({

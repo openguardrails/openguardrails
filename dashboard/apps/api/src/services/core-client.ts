@@ -36,11 +36,8 @@ export async function callCoreDetect(
     "Content-Type": "application/json",
   };
 
-  // Use Bearer token if key looks like sk-og-*, otherwise X-Internal-Key
-  if (coreKey.startsWith("sk-og-")) {
+  if (coreKey) {
     headers["Authorization"] = `Bearer ${coreKey}`;
-  } else if (coreKey) {
-    headers["X-Internal-Key"] = coreKey;
   }
 
   const res = await fetch(`${coreUrl}/v1/detect`, {

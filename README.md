@@ -182,7 +182,6 @@ All agents registered under the same email share one account and quota pool.
 ```bash
 PORT=53666
 CORE_DB_PATH=./data/openguardrails.db
-OG_INTERNAL_KEY=<secret>           # Internal auth for dashboard→core calls
 CORE_URL=http://localhost:53666     # Used in claim URLs and emails
 
 # Email (leave SMTP_HOST blank to log to console in dev)
@@ -236,7 +235,6 @@ STRIPE_WEBHOOK_SECRET=whsec_...
 - All endpoints return `{ success: boolean, data?, error? }`
 - API key format: `sk-og-<32 hex>`
 - Agent auth: `Authorization: Bearer sk-og-...`
-- Internal auth: `X-Internal-Key` header
 
 ## License
 

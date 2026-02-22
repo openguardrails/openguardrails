@@ -53,4 +53,3 @@ OpenClaw plugin (@openguardrails/openguardrails). Guard agent for prompt injecti
 - Express APIs return `{ success: boolean, data?, error? }`
 - Scanners S01-S10 (prompt injection, system override, web attacks, MCP tool poisoning, code execution, NSFW, PII, credentials, confidential data, off-topic)
 - API key format: `sk-og-<32 hex>`
-- Internal auth: `X-Internal-Key` header
