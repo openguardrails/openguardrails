@@ -1,8 +1,8 @@
 {
-  "id": "openguardrails",
-  "name": "OpenGuardrails",
-  "description": "Behavioral anomaly detection for OpenClaw agents.",
-  "version": "6.0.3",
+  "id": "moltguard",
+  "name": "MoltGuard",
+  "description": "AI security guard for OpenClaw agents: prompt injection detection, credential scanning, and behavioral monitoring.",
+  "version": "6.6.6",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,

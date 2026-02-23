@@ -17,7 +17,7 @@ export const DEFAULT_CORE_URL =
 export const DEFAULT_DASHBOARD_URL =
   process.env.OG_DASHBOARD_URL ?? "https://www.openguardrails.com/dashboard";
 
-const CREDENTIALS_DIR = path.join(os.homedir(), ".openclaw/credentials/openguardrails");
+const CREDENTIALS_DIR = path.join(os.homedir(), ".openclaw/credentials/moltguard");
 const CREDENTIALS_FILE = path.join(CREDENTIALS_DIR, "credentials.json");
 
 // =============================================================================
@@ -151,6 +151,28 @@ export const DEFAULT_CONFIG: Required<OpenClawGuardConfig> = {
 // Configuration Helpers
 // =============================================================================
 
+/**
+ * Reads the agent's name from ~/.openclaw/workspace/IDENTITY.md.
+ * Looks for the line "- **Name:**" and returns the next non-empty line.
+ * Returns null if the file is missing or the field is not filled in.
+ */
+function readIdentityName(): string | null {
+  try {
+    const identityPath = path.join(os.homedir(), ".openclaw/workspace/IDENTITY.md");
+    const content = fs.readFileSync(identityPath, "utf-8");
+    const lines = content.split("\n");
+    for (let i = 0; i < lines.length - 1; i++) {
+      if (lines[i]!.trim() === "- **Name:**") {
+        const name = lines[i + 1]!.trim();
+        if (name.length > 0) return name;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export function resolveConfig(config?: Partial<OpenClawGuardConfig>): Required<OpenClawGuardConfig> {
   return {
     enabled: config?.enabled ?? DEFAULT_CONFIG.enabled,
@@ -158,7 +180,7 @@ export function resolveConfig(config?: Partial<OpenClawGuardConfig>): Required<O
     apiKey: config?.apiKey ?? DEFAULT_CONFIG.apiKey,
     timeoutMs: config?.timeoutMs ?? DEFAULT_CONFIG.timeoutMs,
     coreUrl: config?.coreUrl ?? DEFAULT_CONFIG.coreUrl,
-    agentName: config?.agentName ?? DEFAULT_CONFIG.agentName,
+    agentName: config?.agentName ?? readIdentityName() ?? DEFAULT_CONFIG.agentName,
     dashboardUrl: config?.dashboardUrl ?? DEFAULT_CONFIG.dashboardUrl,
     dashboardSessionToken: config?.dashboardSessionToken ?? DEFAULT_CONFIG.dashboardSessionToken,
   };

@@ -30,9 +30,9 @@ import path from "node:path";
 // Constants
 // =============================================================================
 
-const PLUGIN_ID = "openguardrails";
-const PLUGIN_NAME = "OpenGuardrails";
-const PLUGIN_VERSION = "6.0.3";
+const PLUGIN_ID = "moltguard";
+const PLUGIN_NAME = "MoltGuard";
+const PLUGIN_VERSION = "6.6.4";
 const LOG_PREFIX = `[${PLUGIN_ID}]`;
 
 // =============================================================================
@@ -75,7 +75,7 @@ function ensureDefaultConfig(log: Logger): void {
     const raw = fs.readFileSync(configFile, "utf-8");
     const json = JSON.parse(raw);
 
-    const entry = json?.plugins?.entries?.openguardrails;
+    const entry = json?.plugins?.entries?.moltguard;
     if (!entry || entry.config?.coreUrl) return; // already has config
 
     entry.config = {
