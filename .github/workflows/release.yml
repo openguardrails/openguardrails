@@ -1,0 +1,53 @@
+name: Create Release
+
+on:
+  push:
+    branches: [main]
+    paths: ['VERSION']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Bump versions and tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Read VERSION
+        id: ver
+        run: echo "version=$(cat VERSION)" >> $GITHUB_OUTPUT
+
+      - name: Check tag does not already exist
+        run: |
+          if git ls-remote --tags origin "refs/tags/v${{ steps.ver.outputs.version }}" | grep -q .; then
+            echo "Tag v${{ steps.ver.outputs.version }} already exists, skipping."
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Update package.json versions
+        run: |
+          VERSION=${{ steps.ver.outputs.version }}
+          npm pkg set version="$VERSION" --prefix gateway
+          npm pkg set version="$VERSION" --prefix moltguard
+          npm pkg set version="$VERSION" --prefix cli
+
+      - name: Commit version bumps
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add gateway/package.json moltguard/package.json cli/package.json
+          git diff --staged --quiet || git commit -m "chore: bump package versions to ${{ steps.ver.outputs.version }}"
+          git push
+
+      - name: Create and push tag
+        run: |
+          git tag "v${{ steps.ver.outputs.version }}"
+          git push origin "v${{ steps.ver.outputs.version }}"
