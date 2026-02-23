@@ -137,16 +137,14 @@ More data types will be added based on user needs — [contact us](#contact) if 
 openclaw gateway restart
 ```
 
-### Gateway Commands
+### Gateway Control
 
-| Command | Description |
-|---------|-------------|
-| `/og_gateway_status` | View AI Security Gateway status and config examples |
-| `/og_gateway_start` | Start the AI Security Gateway |
-| `/og_gateway_stop` | Stop the AI Security Gateway |
-| `/og_gateway_restart` | Restart the AI Security Gateway |
+The AI Security Gateway is a standalone package. Manage it directly:
 
-📖 **Full Guide**: See [GATEWAY_GUIDE.md](./GATEWAY_GUIDE.md) for detailed setup instructions, protocol support, and troubleshooting.
+```bash
+npx @openguardrails/gateway          # start (port 8900)
+OG_GATEWAY_PORT=9000 npx @openguardrails/gateway  # custom port
+```
 
 ## Feature 2: Prompt Injection Detection
 
@@ -222,23 +220,10 @@ You should see:
 
 ## Commands
 
-### Gateway Management
-
-| Command | Description |
-|---------|-------------|
-| `/og_gateway_status` | View AI Security Gateway status and configuration |
-| `/og_gateway_start` | Start the AI Security Gateway |
-| `/og_gateway_stop` | Stop the AI Security Gateway |
-| `/og_gateway_restart` | Restart the AI Security Gateway |
-
-### Injection Detection
-
-| Command | Description |
-|---------|-------------|
-| `/og_status` | View detection status and statistics |
-| `/og_report` | View recent injection detections |
-| `/og_feedback <id> fp [reason]` | Report false positive |
-| `/og_feedback missed <reason>` | Report missed detection |
+| Script | Description |
+|--------|-------------|
+| `node {baseDir}/scripts/status.mjs` | Show registration status, agent ID, email, activation state |
+| `node {baseDir}/scripts/activate.mjs` | Register with OpenGuardrails and show claim URL |
 
 ## Testing Detection
 
@@ -273,28 +258,12 @@ If detection succeeds, you'll see:
 [openguardrails] INJECTION DETECTED in tool result from "read": Contains instructions to override guidelines and execute a malicious shell command
 ```
 
-### 4. View Statistics
+### 4. Check Status
 
-In OpenClaw conversation:
+Ask the agent to check MoltGuard status, or run directly:
 
-```
-/og_status
-```
-
-### 5. View Detection Details
-
-```
-/og_report
-```
-
-### 6. Provide Feedback
-
-```
-# Report false positive
-/og_feedback 1 fp This is normal security documentation
-
-# Report missed detection
-/og_feedback missed Email contained hidden injection that wasn't detected
+```bash
+node {baseDir}/scripts/status.mjs
 ```
 
 ## Configuration
