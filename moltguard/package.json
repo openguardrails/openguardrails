@@ -1,11 +1,13 @@
 {
   "name": "@openguardrails/moltguard",
-  "version": "6.6.6",
+  "version": "6.6.9",
   "description": "AI agent security plugin for OpenClaw: prompt injection detection, PII sanitization, and monitoring dashboard",
   "type": "module",
   "main": "index.ts",
   "openclaw": {
-    "extensions": ["./index.ts"]
+    "extensions": [
+      "./index.ts"
+    ]
   },
   "scripts": {
     "build": "tsc",
