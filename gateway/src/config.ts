@@ -59,11 +59,13 @@ function loadFromEnv(config: GatewayConfig): GatewayConfig {
     };
   }
 
-  // Kimi (Moonshot)
-  if (process.env.KIMI_API_KEY || process.env.MOONSHOT_API_KEY) {
+  // Kimi (Moonshot) — only set if openai backend not already configured
+  if (
+    (process.env.KIMI_API_KEY || process.env.MOONSHOT_API_KEY) &&
+    !config.backends.openai
+  ) {
     config.backends.openai = {
-      baseUrl:
-        process.env.KIMI_BASE_URL || "https://api.moonshot.cn",
+      baseUrl: process.env.KIMI_BASE_URL || "https://api.moonshot.cn",
       apiKey: process.env.KIMI_API_KEY || process.env.MOONSHOT_API_KEY || "",
     };
   }
@@ -75,6 +77,20 @@ function loadFromEnv(config: GatewayConfig): GatewayConfig {
         process.env.GEMINI_BASE_URL ||
         "https://generativelanguage.googleapis.com",
       apiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "",
+    };
+  }
+
+  // OpenRouter
+  if (process.env.OPENROUTER_API_KEY) {
+    config.backends.openrouter = {
+      baseUrl: process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api",
+      apiKey: process.env.OPENROUTER_API_KEY,
+      ...(process.env.OPENROUTER_REFERER && {
+        referer: process.env.OPENROUTER_REFERER,
+      }),
+      ...(process.env.OPENROUTER_TITLE && {
+        title: process.env.OPENROUTER_TITLE,
+      }),
     };
   }
 

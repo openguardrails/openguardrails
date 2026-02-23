@@ -28,6 +28,12 @@ export type GatewayConfig = {
       baseUrl: string;
       apiKey: string;
     };
+    openrouter?: {
+      baseUrl: string;    // default: "https://openrouter.ai/api"
+      apiKey: string;
+      referer?: string;   // HTTP-Referer (OpenRouter attribution)
+      title?: string;     // X-Title (OpenRouter attribution)
+    };
   };
   // Optional: route specific paths to specific backends
   routing?: {

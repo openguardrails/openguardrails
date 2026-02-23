@@ -14,6 +14,7 @@ import type { GatewayConfig } from "./types.js";
 import { handleAnthropicRequest } from "./handlers/anthropic.js";
 import { handleOpenAIRequest } from "./handlers/openai.js";
 import { handleGeminiRequest } from "./handlers/gemini.js";
+import { handleOpenRouterRequest } from "./handlers/openrouter.js";
 
 const GATEWAY_MODE = process.env.GATEWAY_MODE || "selfhosted";
 
@@ -50,6 +51,12 @@ async function handleRequest(
     return;
   }
 
+  // Handle GET /v1/models — proxy to configured backend's models endpoint
+  if (method === "GET" && url === "/v1/models") {
+    await handleModelsRequest(res, config);
+    return;
+  }
+
   // Only allow POST for API endpoints
   if (method !== "POST") {
     res.writeHead(405, { "Content-Type": "application/json" });
@@ -63,8 +70,17 @@ async function handleRequest(
       // Anthropic Messages API
       await handleAnthropicRequest(req, res, config);
     } else if (url === "/v1/chat/completions") {
-      // OpenAI Chat Completions API
-      await handleOpenAIRequest(req, res, config);
+      // OpenAI/OpenRouter Chat Completions API
+      // Priority: explicit routing config > openrouter backend > openai backend
+      const explicitBackend = config.routing?.["/v1/chat/completions"];
+      if (explicitBackend === "openrouter" || (!explicitBackend && config.backends.openrouter)) {
+        await handleOpenRouterRequest(req, res, config);
+      } else if (explicitBackend === "openai" || (!explicitBackend && config.backends.openai)) {
+        await handleOpenAIRequest(req, res, config);
+      } else {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "No OpenAI-compatible backend configured" }));
+      }
     } else if (url?.match(/^\/v1\/models\/(.+):generateContent$/)) {
       // Gemini API
       const match = url.match(/^\/v1\/models\/(.+):generateContent$/);
@@ -86,6 +102,48 @@ async function handleRequest(
     res.end(
       JSON.stringify({
         error: "Internal server error",
+        message: error instanceof Error ? error.message : String(error),
+      }),
+    );
+  }
+}
+
+/**
+ * Proxy GET /v1/models to the configured backend
+ */
+async function handleModelsRequest(
+  res: ServerResponse,
+  config: GatewayConfig,
+): Promise<void> {
+  try {
+    let modelsUrl: string;
+    let authHeader: string;
+
+    if (config.backends.openrouter) {
+      modelsUrl = `${config.backends.openrouter.baseUrl}/v1/models`;
+      authHeader = `Bearer ${config.backends.openrouter.apiKey}`;
+    } else if (config.backends.openai) {
+      modelsUrl = `${config.backends.openai.baseUrl}/v1/models`;
+      authHeader = `Bearer ${config.backends.openai.apiKey}`;
+    } else {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "No OpenAI-compatible backend configured" }));
+      return;
+    }
+
+    const response = await fetch(modelsUrl, {
+      headers: { "Authorization": authHeader },
+    });
+
+    const body = await response.text();
+    res.writeHead(response.status, { "Content-Type": "application/json" });
+    res.end(body);
+  } catch (error) {
+    console.error("[ai-security-gateway] Models request error:", error);
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        error: "Internal gateway error",
         message: error instanceof Error ? error.message : String(error),
       }),
     );
@@ -120,8 +178,9 @@ export function startGateway(configPath?: string): void {
       console.log("");
       console.log("Endpoints:");
       console.log(`  POST http://127.0.0.1:${config.port}/v1/messages - Anthropic`);
-      console.log(`  POST http://127.0.0.1:${config.port}/v1/chat/completions - OpenAI`);
+      console.log(`  POST http://127.0.0.1:${config.port}/v1/chat/completions - OpenAI / OpenRouter`);
       console.log(`  POST http://127.0.0.1:${config.port}/v1/models/:model:generateContent - Gemini`);
+      console.log(`  GET  http://127.0.0.1:${config.port}/v1/models - List models (OpenAI / OpenRouter)`);
       console.log(`  GET  http://127.0.0.1:${config.port}/health - Health check`);
     });
 
