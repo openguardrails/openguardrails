@@ -94,10 +94,14 @@ export class DashboardClient {
         const existing = list.data.find((a) => a.name === req.name);
         if (existing) {
           this.config.agentId = existing.id;
-          // Update status to active
+          // Update status and metadata
           await this.request(`/api/agents/${existing.id}`, {
             method: "PUT",
-            body: JSON.stringify({ status: "active" }),
+            body: JSON.stringify({
+              status: "active",
+              ...(req.provider && { provider: req.provider }),
+              ...(req.metadata && { metadata: req.metadata }),
+            }),
           }).catch(() => {});
           return { success: true, data: { id: existing.id } };
         }
@@ -124,6 +128,15 @@ export class DashboardClient {
     if (!this.config.agentId) return;
     await this.request(`/api/agents/${this.config.agentId}/heartbeat`, {
       method: "POST",
+    });
+  }
+
+  /** Upload full agent profile (workspace files, skills, cron jobs, etc.) */
+  async updateProfile(profile: Record<string, unknown>): Promise<void> {
+    if (!this.config.agentId) return;
+    await this.request(`/api/agents/${this.config.agentId}`, {
+      method: "PUT",
+      body: JSON.stringify({ metadata: profile }),
     });
   }
 

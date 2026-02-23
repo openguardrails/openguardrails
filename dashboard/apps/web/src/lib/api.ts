@@ -165,7 +165,17 @@ export interface RegisteredAgent {
   description: string | null;
   provider: string;
   status: string;
-  metadata: Record<string, unknown>;
+  metadata: {
+    openclawId?: string;
+    emoji?: string;
+    creature?: string;
+    vibe?: string;
+    model?: string;
+    skills?: { name: string; description?: string }[];
+    plugins?: { name: string; enabled: boolean }[];
+    ownerName?: string;
+    [key: string]: unknown;
+  };
   lastSeenAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -185,7 +195,7 @@ export function buildAgentMap(
   const map = new Map<string, AgentLookup>();
   // Registered agents first (UUIDs used in permissions/observations)
   for (const a of registeredAgents) {
-    map.set(a.id, { name: a.name, emoji: "\uD83E\uDD16" });
+    map.set(a.id, { name: a.name, emoji: a.metadata?.emoji || "\uD83E\uDD16" });
   }
   // Discovery agents overlay (richer info with emoji)
   for (const a of discoveryAgents) {

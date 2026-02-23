@@ -16,6 +16,8 @@ import {
   saveCoreCredentials,
   registerWithCore,
   pollAccountEmail,
+  readAgentProfile,
+  getProfileWatchPaths,
   DEFAULT_CORE_URL,
   DEFAULT_DASHBOARD_URL,
   type CoreCredentials,
@@ -58,6 +60,8 @@ let globalBehaviorDetector: BehaviorDetector | null = null;
 let globalDashboardClient: DashboardClient | null = null;
 let dashboardHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let emailPollTimer: ReturnType<typeof setInterval> | null = null;
+let profileWatchers: ReturnType<typeof fs.watch>[] = [];
+let profileDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 // =============================================================================
 // Ensure default config in openclaw.json
@@ -88,6 +92,47 @@ function ensureDefaultConfig(log: Logger): void {
     log.info(`Default config written to ${configFile}`);
   } catch {
     // Non-critical — don't block plugin startup
+  }
+}
+
+// =============================================================================
+// Profile sync — watches workspace files and re-uploads on change
+// =============================================================================
+
+function startProfileSync(log: Logger): void {
+  if (profileWatchers.length > 0) return; // already watching
+
+  const paths = getProfileWatchPaths();
+
+  const scheduleUpload = () => {
+    if (profileDebounceTimer) clearTimeout(profileDebounceTimer);
+    profileDebounceTimer = setTimeout(() => {
+      if (!globalDashboardClient?.agentId) return;
+      const profile = readAgentProfile();
+      globalDashboardClient
+        .updateProfile({
+          ...(globalCoreCredentials?.agentId !== "configured"
+            ? { openclawId: globalCoreCredentials?.agentId }
+            : {}),
+          ...profile,
+        })
+        .then(() => log.debug?.("Dashboard: profile synced"))
+        .catch((err) => log.debug?.(`Dashboard: profile sync failed — ${err}`));
+    }, 2000);
+  };
+
+  for (const watchPath of paths) {
+    try {
+      if (!fs.existsSync(watchPath)) continue;
+      const watcher = fs.watch(watchPath, { recursive: false }, scheduleUpload);
+      profileWatchers.push(watcher);
+    } catch {
+      // Non-critical — fs.watch may not be available in all environments
+    }
+  }
+
+  if (profileWatchers.length > 0) {
+    log.debug?.(`Dashboard: watching ${profileWatchers.length} path(s) for profile changes`);
   }
 }
 
@@ -174,16 +219,22 @@ const openClawGuardPlugin = {
         sessionToken: creds.apiKey,
       });
 
-      // Register agent with dashboard (non-blocking)
+      // Register agent then upload full profile (non-blocking)
+      const profile = readAgentProfile();
       globalDashboardClient
         .registerAgent({
           name: config.agentName,
           description: "OpenClaw AI Agent secured by OpenGuardrails",
-          metadata: creds.agentId !== "configured" ? { openclawId: creds.agentId } : undefined,
+          provider: profile.provider || undefined,
+          metadata: {
+            ...(creds.agentId !== "configured" ? { openclawId: creds.agentId } : {}),
+            ...profile,
+          },
         })
         .then((result) => {
           if (result.success && result.data?.id) {
             log.debug?.(`Dashboard: agent registered (${result.data.id})`);
+            startProfileSync(log);
           }
         })
         .catch((err) => {
@@ -561,6 +612,14 @@ const openClawGuardPlugin = {
       clearInterval(dashboardHeartbeatTimer);
       dashboardHeartbeatTimer = null;
     }
+    if (profileDebounceTimer) {
+      clearTimeout(profileDebounceTimer);
+      profileDebounceTimer = null;
+    }
+    for (const w of profileWatchers) {
+      try { w.close(); } catch { /* ignore */ }
+    }
+    profileWatchers = [];
     globalCoreCredentials = null;
     globalBehaviorDetector = null;
     globalDashboardClient = null;
