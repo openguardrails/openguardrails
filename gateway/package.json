@@ -1,6 +1,6 @@
 {
   "name": "@openguardrails/gateway",
-  "version": "6.6.7",
+  "version": "6.6.8",
   "description": "AI Security Gateway — secure proxy for LLM APIs with PII sanitization, credential detection, and content security",
   "type": "module",
   "main": "dist/index.js",
