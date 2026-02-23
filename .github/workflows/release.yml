@@ -1,4 +1,4 @@
-name: Create Release
+name: Release
 
 on:
   push:
@@ -7,10 +7,11 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   release:
-    name: Bump versions and tag
+    name: Bump versions, tag, and publish
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -32,6 +33,10 @@ jobs:
         with:
           node-version: '22'
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
       - name: Update package.json versions
         run: |
           VERSION=${{ steps.ver.outputs.version }}
@@ -51,3 +56,42 @@ jobs:
         run: |
           git tag "v${{ steps.ver.outputs.version }}"
           git push origin "v${{ steps.ver.outputs.version }}"
+
+      # ─── Publish @openguardrails/gateway ──────────────────────────
+      - name: Build and publish gateway
+        run: |
+          cd gateway && npm install && npm run build
+          npm config set //registry.npmjs.org/:_authToken "$NODE_AUTH_TOKEN"
+          cd gateway && npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # ─── Publish @openguardrails/moltguard ────────────────────────
+      - name: Build and publish moltguard
+        run: |
+          cd moltguard && npm install && npm run build
+          npm config set //registry.npmjs.org/:_authToken "$NODE_AUTH_TOKEN"
+          cd moltguard && npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # ─── Publish openguardrails CLI ────────────────────────────────
+      - name: Build and publish CLI
+        run: |
+          cd cli && npm install && bash scripts/build.sh
+          npm config set //registry.npmjs.org/:_authToken "$NODE_AUTH_TOKEN"
+          cd cli && npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # ─── Summary ──────────────────────────────────────────────────
+      - name: Release summary
+        run: |
+          VERSION=${{ steps.ver.outputs.version }}
+          echo "## Released v${VERSION}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Package | Version |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|---------|" >> $GITHUB_STEP_SUMMARY
+          echo "| \`openguardrails\` | ${VERSION} |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`@openguardrails/gateway\` | ${VERSION} |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`@openguardrails/moltguard\` | ${VERSION} |" >> $GITHUB_STEP_SUMMARY
