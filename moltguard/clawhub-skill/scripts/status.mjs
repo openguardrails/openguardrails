@@ -11,7 +11,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 const CREDS_FILE = join(homedir(), '.openclaw/credentials/openguardrails/credentials.json');
-const CORE_URL = process.env.OG_CORE_URL ?? 'https://www.openguardrails.com/core';
+const CORE_URL = 'https://www.openguardrails.com/core';
 
 async function main() {
   if (!existsSync(CREDS_FILE)) {

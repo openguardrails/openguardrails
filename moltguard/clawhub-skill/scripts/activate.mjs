@@ -13,8 +13,8 @@ import { join } from 'node:path';
 
 const CREDS_DIR = join(homedir(), '.openclaw/credentials/openguardrails');
 const CREDS_FILE = join(CREDS_DIR, 'credentials.json');
-const CORE_URL = process.env.OG_CORE_URL ?? 'https://www.openguardrails.com/core';
-const AGENT_NAME = process.env.OG_AGENT_NAME ?? 'OpenClaw Agent';
+const CORE_URL = 'https://www.openguardrails.com/core';
+const AGENT_NAME = 'OpenClaw Agent';
 
 async function main() {
   // Already registered — show existing claim URL
