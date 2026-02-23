@@ -59,28 +59,34 @@ jobs:
 
       # ─── Publish @openguardrails/gateway ──────────────────────────
       - name: Build and publish gateway
+        working-directory: gateway
         run: |
-          cd gateway && npm install && npm run build
+          npm install
+          npm run build
           npm config set //registry.npmjs.org/:_authToken "$NODE_AUTH_TOKEN"
-          cd gateway && npm publish --provenance --access public
+          npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       # ─── Publish @openguardrails/moltguard ────────────────────────
       - name: Build and publish moltguard
+        working-directory: moltguard
         run: |
-          cd moltguard && npm install && npm run build
+          npm install
+          npm run build
           npm config set //registry.npmjs.org/:_authToken "$NODE_AUTH_TOKEN"
-          cd moltguard && npm publish --provenance --access public
+          npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       # ─── Publish openguardrails CLI ────────────────────────────────
       - name: Build and publish CLI
+        working-directory: cli
         run: |
-          cd cli && npm install && bash scripts/build.sh
+          npm install
+          bash scripts/build.sh
           npm config set //registry.npmjs.org/:_authToken "$NODE_AUTH_TOKEN"
-          cd cli && npm publish --provenance --access public
+          npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
