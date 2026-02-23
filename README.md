@@ -1,179 +1,72 @@
 # OpenGuardrails
 
-**Runtime Security for AI Agents** — Protect AI agents from data exfiltration, prompt injection, sensitive data leakage, credential theft, command injection, and harmful content.
+**Runtime Security for AI Agents.** Detects prompt injection, credential leakage, data exfiltration, and behavioral threats — in real time, before they execute.
 
-OpenGuardrails is an open-source security framework for AI agents. It monitors agent behavior in real time, blocks malicious tool call patterns before they execute, sanitizes sensitive data before it reaches LLM providers, and gives you full visibility through a management dashboard.
+OpenGuardrails wraps your AI agent with a security layer: the agent-side plugin intercepts every tool call and message, scans it against 10 threat detectors and a behavioral rule engine, and blocks or alerts before damage is done. A management dashboard gives you full visibility. An optional local gateway sanitizes sensitive data before it ever leaves your machine.
 
-## Quick Start (Recommended)
+Open source (Apache 2.0). [Architecture →](docs/architecture.md)
 
-### 1. Install the OpenGuardrails skill from ClawHub
+---
 
-Visit [clawhub.ai/ThomasLWang/moltguard](https://clawhub.ai/ThomasLWang/moltguard) and install the skill into OpenClaw.
+## Quick Start
 
-### 2. Activate
+### 1. Install MoltGuard
 
-Run in OpenClaw:
-
-```
-/og_activate
-```
-
-OpenClaw will automatically register with the OpenGuardrails Core platform. You'll receive:
-- A **claim URL** — open it in your browser, enter your email and the verification code
-- A **verification email** — click the link to activate your agent
-- **30,000 free security detection calls**
-
-### 3. Try it out
-
-After activation, you'll receive a **test email** designed to demonstrate OpenGuardrails' detection capabilities. Ask OpenClaw to read the email — you'll see OpenGuardrails detect and flag the security risks in real time.
-
-### 4. View your dashboard
-
-Sign in at [openguardrails.com/dashboard](https://www.openguardrails.com/dashboard) to view:
-- **Agents** — all registered AI agents under your account
-- **Identities** — email-based account and agent identity management
-- **Permissions** — agent permission policies
-- **Graph** — visual representation of agent behavior and tool call patterns
-- **Risks** — detected threats, blocked actions, and security alerts
-
-## What It Protects Against
-
-### Behavioral Threat Detection
-
-The Core behavioral engine evaluates tool call sequences against a rule hierarchy and returns block/alert/allow decisions with explanations:
-
-| Risk Level | Action | Threats |
-|------------|--------|---------|
-| **Critical** | Block | Sensitive file read + network exfiltration, credential access + external domains |
-| **High** | Block | Shell escape / command injection, credential access with intent mismatch, shell exec after web fetch |
-| **Medium** | Alert | Sensitive path access without clear intent, external domains outside expected scope |
-
-### 10 Built-in Content Scanners
-
-| ID | Scanner | What it catches |
-|----|---------|----------------|
-| S01 | Prompt Injection | Crafted inputs that hijack agent behavior |
-| S02 | System Override | Attempts to bypass safety boundaries |
-| S03 | Web Attacks | XSS, CSRF, and web exploits targeting agent APIs |
-| S04 | MCP Tool Poisoning | Malicious tool definitions in MCP integrations |
-| S05 | Malicious Code Execution | Harmful code via interpreters and sandboxes |
-| S06 | NSFW Content | Explicit or inappropriate content, minor protection (12 risk categories) |
-| S07 | PII Exposure | Personally identifiable information leakage |
-| S08 | Credential Leakage | API keys, tokens, passwords in agent I/O |
-| S09 | Confidential Data | Trade secrets and proprietary information |
-| S10 | Off-Topic Drift | Agent misuse for unauthorized tasks |
-
-### Data Leakage Prevention
-
-The AI Security Gateway sanitizes PII, credentials, and secrets from prompts before they leave the machine, and restores original values in responses. Zero npm dependencies.
-
-## Self-Hosted Deployment
-
-### Dashboard (Private Deployment)
-
-Deploy the management dashboard locally — no need to use the hosted version:
+Run this in your terminal to install the MoltGuard OpenClaw skill:
 
 ```bash
+npx clawhub@latest install moltguard
+```
+
+Then ask OpenClaw to install and activate it:
+
+```
+Install and activate moltguard
+```
+
+### 2. Claim your account
+
+MoltGuard will output a **claim link**. Open it in your browser, enter your email address and the verification code — you'll receive a confirmation email to complete activation.
+
+That's it. Your agent is now protected and you have **30,000 free detections**.
+
+### 3. View the dashboard
+
+Sign in at [openguardrails.com/dashboard](https://www.openguardrails.com/dashboard) to see detected threats, agent behavior graphs, permission policies, and risk events.
+
+---
+
+## What It Detects
+
+10 built-in scanners + a behavioral engine that watches tool call sequences:
+
+**Content scanners:** Prompt injection · System override · Web attacks · MCP tool poisoning · Malicious code execution · NSFW · PII leakage · Credential leakage · Confidential data · Off-topic drift
+
+**Behavioral patterns (cross-call):** File read → exfiltration · Credential access → external write · Shell exec after web fetch · Command injection · and more
+
+See [architecture.md](docs/architecture.md#scanners) for the full list.
+
+---
+
+## Self-Hosted Options
+
+The detection engine (Core) is a hosted service — the rest can be self-hosted:
+
+**Private dashboard** — deploy locally, data stays in SQLite at `~/.openguardrails/`:
+```bash
 npm install -g openguardrails
-openguardrails dashboard init
 openguardrails dashboard start
 ```
 
-Open the dashboard in your browser and enter your Core API key to log in. All data is stored locally in SQLite at `~/.openguardrails/`.
-
-### AI Security Gateway (Private Deployment)
-
-Deploy the gateway locally to sanitize sensitive data before it reaches external LLM providers:
-
+**AI Security Gateway** — sanitize PII and credentials locally before they reach any LLM provider:
 ```bash
 npm install -g @openguardrails/gateway
 openguardrails gateway start
+# Point OpenClaw base URL to http://localhost:8900
 ```
 
-After starting the gateway:
+---
 
-1. Configure your LLM API keys in `~/.openguardrails/gateway.json`:
-
-```json
-{
-  "port": 8900,
-  "backends": {
-    "anthropic": { "apiKey": "sk-ant-..." },
-    "openai": { "apiKey": "sk-..." },
-    "gemini": { "apiKey": "..." }
-  }
-}
-```
-
-2. Point OpenClaw to use the gateway as its LLM base URL:
-
-```
-Base URL: http://localhost:8900
-```
-
-All prompts are sanitized locally before being sent to LLM providers. PII, credentials, and secrets are stripped on the way out and restored on the way back. Supports Anthropic, OpenAI (+ compatible: Kimi, DeepSeek), and Gemini.
-
-### Self-Hosted Core (Full Private Deployment)
-
-For fully air-gapped or private deployments, you can also self-host the Core platform:
-
-```bash
-cd core
-npm install
-cp .env.example .env    # Edit as needed
-npm run dev             # Starts on port 53666
-```
-
-Then point the OpenClaw plugin to your local Core:
-
-```json
-{
-  "plugins": {
-    "entries": {
-      "openguardrails": {
-        "config": {
-          "coreUrl": "http://localhost:53666"
-        }
-      }
-    }
-  }
-}
-```
-
-## Architecture
-
-```
-openguardrails/
-  core/                   # Platform API (port 53666)
-  gateway/                # AI Security Gateway (port 8900)
-  dashboard/              # Management dashboard (pnpm monorepo)
-    apps/
-      api/                #   Express API (port 53667)
-      web/                #   React frontend (port 53668)
-    packages/
-      shared/             #   Types, config, constants
-      db/                 #   Drizzle ORM (SQLite/PG/MySQL)
-  moltguard/              # MoltGuard OpenClaw plugin
-```
-
-## Plans
-
-| Plan | Price | Detections/mo |
-|------|-------|---------------|
-| Free | $0 | 30,000 |
-| Starter | $19/mo | 100,000 |
-| Pro | $49/mo | 300,000 |
-| Business | $199/mo | 2,000,000 |
-
-All agents registered under the same email share one account and quota pool.
-
-## npm Packages
-
-| Package | Description |
-|---------|-------------|
-| `openguardrails` | CLI — includes bundled dashboard for private deployment |
-| `@openguardrails/gateway` | AI Security Gateway — standalone local proxy |
-| `@openguardrails/openguardrails` | OpenClaw security plugin |
 
 ## License
 
