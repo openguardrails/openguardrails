@@ -34,10 +34,6 @@
       "dashboardUrl": {
         "type": "string",
         "description": "Dashboard URL for observation reporting (default: https://www.openguardrails.com/dashboard). Self-hosted users should change to local address."
-      },
-      "dashboardSessionToken": {
-        "type": "string",
-        "description": "Dashboard session token (optional — falls back to Core API key)"
       }
     }
   },
@@ -73,11 +69,6 @@
     "dashboardUrl": {
       "label": "Dashboard URL",
       "help": "URL of the OpenGuardrails dashboard for reporting tool call observations (default: https://www.openguardrails.com/dashboard). Self-hosted users should set to local address.",
-      "advanced": true
-    },
-    "dashboardSessionToken": {
-      "label": "Dashboard Token",
-      "help": "Session token for dashboard auth. Leave blank to auto-use your Core API key.",
       "advanced": true
     }
   }

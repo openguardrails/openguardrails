@@ -17,10 +17,9 @@ export type OpenClawGuardConfig = {
   coreUrl?: string;
   /** Agent name for registration */
   agentName?: string;
-  /** Dashboard URL (standalone, for optional reporting) */
+  /** Dashboard URL (observation reporting).
+   *  Default: https://www.openguardrails.com/dashboard */
   dashboardUrl?: string;
-  /** Dashboard session token */
-  dashboardSessionToken?: string;
 };
 
 // =============================================================================

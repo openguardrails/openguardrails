@@ -144,7 +144,6 @@ export const DEFAULT_CONFIG: Required<OpenClawGuardConfig> = {
   coreUrl: DEFAULT_CORE_URL,
   agentName: "OpenClaw Agent",
   dashboardUrl: DEFAULT_DASHBOARD_URL,
-  dashboardSessionToken: process.env.OG_SESSION_TOKEN ?? "",
 };
 
 // =============================================================================
@@ -182,6 +181,5 @@ export function resolveConfig(config?: Partial<OpenClawGuardConfig>): Required<O
     coreUrl: config?.coreUrl ?? DEFAULT_CONFIG.coreUrl,
     agentName: config?.agentName ?? readIdentityName() ?? DEFAULT_CONFIG.agentName,
     dashboardUrl: config?.dashboardUrl ?? DEFAULT_CONFIG.dashboardUrl,
-    dashboardSessionToken: config?.dashboardSessionToken ?? DEFAULT_CONFIG.dashboardSessionToken,
   };
 }

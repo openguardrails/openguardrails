@@ -17,6 +17,7 @@ import {
   registerWithCore,
   pollAccountEmail,
   DEFAULT_CORE_URL,
+  DEFAULT_DASHBOARD_URL,
   type CoreCredentials,
 } from "./agent/config.js";
 import { BehaviorDetector, FILE_READ_TOOLS, WEB_FETCH_TOOLS } from "./agent/behavior-detector.js";
@@ -64,7 +65,7 @@ let emailPollTimer: ReturnType<typeof setInterval> | null = null;
 
 /**
  * On first load after install, the plugin entry in openclaw.json has no config
- * block. This writes the default `coreUrl` so users can see and edit it.
+ * block. This writes the default URLs so users can see and edit them.
  */
 function ensureDefaultConfig(log: Logger): void {
   try {
@@ -80,6 +81,7 @@ function ensureDefaultConfig(log: Logger): void {
 
     entry.config = {
       coreUrl: DEFAULT_CORE_URL,
+      dashboardUrl: DEFAULT_DASHBOARD_URL,
       ...(entry.config ?? {}),
     };
     fs.writeFileSync(configFile, JSON.stringify(json, null, 2) + "\n", "utf-8");
@@ -160,23 +162,24 @@ const openClawGuardPlugin = {
     }
 
     // ── Dashboard client initialization ─────────────────────────────
-    // Connects to the local/remote dashboard for observation reporting
-    // Uses explicit sessionToken if set, otherwise falls back to Core API key
+    // Connects to the dashboard for observation reporting.
+    // Uses the Core API key for auth — no separate token needed.
 
-    const dashboardToken = config.dashboardSessionToken || globalCoreCredentials?.apiKey || "";
-    if (!globalDashboardClient && config.dashboardUrl && dashboardToken) {
+    function initDashboardClient(creds: CoreCredentials): void {
+      if (globalDashboardClient) return;
+      if (!config.dashboardUrl || !creds.apiKey) return;
+
       globalDashboardClient = new DashboardClient({
         dashboardUrl: config.dashboardUrl,
-        sessionToken: dashboardToken,
+        sessionToken: creds.apiKey,
       });
 
       // Register agent with dashboard (non-blocking)
-      const openclawAgentId = globalCoreCredentials?.agentId;
       globalDashboardClient
         .registerAgent({
           name: config.agentName,
           description: "OpenClaw AI Agent secured by OpenGuardrails",
-          metadata: openclawAgentId ? { openclawId: openclawAgentId } : undefined,
+          metadata: creds.agentId !== "configured" ? { openclawId: creds.agentId } : undefined,
         })
         .then((result) => {
           if (result.success && result.data?.id) {
@@ -190,6 +193,10 @@ const openClawGuardPlugin = {
       // Start periodic heartbeat
       dashboardHeartbeatTimer = globalDashboardClient.startHeartbeat(60_000);
       log.debug?.(`Dashboard: connected to ${config.dashboardUrl}`);
+    }
+
+    if (globalCoreCredentials) {
+      initDashboardClient(globalCoreCredentials);
     }
 
     // ── Email polling ─────────────────────────────────────────────
@@ -506,6 +513,7 @@ const openClawGuardPlugin = {
             config.coreUrl,
           );
           globalBehaviorDetector!.setCredentials(globalCoreCredentials);
+          initDashboardClient(globalCoreCredentials);
           log.info("Registration successful!");
         } catch (err) {
           return {

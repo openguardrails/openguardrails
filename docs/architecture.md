@@ -8,21 +8,17 @@ OpenGuardrails is a runtime security layer for AI agents. The system intercepts 
                     ┌─────────────────────────────────┐
                     │         Your AI Agent            │
                     │    (e.g. OpenClaw + MoltGuard)   │
-                    └────────────┬────────────────────-┘
-                                 │ tool calls / messages
-                                 ▼
-              ┌──────────────────────────────────────────┐
-              │         OpenGuardrails Core               │
-              │   Behavioral Detection + Policy Engine    │
-              │       openguardrails.com/core             │
-              └────────┬────────────────────┬────────────┘
-                       │                    │
-              ┌────────▼──────┐    ┌────────▼──────────┐
-              │   Dashboard   │    │  AI Security       │
-              │  (optional)   │    │  Gateway           │
-              │  Agent mgmt,  │    │  (optional, local) │
-              │  risk graphs  │    │  PII sanitization  │
-              └───────────────┘    └───────────────────-┘
+                    └──┬──────────────┬───────────┬───┘
+                       │ behavioral   │observations│ LLM requests
+                       │ assess       │            │ (optional)
+                       ▼              ▼            ▼
+              ┌──────────────┐  ┌──────────┐  ┌─────────────────┐
+              │  Core        │  │Dashboard │  │  AI Security    │
+              │  Behavioral  │  │Agent mgmt│  │  Gateway        │
+              │  Detection + │  │risk graph│  │  PII sanitize   │
+              │  Policy      │  │tool log  │  │  ↕              │
+              └──────────────┘  └──────────┘  │  LLM Provider   │
+                                              └─────────────────┘
 ```
 
 ## Components
@@ -88,10 +84,10 @@ Bundles the dashboard (API + pre-built frontend) for private deployment. Has zer
 ```
 Agent tool call
   → MoltGuard intercepts
-  → POST /v1/scan to Core
-  → Core runs S01–S10 scanners + behavioral rules
-  → Returns decision (block/alert/allow)
+  → POST /api/v1/behavior/assess to Core  (behavioral rules, S01–S10 scanners)
+  → Core returns decision (block/alert/allow)
   → MoltGuard enforces decision
+  → POST /api/observations to Dashboard   (non-blocking, records tool call)
   → (if allowed) tool call executes
 ```
 
