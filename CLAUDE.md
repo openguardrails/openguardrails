@@ -8,7 +8,7 @@ Guard Agent for AI Agents. Open source (Apache 2.0).
 core/               # Platform API (port 53666) — agent registration, behavioral detection, billing
 gateway/            # AI Security Gateway (@openguardrails/gateway)
 dashboard/          # Management dashboard (pnpm + Turborepo monorepo)
-openclaw-security/  # OpenClaw security plugin with guard agent and monitoring
+moltguard/          # MoltGuard OpenClaw security plugin with guard agent and monitoring
 cli/                # CLI tool (openguardrails) — bundles dashboard for private deployment
 ```
 
@@ -67,9 +67,9 @@ npm run test         # Run sanitizer tests
 
 Config: `~/.openguardrails/gateway.json` or environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GATEWAY_PORT`).
 
-## openclaw-security
+## moltguard
 
-OpenClaw plugin (@openguardrails/openguardrails). Guard agent for prompt injection detection, behavioral monitoring. Uses `gateway/` for AI Security Gateway.
+OpenClaw plugin (@openguardrails/moltguard). Guard agent for prompt injection detection, behavioral monitoring. Uses `gateway/` for AI Security Gateway.
 
 Install from ClawHub: https://clawhub.ai/ThomasLWang/moltguard
 

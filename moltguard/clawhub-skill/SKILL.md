@@ -1,14 +1,31 @@
 ---
-name: openguardrails
-description: "Runtime security plugin for AI agents. Provides local-first protection against data exfiltration, credential theft, command injection, and sensitive data leakage. Includes a free AI Security Gateway that sanitizes PII before it reaches LLM providers. Fully open source (Apache 2.0) — all detection and sanitization logic is auditable on GitHub. Source: github.com/openguardrails/openguardrails"
-metadata: {"openclaw":{"emoji":"🛡️","homepage":"https://github.com/openguardrails/openguardrails","keywords":["security","prompt-injection","data-exfiltration","pii","credential-theft","command-injection","guardrails","safety","agent-security"]}}
+name: moltguard
+description: "MoltGuard — runtime security plugin for OpenClaw agents by OpenGuardrails. Provides local-first protection against data exfiltration, credential theft, command injection, and sensitive data leakage. Includes a free AI Security Gateway that sanitizes PII before it reaches LLM providers. Fully open source (Apache 2.0) — all detection and sanitization logic is auditable on GitHub. Source: github.com/openguardrails/openguardrails"
+metadata: {"openclaw":{"emoji":"🛡️","homepage":"https://github.com/openguardrails/openguardrails","keywords":["security","prompt-injection","data-exfiltration","pii","credential-theft","command-injection","guardrails","safety","agent-security","moltguard"]}}
 ---
 
-# OpenGuardrails
+# MoltGuard
 
-> **What this skill is:** This is the installation and usage guide for the OpenGuardrails security plugin. The plugin code itself lives in the open-source repository at [github.com/openguardrails/openguardrails](https://github.com/openguardrails/openguardrails) (subdirectory `openclaw-security/`). This skill does not execute code on its own — it documents how to install, configure, and verify the plugin.
+> **What this skill is:** This skill is an installation and usage guide for the **MoltGuard plugin** by OpenGuardrails. It tells the agent how to install, configure, and verify the plugin — it does not execute code on its own. The plugin source code lives at [github.com/openguardrails/openguardrails](https://github.com/openguardrails/openguardrails) (subdirectory `moltguard/`).
 >
-> **ClawHub ↔ GitHub identity:** This skill is published on ClawHub as [`ThomasLWang/openguardrails`](https://clawhub.ai/ThomasLWang/openguardrails). The upstream source is at [`github.com/openguardrails/openguardrails`](https://github.com/openguardrails/openguardrails), maintained by the same author (Thomas Wang). The npm package is [`@openguardrails/openclaw-security`](https://www.npmjs.com/package/@openguardrails/openclaw-security). All three point to the same codebase.
+> **ClawHub ↔ GitHub ↔ npm identity:** This skill is published on ClawHub as [`ThomasLWang/moltguard`](https://clawhub.ai/ThomasLWang/moltguard). The upstream source is at [`github.com/openguardrails/openguardrails`](https://github.com/openguardrails/openguardrails), maintained by the same author (Thomas Wang). The npm package is [`@openguardrails/moltguard`](https://www.npmjs.com/package/@openguardrails/moltguard). All three point to the same codebase. You can verify provenance — see "Verify npm ↔ GitHub provenance" below.
+
+## Quick Start — 3 Steps
+
+```bash
+# 1. Install the plugin
+openclaw plugins install @openguardrails/moltguard
+
+# 2. Restart the gateway so the plugin is loaded
+openclaw gateway restart
+
+# 3. Register and activate (inside an OpenClaw session)
+/og_activate
+```
+
+That's it. After `/og_activate`, follow the on-screen instructions to claim your agent and verify your email. Detailed explanations for each step are below.
+
+---
 
 Runtime security guard for OpenClaw agents. Protects against the most critical AI agent threats:
 
@@ -22,22 +39,44 @@ Runtime security guard for OpenClaw agents. Protects against the most critical A
 
 **Open source and auditable.** All code is Apache 2.0 licensed at [github.com/openguardrails/openguardrails](https://github.com/openguardrails/openguardrails). You can audit every line before installing — especially the tool-event hooks, sanitization logic, and network calls. Key files to review:
 
+- `index.ts` — plugin entry point showing all event hooks; confirm no unexpected side effects
 - `agent/sanitizer.ts` — what gets sanitized before any cloud transmission
 - `agent/content-injection-scanner.ts` — local-only regex patterns for injection detection
-- `gateway/src/sanitizer.ts` — AI Security Gateway sanitization (fully local)
-- `index.ts` — plugin entry point showing all event hooks
+- `platform-client/` — every outbound network call the plugin makes; confirm all go to `openguardrails.com/core` only
+- `agent/config.ts:65-68` — the registration request; confirm it sends only `{ name, description }`
+
+**Inspect before installing.** You can inspect the exact npm tarball contents without installing:
+```bash
+# View the npm package contents (no install)
+npm pack @openguardrails/moltguard --dry-run
+
+# Or download and extract the tarball to inspect
+npm pack @openguardrails/moltguard
+tar -xzf openguardrails-moltguard-*.tgz
+ls package/
+```
 
 **What is transmitted to the cloud API (and what is not):**
 
 - **Sent:** sanitized tool metadata only — tool names, parameter keys, session signals (tool ordering, timing). All sensitive values (PII, credentials, file contents, secrets) are replaced with category placeholders (`<EMAIL>`, `<SECRET>`, `<CREDIT_CARD>`, etc.) locally before transmission.
 - **Never sent:** raw file contents, user messages, conversation history, actual credential values, or any unsanitized parameter values.
-- **Data retention:** Detection request payloads (sanitized tool metadata) are not retained after the response is returned. Account data is stored persistently for billing: agent ID and API key (created at registration in Step 2), plus email (provided by you in Step 3 via the claim web form), plan tier, and per-agent usage counts.
+- **Data retention:** Detection request payloads (sanitized tool metadata) are not retained after the response is returned. Account data is stored persistently for billing: agent ID and API key (created at registration in Step 3), plus email (provided by you during activation via the claim web form), plan tier, and per-agent usage counts.
 
 **Local-only mode.** The plugin works without any cloud connection. Local fast-path detection (shell escape blocking, read-then-exfil patterns, content injection redaction) operates entirely on your machine with no network calls. Cloud assessment is only used for borderline behavioral patterns and is opt-in via registration. If you skip registration, you still get all local protections.
 
 **No install-time network calls.** The plugin makes zero network requests at install time. It loads a local `BehaviorDetector` and waits until you explicitly run `/og_activate`.
 
-**Registration sends minimal data.** The `/og_activate` command sends exactly `{ name, description }` to register — no email, no machine identifiers, no file paths, no user data. Your email is only collected later in Step 3, when you voluntarily visit the claim URL in your browser and enter it yourself. See the "Step 2: Register" section for the full request/response specification.
+**Explicit network behavior summary.** The plugin has exactly three network states — here is when each network call happens and what it sends:
+
+| State | When | Network calls | What is sent |
+|-------|------|---------------|--------------|
+| **Installed (not registered)** | After `openclaw plugins install` + `openclaw gateway restart` | None | Nothing — all protections are local-only |
+| **Registered (not activated)** | After `/og_activate` | One `POST /api/v1/agents/register` call | `{ "name": "OpenClaw Agent", "description": "" }` only |
+| **Activated** | After email verification | `POST /api/v1/detect` per tool call (borderline signals only) | Sanitized tool metadata — all PII/secrets replaced with placeholders locally before transmission |
+
+No other network calls are made. You can verify this with `tcpdump`, `mitmproxy`, or Little Snitch — the only destination is `openguardrails.com`.
+
+**Registration creates an account.** Running `/og_activate` registers an agent and creates an API key (`sk-og-...`) stored locally at `~/.openclaw/credentials/openguardrails/credentials.json`. This key is used for cloud assessments and billing. You control the account: revoke the key from the account portal or delete the credentials file. No email is collected until you voluntarily enter it in the browser claim form. See "Step 3: Register and Activate" for the full specification.
 
 **Fail-open design.** If the cloud API is unreachable or times out, tool calls are allowed — the plugin never blocks your workflow due to network issues.
 
@@ -68,22 +107,34 @@ No content is sent externally until the plugin is registered and activated.
 
 ---
 
-## Step 1: Install
+## Step 1: Install the Plugin
 
 Install from npm or directly from source:
 
 ```bash
 # From npm
-openclaw plugins install @openguardrails/openclaw-security
+openclaw plugins install @openguardrails/moltguard
 
 # From source (audit first, then install)
 git clone https://github.com/openguardrails/openguardrails.git
-openclaw plugins install -l ./openguardrails/openclaw-security
+openclaw plugins install -l ./openguardrails/moltguard
 ```
 
-**Installation completes immediately — no network calls are made at install time.** The plugin loads, creates a `BehaviorDetector`, and waits.
+**Installation completes immediately — no network calls are made at install time.** The plugin is downloaded and registered with OpenClaw, but it is not loaded yet.
 
-Verify it's loaded:
+---
+
+## Step 2: Restart the Gateway
+
+After installing the plugin, you must restart the OpenClaw gateway so it picks up the new plugin:
+
+```bash
+openclaw gateway restart
+```
+
+Once the gateway restarts, the plugin is loaded and all **local protections are active immediately** (injection redaction, shell escape blocking, read-then-exfil detection) — no registration required.
+
+Verify the plugin is loaded:
 ```bash
 /og_status
 ```
@@ -100,57 +151,47 @@ OpenGuardrails Status
 
 ---
 
-## Step 2: Register (optional — local-only mode works without this)
+## Step 3: Register and Activate (optional — local-only mode works without this)
 
-Registration is triggered by running `/og_activate`. It enables cloud-based behavioral assessment on top of the local protections you already have.
-
-### What the registration request sends
-
-The plugin calls `POST /api/v1/agents/register` with exactly two fields:
-
-```json
-{ "name": "OpenClaw Agent", "description": "" }
-```
-
-That's it — an agent display name and an optional description. No machine identifiers, no file paths, no user data. See `agent/config.ts:65-68` in the source.
-
-### What gets stored locally
-
-The response is saved to `~/.openclaw/credentials/openguardrails/credentials.json`:
-
-```json
-{
-  "apiKey": "sk-og-<32 hex chars>",
-  "agentId": "<uuid>",
-  "claimUrl": "https://www.openguardrails.com/core/claim/<token>",
-  "verificationCode": "word-XXXX"
-}
-```
-
-These credentials are generated server-side and stored as plaintext JSON on your machine (consistent with how CLI tools like `gh`, `aws`, and `gcloud` store credentials). The `apiKey` authenticates subsequent detection requests. You can revoke it anytime from the account portal or by deleting the credentials file.
-
-### Run registration
+Registration enables cloud-based behavioral assessment on top of the local protections you already have. Run this inside an OpenClaw session:
 
 ```bash
 /og_activate
 ```
 
-If the platform is reachable, you'll see:
+### What happens when you run `/og_activate`
 
-```
-OpenGuardrails: Claim Your Agent
+1. **Registration** — The plugin calls `POST /api/v1/agents/register` with exactly `{ "name": "OpenClaw Agent", "description": "" }`. No machine identifiers, no file paths, no user data. See `agent/config.ts:65-68` in the source.
 
-Agent ID: <uuid>
+2. **Credentials are saved locally** — The response is written to `~/.openclaw/credentials/openguardrails/credentials.json`:
+   ```json
+   {
+     "apiKey": "sk-og-<32 hex chars>",
+     "agentId": "<uuid>",
+     "claimUrl": "https://www.openguardrails.com/core/claim/<token>",
+     "verificationCode": "word-XXXX"
+   }
+   ```
 
-Complete these steps to activate behavioral detection:
+3. **You see the claim instructions**:
+   ```
+   OpenGuardrails: Claim Your Agent
 
-  1. Visit:  https://www.openguardrails.com/core/claim/<token>
-  2. Code:   <word-XXXX>  (e.g. reef-X4B2)
-  3. Email:  your email becomes your login for the account portal
+   Agent ID: <uuid>
 
-After claiming you get 30,000 free detections.
-Platform: https://www.openguardrails.com/core
-```
+   Complete these steps to activate behavioral detection:
+
+     1. Visit:  https://www.openguardrails.com/core/claim/<token>
+     2. Code:   <word-XXXX>  (e.g. reef-X4B2)
+     3. Email:  your email becomes your login for the account portal
+
+   After claiming you get 30,000 free detections.
+   Platform: https://www.openguardrails.com/core
+   ```
+
+4. **Activate in your browser** — visit the claim URL, enter the verification code, enter your email, and click the verification link sent to your inbox. **This is the only step that collects your email.**
+
+Once your email is verified, the agent status changes to `active` and behavioral detection begins. The plugin polls for activation status automatically — no restart needed.
 
 ### Using an existing API key
 
@@ -170,20 +211,7 @@ If you already have a key (e.g. from a previous registration or from the account
 }
 ```
 
----
-
-## Step 3: Activate (this is where your email is collected)
-
-After registration, complete these steps in your browser to activate cloud assessment. **This is the only step that collects your email** — the registration API call in Step 2 does not send or collect any email.
-
-1. **Visit the claim URL** shown by `/og_activate`
-2. **Enter the verification code** (the `word-XXXX` code displayed in the terminal)
-3. **Enter your email** — you type this into the web form yourself; it becomes your account identity and is stored for billing
-4. **Click the verification link** sent to your email
-
-Once your email is verified, the agent status changes to `active` and behavioral detection begins. The plugin polls for activation status automatically — no restart needed.
-
-Check status anytime:
+### Check status
 
 ```bash
 /og_status
@@ -225,7 +253,7 @@ __REDACTED_BY_OPENGUARDRAILS_DUE_TO_PROMPT_INJECTION__
 You can also test with a sample file from the repository:
 
 ```
-https://raw.githubusercontent.com/openguardrails/openguardrails/main/openclaw-security/samples/popup-injection-email.txt
+https://raw.githubusercontent.com/openguardrails/openguardrails/main/moltguard/samples/popup-injection-email.txt
 ```
 
 Download it and ask the agent to read it. OpenGuardrails will detect and redact the injection.
@@ -442,21 +470,36 @@ The sanitization logic is in `agent/sanitizer.ts` — audit it yourself.
 
 Before installing in production, we recommend:
 
-1. **Audit the source** — clone the repo and review these files:
-   - `index.ts` — all event hooks (`before_tool_call`, `after_tool_call`, `tool_result_persist`); confirm no unexpected side effects
-   - `agent/sanitizer.ts` — the sanitization logic that strips PII before any cloud call
-   - `platform-client/` — every outbound network call the plugin makes; confirm all go to `openguardrails.com/core` only
-   - `agent/config.ts:65-68` — the registration request; confirm it sends only `{ name, description }`
-2. **Install from source** — clone from GitHub, inspect the code, then install locally:
+1. **Verify npm ↔ GitHub provenance** — confirm the npm package is built from the GitHub repo:
+   ```bash
+   # Check the npm package metadata
+   npm view @openguardrails/moltguard repository.url
+   # → https://github.com/openguardrails/openguardrails.git
+
+   # Compare npm tarball contents against the GitHub repo
+   npm pack @openguardrails/moltguard
+   tar -xzf openguardrails-moltguard-*.tgz
+   git clone https://github.com/openguardrails/openguardrails.git
+   diff -r package/ openguardrails/moltguard/
+   ```
+   The npm `repository.url` field points to the GitHub repo. The `package.json` in both locations lists the same author (`Thomas Wang`), version, and license (`Apache-2.0`).
+
+2. **Audit the source** — clone the repo and review the key files listed in "Security & Trust" above. Focus on `index.ts` (event hooks), `agent/sanitizer.ts` (sanitization), and `platform-client/` (all outbound calls).
+
+3. **Install from source** (highest assurance) — clone from GitHub, inspect the code, then install locally:
    ```bash
    git clone https://github.com/openguardrails/openguardrails.git
    # Audit the code, then:
-   openclaw plugins install -l ./openguardrails/openclaw-security
+   openclaw plugins install -l ./openguardrails/moltguard
    ```
-3. **Run in local-only mode first** — skip `/og_activate` to use all local protections (injection redaction, shell escape blocking, read-then-exfil detection) with zero cloud connectivity
-4. **Monitor network traffic** — after registration, the plugin only contacts `openguardrails.com/core` for behavioral assessment; verify with your network monitor of choice
-5. **Use a disposable email** for initial testing if you prefer not to use your primary email during evaluation
-6. **Revoke anytime** — each agent gets its own API key; revoke from the account portal or delete `~/.openclaw/credentials/openguardrails/credentials.json`
+
+4. **Run in local-only mode first** — skip `/og_activate` to use all local protections (injection redaction, shell escape blocking, read-then-exfil detection) with zero cloud connectivity and zero network traffic
+
+5. **Monitor network traffic** — after registration, the plugin only contacts `openguardrails.com/core` for behavioral assessment; verify with `tcpdump`, `mitmproxy`, Little Snitch, or your network monitor of choice
+
+6. **Use a disposable email** for initial testing if you prefer not to use your primary email during evaluation
+
+7. **Revoke anytime** — each agent gets its own API key; revoke from the account portal or delete `~/.openclaw/credentials/openguardrails/credentials.json`
 
 ---
 

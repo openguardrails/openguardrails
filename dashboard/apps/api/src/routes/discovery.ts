@@ -75,7 +75,7 @@ discoveryRouter.get("/agents/:id/profile", async (req, res, next) => {
       return;
     }
     // Look up registered agent to get the UUID used in observations.
-    // The openclaw-security plugin stores the OpenClaw agent ID (e.g. "main")
+    // The MoltGuard plugin stores the OpenClaw agent ID (e.g. "main")
     // in metadata.openclawId during registration. Match on that first,
     // then fall back to name match.
     let registeredAgentId: string | null = null;

@@ -1,5 +1,5 @@
 {
-  "name": "@openguardrails/openclaw-security",
+  "name": "@openguardrails/moltguard",
   "version": "6.0.3",
   "description": "AI agent security plugin for OpenClaw: prompt injection detection, PII sanitization, and monitoring dashboard",
   "type": "module",
@@ -34,12 +34,12 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/openguardrails/openguardrails.git",
-    "directory": "openclaw-security"
+    "directory": "moltguard"
   },
   "bugs": {
     "url": "https://github.com/openguardrails/openguardrails/issues"
   },
-  "homepage": "https://github.com/openguardrails/openguardrails/tree/main/openclaw-security#readme",
+  "homepage": "https://github.com/openguardrails/openguardrails/tree/main/moltguard#readme",
   "files": [
     "index.ts",
     "gateway-manager.ts",

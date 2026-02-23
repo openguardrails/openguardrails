@@ -51,7 +51,7 @@ export class DashboardManager {
         // When installed as dependency
         join(__dirname, "node_modules", "@openguardrails", "api", "dist", "index.js"),
         join(__dirname, "node_modules", "@ogp", "platform-api", "dist", "index.js"),
-        // In monorepo workspace (plugin is at openclaw-security/, repo root is ..)
+        // In monorepo workspace (plugin is at moltguard/, repo root is ..)
         join(repoRoot, "dashboard", "apps", "api", "dist", "index.js"),
         join(repoRoot, "dashboard", "apps", "platform-api", "dist", "index.js"),
         // Dev mode (TypeScript)

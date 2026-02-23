@@ -1,13 +1,13 @@
-# OpenGuardrails
+# MoltGuard
 
-[![npm version](https://img.shields.io/npm/v/@openguardrails/openclaw-security.svg)](https://www.npmjs.com/package/@openguardrails/openclaw-security)
+[![npm version](https://img.shields.io/npm/v/@openguardrails/moltguard.svg)](https://www.npmjs.com/package/@openguardrails/moltguard)
 [![GitHub](https://img.shields.io/github/license/openguardrails/openguardrails)](https://github.com/openguardrails/openguardrails)
 
 **Comprehensive AI security for OpenClaw**: AI Security Gateway + Prompt injection detection.
 
-**GitHub**: [https://github.com/openguardrails/openguardrails/tree/main/openclaw-security](https://github.com/openguardrails/openguardrails/tree/main/openclaw-security)
+**GitHub**: [https://github.com/openguardrails/openguardrails/tree/main/moltguard](https://github.com/openguardrails/openguardrails/tree/main/moltguard)
 
-**npm**: [https://www.npmjs.com/package/@openguardrails/openclaw-security](https://www.npmjs.com/package/@openguardrails/openclaw-security)
+**npm**: [https://www.npmjs.com/package/@openguardrails/moltguard](https://www.npmjs.com/package/@openguardrails/moltguard)
 
 ## Features
 
@@ -31,7 +31,7 @@
 
 ```bash
 # Install the plugin
-openclaw plugins install @openguardrails/openclaw-security
+openclaw plugins install @openguardrails/moltguard
 
 # Restart OpenClaw
 openclaw gateway restart
@@ -200,7 +200,7 @@ The plugin hooks into OpenClaw's `tool_result_persist` and `message_received` ev
 
 ```bash
 # Install from npm
-openclaw plugins install @openguardrails/openclaw-security
+openclaw plugins install @openguardrails/moltguard
 
 # Restart gateway to load the plugin
 openclaw gateway restart
@@ -472,7 +472,7 @@ We welcome feedback on detection accuracy, requests for new sanitized data types
 ## Uninstall
 
 ```bash
-openclaw plugins uninstall @openguardrails/openclaw-security
+openclaw plugins uninstall @openguardrails/moltguard
 openclaw gateway restart
 ```
 
@@ -487,7 +487,7 @@ rm ~/.openclaw/credentials/openguardrails/credentials.json
 ```bash
 # Clone repository
 git clone https://github.com/openguardrails/openguardrails.git
-cd openguardrails/openclaw-security
+cd openguardrails/moltguard
 
 # Install dependencies
 npm install

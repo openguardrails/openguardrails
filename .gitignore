@@ -38,7 +38,7 @@ pnpm-debug.log*
 Thumbs.db
 
 # Project-specific
-/openclaw_dir/
-/openclaw/
-/core/
-/docs/
+/openclaw_dir
+/openclaw
+/core
+/docs

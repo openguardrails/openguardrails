@@ -51,9 +51,9 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-  # ─── Publish @openguardrails/openclaw-security (OpenClaw plugin) ──
+  # ─── Publish @openguardrails/moltguard (OpenClaw plugin) ──
   publish-plugin:
-    name: Publish @openguardrails/openclaw-security
+    name: Publish @openguardrails/moltguard
     runs-on: ubuntu-latest
     if: >-
       github.event_name == 'push' ||
@@ -70,19 +70,19 @@ jobs:
         if: github.event_name == 'push'
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
-          cd openclaw-security
+          cd moltguard
           npm version "$VERSION" --no-git-tag-version
 
       - name: Build plugin
         run: |
-          cd openclaw-security
+          cd moltguard
           npm install
           npm run build
 
       - name: Publish
         run: |
           npm config set //registry.npmjs.org/:_authToken "$NODE_AUTH_TOKEN"
-          cd openclaw-security && npm publish --provenance --access public
+          cd moltguard && npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -145,7 +145,7 @@ jobs:
           echo "|---------|---------|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| \`openguardrails\` | ${VERSION:-manual} | ${{ needs.publish-cli.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| \`@openguardrails/gateway\` | ${VERSION:-manual} | ${{ needs.publish-gateway.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| \`@openguardrails/openclaw-security\` | ${VERSION:-manual} | ${{ needs.publish-plugin.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`@openguardrails/moltguard\` | ${VERSION:-manual} | ${{ needs.publish-plugin.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Install" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY

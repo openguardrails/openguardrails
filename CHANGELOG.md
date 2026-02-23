@@ -39,7 +39,7 @@ Management dashboard for AI agent security monitoring. pnpm + Turborepo monorepo
 
 ---
 
-### OpenClaw Plugin (`openclaw-security/`)
+### MoltGuard OpenClaw Plugin (`moltguard/`)
 
 Security guard plugin for OpenClaw agents. Hooks into the agent lifecycle to detect and block threats in real time.
 

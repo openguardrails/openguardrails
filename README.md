@@ -153,7 +153,7 @@ openguardrails/
     packages/
       shared/             #   Types, config, constants
       db/                 #   Drizzle ORM (SQLite/PG/MySQL)
-  openclaw-security/      # OpenClaw plugin
+  moltguard/              # MoltGuard OpenClaw plugin
 ```
 
 ## Plans

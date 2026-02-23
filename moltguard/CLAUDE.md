@@ -1,4 +1,4 @@
-# openclaw-security - OpenClaw Safety Plugin
+# moltguard - MoltGuard OpenClaw Security Plugin
 
 Local safety plugin for OpenClaw with AI Security Gateway, platform integration, and local dashboard.
 
