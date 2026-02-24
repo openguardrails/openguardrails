@@ -1,9 +1,6 @@
 name: Publish npm Packages
 
 on:
-  push:
-    tags:
-      - 'v*.*.*'
   workflow_dispatch:
     inputs:
       packages:
@@ -36,7 +33,7 @@ jobs:
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
           cd gateway
-          npm version "$VERSION" --no-git-tag-version
+          npm pkg set version="$VERSION"
 
       - name: Build gateway
         run: |
@@ -71,7 +68,7 @@ jobs:
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
           cd moltguard
-          npm version "$VERSION" --no-git-tag-version
+          npm pkg set version="$VERSION"
 
       - name: Build plugin
         run: |
@@ -110,7 +107,7 @@ jobs:
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
           cd cli
-          npm version "$VERSION" --no-git-tag-version
+          npm pkg set version="$VERSION"
 
       - name: Install CLI dependencies
         run: |

@@ -168,21 +168,13 @@ export class BehaviorDetector {
   /**
    * Called at before_tool_call. Returns a block decision or undefined (allow).
    *
-   * Only high-risk tools (file read, shell, web fetch) are sent to Core.
-   * Pure search tools (Glob, Grep, Search, etc.) skip Core entirely.
+   * All tool calls are sent to Core to build a complete tool chain.
    * If Core is unavailable, fail-open (allow).
    */
   async onBeforeToolCall(
     ctx: { sessionKey: string; agentId?: string },
     event: { toolName: string; params: Record<string, unknown> },
   ): Promise<BlockDecision | undefined> {
-    const isHighRisk =
-      FILE_READ_TOOLS.has(event.toolName) ||
-      SHELL_TOOLS.has(event.toolName) ||
-      WEB_FETCH_TOOLS.has(event.toolName);
-
-    if (!isHighRisk) return undefined;
-
     // No credentials → can't call Core → allow
     if (!this.coreCredentials) return undefined;
 
