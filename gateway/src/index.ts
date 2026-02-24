@@ -14,7 +14,7 @@ import type { GatewayConfig } from "./types.js";
 import { handleAnthropicRequest } from "./handlers/anthropic.js";
 import { handleOpenAIRequest } from "./handlers/openai.js";
 import { handleGeminiRequest } from "./handlers/gemini.js";
-import { handleOpenRouterRequest } from "./handlers/openrouter.js";
+import { handleModelsRequest } from "./handlers/models.js";
 
 const GATEWAY_MODE = process.env.GATEWAY_MODE || "selfhosted";
 
@@ -74,9 +74,28 @@ async function handleRequest(
       // Priority: explicit routing config > openrouter backend > openai backend
       const explicitBackend = config.routing?.["/v1/chat/completions"];
       if (explicitBackend === "openrouter" || (!explicitBackend && config.backends.openrouter)) {
-        await handleOpenRouterRequest(req, res, config);
+        const backend = config.backends.openrouter;
+        if (!backend) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "No OpenRouter backend configured" }));
+          return;
+        }
+        const extraHeaders: Record<string, string> = {};
+        if (backend.referer) {
+          extraHeaders["HTTP-Referer"] = backend.referer;
+        }
+        if (backend.title) {
+          extraHeaders["X-Title"] = backend.title;
+        }
+        await handleOpenAIRequest(req, res, backend, extraHeaders);
       } else if (explicitBackend === "openai" || (!explicitBackend && config.backends.openai)) {
-        await handleOpenAIRequest(req, res, config);
+        const backend = config.backends.openai;
+        if (!backend) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "No OpenAI backend configured" }));
+          return;
+        }
+        await handleOpenAIRequest(req, res, backend);
       } else {
         res.writeHead(500, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "No OpenAI-compatible backend configured" }));
@@ -102,48 +121,6 @@ async function handleRequest(
     res.end(
       JSON.stringify({
         error: "Internal server error",
-        message: error instanceof Error ? error.message : String(error),
-      }),
-    );
-  }
-}
-
-/**
- * Proxy GET /v1/models to the configured backend
- */
-async function handleModelsRequest(
-  res: ServerResponse,
-  config: GatewayConfig,
-): Promise<void> {
-  try {
-    let modelsUrl: string;
-    let authHeader: string;
-
-    if (config.backends.openrouter) {
-      modelsUrl = `${config.backends.openrouter.baseUrl}/v1/models`;
-      authHeader = `Bearer ${config.backends.openrouter.apiKey}`;
-    } else if (config.backends.openai) {
-      modelsUrl = `${config.backends.openai.baseUrl}/v1/models`;
-      authHeader = `Bearer ${config.backends.openai.apiKey}`;
-    } else {
-      res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "No OpenAI-compatible backend configured" }));
-      return;
-    }
-
-    const response = await fetch(modelsUrl, {
-      headers: { "Authorization": authHeader },
-    });
-
-    const body = await response.text();
-    res.writeHead(response.status, { "Content-Type": "application/json" });
-    res.end(body);
-  } catch (error) {
-    console.error("[ai-security-gateway] Models request error:", error);
-    res.writeHead(500, { "Content-Type": "application/json" });
-    res.end(
-      JSON.stringify({
-        error: "Internal gateway error",
         message: error instanceof Error ? error.message : String(error),
       }),
     );
