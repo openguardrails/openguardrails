@@ -6,17 +6,26 @@
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { GatewayConfig, MappingTable } from "../types.js";
+import type { MappingTable } from "../types.js";
 import { sanitize } from "../sanitizer.js";
 import { restore, restoreSSELine } from "../restorer.js";
 
+export type OpenAICompatibleBackend = {
+  baseUrl: string;
+  apiKey: string;
+};
+
 /**
  * Handle OpenAI API request
+ *
+ * @param backend - Config for OpenAI-compatible backend (OpenAI, OpenRouter, etc.)
+ * @param extraHeaders - Optional additional headers (e.g., OpenRouter attribution)
  */
 export async function handleOpenAIRequest(
   req: IncomingMessage,
   res: ServerResponse,
-  config: GatewayConfig,
+  backend: OpenAICompatibleBackend,
+  extraHeaders?: Record<string, string>,
 ): Promise<void> {
   try {
     // 1. Parse request body
@@ -49,22 +58,19 @@ export async function handleOpenAIRequest(
       ...rest,
     };
 
-    // 4. Get backend config
-    const backend = config.backends.openai;
-    if (!backend) {
-      res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "OpenAI backend not configured" }));
-      return;
-    }
-
-    // 5. Forward to OpenAI (or compatible) API
+    // 4. Use provided backend config
     const apiUrl = `${backend.baseUrl}/v1/chat/completions`;
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${backend.apiKey}`,
+    };
+    // Merge extra headers (e.g., OpenRouter attribution headers)
+    if (extraHeaders) {
+      Object.assign(headers, extraHeaders);
+    }
     const response = await fetch(apiUrl, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${backend.apiKey}`,
-      },
+      headers,
       body: JSON.stringify(sanitizedRequest),
     });
 
