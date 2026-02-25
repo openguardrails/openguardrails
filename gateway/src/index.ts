@@ -14,6 +14,7 @@ import type { GatewayConfig } from "./types.js";
 import { handleAnthropicRequest } from "./handlers/anthropic.js";
 import { handleOpenAIRequest } from "./handlers/openai.js";
 import { handleGeminiRequest } from "./handlers/gemini.js";
+import { handleModelsRequest } from "./handlers/models.js";
 
 const GATEWAY_MODE = process.env.GATEWAY_MODE || "selfhosted";
 
@@ -50,6 +51,12 @@ async function handleRequest(
     return;
   }
 
+  // Handle GET /v1/models — proxy to configured backend's models endpoint
+  if (method === "GET" && url === "/v1/models") {
+    await handleModelsRequest(res, config);
+    return;
+  }
+
   // Only allow POST for API endpoints
   if (method !== "POST") {
     res.writeHead(405, { "Content-Type": "application/json" });
@@ -63,8 +70,36 @@ async function handleRequest(
       // Anthropic Messages API
       await handleAnthropicRequest(req, res, config);
     } else if (url === "/v1/chat/completions") {
-      // OpenAI Chat Completions API
-      await handleOpenAIRequest(req, res, config);
+      // OpenAI/OpenRouter Chat Completions API
+      // Priority: explicit routing config > openrouter backend > openai backend
+      const explicitBackend = config.routing?.["/v1/chat/completions"];
+      if (explicitBackend === "openrouter" || (!explicitBackend && config.backends.openrouter)) {
+        const backend = config.backends.openrouter;
+        if (!backend) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "No OpenRouter backend configured" }));
+          return;
+        }
+        const extraHeaders: Record<string, string> = {};
+        if (backend.referer) {
+          extraHeaders["HTTP-Referer"] = backend.referer;
+        }
+        if (backend.title) {
+          extraHeaders["X-Title"] = backend.title;
+        }
+        await handleOpenAIRequest(req, res, backend, extraHeaders);
+      } else if (explicitBackend === "openai" || (!explicitBackend && config.backends.openai)) {
+        const backend = config.backends.openai;
+        if (!backend) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "No OpenAI backend configured" }));
+          return;
+        }
+        await handleOpenAIRequest(req, res, backend);
+      } else {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "No OpenAI-compatible backend configured" }));
+      }
     } else if (url?.match(/^\/v1\/models\/(.+):generateContent$/)) {
       // Gemini API
       const match = url.match(/^\/v1\/models\/(.+):generateContent$/);
@@ -120,8 +155,9 @@ export function startGateway(configPath?: string): void {
       console.log("");
       console.log("Endpoints:");
       console.log(`  POST http://127.0.0.1:${config.port}/v1/messages - Anthropic`);
-      console.log(`  POST http://127.0.0.1:${config.port}/v1/chat/completions - OpenAI`);
+      console.log(`  POST http://127.0.0.1:${config.port}/v1/chat/completions - OpenAI / OpenRouter`);
       console.log(`  POST http://127.0.0.1:${config.port}/v1/models/:model:generateContent - Gemini`);
+      console.log(`  GET  http://127.0.0.1:${config.port}/v1/models - List models (OpenAI / OpenRouter)`);
       console.log(`  GET  http://127.0.0.1:${config.port}/health - Health check`);
     });
 
