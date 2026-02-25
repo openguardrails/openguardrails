@@ -5,11 +5,11 @@
  * Reads the core database to get agent → email mapping,
  * then updates all dashboard tables accordingly.
  *
- * Usage: npx tsx scripts/migrate-tenant.ts
+ * Usage: cd dashboard/packages/db && pnpm tsx scripts/migrate-tenant.ts
  *
  * Environment variables:
- *   CORE_DATABASE_URL - path to core database (default: ../core/data/openguardrails.db)
- *   DATABASE_URL - path to dashboard database (default: ./data/openguardrails.db)
+ *   CORE_DATABASE_URL - path to core database (default: ../../../../core/data/openguardrails.db)
+ *   DATABASE_URL - path to dashboard database (default: ../../data/openguardrails.db)
  */
 
 import Database from "better-sqlite3";
@@ -17,9 +17,9 @@ import { resolve } from "node:path";
 
 const scriptDir = import.meta.dirname;
 const coreDbPath = process.env.CORE_DATABASE_URL?.replace("file:", "") ||
-  resolve(scriptDir, "../../core/data/openguardrails.db");
+  resolve(scriptDir, "../../../../core/data/openguardrails.db");
 const dashboardDbPath = process.env.DATABASE_URL?.replace("file:", "") ||
-  resolve(scriptDir, "../data/openguardrails.db");
+  resolve(scriptDir, "../../data/openguardrails.db");
 
 console.log("=== Tenant Migration ===\n");
 console.log(`Core database:      ${coreDbPath}`);
