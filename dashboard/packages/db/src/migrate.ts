@@ -1,11 +1,19 @@
 import { config } from "dotenv";
-import { resolve, dirname } from "path";
+import { resolve, dirname, join } from "path";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 config({ path: resolve(__dirname, "../../../.env") });
+
+// Database path configuration:
+// - DASHBOARD_DATA_DIR: directory for data files (default: dashboard/data)
+// - DATABASE_URL: full path to SQLite file (overrides DASHBOARD_DATA_DIR for SQLite)
+function getDefaultDbPath(): string {
+  const dataDir = process.env.DASHBOARD_DATA_DIR || resolve(__dirname, "../../../data");
+  return join(dataDir, "dashboard.db");
+}
 
 async function runMigrations() {
   const { getDialect } = await import("./dialect.js");
@@ -20,8 +28,7 @@ async function runMigrations() {
     const { mkdirSync, existsSync } = await import("fs");
     const { dirname } = await import("path");
 
-    const defaultPath = resolve(__dirname, "../../../data/openguardrails.db");
-    const rawUrl = process.env.DATABASE_URL || defaultPath;
+    const rawUrl = process.env.DATABASE_URL || getDefaultDbPath();
     const dbPath = rawUrl.replace(/^file:/, "");
 
     const dir = dirname(dbPath);

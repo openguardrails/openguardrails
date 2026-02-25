@@ -8,7 +8,9 @@ module.exports = {
     env: {
       API_PORT: 53667,
 
-      // Database
+      // Database — SQLite data directory (database file: {DASHBOARD_DATA_DIR}/dashboard.db)
+      // DASHBOARD_DATA_DIR: "/mnt/data/ogv6data",
+      // Or use DATABASE_URL for full path or PostgreSQL/MySQL connection string:
       // DATABASE_URL: "postgresql://user:pass@localhost:5432/og_dashboard",
 
       // JWT

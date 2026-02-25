@@ -1,5 +1,5 @@
 import { config } from "dotenv";
-import { resolve, dirname } from "path";
+import { resolve, dirname, join } from "path";
 import { mkdirSync, existsSync } from "fs";
 import { fileURLToPath } from "url";
 import { getDialect } from "./dialect.js";
@@ -14,15 +14,21 @@ if (!process.env.DATABASE_URL && !process.env.DB_DIALECT) {
 
 const dialect = getDialect();
 
+// Database path configuration:
+// - DASHBOARD_DATA_DIR: directory for data files (default: dashboard/data)
+// - DATABASE_URL: full path to SQLite file (overrides DASHBOARD_DATA_DIR for SQLite)
+function getDefaultDbPath(): string {
+  const dataDir = process.env.DASHBOARD_DATA_DIR || resolve(__dirname, "../../../data");
+  return join(dataDir, "dashboard.db");
+}
+
 async function createDb() {
   if (dialect === "sqlite") {
     const { default: Database } = await import("better-sqlite3");
     const { drizzle } = await import("drizzle-orm/better-sqlite3");
     const schema = await import("./schema/sqlite.js");
 
-    // Default path relative to monorepo root (packages/db/../../data = dashboard/data)
-    const defaultPath = resolve(__dirname, "../../../data/openguardrails.db");
-    const rawUrl = process.env.DATABASE_URL || defaultPath;
+    const rawUrl = process.env.DATABASE_URL || getDefaultDbPath();
     const dbPath = rawUrl.replace(/^file:/, "");
 
     // Ensure directory exists

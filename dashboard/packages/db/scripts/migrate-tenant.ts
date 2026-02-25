@@ -8,18 +8,26 @@
  * Usage: cd dashboard/packages/db && pnpm tsx scripts/migrate-tenant.ts
  *
  * Environment variables:
- *   CORE_DATABASE_URL - path to core database (default: ../../../../core/data/openguardrails.db)
- *   DATABASE_URL - path to dashboard database (default: ../../data/openguardrails.db)
+ *   CORE_DATA_DIR - core data directory (default: ../../../../core/data)
+ *   DASHBOARD_DATA_DIR - dashboard data directory (default: ../../../data)
+ *
+ * Or specify full paths:
+ *   CORE_DATABASE_URL - full path to core database
+ *   DATABASE_URL - full path to dashboard database
  */
 
 import Database from "better-sqlite3";
-import { resolve } from "node:path";
+import { resolve, join } from "node:path";
 
 const scriptDir = import.meta.dirname;
-const coreDbPath = process.env.CORE_DATABASE_URL?.replace("file:", "") ||
-  resolve(scriptDir, "../../../../core/data/openguardrails.db");
-const dashboardDbPath = process.env.DATABASE_URL?.replace("file:", "") ||
-  resolve(scriptDir, "../../data/openguardrails.db");
+
+// Core database path
+const coreDataDir = process.env.CORE_DATA_DIR || resolve(scriptDir, "../../../../core/data");
+const coreDbPath = process.env.CORE_DATABASE_URL?.replace("file:", "") || join(coreDataDir, "core.db");
+
+// Dashboard database path
+const dashDataDir = process.env.DASHBOARD_DATA_DIR || resolve(scriptDir, "../../../data");
+const dashboardDbPath = process.env.DATABASE_URL?.replace("file:", "") || join(dashDataDir, "dashboard.db");
 
 console.log("=== Tenant Migration ===\n");
 console.log(`Core database:      ${coreDbPath}`);
