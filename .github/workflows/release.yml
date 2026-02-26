@@ -44,11 +44,19 @@ jobs:
           npm pkg set version="$VERSION" --prefix moltguard
           npm pkg set version="$VERSION" --prefix cli
 
+      - name: Update moltguard skill versions
+        run: |
+          VERSION=${{ steps.ver.outputs.version }}
+          # Update openclaw.plugin.json
+          jq --arg v "$VERSION" '.version = $v' moltguard/openclaw.plugin.json > tmp.json && mv tmp.json moltguard/openclaw.plugin.json
+          # Update SKILL.md frontmatter version
+          sed -i "s/^version: .*/version: $VERSION/" moltguard/clawhub-skill/SKILL.md
+
       - name: Commit version bumps
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add gateway/package.json moltguard/package.json cli/package.json
+          git add gateway/package.json moltguard/package.json cli/package.json moltguard/openclaw.plugin.json moltguard/clawhub-skill/SKILL.md
           git diff --staged --quiet || git commit -m "chore: bump package versions to ${{ steps.ver.outputs.version }}"
           git push
 

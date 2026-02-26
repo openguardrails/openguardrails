@@ -1,6 +1,6 @@
 ---
 name: moltguard
-version: 6.6.4
+version: 6.6.14
 description: "MoltGuard — runtime security plugin for OpenClaw agents by OpenGuardrails. Helps users install, register, activate, and check the status of MoltGuard. Use when the user asks to: install MoltGuard, check MoltGuard status, register or activate MoltGuard, configure the AI Security Gateway, or understand what MoltGuard detects. Provides local-first protection against data exfiltration, credential theft, command injection, and sensitive data leakage. Source: https://github.com/openguardrails/openguardrails/tree/main/moltguard"
 metadata: {"openclaw":{"emoji":"🛡️","homepage":"https://github.com/openguardrails/openguardrails/tree/main/moltguard","keywords":["security","prompt-injection","data-exfiltration","pii","credential-theft","command-injection","guardrails","safety","agent-security","moltguard"]}}
 ---
@@ -72,7 +72,7 @@ Run this when the user wants to register MoltGuard or enable cloud behavioral de
 ```bash
 node {baseDir}/scripts/activate.mjs
 ```
-After running, show the user the claim URL. Tell them to visit the URL and provide their email to complete activation. On success, an API key is written to `~/.openclaw/credentials/moltguard/credentials.json` — inform the user so they know a credential file was created.
+After running, show the user the claim URL. Tell them to visit the URL and provide their email to complete activation. On success, an API key is written to `~/.openclaw/credentials/openguardrails/credentials.json` — inform the user so they know a credential file was created.
 
 ---
 
@@ -186,7 +186,7 @@ Account portal: `https://www.openguardrails.com/core/login` (email + API key)
 ```bash
 rm -rf ~/.openclaw/extensions/moltguard
 # Remove moltguard configs from ~/.openclaw/openclaw.json
-rm -rf ~/.openclaw/credentials/moltguard   # optional
+rm -rf ~/.openclaw/credentials/openguardrails   # optional
 ```
 
 ---
