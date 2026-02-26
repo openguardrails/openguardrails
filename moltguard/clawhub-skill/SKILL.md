@@ -1,6 +1,6 @@
 ---
 name: moltguard
-version: 6.6.14
+version: 6.6.16
 description: "MoltGuard — runtime security plugin for OpenClaw agents by OpenGuardrails. Helps users install, register, activate, and check the status of MoltGuard. Use when the user asks to: install MoltGuard, check MoltGuard status, register or activate MoltGuard, configure the AI Security Gateway, or understand what MoltGuard detects. Provides local-first protection against data exfiltration, credential theft, command injection, and sensitive data leakage. Source: https://github.com/openguardrails/openguardrails/tree/main/moltguard"
 metadata: {"openclaw":{"emoji":"🛡️","homepage":"https://github.com/openguardrails/openguardrails/tree/main/moltguard","keywords":["security","prompt-injection","data-exfiltration","pii","credential-theft","command-injection","guardrails","safety","agent-security","moltguard"]}}
 ---
