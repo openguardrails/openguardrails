@@ -11,7 +11,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-const CREDS_DIR = join(homedir(), '.openclaw/credentials/openguardrails');
+const CREDS_DIR = join(homedir(), '.openclaw/credentials/moltguard');
 const CREDS_FILE = join(CREDS_DIR, 'credentials.json');
 const CORE_URL = 'https://www.openguardrails.com/core';
 const AGENT_NAME = 'OpenClaw Agent';

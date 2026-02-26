@@ -29,7 +29,7 @@ Verify with `tcpdump`, `mitmproxy`, or Little Snitch — only destination is `op
 
 **Fail-open design.** If cloud API is unreachable or times out, tool calls are allowed. Network issues never block your workflow.
 
-**Credentials.** Stored at `~/.openclaw/credentials/openguardrails/credentials.json`. Revoke from account portal or delete the file.
+**Credentials.** Stored at `~/.openclaw/credentials/moltguard/credentials.json`. Revoke from account portal or delete the file.
 
 ---
 

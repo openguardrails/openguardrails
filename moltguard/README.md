@@ -376,7 +376,7 @@ The gateway runs on localhost (`127.0.0.1`). It sanitizes your prompts before th
 - Prompt injection redaction — fully local regex-based scanning, no cloud round-trip
 - Fast-path blocks (shell escape detection, read-then-exfil patterns) — fully local
 - AI Security Gateway sanitization and restoration — fully local
-- Credentials stored at `~/.openclaw/credentials/openguardrails/credentials.json`
+- Credentials stored at `~/.openclaw/credentials/moltguard/credentials.json`
 - Gateway placeholder-to-original mappings — ephemeral, discarded after each request
 - Low-risk / no-risk tool calls — never leave the machine
 
@@ -448,7 +448,7 @@ openclaw gateway restart
 To also remove your stored API key:
 
 ```bash
-rm ~/.openclaw/credentials/openguardrails/credentials.json
+rm ~/.openclaw/credentials/moltguard/credentials.json
 ```
 
 ## Development

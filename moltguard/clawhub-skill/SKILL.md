@@ -29,7 +29,7 @@ diff -r package/scripts openguardrails/moltguard/scripts
 ```
 Prefer source install if you have low trust in the publisher: `openclaw plugins install -l ./openguardrails/moltguard`
 
-**What `activate.mjs` does:** Makes an outbound call to `https://www.openguardrails.com/core` to register the agent. Once you visit the claim URL and verify your email, the returned API key is written to `~/.openclaw/credentials/openguardrails/credentials.json`. Do not activate if you do not trust this endpoint. All local protections work without activation.
+**What `activate.mjs` does:** Makes an outbound call to `https://www.openguardrails.com/core` to register the agent. Once you visit the claim URL and verify your email, the returned API key is written to `~/.openclaw/credentials/moltguard/credentials.json`. Do not activate if you do not trust this endpoint. All local protections work without activation.
 
 **Network behavior:**
 - _Before activation_: no outbound calls are made. Fully air-gapped local detection.
@@ -50,7 +50,7 @@ Compare the npm package to the GitHub source (`npm pack` + diff) as described in
 `scripts/activate.mjs` and `scripts/status.mjs` are short and readable. Review them directly before running.
 
 **3. Understand what activation writes.**
-Activation writes an API key to `~/.openclaw/credentials/openguardrails/credentials.json`. If you later distrust the endpoint, delete that file and revoke the key via the platform portal.
+Activation writes an API key to `~/.openclaw/credentials/moltguard/credentials.json`. If you later distrust the endpoint, delete that file and revoke the key via the platform portal.
 
 **4. Activate from a monitored environment if you need high assurance.**
 Use `tcpdump`, `mitmproxy`, or Little Snitch to confirm outbound destinations and that payloads contain only sanitized metadata — not message content.
@@ -72,7 +72,7 @@ Run this when the user wants to register MoltGuard or enable cloud behavioral de
 ```bash
 node {baseDir}/scripts/activate.mjs
 ```
-After running, show the user the claim URL. Tell them to visit the URL and provide their email to complete activation. On success, an API key is written to `~/.openclaw/credentials/openguardrails/credentials.json` — inform the user so they know a credential file was created.
+After running, show the user the claim URL. Tell them to visit the URL and provide their email to complete activation. On success, an API key is written to `~/.openclaw/credentials/moltguard/credentials.json` — inform the user so they know a credential file was created.
 
 ---
 
@@ -186,7 +186,7 @@ Account portal: `https://www.openguardrails.com/core/login` (email + API key)
 ```bash
 rm -rf ~/.openclaw/extensions/moltguard
 # Remove moltguard configs from ~/.openclaw/openclaw.json
-rm -rf ~/.openclaw/credentials/openguardrails   # optional
+rm -rf ~/.openclaw/credentials/moltguard   # optional
 ```
 
 ---
