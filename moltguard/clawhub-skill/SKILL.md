@@ -97,6 +97,16 @@ git clone https://github.com/openguardrails/openguardrails.git
 openclaw plugins install -l ./openguardrails/moltguard
 ```
 
+## Update
+
+```bash
+# 1. Update the plugin
+openclaw plugins update moltguard
+
+# 2. Restart the gateway to load the plugin
+openclaw gateway restart
+```
+
 ---
 
 ## What MoltGuard Protects Against
@@ -170,9 +180,9 @@ Account portal: `https://www.openguardrails.com/core/login` (email + API key)
 ## Uninstall
 
 ```bash
-rm -rf ~/.openclaw/extensions/openguardrails
-# Remove config from ~/.openclaw/openclaw.json
-rm -rf ~/.openclaw/credentials/openguardrails   # optional
+rm -rf ~/.openclaw/extensions/moltguard
+# Remove moltguard configs from ~/.openclaw/openclaw.json
+rm -rf ~/.openclaw/credentials/moltguard   # optional
 ```
 
 ---

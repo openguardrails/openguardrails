@@ -139,9 +139,9 @@ async function ensureApiKey(
   log.info("No API key found — registering with OpenGuardrails...");
 
   try {
-    const creds = await registerWithCore("openclaw-agent", "OpenClaw AI Agent", coreUrl);
+    const result = await registerWithCore("openclaw-agent", "OpenClaw AI Agent", coreUrl);
     log.info("Registered with OpenGuardrails. API key saved to ~/.openclaw/credentials/moltguard/credentials.json");
-    return creds.apiKey;
+    return result.credentials.apiKey;
   } catch (error) {
     throw new Error(
       `Failed to auto-register API key: ${error instanceof Error ? error.message : String(error)}. ` +

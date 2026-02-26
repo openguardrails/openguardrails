@@ -57,11 +57,17 @@ export function loadApiKey(): string | null {
   return loadCoreCredentials()?.apiKey ?? null;
 }
 
+export type RegisterResult = {
+  credentials: CoreCredentials;
+  activateUrl: string;
+  loginUrl: string;
+};
+
 export async function registerWithCore(
   name: string,
   description: string,
   coreUrl: string = DEFAULT_CORE_URL,
-): Promise<CoreCredentials> {
+): Promise<RegisterResult> {
   const response = await fetch(`${coreUrl}/api/v1/agents/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -80,9 +86,9 @@ export async function registerWithCore(
     agent?: {
       id: string;
       api_key: string;
-      claim_url: string;
-      verification_code: string;
     };
+    activate_url?: string;
+    login_url?: string;
     error?: string;
   };
 
@@ -93,12 +99,17 @@ export async function registerWithCore(
   const creds: CoreCredentials = {
     apiKey: json.agent.api_key,
     agentId: json.agent.id,
-    claimUrl: json.agent.claim_url,
-    verificationCode: json.agent.verification_code,
+    claimUrl: json.activate_url ?? "",
+    verificationCode: "", // No longer used
   };
 
   saveCoreCredentials(creds);
-  return creds;
+
+  return {
+    credentials: creds,
+    activateUrl: json.activate_url ?? "",
+    loginUrl: json.login_url ?? `${coreUrl}/login`,
+  };
 }
 
 // =============================================================================

@@ -21,6 +21,7 @@ import {
   DEFAULT_CORE_URL,
   DEFAULT_DASHBOARD_URL,
   type CoreCredentials,
+  type RegisterResult,
 } from "./agent/config.js";
 import { BehaviorDetector, FILE_READ_TOOLS, WEB_FETCH_TOOLS } from "./agent/behavior-detector.js";
 import { scanForInjection, redactContent } from "./agent/content-injection-scanner.js";
@@ -62,6 +63,7 @@ let dashboardHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let emailPollTimer: ReturnType<typeof setInterval> | null = null;
 let profileWatchers: ReturnType<typeof fs.watch>[] = [];
 let profileDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+let lastRegisterResult: RegisterResult | null = null;
 
 // =============================================================================
 // Ensure default config in openclaw.json
@@ -196,12 +198,31 @@ const openClawGuardPlugin = {
           }
           globalBehaviorDetector.setCredentials(globalCoreCredentials);
           if (globalCoreCredentials.claimUrl) {
-            log.info("Platform: registered, pending activation — run /og_activate");
+            log.info(`Platform: pending activation — visit ${globalCoreCredentials.claimUrl}`);
           } else {
             log.info("Platform: active");
           }
         } else {
-          log.info("Platform: not registered — run /og_activate to enable behavioral detection");
+          // Auto-register on first load
+          log.info("Platform: auto-registering...");
+          registerWithCore(
+            config.agentName,
+            "OpenClaw AI Agent secured by OpenGuardrails",
+            config.coreUrl,
+          )
+            .then((result) => {
+              lastRegisterResult = result;
+              globalCoreCredentials = result.credentials;
+              globalBehaviorDetector!.setCredentials(result.credentials);
+              initDashboardClient(result.credentials);
+
+              log.info(`Platform: activate at ${result.activateUrl}`);
+              log.info(`Platform: after activation, login at ${result.loginUrl}`);
+            })
+            .catch((err) => {
+              log.warn(`Platform: auto-registration failed — ${err}`);
+              log.info("Platform: run /og_activate to retry");
+            });
         }
       }
     }
@@ -495,16 +516,16 @@ const openClawGuardPlugin = {
           lines.push(`- API Key:   ${creds.apiKey.slice(0, 12)}...`);
           if (creds.email) {
             lines.push(`- Email:     ${creds.email}`);
-          }
-          lines.push(`- Platform:  ${config.coreUrl}`);
-          if (creds.claimUrl) {
-            lines.push("- Status:    pending activation — run `/og_activate`");
+            lines.push(`- Status:    active`);
+          } else if (creds.claimUrl) {
+            lines.push(`- Status:    pending activation`);
+            lines.push(`- Activate:  ${creds.claimUrl}`);
           } else {
-            lines.push("- Status:    active");
+            lines.push(`- Status:    active`);
           }
+          lines.push(`- Login:     ${config.coreUrl}/login`);
         } else {
-          lines.push("- Status:    not registered — run `/og_activate` to register");
-          lines.push(`- Platform:  ${config.coreUrl}`);
+          lines.push("- Status:    registering...");
         }
 
         lines.push("");
@@ -516,41 +537,39 @@ const openClawGuardPlugin = {
 
     api.registerCommand({
       name: "og_activate",
-      description: "Register and show activation instructions",
+      description: "Register or show activation status",
       requireAuth: true,
       handler: async () => {
-        // Already registered — show current status
-        if (globalCoreCredentials) {
-          const { agentId, claimUrl, verificationCode, apiKey } = globalCoreCredentials;
-
-          if (!claimUrl) {
-            return {
-              text: [
-                "**OpenGuardrails: Active**",
-                "",
-                `Agent ID: ${agentId}`,
-                `API Key:  ${apiKey.slice(0, 12)}...`,
-                `Platform: ${config.coreUrl}`,
-                "",
-                "Behavioral detection is active.",
-              ].join("\n"),
-            };
-          }
-
+        // Already registered and activated
+        if (globalCoreCredentials?.email) {
           return {
             text: [
-              "**OpenGuardrails: Claim Your Agent**",
+              "**OpenGuardrails: Active**",
               "",
-              `Agent ID: ${agentId}`,
+              `Agent ID: ${globalCoreCredentials.agentId}`,
+              `Email:    ${globalCoreCredentials.email}`,
               "",
-              "Complete these steps to activate behavioral detection:",
+              "Behavioral detection is active.",
               "",
-              `  1. Visit:  ${claimUrl}`,
-              `  2. Code:   ${verificationCode}`,
-              `  3. Email:  your email becomes your login for the account portal`,
+              `Login: ${config.coreUrl}/login`,
+            ].join("\n"),
+          };
+        }
+
+        // Registered but pending activation
+        if (globalCoreCredentials?.claimUrl) {
+          return {
+            text: [
+              "**OpenGuardrails: Pending Activation**",
               "",
-              "After claiming you get **30,000 free** detections.",
-              `Platform: ${config.coreUrl}`,
+              `Agent ID: ${globalCoreCredentials.agentId}`,
+              "",
+              "Enter your email to activate:",
+              `  ${globalCoreCredentials.claimUrl}`,
+              "",
+              "After activation you get **30,000 free** detections.",
+              "",
+              `Login: ${config.coreUrl}/login`,
             ].join("\n"),
           };
         }
@@ -558,14 +577,31 @@ const openClawGuardPlugin = {
         // Not registered yet — register now
         try {
           log.info(`Registering with ${config.coreUrl}...`);
-          globalCoreCredentials = await registerWithCore(
+          const result = await registerWithCore(
             config.agentName,
             "OpenClaw AI Agent secured by OpenGuardrails",
             config.coreUrl,
           );
-          globalBehaviorDetector!.setCredentials(globalCoreCredentials);
-          initDashboardClient(globalCoreCredentials);
+          lastRegisterResult = result;
+          globalCoreCredentials = result.credentials;
+          globalBehaviorDetector!.setCredentials(result.credentials);
+          initDashboardClient(result.credentials);
           log.info("Registration successful!");
+
+          return {
+            text: [
+              "**OpenGuardrails: Activate Your Agent**",
+              "",
+              `Agent ID: ${result.credentials.agentId}`,
+              "",
+              "Enter your email to activate:",
+              `  ${result.activateUrl}`,
+              "",
+              "After activation you get **30,000 free** detections.",
+              "",
+              `Login: ${result.loginUrl}`,
+            ].join("\n"),
+          };
         } catch (err) {
           return {
             text: [
@@ -580,25 +616,6 @@ const openClawGuardPlugin = {
             ].join("\n"),
           };
         }
-
-        const { agentId, claimUrl, verificationCode } = globalCoreCredentials;
-
-        return {
-          text: [
-            "**OpenGuardrails: Claim Your Agent**",
-            "",
-            `Agent ID: ${agentId}`,
-            "",
-            "Complete these steps to activate behavioral detection:",
-            "",
-            `  1. Visit:  ${claimUrl}`,
-            `  2. Code:   ${verificationCode}`,
-            `  3. Email:  your email becomes your login for the account portal`,
-            "",
-            "After claiming you get **30,000 free** detections.",
-            `Platform: ${config.coreUrl}`,
-          ].join("\n"),
-        };
       },
     });
   },
