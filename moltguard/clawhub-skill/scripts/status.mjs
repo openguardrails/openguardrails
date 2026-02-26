@@ -65,8 +65,7 @@ async function main() {
   if (accountStatus !== 'active' && creds.claimUrl) {
     console.log('\nTo activate cloud detection:');
     console.log(`  1. Visit: ${creds.claimUrl}`);
-    console.log(`  2. Code:  ${creds.verificationCode}`);
-    console.log('  3. Enter your email in the form to complete activation.');
+    console.log('  2. Enter your email to complete activation.');
   }
 }
 

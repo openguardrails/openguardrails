@@ -72,7 +72,7 @@ Run this when the user wants to register MoltGuard or enable cloud behavioral de
 ```bash
 node {baseDir}/scripts/activate.mjs
 ```
-After running, show the user the claim URL and verification code. Tell them to visit the URL, enter the code, and provide their email to complete activation. On success, an API key is written to `~/.openclaw/credentials/openguardrails/credentials.json` — inform the user so they know a credential file was created.
+After running, show the user the claim URL. Tell them to visit the URL and provide their email to complete activation. On success, an API key is written to `~/.openclaw/credentials/moltguard/credentials.json` — inform the user so they know a credential file was created.
 
 ---
 
@@ -86,16 +86,14 @@ openclaw plugins install @openguardrails/moltguard
 
 # 2. Restart the gateway to load the plugin
 openclaw gateway restart
+
+# 3. Register and show activation link
+node {baseDir}/scripts/activate.mjs
 ```
 
-Local protections are active immediately after restart — no registration required. Cloud behavioral detection requires registration (run `activate.mjs` above).
+After running step 3, show the user the **claim URL** from the output. Tell them to visit the URL and enter their email to complete activation.
 
-To install from source (highest assurance):
-```bash
-git clone https://github.com/openguardrails/openguardrails.git
-# Audit the code, then:
-openclaw plugins install -l ./openguardrails/moltguard
-```
+Local protections are active immediately after restart — no registration required. Cloud behavioral detection requires activation.
 
 ## Update
 
@@ -105,7 +103,12 @@ openclaw plugins update moltguard
 
 # 2. Restart the gateway to load the plugin
 openclaw gateway restart
+
+# 3. Check status
+node {baseDir}/scripts/status.mjs
 ```
+
+After updating, run step 3 to confirm the plugin is loaded and show the current activation status.
 
 ---
 
@@ -147,6 +150,7 @@ All options in `~/.openclaw/openclaw.json` under `plugins.entries.openguardrails
 | `apiKey` | `""` | Explicit API key (`sk-og-...`) |
 | `agentName` | `"OpenClaw Agent"` | Name shown in dashboard |
 | `coreUrl` | `https://www.openguardrails.com/core` | Platform API endpoint |
+| `dashboardUrl` | `https://www.openguardrails.com/dashboard` | Dashboard URL for observation reporting |
 | `timeoutMs` | `60000` | Cloud assessment timeout (ms) |
 
 To use an existing API key directly (skips registration):
