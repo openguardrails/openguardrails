@@ -32,6 +32,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
+import { execSync } from "node:child_process";
 
 // =============================================================================
 // Constants
@@ -169,6 +170,43 @@ function createLogger(baseLogger: Logger): Logger {
 }
 
 // =============================================================================
+// better-sqlite3 native addon check and build
+// =============================================================================
+
+/**
+ * Ensures better-sqlite3 native addon is available.
+ * OpenClaw installs plugins with --ignore-scripts for security,
+ * so we need to manually rebuild better-sqlite3 on first load.
+ */
+function ensureBetterSqlite3(log: Logger): void {
+  try {
+    // Try to load better-sqlite3 to check if native addon exists
+    require("better-sqlite3");
+    log.debug?.("better-sqlite3 native addon is available");
+    return;
+  } catch (err) {
+    // Native addon not found, need to build it
+    log.info("better-sqlite3 not found, rebuilding...");
+  }
+
+  try {
+    // Get plugin installation directory
+    const pluginDir = path.dirname(new URL(import.meta.url).pathname);
+
+    // Rebuild better-sqlite3
+    execSync("npm rebuild better-sqlite3", {
+      cwd: pluginDir,
+      stdio: "ignore", // Hide output to avoid cluttering logs
+      timeout: 60000, // 60 second timeout
+    });
+
+    log.info("better-sqlite3 rebuilt successfully");
+  } catch (err) {
+    log.error(`Failed to rebuild better-sqlite3: ${err}. Dashboard will not work.`);
+  }
+}
+
+// =============================================================================
 // Plugin state (module-level — survives plugin re-registration within a process)
 // =============================================================================
 
@@ -269,6 +307,10 @@ const openClawGuardPlugin = {
 
   register(api: OpenClawPluginApi) {
     const log = createLogger(api.logger);
+
+    // Ensure better-sqlite3 native addon is available
+    // (OpenClaw uses --ignore-scripts during install for security)
+    ensureBetterSqlite3(log);
 
     // Ensure openclaw.json has default config (coreUrl) on first load
     const pluginConfig = (api.pluginConfig ?? {}) as OpenClawGuardConfig;
