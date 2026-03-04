@@ -1,0 +1,16 @@
+{
+  "name": "@og/api-bundle",
+  "version": "0.2.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.0.0"
+  },
+  "optionalDependencies": {
+    "pg": "^8.13.1",
+    "mysql2": "^3.11.5"
+  }
+}
