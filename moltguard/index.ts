@@ -176,7 +176,12 @@ function createLogger(baseLogger: Logger): Logger {
 /**
  * Ensures better-sqlite3 native addon is available.
  * OpenClaw installs plugins with --ignore-scripts for security,
- * so we need to manually rebuild better-sqlite3 on first load.
+ * so we need to manually obtain the native binary on first load.
+ *
+ * Strategy:
+ * 1. Try to load existing binary (already installed)
+ * 2. Try prebuild-install (download precompiled binary, ~2s)
+ * 3. Fall back to npm rebuild (compile from source, ~30s)
  */
 function ensureBetterSqlite3(log: Logger): void {
   try {
@@ -185,24 +190,42 @@ function ensureBetterSqlite3(log: Logger): void {
     log.debug?.("better-sqlite3 native addon is available");
     return;
   } catch (err) {
-    // Native addon not found, need to build it
-    log.info("better-sqlite3 not found, rebuilding...");
+    // Native addon not found, need to obtain it
+    log.info("better-sqlite3 not found, installing...");
   }
 
   try {
     // Get plugin installation directory
     const pluginDir = path.dirname(new URL(import.meta.url).pathname);
+    const sqlite3Dir = path.join(pluginDir, "node_modules", "better-sqlite3");
 
-    // Rebuild better-sqlite3
+    // First, try to download precompiled binary (faster, ~2 seconds)
+    try {
+      log.debug?.("Attempting to download precompiled binary...");
+      execSync("npx --yes prebuild-install", {
+        cwd: sqlite3Dir,
+        stdio: "ignore",
+        timeout: 30000, // 30 second timeout for download
+      });
+
+      // Verify it works
+      require("better-sqlite3");
+      log.info("better-sqlite3 installed successfully (precompiled binary)");
+      return;
+    } catch (downloadErr) {
+      log.debug?.("Precompiled binary not available, compiling from source...");
+    }
+
+    // Fall back to compiling from source (slower, ~30 seconds)
     execSync("npm rebuild better-sqlite3", {
       cwd: pluginDir,
-      stdio: "ignore", // Hide output to avoid cluttering logs
-      timeout: 60000, // 60 second timeout
+      stdio: "ignore",
+      timeout: 60000, // 60 second timeout for compilation
     });
 
-    log.info("better-sqlite3 rebuilt successfully");
+    log.info("better-sqlite3 installed successfully (compiled from source)");
   } catch (err) {
-    log.error(`Failed to rebuild better-sqlite3: ${err}. Dashboard will not work.`);
+    log.error(`Failed to install better-sqlite3: ${err}. Dashboard will not work.`);
   }
 }
 
