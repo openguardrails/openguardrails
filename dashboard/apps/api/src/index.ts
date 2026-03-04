@@ -20,6 +20,7 @@ import { discoveryRouter } from "./routes/discovery.js";
 import { observationsRouter } from "./routes/observations.js";
 import { detectionsRouter } from "./routes/detections.js";
 import { errorHandler } from "./middleware/error-handler.js";
+import { autoMigrate } from "./auto-migrate.js";
 
 import type { DashboardMode } from "@og/shared";
 
@@ -125,6 +126,9 @@ app.use("/api/observations", observationsRouter);
 app.use("/api/detections", detectionsRouter);
 
 app.use(errorHandler);
+
+// Auto-migrate database before starting server
+await autoMigrate();
 
 app.listen(PORT, () => {
   console.log(`OpenGuardrails API running on port ${PORT}`);

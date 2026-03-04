@@ -10,3 +10,4 @@ export { detectionResultQueries } from "./queries/detection-results.js";
 export { settingsQueries } from "./queries/settings.js";
 export { observationQueries, inferCategory, inferAccessPattern } from "./queries/observations.js";
 export { authQueries } from "./queries/auth.js";
+export { runMigrations } from "./migrate.js";
