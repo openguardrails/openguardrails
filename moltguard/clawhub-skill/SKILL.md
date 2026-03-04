@@ -203,6 +203,19 @@ npm pack @openguardrails/moltguard --dry-run
 
 ---
 
+## Update MoltGuard
+
+To update MoltGuard to the latest version:
+
+```bash
+# Update the plugin
+openclaw plugins update moltguard
+
+# Restart to load the updated version
+openclaw gateway restart
+```
+---
+
 ## Uninstall
 
 ```bash
