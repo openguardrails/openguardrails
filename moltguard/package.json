@@ -1,6 +1,6 @@
 {
   "name": "@openguardrails/moltguard",
-  "version": "6.7.2",
+  "version": "6.7.3",
   "description": "AI agent security plugin for OpenClaw: prompt injection detection, PII sanitization, and monitoring dashboard",
   "type": "module",
   "main": "index.ts",
@@ -60,8 +60,8 @@
     "ws": "^8.18.0"
   },
   "optionalDependencies": {
-    "pg": "^8.13.1",
-    "mysql2": "^3.11.5"
+    "mysql2": "^3.11.5",
+    "pg": "^8.13.1"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
