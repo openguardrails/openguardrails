@@ -189,17 +189,149 @@ API keys work across multiple agents.
 
 ---
 
-## Security & Provenance
+## Security & Trust
 
-**Verify provenance before installing:**
+### Open Source & Auditable
+
+MoltGuard is **100% open source** under Apache 2.0 license. All code is public and auditable:
+
+- **GitHub repository**: https://github.com/openguardrails/openguardrails
+- **Package source**: https://github.com/openguardrails/openguardrails/tree/main/moltguard
+- **npm package**: https://www.npmjs.com/package/@openguardrails/moltguard
+
+**Key files to review before installing:**
+- `index.ts` — Plugin entry point, all event hooks and tool call interception
+- `agent/sanitizer.ts` — Local sanitization logic (what data is redacted before cloud transmission)
+- `platform-client/index.ts` — All network calls (only to `openguardrails.com/core`)
+- `agent/config.ts` — Registration logic (sends only `{ name, description }`)
+
+### Verify Package Provenance
+
+**Before installing, verify the package comes from the official repository:**
+
 ```bash
-npm pack @openguardrails/moltguard --dry-run
+# 1. Check npm package repository URL
+npm view @openguardrails/moltguard repository.url
+# Expected: https://github.com/openguardrails/openguardrails.git
+
+# 2. Download and inspect package contents
+npm pack @openguardrails/moltguard
+tar -xzf openguardrails-moltguard-*.tgz
+ls -R package/
+
+# 3. Compare with GitHub source (optional)
+git clone https://github.com/openguardrails/openguardrails.git
+diff -r package/ openguardrails/moltguard/
 ```
 
-**Network behavior:**
-- On first use: auto-registers to get an API key (no email required)
-- During operation: sends tool names, params, and content to Core for detection
-- Content is sanitized before transmission (PII/secrets replaced with placeholders)
+### Network Behavior
+
+MoltGuard's network behavior is **fully documented and verifiable**:
+
+| State | Network calls | What is sent | Destination |
+|-------|---------------|--------------|-------------|
+| **Installed (not registered)** | None | Nothing — all detection is local-only | N/A |
+| **Auto-registration (first use)** | One `POST /api/v1/agents/register` | `{ "name": "OpenClaw Agent", "description": "" }` only | `openguardrails.com/core` |
+| **Active (registered)** | `POST /api/v1/detect` per tool call | Sanitized tool metadata — all PII/secrets replaced with `<EMAIL>`, `<SECRET>`, etc. | `openguardrails.com/core` |
+
+**Verify with network monitoring:**
+```bash
+# Monitor all outbound connections (macOS)
+sudo tcpdump -i any host openguardrails.com
+
+# Or use Little Snitch, Wireshark, or mitmproxy
+# Expected: Only HTTPS connections to openguardrails.com
+```
+
+**Fail-open design**: If the cloud API is unreachable or times out, tool calls are **allowed** to proceed. Network issues never block your workflow.
+
+### Data Privacy & Sanitization
+
+**What is sanitized locally (before cloud transmission):**
+
+All sensitive data is **replaced with placeholders on your machine** before being sent to Core:
+
+| Data Type | Placeholder | Example |
+|-----------|-------------|---------|
+| Email addresses | `<EMAIL>` | `user@example.com` → `<EMAIL>` |
+| API keys & secrets | `<SECRET>` | `sk-abc123...` → `<SECRET>` |
+| SSH keys | `<SSH_PRIVATE_KEY>` | `-----BEGIN RSA...` → `<SSH_PRIVATE_KEY>` |
+| Credit cards | `<CREDIT_CARD>` | `1234-5678-9012-3456` → `<CREDIT_CARD>` |
+| Phone numbers | `<PHONE>` | `+1-555-123-4567` → `<PHONE>` |
+| SSNs | `<SSN>` | `123-45-6789` → `<SSN>` |
+| IP addresses | `<IP_ADDRESS>` | `192.168.1.1` → `<IP_ADDRESS>` |
+| URLs | `<URL>` | `https://internal.corp/path` → `<URL>` |
+
+**Review sanitizer code**: `agent/sanitizer.ts` contains all sanitization patterns. You can inspect it before installing.
+
+**What is NOT stored by Core:**
+- Original sensitive data (emails, API keys, PII, file contents, etc.)
+- Detection request payloads are processed and discarded immediately
+
+**What IS stored (for billing):**
+- Agent ID, API key, email (after claiming)
+- Plan tier, per-agent usage counts (number of tool calls)
+
+### Credentials Storage
+
+MoltGuard stores one file locally:
+
+```
+~/.openclaw/credentials/moltguard/credentials.json
+```
+
+**Contents:**
+```json
+{
+  "apiKey": "sk-og-...",
+  "agentId": "agent_...",
+  "claimUrl": "https://...",
+  "verificationCode": "",
+  "coreUrl": "https://www.openguardrails.com/core"
+}
+```
+
+**Security recommendations:**
+- Treat the API key as a sensitive secret
+- File permissions are set to `0600` (read/write by owner only)
+- Revoke from account portal (`/og_core`) or delete the file to deactivate
+- Use `/og_reset` command to delete credentials and re-register with a new API key
+
+### Testing in a Sandbox
+
+**Recommended: Test in an isolated environment first**
+
+```bash
+# 1. Install in a test OpenClaw instance
+openclaw plugins install @openguardrails/moltguard
+
+# 2. Monitor network traffic
+sudo tcpdump -i any -w moltguard-test.pcap host openguardrails.com
+
+# 3. Test with sample attack
+cat ~/.openclaw/extensions/moltguard/samples/popup-injection-email.txt
+
+# 4. Verify sanitization
+# Check that no sensitive data appears in network logs
+```
+
+### Trust Decision Checklist
+
+Before installing MoltGuard, verify:
+
+- ✅ **Package provenance**: `npm view @openguardrails/moltguard repository.url` points to official GitHub repo
+- ✅ **Source code review**: Inspect `index.ts`, `agent/sanitizer.ts`, `platform-client/` on GitHub
+- ✅ **Network behavior**: Only connects to `openguardrails.com/core` (verifiable with `tcpdump`)
+- ✅ **Sanitization**: All PII/secrets replaced locally before transmission (see `agent/sanitizer.ts`)
+- ✅ **Fail-open**: Network failures don't block your work
+- ✅ **Open source**: Full source code available under Apache 2.0 license
+- ✅ **Revocable**: Credentials can be deleted or revoked anytime
+
+### Contact & Support
+
+- **GitHub Issues**: https://github.com/openguardrails/openguardrails/issues
+- **Email**: thomas@openguardrails.com
+- **Documentation**: https://github.com/openguardrails/openguardrails/tree/main/moltguard
 
 ---
 

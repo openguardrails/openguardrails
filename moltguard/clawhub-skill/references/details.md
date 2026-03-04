@@ -7,7 +7,7 @@
 - `index.ts` — plugin entry point, all event hooks
 - `agent/sanitizer.ts` — what gets sanitized before cloud transmission
 - `platform-client/` — every outbound network call (all go to `openguardrails.com/core` only)
-- `agent/config.ts:65-68` — registration request (sends only `{ name, description }`)
+- `agent/config.ts` — registration request (sends only `{ name, description }`)
 
 **Inspect before installing:**
 ```bash
