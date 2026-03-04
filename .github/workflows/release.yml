@@ -77,6 +77,20 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       # ─── Publish @openguardrails/moltguard ────────────────────────
+      - name: Build Dashboard
+        working-directory: dashboard
+        run: |
+          pnpm install
+          pnpm build
+
+      - name: Bundle Dashboard into MoltGuard
+        run: |
+          mkdir -p moltguard/dashboard-dist/api
+          mkdir -p moltguard/dashboard-dist/web
+          cp -r dashboard/apps/api/dist/* moltguard/dashboard-dist/api/
+          cp dashboard/apps/api/package.json moltguard/dashboard-dist/api/
+          cp -r dashboard/apps/web/out/* moltguard/dashboard-dist/web/
+
       - name: Build and publish moltguard
         working-directory: moltguard
         run: |
