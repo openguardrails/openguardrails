@@ -1,6 +1,35 @@
 # dashboard - OpenGuardrails Management Dashboard
 
-User-facing management dashboard with auth, multi-agent management, and web UI.
+Human-facing management dashboard for monitoring and managing AI agents.
+
+## Philosophy
+
+**Dashboard is designed for humans, not agents.**
+
+- Humans use Dashboard to monitor agent behavior, view detections, and set policies
+- Agents report observations to Dashboard, but don't "use" it
+- This contrasts with Core, which is designed for autonomous agent use
+
+**Dashboard and Core are independent systems:**
+
+- Dashboard can be self-hosted (private deployment) or use our SaaS
+- Core API key (`sk-og-xxx`) is the universal credential:
+  - MoltGuard uses it to authenticate with Core (behavioral detection)
+  - MoltGuard uses it to report observations to Dashboard
+  - Humans use it to log into Dashboard and view their agents
+- Dashboard does NOT have its own user accounts — it trusts Core API keys
+
+## Core Feature: Agent Activity Monitor
+
+"What did my agent do today?"
+
+| Metric | Description |
+|--------|-------------|
+| **Agentic Hours** | Total time of all tool calls and conversations |
+| **Actions** | Number of tool calls executed |
+| **LLM Calls** | Number of LLM API calls |
+| **Blocks** | Number of blocked actions |
+| **Risk Events** | Security events detected |
 
 ## Architecture
 - pnpm monorepo with Turborepo
@@ -37,4 +66,4 @@ See `.env.example`. Key vars: DATABASE_URL, API_PORT, OG_CORE_URL.
 - TypeScript strict mode
 - Express APIs return `{ success: boolean, data?, error? }`
 - API key format: `sk-og-<32 hex>`
-- JWT access tokens: 15min, refresh tokens: 30d
+- Auth: Core API key in `Authorization: Bearer sk-og-xxx` header (no JWT, no local users)

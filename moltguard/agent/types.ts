@@ -181,3 +181,42 @@ export type BehaviorAssessResponse = {
   affectedTools: number[];
   findings?: DetectionFinding[];
 };
+
+// =============================================================================
+// Re-export Hook Types
+// =============================================================================
+
+export type {
+  HookType,
+  HookEvent,
+  HookEventData,
+  EventStreamRequest,
+  EventStreamResponse,
+  // Individual hook data types
+  BeforeAgentStartData,
+  AgentEndData,
+  SessionStartData,
+  SessionEndData,
+  MessageReceivedData,
+  MessageSendingData,
+  MessageSentData,
+  BeforeMessageWriteData,
+  BeforeModelResolveData,
+  BeforePromptBuildData,
+  LlmInputData,
+  LlmOutputData,
+  BeforeToolCallData,
+  AfterToolCallData,
+  ToolResultPersistData,
+  BeforeCompactionData,
+  AfterCompactionData,
+  BeforeResetData,
+  SubagentSpawningData,
+  SubagentDeliveryTargetData,
+  SubagentSpawnedData,
+  SubagentEndedData,
+  GatewayStartData,
+  GatewayStopData,
+} from "./hook-types.js";
+
+export { isBlockingHook, BLOCKING_HOOKS } from "./hook-types.js";

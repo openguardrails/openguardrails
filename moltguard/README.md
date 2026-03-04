@@ -390,7 +390,6 @@ All code is open source. Audit the sanitization logic yourself:
 - `gateway/src/sanitizer.ts` — AI Security Gateway sanitization
 - `gateway/src/restorer.ts` — AI Security Gateway restoration
 - `agent/sanitizer.ts` — detection API sanitization
-- `agent/content-injection-scanner.ts` — local injection detection patterns
 
 ## Injection Detection API Details
 

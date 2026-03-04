@@ -208,7 +208,7 @@ export function AgentProfilePage() {
       <div className="card">
         <div className="card-title">Agent not found</div>
         <div className="card-sub">
-          <Link to="/inventory/agents">Back to agents</Link>
+          <Link to="/agents">Back to agents</Link>
         </div>
       </div>
     );
@@ -228,7 +228,7 @@ export function AgentProfilePage() {
 
   return (
     <>
-      <Link to="/inventory/agents" className="profile-back">
+      <Link to="/agents" className="profile-back">
         &larr; Back to Agents
       </Link>
 

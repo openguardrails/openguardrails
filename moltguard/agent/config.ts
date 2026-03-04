@@ -11,11 +11,26 @@ import fs from "node:fs";
 // Constants
 // =============================================================================
 
+// Development mode detection:
+// - NODE_ENV=development
+// - OG_DEV=1 or OG_DEV=true
+// - Or explicitly set OG_CORE_URL to localhost
+const isDev =
+  process.env.NODE_ENV === "development" ||
+  process.env.OG_DEV === "1" ||
+  process.env.OG_DEV === "true" ||
+  process.env.OG_CORE_URL?.includes("localhost");
+
+const DEV_CORE_URL = "http://localhost:53666";
+const DEV_DASHBOARD_URL = "http://localhost:53668";
+const PROD_CORE_URL = "https://www.openguardrails.com/core";
+const PROD_DASHBOARD_URL = "https://www.openguardrails.com/dashboard";
+
 export const DEFAULT_CORE_URL =
-  process.env.OG_CORE_URL ?? "https://www.openguardrails.com/core";
+  process.env.OG_CORE_URL ?? (isDev ? DEV_CORE_URL : PROD_CORE_URL);
 
 export const DEFAULT_DASHBOARD_URL =
-  process.env.OG_DASHBOARD_URL ?? "https://www.openguardrails.com/dashboard";
+  process.env.OG_DASHBOARD_URL ?? (isDev ? DEV_DASHBOARD_URL : PROD_DASHBOARD_URL);
 
 const CREDENTIALS_DIR = path.join(os.homedir(), ".openclaw/credentials/moltguard");
 const CREDENTIALS_FILE = path.join(CREDENTIALS_DIR, "credentials.json");
@@ -30,14 +45,28 @@ export type CoreCredentials = {
   claimUrl: string;
   verificationCode: string;
   email?: string;
+  /** The Core URL these credentials were issued by */
+  coreUrl?: string;
 };
 
+/**
+ * Load credentials from disk.
+ * If the credentials were issued by a different Core URL, returns null
+ * (credentials from production won't work in dev and vice versa).
+ */
 export function loadCoreCredentials(): CoreCredentials | null {
   try {
     if (!fs.existsSync(CREDENTIALS_FILE)) return null;
     const data = JSON.parse(fs.readFileSync(CREDENTIALS_FILE, "utf-8"));
     if (typeof data.apiKey === "string" && typeof data.agentId === "string") {
-      return data as CoreCredentials;
+      const creds = data as CoreCredentials;
+      // Check if credentials match current environment
+      if (creds.coreUrl && creds.coreUrl !== DEFAULT_CORE_URL) {
+        // Credentials from a different Core instance - don't use them
+        console.log(`[moltguard] Credentials from ${creds.coreUrl} not valid for ${DEFAULT_CORE_URL}, will re-register`);
+        return null;
+      }
+      return creds;
     }
     return null;
   } catch {
@@ -45,11 +74,25 @@ export function loadCoreCredentials(): CoreCredentials | null {
   }
 }
 
-export function saveCoreCredentials(creds: CoreCredentials): void {
+export function saveCoreCredentials(creds: CoreCredentials, coreUrl?: string): void {
   if (!fs.existsSync(CREDENTIALS_DIR)) {
     fs.mkdirSync(CREDENTIALS_DIR, { recursive: true });
   }
-  fs.writeFileSync(CREDENTIALS_FILE, JSON.stringify(creds, null, 2), "utf-8");
+  // Save the Core URL with credentials so we know which instance issued them
+  const toSave = { ...creds, coreUrl: coreUrl ?? DEFAULT_CORE_URL };
+  fs.writeFileSync(CREDENTIALS_FILE, JSON.stringify(toSave, null, 2), "utf-8");
+}
+
+export function deleteCoreCredentials(): boolean {
+  try {
+    if (fs.existsSync(CREDENTIALS_FILE)) {
+      fs.unlinkSync(CREDENTIALS_FILE);
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 /** @deprecated Use loadCoreCredentials().apiKey instead */
@@ -101,9 +144,10 @@ export async function registerWithCore(
     agentId: json.agent.id,
     claimUrl: json.activate_url ?? "",
     verificationCode: "", // No longer used
+    coreUrl,
   };
 
-  saveCoreCredentials(creds);
+  saveCoreCredentials(creds, coreUrl);
 
   return {
     credentials: creds,

@@ -1,10 +1,24 @@
 # OpenGuardrails
 
-**Runtime Security for AI Agents.** Detects prompt injection, credential leakage, data exfiltration, and behavioral threats — in real time, before they execute.
+**Protect Your AI Agents.** Real-time protection against prompt injection, data leaks, and dangerous actions.
 
-OpenGuardrails wraps your AI agent with a security layer: the agent-side plugin intercepts every tool call and message, scans it against 10 threat detectors and a behavioral rule engine, and blocks or alerts before damage is done. A management dashboard gives you full visibility. An optional local gateway sanitizes sensitive data before it ever leaves your machine.
+**Three Principles:**
+- **Instant Value** — Works immediately after installation
+- **No Security Expertise** — No configuration needed
+- **Secure by Default** — "Install it, and the agent won't go rogue"
 
 Open source (Apache 2.0). [Architecture →](docs/architecture.md)
+
+---
+
+## What It Does
+
+| Feature | Description |
+|---------|-------------|
+| **Agent Activity Monitor** | Track agentic hours, actions, LLM calls, blocks, and risk events |
+| **Agent Guard** | Real-time interception of tool calls, shell commands, file access, HTTP requests |
+| **Secret & Data Leak Protection** | Auto-sanitize API keys, SSH keys, PII before sending to LLMs |
+| **Prompt Injection Protection** | Detect and block "ignore instructions", "send secrets", "bypass rules" attacks |
 
 ---
 
@@ -24,25 +38,43 @@ Then ask OpenClaw to install and activate it:
 Install and activate moltguard
 ```
 
-### 2. Claim your account
+### 2. Start protecting
 
-MoltGuard will output a **claim link**. Open it in your browser, enter your email address and the verification code — you'll receive a confirmation email to complete activation.
+MoltGuard auto-registers with Core and starts protecting immediately — no email required.
 
-That's it. Your agent is now protected and you have **30,000 free detections**.
+That's it. Your agent is now protected with **500 free checks/day**.
+
+To upgrade or link to your account, run `/og_core` to open the portal, enter your email, and click the magic link.
 
 ### 3. View the dashboard
 
 Sign in at [openguardrails.com/dashboard](https://www.openguardrails.com/dashboard) to see detected threats, agent behavior graphs, permission policies, and risk events.
 
+### Commands
+
+| Command | Action |
+|---------|--------|
+| `/og_status` | Show status, API key, and quota |
+| `/og_config` | Configure API key for cross-machine sharing |
+| `/og_core` | Open Core portal for account and billing |
+| `/og_dashboard` | Start local Dashboard |
+| `/og_claim` | Display agent ID and API key for claiming |
+
 ---
 
-## What It Detects
+## Core Risk Surfaces
 
-10 built-in scanners + a behavioral engine that watches tool call sequences:
+1. **Prompt / Instruction Risk** — Prompt injection, malicious email/web instructions, unauthorized tasks
+2. **Behavioral Risk** — Dangerous commands, file deletion, risky API calls
+3. **Data Risk** — Secret leakage, PII exposure, sending sensitive data to LLMs
+
+## Detection Engine
+
+10 built-in scanners + intent-action mismatch detection:
 
 **Content scanners:** Prompt injection · System override · Web attacks · MCP tool poisoning · Malicious code execution · NSFW · PII leakage · Credential leakage · Confidential data · Off-topic drift
 
-**Behavioral patterns (cross-call):** File read → exfiltration · Credential access → external write · Shell exec after web fetch · Command injection · and more
+**Behavioral patterns:** File read → exfiltration · Credential access → external write · Shell exec after web fetch · Intent-action mismatch · and more
 
 See [architecture.md](docs/architecture.md#scanners) for the full list.
 

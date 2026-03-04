@@ -1,78 +1,44 @@
 import type { Request, Response, NextFunction } from "express";
 
-const CORE_URL = process.env.OG_CORE_URL || "http://localhost:53666";
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+// Local session token for local mode
+// Set by the startup process when running via /og_dashboard
+export let LOCAL_SESSION_TOKEN: string | null = process.env.LOCAL_SESSION_TOKEN || null;
 
-interface CachedSession {
-  email: string;
-  agentId: string;
-  cachedAt: number;
+/**
+ * Set the local session token (called from index.ts on startup)
+ */
+export function setLocalSessionToken(token: string): void {
+  LOCAL_SESSION_TOKEN = token;
 }
-
-// In-memory cache: apiKey → validated session info
-const sessionCache = new Map<string, CachedSession>();
 
 /**
  * Session authentication middleware.
  *
- * Expects: Authorization: Bearer sk-og-xxx
- * Validates the API key against the core (cached for 5 minutes).
- * Sets res.locals.tenantId and res.locals.coreApiKey.
+ * Only supports session token authentication:
+ *   - URL param: ?token=xxx (for browser access)
+ *   - Authorization header: Bearer xxx (for plugin/API access)
  *
- * tenantId is always derived from the user's email so each account
- * only sees its own agents, regardless of dashboard mode.
+ * Sets res.locals.tenantId = "local" for all authenticated requests.
  */
 export async function sessionAuth(
   req: Request,
   res: Response,
   next: NextFunction,
 ): Promise<void> {
-  const apiKey = req.headers.authorization?.replace("Bearer ", "");
+  // Check session token from URL param or Authorization header
+  const urlToken = req.query.token as string | undefined;
+  const bearerToken = req.headers.authorization?.replace("Bearer ", "");
+  const token = urlToken || bearerToken;
 
-  if (!apiKey?.startsWith("sk-og-")) {
-    res.status(401).json({ success: false, error: "Not authenticated" });
-    return;
-  }
-
-  // Check in-memory cache
-  const cached = sessionCache.get(apiKey);
-  if (cached && Date.now() - cached.cachedAt < CACHE_TTL_MS) {
-    res.locals.tenantId = cached.email;
-    res.locals.userEmail = cached.email;
-    res.locals.coreApiKey = apiKey;
+  if (token && LOCAL_SESSION_TOKEN && token === LOCAL_SESSION_TOKEN) {
+    res.locals.tenantId = "local";
+    res.locals.userEmail = null;
+    res.locals.agentId = null;
+    res.locals.isLocal = true;
+    res.locals.authMethod = "sessionToken";
     next();
     return;
   }
 
-  // Validate with core
-  try {
-    const coreRes = await fetch(`${CORE_URL}/api/v1/account`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    });
-
-    if (!coreRes.ok) {
-      res.status(401).json({ success: false, error: "Invalid or inactive API key" });
-      return;
-    }
-
-    const data = await coreRes.json() as {
-      success: boolean;
-      email: string | null;
-      agentId: string;
-    };
-
-    if (!data.success || !data.email) {
-      res.status(401).json({ success: false, error: "Agent not activated" });
-      return;
-    }
-
-    // Cache and populate locals
-    sessionCache.set(apiKey, { email: data.email, agentId: data.agentId, cachedAt: Date.now() });
-    res.locals.tenantId = data.email;
-    res.locals.userEmail = data.email;
-    res.locals.coreApiKey = apiKey;
-    next();
-  } catch {
-    res.status(503).json({ success: false, error: "Core service unavailable" });
-  }
+  res.status(401).json({ success: false, error: "Invalid session token" });
 }

@@ -16,6 +16,7 @@ import type {
   AgentRegisterRequest,
   ToolCallObservationRequest,
   AgentPermission,
+  DetectionResultRequest,
 } from "./types.js";
 
 export class DashboardClient {
@@ -157,6 +158,14 @@ export class DashboardClient {
     });
   }
 
+  /** Report a detection result to the dashboard */
+  async reportDetection(data: DetectionResultRequest): Promise<void> {
+    await this.request("/api/detections", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
   /** Get observed permissions for an agent */
   async getPermissions(agentId?: string): Promise<AgentPermission[]> {
     const id = agentId || this.config.agentId;
@@ -190,6 +199,7 @@ export {
   type DashboardDetectResponse,
   type ToolCallObservationRequest,
   type AgentPermission,
+  type DetectionResultRequest,
   type PlatformClientConfig,
   type PlatformDetectRequest,
   type PlatformDetectResponse,

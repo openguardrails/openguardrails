@@ -97,7 +97,7 @@ export function AgentsPage() {
             return (
               <Link
                 key={agent.id}
-                to={`/inventory/agents/${profileId}`}
+                to={`/agents/${profileId}`}
                 className={`agent-card stagger-${Math.min(i + 1, 6)}`}
               >
                 <div className="agent-card__header">

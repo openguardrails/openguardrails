@@ -1,129 +1,124 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
 
-const API_KEY_STORAGE = "og_api_key";
-const API_BASE =
-  typeof import.meta.env.BASE_URL === "string" && import.meta.env.BASE_URL !== "/"
-    ? import.meta.env.BASE_URL.replace(/\/$/, "")
-    : "";
+const SESSION_TOKEN_STORAGE = "og_session_token";
 
-export function getStoredApiKey(): string | null {
-  return localStorage.getItem(API_KEY_STORAGE);
-}
-function setStoredApiKey(key: string) {
-  localStorage.setItem(API_KEY_STORAGE, key);
-}
-function clearStoredApiKey() {
-  localStorage.removeItem(API_KEY_STORAGE);
-}
-
-export interface AgentSummary {
-  agentId: string;
-  name: string;
-  apiKeyMasked: string;
-  status: string;
-  quotaTotal: number;
-  quotaUsed: number;
-  quotaRemaining: number;
+// API base: empty for dev mode (Vite proxy handles /api),
+// or tunnel base path for production tunnel access
+function getApiBase(): string {
+  if (typeof document !== "undefined" && document.baseURI) {
+    try {
+      const base = new URL(document.baseURI);
+      // Check if we're behind a tunnel (path contains more than just /dashboard)
+      // e.g., /core/tunnel/abc123/dashboard -> tunnel base is /core/tunnel/abc123
+      const match = base.pathname.match(/^(.*?)\/dashboard(?:\/|$)/);
+      if (match && match[1]) {
+        return match[1]; // Return tunnel base path
+      }
+    } catch {
+      // Fallback
+    }
+  }
+  return ""; // Dev mode: use relative /api paths (Vite proxy)
 }
 
-export interface AccountInfo {
-  email: string;
-  agentId: string;
-  name: string;
-  quotaTotal: number;
-  quotaUsed: number;
-  quotaRemaining: number;
-  agents: AgentSummary[];
+const API_BASE = getApiBase();
+
+// Session token helpers
+export function getSessionToken(): string | null {
+  // First check URL param, then localStorage
+  if (typeof window !== "undefined") {
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlToken = urlParams.get("token");
+    if (urlToken) {
+      // Save to localStorage for subsequent requests
+      localStorage.setItem(SESSION_TOKEN_STORAGE, urlToken);
+      return urlToken;
+    }
+  }
+  return localStorage.getItem(SESSION_TOKEN_STORAGE);
+}
+
+function setSessionToken(token: string) {
+  localStorage.setItem(SESSION_TOKEN_STORAGE, token);
+}
+
+function clearSessionToken() {
+  localStorage.removeItem(SESSION_TOKEN_STORAGE);
 }
 
 interface AuthState {
   authenticated: boolean;
-  account: AccountInfo | null;
   loading: boolean;
-  login: (apiKey: string, email?: string) => Promise<{ success: boolean; error?: string }>;
+  name: string;
   logout: () => void;
+  checkSession: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthState>({
   authenticated: false,
-  account: null,
   loading: true,
-  login: async () => ({ success: false }),
+  name: "",
   logout: () => {},
+  checkSession: async () => {},
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [authenticated, setAuthenticated] = useState(false);
-  const [account, setAccount] = useState<AccountInfo | null>(null);
   const [loading, setLoading] = useState(true);
+  const [name, setName] = useState("");
+
+  // Check session on mount
+  const checkSession = useCallback(async () => {
+    setLoading(true);
+    try {
+      const token = getSessionToken();
+      if (!token) {
+        setAuthenticated(false);
+        setName("");
+        setLoading(false);
+        return;
+      }
+
+      const res = await fetch(`${API_BASE}/api/auth/me?token=${token}`, {
+        credentials: "include",
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        setAuthenticated(true);
+        setSessionToken(token);
+        setName(data.name ?? "Local Dashboard");
+      } else {
+        setAuthenticated(false);
+        setName("");
+        clearSessionToken();
+      }
+    } catch {
+      setAuthenticated(false);
+      setName("");
+      clearSessionToken();
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   // Restore session on mount
   useEffect(() => {
-    const key = getStoredApiKey();
-    if (!key) {
-      setLoading(false);
-      return;
-    }
-    fetch(`${API_BASE}/api/auth/me`, { headers: { Authorization: `Bearer ${key}` } })
-      .then((r) => r.json())
-      .then((data: { success: boolean } & Partial<AccountInfo>) => {
-        if (data.success && data.email) {
-          setAuthenticated(true);
-          setAccount({
-            email: data.email,
-            agentId: data.agentId ?? "",
-            name: data.name ?? "",
-            quotaTotal: data.quotaTotal ?? 0,
-            quotaUsed: data.quotaUsed ?? 0,
-            quotaRemaining: data.quotaRemaining ?? 0,
-            agents: data.agents ?? [],
-          });
-        } else {
-          clearStoredApiKey();
-        }
-      })
-      .catch(() => clearStoredApiKey())
-      .finally(() => setLoading(false));
-  }, []);
-
-  const login = useCallback(async (apiKey: string, email?: string) => {
-    try {
-      const res = await fetch(`${API_BASE}/api/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey, email }),
-      });
-      const data: { success: boolean; error?: string } & Partial<AccountInfo> = await res.json();
-
-      if (data.success && data.email) {
-        setStoredApiKey(apiKey);
-        setAuthenticated(true);
-        setAccount({
-          email: data.email,
-          agentId: data.agentId ?? "",
-          name: data.name ?? "",
-          quotaTotal: data.quotaTotal ?? 0,
-          quotaUsed: data.quotaUsed ?? 0,
-          quotaRemaining: data.quotaRemaining ?? 0,
-          agents: data.agents ?? [],
-        });
-        return { success: true };
-      }
-      return { success: false, error: data.error || "Login failed" };
-    } catch {
-      return { success: false, error: "Network error" };
-    }
-  }, []);
+    checkSession();
+  }, [checkSession]);
 
   const logout = useCallback(() => {
-    clearStoredApiKey();
+    clearSessionToken();
     setAuthenticated(false);
-    setAccount(null);
-    fetch(`${API_BASE}/api/auth/logout`, { method: "POST" }).catch(() => {});
+    setName("");
+    fetch(`${API_BASE}/api/auth/logout`, {
+      method: "POST",
+      credentials: "include",
+    }).catch(() => {});
   }, []);
 
   return (
-    <AuthContext.Provider value={{ authenticated, account, loading, login, logout }}>
+    <AuthContext.Provider value={{ authenticated, loading, name, logout, checkSession }}>
       {children}
     </AuthContext.Provider>
   );

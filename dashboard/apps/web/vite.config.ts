@@ -13,8 +13,13 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
+    allowedHosts: true,
     proxy: {
       "/api": "http://localhost:53667",
+      "/dashboard/api": {
+        target: "http://localhost:53667",
+        rewrite: (path) => path.replace(/^\/dashboard/, ""),
+      },
     },
   },
 });

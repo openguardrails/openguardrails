@@ -1,10 +1,10 @@
-import { getStoredApiKey } from "./auth-context";
+import { getSessionToken } from "./auth-context";
 
 /** When deployed under /dashboard/, API is at /dashboard/api */
 const API_BASE = typeof import.meta.env.BASE_URL === "string" && import.meta.env.BASE_URL !== "/" ? import.meta.env.BASE_URL.replace(/\/$/, "") : "";
 
 function getToken(): string | null {
-  return getStoredApiKey();
+  return getSessionToken();
 }
 
 async function request<T = Record<string, unknown>>(path: string, options?: RequestInit): Promise<T> {
@@ -55,6 +55,9 @@ export const api = {
   getAgentObservations: (agentId: string, limit = 50) =>
     request<{ success: boolean; data: ToolCallObservation[] }>(`/api/observations/agents/${encodeURIComponent(agentId)}/observations?limit=${limit}`),
 
+  getAllObservations: (limit = 100) =>
+    request<{ success: boolean; data: ToolCallObservation[] }>(`/api/observations?limit=${limit}`),
+
   getAllPermissions: () =>
     request<{ success: boolean; data: AgentPermission[] }>("/api/observations/permissions"),
 
@@ -67,6 +70,33 @@ export const api = {
   // Registered agents (database)
   listAgents: () =>
     request<{ success: boolean; data: RegisteredAgent[] }>("/api/agents"),
+
+  // Detection results
+  getDetections: (options?: { limit?: number; unsafe?: boolean }) => {
+    const params = new URLSearchParams();
+    if (options?.limit) params.set("limit", String(options.limit));
+    if (options?.unsafe) params.set("unsafe", "true");
+    const qs = params.toString();
+    return request<{ success: boolean; data: DetectionResult[] }>(`/api/detections${qs ? `?${qs}` : ""}`);
+  },
+
+  getDetectionSummary: () =>
+    request<{ success: boolean; data: DetectionSummary }>("/api/detections/summary"),
+
+  // Settings
+  getSettings: () =>
+    request<{ success: boolean; data: Record<string, string> }>("/api/settings"),
+
+  updateSettings: (settings: Record<string, string>) =>
+    request<{ success: boolean }>("/api/settings", {
+      method: "PUT",
+      body: JSON.stringify(settings),
+    }),
+
+  getConnectionStatus: () =>
+    request<{ success: boolean; data: { mode: "autonomous" | "claimed"; message: string } }>(
+      "/api/settings/connection-status"
+    ),
 };
 
 export interface AgentPermission {
@@ -185,6 +215,30 @@ export interface RegisteredAgent {
 export interface AgentLookup {
   name: string;
   emoji: string;
+}
+
+export interface DetectionResult {
+  id: string;
+  agentId: string | null;
+  safe: boolean;
+  categories: string[];
+  sensitivityScore: number;
+  findings: Array<{
+    scanner: string;
+    name: string;
+    description?: string;
+    matchedText?: string;
+    confidence?: "high" | "medium" | "low";
+  }>;
+  latencyMs: number;
+  requestId: string;
+  createdAt: string;
+}
+
+export interface DetectionSummary {
+  total: number;
+  safe: number;
+  unsafe: number;
 }
 
 /** Build a combined agent lookup map from discovery + registered agents */

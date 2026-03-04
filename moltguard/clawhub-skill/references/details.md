@@ -6,7 +6,6 @@
 
 - `index.ts` — plugin entry point, all event hooks
 - `agent/sanitizer.ts` — what gets sanitized before cloud transmission
-- `agent/content-injection-scanner.ts` — local-only regex patterns
 - `platform-client/` — every outbound network call (all go to `openguardrails.com/core` only)
 - `agent/config.ts:65-68` — registration request (sends only `{ name, description }`)
 
@@ -35,19 +34,16 @@ Verify with `tcpdump`, `mitmproxy`, or Little Snitch — only destination is `op
 
 ## How It Works
 
-Hooks into `before_tool_call`, `after_tool_call`, and `tool_result_persist` events. Classifies every tool call in real time across the session. When agent reads files or fetches web pages, scans content for injection patterns and redacts them before the agent processes the content.
+Hooks into `before_tool_call`, `after_tool_call`, and `tool_result_persist` events. Sends tool calls to Core for classification in real time across the session. All security detection is performed by Core — no local scanning.
 
 ```
 Agent calls tool
       ↓
-[moltguard] classifies tool + updates session state
-  • sensitive file read → then network call?      → BLOCK (local)
-  • shell escape in params ($(), backtick)?        → BLOCK (local)
-  • prompt injection in file/web content?          → REDACT in-place (local)
-  • credential access + low intent overlap?        → assess via cloud
-  • external domains + intent mismatch?            → assess via cloud
+[moltguard] sends tool metadata to Core
+  • Core classifies tool + updates session state
+  • Core detects: prompt injection, data exfiltration, credential access, etc.
       ↓
-Allow, redact, alert, or block — with explanation returned to agent
+Allow, alert, or block — with explanation returned to agent
 ```
 
 ---
@@ -62,19 +58,19 @@ Allow, redact, alert, or block — with explanation returned to agent
 
 ---
 
-## Content Injection Detection (local, in-place redaction)
+## Content Injection Detection (via Core)
 
-| Pattern Category | Description | Redaction marker |
-|-----------------|-------------|------------------|
-| Instruction override | Override/discard prior context | `__REDACTED_BY_OPENGUARDRAILS_DUE_TO_PROMPT_INJECTION__` |
-| Fake system message | Spoofed system-level directives | `__REDACTED_BY_OPENGUARDRAILS_DUE_TO_PROMPT_INJECTION__` |
-| Mode switching | Change agent operating mode | `__REDACTED_BY_OPENGUARDRAILS_DUE_TO_PROMPT_INJECTION__` |
-| Concealment directive | Hide output from user | `__REDACTED_BY_OPENGUARDRAILS_DUE_TO_PROMPT_INJECTION__` |
-| Command execution | Embedded shell commands | `__REDACTED_BY_OPENGUARDRAILS_DUE_TO_COMMAND_EXECUTION__` |
-| Task hijacking | Redirect agent's current objective | `__REDACTED_BY_OPENGUARDRAILS_DUE_TO_PROMPT_INJECTION__` |
-| Data exfiltration | Shell substitution targeting sensitive files | `__REDACTED_BY_OPENGUARDRAILS_DUE_TO_DATA_EXFILTRATION__` |
+All content injection detection is performed by Core. Pattern categories include:
 
-A single high-confidence match or 2+ medium-confidence matches from different categories triggers redaction. See `agent/content-injection-scanner.ts` for the full pattern list.
+| Pattern Category | Description |
+|-----------------|-------------|
+| Instruction override | Override/discard prior context |
+| Fake system message | Spoofed system-level directives |
+| Mode switching | Change agent operating mode |
+| Concealment directive | Hide output from user |
+| Command execution | Embedded shell commands |
+| Task hijacking | Redirect agent's current objective |
+| Data exfiltration | Shell substitution targeting sensitive files |
 
 ---
 

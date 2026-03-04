@@ -48,27 +48,22 @@ settingsRouter.put("/", async (req, res, next) => {
   }
 });
 
-// POST /api/settings/test-connection
-settingsRouter.post("/test-connection", async (_req, res, next) => {
+// GET /api/settings/connection-status
+settingsRouter.get("/connection-status", async (_req, res, next) => {
   try {
-    const ogCoreUrl = await settings.get("og_core_url");
     const ogCoreKey = await settings.get("og_core_key");
 
-    if (!ogCoreUrl && !ogCoreKey) {
-      res.json({
-        success: true,
-        data: { connected: false, message: "No core URL or key configured" },
-      });
-      return;
-    }
+    // Agent is always connected to Core (auto-registered)
+    // The only difference is whether it's linked to a user account (claimed) or not (autonomous)
+    const mode = ogCoreKey ? "claimed" : "autonomous";
 
-    const healthy = await checkCoreHealth();
     res.json({
       success: true,
       data: {
-        connected: healthy,
-        message: healthy ? "Connected to core" : "Failed to connect to core",
-        url: ogCoreUrl || process.env.OG_CORE_URL || "http://localhost:53666",
+        mode,
+        message: mode === "claimed"
+          ? "Agent is linked to your account"
+          : "Agent is running in autonomous mode",
       },
     });
   } catch (err) {

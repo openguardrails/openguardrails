@@ -86,7 +86,7 @@ async function main() {
   console.log('Complete these steps to activate cloud behavioral detection:\n');
   console.log(`  1. Visit: ${creds.claimUrl}`);
   console.log('  2. Enter your email — this becomes your account login.\n');
-  console.log('After claiming you get 30,000 free detections.');
+  console.log('You now have 500 free checks/day.');
   console.log(`Platform: ${CORE_URL}`);
 }
 

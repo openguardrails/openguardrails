@@ -4,9 +4,8 @@
  * Responsibilities:
  *   1. Collect high-risk tool calls (file read, shell, web fetch) and send to Core
  *   2. Record completed tool calls in the chain history
- *   3. Scan tool results locally for content injection patterns
- *   4. Core does all classification, signal computation, and risk decisions
- *   5. Fail-open: if Core is unavailable, allow execution
+ *   3. Core does all classification, signal computation, and risk decisions
+ *   4. Fail-open: if Core is unavailable, allow execution
  */
 
 import { randomBytes } from "node:crypto";
@@ -21,7 +20,6 @@ import type {
   DetectionFinding,
 } from "./types.js";
 import { sanitizeContent } from "./sanitizer.js";
-import { scanForInjection, type InjectionScanResult } from "./content-injection-scanner.js";
 
 // =============================================================================
 // Tool Sets — used to decide whether to send a tool call to Core
@@ -83,6 +81,37 @@ export type DetectionConfig = {
   pluginVersion: string;
 };
 
+/** Response from Core content scan API */
+export type ContentScanResult = {
+  detected: boolean;
+  categories: string[];
+  findings: Array<{
+    scanner: string;
+    name: string;
+    matchedText: string;
+    confidence: "high" | "medium" | "low";
+  }>;
+  summary: string;
+  latency_ms: number;
+};
+
+/** Response when quota is exceeded - still a success but no verdict */
+export type QuotaExceededInfo = {
+  quotaExceeded: true;
+  quotaUsed: number;
+  quotaTotal: number;
+  /** true = autonomous mode (no email), false = human managed mode (email verified) */
+  isAutonomous: boolean;
+  resetAt: string | null;
+  upgradeUrl: string;
+  message: string;
+  /** Persuasive message for the agent to convince the user to purchase */
+  recommendation: string;
+};
+
+/** Callback for quota exceeded notification */
+export type OnQuotaExceededCallback = (info: QuotaExceededInfo) => void;
+
 const MAX_SESSIONS = 200;
 const MAX_CHAIN_ENTRIES = 50;
 
@@ -93,6 +122,12 @@ export class BehaviorDetector {
   private log: Logger;
   /** HTTP status codes we've already warned about — avoid log spam */
   private warnedStatuses = new Set<number>();
+  /** Track if we've already notified about quota exceeded (avoid spam) */
+  private quotaExceededNotified = false;
+  /** Callback for quota exceeded notification */
+  private onQuotaExceeded: OnQuotaExceededCallback | null = null;
+  /** Pending quota exceeded message to append to next tool result */
+  private pendingQuotaMessage: QuotaExceededInfo | null = null;
 
   constructor(config: DetectionConfig, log: Logger) {
     this.config = config;
@@ -101,6 +136,24 @@ export class BehaviorDetector {
 
   setCredentials(creds: CoreCredentials | null): void {
     this.coreCredentials = creds;
+  }
+
+  /** Set callback for when quota is exceeded */
+  setOnQuotaExceeded(callback: OnQuotaExceededCallback | null): void {
+    this.onQuotaExceeded = callback;
+  }
+
+  /** Reset quota exceeded notification flag (e.g., on new day) */
+  resetQuotaExceededNotification(): void {
+    this.quotaExceededNotified = false;
+    this.pendingQuotaMessage = null;
+  }
+
+  /** Get and clear pending quota message (for appending to tool results) */
+  consumePendingQuotaMessage(): QuotaExceededInfo | null {
+    const msg = this.pendingQuotaMessage;
+    this.pendingQuotaMessage = null;
+    return msg;
   }
 
   setUserIntent(sessionKey: string, message: string): void {
@@ -116,53 +169,6 @@ export class BehaviorDetector {
 
   clearSession(sessionKey: string): void {
     this.sessions.delete(sessionKey);
-  }
-
-  /**
-   * Scan tool result text for content injection patterns.
-   * Updates session state with findings for the next Core call.
-   */
-  scanToolResult(
-    sessionKey: string,
-    _toolName: string,
-    textContent: string,
-  ): InjectionScanResult {
-    const result = scanForInjection(textContent);
-    if (result.detected) {
-      const state = this.getOrCreate(sessionKey);
-      for (const match of result.matches) {
-        state.contentInjectionFindings.push({
-          category: match.category,
-          confidence: match.confidence,
-          matchedText: match.matchedText,
-          pattern: match.pattern,
-        });
-      }
-    }
-    return result;
-  }
-
-  /**
-   * Directly flag content injection on a session (fallback path).
-   */
-  flagContentInjection(sessionKey: string, labels: string[]): void {
-    const state = this.getOrCreate(sessionKey);
-    for (const label of labels) {
-      state.contentInjectionFindings.push({
-        category: label,
-        confidence: "high",
-        matchedText: "",
-        pattern: label,
-      });
-    }
-  }
-
-  /**
-   * Query whether content injection has been detected in this session.
-   */
-  hasContentInjection(sessionKey: string): boolean {
-    const state = this.sessions.get(sessionKey);
-    return (state?.contentInjectionFindings.length ?? 0) > 0;
   }
 
   /**
@@ -275,6 +281,68 @@ export class BehaviorDetector {
     }
   }
 
+  /**
+   * Scan tool result content for injection patterns via Core API.
+   * Returns scan result or null if scan failed/unavailable.
+   */
+  async scanContent(
+    sessionKey: string,
+    toolName: string,
+    content: string,
+  ): Promise<ContentScanResult | null> {
+    if (!this.coreCredentials) return null;
+
+    // Limit content size (max 100KB to avoid timeout)
+    const maxSize = 100 * 1024;
+    const truncatedContent = content.length > maxSize ? content.slice(0, maxSize) : content;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.config.assessTimeoutMs);
+
+    try {
+      const response = await fetch(`${this.config.coreUrl}/api/v1/content/scan`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.coreCredentials.apiKey}`,
+        },
+        body: JSON.stringify({
+          content: truncatedContent,
+          toolName,
+          sessionKey,
+        }),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        this.log.debug?.(`Core content-scan returned ${response.status}`);
+        return null;
+      }
+
+      const json = (await response.json()) as {
+        success: boolean;
+        data?: ContentScanResult;
+      };
+
+      if (!json.success || !json.data) return null;
+
+      this.log.info(
+        `Core content-scan: detected=${json.data.detected}, ` +
+        `categories=[${json.data.categories.join(",")}], ` +
+        `findings=${json.data.findings.length}`,
+      );
+
+      return json.data;
+    } catch (err) {
+      if ((err as Error).name !== "AbortError") {
+        this.log.debug?.(`Core content-scan error: ${err}`);
+      }
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   // ── Private helpers ──────────────────────────────────────────────
 
   private getOrCreate(sessionKey: string): SessionState {
@@ -308,6 +376,7 @@ export class BehaviorDetector {
     if (!this.coreCredentials) return null;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.config.assessTimeoutMs);
+    this.log.info(`Core: calling assess API for tool "${req.pendingTool?.toolName}" (session=${req.sessionKey?.slice(0, 8)}...)`);
     try {
       const response = await fetch(`${this.config.coreUrl}/api/v1/behavior/assess`, {
         method: "POST",
@@ -322,11 +391,9 @@ export class BehaviorDetector {
         if (!this.warnedStatuses.has(response.status)) {
           this.warnedStatuses.add(response.status);
           if (response.status === 401) {
-            this.log.warn("Platform: API key invalid or agent not found — run /og_activate to re-register");
-          } else if (response.status === 402) {
-            this.log.warn("Platform: agent not activated — run /og_activate to complete setup");
+            this.log.warn("Platform: API key invalid or agent not found");
           } else if (response.status === 403) {
-            this.log.warn(`Platform: detection quota exceeded — visit ${this.config.coreUrl} to upgrade your plan`);
+            this.log.warn(`Platform: access denied — visit ${this.config.coreUrl} for details`);
           } else {
             this.log.debug?.(`Platform: assess returned ${response.status}`);
           }
@@ -335,9 +402,54 @@ export class BehaviorDetector {
       }
       const json = (await response.json()) as {
         success: boolean;
-        data?: BehaviorAssessResponse;
+        data?: BehaviorAssessResponse & Partial<QuotaExceededInfo>;
       };
-      return json.success ? (json.data ?? null) : null;
+
+      // Log raw Core response for debugging
+      this.log.warn(`Core response: ${JSON.stringify(json, null, 2)}`);
+
+      if (!json.success) return null;
+      if (!json.data) return null;
+
+      // Handle quota exceeded response
+      if (json.data.quotaExceeded) {
+        const info: QuotaExceededInfo = {
+          quotaExceeded: true,
+          quotaUsed: json.data.quotaUsed ?? 0,
+          quotaTotal: json.data.quotaTotal ?? 0,
+          isAutonomous: json.data.isAutonomous ?? true,
+          resetAt: json.data.resetAt ?? null,
+          upgradeUrl: json.data.upgradeUrl ?? "",
+          message: json.data.message ?? "Quota exceeded",
+          recommendation: json.data.recommendation ?? "",
+        };
+
+        const isFirstNotify = !this.quotaExceededNotified;
+        this.log.warn(
+          `Core: quota exceeded (${info.quotaUsed}/${info.quotaTotal}, ` +
+          `autonomous=${info.isAutonomous}, firstNotify=${isFirstNotify})`,
+        );
+
+        // Always set pending message if there isn't one already
+        // This ensures the message gets through even if previous attempts failed
+        if (!this.pendingQuotaMessage) {
+          this.pendingQuotaMessage = info;
+          this.log.info("Core: stored pending quota message for next tool result");
+        }
+
+        // First time notification: trigger callback
+        if (isFirstNotify) {
+          this.quotaExceededNotified = true;
+          if (this.onQuotaExceeded) {
+            this.onQuotaExceeded(info);
+          }
+        }
+
+        // Return null to fail-open (allow execution, no detection)
+        return null;
+      }
+
+      return json.data;
     } catch (err) {
       if ((err as Error).name !== "AbortError") {
         this.log.debug?.(`Assess API error: ${err}`);

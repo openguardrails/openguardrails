@@ -69,6 +69,33 @@ export type AgentPermission = {
   lastSeen: string;
 };
 
+// ─── Detection Result Reporting ──────────────────────────────────
+
+export type DetectionResultRequest = {
+  agentId: string;
+  sessionKey?: string;
+  toolName?: string;
+  safe: boolean;
+  categories: string[];
+  findings: Array<{
+    scanner: string;
+    name: string;
+    description?: string;
+    matchedText?: string;
+    confidence?: "high" | "medium" | "low";
+  }>;
+  sensitivityScore?: number;
+  latencyMs?: number;
+  /** Whether quota was exceeded (detection skipped) */
+  quotaExceeded?: boolean;
+  /** Quota info when exceeded */
+  quotaInfo?: {
+    used: number;
+    total: number;
+    resetAt?: string;
+  };
+};
+
 // Keep old names as aliases for backwards compat during transition
 export type PlatformDetectRequest = DashboardDetectRequest;
 export type PlatformDetectResponse = DashboardDetectResponse;

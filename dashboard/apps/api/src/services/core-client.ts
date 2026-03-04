@@ -5,7 +5,7 @@ const settings = settingsQueries(db);
 
 /** Get core URL from settings or env */
 async function getCoreUrl(): Promise<string> {
-  return (await settings.get("og_core_url")) || process.env.OG_CORE_URL || "http://localhost:53666";
+  return (await settings.get("og_core_url")) || process.env.OG_CORE_URL || "https://openguardrails.com/core";
 }
 
 /** Get core key from settings */
@@ -59,11 +59,18 @@ export async function callCoreDetect(
   return json.data;
 }
 
-/** Check core health */
+/** Check core health with timeout */
 export async function checkCoreHealth(): Promise<boolean> {
   try {
     const coreUrl = await getCoreUrl();
-    const res = await fetch(`${coreUrl}/health`);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
+
+    const res = await fetch(`${coreUrl}/health`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
     const json = await res.json() as { status: string };
     return json.status === "ok";
   } catch {

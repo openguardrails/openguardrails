@@ -1,4 +1,4 @@
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, sql, count } from "drizzle-orm";
 import type { Database } from "../client.js";
 import { detectionResults } from "../schema/index.js";
 import { DEFAULT_TENANT_ID } from "@og/shared";
@@ -53,6 +53,38 @@ export function detectionResultQueries(db: Database) {
         query = query.offset(options.offset) as typeof query;
       }
       return query;
+    },
+
+    async findRecent(options: { tenantId: string; limit?: number; safe?: boolean }) {
+      const conditions = [eq(detectionResults.tenantId, options.tenantId)];
+      if (options.safe !== undefined) {
+        conditions.push(eq(detectionResults.safe, options.safe));
+      }
+
+      return db
+        .select()
+        .from(detectionResults)
+        .where(and(...conditions))
+        .orderBy(desc(detectionResults.createdAt))
+        .limit(options.limit ?? 50);
+    },
+
+    async summary(tenantId: string) {
+      const results = await db
+        .select({
+          total: count(),
+          safe: sql<number>`COALESCE(SUM(CASE WHEN ${detectionResults.safe} = 1 THEN 1 ELSE 0 END), 0)`,
+          unsafe: sql<number>`COALESCE(SUM(CASE WHEN ${detectionResults.safe} = 0 THEN 1 ELSE 0 END), 0)`,
+        })
+        .from(detectionResults)
+        .where(eq(detectionResults.tenantId, tenantId));
+
+      const row = results[0];
+      return {
+        total: row?.total ?? 0,
+        safe: row?.safe ?? 0,
+        unsafe: row?.unsafe ?? 0,
+      };
     },
   };
 }

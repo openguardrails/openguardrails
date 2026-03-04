@@ -59,6 +59,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -69,6 +73,20 @@ jobs:
           VERSION=${GITHUB_REF#refs/tags/v}
           cd moltguard
           npm pkg set version="$VERSION"
+
+      - name: Build Dashboard
+        run: |
+          cd dashboard
+          pnpm install
+          pnpm build
+
+      - name: Bundle Dashboard into MoltGuard
+        run: |
+          mkdir -p moltguard/dashboard-dist/api
+          mkdir -p moltguard/dashboard-dist/web
+          cp -r dashboard/apps/api/dist/* moltguard/dashboard-dist/api/
+          cp dashboard/apps/api/package.json moltguard/dashboard-dist/api/
+          cp -r dashboard/apps/web/out/* moltguard/dashboard-dist/web/
 
       - name: Build plugin
         run: |
