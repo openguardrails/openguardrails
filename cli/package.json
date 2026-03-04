@@ -1,6 +1,6 @@
 {
   "name": "openguardrails",
-  "version": "6.7.5",
+  "version": "6.7.6",
   "description": "Runtime security for AI agents — behavioral detection, PII sanitization, and management dashboard",
   "type": "module",
   "bin": {
