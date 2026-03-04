@@ -11,6 +11,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "postinstall": "npm rebuild better-sqlite3 || echo 'Warning: better-sqlite3 rebuild failed. Dashboard may not work.'",
     "typecheck": "tsc --noEmit",
     "typecheck:plugin": "tsc --noEmit -p tsconfig.plugin.json",
     "test": "vitest run",
