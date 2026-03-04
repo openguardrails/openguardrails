@@ -10,6 +10,7 @@ import crypto from "node:crypto";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
+import { fileURLToPath } from "node:url";
 
 // Dashboard process and state
 let dashboardProcess: ChildProcess | null = null;
@@ -22,6 +23,30 @@ let tunnelConnection: import("ws").WebSocket | null = null;
 export const DASHBOARD_PORT = 53667;
 const WEB_PORT = 53668;
 const TOKEN_FILE = path.join(os.homedir(), ".openclaw", "credentials", "moltguard", "dashboard-session-token");
+
+/**
+ * Get the package root directory
+ * Works for both source (.ts) and compiled (.js) files
+ */
+function getPackageRoot(): string {
+  // Try to get current file path using import.meta.url (ES modules)
+  if (typeof import.meta !== 'undefined' && import.meta.url) {
+    const currentFile = fileURLToPath(import.meta.url);
+    const currentDir = path.dirname(currentFile);
+    // If we're in dist/, go up one level
+    if (currentDir.endsWith('dist')) {
+      return path.dirname(currentDir);
+    }
+    return currentDir;
+  }
+
+  // Fallback to __dirname (CommonJS or TypeScript direct execution)
+  // If __dirname ends with 'dist', go up one level
+  if (__dirname.endsWith('dist')) {
+    return path.dirname(__dirname);
+  }
+  return __dirname;
+}
 
 /**
  * Get the plugin's data directory for storing dashboard database
@@ -176,12 +201,14 @@ export async function startLocalDashboard(options: LaunchOptions): Promise<Launc
  * Find the Dashboard directory
  */
 function findDashboardDir(): { dir: string; bundled: boolean } | null {
+  const packageRoot = getPackageRoot();
+
   // Check common locations
   const candidates = [
     // 1. Bundled in moltguard package (production)
-    { dir: path.join(__dirname, "dashboard-dist"), bundled: true },
+    { dir: path.join(packageRoot, "dashboard-dist"), bundled: true },
     // 2. Relative to moltguard (monorepo development)
-    { dir: path.join(__dirname, "..", "dashboard"), bundled: false },
+    { dir: path.join(packageRoot, "..", "dashboard"), bundled: false },
     // 3. Installed globally
     { dir: path.join(os.homedir(), ".openclaw", "plugins", "moltguard", "dashboard"), bundled: false },
   ];
