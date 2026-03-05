@@ -40,9 +40,9 @@ export async function runMigrations(migrationsFolder?: string) {
   }
 
   if (dialect === "sqlite") {
-    const { default: Database } = await import("better-sqlite3");
-    const { drizzle } = await import("drizzle-orm/better-sqlite3");
-    const { migrate } = await import("drizzle-orm/better-sqlite3/migrator");
+    const { createClient } = await import("@libsql/client");
+    const { drizzle } = await import("drizzle-orm/libsql");
+    const { migrate } = await import("drizzle-orm/libsql/migrator");
 
     // Always use getDefaultDbPath() which respects DASHBOARD_DATA_DIR env var
     // This ensures migrations run on the same database that client.ts connects to
@@ -52,13 +52,13 @@ export async function runMigrations(migrationsFolder?: string) {
     const dir = dirname(dbPath);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
-    const sqlite = new Database(dbPath);
-    sqlite.pragma("journal_mode = WAL");
-    const db = drizzle(sqlite);
+    const client = createClient({ url: `file:${dbPath}` });
+    await client.execute("PRAGMA journal_mode = WAL");
+    const db = drizzle(client);
 
-    migrate(db, { migrationsFolder });
+    await migrate(db, { migrationsFolder });
     console.log(`SQLite migrations complete (${dbPath})`);
-    sqlite.close();
+    client.close();
   } else if (dialect === "mysql") {
     const mysql2 = await import("mysql2/promise");
     const { drizzle } = await import("drizzle-orm/mysql2");

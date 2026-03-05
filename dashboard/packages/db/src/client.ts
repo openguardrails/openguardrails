@@ -24,8 +24,8 @@ function getDefaultDbPath(): string {
 
 async function createDb() {
   if (dialect === "sqlite") {
-    const { default: Database } = await import("better-sqlite3");
-    const { drizzle } = await import("drizzle-orm/better-sqlite3");
+    const { createClient } = await import("@libsql/client");
+    const { drizzle } = await import("drizzle-orm/libsql");
     const schema = await import("./schema/sqlite.js");
 
     const rawUrl = process.env.DATABASE_URL || getDefaultDbPath();
@@ -37,11 +37,12 @@ async function createDb() {
       mkdirSync(dir, { recursive: true });
     }
 
-    const sqlite = new Database(dbPath);
-    sqlite.pragma("journal_mode = WAL");
-    sqlite.pragma("foreign_keys = ON");
+    const client = createClient({ url: `file:${dbPath}` });
+    // Enable WAL mode and foreign keys via PRAGMA
+    await client.execute("PRAGMA journal_mode = WAL");
+    await client.execute("PRAGMA foreign_keys = ON");
 
-    return drizzle(sqlite, { schema });
+    return drizzle(client, { schema });
   }
 
   if (dialect === "mysql") {

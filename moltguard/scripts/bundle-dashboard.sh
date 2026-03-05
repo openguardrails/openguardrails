@@ -21,10 +21,11 @@ echo "==> Bundling API with esbuild..."
 cd "$DASHBOARD_DIR/apps/api"
 
 # Use ncc for better Node.js/ESM compatibility
+# @libsql/client is external because it has native bindings (with WASM fallback)
 pnpm exec ncc build ./dist/index.js \
   --out "$OUTPUT_DIR/api" \
   --target es2022 \
-  --external better-sqlite3
+  --external @libsql/client
 
 echo "API bundled successfully"
 
@@ -40,7 +41,7 @@ cat > "$OUTPUT_DIR/api/package.json" << 'EOF'
   "type": "module",
   "main": "index.js",
   "dependencies": {
-    "better-sqlite3": "^11.0.0"
+    "@libsql/client": "^0.14.0"
   }
 }
 EOF

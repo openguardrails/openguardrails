@@ -18,8 +18,9 @@ mkdirSync(bundleDir, { recursive: true });
 execSync('pnpm tsc', { stdio: 'inherit', cwd: __dirname });
 
 // Bundle with ncc
+// @libsql/client is external because it has native bindings (with WASM fallback)
 execSync(
-  'pnpm ncc build dist/index.js -o bundle --external better-sqlite3 --external pg --external mysql2 --source-map',
+  'pnpm ncc build dist/index.js -o bundle --external @libsql/client --external pg --external mysql2 --source-map',
   { stdio: 'inherit', cwd: __dirname }
 );
 
