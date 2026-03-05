@@ -32,7 +32,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
-import { execSync } from "node:child_process";
 
 // =============================================================================
 // Constants
@@ -170,70 +169,9 @@ function createLogger(baseLogger: Logger): Logger {
 }
 
 // =============================================================================
-// better-sqlite3 native addon check and build
+// Database driver check (libsql)
 // =============================================================================
-
-/**
- * Ensures better-sqlite3 native addon is available.
- * OpenClaw installs plugins with --ignore-scripts for security,
- * so we need to manually obtain the native binary on first load.
- *
- * Strategy:
- * 1. Check if binary file exists (fast)
- * 2. Try prebuild-install (download precompiled binary, ~2s)
- * 3. Fall back to npm rebuild (compile from source, ~30s)
- */
-function ensureBetterSqlite3(log: Logger): void {
-  // Get plugin installation directory
-  const pluginDir = path.dirname(new URL(import.meta.url).pathname);
-  const sqlite3Dir = path.join(pluginDir, "node_modules", "better-sqlite3");
-  const binaryPath = path.join(sqlite3Dir, "build", "Release", "better_sqlite3.node");
-
-  // Check if binary already exists
-  if (fs.existsSync(binaryPath)) {
-    log.debug?.("better-sqlite3 native addon is available");
-    return;
-  }
-
-  log.info("better-sqlite3 native binary not found, installing...");
-
-  // First, try to download precompiled binary (faster, ~2 seconds)
-  try {
-    log.debug?.("Attempting to download precompiled binary...");
-    execSync("npx --yes prebuild-install", {
-      cwd: sqlite3Dir,
-      stdio: "pipe", // Capture output for debugging
-      timeout: 30000, // 30 second timeout for download
-    });
-
-    // Verify binary was created
-    if (fs.existsSync(binaryPath)) {
-      log.info("better-sqlite3 installed successfully (precompiled binary)");
-      return;
-    }
-    log.debug?.("Precompiled binary not available, compiling from source...");
-  } catch (downloadErr) {
-    log.debug?.(`Prebuild-install failed: ${downloadErr}. Compiling from source...`);
-  }
-
-  // Fall back to compiling from source (slower, ~30 seconds)
-  try {
-    execSync("npm rebuild better-sqlite3", {
-      cwd: pluginDir,
-      stdio: "pipe", // Capture output for debugging
-      timeout: 60000, // 60 second timeout for compilation
-    });
-
-    // Verify binary was created
-    if (fs.existsSync(binaryPath)) {
-      log.info("better-sqlite3 installed successfully (compiled from source)");
-      return;
-    }
-    log.error("npm rebuild completed but binary still not found. Dashboard may not work.");
-  } catch (err) {
-    log.error(`Failed to install better-sqlite3: ${err}. Dashboard will not work.`);
-  }
-}
+// Note: @libsql/client has native bindings with WASM fallback, no manual setup needed.
 
 // =============================================================================
 // Plugin state (module-level — survives plugin re-registration within a process)
@@ -336,10 +274,6 @@ const openClawGuardPlugin = {
 
   register(api: OpenClawPluginApi) {
     const log = createLogger(api.logger);
-
-    // Ensure better-sqlite3 native addon is available
-    // (OpenClaw uses --ignore-scripts during install for security)
-    ensureBetterSqlite3(log);
 
     // Ensure openclaw.json has default config (coreUrl) on first load
     const pluginConfig = (api.pluginConfig ?? {}) as OpenClawGuardConfig;
