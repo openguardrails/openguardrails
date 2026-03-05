@@ -2,7 +2,6 @@ import { config } from "dotenv";
 import { resolve, dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { existsSync, mkdirSync } from "fs";
-import { homedir } from "os";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -40,22 +39,14 @@ export async function runMigrations(migrationsFolder?: string) {
     throw new Error(`Migrations folder not found: ${migrationsFolder}`);
   }
 
-  // Detect if running in bundled mode:
-  // - Bundled: migrations are in ./drizzle/ (sibling to this file)
-  // - Dev: migrations are in ../drizzle/ (parent directory)
-  const isBundled = migrationsFolder === resolve(__dirname, "drizzle", dialect);
-
   if (dialect === "sqlite") {
     const { default: Database } = await import("better-sqlite3");
     const { drizzle } = await import("drizzle-orm/better-sqlite3");
     const { migrate } = await import("drizzle-orm/better-sqlite3/migrator");
 
-    // Use bundled-mode path if running in bundled mode
-    const defaultPath = isBundled
-      ? join(homedir(), ".openclaw", "data", "dashboard.db")
-      : getDefaultDbPath();
-
-    const rawUrl = process.env.DATABASE_URL || defaultPath;
+    // Always use getDefaultDbPath() which respects DASHBOARD_DATA_DIR env var
+    // This ensures migrations run on the same database that client.ts connects to
+    const rawUrl = process.env.DATABASE_URL || getDefaultDbPath();
     const dbPath = rawUrl.replace(/^file:/, "");
 
     const dir = dirname(dbPath);

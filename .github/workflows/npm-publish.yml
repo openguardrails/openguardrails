@@ -82,11 +82,8 @@ jobs:
 
       - name: Bundle Dashboard into MoltGuard
         run: |
-          mkdir -p moltguard/dashboard-dist/api
-          mkdir -p moltguard/dashboard-dist/web
-          cp -r dashboard/apps/api/dist/* moltguard/dashboard-dist/api/
-          cp dashboard/apps/api/package.json moltguard/dashboard-dist/api/
-          cp -r dashboard/apps/web/out/* moltguard/dashboard-dist/web/
+          cd moltguard
+          bash scripts/bundle-dashboard.sh
 
       - name: Build plugin
         run: |

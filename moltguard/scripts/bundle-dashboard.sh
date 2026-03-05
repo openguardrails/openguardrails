@@ -28,6 +28,10 @@ pnpm exec ncc build ./dist/index.js \
 
 echo "API bundled successfully"
 
+echo "==> Copying database migrations..."
+cp -r "$DASHBOARD_DIR/packages/db/drizzle" "$OUTPUT_DIR/api/drizzle"
+echo "Migrations copied to $OUTPUT_DIR/api/drizzle"
+
 echo "==> Creating API package.json..."
 cat > "$OUTPUT_DIR/api/package.json" << 'EOF'
 {
