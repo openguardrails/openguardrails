@@ -1,8 +1,7 @@
 /**
  * Dashboard Launcher for MoltGuard
  *
- * Starts the local Dashboard and optionally connects to the tunnel
- * service for public URL access.
+ * Starts the local Dashboard for monitoring agent activity.
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
@@ -16,9 +15,6 @@ import { fileURLToPath } from "node:url";
 let dashboardProcess: ChildProcess | null = null;
 let currentToken: string | null = null;
 let currentLocalUrl: string | null = null;
-let currentPublicUrl: string | null = null;
-// Keep WebSocket connection alive (prevent garbage collection)
-let tunnelConnection: import("ws").WebSocket | null = null;
 
 export const DASHBOARD_PORT = 53667;
 const WEB_PORT = 53668;
@@ -67,7 +63,6 @@ interface LaunchOptions {
 
 interface LaunchResult {
   localUrl: string;
-  publicUrl: string | null;
   token: string;
 }
 
@@ -116,7 +111,7 @@ async function checkRunningDashboard(): Promise<{ running: boolean; token?: stri
 }
 
 /**
- * Start the local Dashboard and tunnel
+ * Start the local Dashboard
  */
 export async function startLocalDashboard(options: LaunchOptions): Promise<LaunchResult> {
   // Check if dashboard is already running (e.g., user started pnpm dev or embedded mode)
@@ -129,21 +124,8 @@ export async function startLocalDashboard(options: LaunchOptions): Promise<Launc
     const webPort = isDevMode ? WEB_PORT : DASHBOARD_PORT;
     currentLocalUrl = `http://localhost:${webPort}/dashboard/?token=${existing.token}`;
 
-    // Connect to tunnel for public URL (best effort)
-    // Skip tunnel in dev mode - Vite's ES modules don't work well through tunnel proxy
-    if (isDevMode) {
-      currentPublicUrl = null;
-    } else {
-      try {
-        currentPublicUrl = await connectTunnel(existing.token, options.coreUrl, false);
-      } catch {
-        currentPublicUrl = null;
-      }
-    }
-
     return {
       localUrl: currentLocalUrl,
-      publicUrl: currentPublicUrl,
       token: existing.token,
     };
   }
@@ -157,7 +139,6 @@ export async function startLocalDashboard(options: LaunchOptions): Promise<Launc
     }
     return {
       localUrl: currentLocalUrl,
-      publicUrl: currentPublicUrl,
       token,
     };
   }
@@ -185,18 +166,8 @@ export async function startLocalDashboard(options: LaunchOptions): Promise<Launc
   // In bundled mode, API serves static files, so use DASHBOARD_PORT (not WEB_PORT)
   currentLocalUrl = `http://localhost:${DASHBOARD_PORT}/dashboard/?token=${token}`;
 
-  // Connect to tunnel for public URL (best effort, don't fail if tunnel unavailable)
-  // Bundled mode: API serves static files, so isDevMode = false
-  try {
-    currentPublicUrl = await connectTunnel(token, options.coreUrl, false);
-  } catch (err) {
-    console.warn(`[dashboard-launcher] Tunnel connection failed: ${err}`);
-    currentPublicUrl = null;
-  }
-
   return {
     localUrl: currentLocalUrl,
-    publicUrl: currentPublicUrl,
     token,
   };
 }
@@ -261,6 +232,9 @@ async function startBundledDashboard(
     }
     fs.writeFileSync(TOKEN_FILE, JSON.stringify({ token, port: DASHBOARD_PORT }));
 
+    // Track if we've resolved (to stop logging after startup)
+    let resolved = false;
+
     // Start the API server with node
     dashboardProcess = spawn("node", ["index.js"], {
       cwd: apiDir,
@@ -280,24 +254,32 @@ async function startBundledDashboard(
       detached: false,
     });
 
+    // Only log during startup, stop after Dashboard is ready
     dashboardProcess.stdout?.on("data", (data) => {
+      if (resolved) return; // Stop logging after startup
       const line = data.toString().trim();
       console.log(`[dashboard] ${line}`);
       if (line.includes("running on port") || line.includes("Local URL:")) {
+        resolved = true;
         resolve();
       }
     });
 
     dashboardProcess.stderr?.on("data", (data) => {
+      if (resolved) return; // Stop logging after startup
       console.error(`[dashboard] ${data.toString().trim()}`);
     });
 
     dashboardProcess.on("error", (err) => {
-      reject(new Error(`Failed to start Dashboard: ${err.message}`));
+      if (!resolved) {
+        resolved = true;
+        reject(new Error(`Failed to start Dashboard: ${err.message}`));
+      }
     });
 
     dashboardProcess.on("exit", (code) => {
-      if (code !== 0 && code !== null) {
+      if (!resolved && code !== 0 && code !== null) {
+        resolved = true;
         reject(new Error(`Dashboard exited with code ${code}`));
       }
       dashboardProcess = null;
@@ -305,7 +287,10 @@ async function startBundledDashboard(
 
     // Timeout if Dashboard doesn't start
     setTimeout(() => {
-      resolve(); // Resolve anyway, we'll check with waitForDashboard
+      if (!resolved) {
+        resolved = true;
+        resolve(); // Resolve anyway, we'll check with waitForDashboard
+      }
     }, 10000);
   });
 }
@@ -385,208 +370,6 @@ async function waitForDashboard(port: number, timeoutMs: number = 30000): Promis
 }
 
 /**
- * Connect to the tunnel service for public URL
- * @param isDevMode - If true, forward non-API requests to WEB_PORT (53668), otherwise to DASHBOARD_PORT (53667)
- */
-async function connectTunnel(token: string, coreUrl: string, isDevMode: boolean): Promise<string> {
-  // Close existing connection if any
-  if (tunnelConnection) {
-    try {
-      tunnelConnection.close();
-    } catch {
-      // Ignore close errors
-    }
-    tunnelConnection = null;
-  }
-
-  // Dynamically import ws to avoid bundling issues
-  const { default: WebSocket } = await import("ws");
-
-  // Convert core URL to WebSocket URL
-  const wsUrl = coreUrl
-    .replace("https://", "wss://")
-    .replace("http://", "ws://")
-    + "/tunnel/ws";
-
-  return new Promise((resolve, reject) => {
-    const ws = new WebSocket(wsUrl);
-    const timeout = setTimeout(() => {
-      ws.close();
-      reject(new Error("Tunnel connection timeout"));
-    }, 10000);
-
-    ws.on("open", () => {
-      // Register with our token
-      ws.send(JSON.stringify({
-        type: "register",
-        token,
-      }));
-    });
-
-    ws.on("message", (data) => {
-      try {
-        const msg = JSON.parse(data.toString());
-        if (msg.type === "registered" && msg.publicUrl) {
-          clearTimeout(timeout);
-          // Store connection to prevent garbage collection
-          tunnelConnection = ws;
-          resolve(msg.publicUrl);
-          // Keep connection open for proxying requests
-          setupTunnelProxy(ws, token, msg.publicUrl, isDevMode);
-        } else if (msg.type === "error") {
-          clearTimeout(timeout);
-          ws.close();
-          reject(new Error(msg.error || "Tunnel registration failed"));
-        }
-      } catch {
-        // Ignore parse errors
-      }
-    });
-
-    ws.on("error", (err) => {
-      clearTimeout(timeout);
-      tunnelConnection = null;
-      reject(err);
-    });
-
-    ws.on("close", () => {
-      clearTimeout(timeout);
-      tunnelConnection = null;
-      console.log("[dashboard-launcher] Tunnel connection closed");
-    });
-
-    // Keep-alive ping every 30 seconds
-    const pingInterval = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.ping();
-      } else {
-        clearInterval(pingInterval);
-      }
-    }, 30_000);
-
-    ws.on("close", () => {
-      clearInterval(pingInterval);
-    });
-  });
-}
-
-/**
- * Set up tunnel proxy to forward requests to local Dashboard
- * @param isDevMode - If true, forward non-API requests to WEB_PORT, otherwise all to DASHBOARD_PORT
- */
-function setupTunnelProxy(ws: import("ws").WebSocket, token: string, publicUrl: string, isDevMode: boolean): void {
-  const http = require("http") as typeof import("http");
-
-  // Extract base path for <base> tag injection (e.g., /core/tunnel/{token})
-  let tunnelBasePath = "/";
-  try {
-    const url = new URL(publicUrl);
-    tunnelBasePath = url.pathname;
-  } catch {
-    // Ignore URL parse errors
-  }
-
-  ws.on("message", (data) => {
-    try {
-      const msg = JSON.parse(data.toString());
-      if (msg.type !== "request" || !msg.requestId) return;
-
-      // Redirect root path to /dashboard/
-      const pathWithoutQuery = msg.path.split("?")[0];
-      if (pathWithoutQuery === "/" || pathWithoutQuery === "") {
-        ws.send(JSON.stringify({
-          type: "response",
-          requestId: msg.requestId,
-          statusCode: 302,
-          headers: { location: `/dashboard/?token=${token}` },
-          body: "",
-        }));
-        return;
-      }
-
-      // Forward request to local Dashboard
-      // In dev mode: API requests go to 53667, web requests go to 53668
-      // In embedded mode: all requests go to 53667 (API serves static files)
-      const isApiRequest = msg.path.startsWith("/api/");
-      const targetPort = isApiRequest ? DASHBOARD_PORT : (isDevMode ? WEB_PORT : DASHBOARD_PORT);
-
-      const options = {
-        hostname: "localhost",
-        port: targetPort,
-        path: msg.path + (msg.path.includes("?") ? "&" : "?") + `token=${token}`,
-        method: msg.method,
-        headers: {
-          ...msg.headers,
-          host: `localhost:${targetPort}`,
-        },
-      };
-
-      const req = http.request(options, (res: import("http").IncomingMessage) => {
-        const chunks: Buffer[] = [];
-        res.on("data", (chunk: Buffer) => chunks.push(chunk));
-        res.on("end", () => {
-          let body = Buffer.concat(chunks);
-          const headers: Record<string, string> = {};
-          for (const [key, value] of Object.entries(res.headers)) {
-            if (typeof value === "string") {
-              headers[key] = value;
-            } else if (Array.isArray(value)) {
-              headers[key] = value.join(", ");
-            }
-          }
-
-          // Inject <base> tag into HTML responses for tunnel access
-          const contentType = headers["content-type"] || "";
-          if (contentType.includes("text/html")) {
-            let html = body.toString("utf-8");
-            // Inject <base> tag to make relative URLs work through tunnel
-            const baseTag = `<base href="${tunnelBasePath}/">`;
-            // Try multiple injection points
-            if (/<head[^>]*>/i.test(html)) {
-              html = html.replace(/<head[^>]*>/i, `$&${baseTag}`);
-            } else if (/<html[^>]*>/i.test(html)) {
-              html = html.replace(/<html[^>]*>/i, `$&<head>${baseTag}</head>`);
-            } else if (/<!DOCTYPE[^>]*>/i.test(html)) {
-              html = html.replace(/<!DOCTYPE[^>]*>/i, `$&<head>${baseTag}</head>`);
-            } else {
-              // Prepend if no standard tags found
-              html = `<head>${baseTag}</head>${html}`;
-            }
-            body = Buffer.from(html, "utf-8");
-            headers["content-length"] = String(body.length);
-          }
-
-          ws.send(JSON.stringify({
-            type: "response",
-            requestId: msg.requestId,
-            statusCode: res.statusCode,
-            headers,
-            body: body.toString("base64"),
-          }));
-        });
-      });
-
-      req.on("error", () => {
-        ws.send(JSON.stringify({
-          type: "response",
-          requestId: msg.requestId,
-          statusCode: 502,
-          headers: { "content-type": "application/json" },
-          body: Buffer.from(JSON.stringify({ error: "Local dashboard error" })).toString("base64"),
-        }));
-      });
-
-      if (msg.body) {
-        req.write(Buffer.from(msg.body, "base64"));
-      }
-      req.end();
-    } catch {
-      // Ignore errors
-    }
-  });
-}
-
-/**
  * Stop the Dashboard process
  */
 export function stopDashboard(): void {
@@ -596,7 +379,6 @@ export function stopDashboard(): void {
   }
   currentToken = null;
   currentLocalUrl = null;
-  currentPublicUrl = null;
 }
 
 /**
@@ -607,11 +389,8 @@ export function isDashboardRunning(): boolean {
 }
 
 /**
- * Get current Dashboard URLs
+ * Get current Dashboard URL
  */
-export function getDashboardUrls(): { localUrl: string | null; publicUrl: string | null } {
-  return {
-    localUrl: currentLocalUrl,
-    publicUrl: currentPublicUrl,
-  };
+export function getDashboardUrl(): string | null {
+  return currentLocalUrl;
 }

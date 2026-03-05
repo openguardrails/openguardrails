@@ -1096,20 +1096,13 @@ const openClawGuardPlugin = {
             coreUrl: config.coreUrl,
           });
 
-          const lines = [
-            "**Dashboard URLs**",
-            "",
-            `Local: ${result.localUrl}`,
-          ];
-
-          // Only show public URL in production (bundled) mode
-          if (result.publicUrl) {
-            lines.push(`Public: ${result.publicUrl}`);
-            lines.push("");
-            lines.push("Use the public URL to access from your phone or other devices.");
-          }
-
-          return { text: lines.join("\n") };
+          return {
+            text: [
+              "**Dashboard URL**",
+              "",
+              result.localUrl,
+            ].join("\n"),
+          };
         } catch (err) {
           // Development mode: show instructions for manual startup
           if (err instanceof DevModeError) {
