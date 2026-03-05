@@ -75,6 +75,15 @@ app.use(cors({
 app.use(morgan("short"));
 app.use(express.json());
 
+// Rewrite /dashboard/api/* to /api/* for embedded mode
+// (frontend uses BASE_URL=/dashboard, but API routes are at /api/*)
+app.use((req, _res, next) => {
+  if (req.path.startsWith("/dashboard/api/")) {
+    req.url = req.url.replace("/dashboard/api/", "/api/");
+  }
+  next();
+});
+
 // Public routes
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", service: "openguardrails-api", timestamp: new Date().toISOString() });

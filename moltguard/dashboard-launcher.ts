@@ -253,6 +253,14 @@ async function startBundledDashboard(
       fs.mkdirSync(effectiveDataDir, { recursive: true });
     }
 
+    // Save token to file BEFORE starting Dashboard
+    // This ensures checkRunningDashboard() can read the correct token
+    const tokenDir = path.dirname(TOKEN_FILE);
+    if (!fs.existsSync(tokenDir)) {
+      fs.mkdirSync(tokenDir, { recursive: true });
+    }
+    fs.writeFileSync(TOKEN_FILE, JSON.stringify({ token, port: DASHBOARD_PORT }));
+
     // Start the API server with node
     dashboardProcess = spawn("node", ["index.js"], {
       cwd: apiDir,
