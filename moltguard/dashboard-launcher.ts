@@ -151,7 +151,10 @@ export async function startLocalDashboard(options: LaunchOptions): Promise<Launc
   // If Dashboard is already running via this launcher, reuse it
   if (dashboardProcess && !dashboardProcess.killed) {
     const token = currentToken || crypto.randomBytes(16).toString("hex");
-    currentLocalUrl = `http://localhost:${WEB_PORT}/dashboard/?token=${token}`;
+    // Reuse existing URL if set, otherwise use DASHBOARD_PORT (bundled mode)
+    if (!currentLocalUrl) {
+      currentLocalUrl = `http://localhost:${DASHBOARD_PORT}/dashboard/?token=${token}`;
+    }
     return {
       localUrl: currentLocalUrl,
       publicUrl: currentPublicUrl,
@@ -179,7 +182,8 @@ export async function startLocalDashboard(options: LaunchOptions): Promise<Launc
   // Wait for Dashboard to be ready
   await waitForDashboard(DASHBOARD_PORT);
 
-  currentLocalUrl = `http://localhost:${WEB_PORT}/dashboard/?token=${token}`;
+  // In bundled mode, API serves static files, so use DASHBOARD_PORT (not WEB_PORT)
+  currentLocalUrl = `http://localhost:${DASHBOARD_PORT}/dashboard/?token=${token}`;
 
   // Connect to tunnel for public URL (best effort, don't fail if tunnel unavailable)
   // Bundled mode: API serves static files, so isDevMode = false
