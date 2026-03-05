@@ -179,51 +179,57 @@ function createLogger(baseLogger: Logger): Logger {
  * so we need to manually obtain the native binary on first load.
  *
  * Strategy:
- * 1. Try to load existing binary (already installed)
+ * 1. Check if binary file exists (fast)
  * 2. Try prebuild-install (download precompiled binary, ~2s)
  * 3. Fall back to npm rebuild (compile from source, ~30s)
  */
 function ensureBetterSqlite3(log: Logger): void {
-  try {
-    // Try to load better-sqlite3 to check if native addon exists
-    require("better-sqlite3");
+  // Get plugin installation directory
+  const pluginDir = path.dirname(new URL(import.meta.url).pathname);
+  const sqlite3Dir = path.join(pluginDir, "node_modules", "better-sqlite3");
+  const binaryPath = path.join(sqlite3Dir, "build", "Release", "better_sqlite3.node");
+
+  // Check if binary already exists
+  if (fs.existsSync(binaryPath)) {
     log.debug?.("better-sqlite3 native addon is available");
     return;
-  } catch (err) {
-    // Native addon not found, need to obtain it
-    log.info("better-sqlite3 not found, installing...");
   }
 
+  log.info("better-sqlite3 native binary not found, installing...");
+
+  // First, try to download precompiled binary (faster, ~2 seconds)
   try {
-    // Get plugin installation directory
-    const pluginDir = path.dirname(new URL(import.meta.url).pathname);
-    const sqlite3Dir = path.join(pluginDir, "node_modules", "better-sqlite3");
+    log.debug?.("Attempting to download precompiled binary...");
+    execSync("npx --yes prebuild-install", {
+      cwd: sqlite3Dir,
+      stdio: "pipe", // Capture output for debugging
+      timeout: 30000, // 30 second timeout for download
+    });
 
-    // First, try to download precompiled binary (faster, ~2 seconds)
-    try {
-      log.debug?.("Attempting to download precompiled binary...");
-      execSync("npx --yes prebuild-install", {
-        cwd: sqlite3Dir,
-        stdio: "ignore",
-        timeout: 30000, // 30 second timeout for download
-      });
-
-      // Verify it works
-      require("better-sqlite3");
+    // Verify binary was created
+    if (fs.existsSync(binaryPath)) {
       log.info("better-sqlite3 installed successfully (precompiled binary)");
       return;
-    } catch (downloadErr) {
-      log.debug?.("Precompiled binary not available, compiling from source...");
     }
+    log.debug?.("Precompiled binary not available, compiling from source...");
+  } catch (downloadErr) {
+    log.debug?.(`Prebuild-install failed: ${downloadErr}. Compiling from source...`);
+  }
 
-    // Fall back to compiling from source (slower, ~30 seconds)
+  // Fall back to compiling from source (slower, ~30 seconds)
+  try {
     execSync("npm rebuild better-sqlite3", {
       cwd: pluginDir,
-      stdio: "ignore",
+      stdio: "pipe", // Capture output for debugging
       timeout: 60000, // 60 second timeout for compilation
     });
 
-    log.info("better-sqlite3 installed successfully (compiled from source)");
+    // Verify binary was created
+    if (fs.existsSync(binaryPath)) {
+      log.info("better-sqlite3 installed successfully (compiled from source)");
+      return;
+    }
+    log.error("npm rebuild completed but binary still not found. Dashboard may not work.");
   } catch (err) {
     log.error(`Failed to install better-sqlite3: ${err}. Dashboard will not work.`);
   }

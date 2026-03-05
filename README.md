@@ -1,13 +1,13 @@
 # OpenGuardrails
 
-**Protect Your AI Agents.** Real-time protection against prompt injection, data leaks, and dangerous actions.
+**#1 OpenClaw security plugin on [ClawHub](https://clawhub.ai/ThomasLWang/moltguard)** protect your OpenClaw with real-time defense against prompt injection, data leaks, and dangerous actions.
 
 **Three Principles:**
 - **Instant Value** — Works immediately after installation
 - **No Security Expertise** — No configuration needed
 - **Secure by Default** — "Install it, and the agent won't go rogue"
 
-Open source (Apache 2.0). [Architecture →](docs/architecture.md)
+Open source (Apache 2.0). 
 
 ---
 
