@@ -40,9 +40,7 @@ jobs:
       - name: Update package.json versions
         run: |
           VERSION=${{ steps.ver.outputs.version }}
-          npm pkg set version="$VERSION" --prefix gateway
           npm pkg set version="$VERSION" --prefix moltguard
-          npm pkg set version="$VERSION" --prefix cli
 
       - name: Update moltguard skill versions
         run: |
@@ -56,7 +54,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add gateway/package.json moltguard/package.json cli/package.json moltguard/openclaw.plugin.json moltguard/clawhub-skill/SKILL.md
+          git add moltguard/package.json moltguard/openclaw.plugin.json moltguard/clawhub-skill/SKILL.md
           git diff --staged --quiet || git commit -m "chore: bump package versions to ${{ steps.ver.outputs.version }}"
           git push
 
@@ -65,18 +63,20 @@ jobs:
           git tag "v${{ steps.ver.outputs.version }}"
           git push origin "v${{ steps.ver.outputs.version }}"
 
-      # ─── Publish @openguardrails/gateway ──────────────────────────
-      - name: Build and publish gateway
+      # ─── Publish @openguardrails/moltguard ────────────────────────
+      - name: Build Gateway
         working-directory: gateway
         run: |
           npm install
           npm run build
-          npm config set //registry.npmjs.org/:_authToken "$NODE_AUTH_TOKEN"
-          npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      # ─── Publish @openguardrails/moltguard ────────────────────────
+      - name: Bundle Gateway into MoltGuard
+        run: |
+          rm -rf moltguard/gateway
+          mkdir -p moltguard/gateway/handlers
+          cp gateway/dist/*.js gateway/dist/*.d.ts gateway/dist/*.map moltguard/gateway/
+          cp gateway/dist/handlers/*.js gateway/dist/handlers/*.d.ts gateway/dist/handlers/*.map moltguard/gateway/handlers/
+
       - name: Build Dashboard
         working-directory: dashboard
         run: |
@@ -101,17 +101,6 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      # ─── Publish openguardrails CLI ────────────────────────────────
-      - name: Build and publish CLI
-        working-directory: cli
-        run: |
-          npm install
-          bash scripts/build.sh
-          npm config set //registry.npmjs.org/:_authToken "$NODE_AUTH_TOKEN"
-          npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
       # ─── Summary ──────────────────────────────────────────────────
       - name: Release summary
         run: |
@@ -120,6 +109,4 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Package | Version |" >> $GITHUB_STEP_SUMMARY
           echo "|---------|---------|" >> $GITHUB_STEP_SUMMARY
-          echo "| \`openguardrails\` | ${VERSION} |" >> $GITHUB_STEP_SUMMARY
-          echo "| \`@openguardrails/gateway\` | ${VERSION} |" >> $GITHUB_STEP_SUMMARY
           echo "| \`@openguardrails/moltguard\` | ${VERSION} |" >> $GITHUB_STEP_SUMMARY

@@ -40,7 +40,7 @@
   "uiHints": {
     "enabled": {
       "label": "Enable Guard",
-      "help": "Enable or disable behavioral anomaly detection"
+      "help": "Enable or disable security guard"
     },
     "blockOnRisk": {
       "label": "Block on Risk",

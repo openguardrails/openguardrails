@@ -113,12 +113,17 @@ export const detectionResults = pgTable(
     findings: jsonb("findings").notNull().default([]),
     latencyMs: integer("latency_ms").notNull(),
     requestId: varchar("request_id", { length: 64 }).notNull(),
+    // Static scan fields
+    scanType: varchar("scan_type", { length: 16 }).notNull().default("dynamic"), // "static" or "dynamic"
+    filePath: text("file_path"), // Relative path from workspace for static scans
+    fileType: varchar("file_type", { length: 16 }), // "soul", "agent", "memory", "task", "skill", "plugin", "other"
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
     agentIdIdx: index("idx_detection_results_agent_id").on(table.agentId),
     createdAtIdx: index("idx_detection_results_created_at").on(table.createdAt),
     tenantIdIdx: index("idx_detection_results_tenant_id").on(table.tenantId),
+    scanTypeIdx: index("idx_detection_results_scan_type").on(table.scanType),
   })
 );
 
@@ -147,6 +152,34 @@ export const toolCallObservations = pgTable(
     toolNameIdx: index("idx_tool_obs_tool_name").on(table.toolName),
     timestampIdx: index("idx_tool_obs_timestamp").on(table.timestamp),
     tenantIdIdx: index("idx_tool_obs_tenant_id").on(table.tenantId),
+  })
+);
+
+// ─── Gateway Activity ─────────────────────────────────────────
+// Records of gateway sanitization and restoration events
+export const gatewayActivity = pgTable(
+  "gateway_activity",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: varchar("tenant_id", { length: 64 }).notNull().default("default"),
+    eventId: varchar("event_id", { length: 128 }).notNull(), // From gateway: gw-timestamp-counter-type
+    requestId: varchar("request_id", { length: 64 }).notNull(), // gw-timestamp-counter
+    timestamp: timestamp("timestamp", { withTimezone: true }).notNull(),
+    type: varchar("type", { length: 16 }).notNull(), // "sanitize" or "restore"
+    direction: varchar("direction", { length: 16 }).notNull(), // "request" or "response"
+    backend: varchar("backend", { length: 32 }).notNull(), // "openai", "anthropic", "gemini"
+    endpoint: varchar("endpoint", { length: 255 }).notNull(), // e.g., "/v1/chat/completions"
+    model: varchar("model", { length: 128 }),
+    redactionCount: integer("redaction_count").notNull().default(0),
+    categories: jsonb("categories").notNull().default({}), // { email: 2, secret: 1 }
+    durationMs: integer("duration_ms"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    requestIdIdx: index("idx_gateway_activity_request_id").on(table.requestId),
+    timestampIdx: index("idx_gateway_activity_timestamp").on(table.timestamp),
+    typeIdx: index("idx_gateway_activity_type").on(table.type),
+    tenantIdIdx: index("idx_gateway_activity_tenant_id").on(table.tenantId),
   })
 );
 

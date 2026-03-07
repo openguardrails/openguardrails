@@ -126,13 +126,16 @@ When you run `/og_sanitize on`, the following happens:
 {
   "port": 8900,
   "backends": {
-    "openai": {
+    "vllm": {
       "baseUrl": "https://api.xiangxinai.cn/coding/v1",
-      "apiKey": "YOUR_API_KEY"
+      "apiKey": "YOUR_API_KEY",
+      "type": "openai"
     }
   }
 }
 ```
+
+The gateway automatically routes requests to the correct backend by matching the API key in the request headers.
 
 ## Multi-Agent Support
 

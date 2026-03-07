@@ -1,150 +1,337 @@
-import express from "express";
+import express, { type Express } from "express";
 import cors from "cors";
 import helmet from "helmet";
-import morgan from "morgan";
 import crypto from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
+import { createServer, type Server } from "node:http";
 import { sessionAuth, setLocalSessionToken, LOCAL_SESSION_TOKEN } from "./middleware/session-auth.js";
 import { authRouter } from "./routes/auth.js";
-import { settingsRouter } from "./routes/settings.js";
-import { agentsRouter } from "./routes/agents.js";
-import { scannersRouter } from "./routes/scanners.js";
-import { policiesRouter } from "./routes/policies.js";
-import { detectionRouter } from "./routes/detection.js";
-import { usageRouter } from "./routes/usage.js";
-import { resultsRouter } from "./routes/results.js";
-import { discoveryRouter } from "./routes/discovery.js";
-import { observationsRouter } from "./routes/observations.js";
-import { detectionsRouter } from "./routes/detections.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { autoMigrate } from "./auto-migrate.js";
+import { getDb } from "@og/db";
 
 import type { DashboardMode } from "@og/shared";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const app = express();
-const PORT = parseInt(process.env.PORT || process.env.API_PORT || "53667", 10);
-const DASHBOARD_MODE = (process.env.DASHBOARD_MODE || "selfhosted") as DashboardMode;
-const LOCAL_MODE = process.env.LOCAL_MODE === "true";
 
-// Generate or reuse local session token for local mode (no auth required, single-user)
-if (LOCAL_MODE && !LOCAL_SESSION_TOKEN) {
-  const tokenDir = join(homedir(), ".openclaw", "credentials", "moltguard");
-  const tokenFile = join(tokenDir, "dashboard-session-token");
+// =============================================================================
+// Types
+// =============================================================================
 
-  let localToken: string | null = null;
+export interface DashboardOptions {
+  port?: number;
+  localMode?: boolean;
+  localToken?: string;
+  dashboardMode?: DashboardMode;
+  webOutDir?: string;
+  dataDir?: string;
+  coreUrl?: string;
+  webOrigin?: string;
+}
 
-  // Try to reuse existing token (important for dev mode: tsx watch restarts)
-  if (existsSync(tokenFile)) {
-    try {
-      const data = JSON.parse(readFileSync(tokenFile, "utf-8"));
-      if (data.token && typeof data.token === "string") {
-        localToken = data.token;
-        console.log(`[dashboard] Local mode: reusing existing token`);
-      }
-    } catch {
-      // Ignore parse errors, will generate new token
+// =============================================================================
+// Dashboard App Factory
+// =============================================================================
+
+/**
+ * Create and configure the Dashboard Express app
+ * Routes are loaded dynamically after database is initialized
+ */
+export async function createDashboardApp(options: DashboardOptions = {}): Promise<Express> {
+  const {
+    localMode = false,
+    localToken,
+    dashboardMode = "selfhosted",
+    webOutDir,
+    webOrigin = "http://localhost:53668",
+  } = options;
+
+  const app = express();
+
+  // Set up local session token if provided
+  if (localMode && localToken) {
+    setLocalSessionToken(localToken);
+  }
+
+  app.use(helmet({ contentSecurityPolicy: false }));
+  app.use(cors({
+    origin: dashboardMode === "embedded" ? true : webOrigin,
+    credentials: true,
+  }));
+  // Skip morgan in embedded mode to reduce noise
+  if (dashboardMode !== "embedded") {
+    const morgan = (await import("morgan")).default;
+    app.use(morgan("short"));
+  }
+  app.use(express.json());
+
+  // Rewrite /dashboard/api/* to /api/* for embedded mode
+  app.use((req, _res, next) => {
+    if (req.path.startsWith("/dashboard/api/")) {
+      req.url = req.url.replace("/dashboard/api/", "/api/");
+    }
+    next();
+  });
+
+  // Public routes
+  app.get("/health", (_req, res) => {
+    res.json({ status: "ok", service: "openguardrails-api", timestamp: new Date().toISOString() });
+  });
+  app.use("/api/auth", authRouter);
+
+  // Serve static web app in embedded mode (before auth middleware)
+  if (dashboardMode === "embedded" && webOutDir) {
+    const resolvedWebDir = resolve(webOutDir);
+    console.log(`[dashboard] Serving static files from: ${resolvedWebDir}`);
+    if (existsSync(resolvedWebDir)) {
+      app.use(express.static(resolvedWebDir, { extensions: ["html"], index: ["index.html"] }));
+      app.use("/dashboard", express.static(resolvedWebDir, { extensions: ["html"], index: ["index.html"] }));
+      // SPA fallback
+      app.use((req, res, next) => {
+        if (req.path.startsWith("/api/")) return next();
+        if (/\.(js|css|svg|png|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|map)$/i.test(req.path)) {
+          return next();
+        }
+        const indexPath = join(resolvedWebDir, "index.html");
+        if (existsSync(indexPath)) {
+          res.sendFile(indexPath);
+        } else {
+          next();
+        }
+      });
     }
   }
 
-  // Generate new token if none exists
-  if (!localToken) {
-    localToken = crypto.randomBytes(16).toString("hex");
-    console.log(`[dashboard] Local mode: generated new token`);
-  }
+  // Session-protected routes - loaded dynamically after db is initialized
+  app.use(sessionAuth);
 
-  setLocalSessionToken(localToken);
+  // Dynamic imports to ensure db is initialized before routes load
+  const { settingsRouter } = await import("./routes/settings.js");
+  const { agentsRouter } = await import("./routes/agents.js");
+  const { scannersRouter } = await import("./routes/scanners.js");
+  const { policiesRouter } = await import("./routes/policies.js");
+  const { detectionRouter } = await import("./routes/detection.js");
+  const { usageRouter } = await import("./routes/usage.js");
+  const { resultsRouter } = await import("./routes/results.js");
+  const { discoveryRouter } = await import("./routes/discovery.js");
+  const { observationsRouter } = await import("./routes/observations.js");
+  const { detectionsRouter } = await import("./routes/detections.js");
+  const { gatewayRouter } = await import("./routes/gateway.js");
 
-  // Save token to file for /og_dashboard to read
-  try {
-    mkdirSync(tokenDir, { recursive: true });
-    writeFileSync(tokenFile, JSON.stringify({ token: localToken, port: PORT }));
-  } catch {
-    // Ignore file errors
-  }
+  app.use("/api/settings", settingsRouter);
+  app.use("/api/agents", agentsRouter);
+  app.use("/api/scanners", scannersRouter);
+  app.use("/api/policies", policiesRouter);
+  app.use("/api/detect", detectionRouter);
+  app.use("/api/usage", usageRouter);
+  app.use("/api/results", resultsRouter);
+  app.use("/api/discovery", discoveryRouter);
+  app.use("/api/observations", observationsRouter);
+  app.use("/api/detections", detectionsRouter);
+  app.use("/api/gateway", gatewayRouter);
+
+  app.use(errorHandler);
+
+  return app;
 }
 
-app.use(helmet({ contentSecurityPolicy: false }));
-app.use(cors({
-  origin: DASHBOARD_MODE === "embedded" ? true : (process.env.WEB_ORIGIN || "http://localhost:53668"),
-  credentials: true,
-}));
-app.use(morgan("short"));
-app.use(express.json());
+// =============================================================================
+// Dashboard Startup
+// =============================================================================
 
-// Rewrite /dashboard/api/* to /api/* for embedded mode
-// (frontend uses BASE_URL=/dashboard, but API routes are at /api/*)
-app.use((req, _res, next) => {
-  if (req.path.startsWith("/dashboard/api/")) {
-    req.url = req.url.replace("/dashboard/api/", "/api/");
+let dashboardRunning = false;
+let dashboardPort: number | null = null;
+let dashboardServer: Server | null = null;
+
+export interface DashboardInstance {
+  port: number;
+  token: string;
+  close: () => Promise<void>;
+}
+
+/**
+ * Start the Dashboard server (in-process)
+ */
+export async function startDashboard(options: DashboardOptions = {}): Promise<DashboardInstance> {
+  const port = options.port || parseInt(process.env.PORT || process.env.API_PORT || "53667", 10);
+  const localMode = options.localMode ?? (process.env.LOCAL_MODE === "true");
+  const dashboardMode = options.dashboardMode || (process.env.DASHBOARD_MODE as DashboardMode) || "selfhosted";
+  const dataDir = options.dataDir || process.env.DASHBOARD_DATA_DIR;
+
+  // Set environment variables for database and other modules
+  if (dataDir) {
+    process.env.DASHBOARD_DATA_DIR = dataDir;
   }
-  next();
-});
+  if (options.coreUrl) {
+    process.env.OG_CORE_URL = options.coreUrl;
+  }
 
-// Public routes
-app.get("/health", (_req, res) => {
-  res.json({ status: "ok", service: "openguardrails-api", timestamp: new Date().toISOString() });
-});
-app.use("/api/auth", authRouter); // /request, /verify/:token, /me, /logout
+  // Generate or reuse token
+  let token = options.localToken || "";
+  if (localMode && !token) {
+    const tokenDir = join(homedir(), ".openclaw", "credentials", "moltguard");
+    const tokenFile = join(tokenDir, "dashboard-session-token");
 
-// Serve static web app in embedded mode (before auth middleware)
-if (DASHBOARD_MODE === "embedded") {
-  // Check WEB_OUT_DIR env var first (for bundled mode), then relative paths
-  const webOutPaths = [
-    process.env.WEB_OUT_DIR,  // Bundled mode: set by dashboard-launcher.ts
-    join(__dirname, "..", "..", "web", "out"),  // Dev mode: relative path
-  ].filter(Boolean) as string[];
-  // Resolve to absolute path (required for sendFile)
-  const webOutDir = webOutPaths.map((p) => resolve(p)).find((p) => existsSync(p));
-  if (webOutDir) {
-    // Serve static files at both root and /dashboard paths
-    app.use(express.static(webOutDir, { extensions: ["html"] }));
-    app.use("/dashboard", express.static(webOutDir, { extensions: ["html"] }));
-    // SPA fallback: serve index.html for non-API, non-static routes
-    app.use((req, res, next) => {
-      // Skip API routes
-      if (req.path.startsWith("/api/")) return next();
-      // Skip static assets (let express.static handle them or 404)
-      if (/\.(js|css|svg|png|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|map)$/i.test(req.path)) {
-        return next();
+    // Try to reuse existing token
+    if (existsSync(tokenFile)) {
+      try {
+        const data = JSON.parse(readFileSync(tokenFile, "utf-8"));
+        if (data.token && typeof data.token === "string") {
+          token = data.token;
+        }
+      } catch {
+        // Generate new
       }
-      const indexPath = join(webOutDir, "index.html");
-      if (existsSync(indexPath)) {
-        res.sendFile(indexPath);
-      } else {
-        next();
-      }
+    }
+
+    if (!token) {
+      token = crypto.randomBytes(16).toString("hex");
+    }
+
+    // Save token to file
+    try {
+      mkdirSync(tokenDir, { recursive: true });
+      writeFileSync(tokenFile, JSON.stringify({ token, port }));
+    } catch {
+      // Ignore
+    }
+  }
+
+  // Determine webOutDir
+  let webOutDir = options.webOutDir || process.env.WEB_OUT_DIR;
+  if (!webOutDir && dashboardMode === "embedded") {
+    // Try relative paths
+    const candidates = [
+      join(__dirname, "..", "..", "web", "out"),
+    ];
+    webOutDir = candidates.find((p) => existsSync(p));
+  }
+
+  // Auto-migrate database (this also initializes the db connection)
+  await autoMigrate();
+
+  // Initialize db for routes that use it
+  await getDb();
+
+  // Create and start app (routes loaded dynamically inside)
+  const app = await createDashboardApp({
+    port,
+    localMode,
+    localToken: token,
+    dashboardMode,
+    webOutDir,
+    dataDir,
+    coreUrl: options.coreUrl,
+  });
+
+  // Create server and attach error handler BEFORE calling listen
+  // This ensures we catch EADDRINUSE errors properly
+  dashboardServer = createServer(app);
+
+  return new Promise((resolve, reject) => {
+    // Attach error handler FIRST
+    dashboardServer!.on("error", (err) => {
+      dashboardServer = null;
+      reject(err);
     });
-  }
+
+    // Now start listening
+    dashboardServer!.listen(port, () => {
+      dashboardRunning = true;
+      dashboardPort = port;
+      console.log(`[dashboard] Running on port ${port} (${dashboardMode} mode)`);
+      resolve({
+        port,
+        token,
+        close: async () => {
+          return new Promise((resolveClose) => {
+            if (dashboardServer) {
+              dashboardServer.close(() => {
+                dashboardRunning = false;
+                dashboardPort = null;
+                dashboardServer = null;
+                console.log("[dashboard] Server closed");
+                resolveClose();
+              });
+            } else {
+              resolveClose();
+            }
+          });
+        },
+      });
+    });
+  });
 }
 
-// Session-protected routes
-app.use(sessionAuth);
-app.use("/api/settings", settingsRouter);
-app.use("/api/agents", agentsRouter);
-app.use("/api/scanners", scannersRouter);
-app.use("/api/policies", policiesRouter);
-app.use("/api/detect", detectionRouter);
-app.use("/api/usage", usageRouter);
-app.use("/api/results", resultsRouter);
-app.use("/api/discovery", discoveryRouter);
-app.use("/api/observations", observationsRouter);
-app.use("/api/detections", detectionsRouter);
+/**
+ * Stop the Dashboard server
+ */
+export async function stopDashboard(): Promise<void> {
+  return new Promise((resolve) => {
+    if (dashboardServer) {
+      dashboardServer.close(() => {
+        dashboardRunning = false;
+        dashboardPort = null;
+        dashboardServer = null;
+        console.log("[dashboard] Server closed");
+        resolve();
+      });
+    } else {
+      resolve();
+    }
+  });
+}
 
-app.use(errorHandler);
+/**
+ * Check if Dashboard is running
+ */
+export function isDashboardRunning(): boolean {
+  return dashboardRunning;
+}
 
-// Auto-migrate database before starting server
-await autoMigrate();
+/**
+ * Get Dashboard port
+ */
+export function getDashboardPort(): number | null {
+  return dashboardPort;
+}
 
-app.listen(PORT, () => {
-  console.log(`OpenGuardrails API running on port ${PORT}`);
-  console.log(`DashboardMode: ${DASHBOARD_MODE}`);
-  if (LOCAL_MODE && LOCAL_SESSION_TOKEN) {
-    console.log(`Local URL: http://localhost:${PORT}?token=${LOCAL_SESSION_TOKEN}`);
-  } else {
-    console.log(`Auth: POST /api/auth/request — send magic link`);
-  }
-});
+// =============================================================================
+// Standalone execution (when run directly with node/tsx)
+// =============================================================================
+
+// Check if this module is being run directly (not imported)
+// Must match the full path, not just filename, to avoid false positives when imported by other modules
+const isMainModule = (() => {
+  if (!process.argv[1]) return false;
+  const mainPath = process.argv[1];
+  const thisPath = import.meta.url.replace("file://", "");
+  // Only run standalone code if this exact file is the entry point
+  return mainPath === thisPath ||
+    mainPath.replace(/\.ts$/, ".js") === thisPath ||
+    thisPath.endsWith(mainPath);
+})();
+
+if (isMainModule) {
+  const PORT = parseInt(process.env.PORT || process.env.API_PORT || "53667", 10);
+  const DASHBOARD_MODE = (process.env.DASHBOARD_MODE || "selfhosted") as DashboardMode;
+  const LOCAL_MODE = process.env.LOCAL_MODE === "true";
+
+  startDashboard({
+    port: PORT,
+    localMode: LOCAL_MODE,
+    dashboardMode: DASHBOARD_MODE,
+    webOutDir: process.env.WEB_OUT_DIR,
+    dataDir: process.env.DASHBOARD_DATA_DIR,
+    coreUrl: process.env.OG_CORE_URL,
+  }).then(({ port, token }) => {
+    if (LOCAL_MODE && token) {
+      console.log(`Local URL: http://localhost:${port}?token=${token}`);
+    } else {
+      console.log(`Auth: POST /api/auth/request — send magic link`);
+    }
+  });
+}

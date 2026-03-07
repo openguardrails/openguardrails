@@ -17,6 +17,7 @@ export const policies = mod.policies;
 export const usageLogs = mod.usageLogs;
 export const detectionResults = mod.detectionResults;
 export const toolCallObservations = mod.toolCallObservations;
+export const gatewayActivity = mod.gatewayActivity;
 export const agentPermissions = mod.agentPermissions;
 export const magicLinks = mod.magicLinks;
 export const userSessions = mod.userSessions;

@@ -9,8 +9,8 @@
 
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { loadConfig, validateConfig } from "./config.js";
-import type { GatewayConfig } from "./types.js";
+import { loadConfig, validateConfig, findBackendByApiKey, findDefaultBackend, findBackendByPathPrefix, getBackendApiType } from "./config.js";
+import type { GatewayConfig, BackendConfig, ApiType } from "./types.js";
 import { handleAnthropicRequest } from "./handlers/anthropic.js";
 import { handleOpenAIRequest } from "./handlers/openai.js";
 import { handleGeminiRequest } from "./handlers/gemini.js";
@@ -19,6 +19,61 @@ import { handleModelsRequest } from "./handlers/models.js";
 const GATEWAY_MODE = process.env.GATEWAY_MODE || "selfhosted";
 
 let config: GatewayConfig;
+let currentServer: ReturnType<typeof createServer> | null = null;
+
+/**
+ * Extract API key from request headers
+ */
+function extractApiKey(req: IncomingMessage): string | null {
+  // Try x-api-key header (Anthropic style)
+  const xApiKey = req.headers["x-api-key"];
+  if (xApiKey && typeof xApiKey === "string") {
+    return xApiKey;
+  }
+
+  // Try Authorization: Bearer (OpenAI style)
+  const auth = req.headers["authorization"];
+  if (auth && typeof auth === "string" && auth.startsWith("Bearer ")) {
+    return auth.slice(7);
+  }
+
+  // Try x-goog-api-key (Gemini style)
+  const googKey = req.headers["x-goog-api-key"];
+  if (googKey && typeof googKey === "string") {
+    return googKey;
+  }
+
+  return null;
+}
+
+/**
+ * Resolve backend for a request based on path prefix, API key, or defaults
+ * Priority: pathPrefix > apiKey > defaultBackend
+ */
+function resolveBackend(
+  req: IncomingMessage,
+  apiType: ApiType,
+): { name: string; backend: BackendConfig } | null {
+  const url = req.url || "";
+
+  // 1. Try to find backend by path prefix (most specific)
+  const byPath = findBackendByPathPrefix(url, config);
+  if (byPath) {
+    return byPath;
+  }
+
+  // 2. Try to find backend by API key
+  const apiKey = extractApiKey(req);
+  if (apiKey) {
+    const byKey = findBackendByApiKey(apiKey, config);
+    if (byKey) {
+      return byKey;
+    }
+  }
+
+  // 3. Fall back to default backend for the API type
+  return findDefaultBackend(apiType, config);
+}
 
 /**
  * Main request handler
@@ -29,8 +84,10 @@ async function handleRequest(
 ): Promise<void> {
   const { method, url } = req;
 
-  // Log request
-  console.log(`[ai-security-gateway] ${method} ${url}`);
+  // Log request (skip health checks to reduce noise)
+  if (url !== "/health") {
+    console.log(`[ai-security-gateway] ${method} ${url}`);
+  }
 
   // CORS headers (for browser-based clients)
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -64,48 +121,71 @@ async function handleRequest(
     return;
   }
 
-  // Route to appropriate handler
+  // Route to appropriate handler based on path suffix
+  // This allows flexible path prefixes (e.g., /v1/coding/chat/completions)
   try {
-    if (url === "/v1/messages") {
-      // Anthropic Messages API
-      await handleAnthropicRequest(req, res, config);
-    } else if (url === "/v1/chat/completions") {
+    if (url?.endsWith("/messages")) {
+      // Anthropic Messages API (matches /v1/messages, /v1/xxx/messages, etc.)
+      const resolved = resolveBackend(req, "anthropic");
+      if (!resolved) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "No Anthropic-compatible backend configured" }));
+        return;
+      }
+      await handleAnthropicRequest(req, res, resolved.backend);
+    } else if (url?.endsWith("/chat/completions")) {
       // OpenAI/OpenRouter Chat Completions API
-      // Priority: explicit routing config > openrouter backend > openai backend
-      const explicitBackend = config.routing?.["/v1/chat/completions"];
-      if (explicitBackend === "openrouter" || (!explicitBackend && config.backends.openrouter)) {
-        const backend = config.backends.openrouter;
-        if (!backend) {
-          res.writeHead(500, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "No OpenRouter backend configured" }));
-          return;
+      // Try to extract backend name from URL: /backend/{name}/chat/completions
+      const backendMatch = url.match(/^\/backend\/([^/]+)\//);
+      let resolved: { name: string; backend: BackendConfig } | null = null;
+
+      if (backendMatch) {
+        const backendName = backendMatch[1];
+        const backend = config.backends[backendName];
+        if (backend) {
+          resolved = { name: backendName, backend };
+          console.log(`[ai-security-gateway] Backend from URL: ${backendName}`);
         }
-        const extraHeaders: Record<string, string> = {};
-        if (backend.referer) {
-          extraHeaders["HTTP-Referer"] = backend.referer;
-        }
-        if (backend.title) {
-          extraHeaders["X-Title"] = backend.title;
-        }
-        await handleOpenAIRequest(req, res, backend, extraHeaders);
-      } else if (explicitBackend === "openai" || (!explicitBackend && config.backends.openai)) {
-        const backend = config.backends.openai;
-        if (!backend) {
-          res.writeHead(500, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "No OpenAI backend configured" }));
-          return;
-        }
-        await handleOpenAIRequest(req, res, backend);
-      } else {
+      }
+
+      // Fallback to path prefix or default
+      if (!resolved) {
+        resolved = resolveBackend(req, "openai");
+        console.log(`[ai-security-gateway] Resolved backend: ${resolved?.name}`);
+      }
+
+      // Check explicit routing config
+      const explicitBackendName = config.routing?.["/v1/chat/completions"];
+      const backend = explicitBackendName
+        ? config.backends[explicitBackendName]
+        : resolved?.backend;
+
+      if (!backend) {
         res.writeHead(500, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "No OpenAI-compatible backend configured" }));
+        return;
       }
-    } else if (url?.match(/^\/v1\/models\/(.+):generateContent$/)) {
-      // Gemini API
-      const match = url.match(/^\/v1\/models\/(.+):generateContent$/);
+
+      const extraHeaders: Record<string, string> = {};
+      if (backend.referer) {
+        extraHeaders["HTTP-Referer"] = backend.referer;
+      }
+      if (backend.title) {
+        extraHeaders["X-Title"] = backend.title;
+      }
+      await handleOpenAIRequest(req, res, backend, extraHeaders);
+    } else if (url?.match(/\/models\/(.+):generateContent$/)) {
+      // Gemini API (matches any path ending with /models/{model}:generateContent)
+      const match = url.match(/\/models\/(.+):generateContent$/);
       const modelName = match?.[1];
       if (modelName) {
-        await handleGeminiRequest(req, res, config, modelName);
+        const resolved = resolveBackend(req, "gemini");
+        if (!resolved) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "No Gemini backend configured" }));
+          return;
+        }
+        await handleGeminiRequest(req, res, resolved.backend, modelName);
       } else {
         res.writeHead(404, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Model name required" }));
@@ -128,9 +208,42 @@ async function handleRequest(
 }
 
 /**
- * Start gateway server
+ * Stop the gateway server
  */
-export function startGateway(configPath?: string): void {
+export function stopGateway(): Promise<void> {
+  return new Promise((resolve) => {
+    if (currentServer) {
+      currentServer.close(() => {
+        currentServer = null;
+        console.log("[ai-security-gateway] Server stopped");
+        resolve();
+      });
+    } else {
+      resolve();
+    }
+  });
+}
+
+/**
+ * Check if gateway is running
+ */
+export function isGatewayServerRunning(): boolean {
+  return currentServer !== null;
+}
+
+/**
+ * Start gateway server
+ * @param configPath - Path to config file
+ * @param embedded - If true, don't call process.exit on errors (for in-process use)
+ */
+export function startGateway(configPath?: string, embedded = false): void {
+  // Stop existing server if running
+  if (currentServer) {
+    console.log("[ai-security-gateway] Stopping existing server for restart...");
+    currentServer.close();
+    currentServer = null;
+  }
+
   try {
     // Load and validate configuration
     config = loadConfig(configPath);
@@ -140,11 +253,12 @@ export function startGateway(configPath?: string): void {
     console.log(`  Mode: ${GATEWAY_MODE}`);
     console.log(`  Port: ${config.port}`);
     console.log(
-      `  Backends: ${Object.keys(config.backends).join(", ")}`,
+      `  Backends: ${Object.keys(config.backends).join(", ") || "(none)"}`,
     );
 
     // Create HTTP server
     const server = createServer(handleRequest);
+    currentServer = server;
 
     // Start listening
     server.listen(config.port, "127.0.0.1", () => {
@@ -161,32 +275,53 @@ export function startGateway(configPath?: string): void {
       console.log(`  GET  http://127.0.0.1:${config.port}/health - Health check`);
     });
 
-    // Handle shutdown
-    process.on("SIGINT", () => {
-      console.log("\n[ai-security-gateway] Shutting down...");
-      server.close(() => {
-        console.log("[ai-security-gateway] Server stopped");
-        process.exit(0);
+    // Only register shutdown handlers if not embedded
+    if (!embedded) {
+      // Handle shutdown
+      process.on("SIGINT", () => {
+        console.log("\n[ai-security-gateway] Shutting down...");
+        server.close(() => {
+          console.log("[ai-security-gateway] Server stopped");
+          process.exit(0);
+        });
       });
-    });
 
-    process.on("SIGTERM", () => {
-      console.log("\n[ai-security-gateway] Shutting down...");
-      server.close(() => {
-        console.log("[ai-security-gateway] Server stopped");
-        process.exit(0);
+      process.on("SIGTERM", () => {
+        console.log("\n[ai-security-gateway] Shutting down...");
+        server.close(() => {
+          console.log("[ai-security-gateway] Server stopped");
+          process.exit(0);
+        });
       });
-    });
+    }
   } catch (error) {
     console.error("[ai-security-gateway] Failed to start:", error);
-    process.exit(1);
+    currentServer = null;
+    if (!embedded) {
+      process.exit(1);
+    }
+    // In embedded mode, just throw the error so the caller can handle it
+    throw error;
   }
 }
 
 // Re-export for programmatic use
 export { sanitize, sanitizeMessages } from "./sanitizer.js";
 export { restore, restoreJSON, restoreSSELine } from "./restorer.js";
-export type { GatewayConfig, MappingTable, SanitizeResult, EntityMatch } from "./types.js";
+export {
+  addActivityListener,
+  removeActivityListener,
+  clearActivityListeners,
+} from "./activity.js";
+// stopGateway and isGatewayServerRunning are already exported above
+export type {
+  GatewayConfig,
+  MappingTable,
+  SanitizeResult,
+  EntityMatch,
+  GatewayActivityEvent,
+  ActivityListener,
+} from "./types.js";
 
 // Start if run directly
 if (import.meta.url === `file://${process.argv[1]}`) {

@@ -1,32 +1,31 @@
 import type { ServerResponse } from "node:http";
 import type { GatewayConfig } from "../types.js";
+import { findDefaultBackend, getBackendApiType } from "../config.js";
 
 export async function handleModelsRequest(
   res: ServerResponse,
   config: GatewayConfig,
 ): Promise<void> {
   try {
-    let modelsUrl: string;
-    let headers: Record<string, string> = {};
-
-    if (config.backends.openrouter) {
-      modelsUrl = `${config.backends.openrouter.baseUrl}/v1/models`;
-      headers = {
-        "Authorization": `Bearer ${config.backends.openrouter.apiKey}`,
-      };
-      if (config.backends.openrouter.referer) {
-        headers["HTTP-Referer"] = config.backends.openrouter.referer;
-      }
-      if (config.backends.openrouter.title) {
-        headers["X-Title"] = config.backends.openrouter.title;
-      }
-    } else if (config.backends.openai) {
-      modelsUrl = `${config.backends.openai.baseUrl}/v1/models`;
-      headers = { "Authorization": `Bearer ${config.backends.openai.apiKey}` };
-    } else {
+    // Find an OpenAI-compatible backend for models listing
+    const resolved = findDefaultBackend("openai", config);
+    if (!resolved) {
       res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "No OpenAI-compatible backend configured" }));
       return;
+    }
+
+    const { backend } = resolved;
+    const modelsUrl = `${backend.baseUrl}/v1/models`;
+    const headers: Record<string, string> = {
+      "Authorization": `Bearer ${backend.apiKey}`,
+    };
+
+    if (backend.referer) {
+      headers["HTTP-Referer"] = backend.referer;
+    }
+    if (backend.title) {
+      headers["X-Title"] = backend.title;
     }
 
     const response = await fetch(modelsUrl, { headers });

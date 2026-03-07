@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { Home, Bot, Activity, Shield, Key, Settings } from "lucide-react";
+import { Home, Bot, Activity, Shield, Key, Settings, ShieldCheck } from "lucide-react";
 import type { ReactNode } from "react";
 
 interface NavItem {
@@ -13,6 +13,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Agents", to: "/agents", icon: <Bot size={18} /> },
   { label: "Activity", to: "/activity", icon: <Activity size={18} /> },
   { label: "Security", to: "/security", icon: <Shield size={18} /> },
+  { label: "Gateway", to: "/gateway", icon: <ShieldCheck size={18} /> },
   { label: "Secrets", to: "/secrets", icon: <Key size={18} /> },
   { label: "Settings", to: "/settings", icon: <Settings size={18} /> },
 ];

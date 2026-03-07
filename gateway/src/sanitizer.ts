@@ -1,171 +1,207 @@
 /**
- * AI Security Gateway - Content sanitizer
+ * AI Security Gateway - Content Sanitizer
  *
- * Recursively processes message structures, replaces sensitive data with
- * numbered placeholders, and returns a mapping table for restoration.
+ * Sanitizes sensitive data in a single request-response cycle.
+ * Placeholder format: __PII_<ENTITY_TYPE>_<SERIAL_ID>__
  */
 
-import type { SanitizeResult, MappingTable, EntityMatch } from "./types.js";
+import type { SanitizeResult, MappingTable } from "./types.js";
 
 // =============================================================================
-// Entity Definitions
+// Entity Types
 // =============================================================================
 
-type Entity = {
-  category: string;
-  categoryKey: string; // Used for numbered placeholders: __email_1__, __email_2__
+type EntityType =
+  | "EMAIL_ADDRESS"
+  | "URL_ADDRESS"
+  | "PHONE_NUMBER"
+  | "BANK_NUMBER"
+  | "PRIVATE_KEY"
+  | "PASSWORD"
+  | "VERIFICATION_CODE"
+  | "API_KEY"
+  | "IP_ADDRESS"
+  | "SSN"
+  | "CREDIT_CARD";
+
+type EntityPattern = {
+  type: EntityType;
   pattern: RegExp;
+  score: number;
+  captureGroup?: number;
 };
 
-const ENTITIES: Entity[] = [
-  // URLs (must come before email to avoid partial matches)
+// =============================================================================
+// Detection Patterns
+// =============================================================================
+
+const ENTITY_PATTERNS: EntityPattern[] = [
+  // PEM Private Keys
   {
-    category: "URL",
-    categoryKey: "url",
-    pattern: /https?:\/\/[^\s<>"{}|\\^`\[\]]+/g,
+    type: "PRIVATE_KEY",
+    pattern: /-----BEGIN (?:OPENSSH |RSA |EC |DSA )?PRIVATE KEY-----[\s\S]*?-----END (?:OPENSSH |RSA |EC |DSA )?PRIVATE KEY-----/g,
+    score: 0.95,
   },
-  // Email
+  // Email addresses
   {
-    category: "EMAIL",
-    categoryKey: "email",
-    pattern: /[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g,
+    type: "EMAIL_ADDRESS",
+    pattern: /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g,
+    score: 0.90,
   },
-  // Credit Card (4 groups of 4 digits)
+  // URLs
   {
-    category: "CREDIT_CARD",
-    categoryKey: "credit_card",
+    type: "URL_ADDRESS",
+    pattern: /https?:\/\/[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]+/g,
+    score: 0.80,
+  },
+  // Known API key prefixes
+  {
+    type: "API_KEY",
+    pattern: /\b(?:sk-[A-Za-z0-9]{20,}|sk_(?:live|test)_[A-Za-z0-9]{20,}|pk_(?:live|test)_[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{36,}|gho_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,}|AKIA[A-Z0-9]{16}|xox[baprs]-[A-Za-z0-9-]+|SG\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+|hf_[A-Za-z0-9]{30,})\b/g,
+    score: 0.90,
+  },
+  // Bearer tokens
+  {
+    type: "API_KEY",
+    pattern: /Bearer\s+[A-Za-z0-9\-_.~+/]{20,}={0,3}/g,
+    score: 0.85,
+  },
+  // Hex private keys (64 hex chars)
+  {
+    type: "PRIVATE_KEY",
+    pattern: /\b[0-9a-fA-F]{64}\b/g,
+    score: 0.75,
+  },
+  // Labeled password patterns
+  {
+    type: "PASSWORD",
+    pattern: /(?:password|passwd|pwd|pass|passcode)\s*[:=]\s*["']?(\S+)["']?/gi,
+    score: 0.80,
+    captureGroup: 1,
+  },
+  // Labeled API key patterns
+  {
+    type: "API_KEY",
+    pattern: /(?:api[_-]?key|apikey|secret[_-]?key|access[_-]?token|auth[_-]?token)\s*[:=]\s*["']?([A-Za-z0-9\-_.~+/]{16,})["']?/gi,
+    score: 0.85,
+    captureGroup: 1,
+  },
+  // Phone numbers
+  {
+    type: "PHONE_NUMBER",
+    pattern: /\+?\d{1,3}[-.\s]?\(?\d{2,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,4}/g,
+    score: 0.70,
+  },
+  // Credit card numbers
+  {
+    type: "CREDIT_CARD",
     pattern: /\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b/g,
+    score: 0.85,
   },
-  // Bank Card (Chinese format: 16-19 digits)
+  // Bank account numbers
   {
-    category: "BANK_CARD",
-    categoryKey: "bank_card",
-    pattern: /\b\d{16,19}\b/g,
+    type: "BANK_NUMBER",
+    pattern: /\b\d{12,19}\b/g,
+    score: 0.60,
   },
-  // SSN (###-##-####)
+  // SSN
   {
-    category: "SSN",
-    categoryKey: "ssn",
+    type: "SSN",
     pattern: /\b\d{3}-\d{2}-\d{4}\b/g,
+    score: 0.85,
   },
-  // IBAN
+  // IP addresses
   {
-    category: "IBAN",
-    categoryKey: "iban",
-    pattern: /\b[A-Z]{2}\d{2}[A-Z0-9]{4}\d{7}[A-Z0-9]{0,16}\b/g,
+    type: "IP_ADDRESS",
+    pattern: /\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b/g,
+    score: 0.70,
   },
-  // IP Address
+  // Labeled verification codes
   {
-    category: "IP_ADDRESS",
-    categoryKey: "ip",
-    pattern: /\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b/g,
-  },
-  // Phone numbers (US/intl formats, including +86-xxx-xxxx-xxxx)
-  {
-    category: "PHONE",
-    categoryKey: "phone",
-    pattern: /[+]?[0-9]{1,3}?[-\s.]?[(]?[0-9]{3}[)]?[-\s.][0-9]{3,4}[-\s.][0-9]{4,6}\b/g,
+    type: "VERIFICATION_CODE",
+    pattern: /(?:verification\s*code|verify\s*code|otp|2fa\s*code|auth(?:entication)?\s*code)\s*[:=\-]?\s*([A-Za-z0-9]{4,12})/gi,
+    score: 0.80,
+    captureGroup: 1,
   },
 ];
-
-// Known secret prefixes
-const SECRET_PREFIXES = [
-  "sk-",
-  "sk_",
-  "pk_",
-  "ghp_",
-  "AKIA",
-  "xox",
-  "SG.",
-  "hf_",
-  "api-",
-  "token-",
-  "secret-",
-];
-
-const BEARER_PATTERN = /Bearer\s+[A-Za-z0-9\-_.~+/]+=*/g;
-
-const SECRET_PREFIX_PATTERN = new RegExp(
-  `(?:${SECRET_PREFIXES.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})[A-Za-z0-9\\-_.~+/]{8,}=*`,
-  "g",
-);
-
-// =============================================================================
-// Shannon Entropy
-// =============================================================================
-
-function shannonEntropy(s: string): number {
-  if (s.length === 0) return 0;
-  const freq = new Map<string, number>();
-  for (const ch of s) {
-    freq.set(ch, (freq.get(ch) ?? 0) + 1);
-  }
-  let entropy = 0;
-  for (const count of freq.values()) {
-    const p = count / s.length;
-    entropy -= p * Math.log2(p);
-  }
-  return entropy;
-}
 
 // =============================================================================
 // Match Collection
 // =============================================================================
 
-function collectMatches(content: string): EntityMatch[] {
-  const matches: EntityMatch[] = [];
+type MatchWithMeta = {
+  originalText: string;
+  type: EntityType;
+  score: number;
+  start: number;
+  end: number;
+};
 
-  // Regex-based entities
-  for (const entity of ENTITIES) {
+function collectMatches(content: string): MatchWithMeta[] {
+  const matches: MatchWithMeta[] = [];
+
+  for (const entity of ENTITY_PATTERNS) {
     entity.pattern.lastIndex = 0;
     let m: RegExpExecArray | null;
+
     while ((m = entity.pattern.exec(content)) !== null) {
+      let matchedText: string;
+      let start: number;
+
+      if (entity.captureGroup !== undefined && m[entity.captureGroup]) {
+        matchedText = m[entity.captureGroup];
+        start = m.index + m[0].indexOf(matchedText);
+      } else {
+        matchedText = m[0];
+        start = m.index;
+      }
+
       matches.push({
-        originalText: m[0],
-        category: entity.categoryKey,
-        placeholder: "", // Will be set later with numbering
-      });
-    }
-  }
-
-  // Secret prefixes
-  SECRET_PREFIX_PATTERN.lastIndex = 0;
-  let m: RegExpExecArray | null;
-  while ((m = SECRET_PREFIX_PATTERN.exec(content)) !== null) {
-    matches.push({
-      originalText: m[0],
-      category: "secret",
-      placeholder: "",
-    });
-  }
-
-  // Bearer tokens
-  BEARER_PATTERN.lastIndex = 0;
-  while ((m = BEARER_PATTERN.exec(content)) !== null) {
-    matches.push({
-      originalText: m[0],
-      category: "secret",
-      placeholder: "",
-    });
-  }
-
-  // High-entropy tokens
-  const tokenPattern = /\b[A-Za-z0-9\-_.~+/]{20,}={0,3}\b/g;
-  tokenPattern.lastIndex = 0;
-  while ((m = tokenPattern.exec(content)) !== null) {
-    const token = m[0];
-    if (matches.some((existing) => existing.originalText === token)) continue;
-    if (/^[a-z]+$/.test(token)) continue;
-    if (shannonEntropy(token) >= 4.0) {
-      matches.push({
-        originalText: token,
-        category: "secret",
-        placeholder: "",
+        originalText: matchedText,
+        type: entity.type,
+        score: entity.score,
+        start,
+        end: start + matchedText.length,
       });
     }
   }
 
   return matches;
+}
+
+// =============================================================================
+// Span Merging
+// =============================================================================
+
+function mergeSpans(matches: MatchWithMeta[]): MatchWithMeta[] {
+  if (matches.length === 0) return [];
+
+  matches.sort((a, b) => {
+    if (a.start !== b.start) return a.start - b.start;
+    const lenDiff = (b.end - b.start) - (a.end - a.start);
+    if (lenDiff !== 0) return lenDiff;
+    return b.score - a.score;
+  });
+
+  const merged: MatchWithMeta[] = [];
+  let current = matches[0];
+
+  for (let i = 1; i < matches.length; i++) {
+    const next = matches[i];
+    if (next.start < current.end) {
+      const currentLen = current.end - current.start;
+      const nextLen = next.end - next.start;
+      if (next.score > current.score || (next.score === current.score && nextLen > currentLen)) {
+        current = next;
+      }
+    } else {
+      merged.push(current);
+      current = next;
+    }
+  }
+
+  merged.push(current);
+  return merged;
 }
 
 // =============================================================================
@@ -175,38 +211,31 @@ function collectMatches(content: string): EntityMatch[] {
 function sanitizeText(
   text: string,
   mappingTable: MappingTable,
-  categoryCounters: Map<string, number>,
+  typeCounters: Map<EntityType, number>,
 ): string {
   const matches = collectMatches(text);
   if (matches.length === 0) return text;
 
-  // Deduplicate by original text
-  const unique = new Map<string, EntityMatch>();
-  for (const match of matches) {
-    if (!unique.has(match.originalText)) {
-      unique.set(match.originalText, match);
+  const merged = mergeSpans(matches);
+  const textToPlaceholder = new Map<string, string>();
+
+  for (const match of merged) {
+    if (!textToPlaceholder.has(match.originalText)) {
+      const counter = (typeCounters.get(match.type) ?? 0) + 1;
+      typeCounters.set(match.type, counter);
+      const paddedId = counter.toString().padStart(8, "0");
+      const placeholder = `__PII_${match.type}_${paddedId}__`;
+      textToPlaceholder.set(match.originalText, placeholder);
+      mappingTable.set(placeholder, match.originalText);
     }
   }
 
-  // Sort by length descending
-  const sorted = [...unique.values()].sort(
-    (a, b) => b.originalText.length - a.originalText.length,
-  );
-
-  // Replace and build mapping table
   let sanitized = text;
-  for (const match of sorted) {
-    // Generate numbered placeholder
-    const counter = (categoryCounters.get(match.category) ?? 0) + 1;
-    categoryCounters.set(match.category, counter);
-    const placeholder = `__${match.category}_${counter}__`;
+  const sortedMatches = [...merged].sort((a, b) => b.start - a.start);
 
-    // Replace all occurrences
-    const parts = sanitized.split(match.originalText);
-    if (parts.length > 1) {
-      sanitized = parts.join(placeholder);
-      mappingTable.set(placeholder, match.originalText);
-    }
+  for (const match of sortedMatches) {
+    const placeholder = textToPlaceholder.get(match.originalText)!;
+    sanitized = sanitized.slice(0, match.start) + placeholder + sanitized.slice(match.end);
   }
 
   return sanitized;
@@ -216,36 +245,27 @@ function sanitizeText(
 // Recursive Sanitization
 // =============================================================================
 
-/**
- * Recursively sanitize any value (string, object, array)
- */
 function sanitizeValue(
-  value: any,
+  value: unknown,
   mappingTable: MappingTable,
-  categoryCounters: Map<string, number>,
-): any {
-  // String: sanitize directly
+  typeCounters: Map<EntityType, number>,
+): unknown {
   if (typeof value === "string") {
-    return sanitizeText(value, mappingTable, categoryCounters);
+    return sanitizeText(value, mappingTable, typeCounters);
   }
 
-  // Array: sanitize each element
   if (Array.isArray(value)) {
-    return value.map((item) =>
-      sanitizeValue(item, mappingTable, categoryCounters),
-    );
+    return value.map((item) => sanitizeValue(item, mappingTable, typeCounters));
   }
 
-  // Object: sanitize each property
   if (value !== null && typeof value === "object") {
-    const sanitized: any = {};
+    const sanitized: Record<string, unknown> = {};
     for (const [key, val] of Object.entries(value)) {
-      sanitized[key] = sanitizeValue(val, mappingTable, categoryCounters);
+      sanitized[key] = sanitizeValue(val, mappingTable, typeCounters);
     }
     return sanitized;
   }
 
-  // Primitives: return as-is
   return value;
 }
 
@@ -257,11 +277,11 @@ function sanitizeValue(
  * Sanitize any content (messages array, object, string)
  * Returns sanitized content and mapping table for restoration
  */
-export function sanitize(content: any): SanitizeResult {
+export function sanitize(content: unknown): SanitizeResult {
   const mappingTable: MappingTable = new Map();
-  const categoryCounters = new Map<string, number>();
+  const typeCounters = new Map<EntityType, number>();
 
-  const sanitized = sanitizeValue(content, mappingTable, categoryCounters);
+  const sanitized = sanitizeValue(content, mappingTable, typeCounters);
 
   return {
     sanitized,
@@ -273,6 +293,6 @@ export function sanitize(content: any): SanitizeResult {
 /**
  * Sanitize messages array (common case for LLM APIs)
  */
-export function sanitizeMessages(messages: any[]): SanitizeResult {
+export function sanitizeMessages(messages: unknown[]): SanitizeResult {
   return sanitize(messages);
 }

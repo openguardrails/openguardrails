@@ -2,60 +2,16 @@ name: Publish npm Packages
 
 on:
   workflow_dispatch:
-    inputs:
-      packages:
-        description: 'Packages to publish (comma-separated: cli,gateway,plugin or all)'
-        required: true
-        default: 'all'
 
 permissions:
   contents: read
   id-token: write
 
 jobs:
-  # ─── Publish @openguardrails/gateway ────────────────────────────
-  publish-gateway:
-    name: Publish @openguardrails/gateway
-    runs-on: ubuntu-latest
-    if: >-
-      github.event_name == 'push' ||
-      contains(github.event.inputs.packages, 'gateway') ||
-      contains(github.event.inputs.packages, 'all')
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Set version from tag
-        if: github.event_name == 'push'
-        run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
-          cd gateway
-          npm pkg set version="$VERSION"
-
-      - name: Build gateway
-        run: |
-          cd gateway
-          npm install
-          npm run build
-
-      - name: Publish
-        run: |
-          npm config set //registry.npmjs.org/:_authToken "$NODE_AUTH_TOKEN"
-          cd gateway && npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
   # ─── Publish @openguardrails/moltguard (OpenClaw plugin) ──
-  publish-plugin:
+  publish-moltguard:
     name: Publish @openguardrails/moltguard
     runs-on: ubuntu-latest
-    if: >-
-      github.event_name == 'push' ||
-      contains(github.event.inputs.packages, 'plugin') ||
-      contains(github.event.inputs.packages, 'all')
     steps:
       - uses: actions/checkout@v4
 
@@ -67,27 +23,36 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Set version from tag
-        if: github.event_name == 'push'
+      - name: Build Gateway
+        working-directory: gateway
         run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
-          cd moltguard
-          npm pkg set version="$VERSION"
+          npm install
+          npm run build
+
+      - name: Bundle Gateway into MoltGuard
+        run: |
+          rm -rf moltguard/gateway
+          mkdir -p moltguard/gateway/handlers
+          cp gateway/dist/*.js gateway/dist/*.d.ts gateway/dist/*.map moltguard/gateway/
+          cp gateway/dist/handlers/*.js gateway/dist/handlers/*.d.ts gateway/dist/handlers/*.map moltguard/gateway/handlers/
 
       - name: Build Dashboard
+        working-directory: dashboard
         run: |
-          cd dashboard
           pnpm install
           pnpm build
+          cd apps/api && pnpm bundle
 
       - name: Bundle Dashboard into MoltGuard
         run: |
-          cd moltguard
-          bash scripts/bundle-dashboard.sh
+          mkdir -p moltguard/dashboard-dist/api
+          mkdir -p moltguard/dashboard-dist/web
+          cp -r dashboard/apps/api/bundle/* moltguard/dashboard-dist/api/
+          cp -r dashboard/apps/web/out/* moltguard/dashboard-dist/web/
 
-      - name: Build plugin
+      - name: Build moltguard
+        working-directory: moltguard
         run: |
-          cd moltguard
           npm install
           npm run build
 
@@ -98,68 +63,26 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-  # ─── Publish openguardrails (CLI) ──────────────────────────────
-  publish-cli:
-    name: Publish openguardrails CLI
-    runs-on: ubuntu-latest
-    if: >-
-      github.event_name == 'push' ||
-      contains(github.event.inputs.packages, 'cli') ||
-      contains(github.event.inputs.packages, 'all')
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-
-      - name: Set version from tag
-        if: github.event_name == 'push'
-        run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
-          cd cli
-          npm pkg set version="$VERSION"
-
-      - name: Install CLI dependencies
-        run: |
-          cd cli
-          npm install
-
-      - name: Build everything (dashboard + gateway + CLI)
-        run: |
-          cd cli
-          bash scripts/build.sh
-
-      - name: Publish
-        run: |
-          npm config set //registry.npmjs.org/:_authToken "$NODE_AUTH_TOKEN"
-          cd cli && npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
   # ─── Release summary ──────────────────────────────────────────
   summary:
     name: Release Summary
     runs-on: ubuntu-latest
-    needs: [publish-gateway, publish-plugin, publish-cli]
+    needs: [publish-moltguard]
     if: always()
     steps:
+      - uses: actions/checkout@v4
+
       - name: Create summary
         run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
+          VERSION=$(jq -r '.version' moltguard/package.json)
           echo "## npm Packages Published" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Package | Version | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|---------|---------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| \`openguardrails\` | ${VERSION:-manual} | ${{ needs.publish-cli.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| \`@openguardrails/gateway\` | ${VERSION:-manual} | ${{ needs.publish-gateway.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| \`@openguardrails/moltguard\` | ${VERSION:-manual} | ${{ needs.publish-plugin.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`@openguardrails/moltguard\` | ${VERSION} | ${{ needs.publish-moltguard.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Install" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-          echo "npm install -g openguardrails" >> $GITHUB_STEP_SUMMARY
+          echo "# Install MoltGuard plugin for OpenClaw" >> $GITHUB_STEP_SUMMARY
+          echo "claw plugin install @openguardrails/moltguard" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY

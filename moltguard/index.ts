@@ -27,7 +27,8 @@ import { BehaviorDetector, FILE_READ_TOOLS, WEB_FETCH_TOOLS, type QuotaExceededI
 import { EventReporter } from "./agent/event-reporter.js";
 import { isBlockingHook, type HookType } from "./agent/hook-types.js";
 import { DashboardClient } from "./platform-client/index.js";
-import { enableGateway, disableGateway, getGatewayStatus } from "./agent/gateway-manager.js";
+import { enableGateway, disableGateway, getGatewayStatus, startGateway, setDashboardPort } from "./agent/gateway-manager.js";
+import { FileWatcher } from "./agent/file-watcher.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -181,6 +182,7 @@ let globalCoreCredentials: CoreCredentials | null = null;
 let globalBehaviorDetector: BehaviorDetector | null = null;
 let globalEventReporter: EventReporter | null = null;
 let globalDashboardClient: DashboardClient | null = null;
+let globalFileWatcher: FileWatcher | null = null;
 let dashboardHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let profileWatchers: ReturnType<typeof fs.watch>[] = [];
 let profileDebounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -189,6 +191,8 @@ let lastRegisterResult: RegisterResult | null = null;
 let quotaExceededNotified = false;
 // Track personal dashboard auto-start state
 let personalDashboardStarted = false;
+// Track auto-scan state
+let autoScanEnabled = false;
 
 // =============================================================================
 // Ensure default config in openclaw.json
@@ -270,10 +274,26 @@ function startProfileSync(log: Logger): void {
 const openClawGuardPlugin = {
   id: PLUGIN_ID,
   name: PLUGIN_NAME,
-  description: "Behavioral anomaly detection for OpenClaw agents",
+  description: "Security guard for OpenClaw agents",
 
   register(api: OpenClawPluginApi) {
     const log = createLogger(api.logger);
+
+    // ── Start AI Security Gateway (in-process) ────────────────────────
+    // Gateway runs in the plugin process and is always available.
+    // Users enable sanitization via /og_sanitize on, which routes agents through it.
+    try {
+      startGateway();
+      log.info("AI Security Gateway started on port 53669");
+    } catch (err) {
+      log.error(`Failed to start AI Security Gateway: ${err}`);
+    }
+
+    // Set dashboard port immediately so gateway can report activity
+    // (Dashboard will start later, but port is fixed at 53667)
+    const DASHBOARD_PORT = 53667;
+    setDashboardPort(DASHBOARD_PORT);
+    log.info(`Gateway activity reporting enabled on port ${DASHBOARD_PORT}`);
 
     // Ensure openclaw.json has default config (coreUrl) on first load
     const pluginConfig = (api.pluginConfig ?? {}) as OpenClawGuardConfig;
@@ -1184,7 +1204,7 @@ const openClawGuardPlugin = {
         const command = ctx.args?.trim().toLowerCase();
 
         if (command === "on") {
-          // Enable gateway
+          // Enable gateway (only modifies agent configs, gateway is always running)
           try {
             const result = await enableGateway();
             return {
@@ -1194,12 +1214,21 @@ const openClawGuardPlugin = {
                 "All LLM requests will now be sanitized before being sent to providers.",
                 "Sensitive data (API keys, PII, credentials) will be automatically detected and replaced with placeholders.",
                 "",
-                `- Gateway URL: http://127.0.0.1:8900`,
-                `- Agents configured: ${result.agents.join(", ")}`,
+                `- Gateway URL: http://127.0.0.1:53669`,
                 `- Providers protected: ${result.providers.join(", ")}`,
                 "",
+                result.warnings.length > 0 ? "**Warnings:**" : "",
+                ...result.warnings.map(w => `  ${w}`),
+                result.warnings.length > 0 ? "" : "",
+                "**IMPORTANT:** Do not add/modify providers in openclaw.json while Gateway is enabled.",
+                "To add/modify providers:",
+                "  1. Run `/og_sanitize off`",
+                "  2. Modify openclaw.json",
+                "  3. Run `/og_sanitize on`",
+                "",
+                "Configuration modified: ~/.openclaw/openclaw.json",
                 "To disable, run: `/og_sanitize off`",
-              ].join("\n"),
+              ].filter(Boolean).join("\n"),
             };
           } catch (err) {
             return {
@@ -1208,13 +1237,13 @@ const openClawGuardPlugin = {
                 "",
                 `Error: ${err instanceof Error ? err.message : String(err)}`,
                 "",
-                "Make sure @openguardrails/gateway is installed:",
-                "  npm install -g @openguardrails/gateway",
+                "The AI Security Gateway is bundled with MoltGuard.",
+                "If you see this error, please report it as a bug.",
               ].join("\n"),
             };
           }
         } else if (command === "off") {
-          // Disable gateway
+          // Disable gateway (only restores agent configs, gateway keeps running)
           try {
             const status = getGatewayStatus();
             if (!status.enabled) {
@@ -1223,19 +1252,21 @@ const openClawGuardPlugin = {
               };
             }
 
-            const result = disableGateway(false); // Don't stop the process by default
+            const result = disableGateway();
             return {
               text: [
                 "**AI Security Gateway Disabled**",
                 "",
                 "LLM requests will now go directly to providers (no sanitization).",
                 "",
-                `- Agents restored: ${result.agents.join(", ")}`,
                 `- Providers restored: ${result.providers.join(", ")}`,
                 "",
-                "Note: Gateway process is still running. To stop it, restart your gateway:",
-                "  openclaw gateway restart",
-              ].join("\n"),
+                result.warnings.length > 0 ? "**Warnings:**" : "",
+                ...result.warnings.map(w => `  ${w}`),
+                result.warnings.length > 0 ? "" : "",
+                "Configuration restored: ~/.openclaw/openclaw.json",
+                "Note: Gateway server continues running in the plugin process.",
+              ].filter(Boolean).join("\n"),
             };
           } catch (err) {
             return {
@@ -1255,12 +1286,8 @@ const openClawGuardPlugin = {
               "",
               `- Enabled: ${status.enabled ? "Yes" : "No"}`,
               `- Running: ${status.running ? "Yes" : "No"}`,
-              status.pid ? `- PID: ${status.pid}` : "",
               `- URL: ${status.url}`,
               "",
-              status.enabled && status.agents.length > 0
-                ? `Protected agents: ${status.agents.join(", ")}`
-                : "",
               status.enabled && status.providers.length > 0
                 ? `Protected providers: ${status.providers.join(", ")}`
                 : "",
@@ -1275,6 +1302,456 @@ const openClawGuardPlugin = {
               "- SSH keys → <SSH_PRIVATE_KEY>",
               "- Credit cards → <CREDIT_CARD>",
               "- And more...",
+            ].filter(Boolean).join("\n"),
+          };
+        }
+      },
+    });
+
+    api.registerCommand({
+      name: "og_scan",
+      description: "Scan workspace files for security risks (skills, plugins, memories, workspace md files)",
+      requireAuth: true,
+      acceptsArgs: true,
+      handler: async (ctx) => {
+        if (!globalCoreCredentials) {
+          return {
+            text: "MoltGuard not registered yet. It will auto-register on first use.",
+          };
+        }
+
+        const scanType = ctx.args?.trim().toLowerCase() || "all";
+
+        // Import workspace scanner
+        const { scanWorkspaceMdFiles, scanFilesByType, getWorkspaceSummary } = await import("./agent/workspace-scanner.js");
+
+        try {
+          let filesToScan: Array<{ path: string; content: string; type: string; sizeBytes: number }> = [];
+
+          if (scanType === "summary" || scanType === "info") {
+            // Show summary only
+            const summary = await getWorkspaceSummary();
+            return {
+              text: [
+                "**Workspace File Summary**",
+                "",
+                `Total files: ${summary.totalFiles}`,
+                `Total size: ${(summary.totalSizeBytes / 1024).toFixed(1)} KB`,
+                "",
+                "Files by type:",
+                `- Soul: ${summary.byType.soul}`,
+                `- Agent: ${summary.byType.agent}`,
+                `- Memory: ${summary.byType.memory}`,
+                `- Task: ${summary.byType.task}`,
+                `- Skill: ${summary.byType.skill}`,
+                `- Plugin: ${summary.byType.plugin}`,
+                `- Other: ${summary.byType.other}`,
+                "",
+                "Run `/og_scan all` to scan all files for security risks.",
+              ].join("\n"),
+            };
+          }
+
+          // Determine what to scan
+          if (scanType === "all") {
+            filesToScan = await scanWorkspaceMdFiles();
+          } else if (scanType === "memories" || scanType === "memory") {
+            filesToScan = await scanFilesByType(["memory"]);
+          } else if (scanType === "skills" || scanType === "skill") {
+            filesToScan = await scanFilesByType(["skill"]);
+          } else if (scanType === "plugins" || scanType === "plugin") {
+            filesToScan = await scanFilesByType(["plugin"]);
+          } else if (scanType === "workspace") {
+            filesToScan = await scanFilesByType(["soul", "agent", "task", "other"]);
+          } else {
+            return {
+              text: [
+                "**Usage: /og_scan [type]**",
+                "",
+                "Types:",
+                "- `all` — Scan all workspace files (default)",
+                "- `memories` — Scan memory files only",
+                "- `skills` — Scan skill files only",
+                "- `plugins` — Scan plugin files only",
+                "- `workspace` — Scan workspace md files (soul.md, agent.md, heartbeat.md, etc.)",
+                "- `summary` — Show file count summary without scanning",
+                "",
+                "Examples:",
+                "  /og_scan all",
+                "  /og_scan memories",
+                "  /og_scan workspace",
+              ].join("\n"),
+            };
+          }
+
+          if (filesToScan.length === 0) {
+            return {
+              text: [
+                "**No Files Found**",
+                "",
+                `No ${scanType === "all" ? "workspace" : scanType} files found to scan.`,
+              ].join("\n"),
+            };
+          }
+
+          // Ensure dashboard client is initialized for reporting
+          if (!globalDashboardClient) {
+            try {
+              const fs = await import("node:fs");
+              const path = await import("node:path");
+              const os = await import("node:os");
+              const tokenFile = path.join(os.homedir(), ".openclaw", "credentials", "moltguard", "dashboard-session-token");
+              if (fs.existsSync(tokenFile)) {
+                const tokenData = JSON.parse(fs.readFileSync(tokenFile, "utf-8"));
+                if (tokenData.token) {
+                  const port = tokenData.port || 53667;
+                  initDashboardClient(tokenData.token, `http://localhost:${port}`);
+                  log.info("Dashboard client initialized from session token");
+                }
+              }
+            } catch (err) {
+              log.warn(`Could not initialize dashboard client: ${err}`);
+            }
+          }
+
+          // Split files into batches of 50 (Core API limit)
+          const BATCH_SIZE = 50;
+          const batches: typeof filesToScan[] = [];
+          for (let i = 0; i < filesToScan.length; i += BATCH_SIZE) {
+            batches.push(filesToScan.slice(i, i + BATCH_SIZE));
+          }
+
+          // Scan each batch
+          const allResults: any[] = [];
+          let totalFilesScanned = 0;
+          let totalRiskFiles = 0;
+
+          for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+            const batch = batches[batchIdx];
+
+            // Call Core API for static scanning
+            const res = await fetch(`${config.coreUrl}/api/v1/static/scan`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${globalCoreCredentials.apiKey}`,
+              },
+              body: JSON.stringify({
+                agentId: globalCoreCredentials.agentId,
+                files: batch,
+                meta: {
+                  pluginVersion: PLUGIN_VERSION,
+                  clientTimestamp: new Date().toISOString(),
+                  batch: `${batchIdx + 1}/${batches.length}`,
+                },
+              }),
+            });
+
+            if (!res.ok) {
+              const error = await res.text();
+              return {
+                text: [
+                  "**Static Scan Failed**",
+                  "",
+                  `Error in batch ${batchIdx + 1}/${batches.length}: ${error}`,
+                ].join("\n"),
+              };
+            }
+
+            const data = await res.json() as any;
+
+            if (!data.success) {
+              if (data.data?.quotaExceeded) {
+                return {
+                  text: [
+                    "**Quota Exceeded**",
+                    "",
+                    data.data.message || "Your detection quota has been exceeded.",
+                    "",
+                    `Quota: ${data.data.quotaUsed}/${data.data.quotaTotal}`,
+                    "",
+                    `Scanned ${totalFilesScanned} files before quota limit.`,
+                    "",
+                    `To continue scanning, upgrade your plan at: ${config.coreUrl}/login`,
+                  ].join("\n"),
+                };
+              }
+              return {
+                text: [
+                  "**Static Scan Failed**",
+                  "",
+                  `Error in batch ${batchIdx + 1}/${batches.length}: ${data.error || "Unknown error"}`,
+                ].join("\n"),
+              };
+            }
+
+            const batchResult = data.data as any;
+            allResults.push(...batchResult.results);
+            totalFilesScanned += batchResult.filesScanned;
+            totalRiskFiles += batchResult.riskFiles;
+
+            // Report batch results to dashboard immediately (non-blocking)
+            if (globalDashboardClient && batchResult.results) {
+              for (const fileResult of batchResult.results) {
+                if (fileResult.riskLevel !== "safe") {
+                  globalDashboardClient
+                    .reportDetection({
+                      agentId: globalCoreCredentials.agentId,
+                      safe: fileResult.riskLevel === "safe",
+                      categories: fileResult.findings.map((f: any) => f.scanner),
+                      findings: fileResult.findings,
+                      sensitivityScore: fileResult.riskLevel === "critical" ? 1.0 :
+                                        fileResult.riskLevel === "high" ? 0.8 :
+                                        fileResult.riskLevel === "medium" ? 0.6 :
+                                        fileResult.riskLevel === "low" ? 0.4 : 0.0,
+                      latencyMs: 0,
+                      scanType: "static",
+                      filePath: fileResult.path,
+                      fileType: batch.find((f: any) => f.path === fileResult.path)?.type as any,
+                    })
+                    .catch((err) => {
+                      log.warn(`Failed to report detection to dashboard: ${err}`);
+                    });
+                }
+              }
+            } else if (!globalDashboardClient) {
+              log.warn("Dashboard client not initialized - scan results not reported to dashboard");
+            }
+          }
+
+          // Combine results from all batches
+          const result = {
+            filesScanned: totalFilesScanned,
+            riskFiles: totalRiskFiles,
+            results: allResults,
+          };
+
+          // Format results
+          const criticalFiles = result.results.filter((r: any) => r.riskLevel === "critical");
+          const highFiles = result.results.filter((r: any) => r.riskLevel === "high");
+          const mediumFiles = result.results.filter((r: any) => r.riskLevel === "medium");
+          const lowFiles = result.results.filter((r: any) => r.riskLevel === "low");
+          const safeFiles = result.results.filter((r: any) => r.riskLevel === "safe");
+
+          const lines = [
+            "**Static Security Scan Results**",
+            "",
+            `Files scanned: ${result.filesScanned}`,
+            `Files with risks: ${result.riskFiles}`,
+            "",
+            "Risk breakdown:",
+            `- Critical: ${criticalFiles.length}`,
+            `- High: ${highFiles.length}`,
+            `- Medium: ${mediumFiles.length}`,
+            `- Low: ${lowFiles.length}`,
+            `- Safe: ${safeFiles.length}`,
+          ];
+
+          // Show critical and high risk files with details
+          if (criticalFiles.length > 0) {
+            lines.push("", "**Critical Risks:**");
+            for (const file of criticalFiles.slice(0, 5)) {
+              lines.push(`\n- **${file.path}**`);
+              for (const finding of file.findings.slice(0, 3)) {
+                lines.push(`  - [${finding.scanner}] ${finding.message}`);
+              }
+            }
+            if (criticalFiles.length > 5) {
+              lines.push(`\n...and ${criticalFiles.length - 5} more critical files`);
+            }
+          }
+
+          if (highFiles.length > 0) {
+            lines.push("", "**High Risks:**");
+            for (const file of highFiles.slice(0, 3)) {
+              lines.push(`\n- **${file.path}**`);
+              for (const finding of file.findings.slice(0, 2)) {
+                lines.push(`  - [${finding.scanner}] ${finding.message}`);
+              }
+            }
+            if (highFiles.length > 3) {
+              lines.push(`\n...and ${highFiles.length - 3} more high-risk files`);
+            }
+          }
+
+          // Show summary for medium/low
+          if (mediumFiles.length > 0) {
+            lines.push("", `**Medium Risks:** ${mediumFiles.map((f: any) => f.path).slice(0, 5).join(", ")}`);
+            if (mediumFiles.length > 5) {
+              lines.push(`...and ${mediumFiles.length - 5} more`);
+            }
+          }
+
+          if (lowFiles.length > 0) {
+            lines.push("", `**Low Risks:** ${lowFiles.length} files (view in dashboard for details)`);
+          }
+
+          lines.push("", `Full details available in dashboard: /og_dashboard`);
+
+          return { text: lines.join("\n") };
+        } catch (err) {
+          return {
+            text: [
+              "**Static Scan Error**",
+              "",
+              `Error: ${err instanceof Error ? err.message : String(err)}`,
+            ].join("\n"),
+          };
+        }
+      },
+    });
+
+    api.registerCommand({
+      name: "og_autoscan",
+      description: "Enable/disable automatic file scanning on workspace changes",
+      requireAuth: true,
+      acceptsArgs: true,
+      handler: async (ctx) => {
+        const command = ctx.args?.trim().toLowerCase();
+
+        if (command === "on") {
+          if (autoScanEnabled && globalFileWatcher?.running) {
+            return {
+              text: "Auto-scan is already enabled.",
+            };
+          }
+
+          if (!globalCoreCredentials) {
+            return {
+              text: "Cannot enable auto-scan: MoltGuard not registered yet.",
+            };
+          }
+
+          // Create file watcher
+          globalFileWatcher = new FileWatcher({
+            onFilesChanged: async (changedFiles) => {
+              if (!globalCoreCredentials) return;
+
+              // Import workspace scanner
+              const { scanWorkspaceMdFiles } = await import("./agent/workspace-scanner.js");
+
+              // Get file details for changed files
+              const allFiles = await scanWorkspaceMdFiles();
+              const filesToScan = allFiles.filter(f =>
+                changedFiles.some(cf => cf.endsWith(f.path))
+              );
+
+              if (filesToScan.length === 0) return;
+
+              log.debug?.(`Auto-scanning ${filesToScan.length} changed file(s)...`);
+
+              // Call Core API for scanning
+              try {
+                const res = await fetch(`${config.coreUrl}/api/v1/static/scan`, {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${globalCoreCredentials.apiKey}`,
+                  },
+                  body: JSON.stringify({
+                    agentId: globalCoreCredentials.agentId,
+                    files: filesToScan,
+                    meta: {
+                      pluginVersion: PLUGIN_VERSION,
+                      clientTimestamp: new Date().toISOString(),
+                    },
+                  }),
+                });
+
+                if (!res.ok) return;
+
+                const data = await res.json() as any;
+                if (!data.success || !data.data) return;
+
+                const result = data.data as any;
+
+                // Report to dashboard
+                if (globalDashboardClient && result.results) {
+                  for (const fileResult of result.results) {
+                    if (fileResult.riskLevel !== "safe") {
+                      globalDashboardClient
+                        .reportDetection({
+                          agentId: globalCoreCredentials.agentId,
+                          safe: fileResult.riskLevel === "safe",
+                          categories: fileResult.findings.map((f: any) => f.scanner),
+                          findings: fileResult.findings,
+                          sensitivityScore: fileResult.riskLevel === "critical" ? 1.0 :
+                                            fileResult.riskLevel === "high" ? 0.8 :
+                                            fileResult.riskLevel === "medium" ? 0.6 :
+                                            fileResult.riskLevel === "low" ? 0.4 : 0.0,
+                          latencyMs: 0,
+                          scanType: "static",
+                          filePath: fileResult.path,
+                          fileType: filesToScan.find((f: any) => f.path === fileResult.path)?.type,
+                        })
+                        .catch(() => {});
+                    }
+                  }
+
+                  // Log summary
+                  const riskCount = result.results.filter((r: any) => r.riskLevel !== "safe").length;
+                  if (riskCount > 0) {
+                    log.info(`Auto-scan found ${riskCount} file(s) with security risks`);
+                  }
+                }
+              } catch (err) {
+                log.debug?.(`Auto-scan failed: ${err}`);
+              }
+            },
+            logger: log,
+          });
+
+          globalFileWatcher.start();
+          autoScanEnabled = true;
+
+          return {
+            text: [
+              "**Auto-Scan Enabled**",
+              "",
+              "Workspace files are now being monitored for changes.",
+              "When a .md file is modified, it will be automatically scanned for security risks.",
+              "",
+              `Watching ${globalFileWatcher.watchCount} directories`,
+              "",
+              "View scan results in Dashboard: `/og_dashboard`",
+              "",
+              "To disable: `/og_autoscan off`",
+            ].join("\n"),
+          };
+        } else if (command === "off") {
+          if (!autoScanEnabled || !globalFileWatcher?.running) {
+            return {
+              text: "Auto-scan is not currently enabled.",
+            };
+          }
+
+          globalFileWatcher.stop();
+          autoScanEnabled = false;
+
+          return {
+            text: [
+              "**Auto-Scan Disabled**",
+              "",
+              "File monitoring stopped. Changes will not trigger automatic scans.",
+              "",
+              "To re-enable: `/og_autoscan on`",
+            ].join("\n"),
+          };
+        } else {
+          // Show status
+          return {
+            text: [
+              "**Auto-Scan Status**",
+              "",
+              `Enabled: ${autoScanEnabled ? "Yes" : "No"}`,
+              globalFileWatcher?.running ? `Watching: ${globalFileWatcher.watchCount} directories` : "",
+              "",
+              "Usage:",
+              "  /og_autoscan on  — Enable automatic scanning",
+              "  /og_autoscan off — Disable automatic scanning",
+              "",
+              "Auto-scan monitors workspace .md files and automatically scans them",
+              "when changes are detected. Results are reported to the dashboard.",
             ].filter(Boolean).join("\n"),
           };
         }
@@ -1376,8 +1853,8 @@ const openClawGuardPlugin = {
     // Stop personal dashboard process
     if (personalDashboardStarted) {
       try {
-        const { stopDashboard } = await import("./dashboard-launcher.js");
-        stopDashboard();
+        const { stopLocalDashboard } = await import("./dashboard-launcher.js");
+        await stopLocalDashboard();
       } catch { /* ignore */ }
       personalDashboardStarted = false;
     }

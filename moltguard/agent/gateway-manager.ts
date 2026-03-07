@@ -1,35 +1,127 @@
 /**
- * AI Security Gateway Manager
+ * AI Security Gateway Manager (Version 2)
  *
- * Manages the lifecycle and configuration of the AI Security Gateway:
- * - Starts/stops the gateway process
- * - Configures gateway to use current LLM providers' API keys
- * - Modifies all agents' models.json to route through gateway
- * - Restores original configuration when disabled
+ * Strategy:
+ * - Modify openclaw.json instead of agents star/agent/models.json
+ * - Because ensureOpenClawModelsJson() overwrites models.json with openclaw.json
  */
 
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { spawn } from "node:child_process";
-import type { ChildProcess } from "node:child_process";
+import { startGateway as startGatewayServer, stopGateway as stopGatewayServer, isGatewayServerRunning, addActivityListener, type GatewayActivityEvent } from "../gateway/index.js";
 
 // =============================================================================
 // Constants
 // =============================================================================
 
 const OPENCLAW_DIR = path.join(os.homedir(), ".openclaw");
-const AGENTS_DIR = path.join(OPENCLAW_DIR, "agents");
-const OG_DIR = path.join(os.homedir(), ".openguardrails");
-const GATEWAY_CONFIG = path.join(OG_DIR, "gateway.json");
-const GATEWAY_BACKUP = path.join(OPENCLAW_DIR, "credentials/moltguard/gateway-backup.json");
-const GATEWAY_PID_FILE = path.join(OG_DIR, "gateway.pid");
-const DEFAULT_GATEWAY_PORT = 8900;
-const GATEWAY_URL = `http://127.0.0.1:${DEFAULT_GATEWAY_PORT}`;
+const OPENCLAW_CONFIG = path.join(OPENCLAW_DIR, "openclaw.json");
+const MOLTGUARD_DATA_DIR = path.join(OPENCLAW_DIR, "extensions/moltguard/data");
+const GATEWAY_CONFIG = path.join(MOLTGUARD_DATA_DIR, "gateway.json");
+const GATEWAY_BACKUP = path.join(MOLTGUARD_DATA_DIR, "gateway-backup.json");
+const DEFAULT_GATEWAY_PORT = 53669;
+const GATEWAY_SERVER_URL = `http://127.0.0.1:${DEFAULT_GATEWAY_PORT}`;
+
+// =============================================================================
+// Auth Profiles (resolve API key placeholders like "VLLM_API_KEY")
+// =============================================================================
+
+type AuthProfile = {
+  type: string;
+  provider: string;
+  key?: string;  // For api_key type
+  access?: string;  // For oauth type
+};
+
+type AuthProfiles = {
+  profiles: Record<string, AuthProfile>;
+};
+
+/**
+ * Check if a string looks like an API key placeholder (e.g., "VLLM_API_KEY", "OPENAI_API_KEY")
+ */
+function isApiKeyPlaceholder(value: string): boolean {
+  // Placeholder pattern: UPPERCASE_LETTERS with underscores, ending with _API_KEY or _KEY
+  return /^[A-Z][A-Z0-9_]*(_API_KEY|_KEY)$/.test(value);
+}
+
+/**
+ * Load auth-profiles.json for a specific agent
+ */
+function loadAuthProfiles(agentId: string = "main"): AuthProfiles | null {
+  const authProfilesPath = path.join(OPENCLAW_DIR, "agents", agentId, "agent", "auth-profiles.json");
+  try {
+    if (fs.existsSync(authProfilesPath)) {
+      return JSON.parse(fs.readFileSync(authProfilesPath, "utf-8"));
+    }
+  } catch {
+    // Ignore errors
+  }
+  return null;
+}
+
+/**
+ * Resolve API key from auth-profiles.json
+ * @param providerName - Provider name (e.g., "vllm")
+ * @param placeholder - The placeholder value (e.g., "VLLM_API_KEY")
+ * @returns The actual API key, or the placeholder if not found
+ */
+function resolveApiKey(providerName: string, placeholder: string): string {
+  // If not a placeholder, return as-is
+  if (!isApiKeyPlaceholder(placeholder)) {
+    return placeholder;
+  }
+
+  // Try to load auth profiles from main agent
+  const authProfiles = loadAuthProfiles("main");
+  if (!authProfiles?.profiles) {
+    return placeholder;
+  }
+
+  // Look for matching profile (e.g., "vllm:default")
+  const profileKey = `${providerName}:default`;
+  const profile = authProfiles.profiles[profileKey];
+
+  if (profile?.type === "api_key" && profile.key) {
+    return profile.key;
+  }
+
+  // Also try just the provider name
+  const directProfile = authProfiles.profiles[providerName];
+  if (directProfile?.type === "api_key" && directProfile.key) {
+    return directProfile.key;
+  }
+
+  return placeholder;
+}
+
+/**
+ * Convert original baseUrl to gateway URL using backend name as identifier
+ * e.g., providerName="vllm" -> http://127.0.0.1:53669/backend/vllm
+ */
+function toGatewayUrl(providerName: string): string {
+  return `${GATEWAY_SERVER_URL}/backend/${providerName}`;
+}
+
+/**
+ * Check if a baseUrl is pointing to the gateway
+ */
+function isGatewayUrl(baseUrl: string): boolean {
+  return baseUrl.startsWith(GATEWAY_SERVER_URL);
+}
 
 // =============================================================================
 // Types
 // =============================================================================
+
+type OpenClawConfig = {
+  models?: {
+    mode?: string;
+    providers?: Record<string, ProviderConfig>;
+  };
+  [key: string]: unknown;
+};
 
 type ProviderConfig = {
   baseUrl?: string;
@@ -39,158 +131,154 @@ type ProviderConfig = {
   [key: string]: unknown;
 };
 
-type ModelsConfig = {
-  providers: Record<string, ProviderConfig>;
-};
-
-type BackupEntry = {
-  agentName: string;
-  modelsFile: string;
-  providers: Record<string, { originalBaseUrl: string }>;
-};
-
 type GatewayBackup = {
   timestamp: string;
-  entries: BackupEntry[];
+  routedProviders: Record<string, {
+    originalBaseUrl: string;
+  }>;
+  agentModelsBackup?: Record<string, {
+    files: string[];
+    originalBaseUrls: Record<string, string>;
+  }>;
 };
 
 type GatewayStatus = {
   enabled: boolean;
   running: boolean;
-  pid?: number;
   port: number;
   url: string;
   providers: string[];
-  agents: string[];
 };
 
 // =============================================================================
-// Gateway Process Management
+// Gateway Server Management
 // =============================================================================
 
-let gatewayProcess: ChildProcess | null = null;
+let gatewayRunning = false;
+let dashboardPort: number | null = null;
+let dashboardToken: string | null = null;
 
 /**
- * Start the gateway process
+ * Set dashboard port for activity reporting
  */
-export async function startGateway(): Promise<void> {
-  // Check if already running
-  if (isGatewayRunning()) {
-    throw new Error("Gateway is already running");
-  }
-
-  // Find the gateway executable
-  const gatewayPath = findGatewayExecutable();
-  if (!gatewayPath) {
-    throw new Error("Gateway executable not found. Please install @openguardrails/gateway");
-  }
-
-  // Start the gateway process
-  gatewayProcess = spawn("node", [gatewayPath], {
-    detached: true,
-    stdio: "ignore",
-    env: {
-      ...process.env,
-      GATEWAY_PORT: String(DEFAULT_GATEWAY_PORT),
-    },
-  });
-
-  gatewayProcess.unref();
-
-  // Save PID
-  if (gatewayProcess.pid) {
-    fs.mkdirSync(OG_DIR, { recursive: true });
-    fs.writeFileSync(GATEWAY_PID_FILE, String(gatewayProcess.pid), "utf-8");
-  }
-
-  // Wait a bit to ensure it started
-  await new Promise(resolve => setTimeout(resolve, 1000));
-
-  // Verify it's running
-  if (!isGatewayRunning()) {
-    throw new Error("Gateway failed to start");
-  }
+export function setDashboardPort(port: number): void {
+  dashboardPort = port;
 }
 
 /**
- * Stop the gateway process
+ * Set dashboard session token for authentication
  */
-export function stopGateway(): void {
-  // Try to kill via PID file
-  if (fs.existsSync(GATEWAY_PID_FILE)) {
-    try {
-      const pid = parseInt(fs.readFileSync(GATEWAY_PID_FILE, "utf-8").trim(), 10);
-      process.kill(pid, "SIGTERM");
-      fs.unlinkSync(GATEWAY_PID_FILE);
-    } catch {
-      // PID file exists but process may already be dead
-    }
-  }
-
-  // Also try to kill via process reference
-  if (gatewayProcess) {
-    try {
-      gatewayProcess.kill("SIGTERM");
-    } catch {
-      // Ignore errors
-    }
-    gatewayProcess = null;
-  }
+export function setDashboardToken(token: string): void {
+  dashboardToken = token;
 }
 
 /**
- * Check if gateway is running
+ * Load dashboard session token from file
  */
-export function isGatewayRunning(): boolean {
-  // Check PID file
-  if (!fs.existsSync(GATEWAY_PID_FILE)) {
-    return false;
-  }
-
+function loadDashboardToken(): string | null {
+  const tokenFile = path.join(OPENCLAW_DIR, "credentials", "moltguard", "dashboard-session-token");
   try {
-    const pid = parseInt(fs.readFileSync(GATEWAY_PID_FILE, "utf-8").trim(), 10);
-    // Check if process exists (signal 0 doesn't kill, just checks)
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    // Process doesn't exist, clean up PID file
-    try {
-      fs.unlinkSync(GATEWAY_PID_FILE);
-    } catch {
-      // Ignore
-    }
-    return false;
-  }
-}
-
-/**
- * Find the gateway executable
- */
-function findGatewayExecutable(): string | null {
-  // Try local installation first (for development)
-  const localPath = path.join(process.cwd(), "../gateway/dist/index.js");
-  if (fs.existsSync(localPath)) {
-    return localPath;
-  }
-
-  // Try moltguard's node_modules
-  const pluginPath = path.join(process.cwd(), "node_modules/@openguardrails/gateway/dist/index.js");
-  if (fs.existsSync(pluginPath)) {
-    return pluginPath;
-  }
-
-  // Try global installation
-  try {
-    const { execSync } = require("node:child_process");
-    const globalPath = execSync("which og-gateway", { encoding: "utf-8" }).trim();
-    if (globalPath && fs.existsSync(globalPath)) {
-      return globalPath;
+    if (fs.existsSync(tokenFile)) {
+      const data = JSON.parse(fs.readFileSync(tokenFile, "utf-8"));
+      return data.token || null;
     }
   } catch {
-    // Not found globally
+    // Ignore errors
   }
-
   return null;
+}
+
+/**
+ * Report gateway activity to dashboard
+ */
+async function reportActivity(event: GatewayActivityEvent): Promise<void> {
+  if (!dashboardPort) {
+    console.log("[moltguard] Dashboard port not set, skipping activity report");
+    return; // Dashboard not running, skip reporting
+  }
+
+  // Try to load token if not set
+  if (!dashboardToken) {
+    dashboardToken = loadDashboardToken();
+  }
+
+  if (!dashboardToken) {
+    console.log("[moltguard] Dashboard token not available, skipping activity report");
+    return;
+  }
+
+  console.log(`[moltguard] Reporting activity to dashboard: ${event.type} (${event.redactionCount} redactions)`);
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${dashboardPort}/api/gateway/activity`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${dashboardToken}`,
+      },
+      body: JSON.stringify(event),
+    });
+
+    if (!response.ok) {
+      console.error("[moltguard] Failed to report gateway activity:", response.status);
+    }
+  } catch {
+    // Silently ignore errors - dashboard may not be running
+  }
+}
+
+let activityListenerRegistered = false;
+
+/**
+ * Start the gateway server (in-process, embedded mode)
+ */
+export function startGateway(): void {
+  fs.mkdirSync(MOLTGUARD_DATA_DIR, { recursive: true });
+
+  if (!fs.existsSync(GATEWAY_CONFIG)) {
+    const defaultConfig = {
+      port: DEFAULT_GATEWAY_PORT,
+      backends: {},
+    };
+    fs.writeFileSync(GATEWAY_CONFIG, JSON.stringify(defaultConfig, null, 2) + "\n", "utf-8");
+  }
+
+  // Register activity listener once
+  if (!activityListenerRegistered) {
+    console.log("[moltguard] Registering gateway activity listener");
+    addActivityListener((event) => {
+      console.log(`[moltguard] Gateway activity: ${event.type}`);
+      // Report asynchronously to avoid blocking gateway
+      reportActivity(event).catch((err) => {
+        console.error("[moltguard] Failed to report activity:", err);
+      });
+    });
+    activityListenerRegistered = true;
+  }
+
+  try {
+    // Start in embedded mode (don't call process.exit on errors)
+    startGatewayServer(GATEWAY_CONFIG, true);
+    gatewayRunning = true;
+  } catch (err) {
+    console.error("[moltguard] Failed to start gateway:", err);
+    gatewayRunning = false;
+  }
+}
+
+/**
+ * Restart the gateway server (reload config)
+ */
+export async function restartGateway(): Promise<void> {
+  console.log("[moltguard] Restarting gateway...");
+  await stopGatewayServer();
+  gatewayRunning = false;
+  startGateway();
+}
+
+export function isGatewayRunning(): boolean {
+  // Check both our flag and the actual server state
+  return gatewayRunning && isGatewayServerRunning();
 }
 
 // =============================================================================
@@ -198,126 +286,199 @@ function findGatewayExecutable(): string | null {
 // =============================================================================
 
 /**
- * Find all agent directories
+ * Read openclaw.json
  */
-function findAgentDirs(): string[] {
-  if (!fs.existsSync(AGENTS_DIR)) {
-    return [];
+function readOpenClawConfig(): OpenClawConfig {
+  if (!fs.existsSync(OPENCLAW_CONFIG)) {
+    throw new Error("openclaw.json not found");
   }
 
-  const agents: string[] = [];
-  const entries = fs.readdirSync(AGENTS_DIR, { withFileTypes: true });
+  try {
+    return JSON.parse(fs.readFileSync(OPENCLAW_CONFIG, "utf-8"));
+  } catch (err) {
+    throw new Error(`Failed to parse openclaw.json: ${err}`);
+  }
+}
 
+/**
+ * Write openclaw.json
+ */
+function writeOpenClawConfig(config: OpenClawConfig): void {
+  fs.writeFileSync(OPENCLAW_CONFIG, JSON.stringify(config, null, 2) + "\n", "utf-8");
+}
+
+/**
+ * Determine backend type from provider config
+ */
+function getBackendType(provider: ProviderConfig): string {
+  if (provider.api === "anthropic") return "anthropic";
+  if (provider.api === "gemini") return "gemini";
+  if (provider.api === "openai-completions" || provider.api === "openai") return "openai";
+
+  // Infer from baseUrl
+  if (provider.baseUrl?.includes("anthropic.com")) return "anthropic";
+  if (provider.baseUrl?.includes("gemini") || provider.baseUrl?.includes("google")) return "gemini";
+
+  return "openai"; // Default
+}
+
+/**
+ * Extract path from URL
+ */
+function extractPathFromUrl(urlString: string): string {
+  try {
+    const url = new URL(urlString);
+    return url.pathname.endsWith("/") ? url.pathname.slice(0, -1) : url.pathname;
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Configure gateway with providers
+ */
+function configureGateway(providers: Record<string, ProviderConfig>): void {
+  const backends: Record<string, { baseUrl: string; apiKey: string; type?: string; pathPrefix?: string; models?: string[] }> = {};
+
+  for (const [name, provider] of Object.entries(providers)) {
+    if (!provider.baseUrl || !provider.apiKey) continue;
+
+    // Extract path prefix from original baseUrl for routing
+    const pathPrefix = extractPathFromUrl(provider.baseUrl);
+
+    // Extract model IDs from provider config
+    const models = (provider.models as Array<{ id?: string }> | undefined)
+      ?.map((m) => m.id)
+      .filter((id): id is string => typeof id === "string");
+
+    // Resolve API key placeholder (e.g., "VLLM_API_KEY" -> actual key from auth-profiles.json)
+    const resolvedApiKey = resolveApiKey(name, provider.apiKey);
+    if (resolvedApiKey !== provider.apiKey) {
+      console.log(`[moltguard] Resolved API key placeholder for ${name}`);
+    }
+
+    backends[name] = {
+      baseUrl: provider.baseUrl,
+      apiKey: resolvedApiKey,
+      type: getBackendType(provider),
+      ...(pathPrefix && { pathPrefix }),
+      ...(models && models.length > 0 && { models }),
+    };
+  }
+
+  const gatewayConfig = {
+    port: DEFAULT_GATEWAY_PORT,
+    backends,
+  };
+
+  fs.mkdirSync(MOLTGUARD_DATA_DIR, { recursive: true });
+  fs.writeFileSync(GATEWAY_CONFIG, JSON.stringify(gatewayConfig, null, 2) + "\n", "utf-8");
+}
+
+/**
+ * Find all agent models.json files
+ */
+function findAgentModelsFiles(): string[] {
+  const agentsDir = path.join(OPENCLAW_DIR, "agents");
+  const modelsFiles: string[] = [];
+
+  if (!fs.existsSync(agentsDir)) {
+    return modelsFiles;
+  }
+
+  // Find all agent directories
+  const entries = fs.readdirSync(agentsDir, { withFileTypes: true });
   for (const entry of entries) {
     if (entry.isDirectory()) {
-      const agentDir = path.join(AGENTS_DIR, entry.name);
-      const modelsFile = path.join(agentDir, "agent/models.json");
-      if (fs.existsSync(modelsFile)) {
-        agents.push(entry.name);
+      const modelsPath = path.join(agentsDir, entry.name, "agent", "models.json");
+      if (fs.existsSync(modelsPath)) {
+        modelsFiles.push(modelsPath);
       }
     }
   }
 
-  return agents;
+  return modelsFiles;
 }
 
 /**
- * Read models.json for an agent
+ * Read and parse a models.json file
  */
-function readModelsConfig(agentName: string): ModelsConfig | null {
-  const modelsFile = path.join(AGENTS_DIR, agentName, "agent/models.json");
-  if (!fs.existsSync(modelsFile)) {
-    return null;
-  }
-
+function readModelsJson(filePath: string): { providers?: Record<string, ProviderConfig> } | null {
   try {
-    return JSON.parse(fs.readFileSync(modelsFile, "utf-8"));
+    return JSON.parse(fs.readFileSync(filePath, "utf-8"));
   } catch {
     return null;
   }
 }
 
 /**
- * Write models.json for an agent
+ * Write a models.json file
  */
-function writeModelsConfig(agentName: string, config: ModelsConfig): void {
-  const modelsFile = path.join(AGENTS_DIR, agentName, "agent/models.json");
-  fs.writeFileSync(modelsFile, JSON.stringify(config, null, 2) + "\n", "utf-8");
+function writeModelsJson(filePath: string, data: unknown): void {
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2) + "\n", "utf-8");
 }
 
 /**
- * Collect all providers from all agents
+ * Update provider baseUrls in all agent models.json files
+ * Converts each provider's baseUrl to gateway URL while preserving the path
  */
-function collectAllProviders(): Record<string, { baseUrl: string; apiKey: string; api?: string }> {
-  const allProviders: Record<string, { baseUrl: string; apiKey: string; api?: string }> = {};
-  const agentNames = findAgentDirs();
+function updateAgentModelsFiles(backupData: Record<string, { files: string[]; originalBaseUrls: Record<string, string> }>): void {
+  const modelsFiles = findAgentModelsFiles();
 
-  for (const agentName of agentNames) {
-    const config = readModelsConfig(agentName);
-    if (!config?.providers) continue;
+  for (const filePath of modelsFiles) {
+    const data = readModelsJson(filePath);
+    if (!data?.providers) continue;
 
-    for (const [providerName, providerConfig] of Object.entries(config.providers)) {
-      if (!providerConfig.baseUrl || !providerConfig.apiKey) continue;
+    const fileBackup: Record<string, string> = {};
+    let modified = false;
 
-      // Use first occurrence of each provider
-      if (!allProviders[providerName]) {
-        allProviders[providerName] = {
-          baseUrl: providerConfig.baseUrl,
-          apiKey: providerConfig.apiKey,
-          api: providerConfig.api,
-        };
+    for (const [name, provider] of Object.entries(data.providers)) {
+      // Skip if already pointing to gateway or no baseUrl
+      if (!provider.baseUrl || isGatewayUrl(provider.baseUrl)) {
+        continue;
       }
+      fileBackup[name] = provider.baseUrl;
+      provider.baseUrl = toGatewayUrl(name);
+      modified = true;
     }
-  }
 
-  return allProviders;
-}
-
-/**
- * Determine backend type from provider name or API
- */
-function getBackendType(providerName: string, api?: string): string {
-  if (api === "anthropic" || providerName.includes("anthropic")) {
-    return "anthropic";
-  }
-  if (api === "gemini" || providerName.includes("gemini") || providerName.includes("google")) {
-    return "gemini";
-  }
-  if (providerName.includes("openrouter")) {
-    return "openrouter";
-  }
-  // Default to OpenAI-compatible
-  return "openai";
-}
-
-/**
- * Configure gateway with all providers
- */
-function configureGateway(providers: Record<string, { baseUrl: string; apiKey: string; api?: string }>): void {
-  const backends: Record<string, { baseUrl: string; apiKey: string }> = {};
-
-  // Group providers by backend type
-  for (const [providerName, providerConfig] of Object.entries(providers)) {
-    const backendType = getBackendType(providerName, providerConfig.api);
-
-    // Use first provider of each backend type
-    if (!backends[backendType]) {
-      backends[backendType] = {
-        baseUrl: providerConfig.baseUrl,
-        apiKey: providerConfig.apiKey,
+    if (modified) {
+      writeModelsJson(filePath, data);
+      backupData[filePath] = {
+        files: [filePath],
+        originalBaseUrls: fileBackup,
       };
     }
   }
+}
 
-  // Create gateway config
-  const gatewayConfig = {
-    port: DEFAULT_GATEWAY_PORT,
-    backends,
-  };
+/**
+ * Restore provider baseUrls in agent models.json files from backup
+ */
+function restoreAgentModelsFiles(backupData: Record<string, { files: string[]; originalBaseUrls: Record<string, string> }>): string[] {
+  const restored: string[] = [];
 
-  // Write gateway config
-  fs.mkdirSync(OG_DIR, { recursive: true });
-  fs.writeFileSync(GATEWAY_CONFIG, JSON.stringify(gatewayConfig, null, 2) + "\n", "utf-8");
+  for (const [filePath, backup] of Object.entries(backupData)) {
+    if (!fs.existsSync(filePath)) continue;
+
+    const data = readModelsJson(filePath);
+    if (!data?.providers) continue;
+
+    let modified = false;
+    for (const [name, originalUrl] of Object.entries(backup.originalBaseUrls)) {
+      if (data.providers[name]) {
+        data.providers[name].baseUrl = originalUrl;
+        modified = true;
+      }
+    }
+
+    if (modified) {
+      writeModelsJson(filePath, data);
+      restored.push(filePath);
+    }
+  }
+
+  return restored;
 }
 
 // =============================================================================
@@ -326,120 +487,190 @@ function configureGateway(providers: Record<string, { baseUrl: string; apiKey: s
 
 /**
  * Enable AI Security Gateway
+ * Modifies openclaw.json to route all providers through gateway
  */
-export async function enableGateway(): Promise<{ agents: string[]; providers: string[] }> {
+export async function enableGateway(): Promise<{ providers: string[]; warnings: string[] }> {
   // Check if already enabled
   if (fs.existsSync(GATEWAY_BACKUP)) {
     throw new Error("Gateway is already enabled. Disable it first with '/og_sanitize off'");
   }
 
-  const agentNames = findAgentDirs();
-  if (agentNames.length === 0) {
-    throw new Error("No agents found");
+  // Read openclaw.json
+  const config = readOpenClawConfig();
+  if (!config.models?.providers) {
+    throw new Error("No providers found in openclaw.json");
   }
 
-  // Collect all providers BEFORE modifying configs
-  const originalProviders = collectAllProviders();
-
-  // Configure gateway with original providers
-  configureGateway(originalProviders);
-
-  // Start gateway if not running
-  if (!isGatewayRunning()) {
-    await startGateway();
-  }
-
-  // Now modify configs and create backup
+  const providers = config.models.providers;
   const backup: GatewayBackup = {
     timestamp: new Date().toISOString(),
-    entries: [],
+    routedProviders: {},
   };
 
-  const allProviders: string[] = [];
+  const routedProviders: string[] = [];
+  const originalProviders: Record<string, ProviderConfig> = {};
+  const skipped: string[] = [];
 
-  for (const agentName of agentNames) {
-    const config = readModelsConfig(agentName);
-    if (!config?.providers) continue;
-
-    const backupEntry: BackupEntry = {
-      agentName,
-      modelsFile: path.join(AGENTS_DIR, agentName, "agent/models.json"),
-      providers: {},
-    };
-
-    // Backup and modify each provider
-    for (const [providerName, providerConfig] of Object.entries(config.providers)) {
-      if (!providerConfig.baseUrl) continue;
-
-      // Save original baseUrl
-      backupEntry.providers[providerName] = {
-        originalBaseUrl: providerConfig.baseUrl,
-      };
-
-      // Update to gateway URL
-      providerConfig.baseUrl = GATEWAY_URL;
-
-      if (!allProviders.includes(providerName)) {
-        allProviders.push(providerName);
-      }
+  // Process each provider
+  for (const [name, provider] of Object.entries(providers)) {
+    // Skip if already pointing to gateway
+    if (provider.baseUrl && isGatewayUrl(provider.baseUrl)) {
+      skipped.push(name);
+      continue;
     }
 
-    // Write modified config
-    writeModelsConfig(agentName, config);
-    backup.entries.push(backupEntry);
+    // Skip if no baseUrl
+    if (!provider.baseUrl) {
+      continue;
+    }
+
+    // Save original baseUrl (只保存 baseUrl，不保存整个配置)
+    backup.routedProviders[name] = {
+      originalBaseUrl: provider.baseUrl,
+    };
+
+    // Save for gateway config
+    originalProviders[name] = { ...provider };
+
+    // Modify to point to gateway using backend name as identifier
+    // e.g., vllm -> http://127.0.0.1:53669/backend/vllm
+    provider.baseUrl = toGatewayUrl(name);
+    routedProviders.push(name);
+  }
+
+  // If all providers are already pointing to gateway, treat as "already enabled"
+  if (routedProviders.length === 0 && skipped.length > 0) {
+    // Create a minimal backup to mark gateway as enabled
+    fs.mkdirSync(MOLTGUARD_DATA_DIR, { recursive: true });
+    const minimalBackup: GatewayBackup = {
+      timestamp: new Date().toISOString(),
+      routedProviders: {},
+    };
+    // Mark skipped providers as routed (we don't know original URLs)
+    for (const name of skipped) {
+      minimalBackup.routedProviders[name] = {
+        originalBaseUrl: GATEWAY_SERVER_URL, // Can't restore, but mark as managed
+      };
+    }
+    fs.writeFileSync(GATEWAY_BACKUP, JSON.stringify(minimalBackup, null, 2) + "\n", "utf-8");
+
+    // Restart gateway to ensure it's running
+    await restartGateway();
+
+    return {
+      providers: skipped,
+      warnings: ["Providers were already pointing to gateway. Gateway is now marked as enabled."],
+    };
+  }
+
+  if (routedProviders.length === 0) {
+    throw new Error("No providers found with baseUrl to route through gateway");
+  }
+
+  // Configure gateway with original provider URLs
+  configureGateway(originalProviders);
+
+  // Write modified openclaw.json
+  writeOpenClawConfig(config);
+
+  // Also update agent models.json files
+  const agentModelsBackup: Record<string, { files: string[]; originalBaseUrls: Record<string, string> }> = {};
+  updateAgentModelsFiles(agentModelsBackup);
+  if (Object.keys(agentModelsBackup).length > 0) {
+    backup.agentModelsBackup = agentModelsBackup;
   }
 
   // Save backup
-  const backupDir = path.dirname(GATEWAY_BACKUP);
-  fs.mkdirSync(backupDir, { recursive: true });
+  fs.mkdirSync(MOLTGUARD_DATA_DIR, { recursive: true });
   fs.writeFileSync(GATEWAY_BACKUP, JSON.stringify(backup, null, 2) + "\n", "utf-8");
 
-  return {
-    agents: agentNames,
-    providers: allProviders,
-  };
+  const warnings: string[] = [];
+  if (skipped.length > 0) {
+    warnings.push(`Skipped providers already pointing to gateway: ${skipped.join(", ")}`);
+  }
+
+  const modifiedAgentFiles = Object.keys(agentModelsBackup).length;
+  if (modifiedAgentFiles > 0) {
+    warnings.push(`Also updated ${modifiedAgentFiles} agent models.json file(s)`);
+  }
+
+  // Restart gateway to pick up new config with backends
+  await restartGateway();
+
+  return { providers: routedProviders, warnings };
 }
 
 /**
  * Disable AI Security Gateway
+ * Restores original provider URLs in openclaw.json (智能恢复)
  */
-export function disableGateway(stopProcess = false): { agents: string[]; providers: string[] } {
+export function disableGateway(): { providers: string[]; warnings: string[] } {
   if (!fs.existsSync(GATEWAY_BACKUP)) {
     throw new Error("Gateway not enabled (no backup found)");
   }
 
+  // Read backup
   const backup: GatewayBackup = JSON.parse(fs.readFileSync(GATEWAY_BACKUP, "utf-8"));
-  const allProviders: string[] = [];
 
-  // Restore original baseUrls
-  for (const entry of backup.entries) {
-    const config = readModelsConfig(entry.agentName);
-    if (!config?.providers) continue;
+  // Read current openclaw.json
+  const config = readOpenClawConfig();
+  if (!config.models?.providers) {
+    throw new Error("No providers found in openclaw.json");
+  }
 
-    for (const [providerName, backupData] of Object.entries(entry.providers)) {
-      if (config.providers[providerName]) {
-        config.providers[providerName].baseUrl = backupData.originalBaseUrl;
-        if (!allProviders.includes(providerName)) {
-          allProviders.push(providerName);
-        }
-      }
+  const providers = config.models.providers;
+  const restoredProviders: string[] = [];
+  const deletedProviders: string[] = [];
+  const modifiedProviders: string[] = [];
+
+  // Smart restore: 只恢复 baseUrl，保留其他字段的修改
+  for (const [name, routeInfo] of Object.entries(backup.routedProviders)) {
+    const provider = providers[name];
+
+    if (!provider) {
+      // Provider 被删除了
+      deletedProviders.push(name);
+      continue;
     }
 
-    writeModelsConfig(entry.agentName, config);
+    if (provider.baseUrl && isGatewayUrl(provider.baseUrl)) {
+      // Provider 还指向 gateway，恢复原始 URL
+      provider.baseUrl = routeInfo.originalBaseUrl;
+      restoredProviders.push(name);
+    } else if (provider.baseUrl !== routeInfo.originalBaseUrl) {
+      // Provider 的 baseUrl 被用户改成了其他值（既不是 gateway 也不是原始值）
+      modifiedProviders.push(name);
+      // 不恢复，保留用户的修改
+    } else {
+      // Provider 的 baseUrl 已经是原始值了，无需恢复
+    }
+  }
+
+  // Write restored config
+  writeOpenClawConfig(config);
+
+  // Restore agent models.json files
+  let restoredAgentFiles = 0;
+  if (backup.agentModelsBackup) {
+    const restored = restoreAgentModelsFiles(backup.agentModelsBackup);
+    restoredAgentFiles = restored.length;
   }
 
   // Delete backup
   fs.unlinkSync(GATEWAY_BACKUP);
 
-  // Optionally stop the gateway process
-  if (stopProcess && isGatewayRunning()) {
-    stopGateway();
+  const warnings: string[] = [];
+  if (deletedProviders.length > 0) {
+    warnings.push(`These providers were deleted and not restored: ${deletedProviders.join(", ")}`);
+  }
+  if (modifiedProviders.length > 0) {
+    warnings.push(`These providers have custom baseUrl (kept as-is): ${modifiedProviders.join(", ")}`);
+  }
+  if (restoredAgentFiles > 0) {
+    warnings.push(`Also restored ${restoredAgentFiles} agent models.json file(s)`);
   }
 
-  return {
-    agents: backup.entries.map(e => e.agentName),
-    providers: allProviders,
-  };
+  return { providers: restoredProviders, warnings };
 }
 
 /**
@@ -453,27 +684,13 @@ export function getGatewayStatus(): GatewayStatus {
     enabled,
     running,
     port: DEFAULT_GATEWAY_PORT,
-    url: GATEWAY_URL,
+    url: GATEWAY_SERVER_URL,
     providers: [],
-    agents: [],
   };
 
   if (enabled && fs.existsSync(GATEWAY_BACKUP)) {
     const backup: GatewayBackup = JSON.parse(fs.readFileSync(GATEWAY_BACKUP, "utf-8"));
-    status.agents = backup.entries.map(e => e.agentName);
-
-    const providerSet = new Set<string>();
-    for (const entry of backup.entries) {
-      for (const providerName of Object.keys(entry.providers)) {
-        providerSet.add(providerName);
-      }
-    }
-    status.providers = Array.from(providerSet);
-  }
-
-  if (running && fs.existsSync(GATEWAY_PID_FILE)) {
-    const pid = parseInt(fs.readFileSync(GATEWAY_PID_FILE, "utf-8").trim(), 10);
-    status.pid = pid;
+    status.providers = Object.keys(backup.routedProviders);
   }
 
   return status;

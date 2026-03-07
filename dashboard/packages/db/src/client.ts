@@ -12,8 +12,6 @@ if (!process.env.DATABASE_URL && !process.env.DB_DIALECT) {
   config({ path: resolve(__dirname, "../../../.env") });
 }
 
-const dialect = getDialect();
-
 // Database path configuration:
 // - DASHBOARD_DATA_DIR: directory for data files (default: dashboard/data)
 // - DATABASE_URL: full path to SQLite file (overrides DASHBOARD_DATA_DIR for SQLite)
@@ -22,7 +20,13 @@ function getDefaultDbPath(): string {
   return join(dataDir, "dashboard.db");
 }
 
+// Lazy-initialized database instance
+let _db: any = null;
+let _dbInitPromise: Promise<any> | null = null;
+
 async function createDb() {
+  const dialect = getDialect();
+
   if (dialect === "sqlite") {
     const { createClient } = await import("@libsql/client");
     const { drizzle } = await import("drizzle-orm/libsql");
@@ -63,5 +67,38 @@ async function createDb() {
   return drizzle(queryClient, { schema });
 }
 
-export const db: any = await createDb();
+/**
+ * Get database instance (lazy initialization)
+ * This ensures DASHBOARD_DATA_DIR is read at runtime, not at import time
+ */
+export async function getDb(): Promise<any> {
+  if (_db) return _db;
+
+  if (!_dbInitPromise) {
+    _dbInitPromise = createDb().then((instance) => {
+      _db = instance;
+      // Also set the exported db variable for backwards compatibility
+      db = instance;
+      return _db;
+    });
+  }
+
+  return _dbInitPromise;
+}
+
+/**
+ * Synchronous db access (legacy compatibility)
+ * Returns the cached instance or throws if not initialized
+ */
+export function getDbSync(): any {
+  if (!_db) {
+    throw new Error("Database not initialized. Call getDb() first.");
+  }
+  return _db;
+}
+
 export type Database = any;
+
+// Legacy export: will be initialized on first getDb() call
+// Routes that use `db` directly will work after autoMigrate() calls getDb()
+export let db: any = null;

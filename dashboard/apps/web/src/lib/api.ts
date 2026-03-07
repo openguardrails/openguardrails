@@ -97,7 +97,83 @@ export const api = {
     request<{ success: boolean; data: { mode: "autonomous" | "claimed"; message: string } }>(
       "/api/settings/connection-status"
     ),
+
+  // Gateway
+  getGatewayStatus: () =>
+    request<{ success: boolean; data: GatewayStatus }>("/api/gateway/status"),
+
+  getGatewayConfig: () =>
+    request<{ success: boolean; data: GatewayConfig }>("/api/gateway/config"),
+
+  getGatewayHealth: () =>
+    request<{ success: boolean; data: GatewayHealth }>("/api/gateway/health"),
+
+  getGatewayActivity: (options?: { limit?: number; type?: "sanitize" | "restore" }) => {
+    const params = new URLSearchParams();
+    if (options?.limit) params.set("limit", String(options.limit));
+    if (options?.type) params.set("type", options.type);
+    const qs = params.toString();
+    return request<{ success: boolean; data: GatewayActivityEvent[] }>(`/api/gateway/activity${qs ? `?${qs}` : ""}`);
+  },
+
+  getGatewayActivityStats: () =>
+    request<{ success: boolean; data: GatewayActivityStats }>("/api/gateway/activity/stats"),
 };
+
+export interface GatewayStatus {
+  enabled: boolean;
+  running: boolean;
+  pid?: number;
+  port: number;
+  url: string;
+  agents: string[];
+  providers: string[];
+  enabledAt: string | null;
+  backends: string[];
+}
+
+export interface GatewayConfig {
+  configured: boolean;
+  port: number;
+  backends: Record<string, { baseUrl: string; hasApiKey: boolean }>;
+  routing?: Record<string, string>;
+}
+
+export interface GatewayHealth {
+  healthy: boolean;
+  status?: string;
+  version?: string;
+  error?: string;
+}
+
+export interface GatewayActivityEvent {
+  id: string;
+  requestId: string;
+  timestamp: string;
+  type: "sanitize" | "restore";
+  direction: "request" | "response";
+  backend: string;
+  endpoint: string;
+  model?: string;
+  redactionCount: number;
+  categories: Record<string, number>;
+  durationMs?: number;
+}
+
+export interface GatewayActivityStats {
+  last24Hours: {
+    sanitizeCount: number;
+    restoreCount: number;
+    totalRedactions: number;
+  };
+  allTime: {
+    sanitizeCount: number;
+    restoreCount: number;
+    totalRedactions: number;
+    categories: Record<string, number>;
+    backends: Record<string, number>;
+  };
+}
 
 export interface AgentPermission {
   id: string;
@@ -232,6 +308,10 @@ export interface DetectionResult {
   }>;
   latencyMs: number;
   requestId: string;
+  // Static scan fields
+  scanType?: "static" | "dynamic";
+  filePath?: string | null;
+  fileType?: "soul" | "agent" | "memory" | "task" | "skill" | "plugin" | "other" | null;
   createdAt: string;
 }
 

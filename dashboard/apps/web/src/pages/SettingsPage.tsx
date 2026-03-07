@@ -11,6 +11,9 @@ interface Settings {
   dailyLlmCalls: number;
   dailyActions: number;
   securityLevel: SecurityLevel;
+  scanAutoEnabled: boolean;
+  scanExclusions: string;
+  scanRiskThreshold: "low" | "medium" | "high" | "critical";
 }
 
 const SECURITY_LEVELS: { value: SecurityLevel; label: string; description: string }[] = [
@@ -36,6 +39,9 @@ export function SettingsPage() {
     dailyLlmCalls: 1000,
     dailyActions: 500,
     securityLevel: "balanced",
+    scanAutoEnabled: false,
+    scanExclusions: "node_modules/**, .git/**, dist/**, build/**",
+    scanRiskThreshold: "medium",
   });
   const [connectionMode, setConnectionMode] = useState<ConnectionMode>("autonomous");
   const [loading, setLoading] = useState(true);
@@ -58,6 +64,9 @@ export function SettingsPage() {
             dailyLlmCalls: parseInt(settingsRes.data.daily_llm_calls || "1000", 10),
             dailyActions: parseInt(settingsRes.data.daily_actions || "500", 10),
             securityLevel: (settingsRes.data.security_level as SecurityLevel) || "balanced",
+            scanAutoEnabled: settingsRes.data.scan_auto_enabled === "true",
+            scanExclusions: settingsRes.data.scan_exclusions || "node_modules/**, .git/**, dist/**, build/**",
+            scanRiskThreshold: (settingsRes.data.scan_risk_threshold as any) || "medium",
           });
         }
 
@@ -81,6 +90,9 @@ export function SettingsPage() {
         daily_llm_calls: String(settings.dailyLlmCalls),
         daily_actions: String(settings.dailyActions),
         security_level: settings.securityLevel,
+        scan_auto_enabled: settings.scanAutoEnabled ? "true" : "false",
+        scan_exclusions: settings.scanExclusions,
+        scan_risk_threshold: settings.scanRiskThreshold,
       });
       if (res.success) {
         setSaveSuccess(true);
@@ -219,6 +231,75 @@ export function SettingsPage() {
                   </div>
                 </button>
               ))}
+            </div>
+          </div>
+
+          {/* Static Security Scanning */}
+          <div className="settings-section">
+            <h2 className="settings-section__title">Static Security Scanning</h2>
+            <p className="settings-section__description">
+              Configure automatic scanning of workspace files for security risks.
+            </p>
+
+            <div className="settings-grid">
+              <div className="settings-field">
+                <label className="settings-field__label">
+                  <input
+                    type="checkbox"
+                    checked={settings.scanAutoEnabled}
+                    onChange={(e) => setSettings(prev => ({
+                      ...prev,
+                      scanAutoEnabled: e.target.checked
+                    }))}
+                    style={{ marginRight: "8px" }}
+                  />
+                  Enable Auto-Scan
+                </label>
+                <div className="settings-field__help">
+                  Automatically scan workspace .md files when they are modified.
+                </div>
+              </div>
+
+              <div className="settings-field">
+                <label className="settings-field__label">Risk Threshold</label>
+                <div className="settings-field__input">
+                  <select
+                    value={settings.scanRiskThreshold}
+                    onChange={(e) => setSettings(prev => ({
+                      ...prev,
+                      scanRiskThreshold: e.target.value as any
+                    }))}
+                    style={{ width: "100%", padding: "8px" }}
+                  >
+                    <option value="low">Low (Report all risks)</option>
+                    <option value="medium">Medium (Report medium+ risks)</option>
+                    <option value="high">High (Report high+ risks only)</option>
+                    <option value="critical">Critical (Report critical only)</option>
+                  </select>
+                </div>
+                <div className="settings-field__help">
+                  Minimum risk level to report in dashboard.
+                </div>
+              </div>
+
+              <div className="settings-field">
+                <label className="settings-field__label">Exclusion Patterns</label>
+                <div className="settings-field__input">
+                  <textarea
+                    value={settings.scanExclusions}
+                    onChange={(e) => setSettings(prev => ({
+                      ...prev,
+                      scanExclusions: e.target.value
+                    }))}
+                    rows={3}
+                    style={{ width: "100%", padding: "8px", fontFamily: "monospace", fontSize: "0.9em" }}
+                    placeholder="node_modules/**, .git/**, dist/**"
+                  />
+                </div>
+                <div className="settings-field__help">
+                  Comma-separated glob patterns to exclude from scanning.
+                </div>
+              </div>
             </div>
           </div>
 

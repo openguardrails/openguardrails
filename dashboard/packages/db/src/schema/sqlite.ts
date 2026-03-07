@@ -102,12 +102,17 @@ export const detectionResults = sqliteTable(
     findings: text("findings", { mode: "json" }).notNull().default([]),
     latencyMs: integer("latency_ms").notNull(),
     requestId: text("request_id").notNull(),
+    // Static scan fields
+    scanType: text("scan_type").notNull().default("dynamic"), // "static" or "dynamic"
+    filePath: text("file_path"), // Relative path from workspace for static scans
+    fileType: text("file_type"), // "soul", "agent", "memory", "task", "skill", "plugin", "other"
     createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   },
   (table) => ({
     agentIdIdx: index("idx_detection_results_agent_id").on(table.agentId),
     createdAtIdx: index("idx_detection_results_created_at").on(table.createdAt),
     tenantIdIdx: index("idx_detection_results_tenant_id").on(table.tenantId),
+    scanTypeIdx: index("idx_detection_results_scan_type").on(table.scanType),
   })
 );
 
@@ -171,6 +176,34 @@ export const userSessions = sqliteTable(
   (table) => ({
     tokenIdx: index("idx_user_sessions_token").on(table.token),
     emailIdx: index("idx_user_sessions_email").on(table.email),
+  })
+);
+
+// ─── Gateway Activity ─────────────────────────────────────────
+// Records of gateway sanitization and restoration events
+export const gatewayActivity = sqliteTable(
+  "gateway_activity",
+  {
+    id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    tenantId: text("tenant_id").notNull().default("default"),
+    eventId: text("event_id").notNull(), // From gateway: gw-timestamp-counter-type
+    requestId: text("request_id").notNull(), // gw-timestamp-counter
+    timestamp: text("timestamp").notNull(),
+    type: text("type").notNull(), // "sanitize" or "restore"
+    direction: text("direction").notNull(), // "request" or "response"
+    backend: text("backend").notNull(), // "openai", "anthropic", "gemini"
+    endpoint: text("endpoint").notNull(), // e.g., "/v1/chat/completions"
+    model: text("model"),
+    redactionCount: integer("redaction_count").notNull().default(0),
+    categories: text("categories", { mode: "json" }).notNull().default({}), // { email: 2, secret: 1 }
+    durationMs: integer("duration_ms"),
+    createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => ({
+    requestIdIdx: index("idx_gateway_activity_request_id").on(table.requestId),
+    timestampIdx: index("idx_gateway_activity_timestamp").on(table.timestamp),
+    typeIdx: index("idx_gateway_activity_type").on(table.type),
+    tenantIdIdx: index("idx_gateway_activity_tenant_id").on(table.tenantId),
   })
 );
 

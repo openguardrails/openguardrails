@@ -261,7 +261,7 @@ Last Active: ${agent.lastActive || "unknown"}
 
 Focus on: what this agent does, its capabilities, connected systems and potential security surface area. Keep it factual and useful for a security team.`;
 
-    const gatewayPort = process.env.GATEWAY_PORT || "8900";
+    const gatewayPort = process.env.GATEWAY_PORT || "53669";
     try {
       const apiKey = process.env.ANTHROPIC_API_KEY || "not-set";
       const response = await fetch(`http://localhost:${gatewayPort}/v1/messages`, {

@@ -43,4 +43,6 @@ Thumbs.db
 /core
 /reference-docs
 /moltguard/dashboard-dist
+/moltguard/gateway
 /moltguard-website
+/cli

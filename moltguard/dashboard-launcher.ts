@@ -1,43 +1,40 @@
 /**
  * Dashboard Launcher for MoltGuard
  *
- * Starts the local Dashboard for monitoring agent activity.
+ * Starts the local Dashboard in-process for monitoring agent activity.
+ * All components (MoltGuard, Gateway, Dashboard) run in the same process.
  */
 
-import { spawn, type ChildProcess } from "node:child_process";
 import crypto from "node:crypto";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
+import { setDashboardPort } from "./agent/gateway-manager.js";
 
-// Dashboard process and state
-let dashboardProcess: ChildProcess | null = null;
+// Dashboard state
+let dashboardRunning = false;
 let currentToken: string | null = null;
 let currentLocalUrl: string | null = null;
+let dashboardCloseFn: (() => Promise<void>) | null = null;
+let startupInProgress = false;
+let startupPromise: Promise<LaunchResult> | null = null;
 
 export const DASHBOARD_PORT = 53667;
-const WEB_PORT = 53668;
 const TOKEN_FILE = path.join(os.homedir(), ".openclaw", "credentials", "moltguard", "dashboard-session-token");
 
 /**
  * Get the package root directory
- * Works for both source (.ts) and compiled (.js) files
  */
 function getPackageRoot(): string {
-  // Try to get current file path using import.meta.url (ES modules)
   if (typeof import.meta !== 'undefined' && import.meta.url) {
     const currentFile = fileURLToPath(import.meta.url);
     const currentDir = path.dirname(currentFile);
-    // If we're in dist/, go up one level
     if (currentDir.endsWith('dist')) {
       return path.dirname(currentDir);
     }
     return currentDir;
   }
-
-  // Fallback to __dirname (CommonJS or TypeScript direct execution)
-  // If __dirname ends with 'dist', go up one level
   if (__dirname.endsWith('dist')) {
     return path.dirname(__dirname);
   }
@@ -45,8 +42,7 @@ function getPackageRoot(): string {
 }
 
 /**
- * Get the plugin's data directory for storing dashboard database
- * Data stored here is deleted when the plugin is uninstalled
+ * Get the plugin's data directory
  */
 export function getPluginDataDir(): string {
   const openclawHome = process.env.OPENCLAW_HOME || path.join(os.homedir(), ".openclaw");
@@ -57,8 +53,8 @@ interface LaunchOptions {
   apiKey: string;
   agentId: string;
   coreUrl: string;
-  dataDir?: string;      // Custom data directory for database
-  autoStart?: boolean;   // Auto-start mode (silent failures for dev mode)
+  dataDir?: string;
+  autoStart?: boolean;
 }
 
 interface LaunchResult {
@@ -67,109 +63,85 @@ interface LaunchResult {
 }
 
 /**
- * Check if a port is responding (for detecting dev vs embedded mode)
+ * Check if a port is responding to HTTP health check
  */
 async function isPortResponding(port: number): Promise<boolean> {
   try {
-    const res = await fetch(`http://localhost:${port}/`, {
+    const res = await fetch(`http://localhost:${port}/health`, {
       signal: AbortSignal.timeout(1000),
     });
-    return res.ok || res.status < 500;
+    return res.ok;
   } catch {
     return false;
   }
 }
 
 /**
- * Check if dashboard is already running and get its token
+ * Check if a port is in use (TCP level check)
  */
-async function checkRunningDashboard(): Promise<{ running: boolean; token?: string; port?: number }> {
-  // First check if dashboard is responding
-  try {
-    const res = await fetch(`http://localhost:${DASHBOARD_PORT}/health`, {
-      signal: AbortSignal.timeout(2000),
-    });
-    if (res.ok) {
-      // Dashboard is running, try to read token from file
-      if (fs.existsSync(TOKEN_FILE)) {
-        try {
-          const data = JSON.parse(fs.readFileSync(TOKEN_FILE, "utf-8"));
-          if (data.token) {
-            return { running: true, token: data.token, port: data.port || DASHBOARD_PORT };
-          }
-        } catch {
-          // Ignore parse errors
-        }
+async function isPortInUse(port: number): Promise<boolean> {
+  const net = await import("node:net");
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once("error", (err: NodeJS.ErrnoException) => {
+      if (err.code === "EADDRINUSE") {
+        resolve(true);
+      } else {
+        resolve(false);
       }
-      // Dashboard running but no token file - still return running
-      return { running: true };
-    }
-  } catch {
-    // Not running
-  }
-  return { running: false };
+    });
+    server.once("listening", () => {
+      server.close();
+      resolve(false);
+    });
+    server.listen(port, "127.0.0.1");
+  });
 }
 
 /**
- * Start the local Dashboard
+ * Wait for a port to become available
  */
-export async function startLocalDashboard(options: LaunchOptions): Promise<LaunchResult> {
-  // Check if dashboard is already running (e.g., user started pnpm dev or embedded mode)
-  const existing = await checkRunningDashboard();
-  if (existing.running && existing.token) {
-    currentToken = existing.token;
-    // Determine correct port: check if Web server (53668) is running (dev mode)
-    // or use API port (53667) for embedded mode where API serves static files
-    const isDevMode = await isPortResponding(WEB_PORT);
-    const webPort = isDevMode ? WEB_PORT : DASHBOARD_PORT;
-    currentLocalUrl = `http://localhost:${webPort}/dashboard/?token=${existing.token}`;
-
-    return {
-      localUrl: currentLocalUrl,
-      token: existing.token,
-    };
-  }
-
-  // If Dashboard is already running via this launcher, reuse it
-  if (dashboardProcess && !dashboardProcess.killed) {
-    const token = currentToken || crypto.randomBytes(16).toString("hex");
-    // Reuse existing URL if set, otherwise use DASHBOARD_PORT (bundled mode)
-    if (!currentLocalUrl) {
-      currentLocalUrl = `http://localhost:${DASHBOARD_PORT}/dashboard/?token=${token}`;
+async function waitForPortAvailable(port: number, timeoutMs: number = 10000): Promise<boolean> {
+  const startTime = Date.now();
+  while (Date.now() - startTime < timeoutMs) {
+    const inUse = await isPortInUse(port);
+    if (!inUse) {
+      return true;
     }
-    return {
-      localUrl: currentLocalUrl,
-      token,
-    };
+    // Wait 500ms before checking again
+    await new Promise(r => setTimeout(r, 500));
   }
+  return false;
+}
 
-  // Find the dashboard directory
-  const dashboard = findDashboardDir();
-  if (!dashboard) {
-    throw new Error("Dashboard directory not found. Please install openguardrails package.");
+/**
+ * Read saved token from file
+ */
+function readSavedToken(): string | null {
+  if (fs.existsSync(TOKEN_FILE)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(TOKEN_FILE, "utf-8"));
+      if (data.token && typeof data.token === "string") {
+        return data.token;
+      }
+    } catch {
+      // Ignore
+    }
   }
+  return null;
+}
 
-  // Generate a new session token
-  const token = crypto.randomBytes(16).toString("hex");
-  currentToken = token;
-
-  // Start the Dashboard process
-  if (dashboard.bundled) {
-    await startBundledDashboard(dashboard.dir, token, options.coreUrl, options.dataDir);
-  } else {
-    await startDashboardProcess(dashboard.dir, token, options.coreUrl, options);
+/**
+ * Save token to file
+ */
+function saveToken(token: string, port: number): void {
+  try {
+    const tokenDir = path.dirname(TOKEN_FILE);
+    fs.mkdirSync(tokenDir, { recursive: true });
+    fs.writeFileSync(TOKEN_FILE, JSON.stringify({ token, port }));
+  } catch {
+    // Ignore
   }
-
-  // Wait for Dashboard to be ready
-  await waitForDashboard(DASHBOARD_PORT);
-
-  // In bundled mode, API serves static files, so use DASHBOARD_PORT (not WEB_PORT)
-  currentLocalUrl = `http://localhost:${DASHBOARD_PORT}/dashboard/?token=${token}`;
-
-  return {
-    localUrl: currentLocalUrl,
-    token,
-  };
 }
 
 /**
@@ -178,19 +150,14 @@ export async function startLocalDashboard(options: LaunchOptions): Promise<Launc
 function findDashboardDir(): { dir: string; bundled: boolean } | null {
   const packageRoot = getPackageRoot();
 
-  // Check common locations
   const candidates = [
     // 1. Bundled in moltguard package (production)
     { dir: path.join(packageRoot, "dashboard-dist"), bundled: true },
     // 2. Relative to moltguard (monorepo development)
     { dir: path.join(packageRoot, "..", "dashboard"), bundled: false },
-    // 3. Installed globally
-    { dir: path.join(os.homedir(), ".openclaw", "plugins", "moltguard", "dashboard"), bundled: false },
   ];
 
   for (const candidate of candidates) {
-    // For bundled: check for api/package.json
-    // For source: check for package.json
     const checkFile = candidate.bundled
       ? path.join(candidate.dir, "api", "package.json")
       : path.join(candidate.dir, "package.json");
@@ -204,188 +171,169 @@ function findDashboardDir(): { dir: string; bundled: boolean } | null {
 }
 
 /**
- * Start bundled Dashboard (pre-built, production mode)
+ * Start the local Dashboard (in-process)
  */
-async function startBundledDashboard(
-  dashboardDir: string,
-  token: string,
-  coreUrl: string,
-  dataDir?: string
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const apiDir = path.join(dashboardDir, "api");
-    const webDir = path.join(dashboardDir, "web");
+export async function startLocalDashboard(options: LaunchOptions): Promise<LaunchResult> {
+  // If already running, return existing URL
+  if (dashboardRunning && currentToken && currentLocalUrl) {
+    return {
+      localUrl: currentLocalUrl,
+      token: currentToken,
+    };
+  }
 
-    // Determine data directory for database storage
-    const effectiveDataDir = dataDir || getPluginDataDir();
+  // If startup is already in progress, wait for it
+  if (startupInProgress && startupPromise) {
+    return startupPromise;
+  }
 
-    // Ensure data directory exists
-    if (!fs.existsSync(effectiveDataDir)) {
-      fs.mkdirSync(effectiveDataDir, { recursive: true });
+  // Check if Dashboard is already running (e.g., dev mode with pnpm dev, or previous instance)
+  const isAlreadyRunning = await isPortResponding(DASHBOARD_PORT);
+  if (isAlreadyRunning) {
+    const existingToken = readSavedToken();
+    if (existingToken) {
+      currentToken = existingToken;
+      currentLocalUrl = `http://localhost:${DASHBOARD_PORT}/dashboard/?token=${existingToken}`;
+      dashboardRunning = true;
+      return {
+        localUrl: currentLocalUrl,
+        token: existingToken,
+      };
     }
+    // Port is responding but no token - another process is using it
+    // Don't try to start, just throw
+    throw new Error(`Port ${DASHBOARD_PORT} is already in use by another process`);
+  }
 
-    // Save token to file BEFORE starting Dashboard
-    // This ensures checkRunningDashboard() can read the correct token
-    const tokenDir = path.dirname(TOKEN_FILE);
-    if (!fs.existsSync(tokenDir)) {
-      fs.mkdirSync(tokenDir, { recursive: true });
+  // Check if port is in use but not responding (e.g., server shutting down)
+  // Wait for it to become available
+  const portInUse = await isPortInUse(DASHBOARD_PORT);
+  if (portInUse) {
+    // Port is held but not responding - likely shutting down, wait for it
+    const portAvailable = await waitForPortAvailable(DASHBOARD_PORT, 15000);
+    if (!portAvailable) {
+      throw new Error(`Port ${DASHBOARD_PORT} is still in use after waiting. Please try again.`);
     }
-    fs.writeFileSync(TOKEN_FILE, JSON.stringify({ token, port: DASHBOARD_PORT }));
-
-    // Track if we've resolved (to stop logging after startup)
-    let resolved = false;
-
-    // Start the API server with node
-    dashboardProcess = spawn("node", ["index.js"], {
-      cwd: apiDir,
-      env: {
-        ...process.env,
-        LOCAL_MODE: "true",
-        LOCAL_SESSION_TOKEN: token,
-        OG_CORE_URL: coreUrl,
-        PORT: String(DASHBOARD_PORT),
-        DASHBOARD_MODE: "embedded",
-        // Serve static web from bundled web directory
-        WEB_OUT_DIR: webDir,
-        // Store database in plugin's data directory
-        DASHBOARD_DATA_DIR: effectiveDataDir,
-      },
-      stdio: ["ignore", "pipe", "pipe"],
-      detached: false,
-    });
-
-    // Only log during startup, stop after Dashboard is ready
-    dashboardProcess.stdout?.on("data", (data) => {
-      if (resolved) return; // Stop logging after startup
-      const line = data.toString().trim();
-      console.log(`[dashboard] ${line}`);
-      if (line.includes("running on port") || line.includes("Local URL:")) {
-        resolved = true;
-        resolve();
-      }
-    });
-
-    dashboardProcess.stderr?.on("data", (data) => {
-      if (resolved) return; // Stop logging after startup
-      console.error(`[dashboard] ${data.toString().trim()}`);
-    });
-
-    dashboardProcess.on("error", (err) => {
-      if (!resolved) {
-        resolved = true;
-        reject(new Error(`Failed to start Dashboard: ${err.message}`));
-      }
-    });
-
-    dashboardProcess.on("exit", (code) => {
-      if (!resolved && code !== 0 && code !== null) {
-        resolved = true;
-        reject(new Error(`Dashboard exited with code ${code}`));
-      }
-      dashboardProcess = null;
-    });
-
-    // Timeout if Dashboard doesn't start
-    setTimeout(() => {
-      if (!resolved) {
-        resolved = true;
-        resolve(); // Resolve anyway, we'll check with waitForDashboard
-      }
-    }, 10000);
-  });
-}
-
-/**
- * Error indicating development mode requires manual startup
- */
-export class DevModeError extends Error {
-  constructor(
-    public dashboardDir: string,
-  ) {
-    super("Development mode requires manual startup");
-    this.name = "DevModeError";
   }
 
-  getInstructions(): string {
-    return [
-      "**Dashboard Not Running**",
-      "",
-      "Start the Dashboard in a separate terminal:",
-      "",
-      "```bash",
-      `cd ${this.dashboardDir}`,
-      `pnpm dev`,
-      "```",
-      "",
-      "Then run `/og_dashboard` again to get the URL.",
-    ].join("\n");
-  }
-}
+  // Mark startup in progress and create promise
+  startupInProgress = true;
 
-/**
- * Start the Dashboard process (development mode with source)
- *
- * In development mode, we don't auto-start pnpm dev because:
- * 1. pnpm may not be in PATH when spawned from the plugin
- * 2. Development mode typically wants interactive terminal access
- *
- * Instead, throw DevModeError with instructions for manual startup.
- * In autoStart mode, silently skip without throwing.
- */
-async function startDashboardProcess(
-  dashboardDir: string,
-  _token: string,
-  _coreUrl: string,
-  options?: { autoStart?: boolean }
-): Promise<void> {
-  // In auto-start mode during development, silently skip
-  if (options?.autoStart) {
-    console.log("[dashboard-launcher] Dev mode: Dashboard not auto-started. Run 'pnpm dev' manually in dashboard/");
-    return;
-  }
-  // Interactive mode - prompt manual startup
-  throw new DevModeError(dashboardDir);
-}
-
-/**
- * Wait for Dashboard to be ready
- */
-async function waitForDashboard(port: number, timeoutMs: number = 30000): Promise<void> {
-  const startTime = Date.now();
-  const checkInterval = 500;
-
-  while (Date.now() - startTime < timeoutMs) {
+  const doStartup = async (): Promise<LaunchResult> => {
     try {
-      const res = await fetch(`http://localhost:${port}/health`);
-      if (res.ok) {
-        return;
+      // Find dashboard directory
+      const dashboard = findDashboardDir();
+      if (!dashboard) {
+        throw new Error("Dashboard directory not found.");
       }
-    } catch {
-      // Not ready yet
+
+      // Generate token
+      const token = crypto.randomBytes(16).toString("hex");
+      currentToken = token;
+
+      // Determine data and web directories
+      const dataDir = options.dataDir || getPluginDataDir();
+      fs.mkdirSync(dataDir, { recursive: true });
+
+      // CRITICAL: Set environment variables BEFORE importing dashboard modules
+      // This ensures the database client uses the correct path
+      process.env.DASHBOARD_DATA_DIR = dataDir;
+      process.env.LOCAL_MODE = "true";
+      process.env.DASHBOARD_MODE = "embedded";
+      if (options.coreUrl) {
+        process.env.OG_CORE_URL = options.coreUrl;
+      }
+
+      // Save token before starting
+      saveToken(token, DASHBOARD_PORT);
+
+      // Start Dashboard in-process with retry on EADDRINUSE
+      const startWithRetry = async (startFn: Function, config: object, maxRetries = 3): Promise<{ close: () => Promise<void> }> => {
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+          try {
+            return await startFn(config);
+          } catch (err: any) {
+            if (err?.code === "EADDRINUSE" || err?.message?.includes("EADDRINUSE")) {
+              if (attempt < maxRetries) {
+                // Wait and retry
+                await new Promise(r => setTimeout(r, 1000 * attempt));
+                continue;
+              }
+            }
+            throw err;
+          }
+        }
+        throw new Error("Failed to start dashboard after retries");
+      };
+
+      let result: { close: () => Promise<void> };
+
+      if (dashboard.bundled) {
+        // Production: import from bundled dist
+        const apiIndexPath = path.join(dashboard.dir, "api", "index.js");
+        const webOutDir = path.join(dashboard.dir, "web");
+
+        const { startDashboard } = await import(apiIndexPath);
+        result = await startWithRetry(startDashboard, {
+          port: DASHBOARD_PORT,
+          localMode: true,
+          localToken: token,
+          dashboardMode: "embedded",
+          webOutDir,
+          dataDir,
+          coreUrl: options.coreUrl,
+        });
+      } else {
+        // Development: import from source (requires build)
+        const apiIndexPath = path.join(dashboard.dir, "apps", "api", "dist", "index.js");
+        const webOutDir = path.join(dashboard.dir, "apps", "web", "out");
+
+        if (!fs.existsSync(apiIndexPath)) {
+          throw new DevModeError(dashboard.dir);
+        }
+
+        const { startDashboard } = await import(apiIndexPath);
+        result = await startWithRetry(startDashboard, {
+          port: DASHBOARD_PORT,
+          localMode: true,
+          localToken: token,
+          dashboardMode: "embedded",
+          webOutDir,
+          dataDir,
+          coreUrl: options.coreUrl,
+        });
+      }
+
+      // Save close function for cleanup
+      dashboardCloseFn = result.close;
+
+      dashboardRunning = true;
+      currentLocalUrl = `http://localhost:${DASHBOARD_PORT}/dashboard/?token=${token}`;
+
+      // Notify gateway manager of dashboard port for activity reporting
+      setDashboardPort(DASHBOARD_PORT);
+
+      return {
+        localUrl: currentLocalUrl,
+        token,
+      };
+    } finally {
+      // Always reset startup state when done (success or failure)
+      startupInProgress = false;
+      startupPromise = null;
     }
-    await new Promise((r) => setTimeout(r, checkInterval));
-  }
+  };
 
-  throw new Error(`Dashboard did not start within ${timeoutMs}ms`);
-}
-
-/**
- * Stop the Dashboard process
- */
-export function stopDashboard(): void {
-  if (dashboardProcess) {
-    dashboardProcess.kill();
-    dashboardProcess = null;
-  }
-  currentToken = null;
-  currentLocalUrl = null;
+  // Assign the promise so concurrent calls can wait on it
+  startupPromise = doStartup();
+  return startupPromise;
 }
 
 /**
  * Check if Dashboard is running
  */
 export function isDashboardRunning(): boolean {
-  return dashboardProcess !== null && !dashboardProcess.killed;
+  return dashboardRunning;
 }
 
 /**
@@ -393,4 +341,66 @@ export function isDashboardRunning(): boolean {
  */
 export function getDashboardUrl(): string | null {
   return currentLocalUrl;
+}
+
+/**
+ * Get current token
+ */
+export function getDashboardToken(): string | null {
+  return currentToken;
+}
+
+/**
+ * Error for development mode (when build is required)
+ */
+export class DevModeError extends Error {
+  constructor(public dashboardDir: string) {
+    super("Development mode requires dashboard build");
+    this.name = "DevModeError";
+  }
+
+  getInstructions(): string {
+    return [
+      "**Dashboard Not Built**",
+      "",
+      "Build the Dashboard first:",
+      "",
+      "```bash",
+      `cd ${this.dashboardDir}`,
+      `pnpm build`,
+      "```",
+      "",
+      "Then run `/og_dashboard` again.",
+    ].join("\n");
+  }
+}
+
+/**
+ * Stop Dashboard server
+ */
+export async function stopLocalDashboard(): Promise<void> {
+  // Wait for any in-progress startup to complete first
+  if (startupInProgress && startupPromise) {
+    try {
+      await startupPromise;
+    } catch {
+      // Ignore startup errors - we're stopping anyway
+    }
+  }
+
+  if (dashboardCloseFn) {
+    try {
+      await dashboardCloseFn();
+    } catch {
+      // Ignore errors during shutdown
+    }
+    dashboardCloseFn = null;
+  }
+
+  // Reset all state
+  dashboardRunning = false;
+  currentLocalUrl = null;
+  currentToken = null;
+  startupInProgress = false;
+  startupPromise = null;
 }

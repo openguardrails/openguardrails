@@ -3,6 +3,8 @@ node_modules/
 
 # Build output
 dist/
+dashboard-dist/
+gateway/
 
 # IDE
 .idea/

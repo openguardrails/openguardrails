@@ -174,7 +174,7 @@ Supports Anthropic, OpenAI (+ compatible: Kimi, DeepSeek), and Gemini.
 
 ```bash
 cd gateway
-npm run dev          # Start on port 8900
+npm run dev          # Start on port 53669
 npm run typecheck    # Type-check
 npm run test         # Run sanitizer tests
 ```
@@ -184,7 +184,7 @@ Config: `~/.openguardrails/gateway.json` or environment variables (`ANTHROPIC_AP
 ### Integration with OpenClaw
 
 Users enable gateway via MoltGuard commands:
-- `/og_sanitize on` — Modifies all agents' `models.json` to route through gateway (http://127.0.0.1:8900)
+- `/og_sanitize on` — Modifies all agents' `models.json` to route through gateway (http://127.0.0.1:53669)
 - `/og_sanitize off` — Restores original baseUrls
 - Gateway config (`~/.openguardrails/gateway.json`) is auto-generated with providers' API keys
 - Backup stored in `~/.openclaw/credentials/moltguard/gateway-backup.json`

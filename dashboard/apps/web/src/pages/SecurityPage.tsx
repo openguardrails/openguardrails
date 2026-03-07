@@ -29,6 +29,7 @@ export function SecurityPage() {
   const [summary, setSummary] = useState<DetectionSummary | null>(null);
   const [agentMap, setAgentMap] = useState<Map<string, { name: string; emoji: string }>>(new Map());
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<"all" | "static" | "dynamic">("all");
 
   useEffect(() => {
     let cancelled = false;
@@ -82,12 +83,23 @@ export function SecurityPage() {
     d.findings?.some(f => f.scanner === "quota" && f.name === "quota_exceeded")
   );
 
+  // Filter detections by tab
+  const filteredDetections = detections.filter(d => {
+    if (activeTab === "static") return d.scanType === "static";
+    if (activeTab === "dynamic") return d.scanType === "dynamic" || !d.scanType;
+    return true; // "all"
+  });
+
+  // Count static vs dynamic
+  const staticCount = detections.filter(d => d.scanType === "static").length;
+  const dynamicCount = detections.filter(d => d.scanType === "dynamic" || !d.scanType).length;
+
   return (
     <>
       <div className="content-header">
         <div>
           <h1 className="page-title">Security</h1>
-          <p className="page-sub">Security risks detected across agents</p>
+          <p className="page-sub">Security risks detected across agents and workspace files</p>
         </div>
         <div className="page-meta">
           {summary && (
@@ -103,6 +115,46 @@ export function SecurityPage() {
             </>
           )}
         </div>
+      </div>
+
+      {/* Tabs for Static vs Dynamic */}
+      <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
+        <button
+          onClick={() => setActiveTab("all")}
+          className={`pill ${activeTab === "all" ? "active" : ""}`}
+          style={{
+            background: activeTab === "all" ? "var(--accent)" : "var(--bg2)",
+            color: activeTab === "all" ? "#fff" : "var(--fg)",
+            cursor: "pointer",
+            border: "none",
+          }}
+        >
+          All ({detections.length})
+        </button>
+        <button
+          onClick={() => setActiveTab("static")}
+          className={`pill ${activeTab === "static" ? "active" : ""}`}
+          style={{
+            background: activeTab === "static" ? "var(--accent)" : "var(--bg2)",
+            color: activeTab === "static" ? "#fff" : "var(--fg)",
+            cursor: "pointer",
+            border: "none",
+          }}
+        >
+          Static Scans ({staticCount})
+        </button>
+        <button
+          onClick={() => setActiveTab("dynamic")}
+          className={`pill ${activeTab === "dynamic" ? "active" : ""}`}
+          style={{
+            background: activeTab === "dynamic" ? "var(--accent)" : "var(--bg2)",
+            color: activeTab === "dynamic" ? "#fff" : "var(--fg)",
+            cursor: "pointer",
+            border: "none",
+          }}
+        >
+          Runtime Detections ({dynamicCount})
+        </button>
       </div>
 
       {quotaExceeded && (
@@ -123,11 +175,16 @@ export function SecurityPage() {
         <div className="card">
           <div className="card-sub">Loading security data...</div>
         </div>
-      ) : detections.length === 0 ? (
+      ) : filteredDetections.length === 0 ? (
         <div className="card">
           <div className="card-title">No risks detected</div>
           <div className="card-sub">
-            No security risks have been detected. Your agents are operating safely.
+            {activeTab === "all"
+              ? "No security risks have been detected. Your agents are operating safely."
+              : activeTab === "static"
+              ? "No static security risks found in workspace files. Run `/og_scan` to scan your files."
+              : "No runtime security risks detected. Your agents are operating safely."
+            }
           </div>
         </div>
       ) : (
@@ -136,14 +193,14 @@ export function SecurityPage() {
             <thead>
               <tr>
                 <th className="perm-th">Risk</th>
-                <th className="perm-th">Agent</th>
+                <th className="perm-th">{activeTab === "static" ? "File / Agent" : "Agent"}</th>
                 <th className="perm-th">Categories</th>
                 <th className="perm-th">Findings</th>
                 <th className="perm-th">Detected</th>
               </tr>
             </thead>
             <tbody>
-              {detections.map((det) => {
+              {filteredDetections.map((det) => {
                 const risk = riskLevel(det);
                 return (
                   <tr key={det.id} className="perm-row">
@@ -151,7 +208,16 @@ export function SecurityPage() {
                       <span className={`access-pill ${risk.cls}`}>{risk.label}</span>
                     </td>
                     <td className="perm-td">
-                      <span>{agentName(det.agentId)}</span>
+                      {det.scanType === "static" && det.filePath ? (
+                        <div>
+                          <div style={{ fontWeight: 500 }}>{det.filePath}</div>
+                          <div style={{ fontSize: "0.85em", color: "var(--fg3)", marginTop: "2px" }}>
+                            {det.fileType ? `[${det.fileType}] ` : ""}{agentName(det.agentId)}
+                          </div>
+                        </div>
+                      ) : (
+                        <span>{agentName(det.agentId)}</span>
+                      )}
                     </td>
                     <td className="perm-td">
                       {det.categories.length > 0 ? (

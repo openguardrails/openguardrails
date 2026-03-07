@@ -8,17 +8,26 @@ OpenGuardrails is a runtime security layer for AI agents. The system intercepts 
                     ┌─────────────────────────────────┐
                     │         Your AI Agent            │
                     │    (e.g. OpenClaw + MoltGuard)   │
-                    └──┬──────────────┬───────────┬───┘
-                       │ behavioral   │observations│ LLM requests
-                       │ assess       │            │ (optional)
-                       ▼              ▼            ▼
-              ┌──────────────┐  ┌──────────┐  ┌─────────────────┐
-              │  Core        │  │Dashboard │  │  AI Security    │
-              │  Behavioral  │  │Agent mgmt│  │  Gateway        │
-              │  Detection + │  │risk graph│  │  PII sanitize   │
-              │  Policy      │  │tool log  │  │  ↕              │
-              └──────────────┘  └──────────┘  │  LLM Provider   │
-                                              └─────────────────┘
+                    └──┬──────────────┬───────────────┘
+                       │ behavioral   │ LLM requests
+                       │ assess       │ (sanitized)
+                       ▼              ▼
+              ┌──────────────┐  ┌─────────────────┐
+              │  Core        │  │  AI Security    │
+              │  Behavioral  │  │  Gateway        │
+              │  Detection + │  │  (embedded)     │
+              │  Policy      │  │  PII sanitize   │
+              └──────────────┘  │  ↕              │
+                                │  LLM Provider   │
+                                └─────────────────┘
+                                        │
+                                        ▼
+                                ┌──────────────┐
+                                │  Dashboard   │
+                                │  (embedded)  │
+                                │  agent mgmt  │
+                                │  risk graph  │
+                                └──────────────┘
 ```
 
 ## Components
@@ -27,7 +36,11 @@ OpenGuardrails is a runtime security layer for AI agents. The system intercepts 
 Source: `moltguard/`
 Package: `@openguardrails/moltguard`
 
-The agent-side plugin. Intercepts tool calls and messages in real time, sends them to Core for scanning, and enforces block/allow/alert decisions before actions execute. Handles agent registration, activation, and quota tracking.
+The agent-side plugin that runs everything locally. Intercepts tool calls and messages in real time, sends them to Core for scanning, and enforces block/allow/alert decisions before actions execute.
+
+**Embedded components:**
+- **AI Security Gateway** — Sanitizes PII/credentials before LLM calls (port 53669)
+- **Dashboard** — Local web UI for monitoring and configuration (ports 53667/53668)
 
 Install via ClawHub: `npx clawhub@latest install moltguard`
 
@@ -45,7 +58,6 @@ Handles: agent registration, email verification, API key issuance, Stripe billin
 ### Dashboard
 Source: `dashboard/`
 Hosted: `https://www.openguardrails.com/dashboard`
-Self-hosted: `npm install -g openguardrails && openguardrails dashboard start`
 
 Management UI. Monorepo (pnpm + Turborepo):
 
@@ -57,29 +69,25 @@ dashboard/
   packages/db/     # Drizzle ORM, multi-dialect: SQLite/PG/MySQL (@og/db)
 ```
 
-Features: agent list, identity management, permission policies, behavior graph, risk event log.
+Features: agent list, identity management, permission policies, behavior graph, risk event log, gateway activity monitoring.
+
+The dashboard runs **embedded** in the MoltGuard plugin process — no separate CLI tool needed.
 
 ---
 
 ### AI Security Gateway
 Source: `gateway/`
-Package: `@openguardrails/gateway` (port 8900)
+Package: `@openguardrails/gateway` (port 53669)
 
-Local reverse proxy for LLM API calls. Sanitizes PII, credentials, and secrets from prompts before they leave the machine, and restores original values in responses. Zero npm dependencies. Supports Anthropic, OpenAI (+ compatible: Kimi, DeepSeek), and Gemini.
+Local reverse proxy for LLM API calls. Sanitizes PII, credentials, and secrets from prompts before they leave the machine, and restores original values in responses. Zero npm dependencies. Supports Anthropic, OpenAI (+ compatible: Kimi, DeepSeek, vLLM), and Gemini.
 
----
-
-### CLI
-Source: `cli/`
-Package: `openguardrails`
-
-Bundles the dashboard (API + pre-built frontend) for private deployment. Has zero workspace dependencies — uses esbuild to bundle everything, spawns child processes at runtime. User data lives at `~/.openguardrails/`.
+The gateway runs **embedded** in the MoltGuard plugin process. Users enable it via `/og_sanitize on`.
 
 ---
 
 ## Data Flow
 
-**Normal agent request (hosted):**
+**Normal agent request (with Core detection):**
 
 ```
 Agent tool call
@@ -87,20 +95,21 @@ Agent tool call
   → POST /api/v1/behavior/assess to Core  (behavioral rules, S01–S10 scanners)
   → Core returns decision (block/alert/allow)
   → MoltGuard enforces decision
-  → POST /api/observations to Dashboard   (non-blocking, records tool call)
+  → Report to Dashboard (non-blocking)
   → (if allowed) tool call executes
 ```
 
-**With AI Security Gateway (local):**
+**With AI Security Gateway (data sanitization):**
 
 ```
 Agent LLM request
-  → Gateway receives (localhost:8900)
-  → Scans & strips PII/credentials from prompt
+  → Gateway receives (localhost:53669)
+  → Scans & replaces PII/credentials with placeholders
   → Forwards sanitized request to LLM provider
   → LLM response arrives
   → Gateway restores original values
   → Returns clean response to agent
+  → Activity logged to Dashboard
 ```
 
 ---
@@ -134,9 +143,21 @@ The Core behavioral engine evaluates tool call sequences — not just individual
 
 ---
 
+## Repository Layout
+
+```
+moltguard/          # MoltGuard OpenClaw plugin (includes embedded gateway + dashboard)
+gateway/            # AI Security Gateway source (@openguardrails/gateway)
+dashboard/          # Management dashboard (pnpm + Turborepo monorepo)
+```
+
+Note: The `cli/` directory has been removed — dashboard and gateway are now embedded in the MoltGuard plugin.
+
+---
+
 ## Contributing
 
-The open-source components (Dashboard, Gateway, MoltGuard, CLI) can each be developed independently. Core is a hosted service and its source is not public.
+The open-source components (Dashboard, Gateway, MoltGuard) can each be developed independently. Core is a hosted service and its source is not public.
 
 ```bash
 # Dashboard (full stack)
@@ -146,7 +167,7 @@ cd dashboard && pnpm install && pnpm build && pnpm db:migrate && pnpm dev
 cd gateway && npm run dev
 
 # MoltGuard plugin
-cd moltguard
+cd moltguard && npm run build
 ```
 
 API conventions:

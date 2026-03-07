@@ -112,12 +112,17 @@ export const detectionResults = mysqlTable(
     findings: json("findings").notNull().default([]),
     latencyMs: int("latency_ms").notNull(),
     requestId: varchar("request_id", { length: 64 }).notNull(),
+    // Static scan fields
+    scanType: varchar("scan_type", { length: 16 }).notNull().default("dynamic"), // "static" or "dynamic"
+    filePath: text("file_path"), // Relative path from workspace for static scans
+    fileType: varchar("file_type", { length: 16 }), // "soul", "agent", "memory", "task", "skill", "plugin", "other"
     createdAt: datetime("created_at").notNull().$defaultFn(() => new Date()),
   },
   (table) => ({
     agentIdIdx: index("idx_detection_results_agent_id").on(table.agentId),
     createdAtIdx: index("idx_detection_results_created_at").on(table.createdAt),
     tenantIdIdx: index("idx_detection_results_tenant_id").on(table.tenantId),
+    scanTypeIdx: index("idx_detection_results_scan_type").on(table.scanType),
   })
 );
 
@@ -146,6 +151,34 @@ export const toolCallObservations = mysqlTable(
     toolNameIdx: index("idx_tool_obs_tool_name").on(table.toolName),
     timestampIdx: index("idx_tool_obs_timestamp").on(table.timestamp),
     tenantIdIdx: index("idx_tool_obs_tenant_id").on(table.tenantId),
+  })
+);
+
+// ─── Gateway Activity ─────────────────────────────────────────
+// Records of gateway sanitization and restoration events
+export const gatewayActivity = mysqlTable(
+  "gateway_activity",
+  {
+    id: varchar("id", { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+    tenantId: varchar("tenant_id", { length: 64 }).notNull().default("default"),
+    eventId: varchar("event_id", { length: 128 }).notNull(), // From gateway: gw-timestamp-counter-type
+    requestId: varchar("request_id", { length: 64 }).notNull(), // gw-timestamp-counter
+    timestamp: datetime("timestamp").notNull(),
+    type: varchar("type", { length: 16 }).notNull(), // "sanitize" or "restore"
+    direction: varchar("direction", { length: 16 }).notNull(), // "request" or "response"
+    backend: varchar("backend", { length: 32 }).notNull(), // "openai", "anthropic", "gemini"
+    endpoint: varchar("endpoint", { length: 255 }).notNull(), // e.g., "/v1/chat/completions"
+    model: varchar("model", { length: 128 }),
+    redactionCount: int("redaction_count").notNull().default(0),
+    categories: json("categories").notNull().default({}), // { email: 2, secret: 1 }
+    durationMs: int("duration_ms"),
+    createdAt: datetime("created_at").notNull().$defaultFn(() => new Date()),
+  },
+  (table) => ({
+    requestIdIdx: index("idx_gateway_activity_request_id").on(table.requestId),
+    timestampIdx: index("idx_gateway_activity_timestamp").on(table.timestamp),
+    typeIdx: index("idx_gateway_activity_type").on(table.type),
+    tenantIdIdx: index("idx_gateway_activity_tenant_id").on(table.tenantId),
   })
 );
 

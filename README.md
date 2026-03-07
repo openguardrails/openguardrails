@@ -1,13 +1,40 @@
 # OpenGuardrails
 
-**#1 OpenClaw security plugin on [ClawHub](https://clawhub.ai/ThomasLWang/moltguard)** protect your OpenClaw with real-time defense against prompt injection, data leaks, and dangerous actions.
+**No.1 OpenClaw security plugin on [ClawHub](https://clawhub.ai/ThomasLWang/moltguard)** — protect your OpenClaw with real-time defense against prompt injection, data leaks, and dangerous actions.
 
 **Three Principles:**
 - **Instant Value** — Works immediately after installation
 - **No Security Expertise** — No configuration needed
 - **Secure by Default** — "Install it, and the agent won't go rogue"
 
-Open source (Apache 2.0). 
+Open source (Apache 2.0).
+
+---
+
+## Installation
+
+```bash
+# 1. Install the plugin
+openclaw plugins install @openguardrails/moltguard
+
+# 2. Restart to load the plugin
+openclaw gateway restart
+```
+
+That's it! MoltGuard works immediately with **500 free security detections per day**.
+
+---
+
+## Test Your Protection
+
+After installation, test to confirm MoltGuard is working:
+
+```bash
+# Read this test file (contains a simulated prompt injection attack)
+cat ~/.openclaw/extensions/moltguard/samples/test-email-popup.txt
+```
+
+MoltGuard will detect the hidden prompt injection attack and show you it's working.
 
 ---
 
@@ -15,49 +42,23 @@ Open source (Apache 2.0).
 
 | Feature | Description |
 |---------|-------------|
-| **Agent Activity Monitor** | Track agentic hours, actions, LLM calls, blocks, and risk events |
-| **Agent Guard** | Real-time interception of tool calls, shell commands, file access, HTTP requests |
-| **Secret & Data Leak Protection** | Auto-sanitize API keys, SSH keys, PII before sending to LLMs |
 | **Prompt Injection Protection** | Detect and block "ignore instructions", "send secrets", "bypass rules" attacks |
+| **Secret & Data Leak Protection** | Auto-sanitize API keys, SSH keys, PII before sending to LLMs |
+| **Agent Activity Monitor** | Track agentic hours, actions, LLM calls, blocks, and risk events |
 
 ---
 
-## Quick Start
-
-### 1. Install MoltGuard
-
-Run this in your terminal to install the MoltGuard OpenClaw skill:
-
-```bash
-npx clawhub@latest install moltguard
-```
-
-Then ask OpenClaw to install and activate it:
-
-```
-Install and activate moltguard
-```
-
-### 2. Start protecting
-
-MoltGuard auto-registers with Core and starts protecting immediately — no email required.
-
-That's it. Your agent is now protected with **500 free checks/day**.
-
-To upgrade or link to your account, run `/og_core` to open the portal, enter your email, and click the magic link.
-
-### 3. View the dashboard
-
-Sign in at [openguardrails.com/dashboard](https://www.openguardrails.com/dashboard) to see detected threats, agent behavior graphs, permission policies, and risk events.
-
-### Commands
+## Commands
 
 | Command | Action |
 |---------|--------|
 | `/og_status` | Show status, API key, and quota |
+| `/og_scan` | Run static security scan on workspace files (results in Dashboard) |
+| `/og_autoscan on/off` | Enable/disable automatic scanning when files change |
+| `/og_sanitize on/off` | Enable/disable AI Security Gateway for data sanitization |
+| `/og_dashboard` | Start local Dashboard to view scan results and activity |
 | `/og_config` | Configure API key for cross-machine sharing |
 | `/og_core` | Open Core portal for account and billing |
-| `/og_dashboard` | Start local Dashboard |
 | `/og_claim` | Display agent ID and API key for claiming |
 
 ---
@@ -68,9 +69,41 @@ Sign in at [openguardrails.com/dashboard](https://www.openguardrails.com/dashboa
 2. **Behavioral Risk** — Dangerous commands, file deletion, risky API calls
 3. **Data Risk** — Secret leakage, PII exposure, sending sensitive data to LLMs
 
+## Two-Layer Detection
+
+### Static Detection (Proactive)
+
+Scans workspace files **before** they can influence agent behavior:
+
+| Target | What It Detects |
+|--------|-----------------|
+| **SOUL.md / agent.md** | Embedded prompt injection, hidden instructions |
+| **Skills** | Malicious skill definitions, dangerous tool patterns |
+| **Plugins** | Backdoor instructions, data exfiltration code |
+| **Memories** | Poisoned context, injected false memories |
+| **Workspace files** | Hidden instructions in markdown, config tampering |
+
+Run manually with `/og_scan` or enable auto-scan with `/og_autoscan on`.
+
+### Runtime Detection (Real-time)
+
+Intercepts agent actions **as they happen**:
+
+| Target | What It Detects |
+|--------|-----------------|
+| **Tool calls** | Dangerous commands, unauthorized file access, risky API calls |
+| **Tool results** | Prompt injection in file content, web pages, API responses |
+| **LLM requests** | PII/credential leakage, sensitive data exposure |
+| **Behavioral chains** | File read → exfiltration, credential access → external write |
+| **Intent mismatch** | Agent says one thing but does another |
+
+Runtime detection is always active — no configuration needed.
+
+---
+
 ## Detection Engine
 
-10 built-in scanners + intent-action mismatch detection:
+10 built-in scanners (S01–S10) + intent-action mismatch detection:
 
 **Content scanners:** Prompt injection · System override · Web attacks · MCP tool poisoning · Malicious code execution · NSFW · PII leakage · Credential leakage · Confidential data · Off-topic drift
 
@@ -80,25 +113,81 @@ See [architecture.md](docs/architecture.md#scanners) for the full list.
 
 ---
 
-## Self-Hosted Options
+## Onboarding Flow
 
-The detection engine (Core) is a hosted service — the rest can be self-hosted:
+### Automatic (Zero Human Intervention)
 
-**Private dashboard** — deploy locally, data stays in SQLite at `~/.openguardrails/`:
+1. MoltGuard installs
+2. Auto-register with Core, get API key
+3. Credentials saved to `~/.openclaw/credentials/moltguard/`
+4. Protection active — 500 free detections/day
+
+### Claiming an Agent (Link to Account)
+
+For shared quota across machines:
+1. `/og_claim` — get agent ID and API key
+2. `/og_core` — go to Core login
+3. Enter email, click magic link
+4. Go to `/claim-agent` page, paste credentials
+5. Agent now shares account quota
+
+---
+
+## Plans
+
+| Plan | Price | Quota |
+|------|-------|-------|
+| Free (Autonomous) | $0 | 500/day |
+| Starter | $19/mo | 100K/mo |
+| Pro | $49/mo | 300K/mo |
+| Business | $199/mo | 2M/mo |
+
+API keys work across multiple agents.
+
+---
+
+## AI Security Gateway
+
+MoltGuard includes an embedded AI Security Gateway that sanitizes PII and credentials before they reach LLM providers:
+
 ```bash
-npm install -g openguardrails
-openguardrails dashboard start
+/og_sanitize on   # Enable data sanitization
+/og_sanitize off  # Disable data sanitization
+/og_sanitize      # Check status
 ```
 
-**AI Security Gateway** — sanitize PII and credentials locally before they reach any LLM provider:
+When enabled:
+- API keys → `__PII_SECRET_00000001__`
+- Email addresses → `__PII_EMAIL_ADDRESS_00000001__`
+- Credit cards, SSN, phone numbers, etc. automatically sanitized
+- Original values restored in responses
+
+---
+
+## Update MoltGuard
+
 ```bash
-npm install -g @openguardrails/gateway
-openguardrails gateway start
-# Point OpenClaw base URL to http://localhost:8900
+# Update the plugin
+openclaw plugins update moltguard
+
+# Restart to load the updated version
+openclaw gateway restart
 ```
 
 ---
 
+## Uninstall
+
+```bash
+rm -rf ~/.openclaw/extensions/moltguard
+rm -rf ~/.openclaw/credentials/moltguard
+```
+
+---
+
+## Contact
+
+**Email**: thomas@openguardrails.com
 
 ## License
 

@@ -94,6 +94,10 @@ export type DetectionResultRequest = {
     total: number;
     resetAt?: string;
   };
+  // Static scan fields
+  scanType?: "static" | "dynamic";
+  filePath?: string;
+  fileType?: "soul" | "agent" | "memory" | "task" | "skill" | "plugin" | "other";
 };
 
 // Keep old names as aliases for backwards compat during transition

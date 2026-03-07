@@ -1,4 +1,4 @@
-export { db, type Database } from "./client.js";
+export { db, getDb, getDbSync, type Database } from "./client.js";
 export { getDialect, type Dialect } from "./dialect.js";
 export * from "./schema/index.js";
 export { insertReturning, updateReturning } from "./helpers.js";
@@ -10,4 +10,5 @@ export { detectionResultQueries } from "./queries/detection-results.js";
 export { settingsQueries } from "./queries/settings.js";
 export { observationQueries, inferCategory, inferAccessPattern } from "./queries/observations.js";
 export { authQueries } from "./queries/auth.js";
+export { gatewayActivityQueries } from "./queries/gateway-activity.js";
 export { runMigrations } from "./migrate.js";

@@ -11,6 +11,107 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [6.8.0] - 2026-03-07
+
+### Unified Plugin Architecture — Embedded Gateway & Dashboard
+
+OpenGuardrails 6.8.0 consolidates the architecture into a single MoltGuard plugin that runs everything locally. The standalone CLI has been removed — AI Security Gateway and Dashboard now run **embedded** in the plugin process.
+
+---
+
+### Architecture Changes
+
+#### Removed
+
+- **CLI Package** (`cli/`) — Removed entirely. Dashboard and Gateway are now embedded in MoltGuard.
+- **Standalone `openguardrails` npm package** — No longer needed. Install MoltGuard directly via ClawHub.
+
+#### Changed
+
+- **AI Security Gateway** — Now runs embedded in the MoltGuard plugin process (port 53669). No separate process management needed.
+- **Dashboard** — Now runs embedded in the MoltGuard plugin process (ports 53667/53668). Auto-starts when plugin loads.
+- **Gateway Port** — Changed from 8900 to 53669 for consistency with other OpenGuardrails ports.
+- **Gateway Config Location** — Moved from `~/.openguardrails/gateway.json` to `~/.openclaw/extensions/moltguard/data/gateway.json`.
+
+---
+
+### AI Security Gateway (`gateway/`)
+
+#### Added
+
+- **Activity Monitoring** — Real-time tracking of sanitization events with `addActivityListener()` API. Events include redaction counts, categories, and timing.
+- **Per-Request Mapping Store** — `mapping-store.ts` for tracking placeholder-to-original mappings across streaming responses.
+- **Embedded Mode** — `startGateway(configPath, embedded=true)` for in-process use without process exit on errors.
+- **Backend URL Routing** — Support for `/backend/{name}/chat/completions` URL pattern to route to specific backends.
+- **Path Prefix Routing** — Backend config supports `pathPrefix` for matching requests by URL path.
+
+#### Changed
+
+- **Placeholder Format** — Updated to `__PII_{TYPE}_{ID}__` format (e.g., `__PII_SECRET_00000001__`, `__PII_EMAIL_ADDRESS_00000002__`).
+- **Config Structure** — Simplified backend configuration with auto-type inference from baseUrl.
+
+---
+
+### MoltGuard Plugin (`moltguard/`)
+
+#### Added
+
+- **`/og_sanitize` Command** — Enable/disable AI Security Gateway with `on`/`off` arguments.
+- **`/og_scan` Command** — Scan workspace files for security risks (skills, plugins, memories, workspace md files). Results viewable in Dashboard.
+- **`/og_autoscan` Command** — Enable/disable automatic file scanning on workspace changes. Results viewable in Dashboard.
+- **Workspace Scanner** — `workspace-scanner.ts` for scanning all OpenClaw workspace files.
+- **File Watcher** — `file-watcher.ts` for monitoring file changes and triggering auto-scans.
+- **Gateway Activity Reporting** — Sanitization events are reported to the embedded Dashboard.
+
+#### Changed
+
+- **Gateway Management** — `gateway-manager.ts` rewritten to manage embedded gateway (no subprocess spawning).
+- **Dashboard Auto-Start** — Dashboard starts automatically when plugin loads (no manual `/og_dashboard` needed for basic use).
+
+---
+
+### Dashboard (`dashboard/`)
+
+#### Added
+
+- **Gateway Activity Page** — New `/gateway` page showing sanitization activity, redaction counts by category, and real-time event log.
+- **Gateway Activity API** — `POST /api/gateway/activity` endpoint for receiving activity events from embedded gateway.
+- **Gateway Activity Schema** — New `gateway_activity` table for storing sanitization events.
+
+---
+
+### Documentation
+
+- **Updated `gateway/CLAUDE.md`** — Comprehensive documentation of embedded gateway architecture, activity monitoring, and programmatic API.
+- **Updated `docs/architecture.md`** — Reflects unified plugin architecture without CLI.
+- **Updated `README.md`** — Simplified installation and usage instructions.
+
+---
+
+### Migration Guide
+
+#### From 6.7.x to 6.8.0
+
+1. **Uninstall CLI** (if installed):
+   ```bash
+   npm uninstall -g openguardrails
+   ```
+
+2. **Update MoltGuard plugin**:
+   ```bash
+   openclaw plugins update moltguard
+   openclaw gateway restart
+   ```
+
+3. **Gateway config migration** (automatic):
+   - Old config at `~/.openguardrails/gateway.json` is still read as fallback
+   - New config location: `~/.openclaw/extensions/moltguard/data/gateway.json`
+
+4. **Port change**:
+   - If you have firewall rules for port 8900, update them to 53669
+
+---
+
 ## [6.5.0] - 2026-02-21
 
 ### Rebuilt for OpenClaw — Guard Agent for AI Agents

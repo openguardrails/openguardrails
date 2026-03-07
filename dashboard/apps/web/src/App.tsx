@@ -8,6 +8,7 @@ import { ActivityPage } from "./pages/ActivityPage";
 import { SecurityPage } from "./pages/SecurityPage";
 import { SecretsPage } from "./pages/SecretsPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { GatewayPage } from "./pages/GatewayPage";
 
 function NoSessionError() {
   return (
@@ -65,6 +66,7 @@ export default function App() {
         <Route path="agents/:id" element={<AgentProfilePage />} />
         <Route path="activity" element={<ActivityPage />} />
         <Route path="security" element={<SecurityPage />} />
+        <Route path="gateway" element={<GatewayPage />} />
         <Route path="secrets" element={<SecretsPage />} />
         <Route path="settings" element={<SettingsPage />} />
 
