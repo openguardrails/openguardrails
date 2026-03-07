@@ -10,7 +10,7 @@
     ]
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && cp -r gateway dist/gateway",
     "typecheck": "tsc --noEmit",
     "typecheck:plugin": "tsc --noEmit -p tsconfig.plugin.json",
     "test": "vitest run",
