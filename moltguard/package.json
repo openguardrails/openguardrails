@@ -46,6 +46,7 @@
     "dist/",
     "gateway/",
     "dashboard-dist/",
+    "samples/",
     "openclaw.plugin.json",
     "README.md"
   ],
