@@ -2,7 +2,7 @@
   "id": "moltguard",
   "name": "MoltGuard",
   "description": "AI security guard for OpenClaw agents: prompt injection detection, credential scanning, and behavioral monitoring.",
-  "version": "6.8.2",
+  "version": "6.8.3",
   "configSchema": {
     "type": "object",
     "properties": {
@@ -32,7 +32,9 @@
       },
       "plan": {
         "type": "string",
-        "enum": ["enterprise"],
+        "enum": [
+          "enterprise"
+        ],
         "description": "Deployment plan. Set to 'enterprise' for self-hosted Core with centralized security management."
       },
       "dashboardUrl": {
