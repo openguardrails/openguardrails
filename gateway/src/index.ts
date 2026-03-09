@@ -23,7 +23,9 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 
 const GATEWAY_MODE = getGatewayMode();
-const SHUTDOWN_TOKEN_FILE = join(homedir(), ".openclaw", "extensions", "moltguard", "data", "gateway-shutdown-token");
+// Store shutdown token outside the extension directory so it survives plugin reinstalls
+// (OpenClaw renames the extension dir during reinstall, which would move the token file)
+const SHUTDOWN_TOKEN_FILE = join(homedir(), ".openclaw", "credentials", "moltguard", "gateway-shutdown-token");
 
 let config: GatewayConfig;
 let currentServer: ReturnType<typeof createServer> | null = null;
