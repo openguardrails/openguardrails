@@ -12,6 +12,7 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { setDashboardPort } from "./agent/gateway-manager.js";
 import { openclawHome } from "./agent/env.js";
+import { loadJsonSync } from "./agent/fs-utils.js";
 
 // Dashboard state
 let dashboardRunning = false;
@@ -120,7 +121,7 @@ async function waitForPortAvailable(port: number, timeoutMs: number = 10000): Pr
 function readSavedToken(): string | null {
   if (fs.existsSync(TOKEN_FILE)) {
     try {
-      const data = JSON.parse(fs.readFileSync(TOKEN_FILE, "utf-8"));
+      const data = loadJsonSync<{ token?: string }>(TOKEN_FILE);
       if (data.token && typeof data.token === "string") {
         return data.token;
       }

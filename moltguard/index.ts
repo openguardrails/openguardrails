@@ -35,6 +35,7 @@ import os from "node:os";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
 import { openclawHome } from "./agent/env.js";
+import { loadJsonSync } from "./agent/fs-utils.js";
 
 // =============================================================================
 // Constants
@@ -1571,7 +1572,7 @@ const openClawGuardPlugin = {
               const os = await import("node:os");
               const tokenFile = path.join(os.homedir(), ".openclaw", "credentials", "moltguard", "dashboard-session-token");
               if (fs.existsSync(tokenFile)) {
-                const tokenData = JSON.parse(fs.readFileSync(tokenFile, "utf-8"));
+                const tokenData = loadJsonSync<{ token?: string; port?: number }>(tokenFile);
                 if (tokenData.token) {
                   const port = tokenData.port || 53667;
                   initDashboardClient(tokenData.token, `http://localhost:${port}`);

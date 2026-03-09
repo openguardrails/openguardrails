@@ -6,10 +6,11 @@
  * - Because ensureOpenClawModelsJson() overwrites models.json with openclaw.json
  */
 
-import fs from "node:fs";
+import { existsSync, mkdirSync, writeFileSync, unlinkSync, readdirSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { startGateway as startGatewayServer, stopGateway as stopGatewayServer, isGatewayServerRunning, addActivityListener, type GatewayActivityEvent } from "../gateway/index.js";
+import { loadJsonSync } from "./fs-utils.js";
 
 // =============================================================================
 // Constants
@@ -52,8 +53,8 @@ function isApiKeyPlaceholder(value: string): boolean {
 function loadAuthProfiles(agentId: string = "main"): AuthProfiles | null {
   const authProfilesPath = path.join(OPENCLAW_DIR, "agents", agentId, "agent", "auth-profiles.json");
   try {
-    if (fs.existsSync(authProfilesPath)) {
-      return JSON.parse(fs.readFileSync(authProfilesPath, "utf-8"));
+    if (existsSync(authProfilesPath)) {
+      return loadJsonSync(authProfilesPath);
     }
   } catch {
     // Ignore errors
@@ -178,8 +179,8 @@ export function setDashboardToken(token: string): void {
 function loadDashboardToken(): string | null {
   const tokenFile = path.join(OPENCLAW_DIR, "credentials", "moltguard", "dashboard-session-token");
   try {
-    if (fs.existsSync(tokenFile)) {
-      const data = JSON.parse(fs.readFileSync(tokenFile, "utf-8"));
+    if (existsSync(tokenFile)) {
+      const data = loadJsonSync<{ token?: string }>(tokenFile);
       return data.token || null;
     }
   } catch {
@@ -233,14 +234,14 @@ let activityListenerRegistered = false;
  * Start the gateway server (in-process, embedded mode)
  */
 export function startGateway(): void {
-  fs.mkdirSync(MOLTGUARD_DATA_DIR, { recursive: true });
+  mkdirSync(MOLTGUARD_DATA_DIR, { recursive: true });
 
-  if (!fs.existsSync(GATEWAY_CONFIG)) {
+  if (!existsSync(GATEWAY_CONFIG)) {
     const defaultConfig = {
       port: DEFAULT_GATEWAY_PORT,
       backends: {},
     };
-    fs.writeFileSync(GATEWAY_CONFIG, JSON.stringify(defaultConfig, null, 2) + "\n", "utf-8");
+    writeFileSync(GATEWAY_CONFIG, JSON.stringify(defaultConfig, null, 2) + "\n", "utf-8");
   }
 
   // Register activity listener once
@@ -289,12 +290,12 @@ export function isGatewayRunning(): boolean {
  * Read openclaw.json
  */
 function readOpenClawConfig(): OpenClawConfig {
-  if (!fs.existsSync(OPENCLAW_CONFIG)) {
+  if (!existsSync(OPENCLAW_CONFIG)) {
     throw new Error("openclaw.json not found");
   }
 
   try {
-    return JSON.parse(fs.readFileSync(OPENCLAW_CONFIG, "utf-8"));
+    return loadJsonSync(OPENCLAW_CONFIG);
   } catch (err) {
     throw new Error(`Failed to parse openclaw.json: ${err}`);
   }
@@ -304,7 +305,7 @@ function readOpenClawConfig(): OpenClawConfig {
  * Write openclaw.json
  */
 function writeOpenClawConfig(config: OpenClawConfig): void {
-  fs.writeFileSync(OPENCLAW_CONFIG, JSON.stringify(config, null, 2) + "\n", "utf-8");
+  writeFileSync(OPENCLAW_CONFIG, JSON.stringify(config, null, 2) + "\n", "utf-8");
 }
 
 /**
@@ -371,8 +372,8 @@ function configureGateway(providers: Record<string, ProviderConfig>): void {
     backends,
   };
 
-  fs.mkdirSync(MOLTGUARD_DATA_DIR, { recursive: true });
-  fs.writeFileSync(GATEWAY_CONFIG, JSON.stringify(gatewayConfig, null, 2) + "\n", "utf-8");
+  mkdirSync(MOLTGUARD_DATA_DIR, { recursive: true });
+  writeFileSync(GATEWAY_CONFIG, JSON.stringify(gatewayConfig, null, 2) + "\n", "utf-8");
 }
 
 /**
@@ -382,16 +383,16 @@ function findAgentModelsFiles(): string[] {
   const agentsDir = path.join(OPENCLAW_DIR, "agents");
   const modelsFiles: string[] = [];
 
-  if (!fs.existsSync(agentsDir)) {
+  if (!existsSync(agentsDir)) {
     return modelsFiles;
   }
 
   // Find all agent directories
-  const entries = fs.readdirSync(agentsDir, { withFileTypes: true });
+  const entries = readdirSync(agentsDir, { withFileTypes: true });
   for (const entry of entries) {
     if (entry.isDirectory()) {
       const modelsPath = path.join(agentsDir, entry.name, "agent", "models.json");
-      if (fs.existsSync(modelsPath)) {
+      if (existsSync(modelsPath)) {
         modelsFiles.push(modelsPath);
       }
     }
@@ -405,7 +406,7 @@ function findAgentModelsFiles(): string[] {
  */
 function readModelsJson(filePath: string): { providers?: Record<string, ProviderConfig> } | null {
   try {
-    return JSON.parse(fs.readFileSync(filePath, "utf-8"));
+    return loadJsonSync(filePath);
   } catch {
     return null;
   }
@@ -415,7 +416,7 @@ function readModelsJson(filePath: string): { providers?: Record<string, Provider
  * Write a models.json file
  */
 function writeModelsJson(filePath: string, data: unknown): void {
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2) + "\n", "utf-8");
+  writeFileSync(filePath, JSON.stringify(data, null, 2) + "\n", "utf-8");
 }
 
 /**
@@ -459,7 +460,7 @@ function restoreAgentModelsFiles(backupData: Record<string, { files: string[]; o
   const restored: string[] = [];
 
   for (const [filePath, backup] of Object.entries(backupData)) {
-    if (!fs.existsSync(filePath)) continue;
+    if (!existsSync(filePath)) continue;
 
     const data = readModelsJson(filePath);
     if (!data?.providers) continue;
@@ -491,7 +492,7 @@ function restoreAgentModelsFiles(backupData: Record<string, { files: string[]; o
  */
 export async function enableGateway(): Promise<{ providers: string[]; warnings: string[] }> {
   // Check if already enabled
-  if (fs.existsSync(GATEWAY_BACKUP)) {
+  if (existsSync(GATEWAY_BACKUP)) {
     throw new Error("Gateway is already enabled. Disable it first with '/og_sanitize off'");
   }
 
@@ -541,7 +542,7 @@ export async function enableGateway(): Promise<{ providers: string[]; warnings: 
   // If all providers are already pointing to gateway, treat as "already enabled"
   if (routedProviders.length === 0 && skipped.length > 0) {
     // Create a minimal backup to mark gateway as enabled
-    fs.mkdirSync(MOLTGUARD_DATA_DIR, { recursive: true });
+    mkdirSync(MOLTGUARD_DATA_DIR, { recursive: true });
     const minimalBackup: GatewayBackup = {
       timestamp: new Date().toISOString(),
       routedProviders: {},
@@ -552,7 +553,7 @@ export async function enableGateway(): Promise<{ providers: string[]; warnings: 
         originalBaseUrl: GATEWAY_SERVER_URL, // Can't restore, but mark as managed
       };
     }
-    fs.writeFileSync(GATEWAY_BACKUP, JSON.stringify(minimalBackup, null, 2) + "\n", "utf-8");
+    writeFileSync(GATEWAY_BACKUP, JSON.stringify(minimalBackup, null, 2) + "\n", "utf-8");
 
     // Restart gateway to ensure it's running
     await restartGateway();
@@ -581,8 +582,8 @@ export async function enableGateway(): Promise<{ providers: string[]; warnings: 
   }
 
   // Save backup
-  fs.mkdirSync(MOLTGUARD_DATA_DIR, { recursive: true });
-  fs.writeFileSync(GATEWAY_BACKUP, JSON.stringify(backup, null, 2) + "\n", "utf-8");
+  mkdirSync(MOLTGUARD_DATA_DIR, { recursive: true });
+  writeFileSync(GATEWAY_BACKUP, JSON.stringify(backup, null, 2) + "\n", "utf-8");
 
   const warnings: string[] = [];
   if (skipped.length > 0) {
@@ -605,12 +606,12 @@ export async function enableGateway(): Promise<{ providers: string[]; warnings: 
  * Restores original provider URLs in openclaw.json (智能恢复)
  */
 export function disableGateway(): { providers: string[]; warnings: string[] } {
-  if (!fs.existsSync(GATEWAY_BACKUP)) {
+  if (!existsSync(GATEWAY_BACKUP)) {
     throw new Error("Gateway not enabled (no backup found)");
   }
 
   // Read backup
-  const backup: GatewayBackup = JSON.parse(fs.readFileSync(GATEWAY_BACKUP, "utf-8"));
+  const backup: GatewayBackup = loadJsonSync(GATEWAY_BACKUP);
 
   // Read current openclaw.json
   const config = readOpenClawConfig();
@@ -657,7 +658,7 @@ export function disableGateway(): { providers: string[]; warnings: string[] } {
   }
 
   // Delete backup
-  fs.unlinkSync(GATEWAY_BACKUP);
+  unlinkSync(GATEWAY_BACKUP);
 
   const warnings: string[] = [];
   if (deletedProviders.length > 0) {
@@ -677,7 +678,7 @@ export function disableGateway(): { providers: string[]; warnings: string[] } {
  * Get gateway status
  */
 export function getGatewayStatus(): GatewayStatus {
-  const enabled = fs.existsSync(GATEWAY_BACKUP);
+  const enabled = existsSync(GATEWAY_BACKUP);
   const running = isGatewayRunning();
 
   const status: GatewayStatus = {
@@ -688,8 +689,8 @@ export function getGatewayStatus(): GatewayStatus {
     providers: [],
   };
 
-  if (enabled && fs.existsSync(GATEWAY_BACKUP)) {
-    const backup: GatewayBackup = JSON.parse(fs.readFileSync(GATEWAY_BACKUP, "utf-8"));
+  if (enabled && existsSync(GATEWAY_BACKUP)) {
+    const backup: GatewayBackup = loadJsonSync(GATEWAY_BACKUP);
     status.providers = Object.keys(backup.routedProviders);
   }
 

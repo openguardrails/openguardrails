@@ -17,7 +17,8 @@ import { handleGeminiRequest } from "./handlers/gemini.js";
 import { handleModelsRequest } from "./handlers/models.js";
 
 import { randomBytes } from "node:crypto";
-import { writeFileSync, readFileSync, existsSync, mkdirSync, unlinkSync } from "node:fs";
+import { writeFileSync, existsSync, mkdirSync, unlinkSync } from "node:fs";
+import { loadTextSync } from "./fs-utils.js";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
@@ -304,7 +305,7 @@ function generateShutdownToken(): string {
 function readShutdownToken(): string | null {
   try {
     if (existsSync(SHUTDOWN_TOKEN_FILE)) {
-      return readFileSync(SHUTDOWN_TOKEN_FILE, "utf-8").trim();
+      return loadTextSync(SHUTDOWN_TOKEN_FILE).trim();
     }
   } catch {
     // Ignore read errors

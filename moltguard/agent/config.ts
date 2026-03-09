@@ -5,8 +5,9 @@
 import type { OpenClawGuardConfig } from "./types.js";
 import os from "node:os";
 import path from "node:path";
-import fs from "node:fs";
+import { existsSync, mkdirSync, writeFileSync, unlinkSync, readdirSync } from "node:fs";
 import { defaultCoreUrl, envApiKey } from "./env.js";
+import { loadTextSync, loadTextSafe, loadJsonSafe } from "./fs-utils.js";
 
 // =============================================================================
 // Constants
@@ -41,8 +42,8 @@ export type CoreCredentials = {
  */
 export function loadCoreCredentials(configuredCoreUrl?: string): CoreCredentials | null {
   try {
-    if (!fs.existsSync(CREDENTIALS_FILE)) return null;
-    const data = JSON.parse(fs.readFileSync(CREDENTIALS_FILE, "utf-8"));
+    if (!existsSync(CREDENTIALS_FILE)) return null;
+    const data = JSON.parse(loadTextSync(CREDENTIALS_FILE));
     if (typeof data.apiKey === "string" && typeof data.agentId === "string") {
       const creds = data as CoreCredentials;
       const expectedUrl = configuredCoreUrl ?? DEFAULT_CORE_URL;
@@ -61,18 +62,18 @@ export function loadCoreCredentials(configuredCoreUrl?: string): CoreCredentials
 }
 
 export function saveCoreCredentials(creds: CoreCredentials, coreUrl?: string): void {
-  if (!fs.existsSync(CREDENTIALS_DIR)) {
-    fs.mkdirSync(CREDENTIALS_DIR, { recursive: true });
+  if (!existsSync(CREDENTIALS_DIR)) {
+    mkdirSync(CREDENTIALS_DIR, { recursive: true });
   }
   // Save the Core URL with credentials so we know which instance issued them
   const toSave = { ...creds, coreUrl: coreUrl ?? DEFAULT_CORE_URL };
-  fs.writeFileSync(CREDENTIALS_FILE, JSON.stringify(toSave, null, 2), "utf-8");
+  writeFileSync(CREDENTIALS_FILE, JSON.stringify(toSave, null, 2), "utf-8");
 }
 
 export function deleteCoreCredentials(): boolean {
   try {
-    if (fs.existsSync(CREDENTIALS_FILE)) {
-      fs.unlinkSync(CREDENTIALS_FILE);
+    if (existsSync(CREDENTIALS_FILE)) {
+      unlinkSync(CREDENTIALS_FILE);
       return true;
     }
     return false;
@@ -214,7 +215,7 @@ function parseIdentityField(content: string, field: string): string {
 function readIdentityName(): string | null {
   try {
     const identityPath = path.join(os.homedir(), ".openclaw/workspace/IDENTITY.md");
-    const content = fs.readFileSync(identityPath, "utf-8");
+    const content = loadTextSync(identityPath);
     const name = parseIdentityField(content, "Name");
     return name || null;
   } catch {
@@ -256,13 +257,6 @@ export type AgentProfile = {
 /** @deprecated use readAgentProfile() */
 export type AgentInfo = AgentProfile;
 
-function readFileSafe(filePath: string): string {
-  try { return fs.readFileSync(filePath, "utf-8"); } catch { return ""; }
-}
-
-function readJsonSafe(filePath: string): Record<string, unknown> | null {
-  try { return JSON.parse(fs.readFileSync(filePath, "utf-8")); } catch { return null; }
-}
 
 /**
  * Reads the full OpenClaw workspace profile from ~/.openclaw/ to report to the dashboard.
@@ -280,7 +274,7 @@ export function readAgentProfile(): AgentProfile {
   };
 
   // ── openclaw.json ──────────────────────────────────────────
-  const config = readJsonSafe(path.join(openclawDir, "openclaw.json"));
+  const config = loadJsonSafe(path.join(openclawDir, "openclaw.json"));
   let workspacePath = path.join(openclawDir, "workspace");
 
   if (config) {
@@ -313,14 +307,14 @@ export function readAgentProfile(): AgentProfile {
   }
 
   // ── Workspace files ─────────────────────────────────────────
-  const identityContent = readFileSafe(path.join(workspacePath, "IDENTITY.md"));
+  const identityContent = loadTextSafe(path.join(workspacePath, "IDENTITY.md"));
   result.workspaceFiles.identity = identityContent;
-  result.workspaceFiles.soul     = readFileSafe(path.join(workspacePath, "SOUL.md"));
-  result.workspaceFiles.user     = readFileSafe(path.join(workspacePath, "USER.md"));
-  result.workspaceFiles.agents   = readFileSafe(path.join(workspacePath, "AGENTS.md"));
-  result.workspaceFiles.tools    = readFileSafe(path.join(workspacePath, "TOOLS.md"));
-  result.workspaceFiles.heartbeat = readFileSafe(path.join(workspacePath, "HEARTBEAT.md"));
-  result.bootstrapExists = fs.existsSync(path.join(workspacePath, "BOOTSTRAP.md"));
+  result.workspaceFiles.soul     = loadTextSafe(path.join(workspacePath, "SOUL.md"));
+  result.workspaceFiles.user     = loadTextSafe(path.join(workspacePath, "USER.md"));
+  result.workspaceFiles.agents   = loadTextSafe(path.join(workspacePath, "AGENTS.md"));
+  result.workspaceFiles.tools    = loadTextSafe(path.join(workspacePath, "TOOLS.md"));
+  result.workspaceFiles.heartbeat = loadTextSafe(path.join(workspacePath, "HEARTBEAT.md"));
+  result.bootstrapExists = existsSync(path.join(workspacePath, "BOOTSTRAP.md"));
 
   // ── Identity fields ─────────────────────────────────────────
   if (identityContent) {
@@ -336,11 +330,11 @@ export function readAgentProfile(): AgentProfile {
   // ── Skills ──────────────────────────────────────────────────
   try {
     const skillsDir = path.join(workspacePath, "skills");
-    if (fs.existsSync(skillsDir)) {
-      result.skills = fs.readdirSync(skillsDir, { withFileTypes: true })
+    if (existsSync(skillsDir)) {
+      result.skills = readdirSync(skillsDir, { withFileTypes: true })
         .filter((d) => d.isDirectory())
         .map((d) => {
-          const meta = readJsonSafe(path.join(skillsDir, d.name, "_meta.json")) as { description?: string } | null;
+          const meta = loadJsonSafe(path.join(skillsDir, d.name, "_meta.json")) as { description?: string } | null;
           return { name: d.name, description: meta?.description };
         });
     }
@@ -349,8 +343,8 @@ export function readAgentProfile(): AgentProfile {
   // ── Connected systems (credential names) ────────────────────
   try {
     const credsDir = path.join(openclawDir, "credentials");
-    if (fs.existsSync(credsDir)) {
-      result.connectedSystems = fs.readdirSync(credsDir)
+    if (existsSync(credsDir)) {
+      result.connectedSystems = readdirSync(credsDir)
         .filter((f) => f.endsWith(".json"))
         .map((f) => f.slice(0, -5));
     }
@@ -359,10 +353,10 @@ export function readAgentProfile(): AgentProfile {
   // ── Sessions (count, lastActive, channels) ──────────────────
   try {
     const agentsDir = path.join(openclawDir, "agents");
-    if (fs.existsSync(agentsDir)) {
-      for (const dir of fs.readdirSync(agentsDir, { withFileTypes: true })) {
+    if (existsSync(agentsDir)) {
+      for (const dir of readdirSync(agentsDir, { withFileTypes: true })) {
         if (!dir.isDirectory()) continue;
-        const sessionsData = readJsonSafe(path.join(agentsDir, dir.name, "sessions", "sessions.json")) as
+        const sessionsData = loadJsonSafe(path.join(agentsDir, dir.name, "sessions", "sessions.json")) as
           Record<string, { updatedAt?: number; lastChannel?: string }> | null;
         if (!sessionsData) continue;
         for (const session of Object.values(sessionsData)) {
@@ -381,7 +375,7 @@ export function readAgentProfile(): AgentProfile {
 
   // ── Cron jobs ────────────────────────────────────────────────
   try {
-    const raw = readFileSafe(path.join(openclawDir, "cron", "jobs.json"));
+    const raw = loadTextSafe(path.join(openclawDir, "cron", "jobs.json"));
     if (raw) {
       const parsed = JSON.parse(raw) as unknown;
       result.cronJobs = Array.isArray(parsed) ? parsed : ((parsed as { jobs?: unknown[] })?.jobs ?? []);
@@ -401,7 +395,7 @@ export function readAgentInfo(): AgentProfile {
  */
 export function getProfileWatchPaths(openclawDir?: string): string[] {
   const dir = openclawDir ?? path.join(os.homedir(), ".openclaw");
-  const config = readJsonSafe(path.join(dir, "openclaw.json"));
+  const config = loadJsonSafe(path.join(dir, "openclaw.json"));
   const agentsConfig = config?.agents as { defaults?: { workspace?: string } } | undefined;
   const workspace = agentsConfig?.defaults?.workspace ?? path.join(dir, "workspace");
   return [
