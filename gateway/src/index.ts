@@ -16,20 +16,10 @@ import { handleOpenAIRequest } from "./handlers/openai.js";
 import { handleGeminiRequest } from "./handlers/gemini.js";
 import { handleModelsRequest } from "./handlers/models.js";
 
-import { randomBytes } from "node:crypto";
-import { writeFileSync, existsSync, mkdirSync, unlinkSync } from "node:fs";
-import { loadTextSync } from "./fs-utils.js";
-import { join } from "node:path";
-import { homedir } from "node:os";
-
 const GATEWAY_MODE = getGatewayMode();
-// Store shutdown token outside the extension directory so it survives plugin reinstalls
-// (OpenClaw renames the extension dir during reinstall, which would move the token file)
-const SHUTDOWN_TOKEN_FILE = join(homedir(), ".openclaw", "credentials", "moltguard", "gateway-shutdown-token");
 
 let config: GatewayConfig;
 let currentServer: ReturnType<typeof createServer> | null = null;
-let currentShutdownToken: string | null = null;
 
 /**
  * Extract API key from request headers
@@ -115,42 +105,6 @@ async function handleRequest(
   if (url === "/health") {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ status: "ok", version: "1.0.0" }));
-    return;
-  }
-
-  // Shutdown endpoint (for graceful restart during plugin update)
-  // Requires Authorization header with the shutdown token
-  if (url === "/shutdown" && method === "POST") {
-    const authHeader = req.headers["authorization"];
-    const providedToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
-
-    if (!currentShutdownToken || !providedToken || providedToken !== currentShutdownToken) {
-      console.log("[ai-security-gateway] Shutdown request rejected: invalid or missing token");
-      res.writeHead(401, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Unauthorized" }));
-      return;
-    }
-
-    console.log("[ai-security-gateway] Shutdown requested with valid token, closing server...");
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ status: "shutting_down" }));
-    // Close after response is sent
-    setImmediate(() => {
-      if (currentServer) {
-        currentServer.close(() => {
-          console.log("[ai-security-gateway] Server shut down via /shutdown endpoint");
-          currentServer = null;
-          // Clean up token file
-          try {
-            if (existsSync(SHUTDOWN_TOKEN_FILE)) {
-              unlinkSync(SHUTDOWN_TOKEN_FILE);
-            }
-          } catch {
-            // Ignore cleanup errors
-          }
-        });
-      }
-    });
     return;
   }
 
@@ -261,15 +215,6 @@ export function stopGateway(): Promise<void> {
     if (currentServer) {
       currentServer.close(() => {
         currentServer = null;
-        currentShutdownToken = null;
-        // Clean up token file
-        try {
-          if (existsSync(SHUTDOWN_TOKEN_FILE)) {
-            unlinkSync(SHUTDOWN_TOKEN_FILE);
-          }
-        } catch {
-          // Ignore cleanup errors
-        }
         console.log("[ai-security-gateway] Server stopped");
         resolve();
       });
@@ -287,73 +232,6 @@ export function isGatewayServerRunning(): boolean {
 }
 
 /**
- * Generate and save a shutdown token for graceful restart
- */
-function generateShutdownToken(): string {
-  const token = randomBytes(32).toString("hex");
-  try {
-    const dir = join(homedir(), ".openclaw", "extensions", "moltguard", "data");
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(SHUTDOWN_TOKEN_FILE, token, { mode: 0o600 });
-  } catch (err) {
-    console.warn("[ai-security-gateway] Could not save shutdown token:", err);
-  }
-  return token;
-}
-
-/**
- * Read shutdown token from file (for requesting shutdown of old server)
- */
-function readShutdownToken(): string | null {
-  try {
-    if (existsSync(SHUTDOWN_TOKEN_FILE)) {
-      return loadTextSync(SHUTDOWN_TOKEN_FILE).trim();
-    }
-  } catch {
-    // Ignore read errors
-  }
-  return null;
-}
-
-/**
- * Request shutdown of an existing gateway server on the same port
- * Uses shutdown token stored in file for authentication
- */
-async function requestShutdown(port: number): Promise<boolean> {
-  const token = readShutdownToken();
-  if (!token) {
-    console.log("[ai-security-gateway] No shutdown token found, cannot request graceful shutdown");
-    return false;
-  }
-
-  try {
-    console.log(`[ai-security-gateway] Requesting shutdown of existing server on port ${port}...`);
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2000);
-
-    const response = await fetch(`http://127.0.0.1:${port}/shutdown`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${token}`,
-      },
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-
-    if (response.ok) {
-      console.log("[ai-security-gateway] Shutdown request accepted, waiting for server to close...");
-      // Wait for the old server to actually close
-      await new Promise(resolve => setTimeout(resolve, 500));
-      return true;
-    }
-    return false;
-  } catch {
-    // Server might not support /shutdown or is not responding
-    return false;
-  }
-}
-
-/**
  * Start gateway server
  * @param configPath - Path to config file
  * @param embedded - If true, don't call process.exit on errors (for in-process use)
@@ -366,105 +244,73 @@ export function startGateway(configPath?: string, embedded = false): void {
     currentServer = null;
   }
 
-  // Internal function to do the actual startup
-  const doStart = (retryCount = 0): void => {
-    try {
-      // Load and validate configuration
-      config = loadConfig(configPath);
-      validateConfig(config);
+  try {
+    // Load and validate configuration
+    config = loadConfig(configPath);
+    validateConfig(config);
 
-      if (retryCount === 0) {
-        console.log("[ai-security-gateway] Configuration loaded:");
-        console.log(`  Mode: ${GATEWAY_MODE}`);
-        console.log(`  Port: ${config.port}`);
-        console.log(
-          `  Backends: ${Object.keys(config.backends).join(", ") || "(none)"}`,
-        );
-      }
+    console.log("[ai-security-gateway] Configuration loaded:");
+    console.log(`  Mode: ${GATEWAY_MODE}`);
+    console.log(`  Port: ${config.port}`);
+    console.log(
+      `  Backends: ${Object.keys(config.backends).join(", ") || "(none)"}`,
+    );
 
-      // Create HTTP server
-      const server = createServer(handleRequest);
-      currentServer = server;
+    // Create HTTP server
+    const server = createServer(handleRequest);
+    currentServer = server;
 
-      // Handle server errors (including EADDRINUSE)
-      server.on("error", (err: NodeJS.ErrnoException) => {
-        if (err.code === "EADDRINUSE" && retryCount < 2) {
-          console.log(`[ai-security-gateway] Port ${config.port} in use, attempting graceful takeover...`);
-          currentServer = null;
-
-          // Try to request shutdown from the old server
-          requestShutdown(config.port).then((success) => {
-            if (success) {
-              console.log("[ai-security-gateway] Old server shut down, retrying startup...");
-              doStart(retryCount + 1);
-            } else {
-              // Old server didn't respond to shutdown, might be a different process
-              console.error(`[ai-security-gateway] Could not shut down existing server on port ${config.port}`);
-              console.error("[ai-security-gateway] Another process may be using this port");
-              if (!embedded) {
-                process.exit(1);
-              }
-            }
-          });
-        } else {
-          console.error("[ai-security-gateway] Server error:", err);
-          currentServer = null;
-          if (!embedded) {
-            process.exit(1);
-          }
-          throw err;
-        }
-      });
-
-      // Start listening
-      server.listen(config.port, "127.0.0.1", () => {
-        // Generate shutdown token for graceful restart
-        currentShutdownToken = generateShutdownToken();
-
-        console.log(
-          `[ai-security-gateway] Server listening on http://127.0.0.1:${config.port}`,
-        );
-        console.log("[ai-security-gateway] Ready to proxy requests");
-        console.log("");
-        console.log("Endpoints:");
-        console.log(`  POST http://127.0.0.1:${config.port}/v1/messages - Anthropic`);
-        console.log(`  POST http://127.0.0.1:${config.port}/v1/chat/completions - OpenAI / OpenRouter`);
-        console.log(`  POST http://127.0.0.1:${config.port}/v1/models/:model:generateContent - Gemini`);
-        console.log(`  GET  http://127.0.0.1:${config.port}/v1/models - List models (OpenAI / OpenRouter)`);
-        console.log(`  GET  http://127.0.0.1:${config.port}/health - Health check`);
-      });
-
-      // Only register shutdown handlers if not embedded
-      if (!embedded) {
-        // Handle shutdown
-        process.on("SIGINT", () => {
-          console.log("\n[ai-security-gateway] Shutting down...");
-          server.close(() => {
-            console.log("[ai-security-gateway] Server stopped");
-            process.exit(0);
-          });
-        });
-
-        process.on("SIGTERM", () => {
-          console.log("\n[ai-security-gateway] Shutting down...");
-          server.close(() => {
-            console.log("[ai-security-gateway] Server stopped");
-            process.exit(0);
-          });
-        });
-      }
-    } catch (error) {
-      console.error("[ai-security-gateway] Failed to start:", error);
+    // Handle server errors
+    server.on("error", (err: NodeJS.ErrnoException) => {
+      console.error("[ai-security-gateway] Server error:", err);
       currentServer = null;
       if (!embedded) {
         process.exit(1);
       }
-      // In embedded mode, just throw the error so the caller can handle it
-      throw error;
-    }
-  };
+      throw err;
+    });
 
-  doStart();
+    // Start listening
+    server.listen(config.port, "127.0.0.1", () => {
+      console.log(
+        `[ai-security-gateway] Server listening on http://127.0.0.1:${config.port}`,
+      );
+      console.log("[ai-security-gateway] Ready to proxy requests");
+      console.log("");
+      console.log("Endpoints:");
+      console.log(`  POST http://127.0.0.1:${config.port}/v1/messages - Anthropic`);
+      console.log(`  POST http://127.0.0.1:${config.port}/v1/chat/completions - OpenAI / OpenRouter`);
+      console.log(`  POST http://127.0.0.1:${config.port}/v1/models/:model:generateContent - Gemini`);
+      console.log(`  GET  http://127.0.0.1:${config.port}/v1/models - List models (OpenAI / OpenRouter)`);
+      console.log(`  GET  http://127.0.0.1:${config.port}/health - Health check`);
+    });
+
+    // Only register shutdown handlers if not embedded
+    if (!embedded) {
+      process.on("SIGINT", () => {
+        console.log("\n[ai-security-gateway] Shutting down...");
+        server.close(() => {
+          console.log("[ai-security-gateway] Server stopped");
+          process.exit(0);
+        });
+      });
+
+      process.on("SIGTERM", () => {
+        console.log("\n[ai-security-gateway] Shutting down...");
+        server.close(() => {
+          console.log("[ai-security-gateway] Server stopped");
+          process.exit(0);
+        });
+      });
+    }
+  } catch (error) {
+    console.error("[ai-security-gateway] Failed to start:", error);
+    currentServer = null;
+    if (!embedded) {
+      process.exit(1);
+    }
+    throw error;
+  }
 }
 
 // Re-export for programmatic use
