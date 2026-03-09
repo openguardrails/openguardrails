@@ -194,7 +194,7 @@ function loadDashboardToken(): string | null {
  */
 async function reportActivity(event: GatewayActivityEvent): Promise<void> {
   if (!dashboardPort) {
-    console.log("[moltguard] Dashboard port not set, skipping activity report");
+    // Dashboard port not set, skip activity report
     return; // Dashboard not running, skip reporting
   }
 
@@ -204,11 +204,11 @@ async function reportActivity(event: GatewayActivityEvent): Promise<void> {
   }
 
   if (!dashboardToken) {
-    console.log("[moltguard] Dashboard token not available, skipping activity report");
+    // Dashboard token not available, skip activity report
     return;
   }
 
-  console.log(`[moltguard] Reporting activity to dashboard: ${event.type} (${event.redactionCount} redactions)`);
+  // Report activity silently
 
   try {
     const response = await fetch(`http://127.0.0.1:${dashboardPort}/api/gateway/activity`, {
@@ -246,9 +246,7 @@ export function startGateway(): void {
 
   // Register activity listener once
   if (!activityListenerRegistered) {
-    console.log("[moltguard] Registering gateway activity listener");
     addActivityListener((event) => {
-      console.log(`[moltguard] Gateway activity: ${event.type}`);
       // Report asynchronously to avoid blocking gateway
       reportActivity(event).catch((err) => {
         console.error("[moltguard] Failed to report activity:", err);
@@ -271,7 +269,7 @@ export function startGateway(): void {
  * Restart the gateway server (reload config)
  */
 export async function restartGateway(): Promise<void> {
-  console.log("[moltguard] Restarting gateway...");
+  // Restarting gateway
   await stopGatewayServer();
   gatewayRunning = false;
   startGateway();
@@ -363,7 +361,7 @@ function configureGateway(providers: Record<string, ProviderConfig>): void {
     // Resolve API key placeholder (e.g., "VLLM_API_KEY" -> actual key from auth-profiles.json)
     const resolvedApiKey = resolveApiKey(name, provider.apiKey);
     if (resolvedApiKey !== provider.apiKey) {
-      console.log(`[moltguard] Resolved API key placeholder for ${name}`);
+      // Resolved API key placeholder
     }
 
     backends[name] = {

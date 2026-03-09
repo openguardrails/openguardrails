@@ -302,7 +302,7 @@ const openClawGuardPlugin = {
     // Users enable sanitization via /og_sanitize on, which routes agents through it.
     try {
       startGateway();
-      log.info("AI Security Gateway started on port 53669");
+      log.debug?.("AI Security Gateway started");
     } catch (err) {
       log.error(`Failed to start AI Security Gateway: ${err}`);
     }
@@ -311,7 +311,7 @@ const openClawGuardPlugin = {
     // (Dashboard will start later, but port is fixed at 53667)
     const DASHBOARD_PORT = 53667;
     setDashboardPort(DASHBOARD_PORT);
-    log.info(`Gateway activity reporting enabled on port ${DASHBOARD_PORT}`);
+    log.debug?.(`Gateway activity reporting enabled on port ${DASHBOARD_PORT}`);
 
     // Ensure openclaw.json has default config (coreUrl) on first load
     const pluginConfig = (api.pluginConfig ?? {}) as OpenClawGuardConfig;
@@ -2013,6 +2013,12 @@ const openClawGuardPlugin = {
       try { w.close(); } catch { /* ignore */ }
     }
     profileWatchers = [];
+
+    // Stop file watcher
+    if (globalFileWatcher) {
+      globalFileWatcher.stop();
+      globalFileWatcher = null;
+    }
 
     // Stop event reporter (flush remaining events)
     if (globalEventReporter) {

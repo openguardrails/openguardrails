@@ -239,7 +239,7 @@ export function isGatewayServerRunning(): boolean {
 export function startGateway(configPath?: string, embedded = false): void {
   // Stop existing server if running (same process)
   if (currentServer) {
-    console.log("[ai-security-gateway] Stopping existing server for restart...");
+    if (!embedded) console.log("[ai-security-gateway] Stopping existing server for restart...");
     currentServer.close();
     currentServer = null;
   }
@@ -249,12 +249,14 @@ export function startGateway(configPath?: string, embedded = false): void {
     config = loadConfig(configPath);
     validateConfig(config);
 
-    console.log("[ai-security-gateway] Configuration loaded:");
-    console.log(`  Mode: ${GATEWAY_MODE}`);
-    console.log(`  Port: ${config.port}`);
-    console.log(
-      `  Backends: ${Object.keys(config.backends).join(", ") || "(none)"}`,
-    );
+    if (!embedded) {
+      console.log("[ai-security-gateway] Configuration loaded:");
+      console.log(`  Mode: ${GATEWAY_MODE}`);
+      console.log(`  Port: ${config.port}`);
+      console.log(
+        `  Backends: ${Object.keys(config.backends).join(", ") || "(none)"}`,
+      );
+    }
 
     // Create HTTP server
     const server = createServer(handleRequest);
@@ -272,18 +274,25 @@ export function startGateway(configPath?: string, embedded = false): void {
 
     // Start listening
     server.listen(config.port, "127.0.0.1", () => {
-      console.log(
-        `[ai-security-gateway] Server listening on http://127.0.0.1:${config.port}`,
-      );
-      console.log("[ai-security-gateway] Ready to proxy requests");
-      console.log("");
-      console.log("Endpoints:");
-      console.log(`  POST http://127.0.0.1:${config.port}/v1/messages - Anthropic`);
-      console.log(`  POST http://127.0.0.1:${config.port}/v1/chat/completions - OpenAI / OpenRouter`);
-      console.log(`  POST http://127.0.0.1:${config.port}/v1/models/:model:generateContent - Gemini`);
-      console.log(`  GET  http://127.0.0.1:${config.port}/v1/models - List models (OpenAI / OpenRouter)`);
-      console.log(`  GET  http://127.0.0.1:${config.port}/health - Health check`);
+      if (!embedded) {
+        console.log(
+          `[ai-security-gateway] Server listening on http://127.0.0.1:${config.port}`,
+        );
+        console.log("[ai-security-gateway] Ready to proxy requests");
+        console.log("");
+        console.log("Endpoints:");
+        console.log(`  POST http://127.0.0.1:${config.port}/v1/messages - Anthropic`);
+        console.log(`  POST http://127.0.0.1:${config.port}/v1/chat/completions - OpenAI / OpenRouter`);
+        console.log(`  POST http://127.0.0.1:${config.port}/v1/models/:model:generateContent - Gemini`);
+        console.log(`  GET  http://127.0.0.1:${config.port}/v1/models - List models (OpenAI / OpenRouter)`);
+        console.log(`  GET  http://127.0.0.1:${config.port}/health - Health check`);
+      }
     });
+
+    // In embedded mode, don't let the server prevent process exit
+    if (embedded) {
+      server.unref();
+    }
 
     // Only register shutdown handlers if not embedded
     if (!embedded) {

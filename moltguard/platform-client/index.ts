@@ -154,9 +154,11 @@ export class DashboardClient {
 
   /** Start periodic heartbeat */
   startHeartbeat(intervalMs = 60_000): NodeJS.Timeout {
-    return setInterval(() => {
+    const timer = setInterval(() => {
       this.heartbeat().catch(() => {});
     }, intervalMs);
+    timer.unref();
+    return timer;
   }
 
   // ─── Tool Call Observations ─────────────────────────────────────

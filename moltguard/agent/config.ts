@@ -50,7 +50,7 @@ export function loadCoreCredentials(configuredCoreUrl?: string): CoreCredentials
       // Check if credentials match current environment
       if (creds.coreUrl && creds.coreUrl !== expectedUrl) {
         // Credentials from a different Core instance - don't use them
-        console.log(`[moltguard] Credentials from ${creds.coreUrl} not valid for ${expectedUrl}, will re-register`);
+        // Credentials from a different Core instance - skip
         return null;
       }
       return creds;
