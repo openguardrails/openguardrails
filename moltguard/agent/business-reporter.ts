@@ -61,6 +61,24 @@ export type AgenticHoursAccum = {
   riskEventCount: number;
 };
 
+export type ScanSummaryAccum = {
+  scanType: string; // static | dynamic
+  totalScans: number;
+  riskyScans: number;
+  categoryCounts: Record<string, number>; // {"S01": 3, "S07": 1}
+};
+
+export type GatewaySummaryAccum = {
+  totalRequests: number;
+  totalRedactions: number;
+  typeCounts: Record<string, number>; // {"email": 5, "api_key": 12}
+};
+
+export type SecretSummaryAccum = {
+  totalDetections: number;
+  typeCounts: Record<string, number>; // {"api_key": 5, "ssh_key": 2}
+};
+
 export type BusinessReporterConfig = {
   coreUrl: string;
   pluginVersion: string;
@@ -87,6 +105,15 @@ export class BusinessReporter {
 
   /** Accumulated agentic hours since last flush */
   private hoursAccum: AgenticHoursAccum = this.emptyAccum();
+
+  /** Accumulated scan summaries since last flush */
+  private scanAccum: ScanSummaryAccum[] = [];
+
+  /** Accumulated gateway activity since last flush */
+  private gatewayAccum: GatewaySummaryAccum = this.emptyGatewayAccum();
+
+  /** Accumulated secret detections since last flush */
+  private secretAccum: SecretSummaryAccum = this.emptySecretAccum();
 
   /** Periodic flush timer */
   private flushInterval: NodeJS.Timeout | null = null;
@@ -222,6 +249,45 @@ export class BusinessReporter {
     }
   }
 
+  /** Record a scan result (static or dynamic) */
+  recordScanResult(scanType: "static" | "dynamic", categories: string[], risky: boolean): void {
+    if (!this.enabled) return;
+
+    // Find or create accum for this scan type
+    let accum = this.scanAccum.find((s) => s.scanType === scanType);
+    if (!accum) {
+      accum = { scanType, totalScans: 0, riskyScans: 0, categoryCounts: {} };
+      this.scanAccum.push(accum);
+    }
+    accum.totalScans += 1;
+    if (risky) accum.riskyScans += 1;
+    for (const cat of categories) {
+      accum.categoryCounts[cat] = (accum.categoryCounts[cat] ?? 0) + 1;
+    }
+  }
+
+  /** Record gateway sanitization activity */
+  recordGatewayActivity(redactionCount: number, typeCounts: Record<string, number>): void {
+    if (!this.enabled) return;
+
+    this.gatewayAccum.totalRequests += 1;
+    this.gatewayAccum.totalRedactions += redactionCount;
+    for (const [k, v] of Object.entries(typeCounts)) {
+      this.gatewayAccum.typeCounts[k] = (this.gatewayAccum.typeCounts[k] ?? 0) + v;
+    }
+  }
+
+  /** Record secret detection */
+  recordSecretDetection(typeCounts: Record<string, number>): void {
+    if (!this.enabled) return;
+
+    const total = Object.values(typeCounts).reduce((a, b) => a + b, 0);
+    this.secretAccum.totalDetections += total;
+    for (const [k, v] of Object.entries(typeCounts)) {
+      this.secretAccum.typeCounts[k] = (this.secretAccum.typeCounts[k] ?? 0) + v;
+    }
+  }
+
   // ─── Flush ─────────────────────────────────────────────────────
 
   private startPeriodicFlush(): void {
@@ -252,8 +318,11 @@ export class BusinessReporter {
       this.hoursAccum.toolCallCount > 0 ||
       this.hoursAccum.llmCallCount > 0 ||
       this.hoursAccum.sessionCount > 0;
+    const hasScans = this.scanAccum.length > 0;
+    const hasGateway = this.gatewayAccum.totalRequests > 0;
+    const hasSecrets = this.secretAccum.totalDetections > 0;
 
-    if (!hasEvents && !hasHours) return;
+    if (!hasEvents && !hasHours && !hasScans && !hasGateway && !hasSecrets) return;
 
     this.flushing = true;
 
@@ -261,6 +330,11 @@ export class BusinessReporter {
     const events = this.pendingEvents.splice(0);
     const hours = { ...this.hoursAccum };
     this.hoursAccum = this.emptyAccum();
+    const scans = this.scanAccum.splice(0);
+    const gateway = { ...this.gatewayAccum };
+    this.gatewayAccum = this.emptyGatewayAccum();
+    const secrets = { ...this.secretAccum };
+    this.secretAccum = this.emptySecretAccum();
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
@@ -277,6 +351,9 @@ export class BusinessReporter {
         events: events.length > 0 ? events : undefined,
         agenticHours: hasHours ? hours : undefined,
         heartbeat: true,
+        scanSummary: scans.length > 0 ? scans : undefined,
+        gatewaySummary: hasGateway ? gateway : undefined,
+        secretSummary: hasSecrets ? secrets : undefined,
       };
 
       debugLog(`flush: POSTing to ${this.config.coreUrl}/api/v1/business/telemetry events=${events.length} hours=${JSON.stringify(hours)}`);
@@ -331,6 +408,14 @@ export class BusinessReporter {
       blockCount: 0,
       riskEventCount: 0,
     };
+  }
+
+  private emptyGatewayAccum(): GatewaySummaryAccum {
+    return { totalRequests: 0, totalRedactions: 0, typeCounts: {} };
+  }
+
+  private emptySecretAccum(): SecretSummaryAccum {
+    return { totalDetections: 0, typeCounts: {} };
   }
 }
 

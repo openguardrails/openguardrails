@@ -59,11 +59,26 @@ interface SessionState {
 // Param Sanitization
 // =============================================================================
 
+/** Module-level secret detection callback (set by BehaviorDetector) */
+let secretDetectionCallback: ((typeCounts: Record<string, number>) => void) | null = null;
+
 function sanitizeParams(params: Record<string, unknown>): Record<string, string> {
   const result: Record<string, string> = {};
+  const allRedactions: Record<string, number> = {};
   for (const [key, value] of Object.entries(params)) {
     const raw = typeof value === "string" ? value : JSON.stringify(value ?? "");
-    result[key] = sanitizeContent(raw.slice(0, 500)).sanitized;
+    const sanitized = sanitizeContent(raw.slice(0, 500));
+    result[key] = sanitized.sanitized;
+    // Accumulate redaction types
+    if (sanitized.redactions) {
+      for (const [type, count] of Object.entries(sanitized.redactions)) {
+        allRedactions[type] = (allRedactions[type] ?? 0) + (count as number);
+      }
+    }
+  }
+  // Report secret detections if any
+  if (Object.keys(allRedactions).length > 0 && secretDetectionCallback) {
+    secretDetectionCallback(allRedactions);
   }
   return result;
 }
@@ -128,6 +143,8 @@ export class BehaviorDetector {
   private onQuotaExceeded: OnQuotaExceededCallback | null = null;
   /** Pending quota exceeded message to append to next tool result */
   private pendingQuotaMessage: QuotaExceededInfo | null = null;
+  /** Callback for secret detection (business reporting) */
+  private onSecretDetected: ((typeCounts: Record<string, number>) => void) | null = null;
 
   constructor(config: DetectionConfig, log: Logger) {
     this.config = config;
@@ -141,6 +158,12 @@ export class BehaviorDetector {
   /** Set callback for when quota is exceeded */
   setOnQuotaExceeded(callback: OnQuotaExceededCallback | null): void {
     this.onQuotaExceeded = callback;
+  }
+
+  /** Set callback for when secrets are detected in params (business reporting) */
+  setOnSecretDetected(callback: ((typeCounts: Record<string, number>) => void) | null): void {
+    this.onSecretDetected = callback;
+    secretDetectionCallback = callback;
   }
 
   /** Reset quota exceeded notification flag (e.g., on new day) */

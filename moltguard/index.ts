@@ -28,7 +28,7 @@ import { BusinessReporter } from "./agent/business-reporter.js";
 import { ConfigSync, type BusinessConfig } from "./agent/config-sync.js";
 import { isBlockingHook, type HookType } from "./agent/hook-types.js";
 import { DashboardClient } from "./platform-client/index.js";
-import { enableGateway, disableGateway, getGatewayStatus, startGateway, stopGateway, setDashboardPort } from "./agent/gateway-manager.js";
+import { enableGateway, disableGateway, getGatewayStatus, startGateway, stopGateway, setDashboardPort, setGatewayActivityCallback } from "./agent/gateway-manager.js";
 import { FileWatcher } from "./agent/file-watcher.js";
 import fs from "node:fs";
 import os from "node:os";
@@ -537,6 +537,18 @@ const openClawGuardPlugin = {
 
           globalBusinessReporter.initialize(plan);
           debugLog(`BusinessReporter initialized, enabled=${globalBusinessReporter.isEnabled()}`);
+
+          // Wire gateway activity to business reporter
+          if (globalBusinessReporter.isEnabled()) {
+            setGatewayActivityCallback((redactionCount, typeCounts) => {
+              globalBusinessReporter?.recordGatewayActivity(redactionCount, typeCounts);
+            });
+
+            // Wire secret detection to business reporter
+            globalBehaviorDetector?.setOnSecretDetected((typeCounts) => {
+              globalBusinessReporter?.recordSecretDetection(typeCounts);
+            });
+          }
         }
 
         // Initialize ConfigSync
@@ -795,6 +807,12 @@ const openClawGuardPlugin = {
                 scanResult.detected ? "high" : "no_risk",
                 false,
                 scanResult.summary,
+              );
+              // Report dynamic scan result to business reporter
+              globalBusinessReporter?.recordScanResult(
+                "dynamic",
+                scanResult.categories ?? [],
+                true,
               );
               // Record risk event for local agentic hours
               globalDashboardClient?.recordRiskEvent();
@@ -1687,6 +1705,18 @@ const openClawGuardPlugin = {
             } else if (!globalDashboardClient) {
               log.warn("Dashboard client not initialized - scan results not reported to dashboard");
             }
+
+            // Report static scan results to business reporter
+            if (globalBusinessReporter && batchResult.results) {
+              for (const fileResult of batchResult.results) {
+                const categories = fileResult.findings?.map((f: any) => f.scanner) ?? [];
+                globalBusinessReporter.recordScanResult(
+                  "static",
+                  categories,
+                  fileResult.riskLevel !== "safe",
+                );
+              }
+            }
           }
 
           // Combine results from all batches
@@ -1862,6 +1892,18 @@ const openClawGuardPlugin = {
                   const riskCount = result.results.filter((r: any) => r.riskLevel !== "safe").length;
                   if (riskCount > 0) {
                     log.info(`Auto-scan found ${riskCount} file(s) with security risks`);
+                  }
+                }
+
+                // Report auto-scan results to business reporter
+                if (globalBusinessReporter && result.results) {
+                  for (const fileResult of result.results) {
+                    const categories = fileResult.findings?.map((f: any) => f.scanner) ?? [];
+                    globalBusinessReporter.recordScanResult(
+                      "static",
+                      categories,
+                      fileResult.riskLevel !== "safe",
+                    );
                   }
                 }
               } catch (err) {

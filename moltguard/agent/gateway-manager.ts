@@ -230,6 +230,14 @@ async function reportActivity(event: GatewayActivityEvent): Promise<void> {
 
 let activityListenerRegistered = false;
 
+/** Optional callback for business reporter gateway activity */
+let gatewayActivityCallback: ((redactionCount: number, typeCounts: Record<string, number>) => void) | null = null;
+
+/** Set a callback to receive gateway activity events for business reporting */
+export function setGatewayActivityCallback(cb: ((redactionCount: number, typeCounts: Record<string, number>) => void) | null): void {
+  gatewayActivityCallback = cb;
+}
+
 /**
  * Start the gateway server (in-process, embedded mode)
  */
@@ -251,6 +259,11 @@ export function startGateway(): void {
       reportActivity(event).catch((err) => {
         console.error("[moltguard] Failed to report activity:", err);
       });
+
+      // Report to business reporter (only sanitize events with actual redactions)
+      if (event.type === "sanitize" && event.redactionCount > 0 && gatewayActivityCallback) {
+        gatewayActivityCallback(event.redactionCount, event.categories);
+      }
     });
     activityListenerRegistered = true;
   }
