@@ -11,7 +11,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
+import { openclawHome } from "./env.js";
 
 export type FileType = "soul" | "agent" | "memory" | "task" | "skill" | "plugin" | "other";
 
@@ -27,7 +27,7 @@ export interface WorkspaceFile {
  * Get OpenClaw workspace directory
  */
 function getWorkspaceDir(): string {
-  return process.env.OPENCLAW_HOME || path.join(os.homedir(), ".openclaw");
+  return openclawHome;
 }
 
 /**

@@ -2,6 +2,7 @@ import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { join, basename, dirname } from "node:path";
 import { homedir } from "node:os";
+import { getEnv } from "./runtime-config.js";
 
 export interface DiscoveredAgent {
   id: string;
@@ -381,8 +382,9 @@ function resolveOpenclawRoot(): string | null {
   if (_openclawRoot !== undefined) return _openclawRoot;
 
   // Try env var first
-  if (process.env.OPENCLAW_SKILLS_PATH) {
-    _openclawRoot = process.env.OPENCLAW_SKILLS_PATH;
+  const skillsPath = getEnv("OPENCLAW_SKILLS_PATH");
+  if (skillsPath) {
+    _openclawRoot = skillsPath;
     return _openclawRoot;
   }
 

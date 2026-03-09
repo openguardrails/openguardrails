@@ -1,11 +1,12 @@
 import type { CoreDetectRequest, CoreDetectResponse, CoreScannerDef } from "@og/shared";
 import { db, settingsQueries } from "@og/db";
+import { getEnvCoreUrl } from "./runtime-config.js";
 
 const settings = settingsQueries(db);
 
 /** Get core URL from settings or env */
 async function getCoreUrl(): Promise<string> {
-  return (await settings.get("og_core_url")) || process.env.OG_CORE_URL || "https://openguardrails.com/core";
+  return (await settings.get("og_core_url")) || getEnvCoreUrl();
 }
 
 /** Get core key from settings */

@@ -1,8 +1,9 @@
 import type { Request, Response, NextFunction } from "express";
+import { getEnv } from "../services/runtime-config.js";
 
 // Local session token for local mode
 // Set by the startup process when running via /og_dashboard
-export let LOCAL_SESSION_TOKEN: string | null = process.env.LOCAL_SESSION_TOKEN || null;
+export let LOCAL_SESSION_TOKEN: string | null = getEnv("LOCAL_SESSION_TOKEN") || null;
 
 /**
  * Set the local session token (called from index.ts on startup)

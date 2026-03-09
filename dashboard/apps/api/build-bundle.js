@@ -19,8 +19,10 @@ execSync('pnpm tsc', { stdio: 'inherit', cwd: __dirname });
 
 // Bundle with ncc
 // @libsql/client is external because it has native bindings (with WASM fallback)
+// morgan is external to avoid bundling its `new Function()` format compiler
+// (only used in standalone mode, not embedded)
 execSync(
-  'pnpm ncc build dist/index.js -o bundle --external @libsql/client --external pg --external mysql2 --source-map',
+  'pnpm ncc build dist/index.js -o bundle --external @libsql/client --external pg --external mysql2 --external morgan --source-map',
   { stdio: 'inherit', cwd: __dirname }
 );
 

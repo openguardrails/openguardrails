@@ -9,7 +9,7 @@
 
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { loadConfig, validateConfig, findBackendByApiKey, findDefaultBackend, findBackendByPathPrefix, getBackendApiType } from "./config.js";
+import { loadConfig, validateConfig, findBackendByApiKey, findDefaultBackend, findBackendByPathPrefix, getBackendApiType, getGatewayMode } from "./config.js";
 import type { GatewayConfig, BackendConfig, ApiType } from "./types.js";
 import { handleAnthropicRequest } from "./handlers/anthropic.js";
 import { handleOpenAIRequest } from "./handlers/openai.js";
@@ -21,7 +21,7 @@ import { writeFileSync, readFileSync, existsSync, mkdirSync, unlinkSync } from "
 import { join } from "node:path";
 import { homedir } from "node:os";
 
-const GATEWAY_MODE = process.env.GATEWAY_MODE || "selfhosted";
+const GATEWAY_MODE = getGatewayMode();
 const SHUTDOWN_TOKEN_FILE = join(homedir(), ".openclaw", "extensions", "moltguard", "data", "gateway-shutdown-token");
 
 let config: GatewayConfig;

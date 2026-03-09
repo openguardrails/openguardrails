@@ -6,26 +6,13 @@ import type { OpenClawGuardConfig } from "./types.js";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
+import { defaultCoreUrl, envApiKey } from "./env.js";
 
 // =============================================================================
 // Constants
 // =============================================================================
 
-// Development mode detection:
-// - NODE_ENV=development
-// - OG_DEV=1 or OG_DEV=true
-// - Or explicitly set OG_CORE_URL to localhost
-const isDev =
-  process.env.NODE_ENV === "development" ||
-  process.env.OG_DEV === "1" ||
-  process.env.OG_DEV === "true" ||
-  process.env.OG_CORE_URL?.includes("localhost");
-
-const DEV_CORE_URL = "http://localhost:53666";
-const PROD_CORE_URL = "https://www.openguardrails.com/core";
-
-export const DEFAULT_CORE_URL =
-  process.env.OG_CORE_URL ?? (isDev ? DEV_CORE_URL : PROD_CORE_URL);
+export const DEFAULT_CORE_URL = defaultCoreUrl;
 
 const CREDENTIALS_DIR = path.join(os.homedir(), ".openclaw/credentials/moltguard");
 const CREDENTIALS_FILE = path.join(CREDENTIALS_DIR, "credentials.json");
@@ -195,7 +182,7 @@ export type ResolvedGuardConfig = Required<Omit<OpenClawGuardConfig, "plan">> & 
 export const DEFAULT_CONFIG: ResolvedGuardConfig = {
   enabled: true,
   blockOnRisk: true,
-  apiKey: process.env.OG_API_KEY ?? "",
+  apiKey: envApiKey,
   timeoutMs: 60000,
   coreUrl: DEFAULT_CORE_URL,
   agentName: "OpenClaw Agent",

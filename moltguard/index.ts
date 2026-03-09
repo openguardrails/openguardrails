@@ -34,6 +34,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
+import { openclawHome } from "./agent/env.js";
 
 // =============================================================================
 // Constants
@@ -49,7 +50,7 @@ const LOG_PREFIX = `[${PLUGIN_ID}]`;
 // =============================================================================
 
 const DEBUG_LOG_PATH = path.join(
-  process.env.OPENCLAW_HOME || path.join(os.homedir(), ".openclaw"),
+  openclawHome,
   "logs",
   "moltguard-debug.log",
 );

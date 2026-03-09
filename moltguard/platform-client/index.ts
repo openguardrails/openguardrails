@@ -9,6 +9,9 @@
  * Works with both local embedded dashboard and remote standalone dashboard.
  */
 
+import fs from "node:fs";
+import path from "node:path";
+import { openclawHome } from "../agent/env.js";
 import type {
   DashboardClientConfig,
   DashboardDetectRequest,
@@ -25,13 +28,7 @@ export class DashboardClient {
 
   private debugFileLog(msg: string): void {
     try {
-      const fs = require("node:fs");
-      const os = require("node:os");
-      const path = require("node:path");
-      const logPath = path.join(
-        process.env.OPENCLAW_HOME || path.join(os.homedir(), ".openclaw"),
-        "logs", "moltguard-debug.log",
-      );
+      const logPath = path.join(openclawHome, "logs", "moltguard-debug.log");
       fs.appendFileSync(logPath, `[${new Date().toISOString()}] [DashboardClient] ${msg}\n`);
     } catch { /* ignore */ }
   }

@@ -158,17 +158,18 @@ export interface DashboardInstance {
  * Start the Dashboard server (in-process)
  */
 export async function startDashboard(options: DashboardOptions = {}): Promise<DashboardInstance> {
-  const port = options.port || parseInt(process.env.PORT || process.env.API_PORT || "53667", 10);
-  const localMode = options.localMode ?? (process.env.LOCAL_MODE === "true");
-  const dashboardMode = options.dashboardMode || (process.env.DASHBOARD_MODE as DashboardMode) || "selfhosted";
-  const dataDir = options.dataDir || process.env.DASHBOARD_DATA_DIR;
+  const { getEnv, setEnv } = await import("./services/runtime-config.js");
+  const port = options.port || parseInt(getEnv("PORT") || getEnv("API_PORT") || "53667", 10);
+  const localMode = options.localMode ?? (getEnv("LOCAL_MODE") === "true");
+  const dashboardMode = options.dashboardMode || (getEnv("DASHBOARD_MODE") as DashboardMode) || "selfhosted";
+  const dataDir = options.dataDir || getEnv("DASHBOARD_DATA_DIR");
 
   // Set environment variables for database and other modules
   if (dataDir) {
-    process.env.DASHBOARD_DATA_DIR = dataDir;
+    setEnv("DASHBOARD_DATA_DIR", dataDir);
   }
   if (options.coreUrl) {
-    process.env.OG_CORE_URL = options.coreUrl;
+    setEnv("OG_CORE_URL", options.coreUrl);
   }
 
   // Generate or reuse token
@@ -203,7 +204,7 @@ export async function startDashboard(options: DashboardOptions = {}): Promise<Da
   }
 
   // Determine webOutDir
-  let webOutDir = options.webOutDir || process.env.WEB_OUT_DIR;
+  let webOutDir = options.webOutDir || getEnv("WEB_OUT_DIR");
   if (!webOutDir && dashboardMode === "embedded") {
     // Try relative paths
     const candidates = [
@@ -318,17 +319,18 @@ const isMainModule = (() => {
 })();
 
 if (isMainModule) {
-  const PORT = parseInt(process.env.PORT || process.env.API_PORT || "53667", 10);
-  const DASHBOARD_MODE = (process.env.DASHBOARD_MODE || "selfhosted") as DashboardMode;
-  const LOCAL_MODE = process.env.LOCAL_MODE === "true";
+  const { getEnv: _getEnv } = await import("./services/runtime-config.js");
+  const PORT = parseInt(_getEnv("PORT") || _getEnv("API_PORT") || "53667", 10);
+  const DASHBOARD_MODE = (_getEnv("DASHBOARD_MODE") || "selfhosted") as DashboardMode;
+  const LOCAL_MODE = _getEnv("LOCAL_MODE") === "true";
 
   startDashboard({
     port: PORT,
     localMode: LOCAL_MODE,
     dashboardMode: DASHBOARD_MODE,
-    webOutDir: process.env.WEB_OUT_DIR,
-    dataDir: process.env.DASHBOARD_DATA_DIR,
-    coreUrl: process.env.OG_CORE_URL,
+    webOutDir: _getEnv("WEB_OUT_DIR"),
+    dataDir: _getEnv("DASHBOARD_DATA_DIR"),
+    coreUrl: _getEnv("OG_CORE_URL"),
   }).then(({ port, token }) => {
     if (LOCAL_MODE && token) {
       console.log(`Local URL: http://localhost:${port}?token=${token}`);

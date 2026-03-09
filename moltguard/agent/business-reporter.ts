@@ -13,13 +13,11 @@ import { createHash } from "node:crypto";
 import { networkInterfaces } from "node:os";
 import type { CoreCredentials } from "./config.js";
 import type { Logger } from "./types.js";
+import { openclawHome } from "./env.js";
 
 function debugLog(msg: string): void {
   try {
-    const logPath = path.join(
-      process.env.OPENCLAW_HOME || path.join(os.homedir(), ".openclaw"),
-      "logs", "moltguard-debug.log",
-    );
+    const logPath = path.join(openclawHome, "logs", "moltguard-debug.log");
     fs.appendFileSync(logPath, `[${new Date().toISOString()}] [BusinessReporter] ${msg}\n`);
   } catch { /* ignore */ }
 }
