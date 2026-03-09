@@ -202,6 +202,9 @@ rsync -av --delete \
     --include='memory/***' \
     --include='platform-client/***' \
     --include='samples/***' \
+    --include='scripts/' \
+    --include='scripts/enterprise-enroll.sh' \
+    --include='scripts/enterprise-unenroll.sh' \
     --include='dist/***' \
     --include='openclaw.plugin.json' \
     --include='tsconfig.json' \

@@ -17,10 +17,24 @@ import type {
   ToolCallObservationRequest,
   AgentPermission,
   DetectionResultRequest,
+  AgenticHoursRequest,
 } from "./types.js";
 
 export class DashboardClient {
   private config: Required<DashboardClientConfig>;
+
+  private debugFileLog(msg: string): void {
+    try {
+      const fs = require("node:fs");
+      const os = require("node:os");
+      const path = require("node:path");
+      const logPath = path.join(
+        process.env.OPENCLAW_HOME || path.join(os.homedir(), ".openclaw"),
+        "logs", "moltguard-debug.log",
+      );
+      fs.appendFileSync(logPath, `[${new Date().toISOString()}] [DashboardClient] ${msg}\n`);
+    } catch { /* ignore */ }
+  }
 
   constructor(config: DashboardClientConfig) {
     this.config = {
@@ -176,6 +190,122 @@ export class DashboardClient {
     return result.data ?? [];
   }
 
+  // ─── Agentic Hours ──────────────────────────────────────────────
+
+  /** Report agentic hours data to the dashboard */
+  async reportAgenticHours(data: AgenticHoursRequest): Promise<void> {
+    await this.request("/api/agentic-hours", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // ─── Agentic Hours Accumulator ────────────────────────────────
+
+  private hoursAccum = {
+    toolCallDurationMs: 0,
+    llmDurationMs: 0,
+    totalDurationMs: 0,
+    toolCallCount: 0,
+    llmCallCount: 0,
+    sessionCount: 0,
+    blockCount: 0,
+    riskEventCount: 0,
+  };
+  private hoursFlushTimer: NodeJS.Timeout | null = null;
+
+  /** Record a tool call duration for agentic hours */
+  recordToolCallDuration(durationMs: number, blocked = false): void {
+    this.hoursAccum.toolCallDurationMs += durationMs;
+    this.hoursAccum.totalDurationMs += durationMs;
+    this.hoursAccum.toolCallCount += 1;
+    if (blocked) this.hoursAccum.blockCount += 1;
+    this.ensureHoursFlush();
+  }
+
+  /** Record an LLM call duration for agentic hours */
+  recordLlmDuration(durationMs: number): void {
+    this.hoursAccum.llmDurationMs += durationMs;
+    this.hoursAccum.totalDurationMs += durationMs;
+    this.hoursAccum.llmCallCount += 1;
+    this.ensureHoursFlush();
+  }
+
+  /** Record a session start */
+  recordSessionStart(): void {
+    this.hoursAccum.sessionCount += 1;
+    this.ensureHoursFlush();
+  }
+
+  /** Record a risk event */
+  recordRiskEvent(): void {
+    this.hoursAccum.riskEventCount += 1;
+    this.ensureHoursFlush();
+  }
+
+  private ensureHoursFlush(): void {
+    if (this.hoursFlushTimer) return;
+    this.hoursFlushTimer = setTimeout(() => {
+      this.flushAgenticHours();
+      this.hoursFlushTimer = null;
+    }, 60_000);
+    this.hoursFlushTimer.unref();
+  }
+
+  private async flushAgenticHours(): Promise<void> {
+    this.debugFileLog(`flushAgenticHours: agentId=${this.config.agentId} accum=${JSON.stringify(this.hoursAccum)}`);
+    if (!this.config.agentId) { this.debugFileLog("flushAgenticHours: no agentId, skipping"); return; }
+    const accum = { ...this.hoursAccum };
+    // Reset
+    this.hoursAccum = {
+      toolCallDurationMs: 0,
+      llmDurationMs: 0,
+      totalDurationMs: 0,
+      toolCallCount: 0,
+      llmCallCount: 0,
+      sessionCount: 0,
+      blockCount: 0,
+      riskEventCount: 0,
+    };
+
+    // Only flush if there's data
+    const hasData =
+      accum.totalDurationMs > 0 ||
+      accum.toolCallCount > 0 ||
+      accum.llmCallCount > 0 ||
+      accum.sessionCount > 0;
+    if (!hasData) return;
+
+    try {
+      this.debugFileLog(`flushAgenticHours: POSTing to dashboard: ${JSON.stringify(accum)}`);
+      await this.reportAgenticHours({
+        agentId: this.config.agentId,
+        ...accum,
+      });
+      this.debugFileLog(`flushAgenticHours: POST success`);
+    } catch (err) {
+      this.debugFileLog(`flushAgenticHours: POST FAILED: ${err}`);
+      // Re-add on failure
+      this.hoursAccum.toolCallDurationMs += accum.toolCallDurationMs;
+      this.hoursAccum.llmDurationMs += accum.llmDurationMs;
+      this.hoursAccum.totalDurationMs += accum.totalDurationMs;
+      this.hoursAccum.toolCallCount += accum.toolCallCount;
+      this.hoursAccum.llmCallCount += accum.llmCallCount;
+      this.hoursAccum.sessionCount += accum.sessionCount;
+      this.hoursAccum.blockCount += accum.blockCount;
+      this.hoursAccum.riskEventCount += accum.riskEventCount;
+    }
+  }
+
+  /** Flush pending agentic hours and clean up timers */
+  async stop(): Promise<void> {
+    if (this.hoursFlushTimer) {
+      clearTimeout(this.hoursFlushTimer);
+      this.hoursFlushTimer = null;
+    }
+    await this.flushAgenticHours();
+  }
+
   // ─── Health ───────────────────────────────────────────────────────
 
   /** Check if dashboard is reachable */
@@ -200,6 +330,7 @@ export {
   type ToolCallObservationRequest,
   type AgentPermission,
   type DetectionResultRequest,
+  type AgenticHoursRequest,
   type PlatformClientConfig,
   type PlatformDetectRequest,
   type PlatformDetectResponse,

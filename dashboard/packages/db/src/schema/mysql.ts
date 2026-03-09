@@ -238,3 +238,29 @@ export const userSessions = mysqlTable(
     emailIdx: index("idx_user_sessions_email").on(table.email),
   })
 );
+
+// ─── Agentic Hours ──────────────────────────────────────────────
+// Daily aggregated duration metrics per agent
+export const agenticHoursLocal = mysqlTable(
+  "agentic_hours_local",
+  {
+    id: varchar("id", { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+    tenantId: varchar("tenant_id", { length: 64 }).notNull().default("default"),
+    agentId: varchar("agent_id", { length: 36 }).notNull(),
+    date: varchar("date", { length: 10 }).notNull(), // YYYY-MM-DD
+    toolCallDurationMs: int("tool_call_duration_ms").notNull().default(0),
+    llmDurationMs: int("llm_duration_ms").notNull().default(0),
+    totalDurationMs: int("total_duration_ms").notNull().default(0),
+    toolCallCount: int("tool_call_count").notNull().default(0),
+    llmCallCount: int("llm_call_count").notNull().default(0),
+    sessionCount: int("session_count").notNull().default(0),
+    blockCount: int("block_count").notNull().default(0),
+    riskEventCount: int("risk_event_count").notNull().default(0),
+    createdAt: datetime("created_at").notNull().$defaultFn(() => new Date()),
+    updatedAt: datetime("updated_at").notNull().$defaultFn(() => new Date()),
+  },
+  (table) => ({
+    agentDateIdx: index("idx_agentic_hours_agent_date").on(table.tenantId, table.agentId, table.date),
+    tenantDateIdx: index("idx_agentic_hours_tenant_date").on(table.tenantId, table.date),
+  })
+);

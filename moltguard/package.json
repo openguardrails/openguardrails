@@ -47,6 +47,8 @@
     "gateway/",
     "dashboard-dist/",
     "samples/",
+    "scripts/enterprise-enroll.sh",
+    "scripts/enterprise-unenroll.sh",
     "openclaw.plugin.json",
     "README.md"
   ],

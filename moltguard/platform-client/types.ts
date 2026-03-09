@@ -100,6 +100,20 @@ export type DetectionResultRequest = {
   fileType?: "soul" | "agent" | "memory" | "task" | "skill" | "plugin" | "other";
 };
 
+// ─── Agentic Hours ──────────────────────────────────────────────
+export type AgenticHoursRequest = {
+  agentId: string;
+  date?: string; // YYYY-MM-DD, defaults to today
+  toolCallDurationMs?: number;
+  llmDurationMs?: number;
+  totalDurationMs?: number;
+  toolCallCount?: number;
+  llmCallCount?: number;
+  sessionCount?: number;
+  blockCount?: number;
+  riskEventCount?: number;
+};
+
 // Keep old names as aliases for backwards compat during transition
 export type PlatformDetectRequest = DashboardDetectRequest;
 export type PlatformDetectResponse = DashboardDetectResponse;

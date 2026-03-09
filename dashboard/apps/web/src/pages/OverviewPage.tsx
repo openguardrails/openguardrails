@@ -1,12 +1,13 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Bot, Zap, ShieldOff, AlertTriangle } from "lucide-react";
+import { Bot, Zap, ShieldOff, AlertTriangle, Clock } from "lucide-react";
 import {
   api,
   type RegisteredAgent,
   type DetectionResult,
   type DetectionSummary,
   type ObservationSummary,
+  type AgenticHoursSummary,
   buildAgentMap,
 } from "../lib/api";
 
@@ -71,6 +72,7 @@ export function OverviewPage() {
   const [detections, setDetections] = useState<DetectionResult[]>([]);
   const [summary, setSummary] = useState<DetectionSummary | null>(null);
   const [observationSummary, setObservationSummary] = useState<ObservationSummary[]>([]);
+  const [agenticHours, setAgenticHours] = useState<AgenticHoursSummary | null>(null);
   const [agentMap, setAgentMap] = useState<Map<string, { name: string; emoji: string }>>(new Map());
   const [loading, setLoading] = useState(true);
 
@@ -78,12 +80,13 @@ export function OverviewPage() {
     let cancelled = false;
     (async () => {
       try {
-        const [agentsRes, detectionsRes, summaryRes, obsRes, discRes] = await Promise.all([
+        const [agentsRes, detectionsRes, summaryRes, obsRes, discRes, hoursRes] = await Promise.all([
           api.listAgents(),
           api.getDetections({ limit: 10, unsafe: true }),
           api.getDetectionSummary(),
           api.getObservationSummary(),
           api.listDiscoveryAgents(),
+          api.getAgenticHoursToday(),
         ]);
         if (cancelled) return;
 
@@ -91,6 +94,7 @@ export function OverviewPage() {
         if (detectionsRes.success) setDetections(detectionsRes.data);
         if (summaryRes.success) setSummary(summaryRes.data);
         if (obsRes.success) setObservationSummary(obsRes.data);
+        if (hoursRes.success) setAgenticHours(hoursRes.data);
 
         const map = buildAgentMap(
           discRes.success ? discRes.data : [],
@@ -106,8 +110,21 @@ export function OverviewPage() {
     return () => { cancelled = true; };
   }, []);
 
+  /** Format milliseconds as human-readable duration */
+  const formatDuration = (ms: number): string => {
+    if (ms < 1000) return "0s";
+    const secs = Math.floor(ms / 1000);
+    if (secs < 60) return `${secs}s`;
+    const mins = Math.floor(secs / 60);
+    const remSecs = secs % 60;
+    if (mins < 60) return remSecs > 0 ? `${mins}m ${remSecs}s` : `${mins}m`;
+    const hrs = Math.floor(mins / 60);
+    const remMins = mins % 60;
+    return remMins > 0 ? `${hrs}h ${remMins}m` : `${hrs}h`;
+  };
+
   const activeAgents = agents.filter(a => a.status === "active").length;
-  const totalActions = observationSummary.reduce((sum, o) => sum + o.totalCalls, 0);
+  const totalActions = agenticHours?.toolCallCount ?? observationSummary.reduce((sum, o) => sum + o.totalCalls, 0);
   const blockedActions = observationSummary.reduce((sum, o) => sum + o.blockedCalls, 0);
   const securityAlerts = summary?.unsafe || 0;
 
@@ -141,6 +158,11 @@ export function OverviewPage() {
         <>
           {/* Stats Grid */}
           <div className="stats-grid">
+            <StatCard
+              icon={<Clock size={24} />}
+              label="Agentic Hours"
+              value={formatDuration(agenticHours?.totalDurationMs ?? 0)}
+            />
             <StatCard
               icon={<Bot size={24} />}
               label="Active Agents"

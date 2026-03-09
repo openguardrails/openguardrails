@@ -91,7 +91,6 @@ npm run test           # Run tests
 ## Environment
 ```
 OG_CORE_URL=https://www.openguardrails.com/core
-OG_DASHBOARD_URL=https://www.openguardrails.com/dashboard
 OG_API_KEY=sk-og-...
 GATEWAY_PORT=38790
 DASHBOARD_PORT=38789

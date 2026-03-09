@@ -120,6 +120,7 @@ export async function createDashboardApp(options: DashboardOptions = {}): Promis
   const { observationsRouter } = await import("./routes/observations.js");
   const { detectionsRouter } = await import("./routes/detections.js");
   const { gatewayRouter } = await import("./routes/gateway.js");
+  const { agenticHoursRouter } = await import("./routes/agentic-hours.js");
 
   app.use("/api/settings", settingsRouter);
   app.use("/api/agents", agentsRouter);
@@ -132,6 +133,7 @@ export async function createDashboardApp(options: DashboardOptions = {}): Promis
   app.use("/api/observations", observationsRouter);
   app.use("/api/detections", detectionsRouter);
   app.use("/api/gateway", gatewayRouter);
+  app.use("/api/agentic-hours", agenticHoursRouter);
 
   app.use(errorHandler);
 

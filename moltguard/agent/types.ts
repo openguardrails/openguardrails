@@ -17,9 +17,11 @@ export type OpenClawGuardConfig = {
   coreUrl?: string;
   /** Agent name for registration */
   agentName?: string;
-  /** Dashboard URL (observation reporting).
-   *  Default: https://www.openguardrails.com/dashboard */
-  dashboardUrl?: string;
+  /** Deployment plan. Set to "enterprise" for self-hosted enterprise deployment.
+   *  When "enterprise", coreUrl must point to the enterprise Core instance.
+   *  Core API calls go to the enterprise coreUrl; dashboard reports to both
+   *  local and enterprise Core for centralized security management. */
+  plan?: "enterprise";
 };
 
 // =============================================================================

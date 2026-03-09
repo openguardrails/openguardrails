@@ -5,7 +5,6 @@
   "version": "6.8.2",
   "configSchema": {
     "type": "object",
-    "additionalProperties": false,
     "properties": {
       "enabled": {
         "type": "boolean",
@@ -31,9 +30,14 @@
         "type": "string",
         "description": "Core API URL — registration and behavioral detection (default: https://www.openguardrails.com/core)"
       },
+      "plan": {
+        "type": "string",
+        "enum": ["enterprise"],
+        "description": "Deployment plan. Set to 'enterprise' for self-hosted Core with centralized security management."
+      },
       "dashboardUrl": {
         "type": "string",
-        "description": "Dashboard URL for observation reporting (default: https://www.openguardrails.com/dashboard). Self-hosted users should change to local address."
+        "description": "Dashboard URL (default: https://www.openguardrails.com/dashboard)"
       }
     }
   },
@@ -63,12 +67,17 @@
     },
     "coreUrl": {
       "label": "Core URL",
-      "help": "Core API endpoint (default: https://www.openguardrails.com/core). Self-hosted users should set to local address (e.g. http://localhost:53666).",
+      "help": "Core API endpoint (default: https://www.openguardrails.com/core). Enterprise users should set to their Core address.",
+      "advanced": true
+    },
+    "plan": {
+      "label": "Plan",
+      "help": "Set to 'enterprise' for self-hosted Core deployment with centralized security management.",
       "advanced": true
     },
     "dashboardUrl": {
       "label": "Dashboard URL",
-      "help": "URL of the OpenGuardrails dashboard for reporting tool call observations (default: https://www.openguardrails.com/dashboard). Self-hosted users should set to local address.",
+      "help": "Dashboard endpoint (default: https://www.openguardrails.com/dashboard).",
       "advanced": true
     }
   }

@@ -239,3 +239,29 @@ export const userSessions = pgTable(
     emailIdx: index("idx_user_sessions_email").on(table.email),
   })
 );
+
+// ─── Agentic Hours ──────────────────────────────────────────────
+// Daily aggregated duration metrics per agent
+export const agenticHoursLocal = pgTable(
+  "agentic_hours_local",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: varchar("tenant_id", { length: 64 }).notNull().default("default"),
+    agentId: uuid("agent_id").notNull(),
+    date: varchar("date", { length: 10 }).notNull(), // YYYY-MM-DD
+    toolCallDurationMs: integer("tool_call_duration_ms").notNull().default(0),
+    llmDurationMs: integer("llm_duration_ms").notNull().default(0),
+    totalDurationMs: integer("total_duration_ms").notNull().default(0),
+    toolCallCount: integer("tool_call_count").notNull().default(0),
+    llmCallCount: integer("llm_call_count").notNull().default(0),
+    sessionCount: integer("session_count").notNull().default(0),
+    blockCount: integer("block_count").notNull().default(0),
+    riskEventCount: integer("risk_event_count").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    agentDateIdx: index("idx_agentic_hours_agent_date").on(table.tenantId, table.agentId, table.date),
+    tenantDateIdx: index("idx_agentic_hours_tenant_date").on(table.tenantId, table.date),
+  })
+);

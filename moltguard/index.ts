@@ -19,12 +19,13 @@ import {
   readAgentProfile,
   getProfileWatchPaths,
   DEFAULT_CORE_URL,
-  DEFAULT_DASHBOARD_URL,
   type CoreCredentials,
   type RegisterResult,
 } from "./agent/config.js";
 import { BehaviorDetector, FILE_READ_TOOLS, WEB_FETCH_TOOLS, type QuotaExceededInfo } from "./agent/behavior-detector.js";
 import { EventReporter } from "./agent/event-reporter.js";
+import { BusinessReporter } from "./agent/business-reporter.js";
+import { ConfigSync, type BusinessConfig } from "./agent/config-sync.js";
 import { isBlockingHook, type HookType } from "./agent/hook-types.js";
 import { DashboardClient } from "./platform-client/index.js";
 import { enableGateway, disableGateway, getGatewayStatus, startGateway, setDashboardPort } from "./agent/gateway-manager.js";
@@ -44,8 +45,36 @@ const PLUGIN_VERSION = "6.7.0";
 const LOG_PREFIX = `[${PLUGIN_ID}]`;
 
 // =============================================================================
+// Debug file logger — writes to openclaw logs dir for agentic hours diagnosis
+// =============================================================================
+
+const DEBUG_LOG_PATH = path.join(
+  process.env.OPENCLAW_HOME || path.join(os.homedir(), ".openclaw"),
+  "logs",
+  "moltguard-debug.log",
+);
+
+function debugLog(msg: string): void {
+  try {
+    const ts = new Date().toISOString();
+    fs.appendFileSync(DEBUG_LOG_PATH, `[${ts}] ${msg}\n`);
+  } catch { /* ignore */ }
+}
+
+// =============================================================================
 // API Helpers
 // =============================================================================
+
+/** Infer tool category from tool name for business reporting */
+function inferToolCategory(toolName: string): string {
+  const name = toolName.toLowerCase();
+  if (FILE_READ_TOOLS.has(toolName) || FILE_READ_TOOLS.has(name)) return "file_read";
+  if (WEB_FETCH_TOOLS.has(toolName) || WEB_FETCH_TOOLS.has(name)) return "web_fetch";
+  if (["bash", "shell", "run_command", "execute"].some((t) => name.includes(t))) return "shell";
+  if (["write", "edit", "create_file", "delete"].some((t) => name.includes(t))) return "file_write";
+  if (name.includes("agent") || name.includes("subagent")) return "agent";
+  return "other";
+}
 
 /** Mask API key for display: sk-og-abc... */
 function maskApiKey(apiKey: string): string {
@@ -181,6 +210,8 @@ function createLogger(baseLogger: Logger): Logger {
 let globalCoreCredentials: CoreCredentials | null = null;
 let globalBehaviorDetector: BehaviorDetector | null = null;
 let globalEventReporter: EventReporter | null = null;
+let globalBusinessReporter: BusinessReporter | null = null;
+let globalConfigSync: ConfigSync | null = null;
 let globalDashboardClient: DashboardClient | null = null;
 let globalFileWatcher: FileWatcher | null = null;
 let dashboardHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -191,39 +222,24 @@ let lastRegisterResult: RegisterResult | null = null;
 let quotaExceededNotified = false;
 // Track personal dashboard auto-start state
 let personalDashboardStarted = false;
+// Track LLM input timestamps per session for duration calculation
+const llmInputTimestamps = new Map<string, number>();
 // Track auto-scan state
 let autoScanEnabled = false;
+// Track current account plan
+let currentAccountPlan = "free";
 
 // =============================================================================
 // Ensure default config in openclaw.json
 // =============================================================================
 
 /**
- * On first load after install, the plugin entry in openclaw.json has no config
- * block. This writes the default URLs so users can see and edit them.
+ * Previously wrote default config to openclaw.json on first load.
+ * Now a no-op — we don't modify openclaw.json automatically.
+ * Config is optional; defaults are applied in resolveConfig().
  */
-function ensureDefaultConfig(log: Logger): void {
-  try {
-    const configDir = process.env.OPENCLAW_HOME || path.join(os.homedir(), ".openclaw");
-    const configFile = path.join(configDir, "openclaw.json");
-    if (!fs.existsSync(configFile)) return;
-
-    const raw = fs.readFileSync(configFile, "utf-8");
-    const json = JSON.parse(raw);
-
-    const entry = json?.plugins?.entries?.moltguard;
-    if (!entry || entry.config?.coreUrl) return; // already has config
-
-    entry.config = {
-      coreUrl: DEFAULT_CORE_URL,
-      dashboardUrl: DEFAULT_DASHBOARD_URL,
-      ...(entry.config ?? {}),
-    };
-    fs.writeFileSync(configFile, JSON.stringify(json, null, 2) + "\n", "utf-8");
-    log.info(`Default config written to ${configFile}`);
-  } catch {
-    // Non-critical — don't block plugin startup
-  }
+function ensureDefaultConfig(_log: Logger): void {
+  // no-op: don't write config to openclaw.json on fresh install
 }
 
 // =============================================================================
@@ -297,15 +313,24 @@ const openClawGuardPlugin = {
 
     // Ensure openclaw.json has default config (coreUrl) on first load
     const pluginConfig = (api.pluginConfig ?? {}) as OpenClawGuardConfig;
+    debugLog(`=== PLUGIN REGISTER ===`);
+    debugLog(`pluginConfig: ${JSON.stringify(pluginConfig)}`);
     if (!pluginConfig.coreUrl) {
       ensureDefaultConfig(log);
     }
 
     const config = resolveConfig(pluginConfig);
+    const isEnterprise = config.plan === "enterprise";
 
     if (config.enabled === false) {
       log.info("Plugin disabled via config");
       return;
+    }
+
+    debugLog(`resolved config: plan=${config.plan}, coreUrl=${config.coreUrl}, isEnterprise=${isEnterprise}`);
+
+    if (isEnterprise) {
+      log.info(`Enterprise mode: Core → ${config.coreUrl}`);
     }
 
     // ── Local initialization (no network) ────────────────────────
@@ -345,7 +370,9 @@ const openClawGuardPlugin = {
         globalEventReporter?.setCredentials(globalCoreCredentials);
         log.info("Platform: using configured API key");
       } else {
-        globalCoreCredentials = loadCoreCredentials();
+        debugLog(`loadCoreCredentials(${config.coreUrl}) called`);
+        globalCoreCredentials = loadCoreCredentials(config.coreUrl);
+        debugLog(`loadCoreCredentials result: ${globalCoreCredentials ? `apiKey=${globalCoreCredentials.apiKey?.slice(0,10)}... agentId=${globalCoreCredentials.agentId} coreUrl=${globalCoreCredentials.coreUrl}` : "null"}`);
         if (globalCoreCredentials) {
           globalBehaviorDetector.setCredentials(globalCoreCredentials);
           globalEventReporter?.setCredentials(globalCoreCredentials);
@@ -354,12 +381,14 @@ const openClawGuardPlugin = {
         } else {
           // Auto-register on first load — agent is immediately usable with autonomous quota
           log.info("Platform: auto-registering...");
+          debugLog(`registerWithCore(${config.agentName}, coreUrl=${config.coreUrl})`);
           registerWithCore(
             config.agentName,
             "OpenClaw AI Agent secured by OpenGuardrails",
             config.coreUrl,
           )
             .then((result) => {
+              debugLog(`registerWithCore SUCCESS: agentId=${result.credentials.agentId} apiKey=${result.credentials.apiKey?.slice(0,10)}...`);
               lastRegisterResult = result;
               globalCoreCredentials = result.credentials;
               globalBehaviorDetector!.setCredentials(result.credentials);
@@ -368,10 +397,16 @@ const openClawGuardPlugin = {
               // Start personal dashboard (auto-starts local dashboard and connects to it)
               initPersonalDashboard(config.coreUrl);
 
-              // Agent is immediately active with autonomous quota (500/day)
-              log.info("Platform: registered (autonomous mode, 500/day quota)");
+              // Check for business plan features
+              initBusinessFeatures(config.coreUrl);
+
+              // Agent is immediately active
+              log.info(isEnterprise
+                ? "Platform: registered (enterprise mode, unlimited quota)"
+                : "Platform: registered (autonomous mode, 500/day quota)");
             })
             .catch((err) => {
+              debugLog(`registerWithCore FAILED: ${err}`);
               log.warn(`Platform: auto-registration failed — ${err}`);
               log.info("Platform: local protections still active");
             });
@@ -384,7 +419,8 @@ const openClawGuardPlugin = {
     // Data is stored in the plugin's data directory.
 
     async function initPersonalDashboard(coreUrl: string): Promise<void> {
-      if (personalDashboardStarted) return;
+      debugLog(`initPersonalDashboard: called, personalDashboardStarted=${personalDashboardStarted}`);
+      if (personalDashboardStarted) { debugLog("initPersonalDashboard: already started, skipping"); return; }
       personalDashboardStarted = true;
 
       try {
@@ -404,6 +440,7 @@ const openClawGuardPlugin = {
         initDashboardClient(result.token, `http://localhost:${DASHBOARD_PORT}`);
       } catch (err) {
         // Dev mode or startup failure - silently continue
+        debugLog(`initPersonalDashboard FAILED: ${err}`);
         log.debug?.(`Dashboard auto-start skipped: ${err}`);
       }
     }
@@ -412,13 +449,13 @@ const openClawGuardPlugin = {
     // Connects to the dashboard for observation reporting.
     // Uses the local session token for auth.
 
-    function initDashboardClient(sessionToken: string, dashboardUrl?: string): void {
-      if (globalDashboardClient) return;
-      const url = dashboardUrl || config.dashboardUrl;
-      if (!url || !sessionToken) return;
+    function initDashboardClient(sessionToken: string, dashboardUrl: string): void {
+      debugLog(`initDashboardClient: dashboardUrl=${dashboardUrl} token=${sessionToken?.slice(0,8)}...`);
+      if (globalDashboardClient) { debugLog("initDashboardClient: already initialized, skipping"); return; }
+      if (!dashboardUrl || !sessionToken) { debugLog("initDashboardClient: missing url or token, skipping"); return; }
 
       globalDashboardClient = new DashboardClient({
-        dashboardUrl: url,
+        dashboardUrl,
         sessionToken,
       });
 
@@ -446,12 +483,82 @@ const openClawGuardPlugin = {
 
       // Start periodic heartbeat
       dashboardHeartbeatTimer = globalDashboardClient.startHeartbeat(60_000);
-      log.debug?.(`Dashboard: connected to ${url}`);
+      log.debug?.(`Dashboard: connected to ${dashboardUrl}`);
     }
 
     if (globalCoreCredentials) {
       // Start personal dashboard (auto-starts local dashboard and connects to it)
       initPersonalDashboard(config.coreUrl);
+    }
+
+    // ── Business plan initialization ───────────────────────────────
+    // Check account plan and initialize BusinessReporter + ConfigSync if business.
+
+    async function initBusinessFeatures(coreUrl: string): Promise<void> {
+      debugLog(`initBusinessFeatures: called, credentials=${!!globalCoreCredentials}, isEnterprise=${isEnterprise}`);
+      if (!globalCoreCredentials) { debugLog("initBusinessFeatures: no credentials, skipping"); return; }
+
+      try {
+        let plan: string;
+        if (isEnterprise) {
+          // Enterprise mode: always business plan, skip remote check
+          plan = "business";
+        } else {
+          const status = await getAccountStatus(globalCoreCredentials.apiKey, coreUrl);
+          plan = status.plan;
+        }
+        currentAccountPlan = plan;
+        debugLog(`initBusinessFeatures: plan=${plan}`);
+
+        if (plan !== "business") {
+          debugLog(`initBusinessFeatures: plan is not business, skipping`);
+          log.debug?.(`Account plan is "${plan}", business features not enabled`);
+          return;
+        }
+
+        // Initialize BusinessReporter
+        if (!globalBusinessReporter) {
+          globalBusinessReporter = new BusinessReporter(
+            { coreUrl, pluginVersion: PLUGIN_VERSION },
+            log,
+          );
+          globalBusinessReporter.setCredentials(globalCoreCredentials);
+
+          // Set profile from workspace
+          const profile = readAgentProfile();
+          globalBusinessReporter.setProfile({
+            ownerName: profile.ownerName,
+            agentName: config.agentName,
+            provider: profile.provider,
+            model: profile.model,
+          });
+
+          globalBusinessReporter.initialize(plan);
+          debugLog(`BusinessReporter initialized, enabled=${globalBusinessReporter.isEnabled()}`);
+        }
+
+        // Initialize ConfigSync
+        if (!globalConfigSync) {
+          globalConfigSync = new ConfigSync(
+            {
+              coreUrl,
+              onUpdate: (bizConfig: BusinessConfig) => {
+                log.info(`ConfigSync: received ${bizConfig.policies.length} policies`);
+                // Future: apply gateway config and policies locally
+              },
+            },
+            log,
+          );
+          globalConfigSync.setCredentials(globalCoreCredentials);
+          await globalConfigSync.initialize(plan);
+        }
+      } catch (err) {
+        log.debug?.(`Business features init failed: ${err}`);
+      }
+    }
+
+    if (globalCoreCredentials) {
+      initBusinessFeatures(config.coreUrl);
     }
 
     // ── Hooks ────────────────────────────────────────────────────
@@ -537,6 +644,9 @@ const openClawGuardPlugin = {
         durationMs: (event as any).durationMs,
       });
 
+      // Report session end to business reporter
+      globalBusinessReporter?.recordSession("end", (event as any).durationMs);
+
       globalBehaviorDetector?.clearSession(sessionKey);
       globalEventReporter?.clearSession(sessionKey);
     });
@@ -578,6 +688,15 @@ const openClawGuardPlugin = {
       }
 
       if (blocked) {
+        // Report blocked tool call to business reporter
+        globalBusinessReporter?.recordToolCall(
+          event.toolName,
+          inferToolCategory(event.toolName),
+          0,
+          true,
+        );
+        // Record blocked call for local agentic hours
+        globalDashboardClient?.recordToolCallDuration(0, true);
         return { block: true, blockReason };
       }
     }, { priority: 100 });
@@ -668,6 +787,15 @@ const openClawGuardPlugin = {
               log.warn(
                 `Core: injection detected in "${event.toolName}" result: ${scanResult.summary}`,
               );
+
+              // Report detection to business reporter
+              globalBusinessReporter?.recordDetection(
+                scanResult.detected ? "high" : "no_risk",
+                false,
+                scanResult.summary,
+              );
+              // Record risk event for local agentic hours
+              globalDashboardClient?.recordRiskEvent();
             }
 
             // Report detection result to dashboard (non-blocking)
@@ -720,6 +848,18 @@ const openClawGuardPlugin = {
             log.debug?.(`Dashboard: report failed (after ${event.toolName}) — ${err}`);
           });
       }
+
+      // Report tool call to business reporter (with duration and category)
+      debugLog(`after_tool_call: tool=${event.toolName} durationMs=${event.durationMs} dashboardClient=${!!globalDashboardClient} businessReporter=${!!globalBusinessReporter} businessEnabled=${globalBusinessReporter?.isEnabled()}`);
+      globalBusinessReporter?.recordToolCall(
+        event.toolName,
+        inferToolCategory(event.toolName),
+        event.durationMs ?? 0,
+        false, // not blocked (blocked calls don't reach after_tool_call)
+      );
+
+      // Record tool call duration for local agentic hours
+      globalDashboardClient?.recordToolCallDuration(event.durationMs ?? 0);
     });
 
     // ── New Hooks (18 additional hooks for complete context) ────
@@ -756,6 +896,13 @@ const openClawGuardPlugin = {
         sessionId,
         isNew: event?.isNew ?? true,
       });
+
+      // Report session start to business reporter
+      debugLog(`session_start: sessionKey=${sessionKey} dashboardClient=${!!globalDashboardClient} businessReporter=${!!globalBusinessReporter}`);
+      globalBusinessReporter?.recordSession("start");
+
+      // Record session start for local agentic hours
+      globalDashboardClient?.recordSessionStart();
     });
 
     // Model resolution: before_model_resolve
@@ -780,6 +927,9 @@ const openClawGuardPlugin = {
     // LLM input: llm_input (critical for context)
     apiAny.on("llm_input", async (event: any, ctx: any) => {
       const sessionKey = ctx?.sessionKey ?? "";
+      // Track timestamp for LLM duration calculation (OpenClaw may not provide latencyMs)
+      llmInputTimestamps.set(sessionKey, Date.now());
+
       const content = typeof event?.content === "string"
         ? event.content
         : JSON.stringify(event?.messages ?? event?.content ?? "");
@@ -802,6 +952,11 @@ const openClawGuardPlugin = {
         ? event.content
         : JSON.stringify(event?.content ?? "");
 
+      // Compute LLM duration: prefer event-provided, fall back to our own timing
+      const inputTs = llmInputTimestamps.get(sessionKey);
+      const llmDuration = event?.latencyMs ?? event?.durationMs ?? (inputTs ? Date.now() - inputTs : 0);
+      if (inputTs) llmInputTimestamps.delete(sessionKey);
+
       globalEventReporter?.report(sessionKey, "llm_output", {
         timestamp: new Date().toISOString(),
         model: event?.model ?? "unknown",
@@ -809,9 +964,17 @@ const openClawGuardPlugin = {
         contentLength: content.length,
         streamed: event?.streamed ?? false,
         tokenUsage: event?.usage ?? event?.tokenUsage,
-        latencyMs: event?.latencyMs ?? event?.durationMs ?? 0,
+        latencyMs: llmDuration,
         stopReason: event?.stopReason ?? event?.stop_reason,
       });
+
+      // Report LLM call to business reporter
+      debugLog(`llm_output: model=${event?.model} latencyMs=${event?.latencyMs} durationMs=${event?.durationMs} computed=${llmDuration} dashboardClient=${!!globalDashboardClient} businessReporter=${!!globalBusinessReporter}`);
+      if (llmDuration > 0) {
+        globalBusinessReporter?.recordLlmCall(llmDuration, event?.model);
+        // Record LLM duration for local agentic hours
+        globalDashboardClient?.recordLlmDuration(llmDuration);
+      }
     });
 
     // Message sending: message_sending (blocking - can modify/cancel)
@@ -1008,8 +1171,10 @@ const openClawGuardPlugin = {
           };
         }
 
-        // Get live quota status from Core
-        const status = await getAccountStatus(creds.apiKey, config.coreUrl);
+        // Get live quota status from Core (skip in enterprise mode)
+        const status = isEnterprise
+          ? { email: "", plan: "enterprise", quotaUsed: 0, quotaTotal: 999_999_999, isAutonomous: false, resetAt: "" }
+          : await getAccountStatus(creds.apiKey, config.coreUrl);
         const mode = status.isAutonomous ? "autonomous" : "human managed";
         const quotaDisplay = `${status.quotaUsed}/${status.quotaTotal}/day`;
 
@@ -1019,14 +1184,17 @@ const openClawGuardPlugin = {
           `- API Key: ${maskApiKey(creds.apiKey)}`,
           `- Agent ID: ${creds.agentId}`,
           `- Email: ${status.email || "(not set)"}`,
-          `- Plan: ${status.plan}`,
-          `- Quota: ${quotaDisplay}${status.resetAt ? " (resets at UTC 0:00)" : ""}`,
-          `- Mode: ${mode}`,
+          `- Plan: ${isEnterprise ? "enterprise" : status.plan}`,
+          `- Quota: ${isEnterprise ? "unlimited" : quotaDisplay}${!isEnterprise && status.resetAt ? " (resets at UTC 0:00)" : ""}`,
+          `- Mode: ${isEnterprise ? "enterprise" : mode}`,
+          ...(isEnterprise ? [`- Core: ${config.coreUrl}`] : []),
           `- blockOnRisk: ${config.blockOnRisk}`,
           "",
           "Commands:",
-          "- /og_core — Open Core portal to upgrade plan",
-          "- /og_claim — Show agent info for claiming",
+          ...(isEnterprise ? [] : [
+            "- /og_core — Open Core portal to upgrade plan",
+            "- /og_claim — Show agent info for claiming",
+          ]),
           "- /og_config — Configure API key",
         ];
 
@@ -1850,6 +2018,23 @@ const openClawGuardPlugin = {
       globalEventReporter = null;
     }
 
+    // Stop business reporter (flush remaining telemetry)
+    if (globalBusinessReporter) {
+      await globalBusinessReporter.stop();
+      globalBusinessReporter = null;
+    }
+
+    // Stop config sync
+    if (globalConfigSync) {
+      globalConfigSync.stop();
+      globalConfigSync = null;
+    }
+
+    // Stop dashboard client (flush agentic hours)
+    if (globalDashboardClient) {
+      await globalDashboardClient.stop();
+    }
+
     // Stop personal dashboard process
     if (personalDashboardStarted) {
       try {
@@ -1863,6 +2048,7 @@ const openClawGuardPlugin = {
     globalBehaviorDetector = null;
     globalDashboardClient = null;
     quotaExceededNotified = false;
+    currentAccountPlan = "free";
   },
 };
 

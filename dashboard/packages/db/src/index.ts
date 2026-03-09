@@ -11,4 +11,5 @@ export { settingsQueries } from "./queries/settings.js";
 export { observationQueries, inferCategory, inferAccessPattern } from "./queries/observations.js";
 export { authQueries } from "./queries/auth.js";
 export { gatewayActivityQueries } from "./queries/gateway-activity.js";
+export { agenticHoursQueries } from "./queries/agentic-hours.js";
 export { runMigrations } from "./migrate.js";

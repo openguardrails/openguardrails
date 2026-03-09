@@ -22,15 +22,10 @@ const isDev =
   process.env.OG_CORE_URL?.includes("localhost");
 
 const DEV_CORE_URL = "http://localhost:53666";
-const DEV_DASHBOARD_URL = "http://localhost:53668";
 const PROD_CORE_URL = "https://www.openguardrails.com/core";
-const PROD_DASHBOARD_URL = "https://www.openguardrails.com/dashboard";
 
 export const DEFAULT_CORE_URL =
   process.env.OG_CORE_URL ?? (isDev ? DEV_CORE_URL : PROD_CORE_URL);
-
-export const DEFAULT_DASHBOARD_URL =
-  process.env.OG_DASHBOARD_URL ?? (isDev ? DEV_DASHBOARD_URL : PROD_DASHBOARD_URL);
 
 const CREDENTIALS_DIR = path.join(os.homedir(), ".openclaw/credentials/moltguard");
 const CREDENTIALS_FILE = path.join(CREDENTIALS_DIR, "credentials.json");
@@ -53,17 +48,21 @@ export type CoreCredentials = {
  * Load credentials from disk.
  * If the credentials were issued by a different Core URL, returns null
  * (credentials from production won't work in dev and vice versa).
+ *
+ * @param configuredCoreUrl - The Core URL from plugin config (openclaw.json).
+ *   When provided, credentials are validated against this URL instead of DEFAULT_CORE_URL.
  */
-export function loadCoreCredentials(): CoreCredentials | null {
+export function loadCoreCredentials(configuredCoreUrl?: string): CoreCredentials | null {
   try {
     if (!fs.existsSync(CREDENTIALS_FILE)) return null;
     const data = JSON.parse(fs.readFileSync(CREDENTIALS_FILE, "utf-8"));
     if (typeof data.apiKey === "string" && typeof data.agentId === "string") {
       const creds = data as CoreCredentials;
+      const expectedUrl = configuredCoreUrl ?? DEFAULT_CORE_URL;
       // Check if credentials match current environment
-      if (creds.coreUrl && creds.coreUrl !== DEFAULT_CORE_URL) {
+      if (creds.coreUrl && creds.coreUrl !== expectedUrl) {
         // Credentials from a different Core instance - don't use them
-        console.log(`[moltguard] Credentials from ${creds.coreUrl} not valid for ${DEFAULT_CORE_URL}, will re-register`);
+        console.log(`[moltguard] Credentials from ${creds.coreUrl} not valid for ${expectedUrl}, will re-register`);
         return null;
       }
       return creds;
@@ -191,14 +190,15 @@ export async function pollAccountEmail(
 // Default Configuration
 // =============================================================================
 
-export const DEFAULT_CONFIG: Required<OpenClawGuardConfig> = {
+export type ResolvedGuardConfig = Required<Omit<OpenClawGuardConfig, "plan">> & Pick<OpenClawGuardConfig, "plan">;
+
+export const DEFAULT_CONFIG: ResolvedGuardConfig = {
   enabled: true,
   blockOnRisk: true,
   apiKey: process.env.OG_API_KEY ?? "",
   timeoutMs: 60000,
   coreUrl: DEFAULT_CORE_URL,
   agentName: "OpenClaw Agent",
-  dashboardUrl: DEFAULT_DASHBOARD_URL,
 };
 
 // =============================================================================
@@ -430,7 +430,8 @@ export function getProfileWatchPaths(openclawDir?: string): string[] {
   ];
 }
 
-export function resolveConfig(config?: Partial<OpenClawGuardConfig>): Required<OpenClawGuardConfig> {
+export function resolveConfig(config?: Partial<OpenClawGuardConfig>): ResolvedGuardConfig {
+  const plan = config?.plan;
   return {
     enabled: config?.enabled ?? DEFAULT_CONFIG.enabled,
     blockOnRisk: config?.blockOnRisk ?? DEFAULT_CONFIG.blockOnRisk,
@@ -438,6 +439,6 @@ export function resolveConfig(config?: Partial<OpenClawGuardConfig>): Required<O
     timeoutMs: config?.timeoutMs ?? DEFAULT_CONFIG.timeoutMs,
     coreUrl: config?.coreUrl ?? DEFAULT_CONFIG.coreUrl,
     agentName: config?.agentName ?? readIdentityName() ?? DEFAULT_CONFIG.agentName,
-    dashboardUrl: config?.dashboardUrl ?? DEFAULT_CONFIG.dashboardUrl,
+    plan,
   };
 }

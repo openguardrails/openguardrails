@@ -230,3 +230,29 @@ export const agentPermissions = sqliteTable(
     uniqueAgentTool: index("idx_agent_perms_unique").on(table.tenantId, table.agentId, table.toolName),
   })
 );
+
+// ─── Agentic Hours ──────────────────────────────────────────────
+// Daily aggregated duration metrics per agent
+export const agenticHoursLocal = sqliteTable(
+  "agentic_hours_local",
+  {
+    id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    tenantId: text("tenant_id").notNull().default("default"),
+    agentId: text("agent_id").notNull(),
+    date: text("date").notNull(), // YYYY-MM-DD
+    toolCallDurationMs: integer("tool_call_duration_ms").notNull().default(0),
+    llmDurationMs: integer("llm_duration_ms").notNull().default(0),
+    totalDurationMs: integer("total_duration_ms").notNull().default(0),
+    toolCallCount: integer("tool_call_count").notNull().default(0),
+    llmCallCount: integer("llm_call_count").notNull().default(0),
+    sessionCount: integer("session_count").notNull().default(0),
+    blockCount: integer("block_count").notNull().default(0),
+    riskEventCount: integer("risk_event_count").notNull().default(0),
+    createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+    updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => ({
+    agentDateIdx: index("idx_agentic_hours_agent_date").on(table.tenantId, table.agentId, table.date),
+    tenantDateIdx: index("idx_agentic_hours_tenant_date").on(table.tenantId, table.date),
+  })
+);

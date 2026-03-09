@@ -118,6 +118,26 @@ export const api = {
 
   getGatewayActivityStats: () =>
     request<{ success: boolean; data: GatewayActivityStats }>("/api/gateway/activity/stats"),
+
+  // Agentic Hours
+  getAgenticHoursToday: () =>
+    request<{ success: boolean; data: AgenticHoursSummary }>("/api/agentic-hours/today"),
+
+  getAgenticHoursDaily: (options?: { from?: string; to?: string }) => {
+    const params = new URLSearchParams();
+    if (options?.from) params.set("from", options.from);
+    if (options?.to) params.set("to", options.to);
+    const qs = params.toString();
+    return request<{ success: boolean; data: AgenticHoursDaily[] }>(`/api/agentic-hours/daily${qs ? `?${qs}` : ""}`);
+  },
+
+  getAgenticHoursByAgent: (options?: { from?: string; to?: string }) => {
+    const params = new URLSearchParams();
+    if (options?.from) params.set("from", options.from);
+    if (options?.to) params.set("to", options.to);
+    const qs = params.toString();
+    return request<{ success: boolean; data: AgenticHoursByAgent[] }>(`/api/agentic-hours/by-agent${qs ? `?${qs}` : ""}`);
+  },
 };
 
 export interface GatewayStatus {
@@ -319,6 +339,35 @@ export interface DetectionSummary {
   total: number;
   safe: number;
   unsafe: number;
+}
+
+export interface AgenticHoursSummary {
+  toolCallDurationMs: number;
+  llmDurationMs: number;
+  totalDurationMs: number;
+  toolCallCount: number;
+  llmCallCount: number;
+  sessionCount: number;
+  blockCount: number;
+  riskEventCount: number;
+}
+
+export interface AgenticHoursDaily {
+  date: string;
+  toolCallDurationMs: number;
+  llmDurationMs: number;
+  totalDurationMs: number;
+  toolCallCount: number;
+  llmCallCount: number;
+}
+
+export interface AgenticHoursByAgent {
+  agentId: string;
+  toolCallDurationMs: number;
+  llmDurationMs: number;
+  totalDurationMs: number;
+  toolCallCount: number;
+  llmCallCount: number;
 }
 
 /** Build a combined agent lookup map from discovery + registered agents */
