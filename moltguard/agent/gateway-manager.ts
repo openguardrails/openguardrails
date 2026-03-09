@@ -277,6 +277,14 @@ export async function restartGateway(): Promise<void> {
   startGateway();
 }
 
+/**
+ * Stop the gateway server completely
+ */
+export async function stopGateway(): Promise<void> {
+  await stopGatewayServer();
+  gatewayRunning = false;
+}
+
 export function isGatewayRunning(): boolean {
   // Check both our flag and the actual server state
   return gatewayRunning && isGatewayServerRunning();

@@ -28,7 +28,7 @@ import { BusinessReporter } from "./agent/business-reporter.js";
 import { ConfigSync, type BusinessConfig } from "./agent/config-sync.js";
 import { isBlockingHook, type HookType } from "./agent/hook-types.js";
 import { DashboardClient } from "./platform-client/index.js";
-import { enableGateway, disableGateway, getGatewayStatus, startGateway, setDashboardPort } from "./agent/gateway-manager.js";
+import { enableGateway, disableGateway, getGatewayStatus, startGateway, stopGateway, setDashboardPort } from "./agent/gateway-manager.js";
 import { FileWatcher } from "./agent/file-watcher.js";
 import fs from "node:fs";
 import os from "node:os";
@@ -2036,6 +2036,11 @@ const openClawGuardPlugin = {
     if (globalDashboardClient) {
       await globalDashboardClient.stop();
     }
+
+    // Stop gateway server
+    try {
+      await stopGateway();
+    } catch { /* ignore */ }
 
     // Stop personal dashboard process
     if (personalDashboardStarted) {
