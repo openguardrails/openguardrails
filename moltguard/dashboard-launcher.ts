@@ -242,7 +242,7 @@ export async function startLocalDashboard(options: LaunchOptions): Promise<Launc
       const { setEnv } = await import("./agent/env.js");
       setEnv("DASHBOARD_DATA_DIR", dataDir);
       setEnv("LOCAL_MODE", "true");
-      setEnv("DASHBOARD_MODE", "embedded");
+
       if (options.coreUrl) {
         setEnv("OG_CORE_URL", options.coreUrl);
       }
@@ -281,7 +281,7 @@ export async function startLocalDashboard(options: LaunchOptions): Promise<Launc
           port: DASHBOARD_PORT,
           localMode: true,
           localToken: token,
-          dashboardMode: "embedded",
+
           webOutDir,
           dataDir,
           coreUrl: options.coreUrl,
@@ -300,7 +300,7 @@ export async function startLocalDashboard(options: LaunchOptions): Promise<Launc
           port: DASHBOARD_PORT,
           localMode: true,
           localToken: token,
-          dashboardMode: "embedded",
+
           webOutDir,
           dataDir,
           coreUrl: options.coreUrl,

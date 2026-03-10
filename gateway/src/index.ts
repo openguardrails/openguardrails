@@ -9,14 +9,12 @@
 
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { loadConfig, validateConfig, findBackendByApiKey, findDefaultBackend, findBackendByPathPrefix, getBackendApiType, getGatewayMode } from "./config.js";
+import { loadConfig, validateConfig, findBackendByApiKey, findDefaultBackend, findBackendByPathPrefix, getBackendApiType } from "./config.js";
 import type { GatewayConfig, BackendConfig, ApiType } from "./types.js";
 import { handleAnthropicRequest } from "./handlers/anthropic.js";
 import { handleOpenAIRequest } from "./handlers/openai.js";
 import { handleGeminiRequest } from "./handlers/gemini.js";
 import { handleModelsRequest } from "./handlers/models.js";
-
-const GATEWAY_MODE = getGatewayMode();
 
 let config: GatewayConfig;
 let currentServer: ReturnType<typeof createServer> | null = null;
@@ -251,7 +249,6 @@ export function startGateway(configPath?: string, embedded = false): void {
 
     if (!embedded) {
       console.log("[ai-security-gateway] Configuration loaded:");
-      console.log(`  Mode: ${GATEWAY_MODE}`);
       console.log(`  Port: ${config.port}`);
       console.log(
         `  Backends: ${Object.keys(config.backends).join(", ") || "(none)"}`,

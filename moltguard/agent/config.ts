@@ -98,7 +98,8 @@ export async function registerWithCore(
   description: string,
   coreUrl: string = DEFAULT_CORE_URL,
 ): Promise<RegisterResult> {
-  const response = await fetch(`${coreUrl}/api/v1/agents/register`, {
+  const url = coreUrl.replace(/\/+$/, "");
+  const response = await fetch(`${url}/api/v1/agents/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name, description }),
@@ -131,15 +132,15 @@ export async function registerWithCore(
     agentId: json.agent.id,
     claimUrl: json.activate_url ?? "",
     verificationCode: "", // No longer used
-    coreUrl,
+    coreUrl: url,
   };
 
-  saveCoreCredentials(creds, coreUrl);
+  saveCoreCredentials(creds, url);
 
   return {
     credentials: creds,
     activateUrl: json.activate_url ?? "",
-    loginUrl: json.login_url ?? `${coreUrl}/login`,
+    loginUrl: json.login_url ?? `${url}/login`,
   };
 }
 
@@ -156,7 +157,8 @@ export async function pollAccountEmail(
   coreUrl: string = DEFAULT_CORE_URL,
 ): Promise<{ email: string; status: string } | null> {
   try {
-    const res = await fetch(`${coreUrl}/api/v1/account`, {
+    const url = coreUrl.replace(/\/+$/, "");
+    const res = await fetch(`${url}/api/v1/account`, {
       headers: { Authorization: `Bearer ${apiKey}` },
     });
     if (!res.ok) return null;
@@ -418,7 +420,7 @@ export function resolveConfig(config?: Partial<OpenClawGuardConfig>): ResolvedGu
     blockOnRisk: config?.blockOnRisk ?? DEFAULT_CONFIG.blockOnRisk,
     apiKey: config?.apiKey ?? DEFAULT_CONFIG.apiKey,
     timeoutMs: config?.timeoutMs ?? DEFAULT_CONFIG.timeoutMs,
-    coreUrl: config?.coreUrl ?? DEFAULT_CONFIG.coreUrl,
+    coreUrl: (config?.coreUrl ?? DEFAULT_CONFIG.coreUrl).replace(/\/+$/, ""),
     agentName: config?.agentName ?? readIdentityName() ?? DEFAULT_CONFIG.agentName,
     plan,
   };

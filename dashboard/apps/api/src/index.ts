@@ -13,8 +13,6 @@ import { errorHandler } from "./middleware/error-handler.js";
 import { autoMigrate } from "./auto-migrate.js";
 import { getDb } from "@og/db";
 
-import type { DashboardMode } from "@og/shared";
-
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // =============================================================================
@@ -25,11 +23,9 @@ export interface DashboardOptions {
   port?: number;
   localMode?: boolean;
   localToken?: string;
-  dashboardMode?: DashboardMode;
   webOutDir?: string;
   dataDir?: string;
   coreUrl?: string;
-  webOrigin?: string;
 }
 
 // =============================================================================
@@ -44,9 +40,7 @@ export async function createDashboardApp(options: DashboardOptions = {}): Promis
   const {
     localMode = false,
     localToken,
-    dashboardMode = "selfhosted",
     webOutDir,
-    webOrigin = "http://localhost:53668",
   } = options;
 
   const app = express();
@@ -57,18 +51,10 @@ export async function createDashboardApp(options: DashboardOptions = {}): Promis
   }
 
   app.use(helmet({ contentSecurityPolicy: false }));
-  app.use(cors({
-    origin: dashboardMode === "embedded" ? true : webOrigin,
-    credentials: true,
-  }));
-  // Skip morgan in embedded mode to reduce noise
-  if (dashboardMode !== "embedded") {
-    const morgan = (await import("morgan")).default;
-    app.use(morgan("short"));
-  }
+  app.use(cors({ origin: true, credentials: true }));
   app.use(express.json());
 
-  // Rewrite /dashboard/api/* to /api/* for embedded mode
+  // Rewrite /dashboard/api/* to /api/*
   app.use((req, _res, next) => {
     if (req.path.startsWith("/dashboard/api/")) {
       req.url = req.url.replace("/dashboard/api/", "/api/");
@@ -82,8 +68,8 @@ export async function createDashboardApp(options: DashboardOptions = {}): Promis
   });
   app.use("/api/auth", authRouter);
 
-  // Serve static web app in embedded mode (before auth middleware)
-  if (dashboardMode === "embedded" && webOutDir) {
+  // Serve static web app (before auth middleware)
+  if (webOutDir) {
     const resolvedWebDir = resolve(webOutDir);
     console.log(`[dashboard] Serving static files from: ${resolvedWebDir}`);
     if (existsSync(resolvedWebDir)) {
@@ -161,7 +147,6 @@ export async function startDashboard(options: DashboardOptions = {}): Promise<Da
   const { getEnv, setEnv } = await import("./services/runtime-config.js");
   const port = options.port || parseInt(getEnv("PORT") || getEnv("API_PORT") || "53667", 10);
   const localMode = options.localMode ?? (getEnv("LOCAL_MODE") === "true");
-  const dashboardMode = options.dashboardMode || (getEnv("DASHBOARD_MODE") as DashboardMode) || "selfhosted";
   const dataDir = options.dataDir || getEnv("DASHBOARD_DATA_DIR");
 
   // Set environment variables for database and other modules
@@ -205,7 +190,7 @@ export async function startDashboard(options: DashboardOptions = {}): Promise<Da
 
   // Determine webOutDir
   let webOutDir = options.webOutDir || getEnv("WEB_OUT_DIR");
-  if (!webOutDir && dashboardMode === "embedded") {
+  if (!webOutDir) {
     // Try relative paths
     const candidates = [
       join(__dirname, "..", "..", "web", "out"),
@@ -224,7 +209,6 @@ export async function startDashboard(options: DashboardOptions = {}): Promise<Da
     port,
     localMode,
     localToken: token,
-    dashboardMode,
     webOutDir,
     dataDir,
     coreUrl: options.coreUrl,
@@ -245,7 +229,7 @@ export async function startDashboard(options: DashboardOptions = {}): Promise<Da
     dashboardServer!.listen(port, () => {
       dashboardRunning = true;
       dashboardPort = port;
-      console.log(`[dashboard] Running on port ${port} (${dashboardMode} mode)`);
+      console.log(`[dashboard] Running on port ${port}`);
       resolve({
         port,
         token,
@@ -300,42 +284,4 @@ export function isDashboardRunning(): boolean {
  */
 export function getDashboardPort(): number | null {
   return dashboardPort;
-}
-
-// =============================================================================
-// Standalone execution (when run directly with node/tsx)
-// =============================================================================
-
-// Check if this module is being run directly (not imported)
-// Must match the full path, not just filename, to avoid false positives when imported by other modules
-const isMainModule = (() => {
-  if (!process.argv[1]) return false;
-  const mainPath = process.argv[1];
-  const thisPath = import.meta.url.replace("file://", "");
-  // Only run standalone code if this exact file is the entry point
-  return mainPath === thisPath ||
-    mainPath.replace(/\.ts$/, ".js") === thisPath ||
-    thisPath.endsWith(mainPath);
-})();
-
-if (isMainModule) {
-  const { getEnv: _getEnv } = await import("./services/runtime-config.js");
-  const PORT = parseInt(_getEnv("PORT") || _getEnv("API_PORT") || "53667", 10);
-  const DASHBOARD_MODE = (_getEnv("DASHBOARD_MODE") || "selfhosted") as DashboardMode;
-  const LOCAL_MODE = _getEnv("LOCAL_MODE") === "true";
-
-  startDashboard({
-    port: PORT,
-    localMode: LOCAL_MODE,
-    dashboardMode: DASHBOARD_MODE,
-    webOutDir: _getEnv("WEB_OUT_DIR"),
-    dataDir: _getEnv("DASHBOARD_DATA_DIR"),
-    coreUrl: _getEnv("OG_CORE_URL"),
-  }).then(({ port, token }) => {
-    if (LOCAL_MODE && token) {
-      console.log(`Local URL: http://localhost:${port}?token=${token}`);
-    } else {
-      console.log(`Auth: POST /api/auth/request — send magic link`);
-    }
-  });
 }

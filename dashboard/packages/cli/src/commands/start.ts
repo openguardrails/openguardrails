@@ -49,7 +49,7 @@ export async function startCommand(options: { port?: string; webPort?: string })
     WEB_ORIGIN: `http://localhost:${webPort}`,
     DB_DIALECT: "sqlite",
     SQLITE_PATH: paths.db,
-    DASHBOARD_MODE: "standalone",
+
   };
 
   // Start API process

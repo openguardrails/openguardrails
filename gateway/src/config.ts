@@ -102,11 +102,6 @@ function loadFromEnv(config: GatewayConfig): GatewayConfig {
   return config;
 }
 
-/** Gateway mode from environment (selfhosted / embedded). */
-export function getGatewayMode(): string {
-  return process.env.GATEWAY_MODE || "selfhosted";
-}
-
 /**
  * Merge file config with default config
  */

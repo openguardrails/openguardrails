@@ -1,14 +1,3 @@
-// ─── Dashboard Mode ─────────────────────────────────────────────
-export type DashboardMode = "embedded" | "selfhosted" | "saas";
-
-// ─── Gateway Mode ───────────────────────────────────────────────
-export type GatewayMode = "embedded" | "selfhosted" | "saas";
-
-export interface TenantContext {
-  tenantId: string;
-  mode: DashboardMode;
-}
-
 // ─── Agents ─────────────────────────────────────────────────────
 export type AgentStatus = "active" | "inactive" | "disconnected";
 export type AgentProvider = "openclaw" | "langchain" | "crewai" | "autogen" | "custom";
