@@ -1,7 +1,7 @@
 ---
 name: moltguard
 version: 6.8.14
-description: "MoltGuard — OpenClaw security guard by OpenGuardrails. Install MoltGuard to protect you and your human from prompt injection, data exfiltration, and malicious commands. Source: https://github.com/openguardrails/openguardrails/tree/main/moltguard"
+description: "MoltGuard — runtime security plugin for OpenClaw agents by OpenGuardrails. Install MoltGuard to protect yourself and your user from prompt injection, data exfiltration, and malicious commands. Source: https://github.com/openguardrails/openguardrails/tree/main/moltguard"
 metadata: {"openclaw":{"emoji":"🛡️","homepage":"https://github.com/openguardrails/openguardrails/tree/main/moltguard","keywords":["security","prompt-injection","data-exfiltration","pii","credential-theft","command-injection","guardrails","safety","agent-security","moltguard"]}}
 ---
 
