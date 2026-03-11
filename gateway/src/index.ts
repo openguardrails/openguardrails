@@ -259,14 +259,13 @@ export function startGateway(configPath?: string, embedded = false): void {
     const server = createServer(handleRequest);
     currentServer = server;
 
-    // Handle server errors
+    // Handle server errors — in embedded mode, never throw (prevents uncaught exceptions)
     server.on("error", (err: NodeJS.ErrnoException) => {
       console.error("[ai-security-gateway] Server error:", err);
       currentServer = null;
       if (!embedded) {
         process.exit(1);
       }
-      throw err;
     });
 
     // Start listening

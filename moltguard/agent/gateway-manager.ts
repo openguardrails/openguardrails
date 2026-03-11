@@ -239,9 +239,39 @@ export function setGatewayActivityCallback(cb: ((redactionCount: number, typeCou
 }
 
 /**
+ * Check if a port is in use (TCP level check)
+ */
+async function isPortInUse(port: number): Promise<boolean> {
+  const net = await import("node:net");
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once("error", (err: NodeJS.ErrnoException) => {
+      resolve(err.code === "EADDRINUSE");
+    });
+    server.once("listening", () => {
+      server.close();
+      resolve(false);
+    });
+    server.listen(port, "127.0.0.1");
+  });
+}
+
+/**
+ * Wait for a port to become available
+ */
+async function waitForPortAvailable(port: number, timeoutMs: number = 10000): Promise<boolean> {
+  const startTime = Date.now();
+  while (Date.now() - startTime < timeoutMs) {
+    if (!(await isPortInUse(port))) return true;
+    await new Promise(r => setTimeout(r, 500));
+  }
+  return false;
+}
+
+/**
  * Start the gateway server (in-process, embedded mode)
  */
-export function startGateway(): void {
+export async function startGateway(): Promise<void> {
   mkdirSync(MOLTGUARD_DATA_DIR, { recursive: true });
 
   if (!existsSync(GATEWAY_CONFIG)) {
@@ -266,6 +296,16 @@ export function startGateway(): void {
       }
     });
     activityListenerRegistered = true;
+  }
+
+  // Wait for port to become available (old process may still hold it during plugin update)
+  if (await isPortInUse(DEFAULT_GATEWAY_PORT)) {
+    const available = await waitForPortAvailable(DEFAULT_GATEWAY_PORT, 10000);
+    if (!available) {
+      console.error(`[moltguard] Gateway port ${DEFAULT_GATEWAY_PORT} is still in use after waiting`);
+      gatewayRunning = false;
+      return;
+    }
   }
 
   try {

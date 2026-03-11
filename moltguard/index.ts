@@ -300,12 +300,10 @@ const openClawGuardPlugin = {
     // ── Start AI Security Gateway (in-process) ────────────────────────
     // Gateway runs in the plugin process and is always available.
     // Users enable sanitization via /og_sanitize on, which routes agents through it.
-    try {
-      startGateway();
-      log.debug?.("AI Security Gateway started");
-    } catch (err) {
-      log.error(`Failed to start AI Security Gateway: ${err}`);
-    }
+    // Async: waits for port availability (old process may hold it during plugin update).
+    startGateway()
+      .then(() => log.debug?.("AI Security Gateway started"))
+      .catch((err) => log.error(`Failed to start AI Security Gateway: ${err}`));
 
     // Set dashboard port immediately so gateway can report activity
     // (Dashboard will start later, but port is fixed at 53667)
