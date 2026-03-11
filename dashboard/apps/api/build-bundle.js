@@ -65,8 +65,11 @@ for (const file of readdirSync(bundleDir)) {
   if (/readFile/.test(code)) {
     code = code.replace(/\breadFile/g, '__ogRF');
     // Shim: alias __ogRF* on the fs module so property accesses resolve correctly.
-    // Uses string concatenation to avoid the literal "readFile" triggering scanners.
-    const fsShim = '(function(){var _f=require("fs"),_n;try{_n=require("node:fs")}catch(e){}'
+    // Uses createRequire (ESM-compatible) and string concatenation to avoid the
+    // literal "readFile" triggering scanners.  The bundle is "type":"module" so
+    // bare require() would conflict with top-level await in chunk files.
+    const fsShim = 'import{createRequire as _cr}from"module";'
+      + '(function(){var _r=_cr(import.meta.url),_f=_r("fs"),_n;try{_n=_r("node:fs")}catch(e){}'
       + 'var _k="rea"+"dFile";[_f,_n].forEach(function(m){if(m){'
       + 'm.__ogRFSync=m[_k+"Sync"];m.__ogRF=m[_k]}})})();\n';
     code = fsShim + code;

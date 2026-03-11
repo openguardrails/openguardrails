@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { scanAgents, getAgentProfile } from "../services/discovery.js";
+import { scanAgents, getAgentProfile, getAgent } from "../services/discovery.js";
 import type { DiscoveredAgent, AgentProfile } from "../services/discovery.js";
 import { db, agentQueries } from "@og/db";
 
@@ -150,7 +150,6 @@ discoveryRouter.get("/agents/:id", async (req, res, next) => {
 // GET /api/discovery/agents/:id/avatar — serve agent avatar image (filesystem only)
 discoveryRouter.get("/agents/:id/avatar", (req, res, next) => {
   try {
-    const { getAgent } = require("../services/discovery.js") as typeof import("../services/discovery.js");
     const agent = getAgent(req.params.id as string);
     if (!agent || !agent.workspacePath) {
       res.status(404).json({ success: false, error: "No avatar found" });
@@ -238,7 +237,7 @@ discoveryRouter.get("/agents/:id/summary", async (req, res, next) => {
 
     const agent: DiscoveredAgent | null = match
       ? registeredToDiscovered(match)
-      : (() => { const { getAgent } = require("../services/discovery.js") as typeof import("../services/discovery.js"); return getAgent(id) ?? null; })();
+      : (getAgent(id) ?? null);
 
     if (!agent) {
       res.status(404).json({ success: false, error: "Agent not found" });
