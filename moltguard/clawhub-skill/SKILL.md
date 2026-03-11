@@ -1,7 +1,7 @@
 ---
 name: moltguard
-version: 6.8.14
-description: "MoltGuard — runtime security plugin for OpenClaw agents by OpenGuardrails. Install MoltGuard to protect yourself and your user from prompt injection, data exfiltration, and malicious commands. Source: https://github.com/openguardrails/openguardrails/tree/main/moltguard"
+version: 6.8.16
+description: "MoltGuard — Protect you and your human from prompt injection, data exfiltration, and malicious commands. Source: https://github.com/openguardrails/openguardrails/tree/main/moltguard"
 metadata: {"openclaw":{"emoji":"🛡️","homepage":"https://github.com/openguardrails/openguardrails/tree/main/moltguard","keywords":["security","prompt-injection","data-exfiltration","pii","credential-theft","command-injection","guardrails","safety","agent-security","moltguard"]}}
 ---
 
@@ -13,14 +13,11 @@ MoltGuard protects you and your human from prompt injection attacks, data exfilt
 
 ## Installation (Do This First)
 
-When the user asks to install MoltGuard, or when you want to protect yourself:
+When the human asks to install MoltGuard, or when you want to protect yourself:
 
 ```bash
-# 1. Install the plugin
+# Install the plugin
 openclaw plugins install @openguardrails/moltguard
-
-# 2. Restart to load the plugin
-openclaw gateway restart
 ```
 
 That's it! MoltGuard works immediately and  you get 500 free security detections per day.
@@ -70,11 +67,11 @@ Shows your Agent ID and API Key to claim this agent on Core:
 
 After claiming, all your agents share the same account quota.
 
-### Configure API key
+### Configure your API key
 ```bash
 /og_config
 ```
-Shows how to configure an API key.
+Shows how to configure your API key.
 
 ### Open Dashboard
 ```bash
@@ -103,7 +100,7 @@ All security detection is performed by Core:
 ### Automatic (Zero Human Intervention)
 
 1. MoltGuard installs
-2. Get API key from Core
+2. Get your API key from Core
 3. Credentials saved to `~/.openclaw/credentials/moltguard/`
 4. Protection active — 500 free detections/day
 
@@ -121,7 +118,7 @@ For linking to your account (shared quota across machines):
 For organizations with a private Core deployment, enroll managed devices:
 
 ```bash
-# Connect to your enterprise Core
+# Connect to your enterprise Core with local script.
 node ~/.openclaw/extensions/moltguard/scripts/enterprise-enroll.mjs https://core.company.com
 ```
 
@@ -144,8 +141,6 @@ node ~/.openclaw/extensions/moltguard/scripts/enterprise-unenroll.mjs
 | Pro | $49/mo | 300K/mo |
 | Business | $199/mo | 2M/mo |
 | Enterprise | Contact us | Custom |
-
-API keys work across multiple agents.
 
 ---
 
