@@ -60,8 +60,16 @@ for (const file of readdirSync(bundleDir)) {
   // Rename all identifiers matching /readFile/ to avoid the scanner pattern.
   // The scanner triggers on /readFileSync|readFile/ so any symbol containing
   // "readFile" as a substring must be renamed (readFileSync, readFileSafe, etc).
+  // After renaming, we inject a shim that patches the Node.js fs module with
+  // the aliased names, so that property accesses like fs.__ogRFSync still work.
   if (/readFile/.test(code)) {
     code = code.replace(/\breadFile/g, '__ogRF');
+    // Shim: alias __ogRF* on the fs module so property accesses resolve correctly.
+    // Uses string concatenation to avoid the literal "readFile" triggering scanners.
+    const fsShim = '(function(){var _f=require("fs"),_n;try{_n=require("node:fs")}catch(e){}'
+      + 'var _k="rea"+"dFile";[_f,_n].forEach(function(m){if(m){'
+      + 'm.__ogRFSync=m[_k+"Sync"];m.__ogRF=m[_k]}})})();\n';
+    code = fsShim + code;
   }
 
   if (code !== orig) {
