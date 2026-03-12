@@ -1,6 +1,8 @@
 # OpenGuardrails
 
-**No.1 OpenClaw security plugin on [ClawHub](https://clawhub.ai/ThomasLWang/moltguard)** — protect your OpenClaw with real-time defense against prompt injection, data leaks, and dangerous actions.
+**The most downloaded security skill on OpenClaw [ClawHub](https://clawhub.ai/ThomasLWang/moltguard)** — protect agents with real-time defense against prompt injection, data leaks, and dangerous actions.
+
+<img width="1144" height="883" alt="image" src="https://github.com/user-attachments/assets/9b6d80f2-dde9-4467-b9e7-2f514e8b01cd" />
 
 **Three Principles:**
 - **Instant Value** — Works immediately after installation
@@ -14,11 +16,7 @@ Open source (Apache 2.0).
 ## Installation
 
 ```bash
-# 1. Install the plugin
 openclaw plugins install @openguardrails/moltguard
-
-# 2. Restart to load the plugin
-openclaw gateway restart
 ```
 
 That's it! MoltGuard works immediately with **500 free security detections per day**.
@@ -132,6 +130,24 @@ For shared quota across machines:
 5. Agent now shares account quota
 
 ---
+### Enterprise Enrollment
+
+For organizations with a private Core deployment, enroll managed devices:
+
+```bash
+# Connect to your enterprise Core with local script.
+node ~/.openclaw/extensions/moltguard/scripts/enterprise-enroll.mjs https://core.company.com
+```
+
+This sets MoltGuard to use the enterprise Core instead of the public one. Restart OpenClaw to apply.
+
+To remove enterprise config and revert to the default public Core:
+
+```bash
+node ~/.openclaw/extensions/moltguard/scripts/enterprise-unenroll.mjs
+```
+
+---
 
 ## Plans
 
@@ -141,8 +157,7 @@ For shared quota across machines:
 | Starter | $19/mo | 100K/mo |
 | Pro | $49/mo | 300K/mo |
 | Business | $199/mo | 2M/mo |
-
-API keys work across multiple agents.
+| Enterprise | Contact us | Custom |
 
 ---
 
@@ -166,28 +181,26 @@ When enabled:
 
 ## Update MoltGuard
 
+To update MoltGuard to the latest version:
+
 ```bash
-# Update the plugin
 openclaw plugins update moltguard
-
-# Restart to load the updated version
-openclaw gateway restart
 ```
-
 ---
 
 ## Uninstall
 
 ```bash
-rm -rf ~/.openclaw/extensions/moltguard
-rm -rf ~/.openclaw/credentials/moltguard
+node ~/.openclaw/extensions/moltguard/scripts/uninstall.mjs
 ```
+
+This removes MoltGuard config from `openclaw.json`, plugin files, and credentials. Restart OpenClaw to apply.
 
 ---
 
-## Contact
+## Contact & Support
 
-**Email**: thomas@openguardrails.com
+- **Email**: thomas@openguardrails.com
 
 ## License
 
