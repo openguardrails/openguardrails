@@ -154,6 +154,8 @@ export class DashboardClient {
 
   /** Start periodic heartbeat */
   startHeartbeat(intervalMs = 60_000): NodeJS.Timeout {
+    // Send first heartbeat immediately so agent shows as active right away
+    this.heartbeat().catch(() => {});
     const timer = setInterval(() => {
       this.heartbeat().catch(() => {});
     }, intervalMs);
