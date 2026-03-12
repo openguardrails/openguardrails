@@ -425,6 +425,14 @@ const openClawGuardPlugin = {
       if (personalDashboardStarted) { debugLog("initPersonalDashboard: already started, skipping"); return; }
       personalDashboardStarted = true;
 
+      // Delay startup to avoid starting in short-lived CLI processes (e.g., openclaw plugins install).
+      // The unref'd timer won't prevent short-lived processes from exiting, so the dashboard
+      // never starts in CLI context. In the long-lived gateway daemon, the timer fires normally.
+      await new Promise<void>(resolve => {
+        const t = setTimeout(resolve, 5000);
+        t.unref();
+      });
+
       try {
         const { startLocalDashboard, getPluginDataDir, DASHBOARD_PORT, DevModeError } = await import("./dashboard-launcher.js");
         const dataDir = getPluginDataDir();
