@@ -235,6 +235,7 @@ export class EventReporter {
           this.log.debug?.(`EventReporter: flush error: ${err}`);
         });
       }, BATCH_FLUSH_INTERVAL_MS);
+      this.flushTimer.unref();
     }
 
     // Flush immediately if queue is full
@@ -289,6 +290,7 @@ export class EventReporter {
             this.log.debug?.(`EventReporter: flush error: ${err}`);
           });
         }, BATCH_FLUSH_INTERVAL_MS);
+        this.flushTimer.unref();
       }
     }
   }

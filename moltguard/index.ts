@@ -268,12 +268,14 @@ function startProfileSync(log: Logger): void {
         .then(() => log.debug?.("Dashboard: profile synced"))
         .catch((err) => log.debug?.(`Dashboard: profile sync failed — ${err}`));
     }, 2000);
+    profileDebounceTimer.unref();
   };
 
   for (const watchPath of paths) {
     try {
       if (!fs.existsSync(watchPath)) continue;
       const watcher = fs.watch(watchPath, { recursive: false }, scheduleUpload);
+      watcher.unref();
       profileWatchers.push(watcher);
     } catch {
       // Non-critical — fs.watch may not be available in all environments

@@ -225,6 +225,13 @@ export async function startDashboard(options: DashboardOptions = {}): Promise<Da
       reject(err);
     });
 
+    // In local/embedded mode, don't let the server prevent process exit.
+    // This allows CLI commands (e.g., openclaw plugins install) that load
+    // plugins to exit normally while the server runs alongside the gateway.
+    if (options.localMode) {
+      dashboardServer!.unref();
+    }
+
     // Now start listening
     dashboardServer!.listen(port, () => {
       dashboardRunning = true;

@@ -72,6 +72,7 @@ export class FileWatcher {
           }
         );
 
+        watcher.unref();
         this.watchers.push(watcher);
         this.config.logger?.debug?.(`Watching: ${watchPath}`);
       } catch (err) {
@@ -118,6 +119,7 @@ export class FileWatcher {
     this.debounceTimer = setTimeout(() => {
       this.processPendingScans();
     }, this.config.debounceMs);
+    this.debounceTimer.unref();
   }
 
   /**
