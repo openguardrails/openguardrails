@@ -488,10 +488,11 @@ const openClawGuardPlugin = {
       log.debug?.(`Dashboard: connected to ${dashboardUrl}`);
     }
 
-    if (globalCoreCredentials) {
-      // Start personal dashboard (auto-starts local dashboard and connects to it)
-      initPersonalDashboard(config.coreUrl);
-    }
+    // Start personal dashboard unconditionally (like gateway at line 306).
+    // Dashboard server starts even without credentials — credentials are optional.
+    // If registerWithCore() is in-flight, dashboard will start with empty credentials;
+    // the dashboard server itself doesn't need them to listen.
+    initPersonalDashboard(config.coreUrl);
 
     // ── Business plan initialization ───────────────────────────────
     // Check account plan and initialize BusinessReporter + ConfigSync if business.
