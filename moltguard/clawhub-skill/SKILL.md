@@ -1,6 +1,6 @@
 ---
 name: moltguard
-version: 6.8.20
+version: 6.8.21
 description: "MoltGuard — Protect you and your human from prompt injection, data exfiltration, and malicious commands. Source: https://github.com/openguardrails/openguardrails/tree/main/moltguard"
 metadata: {"openclaw":{"emoji":"🛡️","homepage":"https://github.com/openguardrails/openguardrails/tree/main/moltguard","keywords":["security","prompt-injection","data-exfiltration","pii","credential-theft","command-injection","guardrails","safety","agent-security","moltguard"]}}
 ---
