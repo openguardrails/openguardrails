@@ -145,8 +145,7 @@ This sets MoltGuard to use the enterprise Core instead of the public one. Restar
 To remove enterprise config and revert to the default public Core:
 
 ```bash
-openclaw config unset plugins.entries.moltguard.config.plan
-openclaw config unset plugins.entries.moltguard.config.coreUrl
+openclaw config unset plugins.entries.moltguard.config
 ```
 
 ---
