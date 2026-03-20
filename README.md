@@ -135,8 +135,9 @@ For shared quota across machines:
 For organizations with a private Core deployment, enroll managed devices:
 
 ```bash
-# Connect to your enterprise Core with local script.
-node ~/.openclaw/extensions/moltguard/scripts/enterprise-enroll.mjs https://core.company.com
+# Connect to your enterprise Core.
+openclaw config set plugins.entries.moltguard.config.plan enterprise
+openclaw config set plugins.entries.moltguard.config.coreUrl "https://your-company-core.com"
 ```
 
 This sets MoltGuard to use the enterprise Core instead of the public one. Restart OpenClaw to apply.
@@ -144,7 +145,8 @@ This sets MoltGuard to use the enterprise Core instead of the public one. Restar
 To remove enterprise config and revert to the default public Core:
 
 ```bash
-node ~/.openclaw/extensions/moltguard/scripts/enterprise-unenroll.mjs
+openclaw config unset plugins.entries.moltguard.config.plan
+openclaw config unset plugins.entries.moltguard.config.coreUrl
 ```
 
 ---
