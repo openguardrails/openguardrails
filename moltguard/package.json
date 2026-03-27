@@ -7,7 +7,10 @@
   "openclaw": {
     "extensions": [
       "./dist/index.js"
-    ]
+    ],
+    "compat": {
+      "pluginApi": "^2026.1.0"
+    }
   },
   "scripts": {
     "build": "tsc && cp -r gateway dist/gateway",
