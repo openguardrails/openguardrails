@@ -1,8 +1,8 @@
 {
-  "id": "moltguard",
+  "id": "@openguardrails/moltguard",
   "name": "MoltGuard",
   "description": "AI security guard for OpenClaw agents: prompt injection detection, credential scanning, and behavioral monitoring.",
-  "version": "6.9.1",
+  "version": "6.9.2",
   "pluginApiVersion": "^2026.1.0",
   "configSchema": {
     "type": "object",
