@@ -1,31 +1,32 @@
-# Open Source License
+Apache License
+Version 2.0, January 2004
+http://www.apache.org/licenses/
 
-OpenGuardrails is licensed under a modified version of the Apache License 2.0, with the following additional conditions:
+Copyright (c) 2026 OpenGuardrails.com
+Author: thomas-security <thomas@openguardrails.com>
 
-1. OpenGuardrails may be utilized commercially, including as a backend service for other applications or as an application development platform for enterprises. Should the conditions below be met, a commercial license must be obtained from the producer:
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
 
-a. Multi-tenant service: Unless explicitly authorized by OpenGuardrails in writing, you may not use the OpenGuardrails source code to operate a multi-tenant SaaS environment.
-    - Tenant Definition: 
-    Within the context of OpenGuardrails, a tenant refers to a logically isolated instance used by an independent user, organization, or client.
-    Multi-tenancy includes — but is not limited to — providing separate user environments, dashboards, or API spaces for multiple customers in one hosted system.
-    - Examples:
-    Using OpenGuardrails within your own company or organization → Allowed.
-    Delivering a single customized instance to one enterprise customer → Allowed.
-    Operating a hosted SaaS platform where multiple users register and use isolated environments → Requires commercial license.
+    http://www.apache.org/licenses/LICENSE-2.0
 
-b. Brand identity and attribution: 
-    When using OpenGuardrails’ frontend interface, you may not remove, obscure, or modify the OpenGuardrails LOGO, product name, or copyright information displayed in the product console, web interface, or related applications.
-    This restriction does not apply to deployments that use OpenGuardrails purely as a backend or SDK component without its frontend interface.
-    - Frontend Definition:
-    The frontend refers to all source code and assets within the frontend/ directory of the OpenGuardrails repository, or the corresponding "frontend" image when running via Docker.
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 
-2. As a contributor, you should agree that:
+---
 
-a. The producer can adjust the open-source agreement to be more strict or relaxed as deemed necessary.
-b. Your contributed code may be used for commercial purposes, including but not limited to its cloud business operations.
+What IS open-sourced in this repository:
+  - Problem-discovery (scanning of known vulnerabilities and malicious components)
+  - Offensive-side tooling (red-team attack catalog and runner)
+  - Integration clients (plugin, skill, SDK) that talk to OpenGuardrails services
 
-Apart from the specific conditions mentioned above, all other rights and restrictions follow the Apache License 2.0. Detailed information about the Apache License 2.0 can be found at http://www.apache.org/licenses/LICENSE-2.0.
+What is NOT open-sourced and remains proprietary:
+  - Defensive detection rules, policy engines, and runtime protection logic
+  - Threat intelligence ingestion pipelines
+  - Backend services operated by OpenGuardrails.com
 
-The interactive design of this product is protected by appearance patent.
-
-© 2026 OpenGuardrails.com
+See docs/PHILOSOPHY.md for the reasoning.

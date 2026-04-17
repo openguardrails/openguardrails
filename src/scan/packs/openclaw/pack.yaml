@@ -1,0 +1,15 @@
+# OpenClaw detection pack
+#
+# Signatures for malicious ClawHub skills, dangerous gateway config, known-
+# vulnerable OpenClaw versions, and in-the-wild prompt-injection payloads
+# targeting OpenClaw agents.
+#
+# Every rule must cite at least one public reference (CVE, GHSA, GitHub
+# issue, or vendor threat-intel writeup). Rules without a reference are
+# rejected at load time. See docs/CONTRIBUTING-DETECTIONS.md.
+name: openclaw
+version: "0.1.0"
+upstream: "https://github.com/openclaw/openclaw"
+description: >-
+  Local signatures for OpenClaw skills, ClawHub supply chain, gateway config,
+  and published OpenClaw advisories.

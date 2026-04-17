@@ -1,49 +1,10 @@
-# Dependencies
 node_modules/
-.pnpm-store/
-
-# Build output
 dist/
-*.tsbuildinfo
-cli/bundled/
-dashboard/.turbo
-
-# Environment
+coverage/
+*.log
+.DS_Store
 .env
 .env.local
-.env.production
-
-# Database
-data/
-*.db
-*.sqlite
-*.sqlite3
-
-# Logs
-logs/
-*.log
-npm-debug.log*
-yarn-debug.log*
-pnpm-debug.log*
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-.claude/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Project-specific
-/openclaw_dir
-/openclaw
-/core
-/reference-docs
-/moltguard/dashboard-dist
-/moltguard/gateway
-/moltguard-website
-/cli
-/tests
+bun.lockb
+.ogr-cache/
+reports/
