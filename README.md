@@ -267,3 +267,9 @@ Apache-2.0. See [LICENSE](LICENSE).
 - Author: [@thomas-security](https://github.com/thomas-security) ·
   thomas@openguardrails.com
 - Organization: OpenGuardrails.com
+
+## About @OpenGuardrails/MoltGuard
+
+**The most downloaded security skill on OpenClaw [ClawHub](https://clawhub.ai/thomas-security/moltguard)** — protect every action your openclaw takes.
+
+<img width="1144" height="883" alt="image" src="https://github.com/user-attachments/assets/9b6d80f2-dde9-4467-b9e7-2f514e8b01cd" />
