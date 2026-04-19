@@ -1,0 +1,138 @@
+name: validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  yaml:
+    name: YAML + schema
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check YAML parses
+        run: |
+          python3 - <<'PY'
+          import sys, glob
+          try:
+              import yaml
+          except ImportError:
+              import subprocess
+              subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "pyyaml"])
+              import yaml
+
+          failed = False
+          for path in sorted(glob.glob("checkups/**/*.yaml", recursive=True)
+                           + glob.glob("redteam/**/*.yaml", recursive=True)):
+              try:
+                  with open(path) as f:
+                      yaml.safe_load(f)
+                  print(f"ok    {path}")
+              except yaml.YAMLError as e:
+                  failed = True
+                  print(f"FAIL  {path}: {e}")
+          sys.exit(1 if failed else 0)
+          PY
+
+      - name: Enforce required fields
+        run: |
+          python3 - <<'PY'
+          import sys, glob, yaml
+
+          REQUIRED_CHECKUP = {"id", "category", "severity", "title",
+                              "description", "references", "remediation"}
+          REQUIRED_REDTEAM = {"id", "suite", "severity", "title", "prompt",
+                              "hit_patterns", "references", "remediation"}
+          VALID_SEVERITY = {"low", "medium", "high", "critical"}
+
+          failed = False
+
+          def check(path, required):
+              global failed
+              with open(path) as f:
+                  data = yaml.safe_load(f)
+              if not isinstance(data, list):
+                  print(f"FAIL  {path}: top-level must be a list")
+                  failed = True
+                  return
+              for entry in data:
+                  missing = required - set(entry or {})
+                  if missing:
+                      print(f"FAIL  {path}:{entry.get('id','<no id>')}: missing {sorted(missing)}")
+                      failed = True
+                  sev = (entry or {}).get("severity")
+                  if sev not in VALID_SEVERITY:
+                      print(f"FAIL  {path}:{entry.get('id','<no id>')}: invalid severity {sev!r}")
+                      failed = True
+                  refs = (entry or {}).get("references")
+                  if not refs or not isinstance(refs, list) or not all(isinstance(r, str) and r.startswith("http") for r in refs):
+                      print(f"FAIL  {path}:{entry.get('id','<no id>')}: references must be a non-empty list of http(s) URLs")
+                      failed = True
+
+          for path in glob.glob("checkups/**/*.yaml", recursive=True):
+              check(path, REQUIRED_CHECKUP)
+          for path in glob.glob("redteam/**/*.yaml", recursive=True):
+              check(path, REQUIRED_REDTEAM)
+
+          if not failed:
+              print("ok    all rules have required fields")
+          sys.exit(1 if failed else 0)
+          PY
+
+      - name: Enforce unique rule IDs
+        run: |
+          python3 - <<'PY'
+          import sys, glob, yaml
+          from collections import Counter
+
+          ids = []
+          for path in sorted(glob.glob("checkups/**/*.yaml", recursive=True)
+                           + glob.glob("redteam/**/*.yaml", recursive=True)):
+              with open(path) as f:
+                  for entry in yaml.safe_load(f) or []:
+                      if isinstance(entry, dict) and "id" in entry:
+                          ids.append((entry["id"], path))
+
+          counts = Counter(i for i, _ in ids)
+          dupes = [i for i, c in counts.items() if c > 1]
+          if dupes:
+              for d in dupes:
+                  paths = [p for i, p in ids if i == d]
+                  print(f"FAIL  duplicate id {d} in: {', '.join(paths)}")
+              sys.exit(1)
+          print(f"ok    {len(ids)} unique rule ids")
+          PY
+
+  skills:
+    name: Skill frontmatter
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check SKILL.md frontmatter
+        run: |
+          python3 - <<'PY'
+          import sys, glob, re
+
+          failed = False
+          for path in sorted(glob.glob("skills/**/SKILL.md", recursive=True)):
+              with open(path) as f:
+                  text = f.read()
+              m = re.search(r"(?ms)^---\s*$(.+?)^---\s*$", text)
+              if not m:
+                  print(f"FAIL  {path}: missing --- frontmatter block")
+                  failed = True
+                  continue
+              fm = m.group(1)
+              if "name:" not in fm:
+                  print(f"FAIL  {path}: frontmatter missing `name:`")
+                  failed = True
+              if "description:" not in fm:
+                  print(f"FAIL  {path}: frontmatter missing `description:`")
+                  failed = True
+          if not failed:
+              print("ok    all SKILL.md have frontmatter")
+          sys.exit(1 if failed else 0)
+          PY

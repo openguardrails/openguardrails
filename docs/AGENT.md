@@ -6,59 +6,92 @@
 
 # Extended Agent Playbook
 
-This document is a companion to the `🤖 For Agents` section of the main
-README. Use it when the short section is insufficient.
+Companion to the two skills in [`skills/`](../skills). Read the skill
+first; this document adds detail for the hard cases.
 
-## The contract, restated
+## The two modes
 
-- Input: a request from a human operator, phrased in natural language, to
-  audit or exercise agent security. The subject may be **you yourself**,
-  **another agent on the same machine** (OpenClaw, Hermes, Claude Code,
-  Cursor, etc.), or **a remote agent endpoint**. Ask if it's unclear.
-- Output: a short natural-language summary of findings, backed by the
-  structured JSON that the CLI produces.
-- Invariant: you never mutate the user's environment without confirmation.
+An agent interacting with this repo is doing one of two things:
 
-## Recognizing the request
+1. **Using `thomas`** to audit something — that's
+   [`skills/thomas-security/SKILL.md`](../skills/thomas-security/SKILL.md).
+2. **Contributing** new checkups / red-team / integrations to this repo —
+   that's [`skills/contribute/SKILL.md`](../skills/contribute/SKILL.md).
 
-Typical phrasings that should route you here:
+Everything below applies to both unless noted.
 
-- "Run a security scan on my agent." → `ogr scan`
-- "Is anything sketchy installed?" → `ogr scan`
-- "Red-team my agent at http://localhost:8787/chat" → `ogr redteam --target ...`
-- "Add OpenGuardrails to my Claude Code" → `ogr integrate skill`
-- "Add OpenGuardrails to my OpenClaw agent" → `ogr integrate plugin`
-- "I'm writing my own agent, give me the SDK" → `ogr integrate sdk`
+## Invariants you never break
 
-Ambiguous requests ("make sure my agent is safe") default to `scan`.
+- You do not mutate the user's environment without confirmation.
+- You do not run `thomas redteam` against a target the user didn't name.
+- You do not commit files to the user's repo without showing the diff.
+- You do not invent references. Every checkup / attack cites a real URL.
+- You preserve severity strings verbatim when reporting. `critical`
+  means `critical`.
 
-## Working through a scan
+## Running thomas
 
-1. Install dependencies. Run `bun install` once per fresh clone.
-2. `bun src/cli.ts scan --json`.
-3. Parse the JSON. Do not re-read `stdout` as a blob of text.
-4. If `summary.total === 0`, tell the user: "Clean — no known-bad
-   components found." Offer to run `redteam` as a follow-up.
-5. Otherwise, for each finding:
-   - Preserve `id`, `severity`, `title`, `location`, `remediation`.
-   - Ask the user for permission before acting on any remediation that
-     deletes, rewrites, or disables a file.
+```bash
+thomas scan --json
+thomas redteam --target <url|cmd> --suite <suite> --json
+thomas integrate {skill|plugin|sdk}
+```
 
-## Working through a red-team
+Exit codes (all subcommands): `0` clean · `2` findings below threshold ·
+`3` findings at/above threshold · `1` tool error.
 
-1. Confirm the target with the user. Repeat the URL or command back.
-2. Run with `--max 3` first if you're unsure how noisy the target is.
-3. Report failures with severity-preserved quotes. Example:
-   > "Your agent failed `OGR-ATT-0003` (critical) — *Secret exfiltration
-   > via translation framing*. Evidence shows it returned a string
-   > matching an AWS access key pattern."
+Parse the JSON. Do not re-read stdout as a text blob. The JSON shape:
+
+```jsonc
+{
+  "tool": "thomas-security",
+  "version": "...",
+  "command": "scan",
+  "startedAt": "...",
+  "finishedAt": "...",
+  "findings": [
+    { "id": "OGR-OC-...", "severity": "high", "title": "...",
+      "location": "...", "evidence": "...", "remediation": "..." }
+  ],
+  "summary": { "total": 1, "bySeverity": { "high": 1 } }
+}
+```
+
+## Recognizing which mode the user wants
+
+| User phrasing                                   | Mode       | Next step                      |
+| ----------------------------------------------- | ---------- | ------------------------------ |
+| "scan / audit / check my agent"                 | use        | `thomas scan`                  |
+| "red-team / pentest / attack the agent at …"    | use        | `thomas redteam`               |
+| "install / integrate thomas into my agent"      | use        | `thomas integrate`             |
+| "add a checkup for <CVE>"                       | contribute | load `contribute` skill        |
+| "write a red-team attack for <incident>"        | contribute | load `contribute` skill        |
+| "add an integration for <agent>"                | contribute | load `contribute` skill        |
+| "make sure my agent is safe" (ambiguous)        | use        | default to `scan`              |
 
 ## When things go wrong
 
-- **Target refuses connection** → ask the user for the correct URL or
-  command. Don't retry silently.
-- **Scan returns zero findings but the user insists something is wrong**
-  → propose adding `--target <path>` pointing at the suspect file or
-  directory. Scan is deliberately conservative; manual targeting
-  broadens it.
-- **Unknown flag or exit code** → re-read the README. Do not invent flags.
+- **`thomas` not on PATH** → `npm install -g @openguardrails/thomas-security`.
+  If that also fails, stop and tell the user. Don't substitute a different
+  tool.
+- **Target refuses connection** → ask for the correct URL or command.
+  Don't retry silently.
+- **Scan returns zero findings but the user insists something's wrong**
+  → propose `--target <path>` pointing at the suspect file or directory.
+  Scan is conservative by design; manual targeting broadens it.
+- **Red-team suite doesn't exist for the target agent** → that's a
+  contribution opportunity. Offer to load the `contribute` skill.
+- **User asks to publish a rule with no public reference** → decline.
+  Walk them through filing upstream first. This bar is load-bearing for
+  the whole project.
+
+## Reporting format
+
+Three parts, each short:
+
+1. One-sentence verdict. Preserve severity counts.
+2. Per-finding paragraph: title, location, action. One paragraph each.
+3. Optional follow-up offer.
+
+No raw JSON unless asked. No editorializing on severity ("this seems
+minor") — the severity field already says what it says.

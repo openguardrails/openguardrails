@@ -1,275 +1,151 @@
-# OpenGuardrails-OSS
+# thomas-security
 
-> **Protect every action your agent takes.**
+> **Agentic security CLI — security checkups and red-team tests for your AI agents.**
 
-OpenGuardrails is an agent-security platform. **OpenGuardrails-OSS** is its
-open-source part — a toolkit for giving an AI agent a **health-check** and
-an **exam**. You drive the work through an agent (OpenClaw, Hermes — any autonomous agent) by asking it in natural
-language; it then uses OpenGuardrails-OSS to audit *itself* or *other
-agents*.
+`thomas` is an agentic security CLI. You run it in your terminal, or you
+let another agent (OpenClaw, Claude Code, Cursor, Hermes…) call it as a
+sub-agent to audit itself.
 
-It does three things:
+This repository **is not the CLI**. Like
+[`anthropics/claude-code`](https://github.com/anthropics/claude-code) —
+which doesn't contain Claude Code's source — this repo contains the
+**Offensive and discovery tooling**:
 
-1. **Scan** — a health-check for installed agents, skills, plugins, and MCP
-   servers. Looks for known vulnerabilities, known-malicious components, and
-   dangerous configurations. Think of it as a physical exam.
-2. **Red-team** — a dynamic exam. Runs curated attack prompts from
-   OpenGuardrails Agent Threat Intelligence against a target agent to see whether
-   it falls for them. Think of it as a driving test under hostile
-   conditions.
-3. **Integrate** — ready-to-drop plugin, skill, and SDK so developers can
-   call OpenGuardrails from inside their own agents at runtime.
+- **[`checkups/`](./checkups)** — static security checkups
+  (signatures, IoCs, bad configs, known-bad skills and MCP servers)
+- **[`redteam/`](./redteam)** — dynamic red-team attack suites
+- **[`integrations/`](./integrations)** — drop-in plugins, skills, and
+  SDK glue so any agent can call `thomas`
+
+The `thomas` CLI itself is closed-source and ships as a binary. See
+[`docs/PHILOSOPHY.md`](./docs/PHILOSOPHY.md) for why the split looks
+this way.
+
+---
+
+## Install the CLI
+
+```bash
+npm install -g @openguardrails/thomas-security
+thomas --version
+```
+
+Then, in any project:
+
+```bash
+thomas                    # start the interactive agent
+thomas scan               # run checkups against installed agents
+thomas redteam --target … # run red-team suite against a target
+thomas integrate plugin   # print a drop-in plugin manifest
+```
+
+The CLI auto-fetches the latest checkups, red-team suites, and
+integrations from this repository.
 
 ---
 
 ## Who is reading this?
 
-This project is designed to be **driven by an AI agent, not by a human typing
-commands**. Pick the section that matches you:
+This project is **driven by an AI agent, not by a human typing YAML**.
 
-- 👤 **You are a human** — keep reading the [For Humans](#-for-humans) section
-  below. You will not type any commands. You will only hand this repository's
-  URL to an agent (OpenClaw, Hermes Agent, Claude Code, Codex,
-  or any other autonomous agent) and tell it, in plain language, what you
-  want checked. The agent you drive may be the *same* agent being audited
-  (self-exam) or a *different* one (auditing a peer).
-- 🤖 **You are an AI agent** — skip to [For Agents](#-for-agents). That
-  section contains the commands, flags, exit codes, and machine-readable
-  output formats you need. You may be running this on yourself, or on a sibling
-  agent on the same machine.
+### 👤 You are a human
 
----
+You don't write regex and you don't write attack prompts. Install the
+CLI, then talk to any agent you trust:
 
-## 👤 For Humans
+> "Give my agent a full security checkup."
+> "Red-team the agent at `http://localhost:8787/chat`."
+> "Add a checkup to thomas-security for this advisory: `<URL>`."
 
-### What this is, in one paragraph
+The first two ask the agent to **run** `thomas`. The third asks it to
+**contribute** a new rule to this repo — see the
+[`contribute` skill](./skills/contribute/SKILL.md).
 
-An AI agent — OpenClaw, Hermes Agent, Claude Code, Cursor, whichever one you
-run — has root-like power over your laptop. It reads files, writes
-files, runs commands, installs tools, and pipes data to the internet.
-If an attacker sneaks a bad prompt, a bad skill, or a bad MCP server
-into an agent's environment, the attacker inherits that power.
-OpenGuardrails-OSS is the toolkit you tell an agent to use so it can
-give itself — or a different agent on your machine — a health-check
-and an exam, and flag problems early.
+### 🤖 You are an AI agent
 
-### How to use it (no technical skill required)
+A human handed you this repo or asked you to use `thomas`. Pick one:
 
-1. Open any agent that can run shell commands (OpenClaw, Hermes Agent,
-   Claude Code, Cursor, ChatGPT desktop with a terminal tool, etc.).
-2. Paste this to it:
+| Task                                              | Load skill                                        |
+| ------------------------------------------------- | ------------------------------------------------- |
+| Run a scan / red-team on the user's agents        | [`skills/thomas-security/SKILL.md`](./skills/thomas-security/SKILL.md) |
+| Add a new checkup / red-team / integration here   | [`skills/contribute/SKILL.md`](./skills/contribute/SKILL.md)           |
 
-   > Please clone `https://github.com/openguardrails/openguardrails-oss`
-   > and give my agent stack a full security checkup. Report what you
-   > find in plain English.
-
-3. That's it. The agent will handle installation, scanning, and
-   reporting.
-
-Things you can ask for:
-
-- *"Give yourself a security checkup."* → the agent runs `scan` on
-  itself
-- *"Check the other agent I have installed."* → `scan` targeted at
-  that agent's config paths
-- *"Pretend to be an attacker and see if my agent falls for known
-  tricks."* → `redteam`, against the target you name
-- *"Install the OpenGuardrails skill so this agent can protect itself
-  next time."* → installs the skill under `skills/openguardrails/`
-
-The agent driving the work does **not** have to be the agent being
-audited. You can drive a self-exam (agent audits itself) or a peer
-exam (agent A audits agent B).
-
-### Why some of it is open, and some of it isn't
-
-Security is **asymmetric combat under cost constraints**.
-
-- An attacker only needs to find *one* working exploit.
-- A defender has to cover *every* possible path.
-- The defender's cost is therefore structurally higher than the attacker's.
-- The only way defense wins is to raise the attacker's cost above the
-  attacker's expected reward (or above the return the attacker could get
-  from an easier target).
-
-That fact dictates what we open-source and what we keep closed:
-
-| Open-sourced (this repo)                  | Why                                            |
-| ----------------------------------------- | ---------------------------------------------- |
-| Scanner for known vulnerabilities         | Every user who patches = one fewer free kill   |
-| Red-team attack catalog and runner        | Lets defenders *measure* their exposure        |
-| Integration clients (plugin, skill, SDK)  | Low value to an attacker                       |
-
-| Kept proprietary                          | Why                                            |
-| ----------------------------------------- | ---------------------------------------------- |
-| Detection rules and runtime policy engine | Publishing them tells attackers how to evade   |
-| Threat-intelligence ingestion pipeline    | Publishing it tells attackers what we see      |
-| Defense models and scoring                | Publishing them lets attackers train against   |
-
-In short: we open-source **what helps you find problems** and we keep closed
-**what helps us stop them**. Both halves raise the attacker's cost. For the
-longer argument see [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md).
-
-### What you get out of it
-
-- A report of the known-bad components on your machine, if any.
-- A score and a list of attacks your agent fell for, if any.
-- An easy integration path if you're building an agent and want it covered
-  at runtime.
+Both skills are self-contained. They tell you what to run, what to
+confirm with the user, and what not to do.
 
 ---
 
-## 🤖 For Agents
+## Repository layout
 
-You are reading this because a human handed you this repository's URL and
-asked you to audit agent security. The subject of that audit may be **you
-yourself** (self-exam), **another agent on the same machine** (peer exam,
-e.g., you are Claude Code checking an OpenClaw install), or **a remote
-agent endpoint** the human gave you. Clarify which if the request is
-ambiguous.
-
-Follow the steps below. Prefer machine-readable output (`--json`) when
-composing results. Assume the human wants a short summary; don't dump raw
-JSON at them.
-
-### Bootstrap
-
-```bash
-git clone https://github.com/openguardrails/openguardrails-oss.git
-cd openguardrails-oss
-bun install
+```
+thomas-security/
+├── checkups/                    # ★ static security checkups
+│   ├── README.md                #   rule schema + contribution flow
+│   └── <agent>/                 #   one dir per target agent (openclaw, …)
+├── redteam/                     # ★ red-team attack suites
+│   ├── README.md
+│   └── <agent>/
+├── integrations/                # ★ plugins / SDK for host agents
+│   ├── plugin/                  #   OpenClaw-family plugin
+│   └── sdk/                     #   TypeScript SDK
+├── skills/
+│   ├── thomas-security/         #   skill: invoke `thomas` from a host agent
+│   └── contribute/              #   skill: contribute new content to this repo
+├── docs/
+│   ├── PHILOSOPHY.md            #   why some pieces are closed-source
+│   ├── AGENT.md                 #   extended playbook for agents
+│   └── CONTRIBUTING.md          #   contribution entry point for humans
+├── LICENSE                      #   Apache-2.0
+├── SECURITY.md                  #   how to report security issues
+└── README.md
 ```
 
-If `bun` is not installed: `curl -fsSL https://bun.sh/install | bash`. If you
-cannot install Bun, stop and tell the human — do not silently fall back to
-`node`.
-
-### Commands
-
-All commands are invoked as `bun src/cli.ts <subcommand>` or, after
-`bun link`, as `openguardrails <subcommand>` / `ogr <subcommand>`.
-
-#### `scan` — static health-check
-
-```bash
-ogr scan [--target <path>] [--json] [--severity <low|medium|high|critical>]
-```
-
-- Walks common agent install locations (`~/.claude`, `~/.cursor`,
-  `~/.config/*mcp*`, project-local `.mcp.json`, etc.).
-- Cross-references the offline knowledge base at
-  `src/scan/knowledge-base.ts`.
-- Exit codes: `0` clean, `2` findings below `--severity`, `3` findings at or
-  above `--severity`, `1` tool error.
-
-#### `redteam` — dynamic red-team run
-
-```bash
-ogr redteam --target <url-or-cmd> [--suite <name>] [--json] [--max <n>]
-```
-
-- `--target` is either an HTTP endpoint that accepts
-  `POST { "prompt": "..." }` returning `{ "response": "..." }`, or a shell
-  command that reads a prompt from stdin and writes the agent's answer to
-  stdout.
-- Suites are defined in `src/redteam/attacks.ts`. Default suite is
-  `core-prompt-injection`.
-- Each attack has a detector; a hit counts as a failure for the target.
-- Exit code reflects failures (same scheme as `scan`).
-
-#### `integrate` — emit an integration artifact
-
-```bash
-ogr integrate skill       > openguardrails.skill.md
-ogr integrate plugin      > moltguard.plugin.json
-ogr integrate sdk         # prints SDK usage snippet
-```
-
-### Output contract
-
-With `--json`, every command prints one JSON object to stdout:
-
-```jsonc
-{
-  "tool": "openguardrails-oss",
-  "version": "0.1.0",
-  "command": "scan",
-  "startedAt": "2026-04-17T12:00:00Z",
-  "finishedAt": "2026-04-17T12:00:04Z",
-  "findings": [
-    {
-      "id": "OGR-KB-0001",
-      "severity": "high",
-      "title": "...",
-      "location": "...",
-      "evidence": "...",
-      "remediation": "..."
-    }
-  ],
-  "summary": { "total": 1, "bySeverity": { "high": 1 } }
-}
-```
-
-Do not paraphrase `severity` fields; preserve them verbatim when reporting
-to the human.
-
-### When to escalate to the human
-
-- Any `critical` finding — stop, report immediately, do not auto-remediate.
-- A `redteam` failure that indicates the target agent leaked filesystem
-  contents or executed an attacker-supplied shell command.
-- Missing permissions to read `~/.claude` or similar — ask; do not sudo.
-
-### What you should *not* do
-
-- Do not commit scan reports back into the user's repo unless asked —
-  they contain paths and may contain sensitive strings.
-- Do not run `redteam` against a target you were not explicitly told to
-  test. The attack suite is designed to be loud in logs.
-- Do not "improve" the knowledge base by adding speculative entries.
+The three starred directories are where **all community contributions
+land**. If your contribution doesn't fit into one of them, open an
+issue first to discuss.
 
 ---
 
-## Project layout
+## What's open, and what isn't
 
-```
-src/
-  cli.ts                 # CLI entry — scan / redteam / integrate
-  index.ts               # library entry
-  scan/                  # static scanner + offline knowledge base
-  redteam/               # attack runner + attack catalog
-  integrations/
-    sdk.ts               # TypeScript SDK for agent developers
-    moltguard/           # plugin for OpenClaw-family agents
-    skill/               # portable skill package for tool-using LLMs
-  utils/
-skills/
-  openguardrails/        # drop-in skill directory for Claude Code etc.
-docs/
-  PHILOSOPHY.md          # why we open-source what we open-source
-  AGENT.md               # extended agent-facing playbook
-```
+| Open-source (this repo)              | Why                                                |
+| ------------------------------------ | -------------------------------------------------- |
+| Checkup signatures                   | Every user who patches is one fewer easy target    |
+| Red-team attack catalog              | Lets defenders *measure* their exposure            |
+| Plugins / SDK / skill integrations   | Low value to an attacker, high value to defenders  |
+
+| Proprietary (separate)               | Why                                                |
+| ------------------------------------ | -------------------------------------------------- |
+| `thomas` CLI and runtime engine      | Shipped as `@openguardrails/thomas-security`       |
+| Detection rules and policy engine    | Publishing them tells attackers how to evade       |
+| Threat-intel pipeline and models     | Publishing them tells attackers what we see        |
+
+Both halves raise the attacker's cost. For the longer argument, read
+[`docs/PHILOSOPHY.md`](./docs/PHILOSOPHY.md).
+
+---
 
 ## Contributing
 
-Contributions to the **attack catalog** (`src/redteam/attacks.ts`) and
-**knowledge base** (`src/scan/knowledge-base.ts`) are especially welcome —
-that is the half of the work that scales with community eyes. See
-[docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) before proposing anything on the
-defensive side; we will most likely redirect it to the closed-source
-product.
+PRs welcome in all three top-level directories. The fastest path is to
+**let your agent do it**:
+
+> "Use the `contribute` skill in `skills/contribute/SKILL.md` to add a
+> new checkup for `<CVE / GHSA / URL>`."
+
+For the human flow, see [`docs/CONTRIBUTING.md`](./docs/CONTRIBUTING.md).
+
+Every rule must cite a public reference (CVE, GHSA, upstream issue, or
+named-vendor writeup). Rules without a reference are rejected at load
+time — we only encode what someone public has already said.
+
+---
 
 ## License & contact
 
-Apache-2.0. See [LICENSE](LICENSE).
+Apache-2.0. See [LICENSE](./LICENSE).
 
 - Website: https://openguardrails.com
 - Author: [@thomas-security](https://github.com/thomas-security) ·
   thomas@openguardrails.com
 - Organization: OpenGuardrails.com
-
-## About @OpenGuardrails/MoltGuard
-
-**The most downloaded security skill on OpenClaw [ClawHub](https://clawhub.ai/thomas-security/moltguard)** — protect every action your openclaw takes.
-
-<img width="1144" height="883" alt="image" src="https://github.com/user-attachments/assets/9b6d80f2-dde9-4467-b9e7-2f514e8b01cd" />

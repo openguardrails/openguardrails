@@ -1,10 +1,4 @@
-node_modules/
-dist/
-coverage/
-*.log
 .DS_Store
+*.log
 .env
 .env.local
-bun.lockb
-.ogr-cache/
-reports/

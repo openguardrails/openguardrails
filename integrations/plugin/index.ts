@@ -11,7 +11,7 @@
  * agent commits to it.
  */
 
-import { OpenGuardrailsClient, type CheckVerdict } from "../sdk.ts";
+import { OpenGuardrailsClient, type CheckVerdict } from "../sdk/index.ts";
 
 export interface MoltguardConfig {
   apiKey: string;
@@ -102,7 +102,7 @@ export function moltguardManifest(): Record<string, unknown> {
     name: "moltguard",
     version: "0.1.0",
     kind: "openclaw-plugin",
-    entry: "dist/integrations/moltguard/index.js",
+    entry: "dist/integrations/plugin/index.js",
     hooks: ["preTool", "postResponse"],
     config: {
       apiKey: { type: "string", required: true, env: "OPENGUARDRAILS_API_KEY" },
