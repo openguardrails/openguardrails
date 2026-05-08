@@ -9,6 +9,11 @@
 // supersedes a leftover local one once the user logs in. Offline (or pre-login)
 // users keep getting their local policies — no behavior change.
 //
+// Two decision paths:
+//   - cost-cascade: aggregate per-agent usage → `decide()` (pure)
+//   - bundle:       per-leg usage from today's runs → `decideBundle()` (pure)
+// The local store only holds cost-cascade. Bundles arrive via the cloud bridge.
+//
 // Usage is provided by src/metering/ — TokenMeter for v0.1.0; future
 // CallMeter/WindowMeter for subscription2api providers.
 
@@ -16,8 +21,11 @@ import type { AgentId } from "../agents/types.js";
 import { loadCloudPolicyForAgent } from "../cloud/policy-bridge.js";
 import { getMeter } from "../metering/registry.js";
 import type { Usage } from "../metering/types.js";
+import { windowStart } from "../metering/types.js";
+import { readRuns } from "../runs/store.js";
+import { decideBundle, legUsageFromRuns } from "./bundle.js";
 import { getPolicy } from "./store.js";
-import type { CostCascadeRule, PolicyConfig, PolicyDecision } from "./types.js";
+import type { CostCascadePolicy, CostCascadeRule, PolicyConfig, PolicyDecision } from "./types.js";
 
 export async function decideForAgent(
   agentId: AgentId,
@@ -25,13 +33,11 @@ export async function decideForAgent(
 ): Promise<PolicyDecision> {
   const cloudPolicy = await loadCloudPolicyForAgent(agentId);
   if (cloudPolicy) {
-    const usage = await getMeter(agentId).usageInWindow(agentId, "day");
-    return { ...decide(cloudPolicy, usage), policy: cloudPolicy, source: "cloud" };
+    return { ...(await evaluate(cloudPolicy, agentId)), policy: cloudPolicy, source: "cloud" };
   }
   const localPolicy = await getPolicy(agentId);
   if (localPolicy) {
-    const usage = await getMeter(agentId).usageInWindow(agentId, "day");
-    return { ...decide(localPolicy, usage), policy: localPolicy, source: "local" };
+    return { ...(await evaluate(localPolicy, agentId)), policy: localPolicy, source: "local" };
   }
   return {
     target: fallbackTarget,
@@ -40,6 +46,22 @@ export async function decideForAgent(
     policy: null,
     source: "none",
   };
+}
+
+async function evaluate(
+  policy: PolicyConfig,
+  agentId: AgentId,
+): Promise<Omit<PolicyDecision, "policy" | "source">> {
+  if (policy.id === "bundle") {
+    // Per-leg accounting needs raw runs, not the per-agent rollup the meter
+    // returns. Single read; legUsageFromRuns aggregates by (provider, model).
+    const records = await readRuns({ agent: agentId, since: windowStart("day") });
+    const usageByLeg = legUsageFromRuns(records);
+    const result = decideBundle(policy, usageByLeg);
+    return { target: result.target, reason: result.reason, policyId: policy.id };
+  }
+  const usage = await getMeter(agentId).usageInWindow(agentId, "day");
+  return decide(policy, usage);
 }
 
 /**
@@ -51,7 +73,7 @@ export async function decideForAgent(
  * count-trigger rules still fire in that case.
  */
 export function decide(
-  policy: PolicyConfig,
+  policy: CostCascadePolicy,
   usage: Usage,
 ): Omit<PolicyDecision, "policy" | "source"> {
   for (const rule of policy.cascade) {

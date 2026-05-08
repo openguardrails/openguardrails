@@ -1,7 +1,7 @@
 import type { AgentId } from "../agents/types.js";
 import { readJson, writeJsonAtomic } from "../config/io.js";
 import { paths } from "../config/paths.js";
-import type { PoliciesStore, PolicyConfig } from "./types.js";
+import type { CostCascadePolicy, PoliciesStore } from "./types.js";
 
 export async function readPolicies(): Promise<PoliciesStore> {
   // fresh default each call — readJson returns the default by reference, and
@@ -9,12 +9,12 @@ export async function readPolicies(): Promise<PoliciesStore> {
   return readJson<PoliciesStore>(paths.policies, { policies: {} });
 }
 
-export async function getPolicy(agentId: AgentId): Promise<PolicyConfig | undefined> {
+export async function getPolicy(agentId: AgentId): Promise<CostCascadePolicy | undefined> {
   const store = await readPolicies();
   return store.policies[agentId];
 }
 
-export async function setPolicy(agentId: AgentId, policy: PolicyConfig): Promise<void> {
+export async function setPolicy(agentId: AgentId, policy: CostCascadePolicy): Promise<void> {
   const store = await readPolicies();
   store.policies[agentId] = policy;
   await writeJsonAtomic(paths.policies, store);

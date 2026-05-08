@@ -5,25 +5,28 @@
 // `bun run gen:types` against the running cloud's /openapi.json). This
 // replaces the hand-written Wire* aliases that lived here in earlier PRs.
 //
-//   binding kind=static  → synthetic policy: primary=staticTarget, no cascade.
+//   binding kind=static  → synthetic cost-cascade: primary=staticTarget, no cascade.
 //                          The cascade decision becomes a no-op; primary wins.
 //   binding kind=policy  → look up the policy in the snapshot, translate the
 //                          field names (providerId/triggerSpendDayUsd →
 //                          provider/triggerSpendDay) and feed it through.
-//   binding kind=bundle  → v1 stub: use the highest-priority leg as primary,
-//                          no cascade. The real bundle balancer (per-leg cap
-//                          accounting + drain order) lands in a follow-up PR.
+//   binding kind=bundle  → translate the BundleSpec into a BundlePolicy with
+//                          all legs preserved (sorted ascending by priority on
+//                          the cloud side). Local proxy applies per-leg caps
+//                          via src/policy/bundle.ts.
 //
 // "No binding for this agent" returns undefined; callers fall back to the
 // local ~/.thomas/policies.json store. Same for "no cloud login" / "stale
 // cache".
 
 import type { AgentId } from "../agents/types.js";
-import type { PolicyConfig } from "../policy/types.js";
+import type { BundleLeg, PolicyConfig } from "../policy/types.js";
 import { readCache } from "./cache.js";
 import type {
   SchemaAgentBindingResponse,
+  SchemaBundleLeg,
   SchemaBundleResponse,
+  SchemaBundleSpec,
   SchemaCascadeStep,
   SchemaModelRef,
   SchemaPolicyResponse,
@@ -54,12 +57,7 @@ export async function loadCloudPolicyForAgent(
     const bundles = snapshot.bundles as SchemaBundleResponse[];
     const bundle = bundles.find((b) => b.id === binding.targetId && b.enabled);
     if (!bundle || bundle.spec.legs.length === 0) return undefined;
-    const head = bundle.spec.legs[0]!;
-    return {
-      id: "cost-cascade",
-      primary: { provider: head.providerId, model: head.model },
-      cascade: [],
-    };
+    return wireToBundlePolicy(bundle.spec);
   }
   return undefined;
 }
@@ -91,7 +89,11 @@ function wireToPolicyConfig(spec: SchemaPolicySpec): PolicyConfig {
   };
 }
 
-function toLocalCascadeRule(step: SchemaCascadeStep): PolicyConfig["cascade"][number] {
+function toLocalCascadeRule(step: SchemaCascadeStep): {
+  triggerSpendDay?: number;
+  triggerCallsDay?: number;
+  fallback: { provider: string; model: string };
+} {
   // Server schema makes both triggers `number | null`; we treat null and
   // undefined identically (absent). Internally only the present trigger
   // is set on the rule.
@@ -101,5 +103,24 @@ function toLocalCascadeRule(step: SchemaCascadeStep): PolicyConfig["cascade"][nu
     ...(spend !== undefined ? { triggerSpendDay: spend } : {}),
     ...(calls !== undefined ? { triggerCallsDay: calls } : {}),
     fallback: { provider: step.fallback.providerId, model: step.fallback.model },
+  };
+}
+
+function wireToBundlePolicy(spec: SchemaBundleSpec): PolicyConfig {
+  return {
+    id: "bundle",
+    legs: spec.legs.map(toLocalBundleLeg),
+  };
+}
+
+function toLocalBundleLeg(leg: SchemaBundleLeg): BundleLeg {
+  // Both caps are `number | null` on the wire; collapse to optional. priority
+  // is required on the wire; preserve as-is. Cloud has already sorted legs
+  // ascending by priority (see BundleSpec._sort_by_priority on the server).
+  return {
+    target: { provider: leg.providerId, model: leg.model },
+    priority: leg.priority,
+    ...(leg.capUsdPerDay != null ? { capUsdPerDay: leg.capUsdPerDay } : {}),
+    ...(leg.capCallsPerDay != null ? { capCallsPerDay: leg.capCallsPerDay } : {}),
   };
 }

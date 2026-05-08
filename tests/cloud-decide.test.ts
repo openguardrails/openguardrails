@@ -1,9 +1,10 @@
-// PR6: decide() consults cloud-cache before local store.
+// decide() consults cloud-cache before local store.
 //
 // Three angles covered:
 //   1. cloud cache binding kind=static  → static target wins (no cascade)
 //   2. cloud cache binding kind=policy  → cascade evaluated against today's spend
-//   3. cloud cache binding kind=bundle  → highest-priority leg used (v1 stub)
+//   3. cloud cache binding kind=bundle  → head leg used when caps untripped;
+//                                         next leg picked when head is exhausted.
 // Plus the fallback paths:
 //   4. cache present but no binding for this agent → falls through to local store
 //   5. cache absent (no cloud login)               → falls through to local store
@@ -259,7 +260,7 @@ describe("decideForAgent — cloud cache integration", () => {
     expect(decision.target.provider).toBe("kimi");
   });
 
-  it("uses highest-priority leg for bundle bindings (v1 stub)", async () => {
+  it("uses highest-priority bundle leg when caps are not yet tripped", async () => {
     await writeCache(
       snapshot({
         bundles: [
@@ -270,7 +271,6 @@ describe("decideForAgent — cloud cache integration", () => {
             spec: {
               schemaVersion: 1,
               legs: [
-                // priority 0 (head) — used by the v1 stub
                 { providerId: "openai", model: "gpt-4o", priority: 0, capUsdPerDay: 5 },
                 { providerId: "deepseek", model: "deepseek-chat", priority: 1, capUsdPerDay: 5 },
               ],
@@ -290,6 +290,66 @@ describe("decideForAgent — cloud cache integration", () => {
     const decision = await decideForAgent("claude-code", FALLBACK);
     expect(decision.target).toEqual({ provider: "openai", model: "gpt-4o" });
     expect(decision.source).toBe("cloud");
+    expect(decision.policyId).toBe("bundle");
+  });
+
+  it("advances to the next bundle leg once the head leg's spend cap is tripped", async () => {
+    await writeCache(
+      snapshot({
+        bundles: [
+          {
+            id: "01BUNDLE_CYCLE",
+            name: "openai then deepseek",
+            enabled: true,
+            spec: {
+              schemaVersion: 1,
+              legs: [
+                { providerId: "openai", model: "gpt-4o", priority: 0, capUsdPerDay: 1 },
+                { providerId: "deepseek", model: "deepseek-chat", priority: 1, capUsdPerDay: 5 },
+              ],
+            },
+          },
+        ],
+        bindings: [
+          {
+            agentId: "claude-code",
+            bindingKind: "bundle",
+            targetId: "01BUNDLE_CYCLE",
+          },
+        ],
+      }) as unknown as CloudSnapshot,
+    );
+
+    const today = windowStart("day");
+    const stamp = (offsetSec: number) =>
+      new Date(today.getTime() + offsetSec * 1000).toISOString();
+    // Two runs on openai/gpt-4o totalling $1.20 — exceeds the $1 cap.
+    for (const [id, cost] of [["a", 0.6], ["b", 0.6]] as const) {
+      await appendRun({
+        runId: id,
+        agent: "claude-code",
+        startedAt: stamp(60),
+        endedAt: stamp(60),
+        durationMs: 0,
+        status: "ok",
+        inboundProtocol: "anthropic",
+        outboundProvider: "openai",
+        outboundModel: "gpt-4o",
+        inputTokens: 0,
+        outputTokens: 0,
+        cost,
+        streamed: false,
+        httpStatus: 200,
+        errorMessage: null,
+        failovers: 0,
+        failoverNote: null,
+      });
+    }
+
+    const decision = await decideForAgent("claude-code", FALLBACK);
+    expect(decision.target).toEqual({ provider: "deepseek", model: "deepseek-chat" });
+    expect(decision.source).toBe("cloud");
+    expect(decision.policyId).toBe("bundle");
   });
 
   it("ignores bundle bindings whose target bundle is missing", async () => {

@@ -150,10 +150,12 @@ src/
     aggregate.ts               aggregateRecords — collapse RunRecord[] sharing a runId into AggregatedRun (X-Thomas-Run-Id header)
     analytics.ts               agentHistory(agentId, windowDays) — token totals + per-day averages
   policy/
-    types.ts                   PolicyConfig (cost-cascade, optional failoverTo) + PoliciesStore + PolicyDecision
-    store.ts                   readPolicies / setPolicy / clearPolicy; ~/.thomas/policies.json
-    decide.ts                  Pure decide() + spendSinceStartOfDay (UTC day window)
-    failover.ts                isRetryableStatus + shouldFailover (pure; tested in failover.test.ts)
+    types.ts                   PolicyConfig union (CostCascadePolicy | BundlePolicy) + PoliciesStore + PolicyDecision.
+                               PoliciesStore narrows to CostCascadePolicy — bundles only arrive via cloud bridge.
+    store.ts                   readPolicies / setPolicy / clearPolicy; ~/.thomas/policies.json (cost-cascade only)
+    decide.ts                  decideForAgent dispatches by policy.id; pure decide() = cost-cascade only
+    bundle.ts                  Pure decideBundle(spec, perLegUsage) + legUsageFromRuns aggregator
+    failover.ts                isRetryableStatus + shouldFailover (accepts either PolicyConfig variant)
     recommender.ts             Heuristic: history + budget + preference → ranked Suggestion[]
   commands/explain.ts          Narrative + facts for a run or an agent (read-only synthesis)
   commands/recommend.ts        Output suggestions with applyCommand strings the agent can exec

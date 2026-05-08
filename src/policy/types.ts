@@ -24,11 +24,39 @@ export type CostCascadePolicy = {
   failoverTo?: { provider: string; model: string };
 };
 
-// Discriminated union — extend with `| { id: "..."; ... }` when more policies land.
-export type PolicyConfig = CostCascadePolicy;
+// Bundle: ordered set of (provider, model) legs with per-leg daily caps.
+// Sorted ascending by priority (lower = tried first). A leg becomes
+// "exhausted" once today's spend ≥ capUsdPerDay OR today's calls ≥
+// capCallsPerDay; the picker advances to the next leg. When all legs are
+// exhausted we stay on the last (lowest-priority) leg — explicit overrun
+// is preferable to a 503 with no upstream attempted.
+//
+// Cloud-defined only (no `thomas bundle set` CLI yet) — translated from
+// SchemaBundleResponse in src/cloud/policy-bridge.ts.
+export type BundleLeg = {
+  target: { provider: string; model: string };
+  priority: number;
+  capUsdPerDay?: number;
+  capCallsPerDay?: number;
+};
 
+export type BundlePolicy = {
+  id: "bundle";
+  legs: BundleLeg[];
+  // Same in-run failover semantics as CostCascadePolicy. Optional and
+  // currently never set by the cloud bridge, but plumbed so future
+  // bundle specs can opt into reliability failover.
+  failoverTo?: { provider: string; model: string };
+};
+
+// Discriminated union — extend with `| { id: "..."; ... }` when more policies land.
+export type PolicyConfig = CostCascadePolicy | BundlePolicy;
+
+// Local store holds only cost-cascade — the CLI (`thomas policy set`) sets
+// nothing else. Bundle policies originate from thomas-cloud and flow through
+// src/cloud/policy-bridge.ts directly, never persisted to ~/.thomas/policies.json.
 export type PoliciesStore = {
-  policies: Partial<Record<AgentId, PolicyConfig>>;
+  policies: Partial<Record<AgentId, CostCascadePolicy>>;
 };
 
 export type PolicyDecision = {

@@ -1,4 +1,4 @@
-import type { CostCascadePolicy } from "./types.js";
+import type { PolicyConfig } from "./types.js";
 
 // Status codes worth retrying on. Excludes 4xx auth/client errors (400/401/403/404)
 // — those won't get better on a different provider.
@@ -12,9 +12,12 @@ export function isRetryableStatus(status: number): boolean {
   return status >= 500;
 }
 
+// Both CostCascadePolicy and BundlePolicy carry an optional `failoverTo`. The
+// failover target is independent of cascade / bundle leg selection — it's the
+// "primary upstream errored, retry once on this stable target" hatch.
 export function shouldFailover(
   upstreamStatus: number,
-  policy: CostCascadePolicy | undefined,
+  policy: PolicyConfig | undefined,
 ): { yes: true; target: { provider: string; model: string } } | { yes: false } {
   if (!policy?.failoverTo) return { yes: false };
   if (!isRetryableStatus(upstreamStatus)) return { yes: false };
