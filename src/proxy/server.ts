@@ -6,7 +6,9 @@ import { findCredential, resolveSecret } from "../config/credentials.js";
 import { paths } from "../config/paths.js";
 import { getRoute } from "../config/routes.js";
 import { getAgent } from "../agents/registry.js";
+import { readIdentity } from "../cloud/identity.js";
 import { loadProviderFromCloudCache } from "../cloud/providers.js";
+import { THOMAS_CLOUD_PROVIDER_ID } from "../cloud/types.js";
 import { getProvider, type ProviderSpec } from "../providers/registry.js";
 import type { AgentId, AgentSpec, Protocol } from "../agents/types.js";
 import { decideForAgent } from "../policy/decide.js";
@@ -62,6 +64,19 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       503,
       `No route for agent ${found.agentId}. Run \`thomas route ${found.agentId} <provider/model>\`.`,
     );
+  }
+
+  // Cloud-forward path: route is the special THOMAS_CLOUD_PROVIDER_ID
+  // sentinel set by `thomas cloud connect <agent>`. Policy / bundle / failover
+  // all happen on the cloud side, so we skip decideForAgent entirely and
+  // stream pass-through to the cloud gateway.
+  if (route.provider === THOMAS_CLOUD_PROVIDER_ID) {
+    return await handleCloudForward({
+      req,
+      res,
+      agentId: found.agentId as AgentId,
+      inboundProtocol: agent.protocol,
+    });
   }
 
   // Apply policy (cost cascade, etc.) — may rewrite provider+model.
@@ -605,4 +620,193 @@ function reply(res: ServerResponse, status: number, message: string): void {
 function log(level: "info" | "error", msg: string): void {
   const line = `${new Date().toISOString()} [${level}] ${msg}\n`;
   process.stdout.write(line);
+}
+
+// ---------------------------------------------------------------------------
+// Cloud-forward path
+// ---------------------------------------------------------------------------
+//
+// When `thomas cloud connect <agent>` ran, the agent's route is set to the
+// sentinel "thomas-cloud" provider. The local proxy still owns the request
+// hot path (so `X-Thomas-Agent-Id` can be injected — model SDKs can't add
+// custom headers themselves), but instead of forwarding to a real upstream
+// it forwards to the thomas-cloud gateway. The cloud picks the actual
+// provider+model from the workspace's binding/policy/bundle.
+//
+// We pass the inbound body through verbatim (no model rewrite, no
+// translation) — translation happens on the cloud side too if the binding
+// resolves to a different-protocol provider.
+//
+// Local Run record is still written so `thomas runs` / `thomas explain`
+// remain useful offline; cloud also records the canonical run on its side.
+
+async function handleCloudForward(params: {
+  req: IncomingMessage;
+  res: ServerResponse;
+  agentId: AgentId;
+  inboundProtocol: Protocol;
+}): Promise<void> {
+  const { req, res, agentId, inboundProtocol } = params;
+
+  // Drain the request body BEFORE any early-return reply paths. Node's http
+  // server keeps the response stuck until the inbound body is consumed; if
+  // the gateway-key check below 503s without reading the body, the client's
+  // fetch hangs on response-body delivery.
+  const inboundBody = await readBody(req);
+  const inboundPath = req.url ?? "";
+
+  const identity = await readIdentity();
+  if (!identity || !identity.gatewayApiKey) {
+    return reply(
+      res,
+      503,
+      `No thomas-cloud gateway API key configured. Run \`thomas cloud connect ${agentId} --api-key tc_gw_…\`.`,
+    );
+  }
+  // The cloud accepts the same /v1 paths the local proxy listens on. Pass
+  // the inbound path unchanged — anthropic clients hit /v1/messages, openai
+  // clients hit /v1/chat/completions; cloud gateway speaks both.
+  const cloudUrl = `${identity.baseUrl.replace(/\/+$/, "")}${inboundPath}`;
+
+  const runStart = Date.now();
+  const startedAt = new Date(runStart).toISOString();
+  const runId = headerString(req.headers["x-thomas-run-id"]) || randomUUID();
+  const isStream = isStreamingBody(inboundBody);
+
+  const outboundHeaders: Record<string, string> = {
+    "content-type": "application/json",
+    authorization: `Bearer ${identity.gatewayApiKey}`,
+    "x-thomas-agent-id": agentId,
+    "x-thomas-run-id": runId,
+  };
+  // Preserve anthropic-* hint headers — the local agent may have set
+  // anthropic-version explicitly. The cloud gateway forwards them on to
+  // the real upstream.
+  const anthropicVersion = headerString(req.headers["anthropic-version"]);
+  if (anthropicVersion) outboundHeaders["anthropic-version"] = anthropicVersion;
+  const anthropicBeta = headerString(req.headers["anthropic-beta"]);
+  if (anthropicBeta) outboundHeaders["anthropic-beta"] = anthropicBeta;
+
+  let upstream: Response;
+  try {
+    upstream = await fetch(cloudUrl, {
+      method: req.method ?? "POST",
+      headers: outboundHeaders,
+      body: inboundBody,
+    });
+  } catch (err) {
+    const message = `Cloud gateway fetch failed: ${err}`;
+    await persistCloudRun({
+      runId,
+      agentId,
+      inboundProtocol,
+      startedAt,
+      durationMs: Date.now() - runStart,
+      httpStatus: 0,
+      streamed: isStream,
+      errorMessage: message,
+    });
+    return reply(res, 502, message);
+  }
+
+  log(
+    "info",
+    `${agentId} → thomas-cloud (cloud-forward) ${req.method} ${req.url}`,
+  );
+
+  const upstreamContentType =
+    upstream.headers.get("content-type") ?? "application/json";
+
+  if (!upstream.ok) {
+    const errorText = await upstream.text();
+    res.writeHead(upstream.status, { "content-type": upstreamContentType });
+    res.end(errorText);
+    await persistCloudRun({
+      runId,
+      agentId,
+      inboundProtocol,
+      startedAt,
+      durationMs: Date.now() - runStart,
+      httpStatus: upstream.status,
+      streamed: isStream,
+      errorMessage: `cloud ${upstream.status}`,
+    });
+    return;
+  }
+
+  // 2xx — pass body bytes-for-bytes back to the agent. Streaming or not.
+  res.writeHead(upstream.status, {
+    "content-type": upstreamContentType,
+    ...(isStream
+      ? { "cache-control": "no-cache", connection: "keep-alive" }
+      : {}),
+  });
+  if (upstream.body) {
+    const reader = upstream.body.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) res.write(value);
+    }
+  }
+  res.end();
+
+  await persistCloudRun({
+    runId,
+    agentId,
+    inboundProtocol,
+    startedAt,
+    durationMs: Date.now() - runStart,
+    httpStatus: upstream.status,
+    streamed: isStream,
+    errorMessage: null,
+  });
+}
+
+function isStreamingBody(body: string): boolean {
+  if (!body) return false;
+  try {
+    return !!JSON.parse(body).stream;
+  } catch {
+    return false;
+  }
+}
+
+async function persistCloudRun(params: {
+  runId: string;
+  agentId: AgentId;
+  inboundProtocol: Protocol;
+  startedAt: string;
+  durationMs: number;
+  httpStatus: number;
+  streamed: boolean;
+  errorMessage: string | null;
+}): Promise<void> {
+  // Token-aware run logging on the cloud-forward path requires parsing the
+  // upstream body; v1 just records "request happened with status N". The
+  // canonical, token-correct row lives on the cloud side anyway.
+  try {
+    await appendRun({
+      runId: params.runId,
+      agent: params.agentId,
+      startedAt: params.startedAt,
+      endedAt: new Date().toISOString(),
+      durationMs: params.durationMs,
+      status:
+        params.httpStatus >= 200 && params.httpStatus < 400 ? "ok" : "error",
+      inboundProtocol: params.inboundProtocol,
+      outboundProvider: THOMAS_CLOUD_PROVIDER_ID,
+      outboundModel: "via-binding",
+      inputTokens: 0,
+      outputTokens: 0,
+      cost: null,
+      streamed: params.streamed,
+      httpStatus: params.httpStatus,
+      errorMessage: params.errorMessage,
+      failovers: 0,
+      failoverNote: null,
+    });
+  } catch (err) {
+    log("error", `failed to append cloud-forward run ${params.runId}: ${err}`);
+  }
 }

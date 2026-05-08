@@ -32,7 +32,19 @@ export type CloudIdentity = {
   loggedInAt: string;
   // Optional, set after first /v1/sync.
   lastSyncAt?: string;
+  // Optional, set by `thomas cloud connect <agent>`. The Bearer token an
+  // agent's traffic carries when the local proxy forwards to the cloud
+  // gateway. Plaintext at rest — same trust boundary as deviceToken.
+  // One key shared across all cloud-routed agents on this machine; per-
+  // agent keys can come later if the use case demands it.
+  gatewayApiKey?: string;
 };
+
+// Sentinel provider id used by the local proxy to recognize a cloud-routed
+// agent. Set on routes.json by `thomas cloud connect`. The proxy's hot path
+// branches on this string and forwards to the cloud gateway instead of a
+// real upstream.
+export const THOMAS_CLOUD_PROVIDER_ID = "thomas-cloud";
 
 // Saved at ~/.thomas/cloud-cache.json after each successful /v1/sync.
 export type CloudSnapshot = {

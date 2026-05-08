@@ -33,7 +33,7 @@ export async function connect(opts: ConnectOptions): Promise<number> {
   });
 }
 
-async function doConnect(opts: ConnectOptions): Promise<ConnectData> {
+export async function doConnect(opts: ConnectOptions): Promise<ConnectData> {
   const spec = getAgent(opts.agentId);
   if (!spec) {
     throw new ThomasError({

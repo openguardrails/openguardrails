@@ -52,6 +52,7 @@ export type ErrorCode =
   | "E_SHIM_NOT_ON_PATH"
   | "E_SNAPSHOT_MISSING"
   | "E_CLOUD_NOT_LOGGED_IN"
+  | "E_CLOUD_NO_GATEWAY_KEY"
   | "E_CLOUD_UNREACHABLE"
   | "E_CLOUD_UNAUTHORIZED"
   | "E_CLOUD_TIMEOUT"
@@ -419,6 +420,8 @@ export type CommandOutput = {
   "cloud.sync": CloudSyncData;
   "cloud.sync-runs": CloudSyncRunsData;
   "cloud.logout": CloudLogoutData;
+  // cloud.connect reuses the shape from `thomas connect` — same shim/snapshot/notes.
+  "cloud.connect": ConnectData;
 };
 
 export type CloudWhoamiData = {

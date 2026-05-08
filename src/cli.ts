@@ -1,4 +1,5 @@
 import { parseArgs } from "node:util";
+import { cloudConnect } from "./commands/cloud/connect.js";
 import { cloudLogin } from "./commands/cloud/login.js";
 import { cloudLogout } from "./commands/cloud/logout.js";
 import { cloudSync } from "./commands/cloud/sync.js";
@@ -88,6 +89,8 @@ Usage:
   thomas cloud whoami [--json]        Show current cloud login (workspace, device, last sync)
   thomas cloud sync [--json]          Pull policy / bundle / binding snapshot from thomas-cloud
   thomas cloud sync-runs [--json]     Drain runs-pending.jsonl by re-uploading runs whose POST failed
+  thomas cloud connect <agent> [--api-key tc_gw_…]
+                                      Wire <agent> to forward through thomas-cloud's gateway instead of a local provider
 
 Add --json to any command for stable, machine-readable output (see SKILL.md).
 
@@ -275,8 +278,33 @@ async function runCloud(args: string[], json: boolean): Promise<number> {
       return cloudSync({ json });
     case "sync-runs":
       return cloudSyncRuns({ json });
+    case "connect": {
+      const { values, positionals } = parseArgs({
+        args: args.slice(2),
+        options: {
+          "api-key": { type: "string" },
+          "no-proxy": { type: "boolean", default: false },
+          "restart-agent": { type: "boolean", default: false },
+        },
+        allowPositionals: true,
+      });
+      const agentId = positionals[0];
+      if (!agentId) {
+        console.error("Usage: thomas cloud connect <agent> [--api-key tc_gw_…]");
+        return 1;
+      }
+      return cloudConnect({
+        agentId,
+        apiKey: values["api-key"],
+        noProxy: values["no-proxy"],
+        restartAgent: values["restart-agent"],
+        json,
+      });
+    }
     default:
-      console.error("Usage: thomas cloud <login|logout|whoami|sync|sync-runs>");
+      console.error(
+        "Usage: thomas cloud <login|logout|whoami|sync|sync-runs|connect>",
+      );
       return 1;
   }
 }
