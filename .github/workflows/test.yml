@@ -1,0 +1,89 @@
+name: Schema portability tests
+
+# Phase 4a Step 6: runs the backend test suite against both PostgreSQL
+# and MySQL on every push and PR. The matrix catches dialect
+# regressions (generated columns, JSON operators, partial indexes,
+# trigger removal, retention purge wiring) before they ship.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/test.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/test.yml'
+
+jobs:
+  test:
+    name: tests / ${{ matrix.dialect }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - dialect: postgresql
+            database_url: postgresql://og_test:og_test@localhost:5432/og_test
+          - dialect: mysql
+            database_url: mysql+pymysql://root:og_test@127.0.0.1:3306/og_test
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: og_test
+          POSTGRES_PASSWORD: og_test
+          POSTGRES_DB: og_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U og_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: og_test
+          MYSQL_DATABASE: og_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h localhost -P 3306 -u root -pog_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run schema-portability tests
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ matrix.database_url }}
+          REDIS_URL: ""  # disabled — PG advisory-lock fallback (PG-only) covers this
+          # Required by config.py validators
+          JWT_SECRET_KEY: ci-test-secret-not-real
+          SUPER_ADMIN_USERNAME: admin@example.com
+          SUPER_ADMIN_PASSWORD: ci-test-password
+          DATA_DIR: /tmp/og-data
+        run: |
+          pytest tests/test_schema_portability.py -v --tb=short

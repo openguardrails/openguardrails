@@ -1,128 +1,324 @@
-# Thomas
+<p align="center">
+    <img src="frontend/public/logo-dark.png" width="360"/>
+</p>
 
-> **Use any model with any AI agent — safely.**
->
-> Thomas is the plug-and-play model hub that connects your agents to your models, with security guardrails, quotas, fallback, and cost controls.
+<p align="center">
+<a href="https://huggingface.co/openguardrails">Hugging Face</a> ·
+<a href="https://www.openguardrails.com/platform/">Free Platform</a> ·
+<a href="https://arxiv.org/abs/2510.19169">Tech Report</a>
+</p>
+
+# OpenGuardrails — Open-source AI Security Gateway
+
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Version](https://img.shields.io/badge/Version-5.1.0-green.svg)](https://github.com/openguardrails/openguardrails-safety/releases)
+[![Stars](https://img.shields.io/github/stars/openguardrails/openguardrails?style=social)](https://github.com/openguardrails/openguardrails-safety)
+
+> **Open-source AI Security Gateway — guardrails, multi-tenant configs, and policy-based routing for every LLM call your enterprise makes**
+
+**OpenGuardrails** is an **open-source AI Security Gateway** that sits between your AI applications and model providers. Every LLM call passes through a single OpenAI-compatible endpoint where guardrails, multi-tenant configs, and policy-based routing are applied — so all AI agents behave consistently under your organization's policies, regardless of model, framework, or use case.
+
+It protects enterprise AI systems from:
+- **PII cross-border transfer**
+- **Sensitive data leakage to external LLMs**
+- **Non-compliant content** (NSFW, violence, extremism)
+- **Prompt injection and adversarial attacks**
+- **Policy violations** (e.g. non-work-related usage during work time)
+
+More importantly, OpenGuardrails enforces a **unified standard of behavior across all AI agents**:
+- Same safety rules across different models (OpenAI, open-source, etc.)
+- Same behavior across different agent frameworks (LangChain, custom agents, etc.)
+- Same output standards across different contexts and applications  
+
+You can define your own:
+- **Security policies**
+- **Compliance rules**
+- **Enterprise culture and communication style**
+
+So every AI agent in your organization speaks, behaves, and responds **in alignment with your company’s standards**.
+
+<p align="center">
+    <a href="https://www.youtube.com/watch?v=b1ZRODONTm8" target="_blank">
+        <img src="https://img.youtube.com/vi/b1ZRODONTm8/0.jpg" alt="Video Introduction" width="480">
+    </a>
+</p>
 
 ---
 
-## What it does
+## The Enterprise AI Data Masking Problem
 
-Thomas is the universal adapter between AI agents and model providers. Install it once, and any agent on your machine — Claude Code, Codex, OpenClaw, Hermes Agent — can talk to any provider — Anthropic, OpenAI, OpenRouter, Kimi, DeepSeek, Groq, or your own OpenAI-compatible endpoint — without editing each agent's own configuration.
+When employees use AI applications (Copilot, ChatGPT, internal AI agents), sensitive enterprise data flows to external model providers:
 
-Roadmap order: **connect → control → optimize → protect.**
+- **PII**: Employee emails, customer phone numbers, government IDs
+- **Credentials**: API keys, database passwords, access tokens in code
+- **Confidentials**: Trade secrets, internal project names, financial data
 
-| Stage | Capability | Status |
-| --- | --- | --- |
-| **connect** | Discover installed agents; route any agent to any provider; cross-protocol translation (Anthropic ↔ OpenAI) including streaming | ✅ v0.1.0 |
-| **control** | Per-agent quotas, allowed-models policies, audit log | 🚧 planned |
-| **optimize** | Multi-provider fallback on failure; cost-aware routing; latency-aware routing | 🚧 planned |
-| **protect** | Prompt-injection / PII / secret detection; tool-call guardrails | 💼 commercial (planned) |
+**The challenge**: Blocking these requests breaks user workflows. Allowing them creates compliance and security risks.
 
-The open core is licensed under Apache-2.0. Security, governance, and team/enterprise features ship as a separate commercial product (`thomas-cloud`) that thomas can talk to over HTTP.
+**OpenGuardrails solves this** with intelligent data protection that keeps AI applications usable while keeping sensitive data secure.
 
-Audience: individual users, developers, solo and small teams. Not aimed at enterprise procurement.
+---
 
-## Why thomas
+## How It Works
 
-| Approach | Problem |
-| --- | --- |
-| Manually edit each agent's config (`~/.claude/settings.json`, `~/.codex/auth.json`, …) | Brittle. Five agents = five drift surfaces. |
-| Use a profile-switcher that rewrites those configs | When you uninstall the switcher, the agent stays pointed at whatever it last wrote. |
-| Use a router that requires `ANTHROPIC_BASE_URL` exported into your shell | When the router stops, your agent breaks. |
-| **thomas** | Installs a transparent shim earlier in `PATH`. Original config is never touched. Uninstall thomas → shim disappears → every agent reverts. |
+OpenGuardrails acts as an AI Gateway between your AI applications and model providers, automatically detecting and protecting sensitive data:
+<p align="center">
+    <img src="frontend/public/arch.png" width="800"/>
+</p>
 
-## Install
+### Strategy 1: Mask & Restore (Anonymization)
 
-```sh
-npm i -g @trustunknown/thomas
-thomas doctor
+Sensitive data is masked before sending to external LLMs, then restored in the response — users see correct results, but external providers never see real data.
+
+<p align="center">
+    <img src="frontend/public/seqflow_mask_restore.png" width="800"/>
+</p>
+
+**Flow:**
+1. User request contains sensitive data (e.g., `thomas@openguardrails.com`)
+2. Gateway detects and masks: `__email_1__@openguardrails.com`
+3. Sanitized request sent to external LLM
+4. Response received with masked placeholders
+5. Original values restored before returning to user
+
+### Strategy 2: Private Model Routing
+
+For high-risk data, requests are automatically routed to your private/on-premise LLM — the original data never leaves your infrastructure.
+
+<p align="center">
+    <img src="frontend/public/seqflow_swich_private_model.png" width="800"/>
+</p>
+
+**Flow:**
+1. User request contains high-risk sensitive data
+2. Gateway classifies risk level and applies policy
+3. Request routed to private LLM (with original data intact)
+4. Response returned to user seamlessly
+
+**Users experience zero disruption** — they don't know their request was rerouted for security.
+
+---
+
+## AI-Powered Sensitive Data Recognition
+
+Unlike rule-based DLP systems, OpenGuardrails uses **GenAI-powered recognition** to detect sensitive data that regex patterns miss:
+
+### Natural Language Anonymization
+
+Detects sensitive information expressed in natural language:
+
+| Input | Detection |
+|-------|-----------|
+| "My employee ID is 12345" | `employee_id` detected |
+| "Contact John at his personal cell" | `phone_number` context detected |
+| "The Q3 revenue was $2.5M" | `financial_data` detected |
+| "Our AWS secret key starts with AKIA..." | `cloud_credential` detected |
+
+### Code Logic Anonymization
+
+Detects credentials and secrets embedded in code:
+
+```python
+# Input code snippet
+db_password = "super_secret_123"
+api_key = "sk-proj-abc123..."
+conn_string = "postgresql://admin:password@internal-db:5432"
 ```
 
-Requires Node 20+.
+All three sensitive values are detected and masked, even without explicit patterns.
 
-## Quick start
+### Recognition Methods
 
-```sh
-# 1. See what agents and credentials you already have on the host
-thomas doctor
+| Method | Best For | Examples |
+|--------|----------|----------|
+| **GenAI Recognition** | Context-dependent, natural language | Trade secrets, business confidentials, implicit references |
+| **Regex Patterns** | Structured data with known formats | Credit cards, SSN, phone numbers, emails |
+| **Custom Keywords** | Organization-specific terms | Project codenames, internal system names |
 
-# 2. Wire an agent through thomas (installs a transparent PATH shim)
-thomas connect claude-code
+---
 
-# 3. Add a provider key (only if thomas didn't import one for you)
-thomas providers add openrouter sk-or-v1-...
+## Policy-Based Data Classification
 
-# 4. Switch which model that agent uses (without touching its own config)
-thomas route claude-code openrouter/anthropic/claude-sonnet-4.5
+Define what's sensitive **according to your organization's policy**, not just generic PII:
 
-# 5. See current state
-thomas list
+```yaml
+# Example: Enterprise Data Classification Policy
+high_risk:
+  - customer_pii
+  - financial_records
+  - source_code
+  - api_credentials
+  action: switch_private_model
 
-# 6. Optional: supervise the proxy with launchd / systemd so it survives reboot
-thomas daemon install
+medium_risk:
+  - employee_emails
+  - internal_project_names
+  action: anonymize
 
-# Revert at any time
-thomas disconnect claude-code
+low_risk:
+  - general_business_info
+  action: anonymize
 ```
 
-After `thomas connect`, add `~/.thomas/bin` to your `PATH` (the command prints the exact line).
+**Configurable actions per risk level:**
+- `block` — Reject the request entirely
+- `switch_private_model` — Route to on-premise LLM
+- `anonymize` — Mask and restore sensitive data
+- `pass` — Allow with audit logging
 
-## Currently supported
+---
 
-**Agents** (CLIs that thomas knows how to detect, import credentials from, and shim):
+## Quick Start
 
-- Claude Code
-- Codex CLI
-- OpenClaw
-- Hermes Agent
+### Option 1: Try Online (Fastest)
 
-**Providers** (built-in routing targets):
+https://www.openguardrails.com/platform/
 
-- `anthropic` (Anthropic API)
-- `openai` (OpenAI API)
-- `openrouter`
-- `kimi` (Moonshot AI)
-- `deepseek`
-- `groq`
+### Option 2: Python SDK
 
-Plus any OpenAI-compatible or Anthropic-compatible endpoint via `thomas providers register`.
-
-## Cross-protocol translation
-
-Both directions of `/v1/messages` ↔ `/v1/chat/completions` are translated, including streaming SSE — so a Claude Code (Anthropic-shape) agent can talk to OpenRouter / Groq / Kimi (OpenAI-shape), and a Codex (OpenAI-shape) agent can talk to Anthropic. System prompts, tool definitions, tool calls, tool results, image inputs, stop reasons, and SSE events are all mapped.
-
-## Use the skill
-
-This repo ships a `SKILL.md` in the root. AI agents that find this repo on GitHub can read it directly to drive thomas on a user's behalf.
-
-To install the skill into your local Claude Code skill directory:
-
-```sh
-thomas skill install claude-code
+```bash
+pip install openguardrails
 ```
 
-After this, your Claude Code session can answer "switch claude code to kimi" / "show me which agents are connected" autonomously.
+```python
+from openguardrails import OpenGuardrails
 
-## Status
+client = OpenGuardrails("your-api-key")
+result = client.check_prompt("Send report to john@company.com with Q3 revenue $2.5M")
 
-**v0.1.0 — public alpha.** The connect/route stage of the roadmap is complete and tested. Quotas, fallback, cost-aware routing, and security guardrails are not yet implemented.
+print(result.detected_entities)
+# [{"type": "email", "value": "john@company.com"},
+#  {"type": "financial_data", "value": "$2.5M"}]
+print(result.suggest_action)  # anonymize
+```
 
-## License
+### Option 3: OpenAI-Compatible Gateway (Zero Code Change)
 
-This project is licensed under the **Apache License 2.0** (Apache-2.0).
+```python
+from openai import OpenAI
 
-This means:
+# Just change the base_url — all other code stays the same
+client = OpenAI(
+    base_url="http://localhost:5002/v1",
+    api_key="sk-xxai-your-key"
+)
 
-- ✅ You can use, modify, and distribute this software
-- ✅ You can use it for commercial purposes
-- ✅ Includes an explicit patent-license grant from contributors
-- ✅ You can build closed-source products on top (e.g. ship your own agent adapter as a private package)
-- ⚠️ You must preserve copyright and license notices, and include the [NOTICE](NOTICE) file when redistributing
-- ⚠️ "thomas" is a trademark of Trust Unknown; the license does not grant trademark rights
+# Automatic data protection — no code changes needed!
+response = client.chat.completions.create(
+    model="gpt-4",
+    messages=[{"role": "user", "content": "Summarize the contract for Acme Corp deal #12345"}]
+)
+# Sensitive data automatically masked/routed based on your policy
+```
 
-See the [LICENSE](LICENSE) and [NOTICE](NOTICE) files for the full text.
+---
 
-### Why Apache-2.0?
+## Enterprise Deployment
 
-The agent and protocol adapters in this repo (the L1 and L2 layers — what makes thomas talk to Claude Code, Codex, OpenClaw, Hermes, etc.) live closer to ecosystem infrastructure than to product IP. Apache-2.0 lets the community fork, contribute, and embed those adapters without copyleft friction; meanwhile the proprietary value (policy intelligence, multi-tenant control plane, security analysis) lives in a separate commercial product (`thomas-cloud`) that communicates with thomas over HTTP.
+OpenGuardrails is designed for **air-gapped and regulated environments**:
+
+- **Fully on-premise** — No data leaves your infrastructure
+- **Private cloud ready** — Deploy on AWS, Azure, GCP VPC
+- **Compliance friendly** — SOC2, HIPAA, GDPR compatible architecture
+- **High performance** — <50ms latency overhead, 1000+ req/sec
+
+### Deployment Options
+
+```bash
+# Quick start with Docker
+docker compose up -d
+
+# Production deployment
+curl -O https://raw.githubusercontent.com/openguardrails/openguardrails/main/docker-compose.prod.yml
+docker compose -f docker-compose.prod.yml up -d
+```
+
+### Integration Points
+
+- **API Gateway** — Nginx, Kong, AWS API Gateway
+- **AI Platforms** — Dify, n8n, LangChain, LlamaIndex
+- **Direct Integration** — SDK for Python, REST API
+
+See [Deployment Guide](docs/DEPLOYMENT.md) for detailed instructions.
+
+---
+
+## Gateway Capabilities
+
+OpenGuardrails is positioned as an AI Gateway. The table below reflects what is shipping today versus what is on the roadmap — please rely on it rather than any marketing copy elsewhere.
+
+### Shipping today
+
+- **Guardrails** — Prompt-injection detection, 19-category content safety, custom scanner packages
+- **Data Masking** — GenAI + regex DLP with mask/restore and private-model routing
+- **Multi-tenant configs** — Per-application blacklist / whitelist / response templates / ban policy / risk-type config
+- **Policy-based routing** — Route by risk level to a private/on-premise model (`switch_private_model`)
+- **OpenAI-compatible proxy** — Single `/v1/chat/completions` endpoint in front of any upstream
+- **Per-tenant rate limiting** — Request-rate and global concurrency limits
+- **Audit logging** — Complete request/response history with detection results
+- **Agent protection** — Pre/post tool-call validation
+
+### On the roadmap (not yet implemented)
+
+- **Retries** — Automatic retry on upstream 5xx / timeout
+- **Fallbacks** — Cascade to a backup model when the primary fails
+- **Load balancing** — Weighted / least-loaded distribution across multiple upstream replicas of the same model
+
+If any of these are blocking for you, please open an issue — that helps us prioritize.
+
+---
+
+## Model
+
+- **OpenGuardrails-Text-2510**
+  - 3.3B parameters
+  - 119 languages
+  - Purpose-built for guardrails & sensitive data detection
+  - [Download on HuggingFace](https://huggingface.co/openguardrails/OpenGuardrails-Text-2510)
+
+---
+
+## Documentation
+
+- [Deployment Guide](docs/DEPLOYMENT.md) — Complete deployment instructions
+- [Data Masking Guide](docs/DATA_LEAKAGE_GUIDE.md) — DLP configuration details
+- [Custom Scanners](docs/CUSTOM_SCANNERS.md) — Build your own detectors
+- [API Reference](docs/API_REFERENCE.md) — Complete API documentation
+- [Architecture](docs/ARCHITECTURE.md) — System architecture & design
+- [Enterprise PoC Guide](docs/ENTERPRISE_POC.md) — PoC deployment guide
+- [Technical Report (arXiv)](https://arxiv.org/abs/2510.19169)
+
+---
+
+## Community & Support
+
+- Star us on GitHub if this project helps you
+- Contributions welcome — see [Contributing Guide](CONTRIBUTING.md)
+- Contact: **[thomas@openguardrails.com](mailto:thomas@openguardrails.com)**
+- Website: [https://openguardrails.com](https://openguardrails.com)
+- Issues: [GitHub Issues](https://github.com/openguardrails/openguardrails-safety/issues)
+
+---
+
+## Citation
+
+If you find our work helpful, feel free to give us a cite.
+
+```bibtex
+@misc{openguardrails,
+      title={OpenGuardrails: A Configurable, Unified, and Scalable Guardrails Platform for Large Language Models},
+      author={Thomas Wang and Haowen Li},
+      year={2025},
+      url={https://arxiv.org/abs/2510.19169},
+}
+```
+
+---
+
+<div align="center">
+
+**Protect enterprise data in AI workflows — automatically.**
+
+Made with care by [OpenGuardrails](https://openguardrails.com)
+
+</div>

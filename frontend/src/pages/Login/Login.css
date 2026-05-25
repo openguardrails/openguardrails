@@ -1,0 +1,62 @@
+/* Login page styles - dark theme */
+.login-container {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: hsl(225 35% 7%);
+  padding: 20px;
+}
+
+.login-content {
+  width: 100%;
+  max-width: 520px;
+}
+
+.login-card {
+  border-radius: 12px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 20px;
+  position: relative;
+  background: hsl(225 30% 10%);
+}
+
+.login-header {
+  text-align: center;
+  margin-bottom: 32px;
+}
+
+.login-title {
+  margin-bottom: 8px !important;
+  color: #0ea5e9;
+  font-weight: 600;
+}
+
+.login-subtitle {
+  font-size: 16px;
+  color: #94a3b8;
+}
+
+.login-button {
+  height: 48px;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 500;
+  margin-top: 16px;
+}
+
+.login-footer {
+  margin-top: 24px;
+  text-align: center;
+}
+
+@media (max-width: 480px) {
+  .login-container {
+    padding: 10px;
+  }
+
+  .login-card {
+    padding: 15px;
+  }
+}

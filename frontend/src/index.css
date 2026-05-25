@@ -1,0 +1,174 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Dark Navy Cybersecurity Theme - F5/CalypsoAI inspired */
+    --background: 225 35% 7%;       /* #0d1117 - main background */
+    --foreground: 210 40% 92%;      /* #e2e8f0 - primary text */
+
+    --card: 225 30% 10%;            /* #141b27 - card background */
+    --card-foreground: 210 40% 92%;
+
+    --popover: 225 30% 12%;         /* #181f2e - popover background */
+    --popover-foreground: 210 40% 92%;
+
+    /* Primary - Cyan/Blue accent */
+    --primary: 199 89% 48%;         /* #0ea5e9 - sky-500 accent */
+    --primary-foreground: 0 0% 100%;
+
+    /* Secondary - slightly lighter navy */
+    --secondary: 225 25% 14%;       /* #1a2233 */
+    --secondary-foreground: 210 40% 85%;
+
+    /* Muted - subtle backgrounds */
+    --muted: 225 25% 12%;           /* #171e2e */
+    --muted-foreground: 215 16% 55%; /* #7c8db5 - secondary text */
+
+    /* Accent - purple/indigo highlight */
+    --accent: 245 58% 51%;          /* #6366f1 - indigo-500 */
+    --accent-foreground: 0 0% 100%;
+
+    /* Destructive - Red */
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Success - Emerald */
+    --success: 160 84% 39%;         /* #10b981 */
+    --success-foreground: 0 0% 100%;
+
+    /* Warning - Amber */
+    --warning: 45 93% 47%;
+    --warning-foreground: 0 0% 100%;
+
+    /* Borders - subtle navy edges */
+    --border: 225 20% 18%;          /* #232d3f */
+    --border-medium: 225 15% 28%;
+    --input: 225 20% 16%;           /* #1e2736 */
+    --ring: 199 89% 48%;
+
+    /* Sidebar specific */
+    --sidebar: 225 35% 8%;          /* #0f1520 */
+    --sidebar-foreground: 215 16% 65%;
+    --sidebar-active: 199 89% 48%;
+    --sidebar-active-bg: 199 89% 48% / 0.1;
+    --sidebar-hover: 225 25% 14%;
+    --sidebar-section: 215 16% 45%;
+    --sidebar-border: 225 20% 15%;
+
+    /* Radius */
+    --radius: 0.5rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html, body, #root {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+    font-feature-settings: "rlig" 1, "calt" 1;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  code {
+    font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
+  }
+
+  /* Custom scrollbar for dark theme */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: hsl(225 35% 7%);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: hsl(225 20% 25%);
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(225 20% 35%);
+  }
+}
+
+/* Global overrides for Ant Design / Radix components in dark theme */
+@layer components {
+  /* Table styles */
+  .og-table {
+    @apply w-full;
+  }
+
+  .og-table th {
+    @apply text-xs font-semibold uppercase tracking-wider text-muted-foreground px-4 py-3 text-left border-b border-border;
+  }
+
+  .og-table td {
+    @apply px-4 py-3 text-sm border-b border-border;
+  }
+
+  .og-table tr:hover td {
+    background: hsl(225 25% 12%);
+  }
+
+  /* Badge variants for dark theme */
+  .og-badge-high {
+    @apply px-2 py-0.5 text-xs font-medium rounded bg-red-500/15 text-red-400 border border-red-500/20;
+  }
+
+  .og-badge-medium {
+    @apply px-2 py-0.5 text-xs font-medium rounded bg-amber-500/15 text-amber-400 border border-amber-500/20;
+  }
+
+  .og-badge-low {
+    @apply px-2 py-0.5 text-xs font-medium rounded bg-yellow-500/15 text-yellow-400 border border-yellow-500/20;
+  }
+
+  .og-badge-safe {
+    @apply px-2 py-0.5 text-xs font-medium rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/20;
+  }
+
+  .og-badge-info {
+    @apply px-2 py-0.5 text-xs font-medium rounded bg-sky-500/15 text-sky-400 border border-sky-500/20;
+  }
+
+  .og-badge-purple {
+    @apply px-2 py-0.5 text-xs font-medium rounded bg-purple-500/15 text-purple-400 border border-purple-500/20;
+  }
+
+  /* Stat card hover */
+  .og-stat-card {
+    @apply bg-card border border-border rounded-lg p-5 transition-all duration-200;
+  }
+
+  .og-stat-card:hover {
+    border-color: hsl(225 20% 25%);
+    box-shadow: 0 0 20px rgba(14, 165, 233, 0.05);
+  }
+
+  /* Section headers */
+  .og-section-title {
+    @apply text-lg font-semibold text-foreground;
+  }
+
+  .og-section-subtitle {
+    @apply text-sm text-muted-foreground mt-1;
+  }
+
+  /* Page title */
+  .og-page-title {
+    @apply text-2xl font-bold text-foreground tracking-tight;
+  }
+}

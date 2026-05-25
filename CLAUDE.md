@@ -1,237 +1,526 @@
-# CLAUDE.md
+# CLAUDE.md - OpenGuardrails Project Context
 
-Engineering notes for working in this repo. Telegraph style. README.md is for users; this file is for whoever (human or agent) is editing the source.
+> AI assistant guide for OpenGuardrails architecture and development workflows.
 
-## Product
+## CRITICAL DEPLOYMENT REQUIREMENT
 
-Thomas is the universal adapter between **autonomous AI agents** and model providers. It connects any agent running on a single user's host (Claude Code, Codex, OpenClaw, Hermes Agent) to any provider (Anthropic, OpenAI, OpenRouter, Kimi, DeepSeek, Groq, custom OpenAI/Anthropic-compatible endpoints) — automatically, with cross-protocol translation, without editing the agent's own config.
+**ONE-COMMAND DEPLOYMENT MUST ALWAYS WORK: `docker compose up -d`**
 
-**Audience and scope.** Thomas is for **personal / solo developers** running autonomous AI agents on their own machine. It is deliberately single-user. Team collaboration, multi-tenancy, shared admin, central observability, enterprise SSO/RBAC are **explicit non-goals** — those concerns belong to separate products built on top of thomas, not features added inside it. PRs that drag thomas toward team/enterprise scope should be redirected to the appropriate sibling project, not merged here.
-
-License: Apache-2.0.
-
-Roadmap order: **connect → control → optimize → protect.** v0.1.0 covers connect + route + cross-protocol translation. Per-agent-run cost tracking, cost cascade (e.g. Opus until $X, then Haiku), in-run model failover come next (control + optimize). Prompt-injection / PII / secret detection are later (protect). All in single-user scope.
-
-## Operating model (the user's own agent is the primary operator)
-
-The user usually interacts with thomas **through their own AI agent** (Claude Code, Codex, OpenClaw, hermes, …), not by typing `thomas` at a terminal. Real questions look like:
-
-- "Which model is each agent on this machine using right now?" (dashboard)
-- "Configure thomas so openclaw falls back to DeepSeek when I'm over $5/day." (writes through the agent)
-- "What's a good model combination for hermes given my budget?" (recommendation)
-- "Why did my last claude-code run cost $2?" (explain)
-
-The agent shells out to `thomas` to answer or act. Direct human-at-terminal use exists, but is the secondary case. Every CLI design decision must serve the agent-as-operator path first.
-
-**Consequences — every command is dual-audience:**
-
-- **Read commands MUST support `--json`** with a stable, documented output schema. Default text output is for humans; JSON is the contract for agents. No agent should have to grep human-formatted text. Applies to `doctor`, `list`, `providers`, `daemon status`, `proxy status`, and any future `status` / `runs` / `explain` / `recommend` commands.
-- **Read commands explain, don't just dump.** A status response must include what each connected agent is *currently effectively using* (after route + cascade), recent activity, spend, errors. The calling agent needs enough material to answer the user in one shot — don't make it stitch together three commands.
-- **Write commands idempotent + reversible.** Agents retry, abort halfway, second-guess. `connect`, `route`, `providers add`, future `policy enable` must be safe to call twice and easy to undo. Snapshot-and-revert (already in config-mode connect) extends to all state-changing commands.
-- **Errors return structured codes** in `--json` mode: `{ "error": { "code": "E_PROVIDER_AUTH", "message": "...", "remediation": "..." } }`. The agent either recovers (different args) or relays the remediation verbatim.
-- **SKILL.md is a load-bearing contract**, not docs. It maps user-intent phrases → commands → JSON interpretation. Every command-surface change updates SKILL.md in the same PR. The skill must cover at least: dashboard ("what's using what"), configure ("make agent X use provider Y"), recommend ("good combination for agent X under $N/day"), explain ("why did this cost / fail").
-
-**Current gap.** No command takes `--json` yet; SKILL.md covers connect/route/disconnect but not dashboard/recommend/explain. Closing this is a near-term task: agree the JSON schemas first (one design pass), then retrofit existing commands and extend SKILL.md.
-
-## Architecture (load-bearing)
-
-**Two connect modes, by agent capability.** `AgentSpec` declares `shimEnv` (env vars the shim sets) and/or `applyConfig`/`revertConfig` (config-file mutation with snapshot). The connect command runs whichever the spec defines.
-
-- **shim-env (preferred)**: agents that respect `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` / per-provider `*_BASE_URL` env vars (claude-code, codex, hermes). `thomas connect` writes a wrapper at `~/.thomas/bin/<binary>` earlier on PATH than the real binary; the wrapper exports the env block and `exec`s the real binary. Original agent config is **never touched**. Uninstall thomas → shim disappears → agent reverts.
-- **config-mode (only when forced)**: agents that don't read base-URL env vars and resolve providers exclusively through their own config file (openclaw is the current case). `applyConfig` mutates the agent's config but must be **strictly additive** (preserve existing user data) and **fully reversible**: it returns an `AgentSnapshot` persisted at `~/.thomas/snapshots/<agent>.json` capturing the prior values it overwrote. `thomas disconnect` reads the snapshot and calls `revertConfig` to restore. Config-mode agents can also have `shimEnv` so their config can reference an env-var-injected token (e.g., openclaw config sets `apiKey: "THOMAS_OPENCLAW_TOKEN"`, shim sets that env var) — keeps the bearer token out of the on-disk config.
-
-**The cc-switch trap to avoid.** cc-switch claims "non-invasive" but does the opposite: it directly overwrites agent configs with no backup and no auto-restore on uninstall. Don't replicate that. Config-mode mutations in thomas MUST satisfy: (a) additive (don't wipe sibling entries); (b) snapshotted (`AgentSnapshot` captures prior state); (c) reversible (`revertConfig` restores cleanly); (d) self-describing if the user nukes `~/.thomas/` — the openclaw config keeps an env-var reference rather than a literal token, so worst case the user gets a dead provider entry they can delete with `jq`, not a stolen token.
-
-**Single local proxy** (default port 51168, configurable). Listens on `/v1/messages` and `/v1/chat/completions`. Inbound auth is the thomas-issued token in the request header; the proxy looks up caller agent → route → provider creds → swaps auth → forwards.
-
-**Cloud-forward path.** `thomas cloud connect <agent>` writes `{ provider: "thomas-cloud", model: "via-binding" }` into routes.json and stashes a `gatewayApiKey` (a `tc_gw_…` token from `/dashboard/api-keys`) on `~/.thomas/cloud.json`. When the proxy sees that sentinel in `route.provider` it skips `decideForAgent` entirely and forwards to `${cloud.baseUrl}${inboundPath}` with `Authorization: Bearer <gatewayApiKey>` + `X-Thomas-Agent-Id: <agentId>` + the inbound body verbatim. Policy / bundle / failover all happen on the cloud side; cross-protocol translation happens on the cloud side too. The local proxy still owns the request hot path because model SDKs cannot inject custom headers — the `X-Thomas-Agent-Id` (which the cloud needs to look up the workspace's binding) has to come from somewhere outside the agent's own configuration.
-
-**Cross-protocol translation** at `src/proxy/translate/`. Both directions implemented: anthropic-to-openai and openai-to-anthropic, request bodies, non-streaming responses, and stateful SSE stream translators. Streaming maps OpenAI `delta.content` / `delta.tool_calls` chunks ↔ Anthropic `content_block_start` / `content_block_delta` / `content_block_stop` events.
-
-**Daemon supervision** mirrors openclaw's `GatewayService` pattern (see `references/openclaw/src/daemon/service.ts` if you need to extend). macOS LaunchAgent + Linux systemd user service implemented; Windows Scheduled Task is stubbed. When a service is installed, `proxy start` defers to it instead of spawning detached.
-
-## Extension layers (contribution surfaces)
-
-Three layers are deliberately pluggable so the surfaces that change fastest — agents, model protocols, strategies — can grow without touching core. A contribution should target exactly one. Each layer has a defined schema; if a PR can't fit one of these layers, it probably doesn't belong in thomas.
-
-### L1 — Agent adapter (`src/agents/`)
-
-Detect a local agent, optionally extract its provider creds, redirect its model traffic to thomas (shim-env preferred, config-mode only when forced), revert cleanly on disconnect. Today: claude-code, codex, openclaw, hermes.
-
-**Contract.** `AgentSpec` in `src/agents/types.ts` — required: `id`, `detect()`. Optional: `extractCredentials()`, `shimEnv`, `applyConfig`/`revertConfig`, `restart()`. Pick shim-env if the agent reads `*_BASE_URL`; pick config-mode only when forced (see openclaw rationale + cc-switch trap above). Config-mode mutations MUST be additive, snapshotted, and reversible. Implement `restart()` only for agents whose long-running daemon caches config in memory (e.g. openclaw's `GatewayService`) — and always go through the agent's own canonical restart API (`<agent> daemon restart` or equivalent), never raw `kill`/`launchctl`. thomas does not own the agent's process tree.
-
-**Adding one.** New file `src/agents/<id>.ts` → register in `src/agents/registry.ts` → extend the `AgentId` union → `tests/<id>.test.ts`. CI runs `detect()` on macOS + Linux.
-
-### L2 — Protocol adapter (`src/proxy/translate/`)
-
-Translate request bodies, non-streaming responses, and stateful streaming SSE events between two model protocols. Today: Anthropic Messages ↔ OpenAI Chat, both directions.
-
-**When to add.** A new model protocol appears (Gemini, Cohere, OpenAI Responses) or an existing protocol grows fields that matter (thinking blocks, cache breakpoints, tool-result media).
-
-**Contract.** Per pair of protocols, a module exposing `translateRequest(body)`, `translateResponseBody(body)`, and a `StreamTranslator` class doing stateful chunk-by-chunk SSE conversion. Translators register pairwise; the proxy resolves `inbound→outbound` at request time.
-
-**Invariants.** Round-trip idempotent for understood fields; lossless OR explicit drop (documented in module header) for unknowns. No cross-request state.
-
-### L3 — Strategy / policy (planned, `src/policy/`)
-
-Per-agent cost cascade ("Opus until $X, then Haiku"), in-run model failover (continue a run on a different provider when the current one errors mid-stream), per-agent-run budget tracking, task-conditional routing. Strictly single-user — no cross-user RBAC, no shared quotas, no central admin.
-
-**Why pluggable.** Strategies encode user preferences that vary widely (cost vs. quality, conservative vs. aggressive failover, different cascades per agent). Core ships sane defaults; community contributes alternatives.
-
-**Layout.** Each policy is a self-contained directory `src/policy/<id>/` with:
-- `manifest.json` — `{ id, version, description, inputs?: JSONSchema, defaults?: object }`. Lets thomas list/inspect installed policies without loading their code.
-- `index.ts` — default export implements `PolicySpec` (interface below).
-- `<id>.test.ts` — unit tests against fixtures of `decide()` inputs.
-
-Policies are auto-discovered at startup by walking `src/policy/*/manifest.json`; no central registry edits needed when adding one. Users select active policy + per-policy config in `~/.thomas/policies.json`.
-
-**Contract sketch** (will firm up before first L3 release):
-
-```ts
-interface PolicySpec {
-  id: string;
-  decide(ctx: {
-    agent: AgentId;
-    runId: string;                              // a single agent task spans many model calls
-    spend: { run: number; day: number; month: number };
-    request: { protocol: ProtocolId; body: unknown };
-  }): Promise<{
-    target: { provider: ProviderId; model: string };
-    onError?: 'fallback' | 'retry' | 'abort';
-    annotateRun?: Record<string, unknown>;       // arbitrary tags on the run record
-  }>;
-}
+**Development mode (Phase 3 step 6+, unified backend):**
+```bash
+cd frontend; npm run dev
+cd backend; python start.py        # Single process: admin + detection + proxy + gateway on :5000
 ```
 
-Until L3 lands, route selection is the static one-route-per-agent in `src/config/routes.ts`.
+The legacy split launchers (`start_{admin,detection,proxy}_service.py`)
+still work for rollback but are deprecated. `start.py` runs all four
+surfaces in one FastAPI app with one worker pool.
 
-### What does NOT belong in any layer
+**Production Environment Notes:**
+- Current environment uses systemctl to start Python services (not Docker)
+- Backend ports (legacy split deployment, kept for the rollback window):
+  - Admin service: 53333
+  - Detection service: 53334
+  - Proxy service: 53335
+- Unified deployment exposes a single port. Default `UNIFIED_PORT=5000`.
 
-- Multi-user features: team workspaces, shared keys, RBAC, audit trails for compliance.
-- Centralized observability: log shipping to SaaS, dashboards, alerting.
-- Enterprise auth: SSO, SCIM, OIDC for human users.
-- Anything that assumes more than one user per thomas install.
+**Before ANY changes affecting database/services/dependencies/config/Docker:**
+1. ✅ Test: `docker compose down -v && docker compose up -d`
+2. ✅ All services start without manual intervention
+3. ✅ Database migrations run automatically
+4. ✅ Services have proper health checks
 
-These are out of scope by design (see Audience above). Redirect the PR.
-
-## File map
-
-```
-src/
-  cli.ts                       Command dispatcher (parseArgs)
-  agents/                      Per-agent specs
-    types.ts                   AgentSpec interface, AgentId union
-    registry.ts                Lookup by id
-    detect-helpers.ts          which / file-exists / macOS keychain helpers
-    dotenv.ts                  Minimal dotenv parser (used by hermes)
-    restart.ts                 runRestartCommand() — shared spawn+capture for AgentSpec.restart()
-    openclaw-plist.ts          Surgical add/remove THOMAS_OPENCLAW_TOKEN in the macOS LaunchAgent plist
-    {claude-code,codex,openclaw,hermes}.ts
-  providers/registry.ts        BUILTIN map + custom-provider persistence (~/.thomas/providers.json)
-  proxy/
-    server.ts                  HTTP listener; auth + route + translate dispatch
-    translate/
-      types.ts                 Anthropic / OpenAI request + response shapes
-      anthropic-to-openai.ts   translateRequest + translateResponseBody + StreamTranslator
-      openai-to-anthropic.ts   translateRequest + translateResponseBody + StreamTranslator
-  shim/
-    install.ts                 Generate + write shim files under ~/.thomas/bin/; renderEnvBlock() exported for tests
-    templates.ts               Inlined sh + cmd templates (must be inlined; bun build does not bundle non-imported files)
-    quote.ts                   Shell quoting + thomas-invocation resolution
-  providers/
-    registry.ts                BUILTIN map + custom-provider persistence (~/.thomas/providers.json)
-    agents/
-      hermes.generated.ts      Mirror of hermes_cli/auth.py PROVIDER_REGISTRY. Regenerate-by-hand;
-                               `bun run sync:providers` is the drift detector that flags upstream changes.
-  runs/
-    types.ts                   RunRecord (internal, persisted in runs.jsonl)
-    pricing.ts                 ModelMeta (provider/model/protocol/price/tier) + async computeCost (overlay → builtin → null) + listAllPrices
-    prices-store.ts            ~/.thomas/prices.json overlay; readOverlay / setOverlayPrice / removeOverlayPrice
-    usage.ts                   extractUsageFromBody + StreamUsageWatcher (per-protocol token capture)
-    store.ts                   appendRun / readRuns / findRun / findRecordsForRun; ~/.thomas/runs.jsonl, append-only
-    aggregate.ts               aggregateRecords — collapse RunRecord[] sharing a runId into AggregatedRun (X-Thomas-Run-Id header)
-    analytics.ts               agentHistory(agentId, windowDays) — token totals + per-day averages
-  policy/
-    types.ts                   PolicyConfig union (CostCascadePolicy | BundlePolicy) + PoliciesStore + PolicyDecision.
-                               PoliciesStore narrows to CostCascadePolicy — bundles only arrive via cloud bridge.
-    store.ts                   readPolicies / setPolicy / clearPolicy; ~/.thomas/policies.json (cost-cascade only)
-    decide.ts                  decideForAgent dispatches by policy.id; pure decide() = cost-cascade only
-    bundle.ts                  Pure decideBundle(spec, perLegUsage) + legUsageFromRuns aggregator
-    failover.ts                isRetryableStatus + shouldFailover (accepts either PolicyConfig variant)
-    recommender.ts             Heuristic: history + budget + preference → ranked Suggestion[]
-  commands/explain.ts          Narrative + facts for a run or an agent (read-only synthesis)
-  commands/recommend.ts        Output suggestions with applyCommand strings the agent can exec
-  daemon/
-    service.ts                 Cross-platform Service interface + factory
-    constants.ts               LABEL = "com.trustunknown.thomas"
-    launchd.ts                 macOS LaunchAgent + exported renderPlist
-    systemd.ts                 Linux systemd user service + exported renderSystemdUnit
-    scheduled-task.ts          Windows stub
-    lifecycle.ts               PID/health-based proxy lifecycle; defers to Service when installed
-  config/
-    paths.ts                   ~/.thomas/* getters (env-overridable via THOMAS_HOME)
-    config.ts                  port, host
-    credentials.ts             SecretRef + Credential schema (matches openclaw's auth-profiles)
-    routes.ts                  agent → provider/model
-    agents.ts                  connected agents + thomas tokens
-    snapshots.ts               Per-agent config-mode snapshots (~/.thomas/snapshots/<agent>.json)
-    io.ts                      Atomic JSON read/write with mode 0600
-  commands/                    One file per top-level CLI verb
-SKILL.md                       Skill bundle root for AI agents that drive thomas
-skill/                         (reserved) reference docs accompanying SKILL.md
-tests/                         bun:test; bunfig.toml scopes to this dir
+**Testing checklist:**
+```bash
+docker compose down -v && docker compose up -d
+docker logs -f openguardrails-platform
+docker ps  # All services healthy
+curl http://localhost:3000/platform/
+docker exec openguardrails-postgres psql -U openguardrails -d openguardrails -c "\dt"
 ```
 
-## Conventions
+---
 
-- TS strict (`strict: true`, `noUncheckedIndexedAccess: true`), ESM, Node 20+ runtime.
-- Imports use `node:` prefix for built-ins. **No external runtime deps**; only `node:` modules + `fetch` (Node 20+).
-- `paths` is a getter object — env (`THOMAS_HOME`) is read at access time so tests can swap per-test.
-- Each agent module exports an `AgentSpec` with `detect()` and optional `extractCredentials()` / `shimEnv` / `applyConfig` / `revertConfig`. Adding a fifth agent: drop in `src/agents/<id>.ts`, register in `src/agents/registry.ts`, add to the `AgentId` union. Pick shim-env or config-mode based on whether the agent reads `*_BASE_URL` env vars.
-- `shimEnv` values may use `${THOMAS_URL}` and `${THOMAS_TOKEN}` template tokens, resolved at install time. `extractCredentials` returns `ExtractedCredential[]` — pair a `Credential` with an optional `ProviderSpec` so connect can auto-register custom endpoints (e.g., the user's vllm baseUrl).
-- Adding a built-in provider: append entry to `BUILTIN` in `src/providers/registry.ts`. User-specific providers come in automatically when extracted from an agent (with `provider` attached on the `ExtractedCredential`), or via `thomas providers register`, persisted at `~/.thomas/providers.json`.
-- Hermes provider list lives in `src/providers/agents/hermes.generated.ts`. When upstream hermes adds/renames a provider, run `bun run sync:providers` to detect drift, then update by hand. Source of truth is hermes's `auth.py` `PROVIDER_REGISTRY` (canonical IDs and env aliases); `providers.py` `HERMES_OVERLAYS` uses display-layer renames that are aliases, not creds.
-- thomas-cloud wire types live in `src/cloud/openapi-types.ts`, generated from `src/cloud/openapi.json` (also checked in). When you change an `apps/api/app/schemas/*.py` Pydantic model in thomas-cloud, regenerate from a running server: `bun run gen:types` (defaults to `http://localhost:8000`, override with `THOMAS_CLOUD_BASE_URL`). The script writes the spec + the TS atomically; commit both. Importers (`src/cloud/policy-bridge.ts`, `src/cloud/runs-uplink.ts`) use the `Schema*` aliases — never hand-edit `openapi-types.ts`. Unlike `sync:providers` (drift detector only), `gen:types` *is* the source of truth for the wire — a stale `openapi-types.ts` means the client won't typecheck against the actual server contract.
-- Daemon service interface follows openclaw's `GatewayService` shape (`label`, `install`, `uninstall`, `status`, `start`, `stop`). Don't add per-platform branches outside `daemon/{launchd,systemd,scheduled-task}.ts`.
-- **JSON output is the agent contract.** Every read command takes `--json` and emits a stable, documented schema. Adding a read command without `--json` is incomplete. Schema changes are breaking changes — bump the schema's `version` field and update SKILL.md.
-- **SKILL.md updates ride alongside command changes.** New command, renamed flag, changed JSON shape → SKILL.md updated in the same PR. The skill is how agents drive thomas; out-of-date skill = silently broken UX for users who never touch the terminal.
-- Comments: only the non-obvious why. Don't restate the code. No multi-line block comments.
+## Project Overview
 
-## Gotchas
+**OpenGuardrails**: Open-source **AI Security Gateway** — an OpenAI-compatible proxy that applies guardrails, multi-tenant configs, and policy-based routing to every LLM call. Categorically similar to LiteLLM / Portkey / Higress, but focused on the security/guardrails axis rather than the routing/observability axis.
 
-- **OpenClaw caches its config in the GatewayService daemon** — editing `~/.openclaw/openclaw.json` does not retroactively affect a daemon that started before the edit. After `connect openclaw` / `disconnect openclaw`, the daemon must reload. `--restart-agent` runs `openclaw daemon restart` for you (which is platform-aware: launchctl kickstart on macOS, systemctl --user on Linux). Without the flag, the user must restart manually or accept that connect's effect is delayed until next daemon spawn.
-- **launchd does not inherit shell env, so the openclaw shim alone is insufficient.** When openclaw runs as a LaunchAgent (`ai.openclaw.gateway.plist` — the default install on macOS), the shim's `THOMAS_OPENCLAW_TOKEN` never reaches the daemon. The patched config's `apiKey: "${THOMAS_OPENCLAW_TOKEN}"` then fails to resolve and openclaw 401s every request. `applyConfig` therefore writes the token directly into the plist's `EnvironmentVariables` dict via `src/agents/openclaw-plist.ts` (round-trips through `plutil -convert json/xml1` so the on-disk format stays canonical). The mutation is **single-key surgical**: we set exactly `EnvironmentVariables.THOMAS_OPENCLAW_TOKEN` and never touch sibling entries; on `revertConfig` we drop just our key (and the dict if it ends up empty). No plist snapshot is needed because the operation is idempotent and reversible by name. **Important:** unlike `~/.openclaw/openclaw.json` snapshots, plist mutations don't roll back if the user nukes `~/.thomas/`. That's intentional and OK — the worst outcome is a leftover `THOMAS_OPENCLAW_TOKEN` env var that's a dead string once the JSON config no longer references it. The user can `launchctl unload && plutil -remove EnvironmentVariables.THOMAS_OPENCLAW_TOKEN <plist>` if they care. Override the plist path with `THOMAS_OPENCLAW_LAUNCHD_PLIST` (used by tests so they never touch a contributor's real install).
-- **`launchctl kickstart -k` does not re-read the plist.** openclaw's own `daemon restart` CLI uses kickstart, which only respawns the daemon process — launchd keeps the previously-loaded `EnvironmentVariables` dict in memory. Right after connect mutates the plist, kickstart would respawn the daemon into the OLD env (no `THOMAS_OPENCLAW_TOKEN`), and KeepAlive would loop because of the failed startup. So `openclaw`'s `AgentSpec.restart()` skips kickstart on darwin and runs `launchctl bootout gui/<uid> <plist> && launchctl bootstrap gui/<uid> <plist>` directly — that's the only macOS launchctl verb pair that forces a plist re-read before the daemon comes back up. Empirically takes ~150ms vs the 30-60s timeouts of repeated `kickstart -k` against an unhealthy daemon.
-- **OpenClaw doesn't read `OPENAI_BASE_URL` / `ANTHROPIC_BASE_URL`.** It resolves providers exclusively through `~/.openclaw/openclaw.json` (`models.providers.<id>.baseUrl` + `agents.defaults.model.primary`). That's why openclaw is the only config-mode agent. The connect flow adds `models.providers.thomas` with `apiKey: "${THOMAS_OPENCLAW_TOKEN}"` (the `${VAR}` template form — openclaw's `parseEnvTemplateSecretRef` recognizes it and resolves from `process.env` at request time; a bare `"THOMAS_OPENCLAW_TOKEN"` string would be sent literally as the bearer, since openclaw only auto-resolves a whitelist of built-in provider env names via `isKnownEnvApiKeyMarker`). It also adds an entry under `agents.defaults.models["thomas/auto"]` and switches `agents.defaults.model.primary` to `thomas/auto`. `applyConfig` snapshots the prior values; `revertConfig` reads the snapshot and restores. The shim sets `THOMAS_OPENCLAW_TOKEN` so the bearer never touches disk.
-- **Claude Code OAuth tokens do not work for direct Anthropic API.** They are scoped to claude.ai endpoints and rejected by `/v1/messages` with `"OAuth authentication is currently not supported."` `thomas connect claude-code` imports the OAuth as a labeled credential, but actual passthrough to Anthropic requires a `sk-ant-` API key. The connect command warns the user about this. Do not regress the warning.
-- **macOS keychain account name varies.** For service `Claude Code-credentials`, the account is the local username (e.g. `tom`), not the literal `"Claude Code"` that openclaw's source suggests. `macKeychainFind()` looks up by service only and returns the actual account.
-- **`bun build --target=node` does not bundle non-imported files.** That bit shim templates once (they were external `template.sh` / `.cmd` files; loading them at runtime broke after bundling). They are now inlined as TS strings in `src/shim/templates.ts`. Same trap applies to anything else that does runtime `readFile` of project assets — only SKILL.md is currently safe because `skillInstall` walks up to the package root and SKILL.md is in `package.json#files`.
-- **Tests must scope to `tests/`.** `bunfig.toml` sets `[test] root = "tests"` because `bun test` from project root would pick up `references/*/test.ts` files (other people's projects we vendored for inspiration).
-- **`references/` is in `.gitignore`** — never commit those vendored repos.
+- **License**: Apache 2.0
+- **Model**: OpenGuardrails-Text-2510 (3.3B, 119 languages) — used internally for guardrail detection
+- **Repo**: https://huggingface.co/openguardrails/OpenGuardrails-Text-2510
+- **Contact**: thomas@openguardrails.com
 
-## Commands
+### What's shipping today
+- **Guardrails**: prompt-attack detection, 19-category content safety, GenAI+regex DLP, custom scanner packages
+- **Two consumption modes**:
+  - **Detection API** — call `POST /v1/guardrails` directly (active mode, no proxying)
+  - **Security Gateway / Proxy mode** — point the OpenAI SDK at `POST /v1/chat/completions`, OG sits in front of the upstream LLM and applies input + output detection
+- **Multi-tenant configs**: per-application blacklist / whitelist / templates / ban-policy / risk-type-config
+- **Policy-based routing**: route to a private/on-premise model when DLP fires (`switch_private_model`)
+- **Per-tenant rate limiting**: request-rate + global concurrency limits
+- **Audit logging**: full request/response history with detection results
+- Multi-turn conversation, multimodal (text+image), knowledge-base responses
 
-```sh
-bun install
-bun run dev          # bun src/cli.ts <args>     — fast iteration
-bun run build        # bun build → dist/cli.js   — single-file Node bundle, ~80 KB
-bun test             # bun test → tests/*.test.ts  (36 tests, ~100ms)
-bunx tsc --noEmit
-bun run gen:types    # regen src/cloud/openapi-types.ts from running thomas-cloud
-bun run sync:providers  # drift-check src/providers/agents/hermes.generated.ts
-npm pack             # produce installable tarball; verify with `tar tzf …`
-node dist/cli.js doctor   # smoke-test the bundle without `bun`
+Both modes are served by the unified backend on port 5000.
+
+### NOT yet implemented (roadmap — do not document as if shipped)
+- **Retries** on upstream 5xx / timeout
+- **Fallbacks** to a backup model on primary failure
+- **Load balancing** across multiple upstream replicas of the same model
+
+If a user asks about these or marketing copy implies they exist, surface them as roadmap items, not shipped features.
+
+## Architecture
+
+### Five Containers
+1. **PostgreSQL** (54321): Database
+2. **Redis** (Phase 2+): Rate-limit counters, distributed locks, hot caches. RDB snapshots, no AOF.
+3. **Text Model** (58002): OpenGuardrails-Text-2510 (vLLM, GPU)
+4. **Embedding** (58004): BAAI/bge-m3 (vLLM, GPU)
+5. **Platform** (Phase 3 step 6+: unified backend): Nginx + one FastAPI app
+   - Unified backend (5000, default 8 workers): admin (`/api/v1/*`),
+     detection (`/v1/guardrails*`, `/v1/scan/*`, `/v1/model/*`),
+     proxy (`/v1/chat/completions`, `/v1/completions`, `/v1/models`),
+     gateway (`/v1/gateway/*`)
+   - Frontend (3000): React UI served by nginx, all `/api/v1/*` and
+     `/v1/*` reverse-proxied to localhost:5000.
+   - Tunable: `UNIFIED_UVICORN_WORKERS` (default 8, was 58 across the
+     legacy split), `UNIFIED_MAX_CONCURRENT_REQUESTS` (default 750).
+
+**Start all**: `docker compose up -d` (models auto-download from HuggingFace)
+
+## Project Structure
+
+```
+openguardrails/
+├── backend/
+│   ├── app.py                              # Unified FastAPI app (Phase 3 step 6+)
+│   ├── start.py                            # Unified launcher (runs migrations + uvicorn)
+│   ├── {admin,detection,proxy}_service.py  # Legacy FastAPI apps (kept for rollback;
+│   │                                       #   app.py imports their AuthContextMiddleware
+│   │                                       #   classes — do not delete yet)
+│   ├── start_{admin,detection,proxy}_service.py  # Legacy launchers (deprecated)
+│   ├── database/{connection,models}.py     # SQLAlchemy ORM (sync + async engines)
+│   ├── routers/                            # API routes: auth, guardrails, proxy_api, config_api, etc.
+│   ├── services/                           # Business logic (sync + async siblings/subclasses)
+│   │   ├── redis_client.py                 # Async Redis pool (Phase 2)
+│   │   └── distributed_lock.py             # Redis SET NX + PG advisory-lock fallback
+│   ├── models/{requests,responses}.py      # Pydantic models
+│   ├── migrations/                         # Auto-run migrations (idempotent, distributed-lock-guarded)
+│   ├── entrypoint.sh                       # Container init (PG wait + init_db + migrations)
+│   └── supervisor-entrypoint.sh            # Per-program shim (gated on SERVICE_NAME=admin)
+├── frontend/
+│   ├── src/{pages,components,services,contexts}/
+│   └── nginx.conf                          # Single upstream → localhost:5000
+└── docs/  # API_REFERENCE.md, DEPLOYMENT.md, MIGRATION_GUIDE.md, DATA_LEAKAGE_GUIDE.md, REFACTOR_PLAN.md
 ```
 
-## Test data
+## Database Schema (Key Tables)
 
-- Tests use `mkdtemp` + `THOMAS_HOME` / `HERMES_HOME` env overrides for isolation.
-- Daemon tests cover **rendering only** (`renderPlist`, `renderSystemdUnit`); we do not invoke `launchctl` / `systemctl` from tests.
-- Integration tests against real provider endpoints are out-of-band; require user-supplied keys.
+**Access DB**: `docker exec openguardrails-postgres psql -U openguardrails -d openguardrails`
 
-## CI
+1. **tenants**: Users (id, email, api_key, is_super_admin)
+2. **detection_results**: Detection logs (risk levels, categories, actions)
+3. **blacklist/whitelist**: Keywords (tenant_id, keywords JSON)
+4. **response_templates**: Custom responses (risk_category, template_text)
+5. **risk_type_config**: Risk type settings (compliance/security/data configs)
+6. **ban_policy**: Auto-ban rules (thresholds, duration)
+7. **knowledge_base**: Q&A pairs (embeddings for similarity search)
+8. **proxy_keys**: Proxy API keys (upstream provider configs)
+9. **upstream_api_config**: Model configs (provider, api_base_url, **safety attributes**)
+10. **rate_limits**: Rate limit settings
+11. **data_security_entity_types**: Data leak entity types (regex/GenAI recognition)
+12. **application_data_leakage_policy**: Data leakage disposal policies per application
 
-- `.github/workflows/ci.yml` — push/PR, ubuntu+macos matrix: typecheck → test → build → smoke.
-- `.github/workflows/publish.yml` — tag `v*` triggered, verifies tag matches `package.json` version, then `npm publish --provenance`. Requires `NPM_TOKEN` repo secret.
+## Risk Categories (19 Types)
 
-Bump `version` in `package.json`, update `CHANGELOG.md`, then `git tag v<version> && git push --tags`.
+**High Risk (S2,S3,S5,S9,S15,S17)**: Sensitive politics, violent crime, prompt attacks, WMDs, sexual crimes
+**Medium Risk (S4,S6,S7,S16)**: Harm to minors, non-violent crime, pornography, self-harm
+**Low Risk (S1,S8,S10-S14,S18,S19)**: General politics, hate, profanity, privacy, commercial, IP, harassment, threats, professional advice
+
+**Processing**: High→preset responses, Medium→knowledge base, Low→allow
+
+---
+
+## SCANNER PACKAGE SYSTEM (Planning Phase)
+
+**Status**: Replacing hardcoded S1-S21 with flexible scanner packages
+
+**New Features**:
+- Built-in packages (S1-S21 migrated)
+- Purchasable packages (admin-published)
+- Custom scanners (S100+, user-defined)
+- Three types: genai, regex, keyword
+
+**Tag Allocation**: S1-S21 (built-in), S22-S99 (reserved), S100+ (custom)
+
+**New Tables**: scanner_packages, scanners, application_scanner_configs, package_purchases, custom_scanners
+
+**API Endpoints**: `/api/v1/scanners/{packages,configs,custom,purchases/*}`
+
+**See**: docs/SCANNER_PACKAGE_IMPLEMENTATION_PLAN.md
+
+---
+
+## Data Masking SYSTEM
+
+**Status**: Production-ready (v5.1.0+)
+
+**v5.1.0 Highlight**: **Automatic Private Model Switching** - Enterprise AI agents can now seamlessly protect sensitive data without affecting user experience. When sensitive data is detected, requests are automatically routed to private/on-premise models instead of blocking, ensuring data never leaves your infrastructure while maintaining uninterrupted user workflows.
+
+**Architecture**: Multi-layer protection system with format-aware detection, intelligent disposal strategies, and automatic private model switching
+
+### Key Components
+
+**Format Detection Service** (`backend/services/format_detection_service.py`):
+- Auto-detects content format (JSON, YAML, CSV, Markdown, Plain Text)
+- Enables format-aware smart segmentation
+
+**Segmentation Service** (`backend/services/segmentation_service.py`):
+- JSON: Split by top-level objects (max 50 segments)
+- YAML: Split by top-level keys (max 50 segments)
+- CSV: Split by rows with header retention (max 100 rows)
+- Markdown: Split by ## sections (max 30 sections)
+- Plain Text: Single segment (no segmentation)
+
+**Data Security Service** (`backend/services/data_security_service.py`):
+- **Regex entities**: Applied to full text (ID cards, credit cards, etc.)
+- **GenAI entities**: Applied per-segment with parallel processing
+- Risk aggregation: Highest risk from all segments wins
+
+**Data Masking Disposal Service** (`backend/services/data_leakage_disposal_service.py`):
+- **Block**: Reject request completely (default for high risk)
+- **Anonymize**: Replace sensitive entities with placeholders (default for medium/low risk)
+- **Switch Private Model**: Redirect to data-private model (optional)
+- **Pass**: Allow request, log only (audit mode)
+
+**Data Masking Policy Flow**:
+```
+User Request → DLP Detection → Sensitive Data Found → Risk Level Determined
+                                                              ↓
+                           ┌──────────────────────────────────┼──────────────────────────────────┐
+                           ↓                                  ↓                                  ↓
+                    High Risk Action              Medium Risk Action                 Low Risk Action
+                           ↓                                  ↓                                  ↓
+                  Block (default)              Anonymize (default)               Anonymize (default)
+                           ↓                                  ↓                                  ↓
+                    Return Error           Replace with placeholders         Replace with placeholders
+```
+
+**Enterprise Value**: Users continue their workflow seamlessly while sensitive data automatically stays within your infrastructure.
+
+### Private Model System (v5.1.0 Enhanced)
+
+**Model Safety Attributes** (`upstream_api_config` table):
+- `is_data_safe`: Mark as safe for sensitive data (on-premise, private cloud, air-gapped)
+- `is_default_private_model`: Tenant-wide default private model
+- `private_model_priority`: Priority ranking (0-100, higher = preferred)
+
+**Private Model Selection Priority**:
+1. Application policy `private_model_id` (explicit configuration)
+2. Tenant default private model (`is_default_private_model = true`)
+3. Highest priority private model (`private_model_priority DESC`)
+
+**Configuration via Admin UI**:
+- Navigate to Proxy Model Management → Select model → Safety Settings
+- Set `is_data_safe = true` for on-premise/private models
+- Optionally set as default or configure priority
+
+### Application-Level Policies
+
+**Table**: `application_data_leakage_policy`
+
+**Configuration per application**:
+- `high_risk_action`: block | switch_private_model | anonymize | pass
+- `medium_risk_action`: block | switch_private_model | anonymize | pass
+- `low_risk_action`: block | switch_private_model | anonymize | pass
+- `private_model_id`: Override private model for this app (nullable)
+- `enable_format_detection`: Enable/disable format detection
+- `enable_smart_segmentation`: Enable/disable smart segmentation
+
+**Default Strategy**:
+- High Risk → `block`
+- Medium Risk → `anonymize`
+- Low Risk → `anonymize`
+
+### Performance Characteristics
+
+- **Format Detection**: ~5-10ms overhead
+- **Smart Segmentation**: ~10-20ms overhead
+- **Parallel Processing Gain**: 20-60% faster for large content (> 1KB)
+- **Net Impact**: Faster overall for medium/large content
+
+**See**: docs/DATA_LEAKAGE_GUIDE.md (comprehensive user guide)
+
+---
+
+## Key Environment Variables
+
+**Database**: `DATABASE_URL`, `RESET_DATABASE_ON_STARTUP` (dev only)
+**Redis** (Phase 2+): `REDIS_URL` (e.g., `redis://redis:6379/0`), `REDIS_PASSWORD`, `REDIS_KEY_PREFIX` (default `og:`). Optional — when unset, distributed locks and rate limiter fall back to PostgreSQL advisory locks / counter rows. Set this for production.
+**Auth**: `JWT_SECRET_KEY`, `SUPER_ADMIN_USERNAME/PASSWORD`
+**Models**: `GUARDRAILS_MODEL_API_URL`, `EMBEDDING_API_BASE_URL`
+**Services**: `{ADMIN,DETECTION,PROXY}_{PORT,UVICORN_WORKERS}`
+**Detection**: `MAX_DETECTION_CONTEXT_LENGTH` (default: 7168, should be model max-len - 1000)
+**Other**: `CORS_ORIGINS`, `DEBUG`, `LOG_LEVEL`, `DATA_DIR`
+
+## API Authentication
+
+1. **API Key**: `Authorization: Bearer sk-xxai-{key}` (Detection/Proxy)
+2. **JWT Token**: `Authorization: Bearer {jwt}` (Admin)
+3. **Admin Switch**: `X-Switch-User: {user_id}`
+
+## Key API Endpoints
+
+All endpoints below live on the same port (`UNIFIED_PORT`, default 5000).
+Surfaces are kept conceptually grouped to match how the legacy split
+deployed them.
+
+### Detection
+- `POST /v1/guardrails` - Main detection API
+  - **Note**: `extra_body` is SDK-only (OpenAI Python SDK unfolds it)
+  - HTTP/curl: flatten params to top level (no `extra_body`)
+- `POST /v1/guardrails/input` - Dify input moderation
+- `POST /v1/guardrails/output` - Dify output moderation
+
+### Proxy
+- `POST /v1/chat/completions` - OpenAI-compatible endpoint
+
+### Admin
+- `/api/v1/auth/{login,register}` - Authentication
+- `/api/v1/config/{blacklist,whitelist,templates,ban-policy}` - Config
+- `/api/v1/config/data-leakage-policy` - Data leakage disposal policy (per-app)
+- `/api/v1/config/private-models` - List available private models
+- `/api/v1/risk-config` - Risk types
+- `/api/v1/proxy/{keys,models}` - Proxy management (includes safety attributes)
+- `/api/v1/dashboard/stats` - Statistics
+- `/api/v1/results` - Detection results
+
+## Detection Flow
+
+**Disposal Strategy: Security/Compliance first, DLP only if Security/Compliance passes**
+
+1. Check ban status (IP/user_id)
+2. Blacklist check (early reject)
+3. Whitelist check (early pass)
+4. Security/Compliance detection (scanner-based) - **with sliding window for long content**
+5. Check Security/Compliance disposal action:
+   - If **block** or **replace** → Skip DLP detection, return immediately
+   - If **pass** → Continue to DLP detection
+6. DLP detection (only runs if Security/Compliance passes)
+7. Determine final action (pass/reject/replace/anonymize/switch_private_model)
+8. Get response (knowledge base or templates)
+9. Log to file (async)
+
+**Gateway / Proxy mode** (the AI-Security-Gateway code path): client → OG `:5000` `/v1/chat/completions` → input detection → forward to upstream LLM if `pass` (or to private model if `switch_private_model`) → stream chunks back → output detection (async, log-only on the streaming path; sync on non-streaming).
+
+**Gateway features the proxy does NOT yet implement** (see Project Overview roadmap): no upstream retries on 5xx/timeout, no fallback to a backup model on primary failure, no load balancing across multiple replicas of the same upstream model. If a request needs that today, the user has to put a separate gateway (LiteLLM, Higress, Kong) in front of OG, or use OG's HTTP detection API as a sidecar.
+
+**See**: docs/DISPOSAL_STRATEGY.md for detailed disposal logic
+
+### Sliding Window Detection (Long Content)
+
+For content exceeding `MAX_DETECTION_CONTEXT_LENGTH`, the system applies sliding window:
+
+- **User-only messages**: Slide window on user content (window size = MAX_DETECTION_CONTEXT_LENGTH)
+- **User+Assistant messages**: Cross-product detection
+  - User window size = 1/2 MAX_DETECTION_CONTEXT_LENGTH
+  - Assistant window size = 1/2 MAX_DETECTION_CONTEXT_LENGTH
+  - Each user window × each assistant window = total detection windows
+- **Window overlap**: 20% overlap to avoid missing content at boundaries
+- **Parallel execution**: All windows detected in parallel for performance
+- **Aggregation**: Scanner matched if it triggers in ANY window (highest sensitivity wins)
+
+---
+
+## Third-Party Gateway Integration
+
+All detection (input/output) is unified through `GatewayIntegrationService` (`backend/services/gateway_integration_service.py`). Both the self-hosted proxy and third-party gateways use the same code path.
+
+### Unified Detection Interface
+
+**Python (direct call, used by self-hosted proxy):**
+```python
+from services.gateway_integration_service import get_gateway_integration_service
+
+service = get_gateway_integration_service(db)
+
+# Input detection
+result = await service.process_input(
+    application_id=app_id, tenant_id=tid,
+    messages=messages, stream=True, user_id=uid
+)
+# result["action"]: "pass" | "block" | "replace" | "anonymize" | "switch_private_model"
+
+# Output detection
+result = await service.process_output(
+    application_id=app_id, tenant_id=tid,
+    content=output_text, restore_mapping=mapping, input_messages=messages
+)
+# result["action"]: "pass" | "block" | "restore" | "anonymize"
+```
+
+**HTTP API (used by external gateways like Higress, LiteLLM):**
+- `POST /v1/gateway/process-input` - Input detection
+- `POST /v1/gateway/process-output` - Output detection + restoration
+
+Auth: Application API key (`Authorization: Bearer sk-xxai-xxx`)
+
+### Integration Patterns
+
+| Gateway | Integration Method | Streaming |
+|---------|-------------------|-----------|
+| **Self-hosted proxy** (unified, :5000) | Direct Python call to `GatewayIntegrationService` | Real-time passthrough + async output detection |
+| **Higress** | WASM plugin calls HTTP API | Higress handles streaming, OG does sidecar detection |
+| **LiteLLM** | Guardrail API (`/beta/litellm_basic_guardrail_api`) | Not supported (LiteLLM limitation) |
+
+### Adding a New Gateway Integration
+
+1. **If gateway supports plugins/webhooks:** Call the HTTP API (`/v1/gateway/process-input` before LLM, `/v1/gateway/process-output` after)
+2. **If gateway is Python-based:** Import and call `GatewayIntegrationService` directly (zero HTTP overhead)
+3. **Handle each action:** pass, block, replace, anonymize (+ restore_mapping), switch_private_model
+
+### Self-Hosted Proxy Architecture
+
+```
+Client ←──stream──→ OG Unified backend (:5000) ←──stream──→ LLM
+                        │
+                        ├── service.process_input()     # Sync, before forwarding
+                        ├── Real-time chunk passthrough  # No buffering
+                        └── service.process_output()     # Async, after stream ends (log-only)
+```
+
+Key files:
+- `backend/routers/proxy_api.py` - Proxy endpoint, streaming/non-streaming handlers
+- `backend/services/gateway_integration_service.py` - Unified detection service
+- `backend/routers/gateway_integration_api.py` - HTTP API for external gateways
+- `backend/routers/litellm_guardrail_api.py` - LiteLLM-specific adapter
+
+---
+
+## Deployment
+
+### Quick Start
+```bash
+# Production (pre-built images)
+curl -O https://raw.githubusercontent.com/openguardrails/openguardrails/main/docker-compose.prod.yml
+export HF_TOKEN=your-hf-token
+docker compose -f docker-compose.prod.yml up -d
+
+# Development (build from source)
+git clone https://github.com/openguardrails/openguardrails
+cd openguardrails
+export HF_TOKEN=your-hf-token
+docker compose up -d --build
+```
+
+**Access**: http://localhost:3000/platform/ (admin@yourdomain.com / CHANGE-THIS-PASSWORD-IN-PRODUCTION)
+
+### Automatic Migrations
+
+**All migrations run automatically on `docker compose up -d`**
+
+**Flow**:
+1. PostgreSQL starts (healthcheck)
+2. Admin service → entrypoint.sh → wait for PG → run migrations (with lock) → start service
+3. Detection/Proxy → entrypoint.sh → wait for PG → skip migrations → start service
+
+**Key Points**:
+- ✅ Migrations run at CONTAINER level (once), NOT worker level
+- ✅ Admin runs migrations BEFORE uvicorn starts (before workers fork)
+- ✅ Detection/Proxy skip migrations (SERVICE_NAME != admin)
+- ✅ PostgreSQL advisory locks prevent concurrent execution
+- ✅ 58 total workers, but migrations execute ONLY ONCE
+
+**Monitor**: `docker logs -f openguardrails-admin | grep -i migration`
+
+**Check history**:
+```bash
+docker exec openguardrails-postgres psql -U openguardrails -d openguardrails \
+  -c "SELECT version, description, executed_at, success FROM schema_migrations ORDER BY version;"
+```
+
+**See**: backend/migrations/README.md, docs/MIGRATION_FAQ.md
+
+## Common Workflows
+
+### Add New API Endpoint
+1. Create route in `backend/routers/`
+2. Add service logic in `backend/services/`
+3. Update Pydantic models in `backend/models/`
+4. Add frontend service in `frontend/src/services/`
+5. Create/update page component
+6. ⚠️ TEST: `docker compose down -v && docker compose up -d`
+
+### Add Database Migration
+```bash
+cd backend/migrations
+./create_migration.sh description_of_change
+# Edit versions/XXX_description_of_change.sql (use idempotent SQL)
+docker compose down -v && docker compose up -d
+docker logs openguardrails-admin | grep -i migration
+git add backend/migrations/versions/XXX_description_of_change.sql
+git commit -m "Add migration: description of change"
+```
+
+**NEVER**: Manually modify schema, require manual SQL, edit existing migrations
+**ALWAYS**: Use migrations, test from clean state, use idempotent SQL (IF EXISTS)
+
+### Troubleshooting
+
+**Deployment fails**:
+1. Check PostgreSQL: `docker logs openguardrails-postgres`
+2. Check migrations: `docker logs openguardrails-platform | grep -i migration`
+3. Check health: `docker ps`
+4. Reset: `docker compose down -v && docker system prune -f && docker compose up -d`
+
+**Common issues**:
+- PostgreSQL not ready → healthcheck in docker-compose.yml
+- Migration failed → SQL syntax error
+- Port conflicts → check 3000, 5000, 54321, 6379 available
+
+## FAQs
+
+**Q: Won't migrations run multiple times with N workers?**
+A: NO. Migrations run at container level (once), before uvicorn forks
+   workers. The unified `start.py` calls `run_migrations()` before
+   `uvicorn.run()`, and the migration runner takes a Redis (or PG
+   advisory-lock) distributed lock so even multi-replica deploys are
+   safe.
+
+**Q: Can I use RESET_DATABASE_ON_STARTUP?**
+A: NO. Deprecated. Use migrations (no data loss).
+
+**Q: Do I need to run migrations manually?**
+A: NO. Automatic on `docker compose up -d`.
+
+**Q: Can I change worker count?**
+A: YES. Safe. Migrations unaffected (run once per container, not per worker).
+
+## Dependencies
+
+**Backend**: FastAPI, SQLAlchemy, Pydantic, Uvicorn, PostgreSQL, OpenAI SDK, Pillow, PyJWT
+**Frontend**: React 18, Ant Design, React Router, i18next, Axios, Vite
+
+## Caching & Performance
+
+- Auth cache (1h TTL)
+- Keyword cache (1m TTL)
+- Risk config cache (5m TTL)
+- Template cache (5m TTL)
+- Rate limiting (per-tenant, global concurrent limits)
+
+## Security
+
+- bcrypt password hashing
+- JWT expiration
+- Secure API key generation
+- SQLAlchemy ORM (SQL injection protection)
+- CORS configured
+- Rate limiting
+- Multi-tenant isolation
+
+---
+
+**Last Updated**: 2026-01-06
+**Generated for**: AI assistants to quickly understand OpenGuardrails architecture.
