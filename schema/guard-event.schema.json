@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openguardrails.com/schema/0.1/guard-event.schema.json",
+  "title": "GuardEvent",
+  "description": "A unit observed at an OGR interception point.",
+  "type": "object",
+  "required": ["ogr_version", "event_id", "guard_id", "timestamp", "observation_point", "kind", "subject", "payload"],
+  "additionalProperties": false,
+  "properties": {
+    "ogr_version": { "type": "string", "const": "0.1" },
+    "event_id": { "type": "string", "minLength": 1 },
+    "guard_id": { "type": "string", "minLength": 1 },
+    "session_id": { "type": "string" },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "observation_point": { "enum": ["gateway", "agent_hook", "sandbox"] },
+    "kind": {
+      "enum": ["user_input", "model_output", "tool_register", "mcp_connect", "skill_load", "tool_call", "tool_result", "exec", "network", "file"]
+    },
+    "llm_protocol": { "enum": ["openai.chat", "openai.responses", "anthropic.messages", null] },
+    "subject": {
+      "type": "object",
+      "required": ["agent_id"],
+      "properties": {
+        "agent_id": { "type": "string" },
+        "agent_type": { "type": "string" },
+        "principal": { "type": "string" },
+        "sandbox_id": { "type": "string" }
+      }
+    },
+    "payload": { "type": "object" },
+    "context_refs": { "type": "array", "items": { "type": "string" } },
+    "provenance": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source", "trust"],
+        "additionalProperties": false,
+        "properties": {
+          "source": { "enum": ["system", "user", "model", "tool_result", "web", "mcp", "file", "retrieved"] },
+          "trust": { "enum": ["trusted", "untrusted", "unverified"] },
+          "ref": { "type": "string" },
+          "taint_tags": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    }
+  }
+}

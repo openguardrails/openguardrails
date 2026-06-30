@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openguardrails.com/schema/0.1/verdict.schema.json",
+  "title": "Verdict",
+  "description": "A detector's decision about a GuardEvent.",
+  "type": "object",
+  "required": ["ogr_version", "event_id", "guard_id", "provider", "decision"],
+  "additionalProperties": false,
+  "properties": {
+    "ogr_version": { "type": "string", "const": "0.1" },
+    "event_id": { "type": "string", "minLength": 1 },
+    "guard_id": { "type": "string", "minLength": 1 },
+    "provider": { "type": "string", "minLength": 1 },
+    "decision": { "enum": ["allow", "block", "require_approval", "modify", "redact"] },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "latency_ms": { "type": "number", "minimum": 0 },
+    "reasons": { "type": "array", "items": { "type": "string" } },
+    "categories": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "domain"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^(safety|security|x)\\.[a-z0-9_.]+$" },
+          "domain": { "enum": ["safety", "security"] },
+          "score": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      }
+    },
+    "modifications": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["redact", "rewrite", "constrain"] },
+        "spans": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["path"],
+            "properties": {
+              "path": { "type": "string" },
+              "start": { "type": "integer" },
+              "end": { "type": "integer" },
+              "replacement": { "type": "string" }
+            }
+          }
+        },
+        "payload": { "type": "object" }
+      }
+    },
+    "evidence": { "type": "array", "items": { "type": "object" } }
+  }
+}
