@@ -23,6 +23,13 @@ enforces.
                  Verdict ◀──────── composition ◀──────────────────────────┘
 ```
 
+Verdicts are only enforceable if the channel carrying them — and the approvals
+that satisfy them — can be trusted.
+[Enrollment & approval receipts](enrollment-and-receipts.md) defines how an
+interception point authenticates to a runtime and how a `require_approval`
+grant becomes a verifiable, payload-bound artifact rather than a propagated
+flag.
+
 ## Three observation altitudes
 
 The same logical action is often observable at more than one point. OGR treats
@@ -62,6 +69,7 @@ ceiling is semantic, fine, and provenance-aware.
 | event & verdict contract | detection mechanism (config rules **or** model/classifier) |
 | provenance & guard-context | detection quality, coverage, latency, freshness |
 | composition meta-policy *mechanism* | which vendors to subscribe to and how to weight them |
+| enrollment & receipt mechanism | approver authentication method and approval UX |
 | risk taxonomy (category IDs) | thresholds, what counts as unsafe for a use case |
 
 A `Verdict` carries a `provider` field precisely so a runtime can attribute,

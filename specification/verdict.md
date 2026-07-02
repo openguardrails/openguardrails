@@ -33,6 +33,11 @@ verdict per detector and [composes](composition.md) them into a single
 A detector that does not handle an event's `kind`, or finds nothing, MUST return
 `allow` (an explicit abstention), never silence.
 
+How a `require_approval` decision is satisfied downstream — the approval flow,
+the runtime-signed receipt that records the grant, and how enforcement points
+verify it — is specified in
+[Enrollment & approval receipts](enrollment-and-receipts.md).
+
 ### `categories` entry
 
 ```json
@@ -55,7 +60,7 @@ or `security`.
 
 ```json
 {
-  "ogr_version": "0.1",
+  "ogr_version": "0.2",
   "event_id": "evt-9f2",
   "guard_id": "ga-1a2b",
   "provider": "ogr.poc.llm_judge",

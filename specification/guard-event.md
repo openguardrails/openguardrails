@@ -7,7 +7,7 @@ the OGR analogue of an OpenTelemetry span. Keywords per RFC 2119.
 
 | Field | Type | Req | Description |
 |---|---|---|---|
-| `ogr_version` | string | MUST | Spec version, e.g. `"0.1"`. |
+| `ogr_version` | string | MUST | Spec version, e.g. `"0.2"`. |
 | `event_id` | string | MUST | Unique id for this observation. |
 | `guard_id` | string | MUST | Stable across observation points for one logical action. See [guard-context](provenance-and-context.md#guard-context-propagation). |
 | `session_id` | string | SHOULD | Conversation / agent-run id. Enables stateful, multi-turn detection. |
@@ -51,7 +51,7 @@ rug-pulls, malicious skill content) — detectable at load time, before any call
 
 ```json
 {
-  "ogr_version": "0.1",
+  "ogr_version": "0.2",
   "event_id": "evt-9f2",
   "guard_id": "ga-1a2b",
   "session_id": "run-55",

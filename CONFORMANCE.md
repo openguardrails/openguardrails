@@ -4,7 +4,7 @@ OGR conformance is intentionally narrow: it is about *speaking the wire*, not
 about detection quality. Quality is measured separately by
 [`openguardrails-bench`](https://github.com/openguardrails/openguardrails-bench).
 
-There are three conformance roles. An implementation may play more than one.
+There are four conformance roles. An implementation may play more than one.
 
 ## Detector conformance
 
@@ -37,7 +37,13 @@ An adapter is **OGR-conformant** if it:
    (see [guard-context propagation](specification/provenance-and-context.md#guard-context-propagation));
 3. honors the composed `Verdict` decision — `block` blocks, `allow` allows,
    `require_approval` gates — at its enforcement point;
-4. fails closed on `security.*` decisions unless explicitly configured otherwise.
+4. fails closed on `security.*` decisions unless explicitly configured otherwise;
+5. enrolls with its runtime before emitting enforcement-relevant events, and
+   emits them only over a channel authenticated with its enrollment credential
+   (see [Enrollment & approval receipts](specification/enrollment-and-receipts.md));
+6. treats an approval as granted **only** after verifying an approval receipt —
+   signature, expiry, scope, and payload-digest binding — and never honors a
+   bare approval flag.
 
 ## Composer conformance
 
@@ -45,6 +51,21 @@ A composer (the component that merges multiple detectors' verdicts into one
 decision) is **OGR-conformant** if it implements the rules in
 [composition](specification/composition.md) — including precedence, the
 most-restrictive-wins default, and `require_approval` handling.
+
+## Runtime conformance
+
+A runtime (the Policy Decision Point) is **OGR-conformant** if it:
+
+1. binds each enrolled PEP's channel identity to the `subject` values that PEP
+   may assert, and rejects events where the two disagree;
+2. accepts events from unenrolled PEPs only as **unverified** — usable for
+   observability, never as the basis for minting receipts or granting
+   enforcement authority;
+3. mints approval receipts only after the approval flow for a
+   `require_approval` decision completes, with bindings and expiry per
+   [Enrollment & approval receipts](specification/enrollment-and-receipts.md);
+4. distributes and rotates its verification keys so PEPs can validate every
+   receipt for its full lifetime (overlapping rotation windows).
 
 ## Self-certification
 

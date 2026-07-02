@@ -54,13 +54,29 @@ When an agent hands an action to a sandbox (or a gateway to an agent), it SHOULD
 propagate context out of band, analogous to W3C `traceparent`:
 
 ```
-ogr-guardcontext: 01|<guard_id>|<session_id>|<flags>
+ogr-guardcontext: 02|<guard_id>|<session_id>|<flags>
 ```
 
 (`|`-delimited; fields are opaque and URL-safe so ids may contain `-`.)
 
-- `01` — version.
-- `flags` — bit 0 = "provenance present"; bit 1 = "approval already granted".
+- `02` — version.
+- `flags` — bit 0 = "provenance present"; bit 1 = "approval receipt attached".
+
+Bit 1 is advisory only: it signals that an approval receipt accompanies the
+context, and carries **no authority by itself**. Authority lives in the
+receipt — a runtime-signed, payload-bound artifact defined in
+[Enrollment & approval receipts](enrollment-and-receipts.md) — propagated in a
+companion header:
+
+```
+ogr-receipt: <JWS compact serialization>
+```
+
+A receiver MUST ignore bit 1 unless the accompanying receipt
+[verifies](enrollment-and-receipts.md#receipt-verification). Version-`01`
+contexts with bit 1 set MUST be treated as carrying **no** approval: that bit
+was forgeable by the propagating party, which is the party OGR defends
+against.
 
 A sandbox that receives `ogr-guardcontext` MUST stamp the inherited `guard_id`
 and provenance onto the `exec`/`network`/`file` events it emits. This is what
