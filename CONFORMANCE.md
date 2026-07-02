@@ -36,7 +36,7 @@ An adapter is **OGR-conformant** if it:
    altitudes by `guard_id`
    (see [guard-context propagation](specification/provenance-and-context.md#guard-context-propagation));
 3. honors the composed `Verdict` decision — `block` blocks, `allow` allows,
-   `require_human` gates — at its enforcement point;
+   `require_approval` gates — at its enforcement point;
 4. fails closed on `security.*` decisions unless explicitly configured otherwise.
 
 ## Composer conformance
@@ -44,7 +44,7 @@ An adapter is **OGR-conformant** if it:
 A composer (the component that merges multiple detectors' verdicts into one
 decision) is **OGR-conformant** if it implements the rules in
 [composition](specification/composition.md) — including precedence, the
-most-restrictive-wins default, and `require_human` handling.
+most-restrictive-wins default, and `require_approval` handling.
 
 ## Self-certification
 
