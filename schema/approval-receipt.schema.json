@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openguardrails.com/schema/0.2/approval-receipt.schema.json",
+  "title": "ApprovalReceipt",
+  "description": "Claims object of a runtime-signed approval receipt (JWS payload).",
+  "type": "object",
+  "required": ["ogr_version", "receipt_id", "issuer", "scope", "approver", "approved_at", "expires_at"],
+  "additionalProperties": false,
+  "properties": {
+    "ogr_version": { "type": "string", "const": "0.2" },
+    "receipt_id": { "type": "string", "minLength": 1 },
+    "issuer": { "type": "string", "minLength": 1 },
+    "scope": { "enum": ["single_action", "pre_authorization"] },
+    "guard_id": { "type": "string", "minLength": 1 },
+    "session_id": { "type": "string" },
+    "bindings": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["kind", "payload_digest"],
+        "additionalProperties": false,
+        "properties": {
+          "kind": { "enum": ["tool_call", "exec", "network", "file", "tool_register", "mcp_connect", "skill_load"] },
+          "payload_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+        }
+      }
+    },
+    "constraints": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "session_id": { "type": "string" },
+        "principal": { "type": "string" },
+        "kinds": { "type": "array", "items": { "type": "string" } },
+        "max_uses": { "type": "integer", "minimum": 1 },
+        "match": { "type": "object" }
+      }
+    },
+    "approver": { "type": "string", "minLength": 1 },
+    "approved_at": { "type": "string", "format": "date-time" },
+    "expires_at": { "type": "string", "format": "date-time" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "scope": { "const": "single_action" } }, "required": ["scope"] },
+      "then": { "required": ["guard_id", "bindings"] }
+    },
+    {
+      "if": { "properties": { "scope": { "const": "pre_authorization" } }, "required": ["scope"] },
+      "then": { "required": ["constraints"] }
+    }
+  ]
+}

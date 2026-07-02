@@ -47,7 +47,7 @@ Without OGR, securing an agent is an `N × M × L × S` integration problem: eve
 agent, every detector vendor, every LLM protocol, every sandbox wired pairwise.
 OGR collapses it to `N + M + L + S` — integrate once against the contract.
 
-## The five normative components
+## The six normative components
 
 | Component | What it defines | OTel analogue |
 |---|---|---|
@@ -56,6 +56,7 @@ OGR collapses it to `N + M + L + S` — integrate once against the contract.
 | [Provenance](specification/provenance-and-context.md) | Trust/taint labels on every piece of context | — |
 | [guard-context](specification/provenance-and-context.md#guard-context-propagation) | Correlation of one logical action across gateway / hook / sandbox | trace context (W3C `traceparent`) |
 | [composition](specification/composition.md) | How multiple vendors' verdicts combine into one decision | — |
+| [enrollment & receipts](specification/enrollment-and-receipts.md) | How PEPs authenticate to a runtime, and how approvals become verifiable payload-bound artifacts | — |
 
 Risk categories live in the [taxonomy](specification/taxonomy.md) (`safety.*` and
 `security.*`), versioned and swappable — the contract references category IDs but

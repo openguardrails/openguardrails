@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://openguardrails.com/schema/0.1/guard-event.schema.json",
+  "$id": "https://openguardrails.com/schema/0.2/guard-event.schema.json",
   "title": "GuardEvent",
   "description": "A unit observed at an OGR interception point.",
   "type": "object",
   "required": ["ogr_version", "event_id", "guard_id", "timestamp", "observation_point", "kind", "subject", "payload"],
   "additionalProperties": false,
   "properties": {
-    "ogr_version": { "type": "string", "const": "0.1" },
+    "ogr_version": { "type": "string", "const": "0.2" },
     "event_id": { "type": "string", "minLength": 1 },
     "guard_id": { "type": "string", "minLength": 1 },
     "session_id": { "type": "string" },
