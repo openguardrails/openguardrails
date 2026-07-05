@@ -43,7 +43,20 @@ An adapter is **OGR-conformant** if it:
    (see [Enrollment & approval receipts](specification/enrollment-and-receipts.md));
 6. treats an approval as granted **only** after verifying an approval receipt —
    signature, expiry, scope, and payload-digest binding — and never honors a
-   bare approval flag.
+   bare approval flag;
+7. when emitting `content_encoding: redacted` (or `hashed`), populates
+   `redactions` for every span it transformed and retains the original
+   locally for verdict enforcement (see
+   [Local redaction](specification/local-redaction.md)).
+
+## Redactor conformance
+
+A local redaction service is **OGR-conformant** if it implements the span
+contract in [Local redaction](specification/local-redaction.md):
+`POST /analyze` accepting `{text, language, score_threshold}` and returning
+`[{entity_type, start, end, score}]`, plus `GET /health`. Any conformant
+redactor container works with any conformant adapter; the adapter — not the
+redactor — applies operators and holds originals.
 
 ## Composer conformance
 

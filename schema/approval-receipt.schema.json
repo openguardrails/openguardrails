@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://openguardrails.com/schema/0.2/approval-receipt.schema.json",
+  "$id": "https://openguardrails.com/schema/0.3/approval-receipt.schema.json",
   "title": "ApprovalReceipt",
   "description": "Claims object of a runtime-signed approval receipt (JWS payload).",
   "type": "object",
   "required": ["ogr_version", "receipt_id", "issuer", "scope", "approver", "approved_at", "expires_at"],
   "additionalProperties": false,
   "properties": {
-    "ogr_version": { "type": "string", "const": "0.2" },
+    "ogr_version": { "type": "string", "const": "0.3" },
     "receipt_id": { "type": "string", "minLength": 1 },
     "issuer": { "type": "string", "minLength": 1 },
     "scope": { "enum": ["single_action", "pre_authorization"] },
