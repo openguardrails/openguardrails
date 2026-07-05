@@ -13,6 +13,36 @@ version is independent of any implementation's package version.
 - Folded the specification into the namesake repo `openguardrails/openguardrails`
   as the canonical home of the standard. (Previously `openguardrails-spec`.)
 
+## [v0.3] — draft revision (proposal)
+
+Span-level detection and privacy-preserving deployment: separate *what was
+found* from *what to do*, and let the enforcement point scrub payloads
+before they ever leave the trust boundary.
+
+### Added
+- **`Verdict.findings`** — normalized span-capable detection results
+  (`category`, `path`, `start`/`end`, `score`, `detector`); offsets only,
+  never matched text (`specification/verdict.md`).
+- **Reversible redaction** — `operator` (`replace|mask|hash|encrypt`) and
+  `ref` on `modifications.spans[]` for stable pseudonyms and
+  redact-then-restore round-trips.
+- **Local pre-detection redaction** (`specification/local-redaction.md`):
+  `GuardEvent.content_encoding` (issue #6) + `GuardEvent.redactions`
+  metadata, the placeholder convention, and a **normative redactor
+  contract** (`POST /analyze`, presidio-analyzer-compatible) with a new
+  Redactor conformance role (`CONFORMANCE.md`).
+- **`safety.pii.*` subcategory registry** with hierarchical rollup
+  (`safety.pii.national_id.cn` → `safety.pii.national_id`) and an
+  informative presidio entity mapping (`specification/taxonomy.md`).
+- **Composition of modifications** — union-of-spans rule for `redact`,
+  first-winner rule for whole-payload rewrites
+  (`specification/composition.md`).
+
+### Changed
+- Wire version `0.2` → `0.3` in schemas (`$id`, `ogr_version`) and examples.
+- All new fields are optional: a valid v0.2 object is a valid v0.3 object
+  after the version-string bump.
+
 ## [v0.2] — draft revision (proposal)
 
 One key model closing two `v0.1` trust gaps: unauthenticated events (#7) and

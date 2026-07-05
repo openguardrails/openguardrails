@@ -17,6 +17,7 @@ verdict per detector and [composes](composition.md) them into a single
 | `modifications` | object | MAY | Required only when `decision` is `modify` or `redact`. |
 | `reasons` | array<string> | SHOULD | Human-readable justification. |
 | `evidence` | array<object> | MAY | Structured pointers (spans, matched rule ids, fetched-artifact hashes). |
+| `findings` | array | SHOULD (span detectors) | Normalized detection results — *what was found*, as opposed to `decision`/`modifications` (*what to do*). |
 | `latency_ms` | number | MAY | Detector self-reported latency. |
 | `confidence` | number | MAY | `0.0`–`1.0`. |
 
@@ -47,20 +48,50 @@ verify it — is specified in
 `id` MUST be drawn from the [taxonomy](taxonomy.md). `domain` MUST be `safety`
 or `security`.
 
+### `findings` entry
+
+```json
+{ "category": "safety.pii.national_id.cn", "path": "payload.text",
+  "start": 7, "end": 25, "score": 0.95, "detector": "ogr.patterns" }
+```
+
+- A finding is *what a detector found*; `decision` and `modifications`
+  remain *what to do about it*. Event-level findings (e.g. a malicious
+  command) omit `path`/`start`/`end`.
+- Findings MUST NOT echo the matched text — offsets only. Otherwise every
+  verdict store becomes a copy of the sensitive data it was meant to guard.
+- All offsets refer to the payload **as transported** (after any
+  [local redaction](local-redaction.md)), never to a form the receiver has
+  not seen.
+- When `decision` is `redact`, `modifications.spans` SHOULD be derivable
+  from the span-bearing findings (same `path`/offsets).
+- `categories` remains the rollup (with max scores) of findings and is the
+  field [composition](composition.md) operates on.
+
 ### `modifications`
 
 ```json
 {
   "kind": "redact",
-  "spans": [ { "path": "payload.text", "start": 40, "end": 76, "replacement": "[REDACTED:pii.email]" } ]
+  "spans": [ { "path": "payload.text", "start": 40, "end": 76,
+               "operator": "encrypt", "ref": "r-8f2e",
+               "replacement": "[PII:safety.pii.email:r-8f2e]" } ]
 }
 ```
+
+`operator` (`replace` default \| `mask` \| `hash` \| `encrypt`) says how the
+span is transformed; `hash` supports stable pseudonyms, `encrypt` supports
+restoration. `ref` is an opaque handle, unique within the verdict: a later
+event or verdict using the same `ref` refers to the same original value. Key
+management and the restore operation are implementation-internal; the
+protocol only guarantees `ref` stability. `replacement` carries a
+placeholder, never the original.
 
 ## Example — an LLM detector blocks an injected install command
 
 ```json
 {
-  "ogr_version": "0.2",
+  "ogr_version": "0.3",
   "event_id": "evt-9f2",
   "guard_id": "ga-1a2b",
   "provider": "ogr.poc.llm_judge",

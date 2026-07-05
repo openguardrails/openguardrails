@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://openguardrails.com/schema/0.2/guard-event.schema.json",
+  "$id": "https://openguardrails.com/schema/0.3/guard-event.schema.json",
   "title": "GuardEvent",
   "description": "A unit observed at an OGR interception point.",
   "type": "object",
   "required": ["ogr_version", "event_id", "guard_id", "timestamp", "observation_point", "kind", "subject", "payload"],
   "additionalProperties": false,
   "properties": {
-    "ogr_version": { "type": "string", "const": "0.2" },
+    "ogr_version": { "type": "string", "const": "0.3" },
     "event_id": { "type": "string", "minLength": 1 },
     "guard_id": { "type": "string", "minLength": 1 },
     "session_id": { "type": "string" },
@@ -28,6 +28,23 @@
       }
     },
     "payload": { "type": "object" },
+    "content_encoding": { "enum": ["raw", "redacted", "hashed", "metadata_only"], "default": "raw" },
+    "redactions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "start", "end"],
+        "additionalProperties": false,
+        "properties": {
+          "path":     { "type": "string" },
+          "start":    { "type": "integer", "minimum": 0 },
+          "end":      { "type": "integer", "minimum": 0 },
+          "category": { "type": "string", "pattern": "^(safety|security|x)\\.[a-z0-9_.]+$" },
+          "operator": { "enum": ["replace", "mask", "hash", "encrypt"] },
+          "ref":      { "type": "string" }
+        }
+      }
+    },
     "context_refs": { "type": "array", "items": { "type": "string" } },
     "provenance": {
       "type": "array",

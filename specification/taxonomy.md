@@ -41,9 +41,38 @@ System compromise, judged on actions and data flow.
 | `security.supply_chain` | Untrusted package / MCP / skill / model source. |
 | `security.tool_poisoning` | Malicious tool/MCP **definition** (hidden instructions in descriptions/schemas). |
 
+## `safety.pii.*` — subcategory registry
+
+Span-level PII detection needs entity-level ids; without a shared registry,
+masking policy (which is written *per entity type*) cannot interoperate.
+Semantic buckets:
+
+`person_name, address, email, phone_number, national_id, tax_id, passport,
+driver_license, health_id, bank_card, bank_account, ip_address,
+organization, date_of_birth, credential`
+
+Ids refine hierarchically — semantic type first, country/variant after:
+`safety.pii.national_id.cn`, `safety.pii.tax_id.de.vat`. A consumer that
+does not know a refined id MUST treat it as its longest known prefix
+(`safety.pii.national_id`, ultimately `safety.pii`). This **rollup rule**
+lets policy be written once per bucket ("all national ids → redact") with
+global coverage, and lets country-specific detectors ship without registry
+churn.
+
+Mapping from presidio-analyzer entity names (informative): `US_SSN →
+safety.pii.national_id.us`, `US_ITIN → safety.pii.tax_id.us`, `IN_AADHAAR →
+safety.pii.national_id.in`, `PL_PESEL → safety.pii.national_id.pl`,
+`KR_RRN → safety.pii.national_id.kr`, `UK_NHS → safety.pii.health_id.uk`,
+`IT_FISCAL_CODE → safety.pii.tax_id.it`, `CREDIT_CARD →
+safety.pii.bank_card`, `IBAN_CODE → safety.pii.bank_account`,
+`PHONE_NUMBER → safety.pii.phone_number`, `PERSON →
+safety.pii.person_name`, `LOCATION → safety.pii.address`.
+
 ## Conventions
 
 - A detector MUST use the most specific ID it can justify.
+- Hierarchical rollup: a consumer encountering an unknown id MUST fall back
+  to its longest known dotted prefix before treating it as unknown.
 - Unknown/experimental categories MUST be namespaced under
   `x.<vendor>.<name>` and MUST NOT collide with `safety.*` / `security.*`.
 - `score` is a detector-reported `0.0`–`1.0`; it is **not** comparable across

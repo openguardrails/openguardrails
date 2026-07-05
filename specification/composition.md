@@ -63,6 +63,16 @@ block  >  require_approval  >  redact  >  modify  >  allow
 - `short_circuit: true` lets the runtime stop once a `block` is reached, so an
   expensive model provider is skipped when a cheap rule already blocked.
 
+## Composing modifications
+
+When the effective decision is `redact`, the effective `modifications.spans`
+MUST be the **union** of spans from all contributing `redact` verdicts.
+Overlapping spans on the same `path` merge to the covering range; the merged
+span keeps the union of the original spans' finding categories. For `modify`
+with whole-payload rewrites (`payload` present), the winning provider per the
+strategy supplies `modifications`; other proposed rewrites are recorded in
+`evidence` (rewrites do not merge).
+
 ## Attribution
 
 The effective verdict MUST record which providers contributed (`provider` on each

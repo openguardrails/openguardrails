@@ -7,7 +7,7 @@ the OGR analogue of an OpenTelemetry span. Keywords per RFC 2119.
 
 | Field | Type | Req | Description |
 |---|---|---|---|
-| `ogr_version` | string | MUST | Spec version, e.g. `"0.2"`. |
+| `ogr_version` | string | MUST | Spec version, e.g. `"0.3"`. |
 | `event_id` | string | MUST | Unique id for this observation. |
 | `guard_id` | string | MUST | Stable across observation points for one logical action. See [guard-context](provenance-and-context.md#guard-context-propagation). |
 | `session_id` | string | SHOULD | Conversation / agent-run id. Enables stateful, multi-turn detection. |
@@ -19,6 +19,8 @@ the OGR analogue of an OpenTelemetry span. Keywords per RFC 2119.
 | `provenance` | array | SHOULD | Trust/taint of the inputs that produced this action. See [Provenance](provenance-and-context.md). |
 | `llm_protocol` | enum \| null | MAY | `openai.chat` \| `openai.responses` \| `anthropic.messages` \| `null`. Set by gateway adapters. |
 | `context_refs` | array | MAY | `event_id`s of related prior events. |
+| `content_encoding` | enum | MAY | `raw` (default) \| `redacted` \| `hashed` \| `metadata_only` — how the payload content was transformed before emission. See [Local redaction](local-redaction.md). |
+| `redactions` | array | MAY | Spans the adapter transformed locally before emission (metadata only, never originals). MUST be populated when `content_encoding` is `redacted`. See [Local redaction](local-redaction.md). |
 
 ### `subject`
 
