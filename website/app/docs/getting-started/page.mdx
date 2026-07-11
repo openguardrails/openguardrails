@@ -1,0 +1,89 @@
+export const metadata = {
+  title: "Getting started — OpenGuardrails Docs",
+  description: "Secure a Hermes agent with OpenGuardrails in five minutes: install the plugin, enable OS-level sandboxing, and configure policy as one JSON file.",
+};
+
+# Getting started
+
+This walkthrough secures a real [Hermes](https://github.com/NousResearch/hermes-agent)
+agent with OGR in about five minutes. Pick the path that matches you — both configure
+guardrails the **same way (one OGR policy model)**, but with a policy and backend
+suited to the deployment.
+
+| You are…                              | Use            | Guide |
+| ------------------------------------- | -------------- | ----- |
+| One developer on a laptop             | **srt** (no containers, OS-level) | [Hermes + srt](/docs/integrations/hermes-srt/) |
+| A team running shared/multi-tenant agents | **OpenShell** (container + gateway) | [Hermes + OpenShell](/docs/integrations/hermes-openshell/) |
+
+## 1. Install the OGR plugin
+
+OGR ships as a Hermes **plugin** — no proxy, no forking. Hermes already exposes the
+hooks OGR needs. Install from PyPI, then point Hermes at the bundled plugin (it ships
+`plugin.yaml` + `register()`):
+
+```bash
+pip install openguardrails-instrumentation-hermes   # pulls in the openguardrails runtime
+
+# make Hermes discover the installed plugin
+ln -s "$(python -c 'import openguardrails_instrumentation_hermes as m, pathlib; print(pathlib.Path(m.__file__).parent)')" \
+  ~/.hermes/plugins/ogr-guard
+hermes plugins enable ogr-guard
+```
+
+## 2. Run the agent — decisions are live immediately
+
+```bash
+hermes -z "show me ~/.hermes/auth.json"
+# → blocked: [OGR:block] security.secret_leak — command references a credential file
+```
+
+The plugin is already enforcing at two altitudes: the **agent hook**
+(`pre_tool_call`, which can block) and the **sandbox** exec wrapper. An audit trail
+is written to `~/.hermes/logs/ogr-guard.log`.
+
+## 3. Add OS-level enforcement (personal)
+
+Decision rules catch *intent*; a real sandbox enforces the *resource boundary* so a
+clever rephrase can't slip past. On a laptop, use srt:
+
+```bash
+npm install -g @anthropic-ai/sandbox-runtime
+export OGR_SANDBOX=srt        # run every Hermes exec under srt
+```
+
+Now reads of `~/.ssh`, `~/.hermes/auth.json`, and non-allowlisted network egress are
+denied by the OS — even if the agent rewrites `cat` into a `python` one-liner.
+
+## 4. Configure policy — security as one file
+
+You never write sandbox code. Copy the bundled default to an editable file and point
+`OGR_POLICY` at it (don't edit the copy inside site-packages):
+
+```bash
+python -c "import openguardrails_instrumentation_hermes as m, pathlib, shutil; \
+  shutil.copy(pathlib.Path(m.__file__).parent/'policy.json', 'ogr-policy.json')"
+export OGR_POLICY=$PWD/ogr-policy.json
+```
+
+Then edit `ogr-policy.json`:
+
+```json
+{
+  "sandbox": {
+    "workspace_write":  [".", "/tmp"],
+    "deny_read":        ["~/.ssh", "~/.aws", "~/.hermes/auth.json"],
+    "egress_allowlist": ["api.github.com", "*.github.com", "pypi.org"]
+  }
+}
+```
+
+This is a **personal** policy — it guards your host. The same OGR `sandbox` model
+compiles to srt locally; for a multi-tenant deployment you write a stricter policy
+(no host filesystem, per-tenant limits) in the same model, and it compiles to
+OpenShell's OPA/Rego. See [Configure a policy](/docs/configuring-policy/).
+
+## Next
+
+- Understand the model: **[The three altitudes](/docs/concepts/altitudes/)**.
+- Going to production with a team: **[Hermes + OpenShell](/docs/integrations/hermes-openshell/)**.
+- Securing a different agent framework: **[Instrument your own agent](/docs/instrument-your-agent/)**.

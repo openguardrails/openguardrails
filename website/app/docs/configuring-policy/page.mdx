@@ -1,0 +1,102 @@
+export const metadata = {
+  title: "Configure a policy — OpenGuardrails Docs",
+  description: "An OGR policy.json is the single source of truth for both detection (allow/block) and enforcement (sandbox). One file, every altitude, every backend.",
+};
+
+# Configure a policy
+
+An OGR **`policy.json`** is the single source of truth for both **detection**
+(which actions are allowed/blocked) and **enforcement** (what the sandbox permits).
+One file drives every altitude for a given deployment, and compiles to whichever
+sandbox backend you use. You write a different policy per deployment — a personal
+assistant and a multi-tenant agent have different threat models — but always in the
+same OGR model. This page is the reference.
+
+## Anatomy
+
+```json
+{
+  "composition": { "...": "how to merge detector verdicts" },
+  "sandbox":     { "...": "how to configure srt / OpenShell" },
+  "config_rules":{ "...": "the deterministic detector" }
+}
+```
+
+## `composition` — merge verdicts
+
+Per risk category, choose how multiple detectors combine and how to fail. See
+**[Composition](/docs/concepts/composition/)**.
+
+```json
+"composition": {
+  "security.*":      { "strategy": "deny-wins", "on_all_failed": "block" },
+  "safety.toxicity": { "strategy": "quorum", "quorum": { "count": 2, "min_score": 0.8 } },
+  "default":         { "strategy": "deny-wins" }
+}
+```
+
+## `sandbox` — configure the enforcement backend
+
+This is the block that the [srt](/docs/integrations/hermes-srt/) and
+[OpenShell](/docs/integrations/hermes-openshell/) adapters compile. You describe the
+boundary once; OGR generates the backend-specific config.
+
+```json
+"sandbox": {
+  "workspace_write":  [".", "/tmp"],
+  "deny_read":        ["~/.ssh", "~/.aws", "~/.hermes/auth.json", "~/.netrc"],
+  "deny_write":       [".env", "~/.gitconfig"],
+  "egress_allowlist": ["api.github.com", "*.github.com", "pypi.org"],
+  "deny_egress":      [],
+  "resource_limits":  { "cpus": 2, "memory_mb": 2048, "pids": 256 }
+}
+```
+
+| Field | Meaning | srt | OpenShell |
+| --- | --- | --- | --- |
+| `egress_allowlist` | deny-by-default network; allow these (`*.` wildcards) | `network.allowedDomains` | Rego `allowed_domains` |
+| `deny_read` | paths the agent can't read | `filesystem.denyRead` | sandbox `deny_read` |
+| `workspace_write` | the only writable paths | `filesystem.allowWrite` | workspace mount |
+| `deny_write` | carve-outs inside the workspace | `filesystem.denyWrite` | sandbox `deny_write` |
+| `resource_limits` | cpu / memory / pids caps | (single process) | container limits |
+
+## `config_rules` — the deterministic detector
+
+Regex command rules and markers, evaluated at the agent-hook and sandbox altitudes.
+Each rule is **resource-based where possible** (match the sensitive *path*, not the
+reader verb — see why in [the Hermes findings](/docs/integrations/hermes-srt/)).
+
+```json
+"config_rules": {
+  "egress_allowlist": ["api.github.com", "pypi.org"],
+  "secret_env_markers": ["SECRET", "TOKEN", "AWS_", "PASSWORD", "PRIVATE_KEY"],
+  "command_rules": [
+    {
+      "id": "secret-file-access",
+      "regex": "(\\.env\\b|/\\.aws/credentials|/\\.ssh/id_|auth\\.json)",
+      "category": "security.secret_leak", "domain": "security",
+      "decision": "block", "score": 0.95,
+      "why": "command references a credential file — independent of the reader"
+    }
+  ]
+}
+```
+
+## Where the policy lives
+
+- **Path:** point `OGR_POLICY=/path/to/policy.json` at your own file. With no
+  override, the Hermes-tuned default that ships **inside the installed package** is
+  used (`python -c "import openguardrails_instrumentation_hermes as m, pathlib; print(pathlib.Path(m.__file__).parent/'policy.json')"`).
+- **Precedence:** an explicit `OGR_POLICY` wins; otherwise the package's bundled
+  default.
+
+## Tips
+
+- Start from the [bundled policy](https://github.com/openguardrails/openguardrails/blob/main/integrations/hermes/src/openguardrails_instrumentation_hermes/policy.json)
+  and tighten `egress_allowlist` / `deny_read` for your project.
+- Prefer **resource-based** rules (match the path/host) over verb-based ones — they
+  survive an agent rephrasing the command.
+- Fail **closed** for `security.*`, **open** for low-risk categories.
+
+Next: **[Instrument your own agent](/docs/instrument-your-agent/)** if you're not on
+Hermes.

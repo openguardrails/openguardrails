@@ -1,0 +1,9 @@
+name: ogr-guard
+version: 0.1.0
+description: "Secure a Hermes agent + its sandbox through the OpenGuardrails (OGR) protocol. One Runtime + one policy.json enforce across three altitudes — gateway (LLM I/O), agent_hook (pre-tool), and sandbox (real exec) — correlated by guard_id and provenance."
+author: "OpenGuardrails"
+hooks:
+  - pre_tool_call
+  - post_tool_call
+  - pre_api_request
+  - post_api_request

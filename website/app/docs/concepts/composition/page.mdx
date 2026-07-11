@@ -1,0 +1,48 @@
+export const metadata = {
+  title: "Composition — OpenGuardrails Docs",
+  description: "How OGR combines verdicts from multiple detectors into one enforced decision: deny-wins, quorum, weighted, first-available.",
+};
+
+# Composition
+
+You rarely want a single detector. You want your deterministic config rules **and**
+an LLM judge **and** maybe a third-party guard model — and one decision out the
+other side. Composition is how OGR merges multiple `Verdict`s into the single
+decision it enforces.
+
+## Strategies
+
+Set per risk category in `policy.json`:
+
+| Strategy | Behavior | Use for |
+| --- | --- | --- |
+| `deny-wins` | most restrictive decision wins (`block` > `require_approval` > `redact` > `modify` > `allow`) | security — never relax on disagreement |
+| `quorum` | needs N detectors above a score to act | noisy categories (toxicity) — reduce false positives |
+| `weighted` | vendor-weighted sum | blending a trusted vendor with cheaper rules |
+| `first-available` | first responder wins | latency-critical paths |
+
+```json
+{
+  "composition": {
+    "security.*":      { "strategy": "deny-wins", "on_all_failed": "block" },
+    "safety.toxicity": { "strategy": "quorum", "quorum": { "count": 2, "min_score": 0.8 }, "on_all_failed": "allow" },
+    "default":         { "strategy": "deny-wins" }
+  }
+}
+```
+
+## Fail-closed vs fail-open
+
+`on_all_failed` (and `on_timeout`) decide what happens when detectors error or time
+out. Security categories fail **closed** (`block`); low-risk categories fail
+**open** (`allow`). This is policy, not code — you choose per category.
+
+## Why composition matters
+
+Detectors have complementary blind spots. On the OGR benchmark, a config detector
+(macro-F1 0.45) and an LLM judge (0.41) **composed** reach 0.625 — better than
+either alone. OGR is a referee: detectors compete on the
+[leaderboard](https://github.com/openguardrails/openguardrails/tree/main/benchmarks), and you
+compose the ones that win on your categories.
+
+Next: see it end to end in the **[Integrations](/docs/integrations/)**.

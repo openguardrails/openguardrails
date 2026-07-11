@@ -1,0 +1,81 @@
+export const metadata = {
+  title: "Claude Code — OpenGuardrails Docs",
+  description: "Guard Claude Code with an OGR PreToolUse hook plugin — it denies risky tool calls (curl|bash, obfuscated exec, non-allowlisted egress, credential reads) before they run, even in bypass mode.",
+};
+
+# Claude Code
+
+Guard [Claude Code](https://code.claude.com) with an OpenGuardrails policy, shipped
+as a **plugin**. It registers a `PreToolUse` hook that turns each risky tool call
+into an OGR `GuardEvent`, evaluates it against a policy you own, and returns a
+`Verdict` — **deny, ask, or allow** — *before* the call runs.
+
+Repo: [openguardrails-instrumentation-claude-code](https://github.com/openguardrails/openguardrails/tree/main/integrations/claude-code).
+
+## Why a hook, and why it matters
+
+Claude Code already has an auto-mode command classifier and an OS sandbox. The gap:
+
+- The classifier only runs in **auto mode**. In **bypass** mode
+  (`--dangerously-skip-permissions`) it doesn't gate anything.
+- The sandbox is network-deny-by-default, but the default
+  `allowUnsandboxedCommands: true` lets a blocked command **retry unsandboxed,
+  with no prompt**, in bypass mode.
+
+So a single `curl … | bash` from a phishing site can run unchecked — which is how a
+real AMOS Stealer infection happened
+([writeup](/blog/when-your-coding-agent-installs-malware/)).
+
+**`PreToolUse` hooks fire *above* the permission system.** A hook returning
+`permissionDecision: "deny"` blocks the call **even in bypass mode** — the one
+place the built-in classifier can't reach. This integration puts an OGR policy
+there. It is the `agent_hook` altitude, the same one the Hermes `pre_tool_call`
+binding uses.
+
+## Install
+
+```
+/plugin marketplace add openguardrails/openguardrails
+/plugin install openguardrails@openguardrails
+```
+
+Requires Node (already a Claude Code dependency) — no other dependencies. To test
+from a local checkout: `/plugin marketplace add /path/to/the/repo`.
+
+## What it catches out of the box
+
+| Tool call | Decision |
+| --- | --- |
+| `curl … \| bash`, remote script → interpreter | **deny** |
+| `base64 -d … \| sh`, obfuscated payload → shell | **deny** |
+| `rm -rf /` / `~` / `$HOME` | **deny** |
+| `curl https://<host-not-in-allowlist>/…` | **ask** (egress) |
+| read of `~/.ssh`, `~/.aws`, `.env`, Keychain, cookies | **ask** |
+| `… \| sudo` | **ask** |
+| everything else | **allow** (silent) |
+
+The rules and egress allow-list live in `policy/policy.json` — the OGR policy you
+own ([how to configure](/docs/configuring-policy/)). `PreToolUse` hooks compose
+**most-restrictive-wins**, which is OGR's `deny-wins`. On a benign call the hook
+stays silent. It **fails open** on its own internal errors (a guardrail must never
+brick the agent) and **fails closed** on a matched rule.
+
+## Plug in a security vendor
+
+The reference build uses the deterministic OGR config-rules detector — enough to
+stop the download-and-execute class. The extension point is the whole idea: a
+vendor implements one interface, `evaluate(GuardEvent) → Verdict`, and composes
+alongside these rules (`deny-wins` / quorum) **without changing the plugin or
+Claude Code**. Threat-intel / IOC, a prompt-injection model, an LLM judge over your
+own model — all plug in behind the same `GuardEvent`. See the
+[spec](https://github.com/openguardrails/openguardrails) and
+[GuardEvent & Verdict](/docs/concepts/event-verdict/).
+
+## Honest limits
+
+OGR guards the **agent** — it prevents the dangerous call at the boundary. It is
+**not** antivirus / EDR: once code executes and escapes to OS-level root
+persistence, it is no longer an agent action and OGR doesn't see it. For
+defense-in-depth, keep Claude Code's sandbox on and set
+`allowUnsandboxedCommands: false`. Provenance-aware verdicts (tainting from
+untrusted tool output via a `PostToolUse` hook) are a planned follow-up.

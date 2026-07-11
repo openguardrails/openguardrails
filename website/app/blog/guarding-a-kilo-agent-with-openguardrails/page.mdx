@@ -1,0 +1,65 @@
+export const metadata = {
+  title: "From AI Gatekeeper to OpenGuardrails: guarding Kilo CLI",
+  description:
+    "Kilo CLI had a bespoke LLM command-approval classifier. We routed it through OpenGuardrails — one GuardEvent → Verdict, composed detectors, your own model as judge — and deleted the backend enum.",
+};
+
+<p className="text-xs uppercase tracking-[0.2em] text-zinc-500 mb-2">2026-06-29</p>
+
+# From AI Gatekeeper to OpenGuardrails: guarding Kilo CLI
+
+*[Kilo CLI](https://github.com/Kilo-Org/kilocode) had a bespoke command-approval classifier — the "AI Gatekeeper." We made it delegate to OpenGuardrails instead, and deleted the one-off backend enum.*
+
+Kilo's gatekeeper ([issue #9138](https://github.com/Kilo-Org/kilocode/issues/9138), modeled on Claude Code's auto mode) sat on the **would-auto-approve** path: when a rule was about to auto-approve a tool call, an LLM classifier got a vote first — block the obviously-dangerous, let the obviously-safe through, reduce prompt fatigue without going fully YOLO. A good idea with a problem: it was a one-off. One model's guess, one bespoke backend abstraction, no way to plug in a real security vendor.
+
+## The change: produce the verdict via OGR
+
+[PR #11619](https://github.com/Kilo-Org/kilocode/pull/11619) keeps the gate's
+*placement* and *safety properties* but swaps out *how the verdict is produced*. The
+gated call becomes an OGR `GuardEvent`, runs through the OGR `Runtime`, and the
+composed `Verdict` (`allow` / `block` / `require_approval`) maps to the gate
+decision:
+
+```
+would-auto-approve call
+  └─ OGR GuardEvent
+       └─ Runtime composes (deny-wins):
+            • ConfigRulesDetector   (deterministic curl|bash, rm -rf, …)
+            • OwnModelJudge         (the user's own model, reasoning-blind)
+       └─ Verdict → allow (proceed) · block (deny-and-continue) · require_approval (ask the human)
+```
+
+The whole bespoke `ClassifierProvider` backend enum (`own` / `http` / the stubbed
+`og-*`) is **gone**. "Local vs hosted," "use my own model" — those aren't Kilo-level
+backend types anymore; they're just which OGR detectors you compose. A security
+vendor implements `evaluate(GuardEvent) → Verdict` once and slots in next to the
+built-ins.
+
+## What survived (the parts that were right)
+
+- **Reasoning-blind transcript** — the judge sees only the user's messages and the
+  bare tool call, never the agent's prose or prior tool *output*. Both a
+  prompt-injection defense (hostile content arrives via tool output) and an
+  anti-rationalization defense (the agent can't talk the judge into a bad call).
+- **Tiered short-circuit** — read-only tools never reach the classifier.
+- **Fail-closed** — any error / unavailable judge → escalate to a human, not approve.
+- **Per-session backstop** — repeated denials in one turn escalate to the human.
+
+`require_approval` is now a **first-class verdict** that becomes a human prompt,
+because Kilo has an interactive ask path (unlike opencode today). Composition is
+`deny-wins`, fail-closed for `security.*`.
+
+## Why route through OGR at all
+
+Because the gatekeeper shouldn't be a Kilo-only mechanism. The same enforcement
+point is going into opencode upstream ([#34329](https://github.com/anomalyco/opencode/pull/34329))
+and ships for [Claude Code](/docs/integrations/claude-code/). Routing through OGR
+means Kilo shares **one policy model, one composition engine, and one
+[benchmark](https://github.com/openguardrails/openguardrails/tree/main/benchmarks)** with every
+other runtime — and gets a real detector ecosystem instead of one prompt.
+
+---
+
+*[Spec](https://github.com/openguardrails/openguardrails) ·
+[Composition](/docs/concepts/composition/) ·
+[GuardEvent & Verdict](/docs/concepts/event-verdict/).*

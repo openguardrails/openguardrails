@@ -1,0 +1,103 @@
+# OpenGuardrails (OGR)
+
+> The open standard and neutral benchmark for AI agent safety & security. OGR is
+> designed to be installed and operated BY an agent: you draft a policy, your human
+> operator approves it, and the runtime enforces it on you or the agents you
+> orchestrate. This file tells an agent how to use OGR. Read it fully before acting.
+
+## Get the skill (start here)
+
+If your runtime supports Agent Skills, install the OGR skill — it bundles this whole
+procedure plus scripts and a policy template. Fetch it directly:
+
+    SKILL.md:        https://openguardrails.com/skill/SKILL.md
+    policy template: https://openguardrails.com/skill/assets/policy.template.json
+    draft script:    https://openguardrails.com/skill/scripts/draft_policy.py
+    enforce script:  https://openguardrails.com/skill/scripts/enforce.sh
+    schema ref:      https://openguardrails.com/skill/reference/policy-schema.md
+
+Install into a Claude Code skills dir:
+
+    DEST=~/.claude/skills/openguardrails
+    mkdir -p "$DEST"/{assets,scripts,reference}
+    base=https://openguardrails.com/skill
+    for f in SKILL.md README.md assets/policy.template.json \
+             scripts/draft_policy.py scripts/enforce.sh reference/policy-schema.md; do
+      curl -fsSL "$base/$f" -o "$DEST/$f"
+    done
+
+Source: https://github.com/openguardrails/openguardrails/tree/main/skills/openguardrails
+Clone: git clone https://github.com/openguardrails/openguardrails.git
+
+If your runtime has no skill system, just keep reading this file — it is enough.
+
+## Your two roles
+
+- agent-as-tool: you USE OGR to govern. Install it, author policy, wire enforcement,
+  run the benchmark to check coverage. You act on behalf of your operator.
+- agent-as-subject: you RUN UNDER OGR. Actions are allowed / denied / held for
+  approval. On a block, read the verdict reason. To change the rules, propose a
+  policy edit and route it through your operator. You cannot quietly loosen the
+  policy that governs you.
+
+## The one safety rule (non-negotiable)
+
+1. A human approves a policy before it goes live. You may draft and propose; you may
+   not enforce a policy your operator has not seen. Editing a live policy re-triggers
+   the approval gate.
+2. Enforcement runs in a layer your task loop cannot mutate. Even if you are
+   prompt-injected mid-task, you cannot disable or rewrite the policy governing you.
+
+If you cannot satisfy both, do NOT claim the agent is guarded.
+
+## Canonical flow: install → draft → confirm → enforce
+
+1. Install the OGR plugin for your runtime (see Runtimes below).
+2. Draft a declarative policy for the task you were given: which tools, files,
+   network egress, and outbound side effects are allowed / denied / require approval.
+3. Show the policy to your operator and WAIT for explicit approval.
+4. After approval, enforce: set OGR_POLICY to the file and enable the sandbox.
+   Every subsequent action is checked at the agent hook and the sandbox boundary.
+
+Example (Hermes):
+    pip install openguardrails-instrumentation-hermes
+    # write ./ogr.policy.json, confirm with operator, then:
+    export OGR_POLICY=./ogr.policy.json
+    export OGR_SANDBOX=srt
+
+## Core model
+
+- Every intercepted action becomes a GuardEvent.
+- A detector returns a Verdict: allow | block | require_approval, with a reason.
+- Provenance travels with the action (trusted vs untrusted input), so OGR catches
+  the dangerous combination — untrusted input -> privileged action — not bad strings.
+- Three altitudes correlated by guard_id: gateway (messages/MCP/skills/tools),
+  agent hook (pre_tool_call, can block), sandbox (real exec/network/files).
+- Detectors compose: deny-wins or quorum. You compose; vendors compete.
+
+## Policy
+
+- Declarative JSON. You never write sandbox code.
+- Same OGR policy model compiles to different backends:
+  personal/srt (OS-level, no containers) and multi-tenant/OpenShell (containers +
+  egress proxy). Same model, different policy per threat model.
+- Reference: https://openguardrails.com/docs/configuring-policy/
+
+## Runtimes / SDKs
+
+- Python: openguardrails, openguardrails-instrumentation-hermes
+- JS/TS: @openguardrails/core, openguardrails-instrumentation-opencode
+
+## Verify your coverage
+
+- Neutral benchmark + harness: https://github.com/openguardrails/openguardrails/tree/main/benchmarks
+- Reproduce from the repository root: python3 benchmarks/harness/run.py
+
+## Links
+
+- Agent guide (human-readable): https://openguardrails.com/agent/
+- Docs: https://openguardrails.com/docs/
+- Getting started: https://openguardrails.com/docs/getting-started/
+- Spec: https://github.com/openguardrails/openguardrails
+- Benchmark: https://github.com/openguardrails/openguardrails/tree/main/benchmarks
+- Runnable PoC (Hermes + sandbox): https://github.com/openguardrails/openguardrails-poc

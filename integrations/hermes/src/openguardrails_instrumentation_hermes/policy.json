@@ -1,0 +1,51 @@
+{
+  "_comment": "Hermes-tuned OGR policy. Extends the base poc policy with rules an agent will realistically trip. Used by the ogr-guard plugin (bridge prefers this file); override with OGR_POLICY.",
+  "composition": {
+    "security.*":      { "strategy": "deny-wins", "on_all_failed": "block" },
+    "safety.toxicity": { "strategy": "quorum", "quorum": { "count": 2, "min_score": 0.8 }, "on_all_failed": "allow" },
+    "default":         { "strategy": "deny-wins" }
+  },
+  "sandbox": {
+    "_comment": "One OGR policy configures BOTH the decision detectors AND the sandbox backend (srt for personal, OpenShell for team). The integration adapters read this block to generate srt settings / OpenShell OPA-Rego.",
+    "workspace_write": [".", "/tmp"],
+    "deny_read": ["~/.ssh", "~/.aws", "~/.hermes/auth.json", "~/.netrc", "~/.config/gcloud"],
+    "deny_write": [".env", "~/.gitconfig", "~/.zshrc", "~/.bashrc"],
+    "egress_allowlist": ["api.github.com", "*.github.com", "pypi.org", "*.pypi.org", "files.pythonhosted.org"],
+    "deny_egress": [],
+    "resource_limits": { "cpus": 2, "memory_mb": 2048, "pids": 256 }
+  },
+  "config_rules": {
+    "egress_allowlist": ["api.github.com", "pypi.org"],
+    "secret_env_markers": ["SECRET", "TOKEN", "AWS_", "PASSWORD", "PRIVATE_KEY"],
+    "command_rules": [
+      {
+        "id": "secret-file-access",
+        "regex": "(\\.env\\b|/\\.aws/credentials|/\\.ssh/id_|auth\\.json|/\\.netrc|credentials\\.json|\\.hermes/auth|secrets?\\.(ya?ml|json|txt))",
+        "category": "security.secret_leak", "domain": "security",
+        "decision": "block", "score": 0.95,
+        "why": "command references a credential/secrets file — resource-based block, independent of the reader (cat, python, cp, ...)"
+      },
+      {
+        "id": "pipe-to-shell",
+        "regex": "(curl|wget)\\b.*\\|\\s*(ba)?sh",
+        "category": "security.malicious_command", "domain": "security",
+        "decision": "require_approval", "score": 0.85,
+        "why": "remote script fetched and piped directly into a shell"
+      },
+      {
+        "id": "rm-rf-root",
+        "regex": "rm\\s+-rf\\s+/(\\s|$)",
+        "category": "security.malicious_command", "domain": "security",
+        "decision": "block", "score": 1.0,
+        "why": "destructive recursive delete of filesystem root"
+      },
+      {
+        "id": "pipe-to-sudo",
+        "regex": "\\|\\s*sudo\\b",
+        "category": "security.privilege_escalation", "domain": "security",
+        "decision": "require_approval", "score": 0.7,
+        "why": "output piped into sudo"
+      }
+    ]
+  }
+}

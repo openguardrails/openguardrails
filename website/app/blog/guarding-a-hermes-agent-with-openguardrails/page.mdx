@@ -1,0 +1,237 @@
+export const metadata = {
+  title: "Guarding a Hermes agent with OpenGuardrails",
+  description:
+    "Guard a Hermes agent behind one neutral contract — intercept every tool call and real exec, enforce one policy you own, and plug in any vendor's detector without rewiring the agent.",
+};
+
+<p className="text-xs uppercase tracking-[0.2em] text-zinc-500 mb-2">2026-06-28</p>
+
+# Guarding a Hermes agent with OpenGuardrails
+
+*Guard a Hermes agent behind one neutral contract — intercept every tool call and real exec, enforce one policy you own, and plug in any vendor's detector without rewiring the agent.*
+
+OpenGuardrails (OGR) is a neutral **enforcement** contract for agent **safety and security**. You wire it into an agent once — at every point where a risky action can still be stopped — and it turns each agent action into a `GuardEvent`, runs it past whatever detectors you choose, and returns a `Verdict` that can **allow, block, or require approval** *before* the action runs.
+
+The point of a neutral layer is simple: **guard once, swap vendors freely.** You should not have to re-wire your agent to try a different prompt-injection detector. The detector is a plug-in behind one interface, and the policy that combines detectors is a file you own.
+
+Three pieces, with clean roles:
+
+| Piece | Role |
+| --- | --- |
+| **Hermes** | the agent you are guarding |
+| **OpenGuardrails / OGR** | the neutral contract + reference runtime (`GuardEvent` → `Verdict`) |
+| **a guardrails / security vendor** | plugs in behind one `Detector` interface |
+| **`GuardEvent`** | a normalized agent action + the provenance of its inputs |
+| **`policy.json`** | the composition rules the deployer owns |
+
+This post is operational: how to actually take a [Hermes](https://github.com/NousResearch/hermes-agent) agent and guard it — what Hermes exposes, what you install, what one policy controls, and how to verify it end to end.
+
+## 1. Why agent security is its own problem
+
+Ordinary logging and APM record *that* a request happened. They will not stop a `curl … | bash` whose URL came from a web page the agent read three steps earlier — and stopping it, not recording it, is the job. Agent risk lives in places ordinary tooling does not act:
+
+- **The action, not the log line.** The dangerous thing is the *tool call about to run*, before it runs — not a record of it afterward.
+- **Provenance, not the string.** `curl https://get.example.sh | bash` typed by the user is a normal install. The *same bytes* synthesized from a web page the agent just fetched is prompt injection. The command is identical; the *origin* is what differs.
+- **Altitude.** The agent's tool-call hook sees the *intent* (`bash deploy.sh`). The sandbox sees the *real syscalls* the script shells out to. A check at one altitude is blind to what the other sees.
+
+So what you need is not "a log of what happened." It is a **normalized, enforceable representation of each agent action, carrying the trust labels of the inputs that produced it, at every altitude where you can still say no.** That is exactly what a `GuardEvent` is.
+
+## 2. What a Hermes agent exposes
+
+OpenGuardrails defines four **altitudes** — interception points in an agent's lifecycle where you can still say no. The nice thing about Hermes is that it already exposes three of them natively, so guarding it needs **no proxy and no core patch**:
+
+| OGR altitude | Hermes surface | Can it block? | What it sees |
+| --- | --- | --- | --- |
+| `gateway` (LLM I/O) | `pre/post_api_request` hooks | observe only | full prompt + completion |
+| `agent_hook` (tool lifecycle) | `pre_tool_call` hook | **yes** | tool name + args, *before* dispatch |
+| provenance | `post_tool_call` hook | taints | tool results (web/mcp → untrusted) |
+| `sandbox` (real exec) | wraps `BaseEnvironment.execute` | **yes** | real `argv` + secret env keys + cwd |
+
+Only the **sandbox** altitude needs a wrapper, because Hermes has no environment-level hook. The instrumentation installs one idempotent wrapper around the single exec chokepoint and **fails open** if Hermes' internals differ — instrumentation should never be the thing that takes your agent down.
+
+### A word on "sandbox"
+
+By default Hermes has **no syscall sandbox** — no gVisor, no seccomp, no firejail. What Hermes calls a "sandbox" is a pluggable `Environment` backend:
+
+- `local` — `subprocess.Popen` **on the host**. Zero isolation. This is the default.
+- `docker` — `docker exec` into a container (UID 10000 — the only real boundary).
+- plus Modal / SSH / Daytona.
+
+Every backend funnels through one `BaseEnvironment.execute()` call, which is why a single wrapper covers them all. We will come back to which sandbox to pick (§6), because it determines how strong your last line of defense is.
+
+## 3. The pipeline
+
+```
+ Hermes loop ──pre_tool_call──▶ agent_hook ┐
+ tool result ──post_tool_call─▶ provenance ┤
+ LLM I/O     ──pre/post_api───▶ gateway    ├─▶ OGR Runtime ─▶ [detector ⊕ detector] ─▶ Verdict
+ real exec   ──execute wrap───▶ sandbox    ┘     (compose)        (your vendors)
+        ▲                                              │
+        └──────────── guard_id + provenance ◀──────────┘
+```
+
+It is a fan-in / fan-out. Each altitude emits a `GuardEvent` to **one** `Runtime` (the Policy Decision Point). The Runtime fans out to your **detectors**, **composes** their verdicts under a policy you own (`deny-wins`, `quorum`, `first-available`), propagates provenance, and **correlates altitudes by `guard_id`** so a later interception point can only ever *tighten* an earlier decision — never loosen it.
+
+**The detector is the vendor surface.** A detector is OGR-conformant if it maps a `GuardEvent` to a `Verdict`. Rules, a classifier, or a hosted model — the implementation is the vendor's competitive surface, and `provider` is its stable identity for attribution and benchmarking:
+
+```python
+from openguardrails.detectors import Detector
+from openguardrails import Verdict, Category
+
+class AcmeInjectionDetector(Detector):
+    provider = "acme.injection"
+    handles  = ("tool_call", "exec", "model_output")
+    def evaluate(self, ev):
+        ...  # rules, a classifier, or a hosted API call — your IP
+        return Verdict(ev.event_id, ev.guard_id, self.provider, "block",
+                       categories=[Category("security.prompt_injection", "security", 0.97)])
+```
+
+Add it to `Runtime(detectors=[...])`, reference it in `policy.json`, and it now enforces across all four altitudes — without touching the agent. That is the "guard once, swap vendors freely" promise made concrete.
+
+## 4. Setup
+
+### Install
+
+```bash
+pip install openguardrails-instrumentation-hermes
+# pulls in `openguardrails`, the zero-dependency reference runtime
+```
+
+One small instrumentation package per target agent, sitting on top of one neutral SDK (`openguardrails`).
+
+### Bind the hooks
+
+```python
+from openguardrails_instrumentation_hermes import register
+register(ctx)   # binds the 4 hooks + installs the sandbox wrapper
+```
+
+Or drop the bundled `plugin.yaml` into a Hermes plugin directory and `hermes plugins enable ogr-guard`. On startup you get one audit line proving what bound:
+
+```
+[load] ogr-guard registered: hooks=[pre/post_tool_call, pre/post_api_request] sandbox_wrap=True policy=…/policy.json
+```
+
+### The policy — this is the whole point
+
+You do not write guard code per deployment; you write **one JSON file**. A Hermes-tuned default ships inside the package; override it with `OGR_POLICY=/path/to/policy.json`. Two blocks matter:
+
+```json
+{
+  "composition": {
+    "security.*":      { "strategy": "deny-wins", "on_all_failed": "block" },
+    "safety.toxicity": { "strategy": "quorum", "quorum": { "count": 2, "min_score": 0.8 } },
+    "default":         { "strategy": "deny-wins" }
+  },
+  "config_rules": {
+    "egress_allowlist": ["api.github.com", "pypi.org"],
+    "command_rules": [
+      { "id": "pipe-to-shell", "regex": "(curl|wget)\\b.*\\|\\s*(ba)?sh",
+        "category": "security.malicious_command", "decision": "require_approval", "score": 0.85 },
+      { "id": "rm-rf-root", "regex": "rm\\s+-rf\\s+/(\\s|$)",
+        "category": "security.malicious_command", "decision": "block", "score": 1.0 }
+    ]
+  }
+}
+```
+
+`composition` is how you combine vendors — *require two independent detectors to agree* (`quorum`) for noisy categories, *any deny wins* for hard security. `config_rules` is the built-in, model-free detector so you have a baseline before you add a vendor.
+
+### Pick the sandbox enforcement backend
+
+```bash
+export OGR_SANDBOX=srt      # default is `argv` (decision only, no OS isolation)
+```
+
+More on this in §6 — it is the difference between "we decided not to" and "the OS made it impossible."
+
+## 5. What you see
+
+The reference runtime writes a structured audit trail of every decision (point `OGR_AUDIT_LOG` wherever you like) — a vendor can surface this however its console likes, but you can read it raw today. Run the self-test, which drives the **real hook signatures** with no Hermes install required:
+
+```bash
+python -m openguardrails_instrumentation_hermes.selftest
+```
+
+```
+A. terminal: ls -la   [trusted user, clean session]
+  agent_hook  -> allow
+  sandbox     -> allow   deny-wins → allow
+
+B. web_extract result taints session, then terminal: curl ... | bash
+  agent_hook  -> BLOCK   security.malicious_command(0.85), security.prompt_injection(0.90)
+                         deny-wins → block; matched 'pipe-to-shell';
+                         privileged action derives from untrusted content (injection)
+
+C. SAME command, fresh session [trusted user]: curl ... | bash
+  agent_hook  -> require_approval   security.malicious_command(0.85)
+                         deny-wins → require_approval; matched 'pipe-to-shell'
+
+D. terminal: bash deploy.sh  (hook allows; sandbox inspects real exec)
+  agent_hook  -> allow
+  sandbox     -> require_approval   sandbox tightened what the hook allowed
+```
+
+Read **B vs C** carefully — they are the same command. B is **blocked** because a web fetch tainted the session and the privileged action now derives from untrusted content; C only requires approval because it came from the trusted user. **Provenance decided, not the string.** And **D** is defense in depth: the tool-call hook allowed a benign-looking `bash deploy.sh`, but the sandbox altitude saw the real `curl | bash` it shelled out to and tightened the verdict.
+
+Verified against real Hermes (2026-06-28): benign `echo` allowed and executed; `cat ~/.hermes/auth.json` blocked at `agent_hook` *before* dispatch — no read, no leak.
+
+## 6. Extending: your laptop, then your fleet
+
+The same OGR `sandbox` policy block compiles to two enforcement backends. You write the policy once; you swap the boundary.
+
+### Personal — Hermes + Anthropic `srt` (no Docker)
+
+[`srt`](https://github.com/anthropic-experimental/sandbox-runtime) is a containerless, OS-level sandbox (`sandbox-exec` on macOS, `bubblewrap` on Linux) that maps perfectly onto Hermes' default `local` backend.
+
+```bash
+npm install -g @anthropic-ai/sandbox-runtime   # the `srt` CLI (Node, not pip)
+export OGR_SANDBOX=srt
+```
+
+OGR compiles your policy's `sandbox` block into srt settings and runs each allowed command under it. Now the OGR decision happens first at `agent_hook` (intent), and srt enforces the *resource* boundary at the syscall level — **closing the argv blind spot**. The demo proves all five cases: benign allowed; `cat ~/.hermes/auth.json` blocked; a `python3` heredoc that `open()`s the same file *also* blocked ("Operation not permitted"); egress to a non-allowlisted host blocked (CONNECT 403); `api.github.com` allowed.
+
+### Multi-tenant — Hermes + NVIDIA OpenShell
+
+For a shared fleet you want hard container isolation, central egress policy, and credentials that never enter the sandbox. The same OGR `sandbox` block compiles to **OPA/Rego** the OpenShell egress proxy enforces plus a sandbox config the supervisor launches — but you ship a *stricter* policy, because the threat model is different (no host filesystem, tight per-tenant allowlist, hard CPU/mem/pid limits). Same model, different policy:
+
+```json
+"sandbox": {
+  "workspace_write":  ["/workspace"],
+  "deny_read":        ["/etc", "/var", "**/secrets/**"],
+  "egress_allowlist": ["api.internal.corp"],
+  "resource_limits":  { "cpus": 1, "memory_mb": 1024, "pids": 128 }
+}
+```
+
+The value proposition is the **model**: you write the policy that fits each deployment once, in OGR — not in srt JSON for the laptop and hand-written Rego for the cluster.
+
+### No sandbox at all?
+
+OGR degrades; it does not fail. With the `local` backend there is no isolation boundary, so the only **enforcement** altitude is `pre_tool_call` (inspect argv before exec and block). You keep policy, provenance, and gateway detection — but you lose the adversary-proof view, so a clever agent can obfuscate argv past the intent check (scenario D is exactly why). Run tools under `srt` or `docker` so the `sandbox` altitude exists.
+
+## 7. Running the example
+
+```bash
+# offline, no Hermes, no API key — drives the real hooks:
+python -m openguardrails_instrumentation_hermes.selftest
+
+# preview the srt settings your policy compiles to:
+python - <<'PY'
+import json
+from openguardrails_instrumentation_hermes import bridge
+from openguardrails_instrumentation_hermes.sandbox import srt
+print(json.dumps(srt.policy_to_srt_settings(bridge.get_runtime_policy()), indent=2))
+PY
+```
+
+Everything here is stdlib-only and runs without a model. To put a real model behind the LLM-judge detector, implement `LLMBackend.complete()` (OpenAI / Anthropic — the latest Claude models like Opus 4.8 are a strong fit for an adjudicating judge) and pass it in; the prompt, provenance signals, and JSON parsing are already wired.
+
+## The takeaway
+
+The reason to put a neutral contract between your agent and its guardrails is that you keep your options open — the decision point is yours, the detector is swappable, and the policy is one file you own. **OpenGuardrails is the neutral contract; a Hermes agent is the workload; the detector is where a security vendor competes.** Guard once, write one policy, and choose your guardrails on the merits — not because you are locked in.
+
+- Spec: [github.com/openguardrails/openguardrails](https://github.com/openguardrails/openguardrails)
+- SDK: `pip install openguardrails-instrumentation-hermes`
+- Benchmark (how detectors are scored): [github.com/openguardrails/openguardrails-bench](https://github.com/openguardrails/openguardrails/tree/main/benchmarks)

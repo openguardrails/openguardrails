@@ -1,0 +1,10 @@
+# Cloudflare Pages config. Pages reads this at the repo root and uses
+# pages_build_output_dir as the source of truth for the publish directory,
+# so it no longer depends on a dashboard setting.
+#
+# This is a static site (Next.js `output: "export"` → ./out). Keep the Pages
+# "Framework preset" set to None and build command `npm run build`; do NOT use
+# the Next.js preset (that runs next-on-pages and expects an SSR/Workers build).
+name = "openguardrails-com"
+pages_build_output_dir = "./out"
+compatibility_date = "2024-09-01"

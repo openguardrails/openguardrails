@@ -1,0 +1,79 @@
+export const metadata = {
+  title: "Guarding Claude Code with OpenGuardrails (even in bypass mode)",
+  description:
+    "Install an OGR plugin and risky Claude Code tool calls are denied before they run — even in bypass mode, because the PreToolUse hook fires above the permission system. The one place the built-in classifier can't reach.",
+};
+
+<p className="text-xs uppercase tracking-[0.2em] text-zinc-500 mb-2">2026-06-29</p>
+
+# Guarding Claude Code with OpenGuardrails (even in bypass mode)
+
+*Install one plugin and risky [Claude Code](https://code.claude.com) tool calls are denied before they run — even when you've turned permissions off.*
+
+Claude Code already has an auto-mode command classifier and an OS sandbox. So why add
+OpenGuardrails? Because of the gap those leave — the gap a real AMOS Stealer
+infection drove straight through
+([the incident](/blog/when-your-coding-agent-installs-malware/)):
+
+- The classifier only runs in **auto mode**. In **bypass** mode
+  (`--dangerously-skip-permissions`) it doesn't gate anything.
+- The sandbox is network-deny-by-default, but the default
+  `allowUnsandboxedCommands: true` lets a blocked command **retry unsandboxed, with
+  no prompt**, in bypass mode.
+
+So a single `curl … | bash` from a #1-ranked phishing site can run unchecked.
+
+## The enforcement point: PreToolUse, above the permission system
+
+The key fact: **`PreToolUse` hooks fire *before* Claude Code's permission-mode
+check, and a hook returning `permissionDecision: "deny"` blocks the call even in
+bypass mode.** Users can't wave it away by changing modes. That's exactly where a
+guardrail belongs — and it's the one place the built-in classifier (auto mode only)
+can't reach.
+
+The OGR plugin —
+[`openguardrails-instrumentation-claude-code`](https://github.com/openguardrails/openguardrails/tree/main/integrations/claude-code)
+— puts an OGR policy there:
+
+```
+/plugin marketplace add openguardrails/openguardrails
+/plugin install openguardrails@openguardrails
+```
+
+```
+tool call → PreToolUse hook → @openguardrails/core Runtime
+   → GuardEvent → composed Verdict → permissionDecision (deny | ask | allow)
+```
+
+It runs the real OGR runtime (`@openguardrails/core`), bundled so the plugin installs
+with just Node — no `npm install`. On a benign call it stays silent; it **fails
+open** on its own errors (a guardrail must never brick the agent) and **fails
+closed** on a matched rule.
+
+## What it catches out of the box
+
+| Tool call | Decision |
+| --- | --- |
+| `curl … \| bash`, obfuscated payload → shell | **deny** |
+| `rm -rf /` / `~` / `$HOME` | **deny** |
+| egress to a host not in the allow-list | **ask** |
+| reads of `~/.ssh`, `~/.aws`, `.env`, Keychain, cookies | **ask** |
+| everything else | **allow** (silent) |
+
+The rules are an OGR policy you own — and a security vendor's detector (threat-intel,
+a prompt-injection model) composes alongside them by implementing one interface,
+with no change to the plugin or Claude Code.
+
+## Honest limits
+
+OGR guards the **agent** — it stops the dangerous call at the boundary. It is **not**
+antivirus / EDR: once code executes and escapes to OS-level root persistence, it's no
+longer an agent action. Keep the sandbox on and set `allowUnsandboxedCommands:
+false` for defense-in-depth. Full walkthrough: the
+[Claude Code integration doc](/docs/integrations/claude-code/).
+
+---
+
+*[Spec](https://github.com/openguardrails/openguardrails) ·
+[the incident this prevents](/blog/when-your-coding-agent-installs-malware/) ·
+[repo](https://github.com/openguardrails/openguardrails/tree/main/integrations/claude-code).*

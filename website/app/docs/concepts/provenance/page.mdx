@@ -1,0 +1,55 @@
+export const metadata = {
+  title: "Provenance & guard-context — OpenGuardrails Docs",
+  description: "Provenance labels track where an agent's inputs came from (trusted vs untrusted), so the same action can be judged differently by origin.",
+};
+
+# Provenance & guard-context
+
+The single most important signal for agent security isn't the command — it's
+**where the command came from**. `curl x | bash` typed by the user is a normal
+install; the *same* command an agent decided to run after reading an untrusted web
+page is **prompt injection**. Provenance is how OGR tells them apart.
+
+## Provenance labels
+
+Every `GuardEvent` carries provenance: a list of labels on the inputs that produced
+the action.
+
+```json
+"provenance": [
+  { "source": "web", "trust": "untrusted", "ref": "evt-7c1",
+    "taint_tags": ["external_content", "executable_intent"] }
+]
+```
+
+- `source` — `user`, `web`, `tool_result`, `mcp`, `file`, …
+- `trust` — `trusted`, `untrusted`, `unverified`
+- `taint_tags` — propagating markers, e.g. `external_content`, `executable_intent`
+
+## Taint propagation
+
+When an agent reads untrusted content (a web fetch, an MCP tool result), the session
+becomes **tainted**. Subsequent actions inherit that untrusted provenance. In the
+Hermes plugin this is automatic: a `web_extract` result taints the session, so the
+next `exec` event arrives labelled `untrusted` — and a provenance-aware detector
+escalates `require_approval` → `block`.
+
+This is also why provenance-aware detection wins on injection: on the OGR benchmark,
+provenance-aware detectors score **0.889 F1** on prompt injection vs **0.333** for a
+config rule that only sees the string.
+
+## guard-context
+
+Provenance and the `guard_id` propagate across altitudes out-of-band, via a
+compact **guard-context** string that rides alongside the action:
+
+```
+01|<guard_id>|<session_id>|<flags>
+```
+
+The agent hook mints it; the sandbox inherits it. That's what lets the sandbox judge
+"a `bash` whose origin was untrusted" rather than just "a `bash`", and lets the
+Runtime correlate both observations into one decision.
+
+Next: **[Composition](/docs/concepts/composition/)** — combining multiple detectors'
+verdicts.

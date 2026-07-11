@@ -1,0 +1,14 @@
+[tool.uv.workspace]
+members = [
+  "packages/python",
+  "services/gateway",
+  "integrations/hermes",
+  "integrations/langgraph",
+]
+
+[tool.pytest.ini_options]
+testpaths = [
+  "packages/python/tests",
+  "services/gateway/tests",
+  "integrations/langgraph/tests",
+]

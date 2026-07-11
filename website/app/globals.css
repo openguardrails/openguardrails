@@ -1,0 +1,28 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-ink text-zinc-100 antialiased;
+  background-image: radial-gradient(60% 50% at 50% 0%, rgba(96, 165, 250, 0.08), transparent 70%);
+}
+
+.container-x {
+  @apply max-w-6xl mx-auto px-6 sm:px-8;
+}
+
+.card {
+  @apply bg-white/[0.02] border border-white/[0.07] rounded-2xl;
+}
+
+.codeblock {
+  @apply font-mono text-[12.5px] leading-relaxed text-zinc-300 bg-black/40 border border-white/[0.07] rounded-xl p-5 overflow-x-auto whitespace-pre;
+}
+
+.eyebrow {
+  @apply text-xs font-semibold uppercase tracking-[0.3em] text-accent;
+}

@@ -1,0 +1,4 @@
+{
+  "$extends": "openguardrails:base",
+  "$source": "thin overlay — inherits the canonical PAP base bundled in the openguardrails core. The agent-hook altitude reads config_rules to judge every tool_call carried in a GuardEvent. Add overlay keys here (e.g. extra command_rules, an untrusted_result_tools list) to diverge from base; with none, this binding tracks the base exactly."
+}

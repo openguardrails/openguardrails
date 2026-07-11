@@ -1,0 +1,11 @@
+[
+  "openguardrails.com/account*",
+  "openguardrails.com/api/*",
+  "openguardrails.com/claim/*",
+  "openguardrails.com/core*",
+  "openguardrails.com/dashboard*",
+  "openguardrails.com/login*",
+  "openguardrails.com/platform*",
+  "openguardrails.com/v1/*",
+  "www.openguardrails.com/*"
+]

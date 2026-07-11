@@ -1,0 +1,19 @@
+{
+  "name": "openguardrails",
+  "owner": {
+    "name": "OpenGuardrails",
+    "url": "https://openguardrails.com"
+  },
+  "plugins": [
+    {
+      "name": "openguardrails",
+      "source": "./integrations/claude-code",
+      "description": "OGR command-approval gate for Claude Code."
+    },
+    {
+      "name": "openguardrails-codex",
+      "source": "./integrations/codex",
+      "description": "OGR auto mode and command-approval gate for Codex."
+    }
+  ]
+}

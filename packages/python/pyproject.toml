@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "openguardrails"
+version = "0.1.2"
+description = "OpenGuardrails (OGR) reference runtime — a vendor-neutral enforcement protocol for AI agent safety & security: GuardEvent to Verdict, composed under a policy you own."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+authors = [{ name = "OpenGuardrails" }]
+keywords = ["ai", "agent", "security", "safety", "guardrails", "llm", "ogr"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Security",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+]
+dependencies = []  # stdlib only — the reference runtime has zero dependencies
+
+[project.urls]
+Homepage = "https://openguardrails.com"
+Specification = "https://github.com/openguardrails/openguardrails/tree/main/specification"
+Source = "https://github.com/openguardrails/openguardrails/tree/main/packages/python"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/openguardrails"]

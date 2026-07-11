@@ -1,1 +1,28 @@
 .DS_Store
+
+# Editors and local environments
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/
+
+# JavaScript / TypeScript
+node_modules/
+dist/
+.next/
+*.tsbuildinfo
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+*.egg-info/
+build/
+
+# Test and coverage output
+coverage/
+.coverage
+htmlcov/

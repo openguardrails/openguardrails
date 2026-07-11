@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "openguardrails-instrumentation-langgraph"
+version = "0.1.1"
+description = "Guard a custom LangGraph agent with the OpenGuardrails (OGR) protocol — a drop-in ToolNode at the agent-hook altitude, with native LangGraph interrupt() as the human-confirm gate."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+dependencies = [
+  "openguardrails>=0.1.2",
+]
+
+[project.optional-dependencies]
+# The ToolNode/decorator bindings need LangGraph; the decision core (_engine)
+# does not, so it stays testable offline without these installed.
+langgraph = [
+  "langgraph>=0.2",
+  "langchain-core>=0.3",
+]
+
+[project.urls]
+Homepage = "https://openguardrails.com"
+Specification = "https://github.com/openguardrails/openguardrails"
+Source = "https://github.com/openguardrails/openguardrails/tree/main/integrations/langgraph"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/openguardrails_instrumentation_langgraph"]

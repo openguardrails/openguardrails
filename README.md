@@ -12,11 +12,16 @@ Apache-2.0 · [openguardrails.com](https://openguardrails.com)
 
 ---
 
-This is the home of the **OpenGuardrails (OGR) specification** — the normative
-contract every adapter, detector, and sandbox speaks. OGR is **not a guardrail
-product**: it defines the wire and referees the leaderboard. Vendors compete on
-detection quality behind a common plug; users get one way to configure and
-compose safety & security across every agent they run.
+This monorepo is the home of the **OpenGuardrails (OGR) specification and its
+reference implementations**. The specification is the normative contract every
+adapter, detector, and sandbox speaks; the SDKs, integrations, gateway,
+benchmark, examples, skill, and website live alongside it so changes can be
+reviewed and tested together.
+
+OGR is **not a guardrail product**: it defines the wire and referees the
+leaderboard. Vendors compete on detection quality behind a common plug; users
+get one way to configure and compose safety & security across every agent they
+run.
 
 - We define the **wire** — events, verdicts, provenance, correlation, composition.
 - We **referee** the benchmark.
@@ -77,44 +82,63 @@ the [overview](specification/overview.md).
 
 - A detector is **OGR-conformant** if it accepts a `GuardEvent` and returns a
   valid `Verdict` against the [JSON Schemas](schema/). See [CONFORMANCE.md](CONFORMANCE.md).
-- [`openguardrails-bench`](https://github.com/openguardrails/openguardrails-bench)
-  evaluates conformant detectors on shared corpora and publishes the leaderboard.
+- The [benchmark](benchmarks/) evaluates conformant detectors on shared corpora
+  and publishes the leaderboard.
 
 ---
 
-## The ecosystem
+## Monorepo layout
 
-The spec is here. Everything that implements it lives in its own repo, discoverable by name.
-
-### Start here
-
-| Repo | What it is |
+| Path | What it contains |
 |---|---|
-| **openguardrails** (this repo) | The normative spec, schemas, taxonomy, conformance & governance. |
-| [openguardrails-examples](https://github.com/openguardrails/openguardrails-examples) | Runnable proof + the index of every integration. `pip install openguardrails && python3 demo.py`. |
-| [openguardrails-bench](https://github.com/openguardrails/openguardrails-bench) | The neutral detector leaderboard. |
-| [openguardrails-gateway](https://github.com/openguardrails/openguardrails-gateway) | Reference service for the **gateway** altitude — terminate OpenAI/Anthropic, enforce on the wire. |
+| [`specification/`](specification/) and [`schema/`](schema/) | Normative protocol, schemas, taxonomy, conformance, and governance. |
+| [`packages/python/`](packages/python/) | `openguardrails` Python runtime (PyPI). |
+| [`packages/javascript/`](packages/javascript/) | `@openguardrails/core` JavaScript/TypeScript runtime (npm). |
+| [`integrations/`](integrations/) | Claude Code, Codex, Hermes, LangGraph, OpenClaw, and opencode bindings. |
+| [`services/gateway/`](services/gateway/) | Reference OpenAI/Anthropic gateway service. |
+| [`benchmarks/`](benchmarks/) | Neutral detector benchmark and leaderboard. |
+| [`examples/`](examples/) | Runnable examples and integration index. |
+| [`skills/openguardrails/`](skills/openguardrails/) | Agent skill for drafting and enforcing policies. |
+| [`website/`](website/) | Source for [openguardrails.com](https://openguardrails.com). |
 
-### SDKs (core runtime)
-
-One per language. Every agent integration depends on the core.
-
-| SDK | Core package |
-|---|---|
-| [openguardrails-js](https://github.com/openguardrails/openguardrails-js) | `@openguardrails/core` (npm) |
-| [openguardrails-python](https://github.com/openguardrails/openguardrails-python) | `openguardrails` (PyPI) |
+Packages remain independently versioned and published. The monorepo only
+centralizes source, issues, pull requests, CI, and cross-component changes.
+See [MONOREPO.md](MONOREPO.md) for the former-repository mapping and rollout
+checklist, and [RELEASING.md](RELEASING.md) for npm/PyPI release tags.
 
 ### Integrations — three altitudes, one policy
 
-| Altitude | Target | Repo |
+| Altitude | Target | Source |
 |---|---|---|
-| **Agent hook** | Claude Code | [openguardrails-instrumentation-claude-code](https://github.com/openguardrails/openguardrails-instrumentation-claude-code) |
-| | Codex | [openguardrails-instrumentation-codex](https://github.com/openguardrails/openguardrails-instrumentation-codex) |
-| | opencode | [openguardrails-instrumentation-opencode](https://github.com/openguardrails/openguardrails-instrumentation-opencode) |
-| | OpenClaw | [openguardrails-instrumentation-openclaw](https://github.com/openguardrails/openguardrails-instrumentation-openclaw) |
-| | Hermes | [openguardrails-instrumentation-hermes](https://github.com/openguardrails/openguardrails-instrumentation-hermes) |
-| **Sandbox** | Anthropic srt (personal) · NVIDIA OpenShell (multi-tenant) | [openguardrails-instrumentation-hermes](https://github.com/openguardrails/openguardrails-instrumentation-hermes) › `sandbox/` |
-| **Gateway** | OpenAI · Anthropic · MCP | [openguardrails-gateway](https://github.com/openguardrails/openguardrails-gateway) |
+| **Agent hook** | Claude Code | [`integrations/claude-code`](integrations/claude-code/) |
+| | Codex | [`integrations/codex`](integrations/codex/) |
+| | opencode | [`integrations/opencode`](integrations/opencode/) |
+| | OpenClaw | [`integrations/openclaw`](integrations/openclaw/) |
+| | Hermes | [`integrations/hermes`](integrations/hermes/) |
+| | LangGraph | [`integrations/langgraph`](integrations/langgraph/) |
+| **Sandbox** | Anthropic srt · NVIDIA OpenShell | [`integrations/hermes`](integrations/hermes/) |
+| **Gateway** | OpenAI · Anthropic | [`services/gateway`](services/gateway/) |
+
+## Development
+
+The JavaScript packages use npm workspaces:
+
+```bash
+npm install
+npm run build
+npm test
+```
+
+The Python packages form a uv workspace and can also be installed with pip:
+
+```bash
+python -m venv .venv
+. .venv/bin/activate
+python -m pip install pytest
+python -m pip install -e packages/python -e services/gateway \
+  -e integrations/hermes -e integrations/langgraph
+python -m pytest
+```
 
 ## Principles
 

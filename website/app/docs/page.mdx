@@ -1,0 +1,45 @@
+export const metadata = {
+  title: "What is OpenGuardrails — Docs",
+  description: "OpenGuardrails (OGR) is a vendor-neutral protocol for AI agent safety & security: one policy, every agent, every sandbox, every detector.",
+};
+
+# What is OpenGuardrails
+
+OpenGuardrails (OGR) is a **vendor-neutral protocol** for AI agent safety &
+security. It defines a small, stable contract — `GuardEvent`, `Verdict`,
+provenance, and policy composition — so that **any** agent, **any** sandbox, and
+**any** safety/security detector can interoperate without custom glue.
+
+You wire OGR into an agent once, then swap detectors and enforcement backends as
+data, not code — and every decision can **allow, block, or require approval**
+before the action runs.
+
+> One policy. Every agent, every sandbox, every detector.
+
+## The problem
+
+Securing an agent today is an **N×M×L×S** mess: every Agent framework integrates
+with every safety Model, every LLM protocol, and every Sandbox, by hand. Change
+one and you rewrite the glue. OGR collapses this to **N+M+L+S**: each side speaks
+one protocol.
+
+## How it fits together
+
+An agent emits **GuardEvents** at up to three **altitudes** — the LLM gateway, the
+agent's tool hooks, and the sandbox where code actually runs. A **Runtime** fans
+each event out to one or more **detectors** (your config rules, an LLM judge, a
+third-party guard model), **composes** their **Verdicts** into one decision
+(`allow` / `block` / `require_approval` / `modify` / `redact`), and enforces it.
+**Provenance** labels (trusted vs. untrusted inputs) travel with the event, so the
+*same* command can be allowed from the user but blocked when it originated from an
+untrusted web page.
+
+## Start here
+
+- **[Getting started](/docs/getting-started/)** — secure a real agent in 5 minutes.
+- **[The three altitudes](/docs/concepts/altitudes/)** — where OGR intercepts & enforces.
+- **[Integrations](/docs/integrations/)** — Hermes + srt (personal) and Hermes + OpenShell (team).
+- **[Configure a policy](/docs/configuring-policy/)** — security as one JSON file.
+
+OGR is Apache-2.0 and governance-neutral. Detectors compete on a
+[neutral benchmark](https://github.com/openguardrails/openguardrails/tree/main/benchmarks); you compose the winners.

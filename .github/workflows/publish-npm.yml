@@ -1,0 +1,103 @@
+name: Publish npm package
+
+on:
+  push:
+    tags:
+      - "js-v*"
+      - "openclaw-v*"
+      - "opencode-v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build npm package
+    runs-on: ubuntu-latest
+    outputs:
+      package_name: ${{ steps.package.outputs.package_name }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+
+      - name: Use an OIDC-capable npm CLI
+        run: npm install --global npm@11
+
+      - name: Resolve package and validate version
+        id: package
+        shell: bash
+        run: |
+          case "$GITHUB_REF_NAME" in
+            js-v*)          directory="packages/javascript"; prefix="js-v" ;;
+            openclaw-v*)    directory="integrations/openclaw"; prefix="openclaw-v" ;;
+            opencode-v*)    directory="integrations/opencode"; prefix="opencode-v" ;;
+            *) echo "::error::Unsupported release tag: $GITHUB_REF_NAME"; exit 1 ;;
+          esac
+
+          tag_version="${GITHUB_REF_NAME#"$prefix"}"
+          package_version="$(node -p "require('./$directory/package.json').version")"
+          package_name="$(node -p "require('./$directory/package.json').name")"
+
+          if [[ "$tag_version" != "$package_version" ]]; then
+            echo "::error::Tag version $tag_version does not match $package_name@$package_version"
+            exit 1
+          fi
+
+          echo "directory=$directory" >> "$GITHUB_OUTPUT"
+          echo "package_name=$package_name" >> "$GITHUB_OUTPUT"
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Build package
+        run: npm run build --workspace "${{ steps.package.outputs.directory }}" --if-present
+
+      - name: Test package
+        run: npm run test --workspace "${{ steps.package.outputs.directory }}" --if-present
+
+      - name: Create package tarball
+        shell: bash
+        run: |
+          mkdir package
+          cd "${{ steps.package.outputs.directory }}"
+          npm pack --pack-destination "$GITHUB_WORKSPACE/package"
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: npm-package
+          path: package/*.tgz
+          if-no-files-found: error
+
+  publish:
+    name: Publish ${{ needs.build.outputs.package_name }}
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/${{ needs.build.outputs.package_name }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Use an OIDC-capable npm CLI
+        run: npm install --global npm@11
+
+      - uses: actions/download-artifact@v5
+        with:
+          name: npm-package
+          path: package
+
+      - name: Publish to npm
+        run: npm publish package/*.tgz --access public

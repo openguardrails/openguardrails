@@ -1,0 +1,67 @@
+{
+  "$comment": "OGR policy for the Claude Code gate. Deterministic config_rules + egress allowlist. Copy-then-edit; this is the OGR policy you own. A security vendor's detector would compose alongside these (deny-wins).",
+  "composition": { "strategy": "deny-wins" },
+  "egress_allowlist": [
+    "github.com", "*.github.com", "api.github.com",
+    "raw.githubusercontent.com", "objects.githubusercontent.com",
+    "pypi.org", "files.pythonhosted.org",
+    "registry.npmjs.org", "*.npmjs.org",
+    "crates.io", "static.crates.io",
+    "proxy.golang.org"
+  ],
+  "secret_read_markers": [
+    "/.ssh/", "/.aws/", "/.netrc", "/.config/gh/", "id_rsa", "id_ed25519",
+    "credentials", "/.env", ".env", "Keychains", "Local Storage", "Cookies"
+  ],
+  "command_rules": [
+    {
+      "id": "pipe-to-shell",
+      "regex": "(curl|wget|fetch)\\b[^|]*\\|\\s*(ba|z|k)?sh\\b",
+      "category": "security.malicious_command",
+      "decision": "block",
+      "why": "remote script fetched and piped directly into a shell"
+    },
+    {
+      "id": "obfuscated-exec",
+      "regex": "(base64\\s+(--?d(ecode)?)|openssl\\s+enc\\b[^|]*-d|\\bxxd\\b[^|]*-r|eval\\s+\"?\\$\\()[^|]*\\|\\s*(ba)?sh\\b",
+      "category": "security.malicious_command",
+      "decision": "block",
+      "why": "decoded/obfuscated payload piped into a shell"
+    },
+    {
+      "id": "remote-installer-to-interpreter",
+      "regex": "(curl|wget)\\b[^|]*\\|\\s*(python3?|node|ruby|perl|php)\\b",
+      "category": "security.malicious_command",
+      "decision": "block",
+      "why": "remote content piped directly into a language interpreter"
+    },
+    {
+      "id": "rm-rf-root",
+      "regex": "rm\\s+-rf?\\s+(/|~|\\$HOME)(\\s|$|/)",
+      "category": "security.malicious_command",
+      "decision": "block",
+      "why": "destructive recursive delete of a top-level directory"
+    },
+    {
+      "id": "pipe-to-sudo",
+      "regex": "\\|\\s*sudo\\b",
+      "category": "security.privilege_escalation",
+      "decision": "require_approval",
+      "why": "output piped into sudo"
+    },
+    {
+      "id": "remote-fetch-eval",
+      "regex": "\\$\\(\\s*(curl|wget)\\b",
+      "category": "security.malicious_command",
+      "decision": "block",
+      "why": "remote fetch executed via command substitution / eval"
+    },
+    {
+      "id": "download-then-exec",
+      "regex": "(curl|wget)\\b.*&&.*chmod\\s+\\+?x",
+      "category": "security.malicious_command",
+      "decision": "block",
+      "why": "download followed by chmod +x and execution — sidesteps pipe-to-shell"
+    }
+  ]
+}

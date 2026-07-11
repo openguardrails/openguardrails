@@ -1,0 +1,40 @@
+# OpenGuardrails for Codex — MANUAL install (add to ~/.codex/config.toml or a
+# project .codex/config.toml).
+#
+# Prefer the plugin install (`codex plugin marketplace add …` — see README);
+# this file is the manual equivalent for when you'd rather wire the hooks by
+# hand or can't use the plugin system. Run `npm run build` once so the bundled,
+# zero-dependency hooks exist under hooks/.
+
+# --- Auto mode: remove prompts for calls an OGR runtime judges safe ----------
+# Fires in the approval path, before the user prompt. allow -> runs unattended,
+# block -> denied, everything else (incl. runtime unavailable) -> your prompt.
+[[hooks.PermissionRequest]]
+matcher = "Bash|apply_patch|Read|Edit|Write|WebFetch|mcp__.*"
+
+  [[hooks.PermissionRequest.hooks]]
+  type = "command"
+  command = "node /ABSOLUTE/PATH/TO/openguardrails/integrations/codex/hooks/ogr-codex-automode-hook.mjs"
+  timeoutSec = 15
+  statusMessage = "OpenGuardrails auto mode"
+
+# Configure auto mode via environment (the hook reads these; export them in your
+# shell profile so Codex's hook process inherits them):
+#   OGR_SERVER=https://your-ogr-runtime:8878   # default http://127.0.0.1:8878
+#   OGR_ENROLL_TOKEN=et-…                       # required: your OGR tenant token
+#   OGR_AGENT_ID=codex-<hostname>               # stable PEP identity
+#   OGR_STATE_DIR=~/.codex/openguardrails       # PEP credential + denial counters
+#   OGR_AUTOMODE_POLICY=/path/to/automode-policy.json   # optional prose policy
+
+# --- Guardrail: block dangerous calls even under bypassed approvals ----------
+[[hooks.PreToolUse]]
+matcher = "Bash|apply_patch|Read|Edit|Write|WebFetch|mcp__.*"
+
+  [[hooks.PreToolUse.hooks]]
+  type = "command"
+  command = "node /ABSOLUTE/PATH/TO/openguardrails/integrations/codex/hooks/ogr-codex-hook.mjs"
+  timeoutSec = 15
+  statusMessage = "OpenGuardrails guardrail"
+
+# Optional: point the guardrail at your own policy instead of the bundled one.
+#   OGR_POLICY=/path/to/policy.json

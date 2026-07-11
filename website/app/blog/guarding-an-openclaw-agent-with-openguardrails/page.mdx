@@ -1,0 +1,68 @@
+export const metadata = {
+  title: "Guarding an OpenClaw agent with OpenGuardrails",
+  description:
+    "Guard OpenClaw as a pure plugin on its before_tool_call hook — with a first-class human-approval gate. block AND require_approval both work natively, no core change.",
+};
+
+<p className="text-xs uppercase tracking-[0.2em] text-zinc-500 mb-2">2026-06-29</p>
+
+# Guarding an OpenClaw agent with OpenGuardrails
+
+*Guard OpenClaw as a pure plugin on its `before_tool_call` hook — and, unlike some runtimes, get a **first-class human-approval gate** for free.*
+
+OpenGuardrails (OGR) turns each agent action into a `GuardEvent`, evaluates it, and
+returns a `Verdict` before the action runs. The OpenClaw binding —
+[`openguardrails-instrumentation-openclaw`](https://www.npmjs.com/package/openguardrails-instrumentation-openclaw)
+— is a **pure plugin** on OpenClaw's `before_tool_call` hook. No fork, no core
+change. It's built on [`@openguardrails/core`](https://www.npmjs.com/package/@openguardrails/core),
+the same runtime as the opencode and Claude Code integrations.
+
+## The nice part: a native ask
+
+Where this integration shines is the third verdict. Many agent hooks can only
+*block* a call (deny-and-continue) — they have no way to pause and ask a human.
+OpenClaw's `before_tool_call` exposes a **native human-approval gate**, so OGR maps
+the full verdict set cleanly:
+
+| OGR verdict | OpenClaw behavior |
+| --- | --- |
+| `allow` | proceed silently |
+| `require_approval` | **pause and ask the human** (native gate) |
+| `block` | deny-and-continue (the agent gets a policy error and adapts) |
+
+That makes the `require_approval` decision genuinely useful here: "this could be
+fine, but a person should look" becomes an actual prompt, not a hard stop or a
+silent pass.
+
+## How it's wired
+
+```
+OpenClaw tool call
+  └─ before_tool_call hook  →  OGR plugin
+       ├─ tool call → GuardEvent (with provenance)
+       ├─ @openguardrails/core Runtime composes detectors (deny-wins)
+       └─ Verdict → allow · require_approval (ask) · block
+```
+
+The policy is an OGR policy file you own — the default catches the
+download-and-execute class (`curl | bash`, obfuscated execs), destructive commands,
+and credential reads — and a security vendor's detector composes alongside the
+built-ins by implementing one interface, `evaluate(GuardEvent) → Verdict`.
+
+This build is published (`openguardrails-instrumentation-openclaw@0.1.0`) and
+smoke-verified against OpenClaw `2026.6.10`.
+
+## Same model, different surface
+
+OpenClaw is one more binding of the same contract. The interesting throughline
+across our integrations is *what each agent's hook can do*: opencode can block but
+not yet ask ([fix in flight](https://github.com/anomalyco/opencode/pull/34329)),
+Claude Code's [`PreToolUse` hook](/docs/integrations/claude-code/) blocks even in
+bypass mode, and OpenClaw asks natively. The `GuardEvent → Verdict` core never
+changes — only the binding does.
+
+---
+
+*[Spec](https://github.com/openguardrails/openguardrails) ·
+[GuardEvent & Verdict](/docs/concepts/event-verdict/) ·
+[`@openguardrails/core`](https://www.npmjs.com/package/@openguardrails/core).*

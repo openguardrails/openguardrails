@@ -1,0 +1,112 @@
+export const metadata = {
+  title: "Hermes + srt (personal) — OpenGuardrails Docs",
+  description: "Secure a Hermes agent on your laptop with OGR and Anthropic Sandbox Runtime (srt): OS-level filesystem and network isolation configured from one policy.json.",
+};
+
+# Hermes + srt — the personal scenario
+
+> One developer, one laptop. No containers. OS-level filesystem + network
+> isolation, configured entirely from your OGR `policy.json`.
+
+[srt](https://github.com/anthropic-experimental/sandbox-runtime)
+(`@anthropic-ai/sandbox-runtime`) is a containerless sandbox that wraps a single
+process with OS-level restrictions — `sandbox-exec` (Seatbelt) on macOS,
+`bubblewrap` on Linux. It maps perfectly onto Hermes' default `local` backend.
+
+OGR makes the **decisions** (allow / block / require-approval, provenance-aware);
+srt enforces the **resource boundary** at the OS level — so even a command that
+slips past an argv check cannot read a credential file or reach a blocked domain.
+
+```text
+Hermes tool call ─▶ ogr-guard (pre_tool_call) ─▶ OGR Runtime ─▶ allow / block      ← decision
+        │ allow                                                                       (intent)
+        ▼
+   exec chokepoint ─▶ ogr-guard sandbox ─▶ srt --settings <ogr-compiled> "<cmd>"     ← enforcement
+                                              └─ OS denies open(~/.ssh), connect(evil.com)   (resource)
+```
+
+## 1. Install
+
+```bash
+npm install -g @anthropic-ai/sandbox-runtime          # the `srt` CLI
+pip install openguardrails-instrumentation-hermes     # the OGR plugin + runtime
+
+# make Hermes discover the installed plugin (ships plugin.yaml + register())
+ln -s "$(python -c 'import openguardrails_instrumentation_hermes as m, pathlib; print(pathlib.Path(m.__file__).parent)')" \
+  ~/.hermes/plugins/ogr-guard
+hermes plugins enable ogr-guard
+```
+
+## 2. Turn on OS-level enforcement
+
+```bash
+export OGR_SANDBOX=srt        # run every Hermes exec under srt
+```
+
+The plugin compiles your policy's `sandbox` block into an srt settings file and
+wraps each command as `srt --settings <file> "<command>"`.
+
+## 3. Configure the policy
+
+You don't write sandbox code — you edit one JSON block. Copy the bundled default to
+an editable file and point `OGR_POLICY` at it:
+
+```bash
+python -c "import openguardrails_instrumentation_hermes as m, pathlib, shutil; \
+  shutil.copy(pathlib.Path(m.__file__).parent/'policy.json', 'ogr-policy.json')"
+export OGR_POLICY=$PWD/ogr-policy.json
+```
+
+```json
+{
+  "sandbox": {
+    "workspace_write":  [".", "/tmp"],
+    "deny_read":        ["~/.ssh", "~/.aws", "~/.hermes/auth.json", "~/.netrc"],
+    "deny_write":       [".env", "~/.gitconfig", "~/.zshrc"],
+    "egress_allowlist": ["api.github.com", "*.github.com", "pypi.org"]
+  }
+}
+```
+
+It compiles to srt settings:
+
+| OGR policy field           | srt setting              | Effect |
+| -------------------------- | ------------------------ | ------ |
+| `sandbox.egress_allowlist` | `network.allowedDomains` | deny-by-default network; only these hosts |
+| `sandbox.deny_read`        | `filesystem.denyRead`    | reads blocked even via `cat`, `python`, `cp` |
+| `sandbox.workspace_write`  | `filesystem.allowWrite`  | writes allowed only here |
+| `sandbox.deny_write`       | `filesystem.denyWrite`   | carve-outs inside the workspace |
+
+Preview the compiled settings without touching Hermes:
+
+```bash
+python - <<'PY'
+import json
+from openguardrails_instrumentation_hermes import bridge
+from openguardrails_instrumentation_hermes.sandbox import srt
+print(json.dumps(srt.policy_to_srt_settings(bridge.get_runtime_policy()), indent=2))
+PY
+```
+
+## 4. See it work
+
+```bash
+hermes -z "show me ~/.hermes/auth.json"
+# blocked at the agent_hook altitude by the OGR decision — and even rephrased as a
+# python heredoc, srt denies the open() because ~/.hermes/auth.json is in denyRead.
+```
+
+This is the key win: OGR's pattern rules decide on **intent**; srt enforces on the
+**real syscall**. The two layers cover each other's blind spots.
+
+## When you outgrow one laptop
+
+Shared agents, untrusted tenants, central policy and audit → move to the
+**[multi-tenant scenario (OpenShell)](/docs/integrations/hermes-openshell/)**. You
+keep the same OGR plugin and the same policy *model*, but write a stricter policy for
+the shared deployment (no host filesystem, deny-by-default egress, hard per-tenant
+limits) and swap the enforcement backend.
+
+Full source & hands-on README:
+[openguardrails-instrumentation-hermes](https://github.com/openguardrails/openguardrails/tree/main/integrations/hermes)
+(the srt adapter is [`sandbox/srt.py`](https://github.com/openguardrails/openguardrails/blob/main/integrations/hermes/src/openguardrails_instrumentation_hermes/sandbox/srt.py)).

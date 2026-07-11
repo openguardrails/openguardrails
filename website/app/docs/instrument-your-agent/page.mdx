@@ -1,0 +1,93 @@
+export const metadata = {
+  title: "Instrument your own agent — OpenGuardrails Docs",
+  description: "Connect any agent framework to OGR in four steps: find your interception points, emit GuardEvents, evaluate against a Runtime, and enforce the verdict.",
+};
+
+# Instrument your own agent
+
+The Hermes integration is a worked example, not a special case. Any agent framework
+connects to OGR the same way. If your framework exposes a tool/exec lifecycle, you
+can secure it.
+
+```bash
+pip install openguardrails   # the vendor-neutral reference runtime (zero deps)
+```
+
+## The four steps
+
+### 1. Find your interception points
+
+Map your framework's hooks to OGR altitudes. You want, in priority order:
+
+- a **pre-tool / pre-exec** hook that can **block** → `agent_hook` altitude
+- the **exec chokepoint** where commands actually run → `sandbox` altitude
+- (optional) the **LLM request/response** boundary → `gateway` altitude
+- (optional) a **post-tool** hook to taint provenance from web/MCP results
+
+Most agent frameworks have at least the first two. Hermes exposed all four as plugin
+hooks, so no forking was needed.
+
+### 2. Emit a GuardEvent at each point
+
+Translate the hook's arguments into a `GuardEvent`. Mint a `guard_id` at the first
+altitude and propagate it (a guard-context) to the exec point so they correlate.
+
+```python
+from openguardrails import GuardEvent, Provenance
+
+ev = GuardEvent(
+    kind="tool_call", observation_point="agent_hook",
+    subject={"agent_id": "my-agent", "agent_type": "custom"},
+    payload={"name": tool_name, "arguments": args},
+    provenance=current_session_provenance(),   # trusted by default; untrusted if tainted
+    guard_id=guard_id, session_id=session_id,
+)
+```
+
+### 3. Evaluate against a Runtime
+
+Build one `Runtime` from your `policy.json` and ask it for a decision.
+
+```python
+from openguardrails import Runtime
+from openguardrails.detectors.config_rules import ConfigRulesDetector
+from openguardrails.detectors.llm_judge import LLMJudgeDetector
+
+runtime = Runtime(
+    detectors=[ConfigRulesDetector(policy["config_rules"]), LLMJudgeDetector()],
+    policy=policy,
+)
+verdict = runtime.evaluate(ev)
+```
+
+### 4. Enforce the verdict
+
+```python
+if verdict.decision not in ("allow", "modify", "redact"):
+    return block(reason=verdict.reasons)   # your framework's "don't run this" path
+```
+
+At the `sandbox` altitude, "enforce" can also mean **run the command under a real
+sandbox** ([srt](/docs/integrations/hermes-srt/) /
+[OpenShell](/docs/integrations/hermes-openshell/)) compiled from the same policy —
+so a rephrased command can't bypass the intent check.
+
+## Reference implementation
+
+The Hermes plugin is ~250 lines and demonstrates all four steps:
+
+- [`bridge.py`](https://github.com/openguardrails/openguardrails/blob/main/integrations/hermes/src/openguardrails_instrumentation_hermes/bridge.py)
+  — hook callbacks ↔ GuardEvent, Runtime, provenance/taint, guard-context.
+- [`sandbox_guard.py`](https://github.com/openguardrails/openguardrails/blob/main/integrations/hermes/src/openguardrails_instrumentation_hermes/sandbox_guard.py)
+  — wrap the exec chokepoint; run under srt when configured.
+- [`__init__.py`](https://github.com/openguardrails/openguardrails/blob/main/integrations/hermes/src/openguardrails_instrumentation_hermes/__init__.py)
+  — bind the four hooks.
+
+## Graceful degradation
+
+If your framework has no sandbox, you still get the `agent_hook` altitude — OGR
+enforces on intent, and records that the adversary-proof layer was unavailable. Add
+a sandbox later without changing your policy.
+
+Start from **[Configure a policy](/docs/configuring-policy/)** and adapt the bridge
+to your framework's hooks.

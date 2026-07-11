@@ -2,7 +2,7 @@
 
 OGR conformance is intentionally narrow: it is about *speaking the wire*, not
 about detection quality. Quality is measured separately by
-[`openguardrails-bench`](https://github.com/openguardrails/openguardrails-bench).
+[`openguardrails-bench`](https://github.com/openguardrails/openguardrails/tree/main/benchmarks).
 
 There are four conformance roles. An implementation may play more than one.
 
@@ -91,4 +91,4 @@ OpenGuardrails v0 — detector + adapter conformant
 
 Validate against the schemas in `schema/` as part of your test suite. A shared
 conformance test corpus is tracked in
-[`openguardrails-examples`](https://github.com/openguardrails/openguardrails-examples).
+[`openguardrails-examples`](https://github.com/openguardrails/openguardrails/tree/main/examples).

@@ -1,0 +1,50 @@
+export const metadata = {
+  title: "The three altitudes — OpenGuardrails Docs",
+  description: "OGR guards an agent at three altitudes — gateway, agent hook, and sandbox — correlated by one guard_id so one logical action gets one decision.",
+};
+
+# The three altitudes
+
+OGR guards an agent at up to three **altitudes**. Each sees something the others
+can't, and each is a different trade-off between richness of intent and
+adversary-resistance. A single logical action is correlated across all of them by
+one `guard_id`, so it yields **one** composed decision.
+
+| Altitude | Where | Sees | Can block? | Adversary-proof? |
+| --- | --- | --- | --- | --- |
+| **gateway** | LLM request/response | full prompt, completion, tool/MCP definitions | depends on host | no — pre-execution intent |
+| **agent_hook** | the agent's tool lifecycle | tool name + arguments, before dispatch | **yes** | no — sees declared args |
+| **sandbox** | the real exec | actual `argv`, env, syscalls, network | **yes** | **yes** — sees real behavior |
+
+## Why three, not one
+
+- The **gateway** has the richest *intent* and provenance (it sees the untrusted
+  web page the model just read), but it's pre-execution — it can't see what the
+  code actually does.
+- The **agent hook** is cheap, in-process, and can block before a tool runs — but
+  it only sees the *declared* arguments. An agent can rewrite `cat secret` into a
+  `python` one-liner and slip past an argument check.
+- The **sandbox** sees the *real* `open()` and `connect()`. It's the
+  adversary-proof layer — but it has the least intent (just an argv and an env).
+
+Defense-in-depth means each altitude covers the others' blind spots. In the
+[Hermes integration](/docs/integrations/hermes-srt/), the agent hook blocks on
+intent and a real sandbox ([srt](/docs/integrations/hermes-srt/) or
+[OpenShell](/docs/integrations/hermes-openshell/)) enforces on behavior.
+
+## Correlation by guard_id
+
+The first altitude to see an action mints a `guard_id` and propagates it
+out-of-band (a **guard-context** that rides alongside the action). Downstream
+altitudes inherit it, so the Runtime knows the sandbox `exec` and the agent-hook
+`tool_call` are the *same* action. A later altitude can only **tighten** an earlier
+decision, never loosen it.
+
+## Graceful degradation
+
+If an agent has no sandbox (e.g. Hermes' `local` backend with no srt), OGR still
+enforces at the agent-hook altitude — you lose the adversary-proof layer, not the
+protocol. The verdict records which altitudes were available.
+
+Next: **[GuardEvent & Verdict](/docs/concepts/event-verdict/)** — the wire types
+each altitude emits.

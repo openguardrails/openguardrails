@@ -1,0 +1,31 @@
+{
+  "name": "@openguardrails/core",
+  "version": "0.1.1",
+  "description": "OpenGuardrails (OGR) reference runtime for JS/TS — a vendor-neutral enforcement protocol for AI agent safety & security: GuardEvent to Verdict, composed under a policy you own.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "author": "OpenGuardrails",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist", "src"],
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "tsc -b --clean"
+  },
+  "keywords": ["ai", "agent", "security", "safety", "guardrails", "llm", "ogr", "openguardrails"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/openguardrails/openguardrails.git",
+    "directory": "packages/javascript"
+  },
+  "homepage": "https://openguardrails.com",
+  "publishConfig": {
+    "access": "public"
+  }
+}

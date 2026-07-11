@@ -1,9 +1,9 @@
 # Contributing
 
-This repo is the **specification** for OpenGuardrails. It holds the normative
-documents, JSON Schemas, taxonomy, and conformance criteria — not implementation
-code. Implementations live in their own repos (SDKs, instrumentations, gateway,
-bench); see the [README](README.md#the-ecosystem).
+This monorepo contains the OpenGuardrails specification, SDKs, integrations,
+gateway, benchmark, examples, skill, and website. Cross-component changes can
+be made in one pull request; independently published packages keep their own
+versions and changelogs.
 
 ## What belongs here
 
@@ -11,8 +11,12 @@ bench); see the [README](README.md#the-ecosystem).
 - Changes to `schema/*.json`
 - Taxonomy additions/changes (`specification/taxonomy.md`)
 - Conformance criteria (`CONFORMANCE.md`)
+- Runtime changes under `packages/`
+- Agent and framework bindings under `integrations/`
+- Gateway, benchmark, example, skill, and website changes in their respective directories
 
-If you're fixing a bug in an adapter or SDK, open the PR against *that* repo.
+Keep a change scoped to the smallest relevant directories. When a protocol
+change affects an implementation, update both in the same pull request.
 
 ## How to propose a change
 
@@ -29,6 +33,8 @@ If you're fixing a bug in an adapter or SDK, open the PR against *that* repo.
    - a migration note if breaking.
 4. Keep schema and prose in sync — a field added to a schema must be documented in
    the matching `specification/` file, and vice versa.
+5. Run the relevant checks from the repository root: `npm run build && npm test`
+   for JavaScript work and `python -m pytest` for Python work.
 
 ## Reviewing
 

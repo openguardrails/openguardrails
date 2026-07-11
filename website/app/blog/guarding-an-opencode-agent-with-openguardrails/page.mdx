@@ -1,0 +1,71 @@
+export const metadata = {
+  title: "Guarding an opencode agent with OpenGuardrails",
+  description:
+    "Guard opencode — a TypeScript coding agent — behind one neutral contract, as a pure plugin on the tool.execute.before hook. What it intercepts today, the deny-and-continue model, and the upstream PR that adds a first-class human ask.",
+};
+
+<p className="text-xs uppercase tracking-[0.2em] text-zinc-500 mb-2">2026-06-29</p>
+
+# Guarding an opencode agent with OpenGuardrails
+
+*Guard [opencode](https://github.com/anomalyco/opencode) — a TypeScript coding agent — behind one neutral contract, as a pure plugin. No fork, no core patch.*
+
+OpenGuardrails (OGR) turns each agent action into a `GuardEvent`, runs it past detectors you choose, and returns a `Verdict` — **allow, block, or require approval** — before the action runs. opencode is TypeScript, so the binding is the npm package
+[`openguardrails-instrumentation-opencode`](https://www.npmjs.com/package/openguardrails-instrumentation-opencode), built on [`@openguardrails/core`](https://www.npmjs.com/package/@openguardrails/core) — the TS port of the same runtime the Python Hermes integration uses.
+
+## How it connects: one plugin hook
+
+opencode already exposes a plugin hook that fires *before* a tool runs:
+**`tool.execute.before`**. The OGR plugin binds it and needs nothing else — no
+fork, no proxy, no core change:
+
+```ts
+// .opencode/plugins — the OGR guardrails plugin
+export const guardrails = {
+  "tool.execute.before": async (input, output) => {
+    const verdict = await runtime.evaluate(toGuardEvent(input))   // GuardEvent → Verdict
+    if (verdict.decision === "block" || verdict.decision === "require_approval") {
+      throw new GuardrailError(verdict.reasons.join("; "))        // deny-and-continue
+    }
+    // allow / modify / redact → proceed
+  },
+}
+```
+
+The policy is a file the agent itself can author — `.opencode/guardrails.json`, an
+OGR policy. A default ships out of the box: `curl | bash`, `rm -rf /`,
+credential-file reads, and `| sudo` are caught immediately.
+
+## What "block" means here: deny-and-continue
+
+When a verdict is `block` (or `require_approval`), the plugin **throws** — opencode
+turns that into a tool error the agent *reacts to* rather than a hard halt. The agent
+sees "that was blocked by policy" and looks for a safer path. That's the right shape
+for an autonomous coding loop: you stop the dangerous action without killing the run.
+
+The judge can be your own model. `own-model.ts` is an OpenAI-compatible backend —
+"use the model I already pay for as the guardrail" — composed alongside the
+deterministic config rules under `deny-wins`.
+
+## Honest limits (and the upstream fix)
+
+Today this integration is **restrict-only**: it can `block`, but it can't turn a
+*would-auto-approve* call into a first-class interactive **ask the human**. The
+reason is structural — opencode's permission system (`PermissionV2`) doesn't route
+its plugin `permission.ask` hook through the tool path, so a plugin can deny but not
+prompt. We opened [anomalyco/opencode#34329](https://github.com/anomalyco/opencode/pull/34329)
+(tracking [#34327](https://github.com/anomalyco/opencode/issues/34327)) to add an
+optional gate in `PermissionV2` for the `allow → ask` path; once it lands,
+`require_approval` becomes a real prompt instead of a deny.
+
+opencode also has **no built-in syscall sandbox** — `bash` runs on the host. OGR's
+sandbox altitude would mean wrapping the spawner (a core change) or running opencode
+inside a container / [srt](/docs/integrations/hermes-srt/). The `agent_hook` altitude
+above, though, works today and stops the download-and-execute class.
+
+---
+
+*Same `GuardEvent → Verdict` model as every OGR integration — only the binding
+differs. [Spec](https://github.com/openguardrails/openguardrails) ·
+[GuardEvent & Verdict](/docs/concepts/event-verdict/) ·
+[`@openguardrails/core`](https://www.npmjs.com/package/@openguardrails/core).*

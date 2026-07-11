@@ -76,5 +76,5 @@ safety.pii.person_name`, `LOCATION → safety.pii.address`.
 - Unknown/experimental categories MUST be namespaced under
   `x.<vendor>.<name>` and MUST NOT collide with `safety.*` / `security.*`.
 - `score` is a detector-reported `0.0`–`1.0`; it is **not** comparable across
-  vendors except through the [benchmark](https://github.com/openguardrails/openguardrails-bench),
+  vendors except through the [benchmark](https://github.com/openguardrails/openguardrails/tree/main/benchmarks),
   which is the entire reason the leaderboard exists.

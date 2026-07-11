@@ -1,0 +1,38 @@
+{
+  "id": "openguardrails",
+  "name": "OpenGuardrails",
+  "description": "Enforce the OpenGuardrails (OGR) protocol on tool calls and channel traffic — block, rewrite, or require human approval under a policy you own.",
+  "activation": {
+    "onStartup": true,
+    "onCapabilities": ["hook"]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": true,
+    "properties": {
+      "policyPath": {
+        "type": "string",
+        "description": "Path to an OGR policy.json. Defaults to <workspace>/openguardrails.json."
+      },
+      "policy": {
+        "type": "object",
+        "description": "Inline OGR policy (composition + config_rules). Overrides the file and the default.",
+        "additionalProperties": true
+      },
+      "judge": {
+        "type": "object",
+        "description": "Use your own model as an LLM-judge detector (any OpenAI-compatible chat endpoint).",
+        "additionalProperties": true,
+        "properties": {
+          "baseURL": { "type": "string" },
+          "model": { "type": "string" },
+          "apiKey": { "type": "string" }
+        }
+      },
+      "guardMessages": {
+        "type": "boolean",
+        "description": "Also evaluate inbound/outbound channel messages (defaults to true)."
+      }
+    }
+  }
+}

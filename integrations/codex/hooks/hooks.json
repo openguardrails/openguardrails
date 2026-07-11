@@ -1,0 +1,31 @@
+{
+  "description": "OpenGuardrails auto mode + guardrail for Codex.",
+  "hooks": {
+    "PermissionRequest": [
+      {
+        "matcher": "Bash|apply_patch|Read|Edit|Write|WebFetch|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "OGR_STATE_DIR=\"${PLUGIN_DATA}\" node \"${PLUGIN_ROOT}/hooks/ogr-codex-automode-hook.mjs\"",
+            "timeout": 15,
+            "statusMessage": "OpenGuardrails auto mode"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|apply_patch|Read|Edit|Write|WebFetch|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/hooks/ogr-codex-hook.mjs\"",
+            "timeout": 15,
+            "statusMessage": "OpenGuardrails guardrail"
+          }
+        ]
+      }
+    ]
+  }
+}

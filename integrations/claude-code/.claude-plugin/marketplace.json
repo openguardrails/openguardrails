@@ -1,0 +1,11 @@
+{
+  "name": "openguardrails",
+  "owner": { "name": "OpenGuardrails", "url": "https://openguardrails.com" },
+  "plugins": [
+    {
+      "name": "openguardrails",
+      "source": "./",
+      "description": "OGR command-approval gate for Claude Code — a PreToolUse hook that denies risky tool calls (curl|bash, obfuscated exec, non-allowlisted egress, credential reads) before they run, even in bypass mode."
+    }
+  ]
+}

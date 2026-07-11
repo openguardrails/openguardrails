@@ -1,0 +1,22 @@
+{
+  "name": "openguardrails-monorepo",
+  "private": true,
+  "description": "OpenGuardrails protocol, SDKs, integrations, gateway, benchmark, examples, skill, and website.",
+  "license": "Apache-2.0",
+  "workspaces": [
+    "packages/javascript",
+    "integrations/claude-code",
+    "integrations/codex",
+    "integrations/openclaw",
+    "integrations/opencode",
+    "website"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "clean": "npm run clean --workspaces --if-present"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

@@ -77,5 +77,5 @@ strategy supplies `modifications`; other proposed rewrites are recorded in
 
 The effective verdict MUST record which providers contributed (`provider` on each
 underlying verdict). This is what makes per-vendor metering, billing, and the
-[benchmark leaderboard](https://github.com/openguardrails/openguardrails-bench)
+[benchmark leaderboard](https://github.com/openguardrails/openguardrails/tree/main/benchmarks)
 possible — the same attribution data, viewed two ways.

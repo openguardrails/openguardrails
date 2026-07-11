@@ -1,0 +1,57 @@
+export const metadata = {
+  title: "Integrations — OpenGuardrails Docs",
+  description: "OGR's first reference integration: a Hermes agent secured with srt (personal) or OpenShell (team). One policy model, two backends — and a policy tuned to each deployment's threat model.",
+};
+
+# Integrations
+
+OGR connects to an agent once — as a **plugin / hook** — and enforces one policy you
+own at the point a risky action can still be stopped. The fastest path is
+**[Claude Code](/docs/integrations/claude-code/)**: install a plugin and risky tool
+calls are gated even in bypass mode. The deepest reference integration secures a
+[Hermes](https://github.com/NousResearch/hermes-agent) agent across every altitude,
+with a choice of sandbox backend.
+
+The Hermes reference below shows the full picture: the agent connects to OGR once,
+then you choose an enforcement backend for the sandbox altitude. You write guardrails
+in **one OGR policy model** that compiles to either backend; the policy *content*
+differs, because a personal assistant and a multi-tenant agent are different security
+and infrastructure problems.
+
+## Two deployments, one policy model
+
+| | **Personal assistant** | **Multi-tenant agent** |
+| --- | --- | --- |
+| Backend | [Anthropic srt](/docs/integrations/hermes-srt/) | [NVIDIA OpenShell](/docs/integrations/hermes-openshell/) |
+| Isolation | OS-level (`sandbox-exec` / `bubblewrap`), no container | Docker/K8s container + gateway, per tenant |
+| Network | per-process domain allowlist | central OPA/Rego egress proxy |
+| Threat model | trusted user, untrusted *inputs* | untrusted tenants **and** workloads |
+| Best for | one developer, one laptop | shared / multi-tenant service |
+| Policy | OGR `sandbox` block — guards **your** host | OGR `sandbox` block — deny-by-default, no host FS, hard per-tenant limits |
+
+The portability is the **model, not the file**: one schema, one integration. You
+still author the policy that fits each deployment — the multi-tenant one is much
+stricter — but you write it once in OGR instead of hand-coding srt JSON for the
+laptop and Rego for the cluster. Security is **policy, compiled to each backend**.
+
+## How Hermes connects to OGR
+
+Hermes needs no fork and no proxy — it already exposes the hooks OGR needs. The
+`ogr-guard` plugin binds them:
+
+| OGR altitude | Hermes surface | Enforces |
+| --- | --- | --- |
+| gateway | `pre_api_request` / `post_api_request` hooks | observe + taint |
+| agent_hook | `pre_tool_call` hook | **block** before dispatch |
+| (provenance) | `post_tool_call` hook | taint web/MCP results |
+| sandbox | wraps `BaseEnvironment.execute` | run exec under srt / route to OpenShell |
+
+One `Runtime` + one policy drive all altitudes, correlated by `guard_id`. The same
+integration runs in both deployments; only the policy and the sandbox backend change.
+
+## Choose your path
+
+- **[Claude Code](/docs/integrations/claude-code/)** — install a plugin; a `PreToolUse` hook denies risky tool calls (curl|bash, obfuscated exec, egress, credential reads) before they run, even in bypass mode.
+- **[Hermes + srt (personal)](/docs/integrations/hermes-srt/)** — 5-minute laptop setup, OS-level enforcement.
+- **[Hermes + OpenShell (team)](/docs/integrations/hermes-openshell/)** — container isolation + central policy.
+- **[Instrument your own agent](/docs/instrument-your-agent/)** — the same pattern for a non-Hermes framework.

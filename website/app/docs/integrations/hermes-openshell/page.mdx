@@ -1,0 +1,114 @@
+export const metadata = {
+  title: "Hermes + OpenShell (team) — OpenGuardrails Docs",
+  description: "Secure shared, multi-tenant Hermes agents with OGR and NVIDIA OpenShell: container isolation and a central OPA/Rego egress proxy, configured with the same OGR policy model your developers use locally.",
+};
+
+# Hermes + OpenShell — the multi-tenant scenario
+
+> Shared, multi-tenant agents. Hard container isolation, a central egress proxy
+> with OPA/Rego policy, credential injection at the gateway — configured with the
+> same OGR policy *model* your developers use locally, but with a policy written for
+> a shared, untrusted environment.
+
+Where the [personal scenario](/docs/integrations/hermes-srt/) secures one laptop
+with srt, [OpenShell](https://github.com/NVIDIA/OpenShell) secures a fleet. Code
+runs in a Docker/K8s sandbox; every outbound connection is evaluated by an OPA/Rego
+policy at an HTTP-CONNECT proxy; credentials live at the gateway and are injected
+only for policy-allowed endpoints. OGR is the **policy plane** above it.
+
+```text
+                   ┌──────────────── OGR control plane ────────────────┐
+   policy.json ──▶ │  Runtime (decisions) + adapter (compile artifacts) │
+                   └──────┬────────────────────────────┬────────────────┘
+                          │ Rego                        │ sandbox config
+                          ▼                             ▼
+   agent ─exec─▶ OpenShell gateway ─▶ egress proxy (OPA) │  Docker/K8s sandbox
+                    └ credential injection ◀──────────────┘  (cpu/mem/pids limits)
+```
+
+> **Status.** OpenShell's full config schema is not yet public. The generated
+> **Rego is real and runs in OPA**; the sandbox-config shape is illustrative of
+> OpenShell's documented concepts (Docker/K8s backend, OPA proxy, gateway
+> credential injection, resource limits). It is the integration contract OGR
+> targets, to be finalized against OpenShell's released format.
+
+## 1. Compile the policy into OpenShell artifacts
+
+```bash
+pip install openguardrails-instrumentation-hermes
+
+python - <<'PY'
+import json
+from openguardrails_instrumentation_hermes import bridge
+from openguardrails_instrumentation_hermes.sandbox import openshell
+rego, cfg = openshell.emit(bridge.get_runtime_policy())
+open("ogr_egress.rego", "w").write(rego)
+open("sandbox.config.json", "w").write(json.dumps(cfg, indent=2))
+print("wrote ogr_egress.rego + sandbox.config.json")
+PY
+```
+
+From the **same** `policy.json`, this produces a deny-by-default egress policy the
+proxy enforces:
+
+```rego
+package ogr.egress
+default allow := false
+allowed_domains := {"api.github.com", "*.github.com", "pypi.org"}
+allow if {
+    not denied(input.host)
+    some pattern in allowed_domains
+    host_matches(input.host, pattern)
+}
+```
+
+…and a sandbox config the supervisor launches (Docker backend, OPA proxy, resource
+limits, credential endpoints).
+
+## 2. Verify the Rego
+
+The generated `ogr_egress.rego` is standard, deny-by-default OPA — evaluate it
+against sample hosts with `opa`:
+
+```bash
+opa eval -d ogr_egress.rego -I 'data.ogr.egress.allow' <<<'{"host":"api.github.com"}'    # true
+opa eval -d ogr_egress.rego -I 'data.ogr.egress.allow' <<<'{"host":"evil.example.com"}'  # false
+opa eval -d ogr_egress.rego -I 'data.ogr.egress.allow' <<<'{"host":"pypi.org"}'          # true
+```
+
+## 3. Same model, a stricter policy
+
+The OGR `sandbox` block compiles to **both** backends — the same fields, two targets:
+
+| OGR policy field           | Personal (srt)           | Multi-tenant (OpenShell) |
+| -------------------------- | ------------------------ | ---------------- |
+| `sandbox.egress_allowlist` | `network.allowedDomains` | Rego `allowed_domains` + proxy |
+| `sandbox.deny_read`        | `filesystem.denyRead`    | sandbox `filesystem.deny_read` |
+| `sandbox.resource_limits`  | (n/a, single process)    | container `resource_limits` |
+
+But you don't ship the *same* policy. A personal policy lets the agent write your
+working directory and reach a few dev hosts; a multi-tenant policy should grant
+**no host filesystem** (a per-tenant `/workspace` only), a tight per-tenant egress
+allowlist, and hard CPU/memory/pid limits — because you trust neither the tenants
+nor their workloads. Same model, different values:
+
+```json
+"sandbox": {
+  "workspace_write":  ["/workspace"],
+  "deny_read":        ["/etc", "/var", "**/secrets/**"],
+  "egress_allowlist": ["api.internal.corp"],
+  "resource_limits":  { "cpus": 1, "memory_mb": 1024, "pids": 128 }
+}
+```
+
+## Why OpenShell for teams
+
+- **Hard isolation** — container/VM boundary, fit for untrusted or third-party agents.
+- **Central policy + audit** — one Rego, one place to change egress for the fleet;
+  every decision logged at the gateway.
+- **Credential safety** — secrets never enter the sandbox; the proxy injects them
+  only for endpoints the OGR policy allows.
+
+Full source & hands-on README:
+[openguardrails-instrumentation-hermes](https://github.com/openguardrails/openguardrails/tree/main/integrations/hermes)
+(the OpenShell adapter is [`sandbox/openshell.py`](https://github.com/openguardrails/openguardrails/blob/main/integrations/hermes/src/openguardrails_instrumentation_hermes/sandbox/openshell.py)).
