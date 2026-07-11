@@ -11,13 +11,13 @@ centralized here.
 |---|---|
 | `openguardrails-python` | `packages/python/` |
 | `openguardrails-js` | `packages/javascript/` |
-| `openguardrails-instrumentation-claude-code` | `integrations/claude-code/` |
-| `openguardrails-instrumentation-codex` | `integrations/codex/` |
-| `openguardrails-instrumentation-hermes` | `integrations/hermes/` |
-| `openguardrails-instrumentation-langgraph` | `integrations/langgraph/` |
-| `openguardrails-instrumentation-openclaw` | `integrations/openclaw/` |
-| `openguardrails-instrumentation-opencode` | `integrations/opencode/` |
-| `openguardrails-gateway` | `services/gateway/` |
+| `openguardrails-instrumentation-claude-code` | `integrations/agent/claude-code/` |
+| `openguardrails-instrumentation-codex` | `integrations/agent/codex/` |
+| `openguardrails-instrumentation-hermes` | `integrations/agent/hermes/` |
+| `openguardrails-instrumentation-langgraph` | `integrations/agent/langgraph/` |
+| `openguardrails-instrumentation-openclaw` | `integrations/agent/openclaw/` |
+| `openguardrails-instrumentation-opencode` | `integrations/agent/opencode/` |
+| `openguardrails-gateway` | `integrations/gateway/openai-anthropic/` |
 | `openguardrails-bench` | `benchmarks/` |
 | `openguardrails-examples` | `examples/` |
 | `openguardrails-skill` | `skills/openguardrails/` |

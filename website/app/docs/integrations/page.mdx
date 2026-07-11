@@ -1,16 +1,24 @@
 export const metadata = {
   title: "Integrations — OpenGuardrails Docs",
-  description: "OGR's first reference integration: a Hermes agent secured with srt (personal) or OpenShell (team). One policy model, two backends — and a policy tuned to each deployment's threat model.",
+  description: "OGR integration examples for agent hooks, gateway hooks, and sandbox hooks.",
 };
 
 # Integrations
 
-OGR connects to an agent once — as a **plugin / hook** — and enforces one policy you
-own at the point a risky action can still be stopped. The fastest path is
-**[Claude Code](/docs/integrations/claude-code/)**: install a plugin and risky tool
+OGR binds guardrails at three integration points: the **agent hook**, the
+**gateway hook**, and the **sandbox hook**. Each binding emits the same
+`GuardEvent` and consumes the same `Verdict`, so one policy can correlate a
+logical action across all three boundaries.
+
+The fastest agent-hook path is
+**[Claude Code](/docs/integrations/agent/claude-code/)**: install a plugin and risky tool
 calls are gated even in bypass mode. The deepest reference integration secures a
 [Hermes](https://github.com/NousResearch/hermes-agent) agent across every altitude,
 with a choice of sandbox backend.
+
+The runnable [gateway-hook integration](https://github.com/openguardrails/openguardrails/tree/main/integrations/gateway/openai-anthropic)
+shows how an OpenAI/Anthropic gateway normalizes wire requests and responses into
+OGR events. It is an integration example, not an OpenGuardrails-operated service.
 
 The Hermes reference below shows the full picture: the agent connects to OGR once,
 then you choose an enforcement backend for the sandbox altitude. You write guardrails
@@ -22,7 +30,7 @@ and infrastructure problems.
 
 | | **Personal assistant** | **Multi-tenant agent** |
 | --- | --- | --- |
-| Backend | [Anthropic srt](/docs/integrations/hermes-srt/) | [NVIDIA OpenShell](/docs/integrations/hermes-openshell/) |
+| Backend | [Anthropic srt](/docs/integrations/agent/hermes-srt/) | [NVIDIA OpenShell](/docs/integrations/agent/hermes-openshell/) |
 | Isolation | OS-level (`sandbox-exec` / `bubblewrap`), no container | Docker/K8s container + gateway, per tenant |
 | Network | per-process domain allowlist | central OPA/Rego egress proxy |
 | Threat model | trusted user, untrusted *inputs* | untrusted tenants **and** workloads |
@@ -33,6 +41,15 @@ The portability is the **model, not the file**: one schema, one integration. You
 still author the policy that fits each deployment — the multi-tenant one is much
 stricter — but you write it once in OGR instead of hand-coding srt JSON for the
 laptop and Rego for the cluster. Security is **policy, compiled to each backend**.
+
+Standalone Anthropic srt and NVIDIA OpenShell sandbox-hook examples will be
+added under `integrations/`; the Hermes integration currently demonstrates both
+backends.
+
+An [`ebpf` integration category](https://github.com/openguardrails/openguardrails/tree/main/integrations/ebpf)
+is also reserved for future kernel-level process, filesystem, and network
+adapters. These adapters reuse the OGR contract and correlate with the three
+existing observation points.
 
 ## How Hermes connects to OGR
 
@@ -51,7 +68,8 @@ integration runs in both deployments; only the policy and the sandbox backend ch
 
 ## Choose your path
 
-- **[Claude Code](/docs/integrations/claude-code/)** — install a plugin; a `PreToolUse` hook denies risky tool calls (curl|bash, obfuscated exec, egress, credential reads) before they run, even in bypass mode.
-- **[Hermes + srt (personal)](/docs/integrations/hermes-srt/)** — 5-minute laptop setup, OS-level enforcement.
-- **[Hermes + OpenShell (team)](/docs/integrations/hermes-openshell/)** — container isolation + central policy.
+- **[Claude Code](/docs/integrations/agent/claude-code/)** — install a plugin; a `PreToolUse` hook denies risky tool calls (curl|bash, obfuscated exec, egress, credential reads) before they run, even in bypass mode.
+- **[Gateway hook](https://github.com/openguardrails/openguardrails/tree/main/integrations/gateway/openai-anthropic)** — integrate OpenAI/Anthropic wire traffic with OGR.
+- **[Hermes + srt (personal)](/docs/integrations/agent/hermes-srt/)** — 5-minute laptop setup, OS-level enforcement.
+- **[Hermes + OpenShell (team)](/docs/integrations/agent/hermes-openshell/)** — container isolation + central policy.
 - **[Instrument your own agent](/docs/instrument-your-agent/)** — the same pattern for a non-Hermes framework.

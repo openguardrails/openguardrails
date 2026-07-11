@@ -1,7 +1,7 @@
 # Contributing
 
-This monorepo contains the OpenGuardrails specification, SDKs, integrations,
-gateway, benchmark, examples, skill, and website. Cross-component changes can
+This monorepo contains the OpenGuardrails specification, core runtimes,
+integrations, benchmark, examples, skill, and website. Cross-component changes can
 be made in one pull request; independently published packages keep their own
 versions and changelogs.
 
@@ -11,9 +11,9 @@ versions and changelogs.
 - Changes to `schema/*.json`
 - Taxonomy additions/changes (`specification/taxonomy.md`)
 - Conformance criteria (`CONFORMANCE.md`)
-- Runtime changes under `packages/`
-- Agent and framework bindings under `integrations/`
-- Gateway, benchmark, example, skill, and website changes in their respective directories
+- Core runtime changes under `packages/`
+- Agent-hook, gateway-hook, and sandbox-hook bindings under `integrations/`
+- Benchmark, example, skill, and website changes in their respective directories
 
 Keep a change scoped to the smallest relevant directories. When a protocol
 change affects an implementation, update both in the same pull request.

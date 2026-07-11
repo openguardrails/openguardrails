@@ -32,7 +32,7 @@ guardrail belongs — and it's the one place the built-in classifier (auto mode 
 can't reach.
 
 The OGR plugin —
-[`openguardrails-instrumentation-claude-code`](https://github.com/openguardrails/openguardrails/tree/main/integrations/claude-code)
+[`openguardrails-instrumentation-claude-code`](https://github.com/openguardrails/openguardrails/tree/main/integrations/agent/claude-code)
 — puts an OGR policy there:
 
 ```
@@ -70,10 +70,10 @@ OGR guards the **agent** — it stops the dangerous call at the boundary. It is 
 antivirus / EDR: once code executes and escapes to OS-level root persistence, it's no
 longer an agent action. Keep the sandbox on and set `allowUnsandboxedCommands:
 false` for defense-in-depth. Full walkthrough: the
-[Claude Code integration doc](/docs/integrations/claude-code/).
+[Claude Code integration doc](/docs/integrations/agent/claude-code/).
 
 ---
 
 *[Spec](https://github.com/openguardrails/openguardrails) ·
 [the incident this prevents](/blog/when-your-coding-agent-installs-malware/) ·
-[repo](https://github.com/openguardrails/openguardrails/tree/main/integrations/claude-code).*
+[repo](https://github.com/openguardrails/openguardrails/tree/main/integrations/agent/claude-code).*

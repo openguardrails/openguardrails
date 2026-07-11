@@ -1,0 +1,54 @@
+{
+  "name": "openguardrails-instrumentation-opencode",
+  "version": "0.1.1",
+  "description": "Guard an opencode agent's tool calls through the OpenGuardrails (OGR) protocol \u2014 agent-configurable text/regex guardrails, or use your own model as the judge. No core changes.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "author": "OpenGuardrails",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "opencode",
+    "plugin",
+    "ai",
+    "agent",
+    "security",
+    "guardrails",
+    "ogr",
+    "openguardrails"
+  ],
+  "dependencies": {
+    "@openguardrails/core": "^0.1.0"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": "*"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "latest",
+    "@types/node": "^22",
+    "typescript": "^5.7.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/openguardrails/openguardrails",
+    "directory": "integrations/agent/opencode"
+  },
+  "homepage": "https://openguardrails.com",
+  "publishConfig": {
+    "access": "public"
+  }
+}

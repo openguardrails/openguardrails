@@ -37,8 +37,8 @@ Per risk category, choose how multiple detectors combine and how to fail. See
 
 ## `sandbox` — configure the enforcement backend
 
-This is the block that the [srt](/docs/integrations/hermes-srt/) and
-[OpenShell](/docs/integrations/hermes-openshell/) adapters compile. You describe the
+This is the block that the [srt](/docs/integrations/agent/hermes-srt/) and
+[OpenShell](/docs/integrations/agent/hermes-openshell/) adapters compile. You describe the
 boundary once; OGR generates the backend-specific config.
 
 ```json
@@ -64,7 +64,7 @@ boundary once; OGR generates the backend-specific config.
 
 Regex command rules and markers, evaluated at the agent-hook and sandbox altitudes.
 Each rule is **resource-based where possible** (match the sensitive *path*, not the
-reader verb — see why in [the Hermes findings](/docs/integrations/hermes-srt/)).
+reader verb — see why in [the Hermes findings](/docs/integrations/agent/hermes-srt/)).
 
 ```json
 "config_rules": {
@@ -92,7 +92,7 @@ reader verb — see why in [the Hermes findings](/docs/integrations/hermes-srt/)
 
 ## Tips
 
-- Start from the [bundled policy](https://github.com/openguardrails/openguardrails/blob/main/integrations/hermes/src/openguardrails_instrumentation_hermes/policy.json)
+- Start from the [bundled policy](https://github.com/openguardrails/openguardrails/blob/main/integrations/agent/hermes/src/openguardrails_instrumentation_hermes/policy.json)
   and tighten `egress_allowlist` / `deny_read` for your project.
 - Prefer **resource-based** rules (match the path/host) over verb-based ones — they
   survive an agent rephrasing the command.

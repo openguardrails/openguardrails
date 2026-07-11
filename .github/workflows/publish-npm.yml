@@ -35,8 +35,8 @@ jobs:
         run: |
           case "$GITHUB_REF_NAME" in
             js-v*)          directory="packages/javascript"; prefix="js-v" ;;
-            openclaw-v*)    directory="integrations/openclaw"; prefix="openclaw-v" ;;
-            opencode-v*)    directory="integrations/opencode"; prefix="opencode-v" ;;
+            openclaw-v*)    directory="integrations/agent/openclaw"; prefix="openclaw-v" ;;
+            opencode-v*)    directory="integrations/agent/opencode"; prefix="opencode-v" ;;
             *) echo "::error::Unsupported release tag: $GITHUB_REF_NAME"; exit 1 ;;
           esac
 

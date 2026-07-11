@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "openguardrails-gateway"
+version = "0.1.0"
+description = "OpenGuardrails gateway-hook integration example for OpenAI and Anthropic wire protocols."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+authors = [{ name = "OpenGuardrails" }]
+keywords = ["ai", "agent", "security", "guardrails", "llm", "gateway", "proxy", "ogr"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Topic :: Security",
+]
+
+# The gateway is a *binding* of the protocol — it depends on the published
+# reference runtime and never vendors a second copy of the policy model.
+dependencies = ["openguardrails>=0.1.1"]
+
+[project.scripts]
+ogr-gateway = "ogr_gateway.server:main"
+
+[project.urls]
+Homepage = "https://openguardrails.com"
+Specification = "https://github.com/openguardrails/openguardrails/tree/main/specification"
+Source = "https://github.com/openguardrails/openguardrails/tree/main/integrations/gateway/openai-anthropic"
+
+[tool.hatch.build.targets.wheel]
+packages = ["ogr_gateway"]

@@ -14,7 +14,7 @@ Apache-2.0 · [openguardrails.com](https://openguardrails.com)
 
 This monorepo is the home of the **OpenGuardrails (OGR) specification and its
 reference implementations**. The specification is the normative contract every
-adapter, detector, and sandbox speaks; the SDKs, integrations, gateway,
+adapter, detector, and sandbox speaks; the core runtimes, integrations,
 benchmark, examples, skill, and website live alongside it so changes can be
 reviewed and tested together.
 
@@ -92,10 +92,9 @@ the [overview](specification/overview.md).
 | Path | What it contains |
 |---|---|
 | [`specification/`](specification/) and [`schema/`](schema/) | Normative protocol, schemas, taxonomy, conformance, and governance. |
-| [`packages/python/`](packages/python/) | `openguardrails` Python runtime (PyPI). |
-| [`packages/javascript/`](packages/javascript/) | `@openguardrails/core` JavaScript/TypeScript runtime (npm). |
-| [`integrations/`](integrations/) | Claude Code, Codex, Hermes, LangGraph, OpenClaw, and opencode bindings. |
-| [`services/gateway/`](services/gateway/) | Reference OpenAI/Anthropic gateway service. |
+| [`packages/python/`](packages/python/) | `openguardrails` Python core runtime (PyPI). |
+| [`packages/javascript/`](packages/javascript/) | `@openguardrails/core` JavaScript/TypeScript core runtime (npm). |
+| [`integrations/`](integrations/) | Agent, gateway, sandbox, and eBPF integration categories. |
 | [`benchmarks/`](benchmarks/) | Neutral detector benchmark and leaderboard. |
 | [`examples/`](examples/) | Runnable examples and integration index. |
 | [`skills/openguardrails/`](skills/openguardrails/) | Agent skill for drafting and enforcing policies. |
@@ -106,18 +105,30 @@ centralizes source, issues, pull requests, CI, and cross-component changes.
 See [MONOREPO.md](MONOREPO.md) for the former-repository mapping and rollout
 checklist, and [RELEASING.md](RELEASING.md) for npm/PyPI release tags.
 
-### Integrations — three altitudes, one policy
+### Core runtimes and integrations
 
-| Altitude | Target | Source |
+The Python and JavaScript packages implement the same OGR core contract. Every
+integration depends on the core for its language:
+
+- Python integrations depend on `openguardrails`.
+- JavaScript/TypeScript integrations depend on `@openguardrails/core`.
+- End users normally install only the integration; pip or npm installs its core
+  dependency automatically. Self-contained marketplace plugins may bundle the
+  core so they can run without a separate install step.
+
+### Integration categories
+
+| Category | Target | Source |
 |---|---|---|
-| **Agent hook** | Claude Code | [`integrations/claude-code`](integrations/claude-code/) |
-| | Codex | [`integrations/codex`](integrations/codex/) |
-| | opencode | [`integrations/opencode`](integrations/opencode/) |
-| | OpenClaw | [`integrations/openclaw`](integrations/openclaw/) |
-| | Hermes | [`integrations/hermes`](integrations/hermes/) |
-| | LangGraph | [`integrations/langgraph`](integrations/langgraph/) |
-| **Sandbox** | Anthropic srt · NVIDIA OpenShell | [`integrations/hermes`](integrations/hermes/) |
-| **Gateway** | OpenAI · Anthropic | [`services/gateway`](services/gateway/) |
+| **Agent hook** | Claude Code | [`integrations/agent/claude-code`](integrations/agent/claude-code/) |
+| | Codex | [`integrations/agent/codex`](integrations/agent/codex/) |
+| | opencode | [`integrations/agent/opencode`](integrations/agent/opencode/) |
+| | OpenClaw | [`integrations/agent/openclaw`](integrations/agent/openclaw/) |
+| | Hermes | [`integrations/agent/hermes`](integrations/agent/hermes/) |
+| | LangGraph | [`integrations/agent/langgraph`](integrations/agent/langgraph/) |
+| **Gateway hook** | OpenAI · Anthropic | [`integrations/gateway/openai-anthropic`](integrations/gateway/openai-anthropic/) |
+| **Sandbox hook** | Anthropic srt · NVIDIA OpenShell | [`integrations/sandbox`](integrations/sandbox/) — standalone examples planned |
+| **eBPF** | Kernel process · filesystem · network events | [`integrations/ebpf`](integrations/ebpf/) — planned |
 
 ## Development
 
@@ -135,8 +146,8 @@ The Python packages form a uv workspace and can also be installed with pip:
 python -m venv .venv
 . .venv/bin/activate
 python -m pip install pytest
-python -m pip install -e packages/python -e services/gateway \
-  -e integrations/hermes -e integrations/langgraph
+python -m pip install -e packages/python -e integrations/gateway/openai-anthropic \
+  -e integrations/agent/hermes -e integrations/agent/langgraph
 python -m pytest
 ```
 

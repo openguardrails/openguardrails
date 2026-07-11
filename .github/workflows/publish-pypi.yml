@@ -32,9 +32,9 @@ jobs:
         run: |
           case "$GITHUB_REF_NAME" in
             python-v*)    directory="packages/python"; prefix="python-v" ;;
-            gateway-v*)   directory="services/gateway"; prefix="gateway-v" ;;
-            hermes-v*)    directory="integrations/hermes"; prefix="hermes-v" ;;
-            langgraph-v*) directory="integrations/langgraph"; prefix="langgraph-v" ;;
+            gateway-v*)   directory="integrations/gateway/openai-anthropic"; prefix="gateway-v" ;;
+            hermes-v*)    directory="integrations/agent/hermes"; prefix="hermes-v" ;;
+            langgraph-v*) directory="integrations/agent/langgraph"; prefix="langgraph-v" ;;
             *) echo "::error::Unsupported release tag: $GITHUB_REF_NAME"; exit 1 ;;
           esac
 

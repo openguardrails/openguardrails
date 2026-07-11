@@ -10,7 +10,7 @@ export const metadata = {
 > same OGR policy *model* your developers use locally, but with a policy written for
 > a shared, untrusted environment.
 
-Where the [personal scenario](/docs/integrations/hermes-srt/) secures one laptop
+Where the [personal scenario](/docs/integrations/agent/hermes-srt/) secures one laptop
 with srt, [OpenShell](https://github.com/NVIDIA/OpenShell) secures a fleet. Code
 runs in a Docker/K8s sandbox; every outbound connection is evaluated by an OPA/Rego
 policy at an HTTP-CONNECT proxy; credentials live at the gateway and are injected
@@ -110,5 +110,5 @@ nor their workloads. Same model, different values:
   only for endpoints the OGR policy allows.
 
 Full source & hands-on README:
-[openguardrails-instrumentation-hermes](https://github.com/openguardrails/openguardrails/tree/main/integrations/hermes)
-(the OpenShell adapter is [`sandbox/openshell.py`](https://github.com/openguardrails/openguardrails/blob/main/integrations/hermes/src/openguardrails_instrumentation_hermes/sandbox/openshell.py)).
+[openguardrails-instrumentation-hermes](https://github.com/openguardrails/openguardrails/tree/main/integrations/agent/hermes)
+(the OpenShell adapter is [`sandbox/openshell.py`](https://github.com/openguardrails/openguardrails/blob/main/integrations/agent/hermes/src/openguardrails_instrumentation_hermes/sandbox/openshell.py)).

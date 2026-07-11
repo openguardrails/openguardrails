@@ -235,10 +235,10 @@ function Altitudes() {
       blurb:
         "One hook turns every tool call into a GuardEvent. Risky execs, curl | bash, non-allowlisted egress and credential reads are denied before they run — even in bypass mode.",
       targets: [
-        { label: "Claude Code", href: `${GH}/openguardrails/tree/main/integrations/claude-code` },
-        { label: "opencode", href: `${GH}/openguardrails/tree/main/integrations/opencode` },
-        { label: "OpenClaw", href: `${GH}/openguardrails/tree/main/integrations/openclaw` },
-        { label: "Hermes", href: `${GH}/openguardrails/tree/main/integrations/hermes` },
+        { label: "Claude Code", href: `${GH}/openguardrails/tree/main/integrations/agent/claude-code` },
+        { label: "opencode", href: `${GH}/openguardrails/tree/main/integrations/agent/opencode` },
+        { label: "OpenClaw", href: `${GH}/openguardrails/tree/main/integrations/agent/openclaw` },
+        { label: "Hermes", href: `${GH}/openguardrails/tree/main/integrations/agent/hermes` },
       ],
       cta: { label: "All agent integrations", href: "/docs/integrations/" },
     },
@@ -250,24 +250,24 @@ function Altitudes() {
       blurb:
         "Your one OGR policy compiles into the sandbox's own enforcement — OS-level on a laptop, container plus egress proxy for a fleet. The real syscall is blocked, not just the argv.",
       targets: [
-        { label: "Anthropic srt · personal", href: "/docs/integrations/hermes-srt/" },
-        { label: "NVIDIA OpenShell · multi-tenant", href: "/docs/integrations/hermes-openshell/" },
+        { label: "Anthropic srt · personal", href: "/docs/integrations/agent/hermes-srt/" },
+        { label: "NVIDIA OpenShell · multi-tenant", href: "/docs/integrations/agent/hermes-openshell/" },
       ],
-      cta: { label: "Sandbox integrations", href: "/docs/integrations/hermes-srt/" },
+      cta: { label: "Sandbox integrations", href: "/docs/integrations/agent/hermes-srt/" },
     },
     {
       n: "03",
-      tag: "Gateway",
+      tag: "Gateway hook",
       where: "intercepts at the LLM protocol",
       scenario: "You're running an LLM gateway",
       blurb:
         "Terminate the wire protocol once — OpenAI & Anthropic, MCP, tools — and inspect or rewrite every request and response before the model sees it or the caller does.",
       targets: [
-        { label: "OpenAI protocol", href: `${GH}/openguardrails/tree/main/services/gateway` },
-        { label: "Anthropic protocol", href: `${GH}/openguardrails/tree/main/services/gateway` },
-        { label: "MCP · tools", href: `${GH}/openguardrails/tree/main/services/gateway` },
+        { label: "OpenAI protocol", href: `${GH}/openguardrails/tree/main/integrations/gateway/openai-anthropic` },
+        { label: "Anthropic protocol", href: `${GH}/openguardrails/tree/main/integrations/gateway/openai-anthropic` },
+        { label: "MCP · tools", href: `${GH}/openguardrails/tree/main/integrations/gateway/openai-anthropic` },
       ],
-      cta: { label: "Gateway service", href: `${GH}/openguardrails/tree/main/services/gateway` },
+      cta: { label: "Gateway integration", href: `${GH}/openguardrails/tree/main/integrations/gateway/openai-anthropic` },
     },
   ];
   return (

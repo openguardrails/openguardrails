@@ -8,12 +8,12 @@ Publishing. No long-lived registry token is stored in GitHub.
 | Tag | Package source |
 |---|---|
 | `js-vX.Y.Z` | `packages/javascript/` |
-| `openclaw-vX.Y.Z` | `integrations/openclaw/` |
-| `opencode-vX.Y.Z` | `integrations/opencode/` |
+| `openclaw-vX.Y.Z` | `integrations/agent/openclaw/` |
+| `opencode-vX.Y.Z` | `integrations/agent/opencode/` |
 | `python-vX.Y.Z` | `packages/python/` |
-| `gateway-vX.Y.Z` | `services/gateway/` |
-| `hermes-vX.Y.Z` | `integrations/hermes/` |
-| `langgraph-vX.Y.Z` | `integrations/langgraph/` |
+| `gateway-vX.Y.Z` | `integrations/gateway/openai-anthropic/` |
+| `hermes-vX.Y.Z` | `integrations/agent/hermes/` |
+| `langgraph-vX.Y.Z` | `integrations/agent/langgraph/` |
 
 The workflow rejects a tag when its version does not exactly match the version
 in the selected `package.json` or `pyproject.toml`.

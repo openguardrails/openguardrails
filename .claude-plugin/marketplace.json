@@ -7,12 +7,12 @@
   "plugins": [
     {
       "name": "openguardrails",
-      "source": "./integrations/claude-code",
+      "source": "./integrations/agent/claude-code",
       "description": "OGR command-approval gate for Claude Code."
     },
     {
       "name": "openguardrails-codex",
-      "source": "./integrations/codex",
+      "source": "./integrations/agent/codex",
       "description": "OGR auto mode and command-approval gate for Codex."
     }
   ]

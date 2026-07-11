@@ -3,11 +3,27 @@
 This is a monorepo. Run commands from the repository root unless a component
 README explicitly says otherwise.
 
+`packages/python` (`openguardrails`) and `packages/javascript`
+(`@openguardrails/core`) are the two language implementations of the OGR core
+runtime. Python integrations depend on the Python core; JavaScript/TypeScript
+integrations depend on the JS core. Users normally install an integration and
+receive its core dependency automatically. Self-contained marketplace plugins
+may bundle the core and require no separate runtime install.
+
+OGR supports three integration points: agent hooks, gateway hooks, and sandbox
+hooks. All bindings and runnable integration examples belong under
+`integrations/`; a gateway implementation is not an OGR-operated service.
+`integrations/gateway/openai-anthropic` demonstrates OpenAI/Anthropic gateway-hook integration.
+Standalone Anthropic srt and NVIDIA OpenShell sandbox-hook examples are planned.
+The fourth directory category, `integrations/ebpf`, is reserved for future
+kernel-level adapters; those adapters must map their events to an OGR
+observation point rather than inventing a separate wire contract.
+
 ## Validation
 
 - JavaScript/TypeScript: `npm ci && npm run build && npm test`
 - Python tests: `python -m pytest` and
-  `python integrations/langgraph/tests/test_smoke.py`
+  `python integrations/agent/langgraph/tests/test_smoke.py`
 - Release workflows: run `actionlint` against `.github/workflows/*.yml`
 
 ## Publishing packages
@@ -35,7 +51,7 @@ GitHub Environment: `npm`
 | `openclaw-vX.Y.Z` | `openguardrails-instrumentation-openclaw` |
 | `opencode-vX.Y.Z` | `openguardrails-instrumentation-opencode` |
 
-`integrations/claude-code` and `integrations/codex` are private npm workspaces.
+`integrations/agent/claude-code` and `integrations/agent/codex` are private npm workspaces.
 They use npm for builds and tests but are distributed as marketplace plugins;
 do not publish them to npmjs.
 
@@ -63,4 +79,3 @@ git push origin python-v0.1.3
 Approve the pending deployment in the matching GitHub Environment, then verify
 the package and provenance on npmjs or PyPI. Never reuse a version that already
 exists on the registry.
-

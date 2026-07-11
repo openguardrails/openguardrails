@@ -41,25 +41,29 @@ Pick the altitude you're entering from. Each link points to its source directory
 ### Agent hook — intercept the tool call
 | Target | Source | Distribution |
 |---|---|---|
-| Claude Code | [openguardrails-instrumentation-claude-code](https://github.com/openguardrails/openguardrails/tree/main/integrations/claude-code) | plugin marketplace |
-| opencode | [integrations/opencode](https://github.com/openguardrails/openguardrails/tree/main/integrations/opencode) | npm plugin |
-| OpenClaw | [integrations/openclaw](https://github.com/openguardrails/openguardrails/tree/main/integrations/openclaw) | npm + ClawHub |
-| Hermes | [integrations/hermes](https://github.com/openguardrails/openguardrails/tree/main/integrations/hermes) | PyPI |
-| LangGraph | [integrations/langgraph](https://github.com/openguardrails/openguardrails/tree/main/integrations/langgraph) | PyPI |
+| Claude Code | [openguardrails-instrumentation-claude-code](https://github.com/openguardrails/openguardrails/tree/main/integrations/agent/claude-code) | plugin marketplace |
+| opencode | [integrations/agent/opencode](https://github.com/openguardrails/openguardrails/tree/main/integrations/agent/opencode) | npm plugin |
+| OpenClaw | [integrations/agent/openclaw](https://github.com/openguardrails/openguardrails/tree/main/integrations/agent/openclaw) | npm + ClawHub |
+| Hermes | [integrations/agent/hermes](https://github.com/openguardrails/openguardrails/tree/main/integrations/agent/hermes) | PyPI |
+| LangGraph | [integrations/agent/langgraph](https://github.com/openguardrails/openguardrails/tree/main/integrations/agent/langgraph) | PyPI |
 
-### Sandbox — enforce on the real exec / network / files
+### Sandbox hook — enforce on the real exec / network / files
 | Target | Source | Scenario |
 |---|---|---|
-| Anthropic srt | [integrations/hermes](https://github.com/openguardrails/openguardrails/tree/main/integrations/hermes) | personal · OS-level, no Docker |
-| NVIDIA OpenShell | [integrations/hermes](https://github.com/openguardrails/openguardrails/tree/main/integrations/hermes) | multi-tenant · container + OPA egress |
+| Anthropic srt | [integrations/agent/hermes](https://github.com/openguardrails/openguardrails/tree/main/integrations/agent/hermes) | personal · OS-level, no Docker |
+| NVIDIA OpenShell | [integrations/agent/hermes](https://github.com/openguardrails/openguardrails/tree/main/integrations/agent/hermes) | multi-tenant · container + OPA egress |
 
 One OGR `sandbox` policy block compiles to either backend — same fields, two
 threat models.
 
-### Gateway — terminate the LLM protocol
-| Target | Repo | |
+Dedicated Anthropic srt and NVIDIA OpenShell sandbox-hook examples will be added
+under `integrations/`. The Hermes integration currently demonstrates both
+backends end to end.
+
+### Gateway hook — integrate at the LLM protocol boundary
+| Target | Source | |
 |---|---|---|
-| OpenAI / Anthropic / MCP | [openguardrails-gateway](https://github.com/openguardrails/openguardrails/tree/main/services/gateway) | inspect & rewrite on the wire |
+| OpenAI / Anthropic / MCP | [integrations/gateway/openai-anthropic](https://github.com/openguardrails/openguardrails/tree/main/integrations/gateway/openai-anthropic) | runnable integration example |
 
 ### Core, spec & benchmark
 | | Repo |

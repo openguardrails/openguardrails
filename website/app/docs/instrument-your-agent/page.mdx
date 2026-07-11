@@ -68,19 +68,19 @@ if verdict.decision not in ("allow", "modify", "redact"):
 ```
 
 At the `sandbox` altitude, "enforce" can also mean **run the command under a real
-sandbox** ([srt](/docs/integrations/hermes-srt/) /
-[OpenShell](/docs/integrations/hermes-openshell/)) compiled from the same policy —
+sandbox** ([srt](/docs/integrations/agent/hermes-srt/) /
+[OpenShell](/docs/integrations/agent/hermes-openshell/)) compiled from the same policy —
 so a rephrased command can't bypass the intent check.
 
 ## Reference implementation
 
 The Hermes plugin is ~250 lines and demonstrates all four steps:
 
-- [`bridge.py`](https://github.com/openguardrails/openguardrails/blob/main/integrations/hermes/src/openguardrails_instrumentation_hermes/bridge.py)
+- [`bridge.py`](https://github.com/openguardrails/openguardrails/blob/main/integrations/agent/hermes/src/openguardrails_instrumentation_hermes/bridge.py)
   — hook callbacks ↔ GuardEvent, Runtime, provenance/taint, guard-context.
-- [`sandbox_guard.py`](https://github.com/openguardrails/openguardrails/blob/main/integrations/hermes/src/openguardrails_instrumentation_hermes/sandbox_guard.py)
+- [`sandbox_guard.py`](https://github.com/openguardrails/openguardrails/blob/main/integrations/agent/hermes/src/openguardrails_instrumentation_hermes/sandbox_guard.py)
   — wrap the exec chokepoint; run under srt when configured.
-- [`__init__.py`](https://github.com/openguardrails/openguardrails/blob/main/integrations/hermes/src/openguardrails_instrumentation_hermes/__init__.py)
+- [`__init__.py`](https://github.com/openguardrails/openguardrails/blob/main/integrations/agent/hermes/src/openguardrails_instrumentation_hermes/__init__.py)
   — bind the four hooks.
 
 ## Graceful degradation

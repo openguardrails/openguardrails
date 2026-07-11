@@ -22,13 +22,13 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install pytest
           python -m pip install -e packages/python
-          python -m pip install -e services/gateway
-          python -m pip install -e integrations/hermes
-          python -m pip install -e integrations/langgraph
+          python -m pip install -e integrations/gateway/openai-anthropic
+          python -m pip install -e integrations/agent/hermes
+          python -m pip install -e integrations/agent/langgraph
       - name: Test
         run: |
           python -m pytest
-          python integrations/langgraph/tests/test_smoke.py
+          python integrations/agent/langgraph/tests/test_smoke.py
 
   javascript:
     runs-on: ubuntu-latest
