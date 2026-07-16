@@ -23,6 +23,7 @@ Harmful content/behavior, judged at the content I/O boundary.
 | `safety.brand` | Brand-safety / off-policy persona. |
 | `safety.topic_violation` | Out-of-scope topic for a constrained agent. |
 | `safety.hallucination` | Unsupported factual claim (where checkable). |
+| `safety.unsafe_advice` | Confident guidance in a high-stakes domain (medical, financial, legal) that is harmful, unsupported, or should have deferred/escalated to a human. Domain-neutral: specialize per domain via subcategory (e.g. `safety.unsafe_advice.clinical_escalation`, `safety.unsafe_advice.medication_interaction`), never a vertical sibling. |
 
 ## `security.*`
 

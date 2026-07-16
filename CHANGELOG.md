@@ -9,6 +9,13 @@ version is independent of any implementation's package version.
 
 ## [Unreleased]
 
+### Added
+- **`safety.unsafe_advice`** taxonomy category — a domain-neutral failure mode
+  for confident guidance in a high-stakes domain (medical/financial/legal) that
+  is harmful, unsupported, or should have deferred/escalated to a human. Domains
+  specialize via subcategory (`safety.unsafe_advice.clinical_escalation`) rather
+  than a vertical sibling under `safety.*` (issue #14). (`specification/taxonomy.md`)
+
 ### Changed
 - Folded the specification into the namesake repo `openguardrails/openguardrails`
   as the canonical home of the standard. (Previously `openguardrails-spec`.)
