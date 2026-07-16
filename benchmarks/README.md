@@ -49,6 +49,8 @@ suites/security/
   malicious_command.jsonl
   data_exfiltration.jsonl
   secret_leak.jsonl
+suites/safety/
+  unsafe_advice_healthcare.jsonl # synthetic category-expectation fixtures
 harness/
   ogrlib.py              # minimal OGR types (mirrors openguardrails)
   detectors.py           # reference detectors + baselines (NOT third-party vendors)
@@ -61,6 +63,12 @@ Positives carry realistic `provenance` (indirect injection is only meaningful wi
 an untrusted origin). Scoring is binary per suite (a detector predicts unsafe iff
 its `decision` ∈ {block, require_approval, redact}); the harness reports
 precision / recall / F1 per category, macro-F1, and p95 latency.
+
+Safety/category-expectation corpora may also include `expected_categories`, an
+array of score-free `Verdict.categories` entries (`{id, domain}`). These labels
+make category mapping executable without pretending that the current reference
+detectors score the suite. The binary `seed-v0` leaderboard remains limited to
+the security suites listed above.
 
 ## Submit a detector
 
