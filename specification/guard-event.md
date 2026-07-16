@@ -7,7 +7,7 @@ the OGR analogue of an OpenTelemetry span. Keywords per RFC 2119.
 
 | Field | Type | Req | Description |
 |---|---|---|---|
-| `ogr_version` | string | MUST | Spec version, e.g. `"0.3"`. |
+| `ogr_version` | string | MUST | Spec version, e.g. `"0.4"`. |
 | `event_id` | string | MUST | Unique id for this observation. |
 | `guard_id` | string | MUST | Stable across observation points for one logical action. See [guard-context](provenance-and-context.md#guard-context-propagation). |
 | `session_id` | string | SHOULD | Conversation / agent-run id. Enables stateful, multi-turn detection. |
@@ -24,13 +24,35 @@ the OGR analogue of an OpenTelemetry span. Keywords per RFC 2119.
 
 ### `subject`
 
+Who is acting. `parent_agent_id` and `delegation_chain` carry **actor lineage**
+for multi-agent systems (an agent that spawns sub-agents) — distinct from the
+**data lineage** [provenance](provenance-and-context.md) carries. Per-event
+subjects look legitimate in isolation; only the delegation path exposes an
+inherited privilege or a confused deputy (a low-privilege agent relaying
+instructions to a high-privilege one).
+
+| Field | Req | Description |
+|---|---|---|
+| `agent_id` | MUST | The acting agent. |
+| `agent_type` | SHOULD | e.g. `claude-code.subagent`. |
+| `principal` | SHOULD | The human/service on whose behalf it acts. |
+| `sandbox_id` | MAY | Sandbox the action runs in. |
+| `parent_agent_id` | MAY | The agent that spawned this one; SHOULD be set by adapters that observe spawn. |
+| `delegation_chain` | MAY | Agent ids root-first, from the top-level agent to this one; length 1 for a top-level agent. MAY be maintained by the runtime from `agent_spawn` events instead of carried on every event. |
+
 ```json
-{ "agent_id": "hermes-1", "agent_type": "hermes", "principal": "user:tom", "sandbox_id": "sbx-7" }
+{ "agent_id": "cc-sub-4", "agent_type": "claude-code.subagent", "principal": "user:tom",
+  "sandbox_id": "sbx-7", "parent_agent_id": "cc-main-1",
+  "delegation_chain": ["cc-main-1", "cc-sub-4"] }
 ```
 
 ## Kinds
 
-A runtime MUST accept all kinds; a detector MAY declare which kinds it handles.
+A runtime MUST accept all kinds; a detector MAY declare which kinds it handles. A
+detector MAY also declare which `content_encoding` values it can meaningfully
+judge; one that receives an encoding it did not declare MUST abstain (`allow`
+with a reason) rather than judge blind (see
+[detector encoding capability](local-redaction.md#detector-encoding-capability)).
 
 | `kind` | Emitted when | `payload` shape (informative) |
 |---|---|---|
@@ -44,16 +66,27 @@ A runtime MUST accept all kinds; a detector MAY declare which kinds it handles.
 | `exec` | sandbox runs a process | `{ "argv": [...], "cwd": "...", "env_keys": [...] }` |
 | `network` | sandbox opens a connection | `{ "host": "...", "port": 443, "direction": "egress" }` |
 | `file` | sandbox reads/writes a path | `{ "op": "write", "path": "..." }` |
+| `agent_spawn` | an agent creates/delegates to a sub-agent | `{ "child_agent_id": "...", "child_agent_type": "...", "granted_scopes": [...] }` |
+| `config_change` | the adapter's own guardrail config changes | `{ "target": "permissions\|hooks\|mcp_allowlist\|skills\|other", "path": "...", "diff_ref": "..." }` |
 
 `tool_register`, `mcp_connect`, and `skill_load` exist because the **definition**
 of a tool/MCP/skill is itself an attack surface (description injection,
 rug-pulls, malicious skill content) — detectable at load time, before any call.
 
+`agent_spawn` makes delegation itself a guarded, detectable action — the hook for
+an "inherited scope exceeds task requirement" detector, and the source a runtime
+can build `subject.delegation_chain` from. `config_change` lets an agent-hook
+adapter report mutation of its **own** guardrail surface (settings/permissions,
+hook definitions, MCP allowlists, skill directories) with semantics that a
+sandbox `file` write loses — configuration integrity is a named attack target,
+and editing the agent's own security config is a first move against the
+`agent_hook` altitude.
+
 ## Example — sandbox `exec` of a piped installer
 
 ```json
 {
-  "ogr_version": "0.2",
+  "ogr_version": "0.4",
   "event_id": "evt-9f2",
   "guard_id": "ga-1a2b",
   "session_id": "run-55",

@@ -28,7 +28,9 @@ that satisfy them — can be trusted.
 [Enrollment & approval receipts](enrollment-and-receipts.md) defines how an
 interception point authenticates to a runtime and how a `require_approval`
 grant becomes a verifiable, payload-bound artifact rather than a propagated
-flag.
+flag. When the runtime is unreachable, [adapter degraded mode](degraded-mode.md)
+keeps the enforcement point safe — degrading to runtime-independent local
+approval rather than failing fully open or fully closed.
 
 ## Three observation altitudes
 

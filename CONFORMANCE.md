@@ -37,7 +37,13 @@ An adapter is **OGR-conformant** if it:
    (see [guard-context propagation](specification/provenance-and-context.md#guard-context-propagation));
 3. honors the composed `Verdict` decision — `block` blocks, `allow` allows,
    `require_approval` gates — at its enforcement point;
-4. fails closed on `security.*` decisions unless explicitly configured otherwise;
+4. when the runtime is unreachable, honors its configured `on_unreachable`
+   policy per category — `block`, `allow`, or `require_local_approval` — rather
+   than a blanket hard block; keeps locally cached hard rules enforced; and
+   signals degraded entry/exit and buffers events for tamper-evident replay on
+   reconnect (see [Adapter degraded mode](specification/degraded-mode.md)).
+   `security.*` defaults to fail-closed, but the deployer MUST be able to choose
+   `require_local_approval`;
 5. enrolls with its runtime before emitting enforcement-relevant events, and
    emits them only over a channel authenticated with its enrollment credential
    (see [Enrollment & approval receipts](specification/enrollment-and-receipts.md));

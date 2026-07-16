@@ -115,10 +115,22 @@ An adapter emitting `content_encoding: redacted` (or `hashed`):
 4. MUST keep `ref` values unique per event and stable across retries of
    the same event.
 
+## Detector encoding capability
+
+A detector MAY declare which `content_encoding` values it can meaningfully judge
+(alongside the kinds it handles, [guard-event](guard-event.md#kinds)). A detector
+that receives an encoding it did not declare MUST abstain — return `allow` with a
+reason — rather than run its logic on content it cannot interpret and report a
+misleading score. Runtimes route and [compose](composition.md) accordingly.
+
+This also makes *detection quality under redaction* a first-class, comparable
+dimension: scoring a benchmark corpus per encoding measures exactly what a
+privacy-sensitive deployer cares about (a per-encoding scoring axis is a
+follow-up for the [benchmark](../benchmarks)).
+
 ## Runtime behavior on reduced content
 
 A runtime receiving `metadata_only` (or `hashed`) content on an event kind
 whose policy requires content inspection SHOULD NOT silently `allow`; it
 SHOULD return `require_approval` with a reason indicating insufficient
-content for the configured policy. (Under discussion — see proposal open
-questions.)
+content for the configured policy.
