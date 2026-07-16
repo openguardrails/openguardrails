@@ -51,7 +51,30 @@ has expired. PEPs SHOULD refresh verification keys on every reconnect.
    enforcement authority from them.
 4. Store-and-forward: events buffered while the runtime is unreachable SHOULD
    be signed per batch (JWS, PEP credential) so delayed delivery is
-   tamper-evident.
+   tamper-evident (see [degraded mode](degraded-mode.md)).
+
+## Liveness (heartbeat)
+
+Uninstalling or silencing a PEP is the cheapest bypass of an altitude, and a
+runtime cannot otherwise distinguish "agent idle" from "PEP went dark". An
+enrolled PEP SHOULD emit a periodic **heartbeat** over its authenticated
+channel, with the cadence declared at enrollment:
+
+```
+heartbeat: { interval_s: 30, counters: { events_emitted: 1420, degraded: false } }
+```
+
+- A runtime SHOULD alert when a PEP misses heartbeats beyond a tolerance and
+  MUST treat the gap as a **coverage loss**, not as "no risk". Fleet coverage
+  metrics depend on this signal.
+- Heartbeat is a **transport/enrollment-level** signal, not a `GuardEvent`
+  `kind`: it authenticates like any event on the PEP's channel but carries no
+  guarded action.
+- `counters` let the runtime reconcile against delivered events and catch
+  selective suppression (a PEP reporting N emitted while N−k arrived). Combined
+  with reconnect replay of [degraded-mode](degraded-mode.md) buffers, this is
+  what makes the "selective event suppression" row of the threat model
+  detectable.
 
 ## Approval receipts
 
@@ -63,7 +86,7 @@ runtime-signed statement of *what* was approved, *by whom*, *until when*.
 
 | Claim | Req | Description |
 |---|---|---|
-| `ogr_version` | MUST | `"0.2"`. |
+| `ogr_version` | MUST | `"0.4"`. |
 | `receipt_id` | MUST | Unique id for this receipt. |
 | `issuer` | MUST | Runtime identity; pairs with the JWS `kid`. |
 | `scope` | MUST | `single_action` \| `pre_authorization`. |
@@ -114,7 +137,8 @@ runtime can derive** at minting time. Verification requires a binding that
 matches the verifying PEP's own event. When none matches — the runtime could
 not project the payload for that altitude — the receipt does not apply, and the
 PEP MUST fall back to asking the runtime (which holds approval state for the
-`guard_id`) or, if unreachable, to its configured unreachable-mode policy.
+`guard_id`) or, if unreachable, to its configured
+[unreachable-mode policy](degraded-mode.md).
 
 ### Receipt verification
 
@@ -174,7 +198,7 @@ what will actually execute, and it is what the receipt binds.
 | Receipt replayed against a different action | — | Digest cannot match |
 | Spoofed GuardEvents from a local process | Accepted | Rejected, or marked unverified |
 | Tampering with buffered degraded-mode events | Undetected | Batch signature fails |
-| Selective event suppression | Undetected | Detectable via liveness signals + reconciliation on reconnect |
+| Selective event suppression | Undetected | Detectable via [liveness](#liveness-heartbeat) signals + reconciliation on reconnect |
 
 ## Out of scope
 

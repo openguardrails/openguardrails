@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://openguardrails.com/schema/0.3/verdict.schema.json",
+  "$id": "https://openguardrails.com/schema/0.4/verdict.schema.json",
   "title": "Verdict",
   "description": "A detector's decision about a GuardEvent.",
   "type": "object",
   "required": ["ogr_version", "event_id", "guard_id", "provider", "decision"],
   "additionalProperties": false,
   "properties": {
-    "ogr_version": { "type": "string", "const": "0.3" },
+    "ogr_version": { "type": "string", "const": "0.4" },
     "event_id": { "type": "string", "minLength": 1 },
     "guard_id": { "type": "string", "minLength": 1 },
     "provider": { "type": "string", "minLength": 1 },

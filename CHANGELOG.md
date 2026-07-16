@@ -7,9 +7,39 @@ not implementations. Downstream SDKs and adapters pin a protocol version.
 The format follows [Keep a Changelog](https://keepachangelog.com/). The protocol
 version is independent of any implementation's package version.
 
-## [Unreleased]
+## [v0.4] — draft revision (proposal)
+
+Agent-security observability and degraded-mode operation: keep a PEP safe when
+the runtime is unreachable, attribute multi-agent delegation, and give the
+agent-security threat classes standard IDs.
 
 ### Added
+- **Adapter degraded mode** (`specification/degraded-mode.md`): a PEP-side
+  `on_unreachable` (`block | allow | require_local_approval`) per category-prefix
+  for when the enforcement point cannot reach the runtime — runtime-independent
+  local approval, locally cached hard rules that stay enforced, degraded
+  entry/exit signaling, and tamper-evident buffered-event replay on reconnect.
+  Replaces the blanket fail-closed default in `CONFORMANCE.md` (issue #3).
+- **Actor lineage** — `subject.parent_agent_id` + `subject.delegation_chain` and
+  an `agent_spawn` kind, so multi-agent delegation (unscoped privilege
+  inheritance, confused deputy) is attributable and itself guardable; distinct
+  from the data-lineage provenance already carried (`specification/guard-event.md`,
+  `schema/guard-event.schema.json`, issue #4).
+- **`config_change` kind** — an agent-hook adapter reporting mutation of its own
+  guardrail surface (permissions, hooks, MCP allowlist, skills), semantics a
+  sandbox `file` write loses (`specification/guard-event.md`, issue #5).
+- **Liveness / heartbeat** — a transport-level PEP heartbeat with
+  enrollment-declared cadence and counters, closing the "selective suppression"
+  gap the threat model already referenced
+  (`specification/enrollment-and-receipts.md`, issue #5).
+- **`security.memory_poisoning`** and **`security.resource_exhaustion`** taxonomy
+  IDs — persistent-memory corruption and loop/rate/spend abuse — as neutral
+  standard IDs, with reference-detector coverage recorded as informative rather
+  than an admission gate (`specification/taxonomy.md`, issue #5).
+- **Detector encoding capability** — detectors declare which `content_encoding`
+  values they can judge and MUST abstain otherwise; completes the edge-redaction
+  story and flags a per-encoding benchmark axis as follow-up
+  (`specification/local-redaction.md`, issue #6).
 - **`safety.unsafe_advice`** taxonomy category — a domain-neutral failure mode
   for confident guidance in a high-stakes domain (medical/financial/legal) that
   is harmful, unsupported, or should have deferred/escalated to a human. Domains
@@ -23,6 +53,9 @@ version is independent of any implementation's package version.
   bucket. (`specification/taxonomy.md`)
 
 ### Changed
+- Wire version `0.3` → `0.4` in schemas (`$id`, `ogr_version`) and examples. All
+  new fields and kinds are optional and the taxonomy additions need no schema
+  change: a valid v0.3 object is a valid v0.4 object after the version-string bump.
 - Folded the specification into the namesake repo `openguardrails/openguardrails`
   as the canonical home of the standard. (Previously `openguardrails-spec`.)
 

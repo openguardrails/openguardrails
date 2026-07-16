@@ -41,6 +41,8 @@ System compromise, judged on actions and data flow.
 | `security.sandbox_escape` | Attempt to break out of the sandbox. |
 | `security.supply_chain` | Untrusted package / MCP / skill / model source. |
 | `security.tool_poisoning` | Malicious tool/MCP **definition** (hidden instructions in descriptions/schemas). |
+| `security.memory_poisoning` | Persistent/cross-session corruption of agent memory — instructions implanted in memory that survive across sessions. |
+| `security.resource_exhaustion` | Loop amplification, runaway API spend, action/order spam — abuse judged on action rates and volume. |
 
 ## `safety.pii.*` — subcategory registry
 
@@ -86,6 +88,20 @@ symbols) have no neutral home in the standard and stay under the vendor namespac
 `x.ogr.politics.general`, `x.ogr.politics.sensitive`, `x.ogr.national_symbols`. Per
 the rollup rule below, a consumer that doesn't recognize a refinement treats it as
 its parent (`safety.toxicity.hate` → `safety.toxicity`).
+
+## Reference detector coverage (informative)
+
+An ID is defined by its threat class, **not** by whether any given detector emits
+it — the taxonomy is a neutral vocabulary, and several standard IDs
+(`security.supply_chain`, `security.sandbox_escape`) already have no reference
+emitter. For the two agent-security IDs added in v0.4, the OpenGuardrails
+reference pipeline maps only *partially*: its indirect-injection capability flags
+memory-write payloads (an informative source for `security.memory_poisoning`),
+and its content-safety S9 class covers model resource-consumption loops (an
+informative source for `security.resource_exhaustion`). Neither is a dedicated
+persistent-memory or rate-abuse detector; third-party or future detectors report
+against the same IDs. Reference coverage is a roadmap note, never an admission
+gate for the standard.
 
 ## Conventions
 
