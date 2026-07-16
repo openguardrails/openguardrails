@@ -4,7 +4,8 @@
     "prompt_injection",
     "malicious_command",
     "data_exfiltration",
-    "secret_leak"
+    "secret_leak",
+    "unsafe_advice"
   ],
   "counts": {
     "prompt_injection": {
@@ -22,9 +23,71 @@
     "secret_leak": {
       "unsafe": 8,
       "safe": 14
+    },
+    "unsafe_advice": {
+      "unsafe": 8,
+      "safe": 4
     }
   },
   "detectors": [
+    {
+      "name": "block-all",
+      "type": "baseline",
+      "perSuite": {
+        "prompt_injection": {
+          "precision": 0.44,
+          "recall": 1.0,
+          "f1": 0.611,
+          "tp": 11,
+          "fp": 14,
+          "fn": 0,
+          "tn": 0,
+          "p95ms": 0.0002
+        },
+        "malicious_command": {
+          "precision": 0.462,
+          "recall": 1.0,
+          "f1": 0.632,
+          "tp": 12,
+          "fp": 14,
+          "fn": 0,
+          "tn": 0,
+          "p95ms": 0.0001
+        },
+        "data_exfiltration": {
+          "precision": 0.417,
+          "recall": 1.0,
+          "f1": 0.588,
+          "tp": 10,
+          "fp": 14,
+          "fn": 0,
+          "tn": 0,
+          "p95ms": 0.0001
+        },
+        "secret_leak": {
+          "precision": 0.364,
+          "recall": 1.0,
+          "f1": 0.533,
+          "tp": 8,
+          "fp": 14,
+          "fn": 0,
+          "tn": 0,
+          "p95ms": 0.0001
+        },
+        "unsafe_advice": {
+          "precision": 0.667,
+          "recall": 1.0,
+          "f1": 0.8,
+          "tp": 8,
+          "fp": 4,
+          "fn": 0,
+          "tn": 0,
+          "p95ms": 0.0001
+        }
+      },
+      "macroF1": 0.633,
+      "p95ms": 0.0002
+    },
     {
       "name": "ogr-compose (config\u2295llm)",
       "type": "hybrid",
@@ -37,7 +100,7 @@
           "fp": 0,
           "fn": 2,
           "tn": 14,
-          "p95ms": 0.0116
+          "p95ms": 0.0032
         },
         "malicious_command": {
           "precision": 1.0,
@@ -47,7 +110,7 @@
           "fp": 0,
           "fn": 4,
           "tn": 14,
-          "p95ms": 0.0112
+          "p95ms": 0.0033
         },
         "data_exfiltration": {
           "precision": 1.0,
@@ -57,7 +120,7 @@
           "fp": 0,
           "fn": 7,
           "tn": 14,
-          "p95ms": 0.0133
+          "p95ms": 0.0037
         },
         "secret_leak": {
           "precision": 1.0,
@@ -67,11 +130,21 @@
           "fp": 0,
           "fn": 6,
           "tn": 14,
-          "p95ms": 0.0112
+          "p95ms": 0.0031
+        },
+        "unsafe_advice": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 8,
+          "tn": 4,
+          "p95ms": 0.0004
         }
       },
-      "macroF1": 0.641,
-      "p95ms": 0.0133
+      "macroF1": 0.512,
+      "p95ms": 0.0037
     },
     {
       "name": "keyword-baseline",
@@ -85,7 +158,7 @@
           "fp": 4,
           "fn": 7,
           "tn": 10,
-          "p95ms": 0.0154
+          "p95ms": 0.007
         },
         "malicious_command": {
           "precision": 0.714,
@@ -95,7 +168,7 @@
           "fp": 4,
           "fn": 2,
           "tn": 10,
-          "p95ms": 0.0089
+          "p95ms": 0.0021
         },
         "data_exfiltration": {
           "precision": 0.636,
@@ -105,7 +178,7 @@
           "fp": 4,
           "fn": 3,
           "tn": 10,
-          "p95ms": 0.0087
+          "p95ms": 0.002
         },
         "secret_leak": {
           "precision": 0.556,
@@ -115,59 +188,21 @@
           "fp": 4,
           "fn": 3,
           "tn": 10,
-          "p95ms": 0.0088
+          "p95ms": 0.0019
+        },
+        "unsafe_advice": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 8,
+          "tn": 4,
+          "p95ms": 0.0038
         }
       },
-      "macroF1": 0.611,
-      "p95ms": 0.0154
-    },
-    {
-      "name": "block-all",
-      "type": "baseline",
-      "perSuite": {
-        "prompt_injection": {
-          "precision": 0.44,
-          "recall": 1.0,
-          "f1": 0.611,
-          "tp": 11,
-          "fp": 14,
-          "fn": 0,
-          "tn": 0,
-          "p95ms": 0.0004
-        },
-        "malicious_command": {
-          "precision": 0.462,
-          "recall": 1.0,
-          "f1": 0.632,
-          "tp": 12,
-          "fp": 14,
-          "fn": 0,
-          "tn": 0,
-          "p95ms": 0.0004
-        },
-        "data_exfiltration": {
-          "precision": 0.417,
-          "recall": 1.0,
-          "f1": 0.588,
-          "tp": 10,
-          "fp": 14,
-          "fn": 0,
-          "tn": 0,
-          "p95ms": 0.0004
-        },
-        "secret_leak": {
-          "precision": 0.364,
-          "recall": 1.0,
-          "f1": 0.533,
-          "tp": 8,
-          "fp": 14,
-          "fn": 0,
-          "tn": 0,
-          "p95ms": 0.0004
-        }
-      },
-      "macroF1": 0.591,
-      "p95ms": 0.0004
+      "macroF1": 0.489,
+      "p95ms": 0.007
     },
     {
       "name": "config-rules",
@@ -181,7 +216,7 @@
           "fp": 0,
           "fn": 8,
           "tn": 14,
-          "p95ms": 0.0092
+          "p95ms": 0.0055
         },
         "malicious_command": {
           "precision": 1.0,
@@ -191,7 +226,7 @@
           "fp": 0,
           "fn": 4,
           "tn": 14,
-          "p95ms": 0.0078
+          "p95ms": 0.0025
         },
         "data_exfiltration": {
           "precision": 1.0,
@@ -201,7 +236,7 @@
           "fp": 0,
           "fn": 8,
           "tn": 14,
-          "p95ms": 0.0098
+          "p95ms": 0.0028
         },
         "secret_leak": {
           "precision": 1.0,
@@ -211,11 +246,21 @@
           "fp": 0,
           "fn": 6,
           "tn": 14,
-          "p95ms": 0.0078
+          "p95ms": 0.0024
+        },
+        "unsafe_advice": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 8,
+          "tn": 4,
+          "p95ms": 0.0002
         }
       },
-      "macroF1": 0.491,
-      "p95ms": 0.0098
+      "macroF1": 0.392,
+      "p95ms": 0.0055
     },
     {
       "name": "llm-judge",
@@ -229,7 +274,7 @@
           "fp": 0,
           "fn": 2,
           "tn": 14,
-          "p95ms": 0.0058
+          "p95ms": 0.0035
         },
         "malicious_command": {
           "precision": 1.0,
@@ -239,7 +284,7 @@
           "fp": 0,
           "fn": 10,
           "tn": 14,
-          "p95ms": 0.0034
+          "p95ms": 0.001
         },
         "data_exfiltration": {
           "precision": 1.0,
@@ -249,7 +294,7 @@
           "fp": 0,
           "fn": 8,
           "tn": 14,
-          "p95ms": 0.0036
+          "p95ms": 0.001
         },
         "secret_leak": {
           "precision": 0.0,
@@ -259,11 +304,21 @@
           "fp": 0,
           "fn": 8,
           "tn": 14,
-          "p95ms": 0.0031
+          "p95ms": 0.0008
+        },
+        "unsafe_advice": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 8,
+          "tn": 4,
+          "p95ms": 0.0003
         }
       },
-      "macroF1": 0.38,
-      "p95ms": 0.0058
+      "macroF1": 0.304,
+      "p95ms": 0.0035
     },
     {
       "name": "allow-all",
@@ -277,7 +332,7 @@
           "fp": 0,
           "fn": 11,
           "tn": 14,
-          "p95ms": 0.0007
+          "p95ms": 0.0004
         },
         "malicious_command": {
           "precision": 0.0,
@@ -287,7 +342,7 @@
           "fp": 0,
           "fn": 12,
           "tn": 14,
-          "p95ms": 0.0004
+          "p95ms": 0.0001
         },
         "data_exfiltration": {
           "precision": 0.0,
@@ -297,7 +352,7 @@
           "fp": 0,
           "fn": 10,
           "tn": 14,
-          "p95ms": 0.0004
+          "p95ms": 0.0001
         },
         "secret_leak": {
           "precision": 0.0,
@@ -307,11 +362,21 @@
           "fp": 0,
           "fn": 8,
           "tn": 14,
-          "p95ms": 0.0004
+          "p95ms": 0.0001
+        },
+        "unsafe_advice": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 8,
+          "tn": 4,
+          "p95ms": 0.0001
         }
       },
       "macroF1": 0.0,
-      "p95ms": 0.0007
+      "p95ms": 0.0004
     }
   ]
 }

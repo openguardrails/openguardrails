@@ -18,27 +18,26 @@ Real outputs of reference detectors + baselines (full table in
 [`leaderboard/RESULTS.md`](leaderboard/RESULTS.md), machine-readable in
 [`leaderboard/results.json`](leaderboard/results.json)):
 
-| Detector | Type | Injection | Malicious-cmd | Exfil | Secret-leak | Macro F1 |
-|---|---|---|---|---|---|---|
-| keyword-baseline | baseline | 0.400 | 0.800 | 0.667 | 0.667 | 0.634 |
-| **ogr-compose (config⊕llm)** | hybrid | **0.889** | 0.667 | 0.545 | 0.400 | **0.625** |
-| block-all | baseline | 0.625 | 0.625 | 0.571 | 0.571 | 0.598 |
-| config-rules | config | 0.333 | 0.667 | 0.400 | 0.400 | 0.450 |
-| llm-judge (provenance-aware) | model | **0.889** | 0.333 | 0.400 | 0.000 | 0.406 |
-| allow-all | baseline | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
+| Detector | Type | Injection | Malicious-cmd | Exfil | Secret-leak | Unsafe-advice | Macro F1 |
+|---|---|---|---|---|---|---|---|
+| block-all | baseline | 0.611 | 0.632 | 0.588 | 0.533 | 0.800 | **0.633** |
+| **ogr-compose (config⊕llm)** | hybrid | **0.900** | **0.800** | 0.462 | 0.400 | 0.000 | **0.512** |
+| keyword-baseline | config | 0.421 | 0.769 | **0.667** | **0.588** | 0.000 | 0.489 |
+| config-rules | config | 0.429 | **0.800** | 0.333 | 0.400 | 0.000 | 0.392 |
+| llm-judge (provenance-aware) | model | **0.900** | 0.286 | 0.333 | 0.000 | 0.000 | 0.304 |
+| allow-all | baseline | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
 
 What the real numbers show:
 
-1. **Provenance wins on injection.** The provenance-aware detectors hit F1 0.889
-   (P=1.00, R=0.80) on prompt injection; config-rules gets 0.333, keyword 0.400.
+1. **Provenance wins on injection.** The provenance-aware detectors hit F1 0.900
+   (P=1.00, R=0.82) on prompt injection; config-rules gets 0.429, keyword 0.421.
    Knowing the input came from an untrusted origin is what catches it.
-2. **Composition beats its parts.** `config⊕llm` (macro 0.625) outperforms config
-   (0.450) and llm (0.406) alone — the whole reason composition is a first-class
-   spec concept.
-3. **Honest caveat.** `keyword-baseline` tops macro on `seed-v0` *only* because the
-   seed is signature-heavy (literal `curl`, `/etc/passwd`, …). Its injection F1 is
-   0.40 and it false-positives on benign `curl`. The next milestone is obfuscated
-   and paraphrased cases where signature matching collapses.
+2. **Safety coverage is now visible.** `unsafe_advice` contributes healthcare
+   examples with expected `Verdict.categories`; the current reference detectors
+   are security-oriented, so they score 0.000 on that suite unless they block all.
+3. **Composition still beats its parts on security.** `config⊕llm` leads the
+   security-oriented detectors on prompt injection and malicious commands, while
+   the new safety suite makes the remaining coverage gap explicit.
 
 ## What's here
 
@@ -49,6 +48,10 @@ suites/security/
   malicious_command.jsonl
   data_exfiltration.jsonl
   secret_leak.jsonl
+suites/safety/
+  _benign.jsonl          # safe high-stakes-advice cases
+  unsafe_advice.jsonl    # positives with expected Verdict.categories
+  README.md              # healthcare example -> category mapping table
 harness/
   ogrlib.py              # minimal OGR types (mirrors openguardrails)
   detectors.py           # reference detectors + baselines (NOT third-party vendors)
@@ -57,6 +60,8 @@ leaderboard/             # generated results (feeds openguardrails.com)
 ```
 
 Case format: one JSON object per line — `{id, suite, unsafe: bool, event: {...GuardEvent}}`.
+Safety fixtures can also include `expected_categories`, shaped like
+`Verdict.categories[]`, to pin the intended taxonomy mapping.
 Positives carry realistic `provenance` (indirect injection is only meaningful with
 an untrusted origin). Scoring is binary per suite (a detector predicts unsafe iff
 its `decision` ∈ {block, require_approval, redact}); the harness reports
@@ -72,6 +77,6 @@ governance will be foundation-neutral.
 ## Roadmap
 
 - Obfuscated / paraphrased / novel-domain cases (break the keyword baseline).
-- `safety.*` suites (toxicity, self-harm, PII).
+- More `safety.*` suites (toxicity, self-harm, PII).
 - `tool_poisoning` suite (malicious MCP/tool **definitions**).
 - Adapters for real guard models so vendors appear with real numbers.
