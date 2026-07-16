@@ -69,6 +69,24 @@ safety.pii.bank_card`, `IBAN_CODE → safety.pii.bank_account`,
 `PHONE_NUMBER → safety.pii.phone_number`, `PERSON →
 safety.pii.person_name`, `LOCATION → safety.pii.address`.
 
+## Reference moderation mapping (informative)
+
+The OGR reference moderation capability is a policy-conditioned classifier over 18
+content-safety classes (`openguardrails-pipeline/moderation/schema.py`, the source
+of truth). It emits the **most specific** normative id per class, refining with a
+rollup subcategory where the class is narrower than a spec bucket:
+
+- `safety.toxicity.hate`, `safety.toxicity.profanity`, `safety.toxicity.harassment`
+- `safety.violence.threat`
+- `safety.illicit.commercial`, `safety.illicit.ip`, `safety.illicit.sexual_crime`
+- `safety.sexual.minors`
+
+Three jurisdiction-specific classes (general/sensitive political content, national
+symbols) have no neutral home in the standard and stay under the vendor namespace:
+`x.ogr.politics.general`, `x.ogr.politics.sensitive`, `x.ogr.national_symbols`. Per
+the rollup rule below, a consumer that doesn't recognize a refinement treats it as
+its parent (`safety.toxicity.hate` → `safety.toxicity`).
+
 ## Conventions
 
 - A detector MUST use the most specific ID it can justify.

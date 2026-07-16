@@ -15,6 +15,12 @@ version is independent of any implementation's package version.
   is harmful, unsupported, or should have deferred/escalated to a human. Domains
   specialize via subcategory (`safety.unsafe_advice.clinical_escalation`) rather
   than a vertical sibling under `safety.*` (issue #14). (`specification/taxonomy.md`)
+- **Reference moderation mapping** (informative) — the 18-class content-safety
+  model now emits the most specific normative id per class, with rollup
+  subcategories (`safety.toxicity.hate`, `safety.violence.threat`,
+  `safety.illicit.commercial`, …) and `x.ogr.politics.*` / `x.ogr.national_symbols`
+  for the jurisdiction-specific classes, replacing a generic `content_safety`
+  bucket. (`specification/taxonomy.md`)
 
 ### Changed
 - Folded the specification into the namesake repo `openguardrails/openguardrails`
