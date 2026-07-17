@@ -35,9 +35,9 @@ run.
         │                          │
         ▼                          ▼
    ┌───────────────────────────────────────────┐
-   │  OGR core contract                          │
-   │  GuardEvent · Verdict · Provenance ·        │
-   │  guard-context · composition · taxonomy     │
+   │  OGR core contract                        │
+   │  GuardEvent · Verdict · Provenance ·      │
+   │  guard-context · composition · taxonomy   │
    └───────────────────────────────────────────┘
         ▲                          ▲
         │                          │
