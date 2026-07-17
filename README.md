@@ -35,9 +35,9 @@ run.
         │                          │
         ▼                          ▼
    ┌───────────────────────────────────────────┐
-   │  OGR core contract                          │
-   │  GuardEvent · Verdict · Provenance ·        │
-   │  guard-context · composition · taxonomy     │
+   │  OGR core contract                        │
+   │  GuardEvent · Verdict · Provenance ·      │
+   │  guard-context · composition · taxonomy   │
    └───────────────────────────────────────────┘
         ▲                          ▲
         │                          │
@@ -128,7 +128,7 @@ integration depends on the core for its language:
 | | LangGraph | [`integrations/agent/langgraph`](integrations/agent/langgraph/) |
 | **Gateway hook** | OpenAI · Anthropic | [`integrations/gateway/openai-anthropic`](integrations/gateway/openai-anthropic/) |
 | **Sandbox hook** | Anthropic srt · NVIDIA OpenShell | [`integrations/sandbox`](integrations/sandbox/) — standalone examples planned |
-| **eBPF** | Kernel process · filesystem · network events | [`integrations/ebpf`](integrations/ebpf/) — planned |
+| **eBPF** | OGR reference sensor (kernel process · filesystem · network events) | [`integrations/ebpf/sensor`](integrations/ebpf/sensor/) |
 
 ## Development
 
@@ -147,7 +147,8 @@ python -m venv .venv
 . .venv/bin/activate
 python -m pip install pytest
 python -m pip install -e packages/python -e integrations/gateway/openai-anthropic \
-  -e integrations/agent/hermes -e integrations/agent/langgraph
+  -e integrations/agent/hermes -e integrations/agent/langgraph \
+  -e integrations/ebpf/sensor
 python -m pytest
 ```
 

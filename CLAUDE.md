@@ -15,9 +15,11 @@ hooks. All bindings and runnable integration examples belong under
 `integrations/`; a gateway implementation is not an OGR-operated service.
 `integrations/gateway/openai-anthropic` demonstrates OpenAI/Anthropic gateway-hook integration.
 Standalone Anthropic srt and NVIDIA OpenShell sandbox-hook examples are planned.
-The fourth directory category, `integrations/ebpf`, is reserved for future
-kernel-level adapters; those adapters must map their events to an OGR
-observation point rather than inventing a separate wire contract.
+The fourth directory category, `integrations/ebpf`, holds kernel-level
+integrations. `integrations/ebpf/sensor` is the native OGR eBPF reference
+implementation (a CO-RE kernel program under `bpf/` plus a userspace PEP in
+`src/openguardrails_ebpf/`). Such integrations must map their events to an OGR
+observation point (`sandbox`) rather than inventing a separate wire contract.
 
 ## Validation
 

@@ -1,0 +1,229 @@
+export const metadata = {
+  title: "Production agent security with eBPF and OpenGuardrails",
+  description:
+    "A vendor-neutral architecture for using eBPF telemetry and the OpenGuardrails protocol to compose multiple agent-security providers in enterprise production environments.",
+};
+
+<p className="text-xs uppercase tracking-[0.2em] text-zinc-500 mb-2">2026-07-16</p>
+
+# Production agent security with eBPF and OpenGuardrails
+
+> eBPF tells you what an agent actually did on a Linux host. OpenGuardrails gives that observation a portable security contract, so several vendors can judge it and one enforcement point can act on the result.
+
+An enterprise agent may appear to call one harmless tool while the process it launches reads a credential, spawns another executable, and opens an unexpected network connection. An agent hook sees the intended tool call. The kernel sees the resulting `execve`, file, and network operations. Production security needs both views, connected by one policy and one correlation identity.
+
+This article presents a vendor-neutral deployment pattern. It does not prescribe a particular eBPF product, detector, model, SIEM, or runtime. The examples use OpenGuardrails (OGR) names because OGR is the interoperability layer: a common `GuardEvent` goes in, attributed vendor `Verdict`s come back, and a deployer-owned composition policy produces the effective decision.
+
+## Start with the separation of responsibilities
+
+eBPF and OGR solve different parts of the system:
+
+| Layer | Responsibility | What remains interchangeable |
+|---|---|---|
+| Linux kernel sensor | Observe or mediate process, file, and network behavior | An open-source probe, an endpoint-security agent, or a vendor eBPF/LSM sensor |
+| OGR adapter / PEP | Normalize sensor records into `GuardEvent`s and enforce the effective `Verdict` | A sidecar, node daemon, sandbox service, or vendor adapter |
+| OGR runtime / PDP | Authenticate events, route them to detectors, correlate them, and compose results | Self-hosted, managed, or embedded runtime |
+| Security providers | Detect malicious commands, secret access, anomalous behavior, policy violations, or unsafe content | Rules, classifiers, threat intelligence, behavioral models, and existing enterprise controls |
+| Enterprise policy | Choose providers, thresholds, failure behavior, and the final enforcement posture | Always owned by the deployer |
+
+The boundary is deliberately narrow. A sensor does not need to understand every detector API, and a detector does not need a custom integration for every agent framework or kernel probe. Each side implements the OGR contract once.
+
+## The production data path
+
+```text
+Agent process tree
+      |
+      | exec / file / network
+      v
+Kernel sensor (tracepoint, cgroup hook, or BPF LSM)
+      |
+      | vendor-native record
+      v
+Node PEP / OGR adapter ---- local hard rules and event buffer
+      |
+      | authenticated GuardEvent
+      v
+OGR runtime ----+---- provider: endpoint behavior
+                +---- provider: data security / DLP
+                +---- provider: command and egress policy
+                +---- provider: agent intent / provenance
+      |
+      | deployer-owned composition
+      v
+Effective Verdict ---- allow / modify / redact / require_approval / block
+      |
+      +---- node enforcement
+      +---- approval service
+      +---- audit, SIEM, and fleet coverage metrics
+```
+
+For the kernel altitude, the normalized event is intentionally small. An `exec` event carries arguments and process identity; a `file` event carries operation and path; a `network` event carries destination, port, and direction. The event also states `observation_point: "sandbox"`, the agent and sandbox subject, and a `guard_id` that correlates the behavior with observations made earlier at the gateway or agent hook.
+
+```json
+{
+  "ogr_version": "0.4",
+  "event_id": "evt-node-0187",
+  "guard_id": "ga-deploy-42",
+  "session_id": "run-prod-9",
+  "timestamp": "2026-07-16T18:04:11Z",
+  "observation_point": "sandbox",
+  "kind": "network",
+  "subject": {
+    "agent_id": "release-agent-17",
+    "principal": "service:release",
+    "sandbox_id": "pod-7c9"
+  },
+  "payload": {
+    "host": "203.0.113.24",
+    "port": 443,
+    "direction": "egress",
+    "process": { "pid": 2841, "ppid": 2804, "comm": "curl", "uid": 10001 }
+  },
+  "provenance": [
+    { "source": "web", "trust": "untrusted", "ref": "evt-tool-result-61" }
+  ]
+}
+```
+
+The example address is documentation-only. More importantly, the event is not a vendor alert. It is the shared evidence that several providers can evaluate independently.
+
+## Connect multiple security vendors without surrendering policy
+
+Each detector returns its own `Verdict` with a stable `provider` identity, decision, risk categories, confidence, latency, and evidence pointers. Provider names below are illustrative rather than product endorsements:
+
+| Provider capability | Useful kernel events | Typical contribution |
+|---|---|---|
+| Endpoint behavioral analytics | `exec`, `file`, `network` | Process ancestry, rare binary, persistence, or lateral-movement signals |
+| Data security / DLP | `file`, `network` | Secret-path access, sensitive-data movement, destination policy |
+| Workload and container security | all sandbox kinds | Namespace, image, workload identity, runtime policy |
+| Agent-security detector | correlated `tool_call` plus sandbox events | Intent, prompt-injection provenance, action mismatch |
+| Enterprise rules engine | all supported kinds | Deterministic allowlists, change windows, environment-specific constraints |
+
+The runtime preserves every underlying verdict. It then applies a composition policy controlled by the enterprise, not by any one provider.
+
+```yaml
+composition:
+  "security.secret_leak":
+    providers: [vendor.data.dlp, vendor.endpoint.behavior]
+    strategy: deny-wins
+    timeout_ms: 150
+    on_all_failed: block
+
+  "security.malicious_command":
+    providers: [enterprise.command_rules, vendor.agent.intent]
+    strategy: deny-wins
+    short_circuit: true
+    on_all_failed: block
+
+  "security.privilege_escalation":
+    providers: [vendor.endpoint.behavior, vendor.workload.runtime, vendor.agent.intent]
+    strategy: quorum
+    quorum: { count: 2, min_score: 0.8 }
+    on_all_failed: block
+
+  "x.enterprise.reputation":
+    providers: [vendor.primary, vendor.secondary]
+    strategy: first-available
+    on_all_failed: allow
+```
+
+Use `deny-wins` where one high-confidence block must stop the action. Use a quorum when independent agreement is more valuable than maximum sensitivity. Use `first-available` for enrichment or latency-sensitive paths with an equivalent fallback. Treat provider weights and thresholds as production policy: version them, review them, test them against recorded events, and make rollbacks routine.
+
+This design also makes vendor evaluation less disruptive. A new provider can run in shadow mode against the same GuardEvents, its accuracy and latency can be measured, and only then can it be added to the enforcing composition set. Removing it later does not require changing the kernel sensor or every agent integration.
+
+## Choose the correct eBPF enforcement semantics
+
+“Observed by eBPF” does not automatically mean “blocked before it happened.” The attachment point determines the guarantee.
+
+- Tracepoints and similar observability hooks are excellent for audit, detection, and rapid containment. The event may arrive after the syscall, so killing the process limits further damage but cannot undo the first file read or network packet.
+- Cgroup networking hooks can enforce network policy at the relevant cgroup boundary, depending on hook and design.
+- BPF LSM programs can instrument Linux Security Module hooks and return an error such as `-EPERM`, enabling pre-commit denial for supported operations. The Linux kernel documentation describes BPF LSM as a mechanism for system-wide MAC and audit policies.
+
+Therefore, map OGR decisions to controls the PEP can honestly enforce:
+
+| Effective decision | Tracepoint-based PEP | Pre-commit capable PEP |
+|---|---|---|
+| `allow` | Record and continue | Continue |
+| `block` | Kill or contain; record that the action may have started | Deny before commit where the hook supports it |
+| `require_approval` | Do not pretend a completed syscall can wait; contain or move the gate to an earlier altitude | Suspend at an agent/gateway gate, or use a deployment-specific preauthorization mechanism |
+| `modify` / `redact` | Usually not meaningful for a completed syscall | Apply only where the enforcement layer can transform the action safely |
+
+The [OGR reference eBPF sensor](https://github.com/openguardrails/openguardrails/tree/main/integrations/ebpf/sensor) uses tracepoints and userspace containment so that limitation is visible and testable. A commercial or internal BPF LSM sensor can replace the kernel half while keeping the same GuardEvent, runtime, providers, and audit model. The [kernel BPF LSM documentation](https://docs.kernel.org/bpf/prog_lsm.html) is the authoritative starting point for pre-commit enforcement behavior.
+
+## Correlate intent with real behavior
+
+The most useful kernel alert is often one enriched by an earlier observation. A gateway may know that a command came from an untrusted web page. An agent hook may know the requested tool and human principal. The eBPF sensor knows which binary executed and which destination it reached.
+
+OGR connects these projections with `guard_id`:
+
+```text
+gateway:    tool_result from web/untrusted  --+
+agent hook: shell.exec("bash deploy.sh")      +-- guard_id: ga-deploy-42
+sandbox:    exec curl; connect 203.0.113.24 --+
+```
+
+The runtime merges provenance and allows later observations to tighten, never loosen, the effective decision. A human approval must be a runtime-signed receipt bound to the exact action payload; a propagated “approved” flag is not authority. This prevents a compromised agent from approving itself or changing the command after approval.
+
+Kernel correlation needs an explicit bridge because a syscall does not carry an HTTP header. Common implementations use a trusted sidecar or sandbox supervisor to bind `guard_id` to a cgroup, process tree, workload identity, or short-lived local context. Prefer cgroup- or workload-bound mappings over a broad time window when the platform exposes them.
+
+## Engineer the node path for production
+
+The protocol is only one part of a reliable deployment. Treat the node sensor and PEP as privileged infrastructure.
+
+### Portability and kernel support
+
+Build a tested support matrix for distributions, kernel versions, architectures, and required hooks. CO-RE uses kernel BTF, compiler relocation records, and libbpf to adapt a compiled program to compatible kernel layouts. The kernel exposes authoritative BTF at `/sys/kernel/btf/vmlinux` on supported systems; see the [libbpf CO-RE overview](https://docs.kernel.org/bpf/libbpf/libbpf_overview.html). Test verifier acceptance and event semantics on every supported kernel family, not just compilation in CI.
+
+### Privilege and supply chain
+
+Grant only the capabilities required to load and attach the chosen programs. Separate the privileged loader from the less-privileged userspace PEP when practical. Sign artifacts, produce an SBOM, pin build inputs, verify hashes before loading, and prevent the guarded agent from modifying maps, links, binaries, policy, or the PEP process. Account for BPF licensing requirements when selecting program types and helpers.
+
+### Scope and event volume
+
+Attach to the smallest useful boundary: an agent cgroup, pod, sandbox, or process tree. A host-wide stream of every file open will be noisy and expensive. Filter stable, low-risk facts near the sensor, but keep policy and semantic classification in userspace where they can be changed and audited safely. Export counters for emitted, dropped, filtered, and malformed records; ring-buffer loss must be a coverage incident, not a quiet metric.
+
+### Data minimization
+
+Kernel telemetry can expose command arguments, paths, destinations, and process metadata. Collect only what each detector needs. Apply local redaction or hashing before remote transport, declare the event's `content_encoding`, encrypt in transit and at rest, and set retention by event class. A detector that cannot evaluate the transported encoding should abstain explicitly rather than guess.
+
+### Availability and backpressure
+
+Keep local hard rules and a bounded, tamper-evident event buffer on the node. Define both failure planes:
+
+- `on_timeout` and `on_all_failed` govern a reachable runtime whose providers are slow or unavailable.
+- `on_unreachable` governs a PEP that cannot reach the runtime at all.
+
+For high-risk security categories, choose `block` or runtime-independent local approval. For known-safe unattended work, use narrow, time-boxed preauthorization rather than a global fail-open switch. Emit degraded-mode transitions and replay signed batches after reconnection.
+
+### Identity, liveness, and audit
+
+Enroll each PEP with a short-lived identity, preferably over mTLS or an equivalent authenticated channel. Bind that identity to the subjects it may assert. Send heartbeats with event counters so “the agent was idle” can be distinguished from “the sensor disappeared.” Store underlying vendor verdicts, the effective verdict, policy version, enforcement result, and approval receipt reference under the same `guard_id`.
+
+## Roll out in four controlled phases
+
+1. **Inventory.** Identify agent workloads, kernel coverage, data classes, required destinations, and the actions that genuinely need human approval.
+2. **Observe.** Emit normalized GuardEvents without enforcement. Measure event rates, drops, detector latency, provider disagreement, false positives, and missing correlation.
+3. **Shadow-compose.** Run all candidate vendors, calculate the effective verdict, but compare it with the current control instead of acting. Freeze category ownership and failure behavior before enforcement.
+4. **Enforce progressively.** Start with deterministic blocks on a small canary group, then expand by workload and risk category. Keep a tested kill switch, signed rollback policy, and an incident runbook for runtime or sensor failure.
+
+Production acceptance should cover more than detection accuracy. Test kernel upgrades, PEP restarts, ring-buffer saturation, runtime partitions, provider timeouts, forged identities, stale approvals, sensor removal, and a full rollback. Verify the control by generating benign and denied actions from a real agent process tree and checking the final enforcement result, not just the presence of an alert.
+
+## What stays neutral
+
+OGR does not decide which vendor is best, which model should judge an action, or which kernel sensor an enterprise should deploy. It standardizes the evidence and decision boundary that lets those choices remain replaceable:
+
+- `GuardEvent` for portable observations
+- `Verdict` for attributed provider results
+- taxonomy for comparable risk categories
+- composition for deployer-owned multi-vendor decisions
+- `guard_id`, provenance, enrollment, and receipts for cross-layer trust
+- explicit degraded-mode behavior for operational safety
+
+That is the practical value of pairing eBPF with a protocol rather than another closed pipeline. The kernel layer verifies what happened. Multiple security providers contribute specialized judgment. The enterprise keeps one policy, one audit trail, and the ability to change vendors without reinstrumenting every agent.
+
+---
+
+- Protocol overview: [OpenGuardrails specification](https://github.com/openguardrails/openguardrails/tree/main/specification)
+- Reference implementation: [OGR eBPF sensor and userspace PEP](https://github.com/openguardrails/openguardrails/tree/main/integrations/ebpf/sensor)
+- Kernel reference: [BPF LSM programs](https://docs.kernel.org/bpf/prog_lsm.html)
+- Portability reference: [libbpf and BPF CO-RE](https://docs.kernel.org/bpf/libbpf/libbpf_overview.html)
