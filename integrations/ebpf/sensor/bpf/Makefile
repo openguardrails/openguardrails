@@ -11,9 +11,11 @@ CLANG    ?= clang
 # Prefer a bpftool that actually runs. Ubuntu's /usr/sbin/bpftool is a wrapper
 # that dispatches by *running* kernel version and fails when that exact
 # linux-tools package is absent; fall back to any versioned binary, which can
-# still dump BTF from the file regardless of the running kernel.
+# still dump BTF from the file regardless of the running kernel. Ubuntu has
+# shipped both /usr/lib/linux-tools/<version>/bpftool and
+# /usr/lib/linux-tools-<version>/bpftool layouts, so search both via find.
 BPFTOOL  ?= $(shell if bpftool version >/dev/null 2>&1; then echo bpftool; \
-	else ls /usr/lib/linux-tools/*/bpftool 2>/dev/null | head -1; fi)
+	else find /usr/lib -maxdepth 2 -type f -name bpftool -print -quit 2>/dev/null; fi)
 ARCH     := $(shell uname -m | sed 's/x86_64/x86/;s/aarch64/arm64/;s/ppc64le/powerpc/;s/mips.*/mips/')
 BTF      ?= /sys/kernel/btf/vmlinux
 
@@ -24,6 +26,10 @@ LDLIBS     := -lbpf -lelf -lz
 all: ogr-sensor
 
 vmlinux.h:
+	@test -n "$(BPFTOOL)" || { \
+		echo "error: bpftool not found; install bpftool or a linux-tools package" >&2; \
+		exit 1; \
+	}
 	$(BPFTOOL) btf dump file $(BTF) format c > $@
 
 ogr_sensor.bpf.o: ogr_sensor.bpf.c ogr_sensor.h vmlinux.h
