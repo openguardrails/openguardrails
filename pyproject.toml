@@ -4,6 +4,7 @@ members = [
   "integrations/gateway/openai-anthropic",
   "integrations/agent/hermes",
   "integrations/agent/langgraph",
+  "integrations/ebpf/sensor",
 ]
 
 [tool.pytest.ini_options]
@@ -11,4 +12,5 @@ testpaths = [
   "packages/python/tests",
   "integrations/gateway/openai-anthropic/tests",
   "integrations/agent/langgraph/tests",
+  "integrations/ebpf/sensor/tests",
 ]

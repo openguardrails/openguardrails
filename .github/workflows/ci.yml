@@ -25,6 +25,7 @@ jobs:
           python -m pip install -e integrations/gateway/openai-anthropic
           python -m pip install -e integrations/agent/hermes
           python -m pip install -e integrations/agent/langgraph
+          python -m pip install -e integrations/ebpf/sensor
       - name: Test
         run: |
           python -m pytest
@@ -41,3 +42,18 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm test
+
+  ebpf:
+    # Compile the OGR eBPF sensor object + loader (CO-RE build check). The
+    # runner kernel exposes BTF at /sys/kernel/btf/vmlinux, so vmlinux.h can be
+    # generated; loading/attaching is not exercised here (needs privileges).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install BPF toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm libbpf-dev libelf-dev zlib1g-dev linux-tools-common linux-tools-$(uname -r) || \
+            sudo apt-get install -y clang llvm libbpf-dev libelf-dev zlib1g-dev linux-tools-generic
+      - name: Build sensor
+        run: make -C integrations/ebpf/sensor/bpf

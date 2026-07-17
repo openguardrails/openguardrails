@@ -52,6 +52,7 @@ Pick the altitude you're entering from. Each link points to its source directory
 |---|---|---|
 | Anthropic srt | [integrations/agent/hermes](https://github.com/openguardrails/openguardrails/tree/main/integrations/agent/hermes) | personal · OS-level, no Docker |
 | NVIDIA OpenShell | [integrations/agent/hermes](https://github.com/openguardrails/openguardrails/tree/main/integrations/agent/hermes) | multi-tenant · container + OPA egress |
+| OGR eBPF sensor | [integrations/ebpf/sensor](https://github.com/openguardrails/openguardrails/tree/main/integrations/ebpf/sensor) | kernel altitude · native OGR sensor + userspace PEP |
 
 One OGR `sandbox` policy block compiles to either backend — same fields, two
 threat models.
