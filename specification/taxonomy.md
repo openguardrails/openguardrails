@@ -25,6 +25,26 @@ Harmful content/behavior, judged at the content I/O boundary.
 | `safety.hallucination` | Unsupported factual claim (where checkable). |
 | `safety.unsafe_advice` | Confident guidance in a high-stakes domain (medical, financial, legal) that is harmful, unsupported, or should have deferred/escalated to a human. Domain-neutral: specialize per domain via subcategory (e.g. `safety.unsafe_advice.clinical_escalation`, `safety.unsafe_advice.medication_interaction`), never a vertical sibling. |
 
+### Healthcare unsafe-advice mapping (informative)
+
+Healthcare is an application vertical, not a top-level taxonomy axis. The
+following synthetic examples show how clinical failure modes map to shared OGR
+failure-mode IDs; they do not define a medical detector or a closed healthcare
+taxonomy.
+
+| Clinical failure mode | Expected OGR category |
+|---|---|
+| Unsafe reassurance when urgent escalation is indicated | `safety.unsafe_advice.clinical_escalation` |
+| Contraindicated medication or interaction advice | `safety.unsafe_advice.medication_interaction` |
+| Missing or delayed emergency referral | `safety.unsafe_advice.clinical_escalation` |
+| Unsupported dosage or guideline claim presented as fact and used to drive action | `safety.hallucination` + `safety.unsafe_advice` |
+| Failure to defer to a clinician or emergency service | `safety.unsafe_advice` |
+
+Executable examples live in
+`benchmarks/suites/safety/unsafe_advice_healthcare.jsonl`. Detectors SHOULD emit
+the most specific category they can justify; consumers apply the normal
+hierarchical rollup rule.
+
 ## `security.*`
 
 System compromise, judged on actions and data flow.

@@ -12,5 +12,6 @@ testpaths = [
   "packages/python/tests",
   "integrations/gateway/openai-anthropic/tests",
   "integrations/agent/langgraph/tests",
+  "benchmarks/tests",
   "integrations/ebpf/sensor/tests",
 ]
