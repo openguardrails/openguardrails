@@ -15,7 +15,7 @@ CLANG    ?= clang
 # shipped both /usr/lib/linux-tools/<version>/bpftool and
 # /usr/lib/linux-tools-<version>/bpftool layouts, so search both via find.
 BPFTOOL  ?= $(shell if bpftool version >/dev/null 2>&1; then echo bpftool; \
-	else find /usr/lib -maxdepth 2 -type f -name bpftool -print -quit 2>/dev/null; fi)
+	else find /usr/lib -maxdepth 3 -type f -name bpftool -print -quit 2>/dev/null; fi)
 ARCH     := $(shell uname -m | sed 's/x86_64/x86/;s/aarch64/arm64/;s/ppc64le/powerpc/;s/mips.*/mips/')
 BTF      ?= /sys/kernel/btf/vmlinux
 
