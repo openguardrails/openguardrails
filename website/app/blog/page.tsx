@@ -5,6 +5,13 @@ export const metadata = {
 
 const POSTS = [
   {
+    slug: "production-agent-security-with-ebpf-and-openguardrails",
+    title: "Production agent security with eBPF and OpenGuardrails",
+    date: "2026-07-16",
+    blurb:
+      "A vendor-neutral reference architecture for turning kernel exec, file, and network activity into OGR GuardEvents, composing multiple security providers, and enforcing one auditable decision across an enterprise fleet.",
+  },
+  {
     slug: "guarding-your-agent-with-openguardrails-and-openafw",
     title: "Guarding your working agent with OpenGuardrails and openafw",
     date: "2026-06-29",
