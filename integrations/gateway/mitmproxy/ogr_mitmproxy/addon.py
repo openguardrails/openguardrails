@@ -13,12 +13,14 @@ the model (request side) or its output never reaches the agent (response side).
 Enforcement is at the runtime: configure a policy there (e.g. attach the
 `moderation` guardrail). This addon carries no detection logic — it is a pure PEP.
 
-Run:
+Run (load `run.py`, not this module — see the README):
     OGR_RUNTIME_URL=http://localhost:3000 OGR_API_KEY=ogr_... \
-        mitmdump -s ogr_mitmproxy/addon.py
+        mitmdump -s run.py
 
 mitmproxy event hooks used (https://docs.mitmproxy.org/stable/api/events.html):
-`request` (inbound prompt) and `response` (model completion).
+`request` (inbound prompt), `response` (model completion), and
+`websocket_message` (Codex over its ChatGPT-backend socket, where the agent's
+tool_call / tool_result surfaces live).
 """
 from __future__ import annotations
 
@@ -53,6 +55,8 @@ class OGRGateway:
         self.fail_closed = _truthy(os.environ.get("OGR_FAIL_MODE_CLOSED"), True)
         # also moderate the model's completion on the way back.
         self.check_response = _truthy(os.environ.get("OGR_CHECK_RESPONSE"), True)
+        # withhold streamed tool-call fragments until the completed call is judged.
+        self.hold_tool_deltas = _truthy(os.environ.get("OGR_WS_HOLD_TOOL_DELTAS"), True)
         timeout = float(os.environ.get("OGR_EVAL_TIMEOUT", "2.0"))
         self.client = OGRClient(self.runtime, self.api_key, timeout=timeout)
         if not self.api_key:
@@ -151,27 +155,81 @@ class OGRGateway:
                         self._session(flow), protocols.reasons(verdict))
             flow.response = protocols.block_response(proto, protocols.reasons(verdict), verdict)
 
-    # ── WebSocket side: moderate Codex (ChatGPT backend) request frames ────
+    # ── WebSocket side: moderate Codex (ChatGPT backend) traffic ──────────
     async def websocket_message(self, flow: http.HTTPFlow) -> None:
         """Codex-in-ChatGPT-mode speaks the Responses API over a WebSocket
-        (chatgpt.com/backend-api/codex/responses), so its user input never hits
-        the request/response hooks. Moderate the client→server `response.create`
-        frame; on block, drop the frame and kill the flow so the model never
-        sees the unsafe turn."""
+        (chatgpt.com/backend-api/codex/responses), so nothing reaches the
+        request/response hooks. Three surfaces ride this socket:
+
+          client→server  `response.create`      → user_input, tool_result
+          server→client  `response.output_item.done` (custom_tool_call)
+                                                 → tool_call   ← the agent surface
+
+        The tool_call direction is the one that matters for a coding agent:
+        that frame is the model telling Codex to run a command, and mitmproxy
+        awaits this hook before forwarding it, so a `block` verdict stops the
+        command from ever reaching the agent.
+        """
         if not protocols.is_codex_ws(flow.request.path):
             return
         msg = flow.websocket.messages[-1]
-        if not msg.from_client or not msg.is_text:
+        if not msg.is_text:
             return
+        frame = protocols.codex_frame(msg.content.decode("utf-8", "replace"))
+        if frame is None:
+            return  # unparseable, or Codex's own auto-reviewer talking
+        if msg.from_client:
+            await self._ws_from_client(flow, msg, frame)
+        else:
+            await self._ws_from_server(flow, msg, frame)
+
+    def _ws_state(self, flow: http.HTTPFlow) -> dict:
+        """Per-socket conversation state feeding the authz envelope."""
+        return flow.metadata.setdefault(
+            "ogr_ws", {"transcript": [], "system_prompt": "", "verdicts": {}})
+
+    def _authz(self, flow: http.HTTPFlow) -> dict:
+        st = self._ws_state(flow)
+        authz: dict = {}
+        if st["transcript"]:
+            authz["transcript"] = st["transcript"][-protocols.MAX_TRANSCRIPT_ENTRIES:]
+        if st["system_prompt"]:
+            authz["agent_system_prompt"] = st["system_prompt"]
+        return authz
+
+    async def _ws_from_client(self, flow: http.HTTPFlow, msg, frame: dict) -> None:
+        st = self._ws_state(flow)
+        if not st["system_prompt"]:
+            st["system_prompt"] = protocols.parse_codex_ws_system_prompt(frame)
+
+        # Tool results: untrusted content entering the context (indirect injection).
+        for out in protocols.parse_codex_ws_tool_outputs(frame):
+            event = make_event(
+                "tool_result", subject=self._subject(),
+                payload={"result": out["text"], "call_id": out["call_id"]},
+                session_id=self._session(flow), llm_protocol="openai.responses",
+                authz=self._authz(flow),
+                provenance=[{"source": "tool", "trust": "untrusted"}])
+            verdict = await self._evaluate(event)
+            decision = (verdict or {}).get("decision") or (
+                "block" if self.fail_closed else "allow")
+            if decision in BLOCKING:
+                logger.info("[OGR] %s codex-ws tool_result (%s): %s", decision,
+                            self._session(flow), protocols.reasons(verdict or {}))
+                msg.drop()      # poisoned tool output never reaches the model
+                flow.kill()
+                return
+
         parsed = protocols.parse_codex_ws_user(msg.content.decode("utf-8", "replace"))
         if parsed is None:
             return
         text, turn_id = parsed
+        st["transcript"].append(protocols.transcript_entry("user", text=text))
 
-        # response.create re-sends history each turn; remember the verdict per turn so
-        # we evaluate once but keep DROPPING resends of a blocked turn (never forward it).
-        seen = flow.metadata.setdefault("ogr_ws_verdict", {})
-        key = turn_id or text
+        # response.create re-sends the opening turn; remember the verdict per turn so
+        # we evaluate once but keep DROPPING resends of a blocked turn.
+        seen = st["verdicts"]
+        key = f"user:{turn_id or text}"
         if key in seen:
             if seen[key] in BLOCKING:
                 msg.drop()
@@ -186,10 +244,47 @@ class OGRGateway:
         seen[key] = decision
 
         if decision in BLOCKING:
-            logger.info("[OGR] %s codex-ws (%s): %s", decision,
+            logger.info("[OGR] %s codex-ws user_input (%s): %s", decision,
                         self._session(flow), protocols.reasons(verdict or {}))
             msg.drop()          # the unsafe request frame never reaches the model
             flow.kill()         # best-effort socket teardown so codex stops waiting
+
+    async def _ws_from_server(self, flow: http.HTTPFlow, msg, frame: dict) -> None:
+        # Withhold the incremental tool-call stream: it lands before the completed
+        # item we gate on, and Codex can assemble a runnable call from it. The
+        # completed `output_item.done` carries the full input, so suppressing the
+        # deltas costs the agent nothing but the typing animation.
+        if self.hold_tool_deltas and protocols.is_codex_tool_input_delta(frame):
+            msg.drop()
+            return
+
+        call = protocols.parse_codex_ws_tool_call(frame)
+        if call is None:
+            return
+
+        event = make_event(
+            "tool_call", subject=self._subject(),
+            payload={"name": call["name"], "arguments": {"input": call["arguments"]},
+                     "call_id": call["call_id"]},
+            session_id=self._session(flow), llm_protocol="openai.responses",
+            authz=self._authz(flow),
+            provenance=[{"source": "model", "trust": "unverified"}])
+        verdict = await self._evaluate(event)
+        decision = (verdict or {}).get("decision") or ("block" if self.fail_closed else "allow")
+
+        if decision in BLOCKING:
+            logger.info("[OGR] %s codex-ws tool_call %s (%s): %s", decision,
+                        call["name"], self._session(flow),
+                        protocols.reasons(verdict or {}))
+            msg.drop()          # the command never reaches the agent
+            flow.kill()         # Codex surfaces this as a failed turn (no clean 403 on a socket)
+            return
+
+        logger.info("[OGR] allow codex-ws tool_call %s (%s)", call["name"],
+                    self._session(flow))
+        self._ws_state(flow)["transcript"].append(
+            protocols.transcript_entry("assistant", tool_name=call["name"],
+                                       tool_input=call["arguments"]))
 
 
 addons = [OGRGateway()]

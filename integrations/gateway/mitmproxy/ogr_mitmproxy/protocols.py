@@ -102,19 +102,55 @@ def parse_response(proto: str, body: dict) -> str:
 # "text":...}], "internal_chat_message_metadata_passthrough":{"turn_id":...}}.
 CODEX_WS_PATH = "/backend-api/codex/responses"
 
+# Codex runs its own built-in action reviewer as a second model on the SAME
+# socket (config `approvals_reviewer`). Those frames carry the action we are
+# about to judge as *their* prompt — evaluating them would double-report every
+# action with the reviewer's rubric as the "user turn". Skip them wholesale.
+CODEX_REVIEW_MODEL = "codex-auto-review"
+
+# Item types carrying a tool the model wants to run. Codex >= 0.14 emits
+# `custom_tool_call` (freeform: `input` is JS driving `tools.exec_command`);
+# the classic Responses function tool is `function_call` (`arguments` is JSON).
+_TOOL_CALL_ITEMS = ("custom_tool_call", "function_call")
+_TOOL_OUTPUT_ITEMS = ("custom_tool_call_output", "function_call_output")
+
+# Field caps from the runtime's guardEventExtSchema (authzEnvelopeSchema). The
+# runtime rejects the whole event with `invalid_event` when one is exceeded, so
+# truncate here rather than lose the verdict.
+MAX_TRANSCRIPT_ENTRIES = 128
+MAX_TRANSCRIPT_TEXT = 8192
+MAX_SYSTEM_PROMPT = 16384
+
 
 def is_codex_ws(path: str) -> bool:
     return CODEX_WS_PATH in (path or "")
 
 
-def parse_codex_ws_user(text: str) -> tuple[str, str | None] | None:
-    """Parse a client→server `response.create` frame -> (latest_user_text, turn_id),
-    or None if the frame carries no user turn."""
+def codex_frame(text: str) -> dict | None:
+    """Parse a Codex WebSocket text frame; None when it is not a JSON object or
+    belongs to Codex's own action reviewer."""
     try:
         d = json.loads(text)
     except (ValueError, TypeError):
         return None
-    if d.get("type") != "response.create":
+    if not isinstance(d, dict):
+        return None
+    if d.get("model") == CODEX_REVIEW_MODEL:
+        return None
+    return d
+
+
+def _turn_id(item: dict) -> str | None:
+    meta = (item.get("metadata")
+            or item.get("internal_chat_message_metadata_passthrough") or {})
+    return meta.get("turn_id")
+
+
+def parse_codex_ws_user(text: str) -> tuple[str, str | None] | None:
+    """Parse a client→server `response.create` frame -> (latest_user_text, turn_id),
+    or None if the frame carries no user turn."""
+    d = codex_frame(text)
+    if d is None or d.get("type") != "response.create":
         return None
     latest, turn_id = "", None
     for it in d.get("input", []):
@@ -123,9 +159,88 @@ def parse_codex_ws_user(text: str) -> tuple[str, str | None] | None:
         t = _content_text(it.get("content"))
         if t:
             latest = t
-            meta = it.get("internal_chat_message_metadata_passthrough") or {}
-            turn_id = meta.get("turn_id") or turn_id
+            turn_id = _turn_id(it) or turn_id
     return (latest, turn_id) if latest else None
+
+
+def parse_codex_ws_tool_call(d: dict) -> dict | None:
+    """Parse a server→client `response.output_item.done` frame carrying a
+    COMPLETED tool call -> {name, arguments, call_id, turn_id}, else None.
+
+    This is the enforcement point for `tool_call`: the frame is the model
+    telling Codex to run something, and mitmproxy awaits this hook before
+    forwarding it, so a verdict can still stop the call from ever reaching
+    the agent. (The client→server side only ever carries the *result*: Codex
+    threads history server-side via `previous_response_id` and never re-sends
+    the call itself.)"""
+    if d.get("type") != "response.output_item.done":
+        return None
+    item = d.get("item")
+    if not isinstance(item, dict) or item.get("type") not in _TOOL_CALL_ITEMS:
+        return None
+    args = item.get("input")
+    if args is None:
+        args = item.get("arguments")
+    return {
+        "name": item.get("name") or "tool",
+        "arguments": args if isinstance(args, str) else json.dumps(args or {}),
+        "call_id": item.get("call_id") or item.get("id") or "",
+        "turn_id": _turn_id(item),
+    }
+
+
+def is_codex_tool_input_delta(d: dict) -> bool:
+    """Incremental tool-call streaming (`…input.delta` / `…arguments.delta`).
+    These reach the agent BEFORE the completed item we gate on, so they are
+    withheld until the verdict lands — otherwise Codex could assemble and run
+    the call out from under the guardrail."""
+    t = d.get("type") or ""
+    return t.endswith("custom_tool_call_input.delta") or t.endswith(
+        "function_call_arguments.delta")
+
+
+def parse_codex_ws_tool_outputs(d: dict) -> list[dict]:
+    """Tool results Codex sends back inside the next `response.create` frame ->
+    [{call_id, text}]. This is the `tool_result` surface — untrusted content
+    entering the context, which is what the indirect-injection judge reads."""
+    if d.get("type") != "response.create":
+        return []
+    out = []
+    for it in d.get("input", []):
+        if not isinstance(it, dict) or it.get("type") not in _TOOL_OUTPUT_ITEMS:
+            continue
+        text = _content_text(it.get("output"))
+        if text:
+            out.append({"call_id": it.get("call_id") or "", "text": text})
+    return out
+
+
+def parse_codex_ws_system_prompt(d: dict) -> str:
+    """Codex's own instructions (developer-role turns + top-level `instructions`)
+    — the agent_system_prompt slot of the authz envelope: trusted configuration
+    the scope judge weighs a proposed action against."""
+    if d.get("type") != "response.create":
+        return ""
+    parts = []
+    if isinstance(d.get("instructions"), str):
+        parts.append(d["instructions"])
+    for it in d.get("input", []):
+        if isinstance(it, dict) and it.get("role") == "developer":
+            t = _content_text(it.get("content"))
+            if t:
+                parts.append(t)
+    return "\n\n".join(parts)[:MAX_SYSTEM_PROMPT]
+
+
+def transcript_entry(role: str, *, text: str = "", tool_name: str = "",
+                     tool_input: str = "") -> dict:
+    """One authz-envelope transcript entry, capped to the runtime's limits.
+    Deliberately carries only user text and tool_use projections — never the
+    agent's prose (the judge is reasoning-blind by design)."""
+    if tool_name:
+        return {"role": role, "tool_use": {"name": tool_name[:128],
+                                           "input": tool_input[:MAX_TRANSCRIPT_TEXT]}}
+    return {"role": role, "text": text[:MAX_TRANSCRIPT_TEXT]}
 
 
 def reasons(verdict: dict) -> str:

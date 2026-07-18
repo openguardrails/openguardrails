@@ -30,10 +30,16 @@ def new_id(prefix: str) -> str:
 
 def make_event(kind: str, *, subject: dict, payload: dict, session_id: str,
                guard_id: str | None = None, llm_protocol: str | None = None,
-               provenance: list[dict] | None = None) -> dict:
+               provenance: list[dict] | None = None,
+               authz: dict | None = None) -> dict:
     """Build a GuardEvent (observation_point='gateway'). `subject` must carry
     at least `agent_id`; `payload` is kind-specific (user_input/model_output ->
-    {"text": ...})."""
+    {"text": ...}; tool_call -> {"name","arguments"}).
+
+    `authz` is the runtime's reasoning-blind authorization envelope
+    (transcript / agent_system_prompt / authorization) that scope-aware
+    guardrails such as `yolo` consume. It rides on guardEventExtSchema, an
+    additive runtime extension off the OGR wire GuardEvent."""
     event = {
         "ogr_version": OGR_VERSION,
         "event_id": new_id("evt"),
@@ -49,6 +55,8 @@ def make_event(kind: str, *, subject: dict, payload: dict, session_id: str,
         event["llm_protocol"] = llm_protocol
     if provenance:
         event["provenance"] = provenance
+    if authz:
+        event["authz"] = authz
     return event
 
 

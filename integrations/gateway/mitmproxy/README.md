@@ -26,6 +26,7 @@ sandbox) share.
 |------|-------|-------------------------------|
 | `request` | `user_input` = the latest user turn on the wire | replaces the request with a `403`/`409` error — the model is never called |
 | `response` | `model_output` = the completion | replaces the completion with a `403`/`409` error |
+| `websocket_message` | `user_input`, **`tool_call`**, `tool_result` (Codex) | drops the frame — the command never reaches the agent |
 
 Supported wire protocols: OpenAI Chat Completions (`/v1/chat/completions`),
 OpenAI Responses (`/v1/responses`), Anthropic Messages (`/v1/messages`), and
@@ -35,11 +36,33 @@ OpenAI Responses (`/v1/responses`), Anthropic Messages (`/v1/messages`), and
 
 Codex in ChatGPT-login mode does not use plain HTTP — it opens a **WebSocket** to
 `chatgpt.com/backend-api/codex/responses` and sends each turn as a Responses-API
-`response.create` text frame. The addon's `websocket_message` hook parses the
-client→server frame, extracts the user turn, evaluates it, and on `block` **drops
-that frame** so the model never receives it (the request never completes).
+`response.create` text frame. The addon's `websocket_message` hook handles three
+surfaces on that socket:
 
-Two things are Codex-specific:
+| Direction | Frame | Event |
+|-----------|-------|-------|
+| client→server | `response.create` user turn | `user_input` |
+| client→server | `response.create` → `custom_tool_call_output` | `tool_result` (untrusted — the indirect-injection surface) |
+| **server→client** | `response.output_item.done` → `custom_tool_call` | **`tool_call`** — the command the model wants Codex to run |
+
+The `tool_call` direction is the one that matters for a coding agent, and it is
+**server→client**: Codex threads history server-side via `previous_response_id`,
+so the call itself is never re-sent by the client — the only place to see it is
+on its way to the agent. mitmproxy awaits the hook before forwarding the frame,
+so a `block` verdict stops the command from ever reaching Codex. This is what
+lights up the runtime's `yolo` guardrail (scope + command danger + tenant rules),
+which only ever fires on `tool_call`.
+
+Three things are Codex-specific:
+- **Streamed tool fragments**: the completed call is preceded by
+  `custom_tool_call_input.delta` frames carrying it piecemeal — enough for Codex
+  to assemble and run before the verdict lands. The addon withholds those deltas
+  (`OGR_WS_HOLD_TOOL_DELTAS`, default on); the completed item carries the full
+  input, so the agent loses only the typing animation.
+- **Codex's own reviewer**: with `approvals_reviewer` enabled Codex runs a second
+  model (`codex-auto-review`) over the *same socket*, and its prompt is the action
+  being judged. Those frames are skipped — evaluating them would double-report
+  every action with the reviewer's rubric as the "user turn".
 - **CA trust**: Codex is a Rust binary (reqwest), so `NODE_EXTRA_CA_CERTS` does
   nothing. Use `SSL_CERT_FILE` pointing at a bundle that includes the mitmproxy
   CA (system roots + `~/.mitmproxy/mitmproxy-ca-cert.pem`), or add the CA to the
@@ -125,7 +148,8 @@ A prompt that trips the moderation policy comes back as:
 | `OGR_AGENT_TYPE` | — | optional `subject.agent_type` |
 | `OGR_FAIL_MODE_CLOSED` | `true` | if the runtime is unreachable: block (`true`) or pass through (`false`) |
 | `OGR_CHECK_RESPONSE` | `true` | also moderate the model completion |
-| `OGR_EVAL_TIMEOUT` | `2.0` | seconds to wait on the PDP call |
+| `OGR_WS_HOLD_TOOL_DELTAS` | `true` | withhold streamed tool-call fragments until the completed call is judged |
+| `OGR_EVAL_TIMEOUT` | `2.0` | seconds to wait on the PDP call — **raise it** (15–25s) when the policy calls an undistilled judge; a 27B LoRA takes 1–4s per call |
 
 Session correlation: the addon uses an `x-ogr-session` (or `x-session-id`)
 request header if the agent sets one, else the client connection id. The runtime
@@ -137,6 +161,12 @@ to one conversation turn.
 - **Streaming responses** (`text/event-stream`) skip response-side moderation for
   now; request-side (`user_input`) moderation always applies. Disable streaming
   on the agent to moderate completions, or wait for the streaming follow-up.
+  This affects the **HTTP** protocols only — the Codex WebSocket path moderates
+  `tool_call` on the server→client side regardless.
+- **The authz envelope is per socket.** `transcript` (user turns + executed
+  `tool_use` projections) and `agent_system_prompt` are accumulated as the
+  connection runs, so the scope judge sees what authorized an action. A verdict
+  on the first tool call of a fresh connection has less context than a later one.
 - The addon evaluates the **latest user turn** per request (the run's new input),
   not the entire history each time — that is what the runtime derives runs from.
 - Blocking is synchronous and bounded by `OGR_EVAL_TIMEOUT`; the PDP call runs off
