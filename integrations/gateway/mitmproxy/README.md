@@ -53,6 +53,17 @@ so a `block` verdict stops the command from ever reaching Codex. This is what
 lights up the runtime's `yolo` guardrail (scope + command danger + tenant rules),
 which only ever fires on `tool_call`.
 
+**Graceful block (default).** Codex's freeform exec tool runs the tool call's
+`input` as JS and reports whatever `text(...)` emits. On a blocked `tool_call`
+the addon rewrites `input` in-frame to a bare `text("⛔ OpenGuardrails blocked
+…")` — no command — and forwards it. Codex "runs" the notice, gets it as the
+tool result, and relays it to the user in its own words; the dangerous command
+never executes and the turn completes cleanly. Contrast the fallback below
+(drop + kill), which leaves the user staring at a stalled turn. Set
+`OGR_WS_BLOCK_REWRITE=false` to force the fallback. A **named** `function_call`
+(rather than freeform exec) can't be rewritten — a benign argument would still
+invoke the real tool — so those always fall back to drop + kill.
+
 Three things are Codex-specific:
 - **Streamed tool fragments**: the completed call is preceded by
   `custom_tool_call_input.delta` frames carrying it piecemeal — enough for Codex
@@ -67,9 +78,10 @@ Three things are Codex-specific:
   nothing. Use `SSL_CERT_FILE` pointing at a bundle that includes the mitmproxy
   CA (system roots + `~/.mitmproxy/mitmproxy-ca-cert.pem`), or add the CA to the
   system store (`update-ca-certificates`).
-- **Block UX**: dropping a WebSocket request frame stops the model from seeing the
-  input, but there is no clean 403 — Codex surfaces it as a stalled/failed turn.
-  (HTTP protocols get a proper 403/409 body; WebSocket blocking is drop-based.)
+- **Block UX**: `user_input` / `tool_result` blocks have no clean 403 on a socket,
+  so they drop the frame + kill the flow (Codex shows a stalled/failed turn).
+  `tool_call` blocks are graceful — see "Graceful block" above. (HTTP protocols
+  always get a proper 403/409 body.)
 
 ```bash
 export HTTPS_PROXY=http://localhost:8080 HTTP_PROXY=http://localhost:8080
@@ -120,6 +132,19 @@ mitmdump -s run.py --listen-port 8080
 (mitmproxy loads a `-s` script standalone, which would break the addon's
 intra-package imports). `run.py` puts the package on `sys.path` and exposes `addons`.
 
+**Want to watch the traffic?** Swap `mitmdump` for `mitmweb` — same addon, plus a
+web UI that lists every flow (and every Codex WebSocket frame) so you can inspect
+what was evaluated and blocked:
+
+```bash
+mitmweb -s run.py --listen-port 8080 \
+        --web-host 127.0.0.1 --web-port 8081 --no-web-open-browser
+# open http://127.0.0.1:8081  (over SSH: ssh -L 8081:127.0.0.1:8081 <host>)
+```
+
+Note the `[OGR]` verdict lines go to mitmweb's **Events** pane in the UI, not the
+terminal; use `mitmdump` if you want them on stdout.
+
 ### 4. Route the agent through the proxy
 
 ```bash
@@ -149,6 +174,7 @@ A prompt that trips the moderation policy comes back as:
 | `OGR_FAIL_MODE_CLOSED` | `true` | if the runtime is unreachable: block (`true`) or pass through (`false`) |
 | `OGR_CHECK_RESPONSE` | `true` | also moderate the model completion |
 | `OGR_WS_HOLD_TOOL_DELTAS` | `true` | withhold streamed tool-call fragments until the completed call is judged |
+| `OGR_WS_BLOCK_REWRITE` | `true` | on a blocked Codex `tool_call`, rewrite it to a harmless notice (graceful) instead of dropping the frame + killing the socket |
 | `OGR_EVAL_TIMEOUT` | `2.0` | seconds to wait on the PDP call — **raise it** (15–25s) when the policy calls an undistilled judge; a 27B LoRA takes 1–4s per call |
 
 Session correlation: the addon uses an `x-ogr-session` (or `x-session-id`)

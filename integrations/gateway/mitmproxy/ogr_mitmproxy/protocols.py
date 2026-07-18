@@ -232,6 +232,35 @@ def parse_codex_ws_system_prompt(d: dict) -> str:
     return "\n\n".join(parts)[:MAX_SYSTEM_PROMPT]
 
 
+def block_message(reason: str) -> str:
+    """User-facing text Codex shows in place of a blocked command's output."""
+    return (f"⛔ OpenGuardrails blocked this action (policy: {reason}). "
+            "The command was NOT executed.")
+
+
+def rewrite_codex_tool_call_block(frame: dict, reason: str) -> bytes | None:
+    """Turn a blocked `custom_tool_call` frame into a harmless one that surfaces
+    the block, instead of dropping it and killing the socket.
+
+    Codex's freeform exec tool runs the item's `input` as JS in its sandbox and
+    reports whatever `text(...)` emits. Rewriting `input` to a bare `text(<reason>)`
+    — no `exec_command` — means Codex "runs" the call, gets the block notice as the
+    tool result, and relays it to the user in its own words. The dangerous command
+    never executes, and the turn completes cleanly (no dropped frame, no dead
+    socket). The item id / call_id / type are preserved so Codex's state machine,
+    which already saw this item's `output_item.added`, stays consistent.
+
+    Returns the mutated frame bytes, or None when the frame is not a rewritable
+    `custom_tool_call` (e.g. a named `function_call`, where a rewritten argument
+    would still invoke the real tool — the caller must drop those instead)."""
+    item = frame.get("item")
+    if not isinstance(item, dict) or item.get("type") != "custom_tool_call":
+        return None
+    payload = json.dumps(block_message(reason))
+    item["input"] = f"text({payload})\n"
+    return json.dumps(frame).encode("utf-8")
+
+
 def transcript_entry(role: str, *, text: str = "", tool_name: str = "",
                      tool_input: str = "") -> dict:
     """One authz-envelope transcript entry, capped to the runtime's limits.

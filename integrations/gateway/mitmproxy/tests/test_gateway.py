@@ -191,7 +191,74 @@ def test_codex_ws_tool_call_blocked(monkeypatch):
     assert seen["kind"] == "tool_call"
     assert seen["payload"]["name"] == "exec"
     assert "ls -la /tmp" in seen["payload"]["arguments"]["input"]
-    assert flow.websocket.messages[-1].dropped  # never reaches the agent
+    # the original command never reaches the agent (rewrite is on by default)
+    assert "ls -la /tmp" not in flow.websocket.messages[-1].text
+
+
+def test_codex_ws_tool_call_block_rewrites_to_notice(monkeypatch):
+    """Graceful block: the dangerous command is replaced in-frame by a harmless
+    `text(...)` notice, the frame is forwarded (not dropped), and the socket
+    stays open so Codex completes the turn and relays the notice to the user."""
+    gw = OGRGateway()
+    monkeypatch.setattr(gw, "_evaluate", lambda e: _wrap(
+        {"decision": "block", "guard_id": "gw-3",
+         "reasons": ["yolo.command_danger: destruction"], "categories": []}))
+    flow = _ws_flow(TOOL_CALL_FRAME, from_client=False)
+    _run(gw.websocket_message(flow))
+
+    msg = flow.websocket.messages[-1]
+    assert not msg.dropped                       # forwarded, not dropped
+    assert flow.error is None                    # socket kept alive
+    item = json.loads(msg.content)["item"]
+    assert "exec_command" not in item["input"]   # the real command is gone
+    assert item["input"].startswith("text(")     # replaced by a bare notice
+    assert "OpenGuardrails blocked" in item["input"]
+    assert item["call_id"] == "call_1BBTE5MvFWott3Cw1KWwetO5"  # id preserved
+    # the notice's own tool_result echo is not re-judged
+    assert "call_1BBTE5MvFWott3Cw1KWwetO5" in flow.metadata["ogr_ws"]["blocked_calls"]
+
+
+def test_codex_ws_block_rewrite_disabled_falls_back_to_drop(monkeypatch):
+    gw = OGRGateway()
+    gw.ws_block_rewrite = False
+    monkeypatch.setattr(gw, "_evaluate", lambda e: _wrap(
+        {"decision": "block", "reasons": ["nope"], "categories": []}))
+    flow = _ws_flow(TOOL_CALL_FRAME, from_client=False)
+    _run(gw.websocket_message(flow))
+    assert flow.websocket.messages[-1].dropped and flow.error is not None
+
+
+def test_codex_ws_function_call_block_cannot_rewrite(monkeypatch):
+    """A named function_call can't be rewritten (a benign argument would still
+    invoke the real tool), so it must fall back to drop + kill even in rewrite mode."""
+    gw = OGRGateway()
+    monkeypatch.setattr(gw, "_evaluate", lambda e: _wrap(
+        {"decision": "block", "reasons": ["danger"], "categories": []}))
+    frame = {"type": "response.output_item.done",
+             "item": {"type": "function_call", "name": "shell", "call_id": "c9",
+                      "arguments": '{"command":["rm","-rf","/"]}'}}
+    flow = _ws_flow(frame, from_client=False)
+    _run(gw.websocket_message(flow))
+    assert flow.websocket.messages[-1].dropped and flow.error is not None
+
+
+def test_codex_ws_blocked_notice_echo_is_not_rejudged(monkeypatch):
+    gw = OGRGateway()
+    calls = {"n": 0}
+
+    async def spy(event):
+        calls["n"] += 1
+        return {"decision": "allow"}
+
+    monkeypatch.setattr(gw, "_evaluate", spy)
+    outgoing = {"type": "response.create", "input": [
+        {"type": "custom_tool_call_output", "call_id": "call_X",
+         "output": [{"type": "input_text", "text": "⛔ OpenGuardrails blocked..."}]}]}
+    flow = _ws_flow(outgoing, from_client=True)
+    flow.metadata["ogr_ws"] = {"transcript": [], "system_prompt": "",
+                               "verdicts": {}, "blocked_calls": {"call_X"}}
+    _run(gw.websocket_message(flow))
+    assert calls["n"] == 0  # our own notice is skipped, not sent to the PDP
 
 
 def test_codex_ws_tool_call_allowed_lands_in_transcript(monkeypatch):

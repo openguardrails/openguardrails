@@ -57,6 +57,9 @@ class OGRGateway:
         self.check_response = _truthy(os.environ.get("OGR_CHECK_RESPONSE"), True)
         # withhold streamed tool-call fragments until the completed call is judged.
         self.hold_tool_deltas = _truthy(os.environ.get("OGR_WS_HOLD_TOOL_DELTAS"), True)
+        # on a blocked Codex tool_call, rewrite it to a harmless notice (graceful)
+        # rather than dropping the frame and killing the socket (silent stall).
+        self.ws_block_rewrite = _truthy(os.environ.get("OGR_WS_BLOCK_REWRITE"), True)
         timeout = float(os.environ.get("OGR_EVAL_TIMEOUT", "2.0"))
         self.client = OGRClient(self.runtime, self.api_key, timeout=timeout)
         if not self.api_key:
@@ -186,7 +189,8 @@ class OGRGateway:
     def _ws_state(self, flow: http.HTTPFlow) -> dict:
         """Per-socket conversation state feeding the authz envelope."""
         return flow.metadata.setdefault(
-            "ogr_ws", {"transcript": [], "system_prompt": "", "verdicts": {}})
+            "ogr_ws", {"transcript": [], "system_prompt": "", "verdicts": {},
+                       "blocked_calls": set()})
 
     def _authz(self, flow: http.HTTPFlow) -> dict:
         st = self._ws_state(flow)
@@ -204,6 +208,10 @@ class OGRGateway:
 
         # Tool results: untrusted content entering the context (indirect injection).
         for out in protocols.parse_codex_ws_tool_outputs(frame):
+            if out["call_id"] in st["blocked_calls"]:
+                # This is our own block notice echoing back — not agent output.
+                st["blocked_calls"].discard(out["call_id"])
+                continue
             event = make_event(
                 "tool_result", subject=self._subject(),
                 payload={"result": out["text"], "call_id": out["call_id"]},
@@ -273,11 +281,22 @@ class OGRGateway:
         decision = (verdict or {}).get("decision") or ("block" if self.fail_closed else "allow")
 
         if decision in BLOCKING:
+            reason = protocols.reasons(verdict or {})
             logger.info("[OGR] %s codex-ws tool_call %s (%s): %s", decision,
-                        call["name"], self._session(flow),
-                        protocols.reasons(verdict or {}))
-            msg.drop()          # the command never reaches the agent
-            flow.kill()         # Codex surfaces this as a failed turn (no clean 403 on a socket)
+                        call["name"], self._session(flow), reason)
+            rewritten = (protocols.rewrite_codex_tool_call_block(frame, reason)
+                         if self.ws_block_rewrite else None)
+            if rewritten is not None:
+                # Graceful block: Codex "runs" a harmless notice and reports it to
+                # the user; the real command never executes. Skip re-judging the
+                # notice when it comes back as this call's tool_result.
+                msg.content = rewritten
+                self._ws_state(flow)["blocked_calls"].add(call["call_id"])
+            else:
+                # No safe rewrite (e.g. a named function_call): drop + tear down.
+                # Codex surfaces this as a failed turn — there is no clean 403 on a socket.
+                msg.drop()
+                flow.kill()
             return
 
         logger.info("[OGR] allow codex-ws tool_call %s (%s)", call["name"],
