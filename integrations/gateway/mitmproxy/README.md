@@ -24,13 +24,15 @@ sandbox) share.
 
 | Hook | Event | On `block`/`require_approval` |
 |------|-------|-------------------------------|
-| `request` | `user_input` = the latest user turn on the wire | replaces the request with a `403`/`409` error — the model is never called |
-| `response` | `model_output` = the completion | replaces the completion with a `403`/`409` error |
-| `websocket_message` | `user_input`, **`tool_call`**, `tool_result` (Codex) | drops the frame — the command never reaches the agent |
+| `request` | `user_input` = the latest user turn on the wire; also **`tool_result`** for HTTP-transport Codex | replaces the request with a `403`/`409` error — the model is never called |
+| `response` | `model_output` = the completion; also **`tool_call`** for HTTP-transport Codex | replaces the completion with a `403`/`409` error |
+| `websocket_message` | `user_input`, **`tool_call`**, `tool_result` (Codex, WebSocket transport) | drops the frame — the command never reaches the agent |
 
 Supported wire protocols: OpenAI Chat Completions (`/v1/chat/completions`),
-OpenAI Responses (`/v1/responses`), Anthropic Messages (`/v1/messages`), and
-**Codex over WebSocket** (ChatGPT-login mode — see below).
+OpenAI Responses (`/v1/responses`), Anthropic Messages (`/v1/messages`),
+**Codex over WebSocket** (ChatGPT-login mode — see below), and **Codex over
+HTTP+SSE** (third-party ChatGPT-backend clients built on the openai SDK — see
+further below).
 
 ### Codex (ChatGPT backend, WebSocket)
 
@@ -88,6 +90,48 @@ export HTTPS_PROXY=http://localhost:8080 HTTP_PROXY=http://localhost:8080
 export SSL_CERT_FILE=~/.mitmproxy/combined-ca.pem   # system roots + mitmproxy CA
 codex exec "…"                                       # traffic now flows through the proxy
 ```
+
+### Codex (ChatGPT backend, HTTP+SSE)
+
+`codex-cli` (the Rust binary) is not the only client on this URL. Third-party
+agents built on the **openai SDK** and pointed at
+`base_url="https://chatgpt.com/backend-api/codex"` (e.g.
+[hermes-agent](https://github.com/nousresearch/hermes-agent)) call the
+Responses API the SDK's normal way: a plain HTTPS `POST
+/backend-api/codex/responses`, not a WebSocket. `protocols.is_codex_http` /
+`OGRGateway._codex_http_request` / `_codex_http_response` handle that case —
+same path as the WebSocket transport above, disambiguated by HTTP method (a
+WS handshake is a `GET`; a Responses API call is always a `POST`) rather than
+by URL.
+
+The underlying Responses API objects are identical between the two
+transports — a `response.output_item.done` tool-call frame parses the same
+way whether it arrived as a WebSocket text frame or an SSE `data:` line — so
+tool_call extraction reuses the exact same parser. Two things genuinely
+differ from the WebSocket path, both because these clients typically set
+`store: false` (no server-side history, so Codex never issues a
+`previous_response_id` for them to thread on):
+
+- **No per-connection state.** Every turn is its own HTTP connection (unlike
+  the long-lived WebSocket), and the full turn history is resent in
+  `input[]` on every request. The authz-envelope transcript is rebuilt fresh
+  from that each time; only the tool_result dedup cache (so the same
+  historical result isn't re-judged on every later turn) survives across
+  requests, keyed by session id on the gateway instance.
+- **Session id.** With no persistent connection to key off, the gateway
+  prefers `x-ogr-session`/`x-session-id` if the client sends one, then falls
+  back to the request body's `prompt_cache_key` (hermes-agent sets this to
+  its own session id) before finally falling back to the per-connection id.
+
+**Block UX** is HTTP-clean either way (a proper 403/409), which is simpler
+than the WebSocket path's graceful-rewrite-or-drop-and-kill dance — but it
+means a blocked `tool_call` discards the *entire* buffered response, not just
+the offending item; there is no partial-forward. mitmproxy buffers the whole
+response (streaming or not) before the `response` hook fires, so this is
+still enforced before any byte reaches the client. **Streaming completion
+text** (`stream=true` SSE) is not moderated yet, same limitation as the other
+HTTP protocols above — `tool_call` gating is unaffected, it runs off the
+buffered SSE body regardless.
 
 ## Quick start (end-to-end moderation)
 

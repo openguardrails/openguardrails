@@ -126,6 +126,16 @@ def is_codex_ws(path: str) -> bool:
     return CODEX_WS_PATH in (path or "")
 
 
+def is_codex_http(path: str) -> bool:
+    """Same URL as `is_codex_ws` — chatgpt.com/backend-api/codex/responses
+    serves both transports. codex-cli (Rust, WebSocket) and third-party
+    clients built on the openai SDK (plain HTTPS POST, e.g. hermes-agent)
+    hit the identical path; the addon tells them apart by hook (WS frames
+    only ever reach `websocket_message`) and HTTP method (a WS handshake is
+    a GET, a Responses API call is always a POST) rather than by path."""
+    return CODEX_WS_PATH in (path or "")
+
+
 def codex_frame(text: str) -> dict | None:
     """Parse a Codex WebSocket text frame; None when it is not a JSON object or
     belongs to Codex's own action reviewer."""
@@ -163,19 +173,12 @@ def parse_codex_ws_user(text: str) -> tuple[str, str | None] | None:
     return (latest, turn_id) if latest else None
 
 
-def parse_codex_ws_tool_call(d: dict) -> dict | None:
-    """Parse a server→client `response.output_item.done` frame carrying a
-    COMPLETED tool call -> {name, arguments, call_id, turn_id}, else None.
-
-    This is the enforcement point for `tool_call`: the frame is the model
-    telling Codex to run something, and mitmproxy awaits this hook before
-    forwarding it, so a verdict can still stop the call from ever reaching
-    the agent. (The client→server side only ever carries the *result*: Codex
-    threads history server-side via `previous_response_id` and never re-sends
-    the call itself.)"""
-    if d.get("type") != "response.output_item.done":
-        return None
-    item = d.get("item")
+def _tool_call_item(item: Any) -> dict | None:
+    """{name, arguments, call_id, turn_id} from a completed output item, or
+    None if `item` isn't a tool call. Shared by the WebSocket per-frame path
+    and the buffered-HTTP paths (non-streaming `output[]`, SSE events) — the
+    underlying Responses API item shape is identical across all three
+    transports, only the framing around it differs."""
     if not isinstance(item, dict) or item.get("type") not in _TOOL_CALL_ITEMS:
         return None
     args = item.get("input")
@@ -186,6 +189,122 @@ def parse_codex_ws_tool_call(d: dict) -> dict | None:
         "arguments": args if isinstance(args, str) else json.dumps(args or {}),
         "call_id": item.get("call_id") or item.get("id") or "",
         "turn_id": _turn_id(item),
+    }
+
+
+def parse_codex_ws_tool_call(d: dict) -> dict | None:
+    """Parse a server→client `response.output_item.done` frame carrying a
+    COMPLETED tool call -> {name, arguments, call_id, turn_id}, else None.
+
+    This is the enforcement point for `tool_call`: the frame is the model
+    telling Codex to run something, and mitmproxy awaits this hook before
+    forwarding it, so a verdict can still stop the call from ever reaching
+    the agent. (The client→server side only ever carries the *result*: Codex
+    threads history server-side via `previous_response_id` and never re-sends
+    the call itself.)
+
+    The identical `response.output_item.done` event also appears verbatim as
+    an SSE `data:` payload for HTTP+SSE Codex clients (see `parse_sse_events`)
+    — same parser, different transport."""
+    if d.get("type") != "response.output_item.done":
+        return None
+    return _tool_call_item(d.get("item"))
+
+
+def tool_calls_from_output(body: dict) -> list[dict]:
+    """Every completed tool call in a non-streaming Responses API `output[]`
+    array — the buffered-JSON counterpart of `parse_codex_ws_tool_call` for
+    HTTP+SSE Codex clients (see `protocols.is_codex_http`) that call with
+    `stream=false`. A plain HTTP response carries the whole turn's output at
+    once instead of one `output_item.done` frame at a time."""
+    calls = []
+    for item in body.get("output") or []:
+        call = _tool_call_item(item)
+        if call:
+            calls.append(call)
+    return calls
+
+
+def parse_sse_events(text: str) -> list[dict]:
+    """Split a buffered `text/event-stream` body into its `data:` JSON
+    payloads (skipping the terminal `[DONE]` marker and Codex's own
+    auto-reviewer frames, via `codex_frame`).
+
+    mitmproxy buffers the whole response before the `response` hook fires
+    (no `stream_large_bodies` opt-in here), so by the time this runs every
+    event for the turn is already in `text` and nothing has reached the
+    client yet — the same enforcement window the WebSocket path gets from
+    awaiting `websocket_message` before forwarding a frame."""
+    events: list[dict] = []
+    data_lines: list[str] = []
+
+    def _flush() -> None:
+        if not data_lines:
+            return
+        raw = "\n".join(data_lines)
+        data_lines.clear()
+        if raw == "[DONE]":
+            return
+        frame = codex_frame(raw)
+        if frame is not None:
+            events.append(frame)
+
+    for line in text.split("\n"):
+        line = line.rstrip("\r")
+        if line.startswith("data:"):
+            data_lines.append(line[len("data:"):].lstrip())
+        elif line == "":
+            _flush()
+    _flush()
+    return events
+
+
+def parse_codex_http_input(body: dict) -> dict:
+    """Everything the OGR gateway needs from a plain-HTTP Codex Responses API
+    request body (e.g. hermes-agent: the openai SDK against
+    chatgpt.com/backend-api/codex, no WS envelope).
+
+    These callers set `store: false`, so Codex never threads history via
+    `previous_response_id` for them — the full turn history is resent in
+    `input[]` on every request. That means (unlike the WebSocket path) there
+    is no per-connection state to accumulate: the transcript below is
+    rebuilt fresh from this one body. The caller still needs to dedup
+    `tool_outputs` against what it already judged for this session, since
+    the same historical tool results reappear on every later turn.
+
+    -> {latest_user, system_prompt, transcript, tool_outputs, session_hint}"""
+    latest_user = ""
+    transcript: list[dict] = []
+    tool_outputs: list[dict] = []
+    for item in body.get("input") or []:
+        if not isinstance(item, dict):
+            continue
+        item_type = item.get("type")
+        if item_type in _TOOL_CALL_ITEMS:
+            call = _tool_call_item(item)
+            if call:
+                transcript.append(transcript_entry(
+                    "assistant", tool_name=call["name"], tool_input=call["arguments"]))
+            continue
+        if item_type in _TOOL_OUTPUT_ITEMS:
+            text = _content_text(item.get("output"))
+            if text:
+                tool_outputs.append({"call_id": item.get("call_id") or "", "text": text})
+            continue
+        if item.get("role") != "user":
+            continue
+        text = _content_text(item.get("content"))
+        if text:
+            latest_user = text
+            transcript.append(transcript_entry("user", text=text))
+
+    session_hint = body.get("prompt_cache_key")
+    return {
+        "latest_user": latest_user,
+        "system_prompt": str(body.get("instructions") or "")[:MAX_SYSTEM_PROMPT],
+        "transcript": transcript[-MAX_TRANSCRIPT_ENTRIES:],
+        "tool_outputs": tool_outputs,
+        "session_hint": session_hint if isinstance(session_hint, str) and session_hint else None,
     }
 
 
