@@ -11,6 +11,24 @@ pip install openguardrails-instrumentation-hermes
 
 (pulls in `openguardrails`, the zero-dependency reference runtime.)
 
+Installing the Python package does **not** activate a Hermes plugin by itself.
+Hermes discovers plugins from `$HERMES_HOME/plugins` (normally
+`~/.hermes/plugins`) and the plugin must be enabled:
+
+```bash
+# Development checkout of the OpenGuardrails repository
+python -m pip install -e integrations/agent/hermes
+mkdir -p "${HERMES_HOME:-$HOME/.hermes}/plugins"
+ln -sfn "$PWD/integrations/agent/hermes/src/openguardrails_instrumentation_hermes" \
+  "${HERMES_HOME:-$HOME/.hermes}/plugins/ogr-guard"
+hermes plugins enable ogr-guard
+hermes plugins list
+```
+
+Run these commands from the OpenGuardrails repository root, then restart
+Hermes. This plugin is used for in-process enforcement; Session/Run/Turn
+reconstruction at the external gateway does not depend on the client plugin.
+
 ## Why a plugin, not a proxy
 
 Hermes already exposes the interception points OGR needs, so no proxy and no core

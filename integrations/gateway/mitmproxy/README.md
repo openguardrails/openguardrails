@@ -34,6 +34,35 @@ OpenAI Responses (`/v1/responses`), Anthropic Messages (`/v1/messages`),
 HTTP+SSE** (third-party ChatGPT-backend clients built on the openai SDK — see
 further below).
 
+### Server-side lifecycle reconstruction
+
+An HTTP connection is a transport detail, not an agent Session. The gateway
+reconstructs lifecycle from the ordinary provider request and response; the
+agent client does not need to send OGR-specific fields. It extracts an existing
+conversation ID from standard/provider fields such as `session_id`,
+`prompt_cache_key`, `x-session-id`, or `x-conversation-id`, then follows message
+history, tool calls/results, and the final response to emit one `user_input` per
+Run, a full `model_input` and `model_output` per Turn, and correlated
+`tool_call` / `tool_result` events. OpenAI/Anthropic streaming responses are
+reconstructed before telemetry and tool-call enforcement.
+
+The tool call and its later result share one OGR `guard_id`; the provider's
+call ID is retained as `payload.call_id`.
+
+Whenever a request carries no `x-ogr-*` lifecycle headers, the gateway infers
+the lifecycle server-side (`OGR_INFER_LIFECYCLE`, on by default): the same
+latest user instruction remains one Run until a model response has no tool
+calls; each intervening model request is the next Turn; a `tool_result` is
+attributed back to the Turn of the Action that produced it. A conversation that
+restarts with an identical opening prompt is NOT merged into the older inferred
+Session once that Session has grown past it. Transcript-only title/summary
+helper calls are passed upstream but excluded from the primary Agent timeline.
+
+Agent identity is NOT configured on the gateway: events are sent without
+`subject.agent_id` and the runtime recognises the Agent from the system
+prompt's self-definition at ingest (`OGR_AGENT_ID`/`OGR_AGENT_TYPE` remain as
+explicit operator overrides only).
+
 ### Codex (ChatGPT backend, WebSocket)
 
 Codex in ChatGPT-login mode does not use plain HTTP — it opens a **WebSocket** to
@@ -118,10 +147,10 @@ differ from the WebSocket path, both because these clients typically set
   from that each time; only the tool_result dedup cache (so the same
   historical result isn't re-judged on every later turn) survives across
   requests, keyed by session id on the gateway instance.
-- **Session id.** With no persistent connection to key off, the gateway
-  prefers `x-ogr-session`/`x-session-id` if the client sends one, then falls
-  back to the request body's `prompt_cache_key` (hermes-agent sets this to
-  its own session id) before finally falling back to the per-connection id.
+- **Session id.** With no persistent connection to key off, the gateway reads
+  the request body's `session_id` or `prompt_cache_key` (Hermes uses its own
+  Session ID), plus standard provider conversation headers when available,
+  before falling back to conversation-history reconstruction.
 
 **Block UX** is HTTP-clean either way (a proper 403/409), which is simpler
 than the WebSocket path's graceful-rewrite-or-drop-and-kill dance — but it
@@ -213,18 +242,20 @@ A prompt that trips the moderation policy comes back as:
 |-----|---------|---------|
 | `OGR_RUNTIME_URL` | `http://localhost:3000` | runtime base URL (PDP) |
 | `OGR_API_KEY` | — | workspace key, `Authorization: Bearer` (required) |
-| `OGR_AGENT_ID` | `mitmproxy-agent` | `subject.agent_id` on every event |
-| `OGR_AGENT_TYPE` | — | optional `subject.agent_type` |
+| `OGR_AGENT_ID` | — | operator override for `subject.agent_id`; unset (recommended) lets the runtime derive the Agent from the system prompt |
+| `OGR_AGENT_TYPE` | — | optional `subject.agent_type` override |
+| `OGR_INFER_LIFECYCLE` | `true` | infer Session/Run/Turn server-side when no `x-ogr-*` headers are present |
 | `OGR_FAIL_MODE_CLOSED` | `true` | if the runtime is unreachable: block (`true`) or pass through (`false`) |
 | `OGR_CHECK_RESPONSE` | `true` | also moderate the model completion |
 | `OGR_WS_HOLD_TOOL_DELTAS` | `true` | withhold streamed tool-call fragments until the completed call is judged |
 | `OGR_WS_BLOCK_REWRITE` | `true` | on a blocked Codex `tool_call`, rewrite it to a harmless notice (graceful) instead of dropping the frame + killing the socket |
 | `OGR_EVAL_TIMEOUT` | `2.0` | seconds to wait on the PDP call — **raise it** (15–25s) when the policy calls an undistilled judge; a 27B LoRA takes 1–4s per call |
 
-Session correlation: the addon uses an `x-ogr-session` (or `x-session-id`)
-request header if the agent sets one, else the client connection id. The runtime
-derives a **run** at each new `user_input` in a session, so a moderated run maps
-to one conversation turn.
+Session correlation is automatic. The gateway reads ordinary provider
+conversation fields from headers/body and, for Hermes, reconstructs missing
+boundaries from growing message history. A Run lasts from one external user
+instruction through the final model response; each intervening model request is
+a Turn and each tool call is an Action.
 
 ## Notes / limits (milestone)
 

@@ -26,3 +26,6 @@ build/
 coverage/
 .coverage
 htmlcov/
+
+# mitmproxy runtime log
+integrations/gateway/mitmproxy/log

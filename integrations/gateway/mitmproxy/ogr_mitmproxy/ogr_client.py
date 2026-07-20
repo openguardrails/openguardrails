@@ -12,12 +12,19 @@ from __future__ import annotations
 
 import itertools
 import json
+import secrets
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 
 OGR_VERSION = "0.3"
 _seq = itertools.count(1)
+# Per-process tag folded into every generated id. A bare counter reuses
+# evt-/gw-/session-/run- ids after a gateway restart, and the runtime's
+# analytics store treats a reused event id as a NEWER VERSION of the old row —
+# a restart then silently overwrites historical events. The tag makes ids from
+# different gateway processes disjoint while keeping them readable/sortable.
+_proc_tag = secrets.token_hex(4)
 
 
 def _now() -> str:
@@ -25,16 +32,19 @@ def _now() -> str:
 
 
 def new_id(prefix: str) -> str:
-    return f"{prefix}-{next(_seq):06d}"
+    return f"{prefix}-{_proc_tag}-{next(_seq):06d}"
 
 
 def make_event(kind: str, *, subject: dict, payload: dict, session_id: str,
                guard_id: str | None = None, llm_protocol: str | None = None,
                provenance: list[dict] | None = None,
-               authz: dict | None = None) -> dict:
-    """Build a GuardEvent (observation_point='gateway'). `subject` must carry
-    at least `agent_id`; `payload` is kind-specific (user_input/model_output ->
-    {"text": ...}; tool_call -> {"name","arguments"}).
+               authz: dict | None = None, run_id: str | None = None,
+               turn: int | None = None) -> dict:
+    """Build a GuardEvent (observation_point='gateway'). `subject` may be empty:
+    when the operator does not force an agent identity, the runtime derives the
+    Agent from the request's system-prompt self-definition at ingest. `payload`
+    is kind-specific (user_input/model_output -> {"text": ...}; tool_call ->
+    {"name","arguments"}).
 
     `authz` is the runtime's reasoning-blind authorization envelope
     (transcript / agent_system_prompt / authorization) that scope-aware
@@ -57,6 +67,9 @@ def make_event(kind: str, *, subject: dict, payload: dict, session_id: str,
         event["provenance"] = provenance
     if authz:
         event["authz"] = authz
+    if run_id:
+        event["run_id"] = run_id
+        event["turn"] = max(int(turn or 0), 0)
     return event
 
 

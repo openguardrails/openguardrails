@@ -39,7 +39,7 @@ from collections import OrderedDict
 from mitmproxy import http
 
 from . import protocols
-from .ogr_client import OGRClient, make_event
+from .ogr_client import OGRClient, make_event, new_id
 
 logger = logging.getLogger("ogr.gateway")
 
@@ -56,17 +56,38 @@ class OGRGateway:
     def __init__(self) -> None:
         self.runtime = os.environ.get("OGR_RUNTIME_URL", "http://localhost:3000")
         self.api_key = os.environ.get("OGR_API_KEY", "")
-        self.agent_id = os.environ.get("OGR_AGENT_ID", "mitmproxy-agent")
+        # Agent identity is the RUNTIME's job: it recognises the agent from the
+        # system prompt's self-definition at ingest. OGR_AGENT_ID/OGR_AGENT_TYPE
+        # remain as explicit operator overrides only — no default.
+        self.agent_id = os.environ.get("OGR_AGENT_ID", "")
         self.agent_type = os.environ.get("OGR_AGENT_TYPE", "")
         # fail-closed: if the runtime is unreachable, block rather than pass the call.
         self.fail_closed = _truthy(os.environ.get("OGR_FAIL_MODE_CLOSED"), True)
         # also moderate the model's completion on the way back.
         self.check_response = _truthy(os.environ.get("OGR_CHECK_RESPONSE"), True)
+        # Uninstrumented agents (Hermes and friends) send ordinary provider
+        # requests; lifecycle reconstruction is a server-side gateway
+        # responsibility and applies whenever the client sends no x-ogr-*
+        # lifecycle headers. Optional x-ogr-* hints always win.
+        self.infer_lifecycle = _truthy(os.environ.get("OGR_INFER_LIFECYCLE"), True)
+        self._hermes_states: OrderedDict[str, dict] = OrderedDict()
         # withhold streamed tool-call fragments until the completed call is judged.
         self.hold_tool_deltas = _truthy(os.environ.get("OGR_WS_HOLD_TOOL_DELTAS"), True)
         # on a blocked Codex tool_call, rewrite it to a harmless notice (graceful)
         # rather than dropping the frame and killing the socket (silent stall).
         self.ws_block_rewrite = _truthy(os.environ.get("OGR_WS_BLOCK_REWRITE"), True)
+        # DEMO: when a block comes from the `moderation` guardrail, hand its
+        # refusal text back AS THE MODEL'S REPLY (代答, HTTP 200) instead of an
+        # API error. Other blocks (command danger, injection, tool gates) still
+        # return a typed 403/409. See protocols.moderation_answer.
+        self.answer_on_moderation = _truthy(
+            os.environ.get("OGR_ANSWER_ON_MODERATION"), False)
+        # DEMO (broader): hand EVERY block back to the agent as a 200 reply
+        # carrying the block reason (not just moderation) — a coding agent gets
+        # "I can't do that because …" instead of a non-retryable 403 that aborts
+        # it. Moderation blocks still use the nicer suggest_answer text.
+        self.answer_on_block = _truthy(
+            os.environ.get("OGR_ANSWER_ON_BLOCK"), False)
         timeout = float(os.environ.get("OGR_EVAL_TIMEOUT", "2.0"))
         self.client = OGRClient(self.runtime, self.api_key, timeout=timeout)
         # HTTP-transport Codex clients (protocols.is_codex_http) resend full
@@ -77,14 +98,24 @@ class OGRGateway:
         # flow.metadata doesn't survive between them. Capped so a long-lived
         # mitmdump process doesn't accumulate sessions forever.
         self._codex_http_seen_results: OrderedDict[str, set] = OrderedDict()
+        # Native agent integrations (Hermes first) provide authoritative Run
+        # and Turn headers. Keep just enough bounded state to emit the Run's
+        # user_input once and to avoid re-emitting historical tool results
+        # included in later model requests.
+        self._run_verdicts: OrderedDict[str, dict | None] = OrderedDict()
+        self._run_seen_results: OrderedDict[str, set] = OrderedDict()
+        self._run_call_guards: OrderedDict[str, dict[str, str]] = OrderedDict()
         if not self.api_key:
             logger.warning("OGR_API_KEY is not set — runtime calls will be rejected (401).")
-        logger.info("OGR gateway → %s (fail_%s, check_response=%s)",
-                    self.runtime, "closed" if self.fail_closed else "open", self.check_response)
+        logger.info("OGR gateway → %s (fail_%s, check_response=%s, infer_lifecycle=%s)",
+                    self.runtime, "closed" if self.fail_closed else "open",
+                    self.check_response, self.infer_lifecycle)
 
     # ── helpers ───────────────────────────────────────────────────────────
     def _subject(self) -> dict:
-        s = {"agent_id": self.agent_id}
+        s: dict = {}
+        if self.agent_id:
+            s["agent_id"] = self.agent_id
         if self.agent_type:
             s["agent_type"] = self.agent_type
         return s
@@ -93,6 +124,108 @@ class OGRGateway:
         h = flow.request.headers
         return (h.get("x-ogr-session") or h.get("x-session-id")
                 or f"conn-{flow.client_conn.id}")
+
+    def _lifecycle(self, flow: http.HTTPFlow) -> dict | None:
+        h = flow.request.headers
+        run_id = h.get("x-ogr-run")
+        if not run_id:
+            return None
+        try:
+            turn = max(int(h.get("x-ogr-turn") or 0), 0)
+        except ValueError:
+            turn = 0
+        return {"run_id": run_id, "turn": turn}
+
+    @staticmethod
+    def _bounded(cache: OrderedDict, key: str, factory):
+        if key in cache:
+            cache.move_to_end(key)
+            return cache[key]
+        if len(cache) >= 512:
+            cache.popitem(last=False)
+        value = factory()
+        cache[key] = value
+        return value
+
+    def _infer_hermes_lifecycle(
+        self, proto: str, body: dict, instruction: str, session_hint: str = "",
+        signature: str = "",
+    ) -> tuple[str, dict] | None:
+        """Best-effort lifecycle for an uninstrumented Hermes main loop.
+
+        Repeated requests carrying the same latest user instruction are model
+        Turns of one Run. A response without tool calls completes that Run.
+        Conversation history identifies the Session; `/new` resets the first
+        user message and therefore starts another inferred Session.
+        """
+        if not self.infer_lifecycle or not instruction:
+            return None
+        users = protocols.user_messages(proto, body)
+        if not users:
+            return None
+        first_user = users[0]
+        session_id = session_hint
+        state = self._hermes_states.get(session_id) if session_id else None
+        if not session_id:
+            # Without an explicit ordinary provider field, match the growing
+            # conversation by its first user message. This also detects /new.
+            # A conversation whose history is SHORTER than what a candidate has
+            # already seen is a fresh conversation that merely reused the same
+            # opening prompt — do not merge it into the older Session.
+            for candidate_id, candidate in reversed(self._hermes_states.items()):
+                if (candidate.get("inferred")
+                        and candidate.get("first_user") == first_user
+                        and len(users) >= candidate.get("user_count", 1)):
+                    session_id, state = candidate_id, candidate
+                    break
+        if state is None:
+            session_id = session_id or new_id("hermes-session")
+            state = self._bounded(
+                self._hermes_states,
+                session_id,
+                lambda: {
+                    "session_id": session_id,
+                    "first_user": first_user,
+                    "inferred": not bool(session_hint),
+                    "user_count": len(users),
+                    "run_id": "",
+                    "instruction": "",
+                    "next_turn": 0,
+                    "completed": True,
+                    "last_signature": "",
+                    "last_turn": 0,
+                },
+            )
+        else:
+            state["user_count"] = max(state.get("user_count", 1), len(users))
+            self._hermes_states.move_to_end(session_id)
+
+        # A resent identical request is the agent retrying a failed provider
+        # call (429/403/5xx), not the next roundtrip: reuse the same Turn.
+        if signature and signature == state.get("last_signature"):
+            return state["session_id"], {
+                "run_id": state["run_id"],
+                "turn": state["last_turn"],
+            }
+
+        if state["completed"] or state["instruction"] != instruction:
+            state["run_id"] = new_id("hermes-run")
+            state["instruction"] = instruction
+            state["next_turn"] = 1
+            state["completed"] = False
+            turn = 0
+        else:
+            turn = state["next_turn"]
+            state["next_turn"] += 1
+        state["last_signature"] = signature
+        state["last_turn"] = turn
+        return state["session_id"], {"run_id": state["run_id"], "turn": turn}
+
+    def _complete_inferred_hermes_run(self, run_id: str) -> None:
+        for state in reversed(self._hermes_states.values()):
+            if state.get("run_id") == run_id:
+                state["completed"] = True
+                return
 
     async def _evaluate(self, event: dict) -> dict | None:
         """Call the PDP off the event loop; None on transport/PDP failure."""
@@ -106,6 +239,23 @@ class OGRGateway:
     def _fail_closed_block(self, proto: str) -> http.Response:
         return protocols.block_response(
             proto, "guardrail unavailable (fail-closed)", {"decision": "block"})
+
+    def _deny(self, proto: str, verdict: dict, streaming: bool = False) -> http.Response:
+        """The response for a blocking verdict. When an answer mode is on the
+        block is handed back to the agent AS A 200 REPLY carrying a reason
+        (graceful degradation) instead of a typed 403/409:
+          - a moderation hit uses the nicer `suggest_answer` refusal text;
+          - `answer_on_block` covers every other block (injection, command
+            danger, a tenant rule, a tool gate) with a templated reason.
+        Otherwise the typed block error is returned unchanged."""
+        answer = None
+        if self.answer_on_moderation or self.answer_on_block:
+            answer = protocols.moderation_answer(verdict)
+        if answer is None and self.answer_on_block:
+            answer = protocols.block_answer_text(verdict)
+        if answer is not None:
+            return protocols.answer_response(proto, answer, verdict, streaming)
+        return protocols.block_response(proto, protocols.reasons(verdict), verdict)
 
     # ── request side: moderate the inbound prompt ─────────────────────────
     async def request(self, flow: http.HTTPFlow) -> None:
@@ -123,15 +273,36 @@ class OGRGateway:
             return
         parsed = protocols.parse_request(proto, body)
         text = parsed.get("latest_user")
+        request_session_id = protocols.session_id_from_request(
+            flow.request.headers, body)
+        session_id = request_session_id or self._session(flow)
+        lifecycle = self._lifecycle(flow)
+        if (lifecycle is None and self.infer_lifecycle
+                and protocols.is_transcript_helper_request(proto, body)):
+            flow.metadata["ogr_skip"] = True
+            return
+        if lifecycle is None:
+            inferred = self._infer_hermes_lifecycle(
+                proto, body, text or "", request_session_id,
+                protocols.request_signature(proto, body))
+            if inferred is not None:
+                session_id, lifecycle = inferred
+                flow.metadata["ogr_hermes_inferred"] = True
+        flow.metadata["ogr_proto"] = proto
+        flow.metadata["ogr_session"] = session_id
+        flow.metadata["ogr_lifecycle"] = lifecycle
+        if lifecycle is not None:
+            await self._request_with_lifecycle(
+                flow, proto, body, text or "", session_id, lifecycle)
+            return
         if not text:
             return
         guard_id = protocols.new_guard_id()
         flow.metadata["ogr_guard_id"] = guard_id
-        flow.metadata["ogr_proto"] = proto
 
         event = make_event(
             "user_input", subject=self._subject(), payload={"text": text},
-            session_id=self._session(flow), guard_id=guard_id, llm_protocol=proto,
+            session_id=session_id, guard_id=guard_id, llm_protocol=proto,
             provenance=[{"source": "user", "trust": "unverified"}])
         verdict = await self._evaluate(event)
 
@@ -142,28 +313,142 @@ class OGRGateway:
         if verdict.get("decision") in BLOCKING:
             logger.info("[OGR] %s request (%s): %s", verdict["decision"],
                         self._session(flow), protocols.reasons(verdict))
-            flow.response = protocols.block_response(proto, protocols.reasons(verdict), verdict)
+            flow.response = self._deny(proto, verdict, protocols.wants_stream(body))
+
+    async def _request_with_lifecycle(
+        self, flow: http.HTTPFlow, proto: str, body: dict, text: str,
+        session_id: str, lifecycle: dict,
+    ) -> None:
+        run_id, turn = lifecycle["run_id"], lifecycle["turn"]
+        run_key = f"{session_id}:{run_id}"
+
+        # Tool results ride in the NEXT model request, but semantically they
+        # belong to the Turn of the Action that produced them (the tool_call we
+        # emitted from the previous response). Full-history protocols repeat
+        # them, so correlate by call id/content and emit once.
+        seen_results = self._bounded(self._run_seen_results, run_key, set)
+        call_guards = self._bounded(self._run_call_guards, run_key, dict)
+        for result in protocols.request_tool_results(proto, body):
+            identity = result.get("call_id") or json.dumps(
+                result, sort_keys=True, ensure_ascii=False, default=str)
+            if identity in seen_results:
+                continue
+            seen_results.add(identity)
+            entry = call_guards.get(identity)
+            if entry is None:
+                # Result for a call we never observed (e.g. gateway restarted
+                # mid-run): it answers an Action of the previous roundtrip.
+                entry = {"guard": protocols.new_guard_id(),
+                         "turn": max(turn - 1, 0)}
+                call_guards[identity] = entry
+            event = make_event(
+                "tool_result", subject=self._subject(), payload=result,
+                session_id=session_id, llm_protocol=proto,
+                guard_id=entry["guard"],
+                run_id=run_id, turn=entry["turn"],
+                provenance=[{"source": "tool", "trust": "untrusted"}])
+            verdict = await self._evaluate(event)
+            if verdict is None:
+                # PDP unreachable. Fail-closed blocks; fail-open must keep
+                # OBSERVING — an early return here silently drops the rest of
+                # this request's telemetry (model_input and its model_output).
+                if self.fail_closed:
+                    flow.response = self._fail_closed_block(proto)
+                    return
+                continue
+            if verdict.get("decision") in BLOCKING:
+                flow.response = self._deny(
+                    proto, verdict, protocols.wants_stream(body))
+                return
+
+        # One Run has one external user instruction. Subsequent model requests
+        # in that Run are model_input Turns, not new user instructions/Runs.
+        if run_key in self._run_verdicts:
+            self._run_verdicts.move_to_end(run_key)
+            user_verdict = self._run_verdicts[run_key]
+        elif text:
+            user_event = make_event(
+                "user_input", subject=self._subject(), payload={"text": text},
+                session_id=session_id, llm_protocol=proto,
+                run_id=run_id, turn=turn,
+                provenance=[{"source": "user", "trust": "unverified"}])
+            user_verdict = await self._evaluate(user_event)
+            self._bounded(self._run_verdicts, run_key, lambda: user_verdict)
+        else:
+            user_verdict = {"decision": "allow"}
+
+        if user_verdict is None:
+            if self.fail_closed:
+                flow.response = self._fail_closed_block(proto)
+                return
+        elif user_verdict.get("decision") in BLOCKING:
+            flow.response = self._deny(
+                proto, user_verdict, protocols.wants_stream(body))
+            return
+
+        model_event = make_event(
+            "model_input", subject=self._subject(),
+            payload=protocols.model_input_payload(proto, body),
+            session_id=session_id, llm_protocol=proto,
+            run_id=run_id, turn=turn,
+            provenance=[{"source": "system", "trust": "trusted"},
+                        {"source": "user", "trust": "unverified"}])
+        verdict = await self._evaluate(model_event)
+        if verdict is None:
+            if self.fail_closed:
+                flow.response = self._fail_closed_block(proto)
+            return
+        if verdict.get("decision") in BLOCKING:
+            flow.response = self._deny(proto, verdict, protocols.wants_stream(body))
+
+    def _is_own_response(self, flow: http.HTTPFlow) -> bool:
+        """True if WE generated flow.response (a block error or a 代答 answer).
+
+        When the request hook short-circuits with our own response, mitmproxy
+        skips the upstream round-trip but STILL fires the response hook on that
+        synthetic response — so without this guard we would re-moderate our own
+        block/answer text (e.g. Presidio flags the appeal URL in a 代答 as PII
+        and turns a 200 answer into a 403). Every response we mint carries the
+        `x-ogr-decision` header; a real upstream response never does.
+        """
+        return (flow.response is not None
+                and flow.response.headers.get("x-ogr-decision") is not None)
 
     # ── response side: moderate the model completion ──────────────────────
     async def response(self, flow: http.HTTPFlow) -> None:
+        if flow.metadata.get("ogr_skip") or self._is_own_response(flow):
+            return
         # tool_call gating runs regardless of check_response (it's the yolo
         # judge, not completion moderation) so this dispatch sits ahead of
         # that flag's early-return below.
         if flow.request.method == "POST" and protocols.is_codex_http(flow.request.path):
             await self._codex_http_response(flow)
             return
-        if not self.check_response:
-            return
         proto = flow.metadata.get("ogr_proto") or protocols.match(flow.request.path)
         if proto is None or flow.response is None:
             return
         if flow.response.status_code != 200:
             return  # our own block, or an upstream error — nothing to moderate
-        if "event-stream" in flow.response.headers.get("content-type", ""):
-            return  # streaming completion — response-side moderation is a follow-up
-        try:
-            body = json.loads(flow.response.get_text() or "{}")
-        except ValueError:
+        streaming = "event-stream" in flow.response.headers.get("content-type", "")
+        raw = flow.response.get_text() or ""
+        if streaming:
+            body = protocols.parse_sse_response(proto, raw)
+        else:
+            try:
+                body = json.loads(raw or "{}")
+            except ValueError:
+                return
+        lifecycle = flow.metadata.get("ogr_lifecycle") or self._lifecycle(flow)
+        if lifecycle is not None:
+            await self._response_with_lifecycle(
+                flow, proto, body,
+                flow.metadata.get("ogr_session") or self._session(flow),
+                lifecycle, streaming)
+            if (flow.metadata.get("ogr_hermes_inferred")
+                    and not protocols.tool_calls_from_response(proto, body)):
+                self._complete_inferred_hermes_run(lifecycle["run_id"])
+            return
+        if not self.check_response or streaming:
             return
         text = protocols.parse_response(proto, body)
         if not text:
@@ -182,7 +467,60 @@ class OGRGateway:
         if verdict.get("decision") in BLOCKING:
             logger.info("[OGR] %s response (%s): %s", verdict["decision"],
                         self._session(flow), protocols.reasons(verdict))
-            flow.response = protocols.block_response(proto, protocols.reasons(verdict), verdict)
+            flow.response = self._deny(proto, verdict)
+
+    async def _response_with_lifecycle(
+        self, flow: http.HTTPFlow, proto: str, body: dict,
+        session_id: str, lifecycle: dict, streaming: bool = False,
+    ) -> None:
+        run_id, turn = lifecycle["run_id"], lifecycle["turn"]
+        run_key = f"{session_id}:{run_id}"
+        call_guards = self._bounded(self._run_call_guards, run_key, dict)
+
+        # The model's requested operations are the Action leaves of this Turn.
+        # Gate them even when completion-text moderation is disabled.
+        for call in protocols.tool_calls_from_response(proto, body):
+            identity = call.get("call_id") or json.dumps(
+                call, sort_keys=True, ensure_ascii=False, default=str)
+            # Remember this Action's Turn: its tool_result arrives in the next
+            # request but must be attributed back to THIS turn.
+            entry = call_guards.setdefault(
+                identity, {"guard": protocols.new_guard_id(), "turn": turn})
+            event = make_event(
+                "tool_call", subject=self._subject(), payload=call,
+                session_id=session_id, llm_protocol=proto,
+                guard_id=entry["guard"],
+                run_id=run_id, turn=turn,
+                provenance=[{"source": "model", "trust": "unverified"}])
+            verdict = await self._evaluate(event)
+            if verdict is None:
+                # Fail-open keeps observing the remaining Actions (see the
+                # request-side tool_result loop).
+                if self.fail_closed:
+                    flow.response = self._fail_closed_block(proto)
+                    return
+                continue
+            if verdict.get("decision") in BLOCKING:
+                flow.response = self._deny(proto, verdict, streaming)
+                return
+
+        if not self.check_response:
+            return
+        payload = protocols.response_payload(proto, body)
+        if not payload:
+            return
+        event = make_event(
+            "model_output", subject=self._subject(), payload=payload,
+            session_id=session_id, llm_protocol=proto,
+            run_id=run_id, turn=turn,
+            provenance=[{"source": "model", "trust": "unverified"}])
+        verdict = await self._evaluate(event)
+        if verdict is None:
+            if self.fail_closed:
+                flow.response = self._fail_closed_block(proto)
+            return
+        if verdict.get("decision") in BLOCKING:
+            flow.response = self._deny(proto, verdict, streaming)
 
     # ── HTTP-transport Codex side: moderate hermes-agent-style clients ─────
     # These callers drive chatgpt.com/backend-api/codex/responses through the
@@ -240,9 +578,9 @@ class OGRGateway:
             if decision in BLOCKING:
                 logger.info("[OGR] %s codex-http tool_result (%s): %s", decision,
                             session_id, protocols.reasons(verdict or {}))
-                flow.response = protocols.block_response(
-                    "openai.responses", protocols.reasons(verdict or {}),
-                    verdict or {"decision": decision})
+                flow.response = self._deny(
+                    "openai.responses", verdict or {"decision": decision},
+                    protocols.wants_stream(body))
                 return
 
         if not parsed["latest_user"]:
@@ -262,12 +600,14 @@ class OGRGateway:
         if verdict.get("decision") in BLOCKING:
             logger.info("[OGR] %s codex-http request (%s): %s", verdict["decision"],
                         session_id, protocols.reasons(verdict))
-            flow.response = protocols.block_response(
-                "openai.responses", protocols.reasons(verdict), verdict)
+            flow.response = self._deny(
+                "openai.responses", verdict, protocols.wants_stream(body))
 
     async def _codex_http_response(self, flow: http.HTTPFlow) -> None:
-        if flow.response is None or flow.response.status_code != 200:
-            return  # our own block, or an upstream error — nothing to moderate
+        if flow.response is None or self._is_own_response(flow):
+            return  # our own block/answer — never re-moderate it
+        if flow.response.status_code != 200:
+            return  # an upstream error — nothing to moderate
         session_id = (flow.metadata.get("ogr_codex_http_session")
                       or f"conn-{flow.client_conn.id}")
         authz = flow.metadata.get("ogr_codex_http_authz") or {}
@@ -305,10 +645,10 @@ class OGRGateway:
                             call["name"], session_id, reason)
                 # Unlike the WebSocket path there is no single frame to rewrite
                 # or drop — the whole buffered response is one unit, so a block
-                # replaces it outright (same "HTTP protocols get a proper
-                # 403/409" behavior as every other protocol here).
-                flow.response = protocols.block_response(
-                    "openai.responses", reason, verdict or {"decision": decision})
+                # replaces it outright (a typed 403, or a 代答/reason under an
+                # answer mode).
+                flow.response = self._deny(
+                    "openai.responses", verdict or {"decision": decision}, streaming)
                 return
             logger.info("[OGR] allow codex-http tool_call %s (%s)", call["name"], session_id)
 
@@ -329,8 +669,7 @@ class OGRGateway:
         if verdict.get("decision") in BLOCKING:
             logger.info("[OGR] %s codex-http response (%s): %s", verdict["decision"],
                         session_id, protocols.reasons(verdict))
-            flow.response = protocols.block_response(
-                "openai.responses", protocols.reasons(verdict), verdict)
+            flow.response = self._deny("openai.responses", verdict, streaming)
 
     # ── WebSocket side: moderate Codex (ChatGPT backend) traffic ──────────
     async def websocket_message(self, flow: http.HTTPFlow) -> None:
