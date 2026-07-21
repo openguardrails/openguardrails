@@ -35,6 +35,7 @@ import {
 } from "@openguardrails/core"
 import { loadGuardrailsConfig, type GuardrailsOptions, type TaintConfig } from "./config.js"
 import { openAICompatibleBackend } from "./own-model.js"
+import { getReporter, hostAgentId } from "./platform.js"
 
 let seq = 0
 function id(prefix: string): string {
@@ -213,8 +214,12 @@ const plugin: ReturnType<typeof definePluginEntry> = definePluginEntry({
           kind: "tool_call",
           observationPoint: "agent_hook",
           subject: {
-            agent_id: c.agentId ?? "openclaw",
+            // One assistant daemon per machine → machine-scoped identity
+            // (identity design §7); client_key is clamped by the runtime to
+            // this key's enrollment scope.
+            agent_id: c.agentId ?? hostAgentId(),
             agent_type: "openclaw",
+            attestation: "client_key",
             session_id: c.sessionKey,
             channel: c.channelId,
           },
@@ -227,6 +232,7 @@ const plugin: ReturnType<typeof definePluginEntry> = definePluginEntry({
         }
 
         const verdict = await guard.evaluate(ev)
+        getReporter().report(ev) // fire-and-forget platform observability
 
         if (verdict.decision === "block") {
           return { block: true, blockReason: `[OpenGuardrails] ${brief(verdict)}` }
@@ -256,7 +262,12 @@ const plugin: ReturnType<typeof definePluginEntry> = definePluginEntry({
       const ev: GuardEvent = {
         kind: "model_output",
         observationPoint: "gateway",
-        subject: { agent_id: c.agentId ?? "openclaw", agent_type: "openclaw", session_id: c.sessionKey },
+        subject: {
+          agent_id: c.agentId ?? hostAgentId(),
+          agent_type: "openclaw",
+          attestation: "client_key",
+          session_id: c.sessionKey,
+        },
         payload: { content: e.content ?? "", channel: c.messageProvider },
         eventId: id("evt"),
         guardId: id("ga"),
@@ -266,6 +277,7 @@ const plugin: ReturnType<typeof definePluginEntry> = definePluginEntry({
       }
 
       const verdict = await guard.evaluate(ev)
+      getReporter().report(ev)
       if (verdict.decision === "block" || verdict.decision === "require_approval") {
         return {
           cancel: true,

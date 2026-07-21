@@ -29,6 +29,8 @@ from openguardrails import GuardEvent, Provenance, Runtime
 from openguardrails.detectors.config_rules import ConfigRulesDetector
 from openguardrails.detectors.llm_judge import LLMJudgeDetector
 
+from .platform import get_reporter, subject_for
+
 _seq = itertools.count(1)
 _lock = threading.Lock()
 
@@ -222,12 +224,15 @@ def on_pre_tool_call(tool_name="", args=None, session_id="", tool_call_id="", **
 
     ev = GuardEvent(
         kind="tool_call", observation_point="agent_hook",
-        subject={"agent_id": "hermes", "agent_type": "hermes", "principal": "user:tom"},
+        # Per-instance identity assertion (platform.py): hermes-<OGR_INSTANCE>,
+        # attestation claim client_key — the runtime clamps to enrollment scope.
+        subject=subject_for(),
         payload={"name": tool_name, "arguments": args},
         event_id=_id("evt"), guard_id=guard_id, timestamp=_now(),
         session_id=session_id, provenance=provenance,
     )
     verdict = get_runtime().evaluate(ev)
+    get_reporter().report(ev)  # fire-and-forget platform observability
 
     # hand the guard-context to the sandbox wrapper for the SAME logical action
     _set_guardcontext(guard_id, session_id, provenance)
@@ -265,12 +270,13 @@ def guard_exec(command: str, cwd: str = "/workspace") -> tuple[bool, str]:
     env_keys = sorted(k for k, v in os.environ.items() if _is_secret_env(k, v))
     ev = GuardEvent(
         kind="exec", observation_point="sandbox",
-        subject={"agent_id": "hermes", "agent_type": "hermes", "sandbox_id": "sbx"},
+        subject=subject_for(sandbox_id="sbx"),
         payload={"argv": ["bash", "-c", command], "cwd": cwd, "env_keys": env_keys},
         event_id=_id("evt"), guard_id=guard_id, timestamp=_now(),
         session_id=session_id, provenance=provenance,
     )
     verdict = get_runtime().evaluate(ev)
+    get_reporter().report(ev)
     allowed = verdict.decision in _ALLOW_DECISIONS
     _audit("sandbox", f"argv={['bash', '-c', command]} secret_env={env_keys} "
                       f"{_verdict_brief(verdict)}")

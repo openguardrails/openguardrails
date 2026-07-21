@@ -97,3 +97,20 @@ Drives four scenarios through the real hook signatures: benign / injection-block
 `v0.1`. Verified against real Hermes (2026-06-28): all four hooks bound, benign
 commands executed, credential reads and untrusted-origin `curl | bash` blocked at
 the altitude that saw them first.
+
+## Platform reporting with an enrolled identity (optional)
+
+Set `OGR_RUNTIME_URL` + `OGR_API_KEY` and the plugin also ships every
+GuardEvent to an OpenGuardrails runtime — fire-and-forget, local enforcement
+stays authoritative. On first use it enrolls a per-instance Ed25519 key
+(`POST /enroll`, the API key is the bootstrap token) and signs each batch
+with `OGR-Batch-Signature`, so the runtime records this instance's identity
+at its enrollment scope instead of an unverified claim
+(spec: `specification/attestation.md`).
+
+Hermes is the "many instances per machine" case: name each one with
+`OGR_INSTANCE` (default `default`). The instance asserts
+`subject.agent_id = hermes-<instance>` and appears as its own Agent in the
+console. `OGR_KEYFILE` overrides the keypair path
+(`~/.ogr/hermes-<instance>-ed25519.json`), `OGR_PRINCIPAL` the principal
+(default `user:<login>`).

@@ -96,3 +96,15 @@ model. Tune via config:
 ## License
 
 Apache-2.0
+
+## Platform reporting with an enrolled identity (optional)
+
+Set `OGR_RUNTIME_URL` + `OGR_API_KEY` and the plugin also ships every
+GuardEvent to an OpenGuardrails runtime — fire-and-forget, local enforcement
+stays authoritative. On first use it enrolls a per-machine Ed25519 key
+(`~/.ogr/openclaw-ed25519.json`, override with `OGR_KEYFILE`) and signs each
+batch with `OGR-Batch-Signature` (spec: `specification/attestation.md`).
+
+OpenClaw is the "one assistant per machine" case: every terminal attaches to
+the same daemon, so events assert `subject.agent_id = openclaw-<hostname>`
+and the machine appears as one Agent in the console.
