@@ -76,21 +76,30 @@ def make_event(kind: str, *, subject: dict, payload: dict, session_id: str,
 class OGRClient:
     """Thin PDP client. `evaluate` is blocking; run it off the event loop."""
 
-    def __init__(self, base_url: str, api_key: str, timeout: float = 2.0):
+    def __init__(self, base_url: str, api_key: str, timeout: float = 2.0,
+                 identity=None):
         self.endpoint = base_url.rstrip("/") + "/api/public/ogr/v1/evaluate"
         self.api_key = api_key
         self.timeout = timeout
+        # Optional PepIdentity: when enrolled, every request body is signed so
+        # the runtime can raise this channel's attestation ceiling
+        # (specification/attestation.md).
+        self.identity = identity
 
     def evaluate(self, event: dict) -> dict:
         """POST one GuardEvent, return the Verdict dict. Raises on transport or
         non-2xx (the caller maps that to its fail mode)."""
         data = json.dumps(event).encode("utf-8")
+        headers = {
+            "content-type": "application/json",
+            "authorization": f"Bearer {self.api_key}",
+        }
+        if self.identity is not None:
+            signature = self.identity.signature_header(data)
+            if signature:
+                headers["ogr-batch-signature"] = signature
         req = urllib.request.Request(
-            self.endpoint, data=data, method="POST",
-            headers={
-                "content-type": "application/json",
-                "authorization": f"Bearer {self.api_key}",
-            },
+            self.endpoint, data=data, method="POST", headers=headers,
         )
         with urllib.request.urlopen(req, timeout=self.timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))

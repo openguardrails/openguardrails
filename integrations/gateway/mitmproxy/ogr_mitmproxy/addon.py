@@ -40,6 +40,7 @@ from mitmproxy import http
 
 from . import protocols
 from .ogr_client import OGRClient, make_event, new_id
+from .pep_identity import PepIdentity
 
 logger = logging.getLogger("ogr.gateway")
 
@@ -89,7 +90,15 @@ class OGRGateway:
         self.answer_on_block = _truthy(
             os.environ.get("OGR_ANSWER_ON_BLOCK"), False)
         timeout = float(os.environ.get("OGR_EVAL_TIMEOUT", "2.0"))
-        self.client = OGRClient(self.runtime, self.api_key, timeout=timeout)
+        # PEP enrollment identity (keyfile via OGR_KEYFILE): enroll once at
+        # startup, then sign every runtime request so the channel's attestation
+        # ceiling rises to this guard's enrollment scope. Best-effort — any
+        # failure keeps the gateway running unsigned.
+        self.identity = PepIdentity()
+        if self.api_key:
+            self.identity.enroll(self.runtime, self.api_key)
+        self.client = OGRClient(self.runtime, self.api_key, timeout=timeout,
+                                identity=self.identity)
         # HTTP-transport Codex clients (protocols.is_codex_http) resend full
         # turn history every request (they set `store: false`, so there is no
         # server-side previous_response_id to thread on) — this dedups
