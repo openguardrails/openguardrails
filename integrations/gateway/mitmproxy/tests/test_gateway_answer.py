@@ -4,6 +4,7 @@ OGR_ANSWER_ON_MODERATION is enabled. Non-moderation blocks stay 403/409.
 """
 import asyncio
 import json
+import re
 
 from mitmproxy.test import tflow, tutils
 
@@ -60,8 +61,8 @@ def test_responses_answer_uses_upstream_compatible_ids():
     resp = protocols.answer_response(
         "openai.responses", "很抱歉，我不能协助。", MOD_BLOCK, streaming=False)
     body = json.loads(resp.get_text())
-    assert body["id"].startswith("resp")
-    assert body["output"][0]["id"].startswith("msg")
+    assert re.fullmatch(r"resp_[0-9a-f]{8}_[0-9]{6}", body["id"])
+    assert re.fullmatch(r"msg_[0-9a-f]{8}_[0-9]{6}", body["output"][0]["id"])
 
 
 def test_answer_response_sse_carries_the_refusal_as_a_stream():
@@ -72,8 +73,8 @@ def test_answer_response_sse_carries_the_refusal_as_a_stream():
     text = resp.get_text()
     # the reconstructor (what the SDK effectively does) must recover the text
     rebuilt = protocols.parse_sse_response("openai.responses", text)
-    assert rebuilt["id"].startswith("resp")
-    assert rebuilt["output"][0]["id"].startswith("msg")
+    assert re.fullmatch(r"resp_[0-9a-f]{8}_[0-9]{6}", rebuilt["id"])
+    assert re.fullmatch(r"msg_[0-9a-f]{8}_[0-9]{6}", rebuilt["output"][0]["id"])
     assert protocols.parse_response("openai.responses", rebuilt) == "很抱歉，我不能协助。"
 
 

@@ -550,6 +550,8 @@ class OGRGateway:
             return
         if not isinstance(body, dict):
             return
+        if protocols.normalize_codex_http_ids(body):
+            flow.request.set_text(json.dumps(body))
         parsed = protocols.parse_codex_http_input(body)
         session_id = self._codex_http_session_id(flow, parsed["session_hint"])
         flow.metadata["ogr_codex_http_session"] = session_id

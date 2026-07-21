@@ -92,6 +92,17 @@ def test_parse_codex_http_input_no_user_turn():
     assert parsed["tool_outputs"] == [{"call_id": "c1", "text": "ok"}]
 
 
+def test_normalize_codex_http_ids_repairs_only_legacy_gateway_ids():
+    body = {"input": [
+        {"type": "message", "id": "msg-8b01ff56-000011"},
+        {"type": "message", "id": "msg_native-id"},
+        {"type": "message", "id": "msg-not-ours"},
+    ]}
+    assert protocols.normalize_codex_http_ids(body)
+    assert [item["id"] for item in body["input"]] == [
+        "msg_8b01ff56_000011", "msg_native-id", "msg-not-ours"]
+
+
 def test_tool_calls_from_output():
     body = {"output": [
         {"type": "message", "role": "assistant", "content": []},

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from typing import Any
 
 from mitmproxy import http
@@ -666,6 +667,29 @@ def parse_codex_http_input(body: dict) -> dict:
     }
 
 
+_LEGACY_SYNTHETIC_RESPONSE_ID = re.compile(
+    r"^(?P<prefix>msg|resp)-(?P<tag>[0-9a-f]{8})-(?P<seq>[0-9]{6})$")
+
+
+def normalize_codex_http_ids(body: dict) -> bool:
+    """Upgrade synthetic IDs emitted before native Codex ID formatting.
+
+    Hermes persists response output items and resends them in later `input[]`
+    arrays. Keep this deliberately limited to the exact shape minted by this
+    gateway so arbitrary upstream/client IDs remain opaque.
+    """
+    changed = False
+    for item in body.get("input") or []:
+        if not isinstance(item, dict) or not isinstance(item.get("id"), str):
+            continue
+        match = _LEGACY_SYNTHETIC_RESPONSE_ID.fullmatch(item["id"])
+        if match:
+            item["id"] = (f'{match.group("prefix")}_{match.group("tag")}_'
+                          f'{match.group("seq")}')
+            changed = True
+    return changed
+
+
 def is_codex_tool_input_delta(d: dict) -> bool:
     """Incremental tool-call streaming (`…input.delta` / `…arguments.delta`).
     These reach the agent BEFORE the completed item we gate on, so they are
@@ -855,8 +879,12 @@ def answer_response(
     # (An `ogrmsg-*` item is rejected with "Expected an ID that begins with
     # 'msg'" on the next turn.)
     if proto == "openai.responses":
-        mid = new_id("msg")
-        rid = new_id("resp")
+        # Match the native Responses opaque-id shape (`msg_…` / `resp_…`).
+        # `new_id` deliberately uses dashes for OGR's own identifiers, but
+        # synthetic output items are persisted by clients and later validated
+        # by the Codex backend as upstream object IDs.
+        mid = new_id("msg").replace("-", "_")
+        rid = new_id("resp").replace("-", "_")
     else:
         mid = new_id("ogrmsg")
         rid = new_id("ogrresp")
