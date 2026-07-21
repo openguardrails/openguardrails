@@ -34,7 +34,11 @@ enrollment a PEP MUST hold:
 1. a credential binding it to an identity the runtime recognizes on every
    connection — an mTLS client certificate or equivalent channel credential.
    Credentials SHOULD be short-lived and renewed automatically;
-2. the runtime's current verification keys.
+2. the runtime's current verification keys;
+3. a recorded **assertion scope**: the workspaces this PEP may write into,
+   the `subject.principal` namespaces it may name (exact values or prefix
+   patterns), and the maximum [attestation level](attestation.md) it may
+   declare. The scope bounds the blast radius of a compromised PEP.
 
 Rotation: a runtime MUST publish a new verification key before retiring the old
 one, and MUST keep a retired key available until every receipt signed with it
@@ -45,7 +49,10 @@ has expired. PEPs SHOULD refresh verification keys on every reconnect.
 1. A PEP MUST send events over a channel authenticated with its enrollment
    credential. mTLS is RECOMMENDED; the contract stays transport-neutral.
 2. A runtime MUST bind the channel identity to the `subject` values that PEP is
-   allowed to assert, and MUST reject events where the two disagree.
+   allowed to assert (its enrollment assertion scope). For an out-of-scope or
+   unverifiable assertion it MUST NOT accept the claimed identity strength:
+   it MUST either reject the event or downgrade the assertion to
+   `self_declared` per the [attestation ladder](attestation.md).
 3. A runtime MAY accept events from unenrolled PEPs for observability, but MUST
    treat them as unverified and MUST NOT mint receipts for them or derive
    enforcement authority from them.

@@ -39,11 +39,12 @@ instructions to a high-privilege one).
 | `sandbox_id` | MAY | Sandbox the action runs in. |
 | `parent_agent_id` | MAY | The agent that spawned this one; SHOULD be set by adapters that observe spawn. |
 | `delegation_chain` | MAY | Agent ids root-first, from the top-level agent to this one; length 1 for a top-level agent. MAY be maintained by the runtime from `agent_spawn` events instead of carried on every event. |
+| `attestation` | MAY | How the PEP verified `agent_id`/`principal` — a level from the [attestation ladder](attestation.md). The runtime clamps it to the channel ceiling; a claim is never taken at face value. |
 
 ```json
 { "agent_id": "cc-sub-4", "agent_type": "claude-code.subagent", "principal": "user:tom",
   "sandbox_id": "sbx-7", "parent_agent_id": "cc-main-1",
-  "delegation_chain": ["cc-main-1", "cc-sub-4"] }
+  "delegation_chain": ["cc-main-1", "cc-sub-4"], "attestation": "gateway_api_key" }
 ```
 
 ## Kinds

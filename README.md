@@ -62,6 +62,7 @@ OGR collapses it to `N + M + L + S` — integrate once against the contract.
 | [guard-context](specification/provenance-and-context.md#guard-context-propagation) | Correlation of one logical action across gateway / hook / sandbox | trace context (W3C `traceparent`) |
 | [composition](specification/composition.md) | How multiple vendors' verdicts combine into one decision | — |
 | [enrollment & receipts](specification/enrollment-and-receipts.md) | How PEPs authenticate to a runtime, and how approvals become verifiable payload-bound artifacts | — |
+| [attestation](specification/attestation.md) | How strongly identity claims are verified — one ladder for subject assertions and channel auth, with gateway multiplexing guidance | — |
 
 Risk categories live in the [taxonomy](specification/taxonomy.md) (`safety.*` and
 `security.*`), versioned and swappable — the contract references category IDs but
