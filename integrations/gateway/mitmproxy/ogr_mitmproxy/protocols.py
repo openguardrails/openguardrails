@@ -849,8 +849,17 @@ def answer_response(
     model's own reply, not an error. Emits SSE when the client asked for a
     stream (agents over the codex/responses endpoint do), else buffered JSON.
     """
-    mid = new_id("ogrmsg")
-    rid = new_id("ogrresp")
+    # Responses clients persist output items and send them back in a later
+    # input[]. The Codex endpoint validates these opaque IDs by kind, so our
+    # synthetic answer must use the same prefixes as native Responses objects.
+    # (An `ogrmsg-*` item is rejected with "Expected an ID that begins with
+    # 'msg'" on the next turn.)
+    if proto == "openai.responses":
+        mid = new_id("msg")
+        rid = new_id("resp")
+    else:
+        mid = new_id("ogrmsg")
+        rid = new_id("ogrresp")
     headers = {
         "x-ogr-decision": "block",
         "x-ogr-answer": "1",

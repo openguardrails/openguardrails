@@ -56,6 +56,14 @@ def test_answer_response_json_is_a_200_completion_with_the_refusal():
     assert body["choices"][0]["message"]["content"] == "很抱歉，我不能协助。"
 
 
+def test_responses_answer_uses_upstream_compatible_ids():
+    resp = protocols.answer_response(
+        "openai.responses", "很抱歉，我不能协助。", MOD_BLOCK, streaming=False)
+    body = json.loads(resp.get_text())
+    assert body["id"].startswith("resp")
+    assert body["output"][0]["id"].startswith("msg")
+
+
 def test_answer_response_sse_carries_the_refusal_as_a_stream():
     resp = protocols.answer_response(
         "openai.responses", "很抱歉，我不能协助。", MOD_BLOCK, streaming=True)
@@ -64,6 +72,8 @@ def test_answer_response_sse_carries_the_refusal_as_a_stream():
     text = resp.get_text()
     # the reconstructor (what the SDK effectively does) must recover the text
     rebuilt = protocols.parse_sse_response("openai.responses", text)
+    assert rebuilt["id"].startswith("resp")
+    assert rebuilt["output"][0]["id"].startswith("msg")
     assert protocols.parse_response("openai.responses", rebuilt) == "很抱歉，我不能协助。"
 
 
