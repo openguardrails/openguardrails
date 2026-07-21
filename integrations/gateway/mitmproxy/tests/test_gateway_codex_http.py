@@ -303,7 +303,45 @@ def test_codex_http_no_tool_call_passes_through_streaming(monkeypatch):
     req.response = orig
     _run(gw.response(req))
     assert req.response is orig
-    assert called["n"] == 0  # no tool_call in the stream -> nothing to judge
+    assert called["n"] == 1  # reconstructed streaming model_output
+
+
+def test_codex_http_streaming_completed_response_emits_tool_call_and_model_output(monkeypatch):
+    gw = OGRGateway()
+    events = []
+
+    async def spy(event):
+        events.append(event)
+        return {"decision": "allow"}
+
+    monkeypatch.setattr(gw, "_evaluate", spy)
+    req = _flow({"model": "m", "input": [{"role": "user", "content": "search"}]})
+    _run(gw.request(req))
+    events.clear()
+    completed = {
+        "type": "response.completed",
+        "response": {
+            "model": "gpt-5.6-sol",
+            "status": "completed",
+            "output": [
+                {"type": "function_call", "name": "browser",
+                 "call_id": "call_real", "arguments": '{"query":"weather"}'},
+                {"type": "message", "role": "assistant", "content": [
+                    {"type": "output_text", "text": "Weather found."}]},
+            ],
+            "output_text": "Weather found.",
+        },
+    }
+    sse = f'event: response.completed\ndata: {json.dumps(completed)}\n\n'
+    req.response = tutils.tresp(
+        content=sse.encode(),
+        headers=Headers([(b"content-type", b"text/event-stream; charset=utf-8")]))
+
+    _run(gw.response(req))
+
+    assert [event["kind"] for event in events] == ["tool_call", "model_output"]
+    assert events[0]["payload"]["name"] == "browser"
+    assert events[1]["payload"]["text"] == "Weather found."
 
 
 def test_codex_http_response_status_not_200_ignored(monkeypatch):

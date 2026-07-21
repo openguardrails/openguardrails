@@ -617,13 +617,19 @@ class OGRGateway:
         streaming = "event-stream" in content_type
         raw = flow.response.get_text() or ""
 
-        body: dict | None = None
         if streaming:
-            calls = []
-            for frame in protocols.parse_sse_events(raw):
+            frames = protocols.parse_sse_events(raw)
+            body = protocols.parse_sse_response("openai.responses", raw)
+            calls = protocols.tool_calls_from_output(body)
+            # Some Responses-compatible streams omit the full `response`
+            # object from response.completed. Keep completed-item extraction
+            # as a fallback, de-duplicated by call id.
+            seen_calls = {call.get("call_id") for call in calls}
+            for frame in frames:
                 call = protocols.parse_codex_ws_tool_call(frame)
-                if call:
+                if call and call.get("call_id") not in seen_calls:
                     calls.append(call)
+                    seen_calls.add(call.get("call_id"))
         else:
             try:
                 parsed_body = json.loads(raw or "{}")
@@ -654,8 +660,8 @@ class OGRGateway:
                 return
             logger.info("[OGR] allow codex-http tool_call %s (%s)", call["name"], session_id)
 
-        if not self.check_response or streaming or body is None:
-            return  # streaming completion text: not moderated yet (same limitation as the other HTTP protocols)
+        if not self.check_response or body is None:
+            return
         text = protocols.parse_response("openai.responses", body)
         if not text:
             return
