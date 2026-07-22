@@ -15,11 +15,14 @@ best-effort and never blocks or fails a hook.
 Env:
   OGR_RUNTIME_URL   runtime base URL (unset = reporter disabled)
   OGR_API_KEY       workspace API key (bootstrap token for enrollment)
-  OGR_INSTANCE      instance name, default: this machine's hostname (matches
-                     the openclaw adapter's own `openclaw-<hostname>` default;
-                     set explicitly only to disambiguate multiple Hermes
-                     instances on the SAME machine — the case this identity
-                     design exists for)
+  OGR_INSTANCE      instance name, default: hostname, plus the HERMES_HOME
+                     basename when that's set to a non-default path (Hermes'
+                     own mechanism for running genuinely separate instances
+                     on one machine, each with its own config/session
+                     history — two processes sharing the default home are
+                     the same logical install and collapse to one instance;
+                     session_id already tells their conversations apart).
+                     Set explicitly to override either signal.
   OGR_PRINCIPAL     principal override, default "user:<login>"
   OGR_KEYFILE       keypair path, default ~/.ogr/hermes-<instance>-ed25519.json
 """
@@ -61,10 +64,23 @@ def instance_name() -> str:
     explicit = os.environ.get("OGR_INSTANCE", "").strip()
     if explicit:
         return explicit
+    host = ""
     try:
-        return socket.gethostname().strip() or "default"
+        host = socket.gethostname().strip()
     except Exception:  # noqa: BLE001
-        return "default"
+        pass
+    host = host or "default"
+    # HERMES_HOME is Hermes' OWN mechanism for running multiple genuinely
+    # separate instances on one machine (each gets its own config/session
+    # history) — fold its basename in so those disambiguate automatically.
+    # Two processes sharing the SAME (default) home collapse to one
+    # instance, which is correct: they're the same logical install, and
+    # session_id already tells their conversations apart in the console.
+    home = os.environ.get("HERMES_HOME", "").strip()
+    if home:
+        tag = pathlib.Path(home).expanduser().name.strip(".") or "home"
+        return f"{host}-{tag}"
+    return host
 
 
 def agent_id() -> str:
