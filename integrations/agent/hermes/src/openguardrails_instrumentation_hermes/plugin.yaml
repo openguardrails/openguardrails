@@ -17,4 +17,4 @@ requires_env:
     description: "Workspace API key from your OGR console — used as the one-time enrollment bootstrap token"
     secret: true
   - name: OGR_INSTANCE
-    description: "Name for this Hermes instance — becomes agent 'hermes-<instance>' in the console (default: default)"
+    description: "Name for this Hermes instance — becomes agent 'hermes-<instance>' in the console. Blank is fine: defaults to this machine's hostname. Only set this if you run multiple Hermes instances on the SAME machine and want to tell them apart"

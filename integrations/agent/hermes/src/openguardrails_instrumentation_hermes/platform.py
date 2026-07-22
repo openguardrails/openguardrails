@@ -15,7 +15,11 @@ best-effort and never blocks or fails a hook.
 Env:
   OGR_RUNTIME_URL   runtime base URL (unset = reporter disabled)
   OGR_API_KEY       workspace API key (bootstrap token for enrollment)
-  OGR_INSTANCE      instance name, default "default"
+  OGR_INSTANCE      instance name, default: this machine's hostname (matches
+                     the openclaw adapter's own `openclaw-<hostname>` default;
+                     set explicitly only to disambiguate multiple Hermes
+                     instances on the SAME machine — the case this identity
+                     design exists for)
   OGR_PRINCIPAL     principal override, default "user:<login>"
   OGR_KEYFILE       keypair path, default ~/.ogr/hermes-<instance>-ed25519.json
 """
@@ -29,6 +33,7 @@ import logging
 import os
 import pathlib
 import queue
+import socket
 import threading
 import urllib.error
 import urllib.request
@@ -53,7 +58,13 @@ def _b64url(raw: bytes) -> str:
 
 
 def instance_name() -> str:
-    return os.environ.get("OGR_INSTANCE", "").strip() or "default"
+    explicit = os.environ.get("OGR_INSTANCE", "").strip()
+    if explicit:
+        return explicit
+    try:
+        return socket.gethostname().strip() or "default"
+    except Exception:  # noqa: BLE001
+        return "default"
 
 
 def agent_id() -> str:
