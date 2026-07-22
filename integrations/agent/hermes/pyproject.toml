@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "openguardrails-instrumentation-hermes"
-version = "0.1.1"
+version = "0.1.2"
 description = "Guard a Hermes agent and its sandbox through the OpenGuardrails (OGR) protocol — one policy enforced across the LLM gateway, the agent tool-call hook, and the real sandbox exec."
 readme = "README.md"
 requires-python = ">=3.10"
