@@ -248,9 +248,20 @@ class PlatformReporter:
             data=body, method="POST", headers=headers,
         )
         try:
-            urllib.request.urlopen(req, timeout=5.0).read()
+            raw = urllib.request.urlopen(req, timeout=5.0).read()
         except Exception as exc:  # noqa: BLE001
             logger.warning("OGR ingest failed (%s) — %d events dropped", exc, len(batch))
+            return
+        try:
+            rejected = [
+                r for r in json.loads(raw.decode("utf-8")).get("results", [])
+                if r.get("status", 200) >= 300
+            ]
+        except Exception:  # noqa: BLE001
+            return
+        if rejected:
+            logger.warning("OGR ingest rejected %d/%d events: %s",
+                            len(rejected), len(batch), rejected)
 
 
 _reporter: PlatformReporter | None = None
