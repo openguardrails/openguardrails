@@ -7,3 +7,14 @@ hooks:
   - post_tool_call
   - pre_api_request
   - post_api_request
+# Optional: ship every GuardEvent to an OpenGuardrails runtime for console
+# visibility (Explorer, findings). Local enforcement is fully authoritative
+# without these — skip any prompt below (leave blank) to stay local-only.
+requires_env:
+  - name: OGR_RUNTIME_URL
+    description: "OpenGuardrails runtime base URL, e.g. https://your-ogr-instance.example.com (blank = local enforcement only, no console reporting)"
+  - name: OGR_API_KEY
+    description: "Workspace API key from your OGR console — used as the one-time enrollment bootstrap token"
+    secret: true
+  - name: OGR_INSTANCE
+    description: "Name for this Hermes instance — becomes agent 'hermes-<instance>' in the console (default: default)"
