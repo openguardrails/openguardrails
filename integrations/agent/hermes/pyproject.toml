@@ -19,6 +19,15 @@ classifiers = [
 ]
 dependencies = ["openguardrails>=0.1.0"]
 
+# Resolve the sibling workspace member's SOURCE instead of PyPI — required for
+# `uv pip install -e` (from this dir, or targeting an external venv like
+# Hermes' own) to work at all; without it uv errors with "openguardrails is
+# included as a workspace member, but is missing an entry in tool.uv.sources".
+# Editable installs of workspace deps are the point: edit packages/python/src
+# or this package's src and both are live without a release.
+[tool.uv.sources]
+openguardrails = { workspace = true }
+
 [project.optional-dependencies]
 # `srt` (Anthropic Sandbox Runtime) is a Node CLI installed via npm, not pip:
 #   npm install -g @anthropic-ai/sandbox-runtime
