@@ -64,7 +64,60 @@ System compromise, judged on actions and data flow.
 | `security.memory_poisoning` | Persistent/cross-session corruption of agent memory — instructions implanted in memory that survive across sessions. |
 | `security.resource_exhaustion` | Loop amplification, runaway API spend, action/order spam — abuse judged on action rates and volume. |
 
-## `safety.pii.*` — subcategory registry
+### `security.secret_leak.*` — credential-kind subcategories
+
+`security.secret_leak` says *that* a credential was exposed. Policy is usually
+written on *which kind* — an AWS key reaching a public repo is a rotate-now
+event, a password in a prompt is a redact-and-warn one — so a detector SHOULD
+refine it. Semantic buckets:
+
+`api_key, password, private_key, cloud_credential, db_connection`
+
+| ID | Covers |
+|---|---|
+| `security.secret_leak.api_key` | API and app tokens, JWT signing secrets, `Authorization: Bearer/Basic` values, client/webhook secrets |
+| `security.secret_leak.password` | Account or service passwords and passphrases, including SQL `IDENTIFIED BY` |
+| `security.secret_leak.private_key` | PEM / OpenSSH private key material |
+| `security.secret_leak.cloud_credential` | Cloud-provider access-key secrets and service-account keys |
+| `security.secret_leak.db_connection` | Credentials embedded in a DSN, connection string, `.pgpass`, or `DATABASE_URL` |
+
+This list is **open by construction** — credential kinds are unbounded, every
+vendor mints its own — so a detector or a deployment MAY emit a further id under
+this prefix without registry churn. The usual **rollup rule** applies: a consumer
+that does not know `security.secret_leak.cloud_credential` MUST treat it as
+`security.secret_leak`. A detector that cannot determine the kind emits the bare
+id; that is a valid answer, not a degraded one.
+
+**Why not `privacy.secret.*`.** A leaked key leads to *compromise*, not to a
+privacy harm: the control is block-and-rotate rather than masking or
+minimisation, and a machine credential has no data subject. Credential exposure
+therefore stays in `security.*` — the same reasoning as the v0.4 note under
+`privacy.pii.*` below. A *person's* credential handled as personal data is
+`privacy.pii.credential`; that id is about data handling, this one is about
+exposure.
+
+## `privacy.*`
+
+Personal-data handling, judged where data **crosses a boundary** (egress to a
+tool call, a model reply, a retrieved result) rather than at the content I/O
+boundary. Distinct from `safety.*` on purpose: exposing an email address is not
+harm in the sense `safety.self_harm` or `safety.weapons` mean it, and the control
+it drives is masking/minimisation, not refusal.
+
+| ID | Description |
+|---|---|
+| `privacy.pii` | Personal data crossing a boundary (often `redact`). Refine with the registry below. |
+
+**Why not `compliance.*`.** A risk taxonomy names *what was detected*, not *why
+you care*. A span detector can answer "is this a national ID"; it cannot answer
+"is this a GDPR violation" — that depends on jurisdiction, data-subject
+residency, lawful basis, consent state and contract, none of which reach the
+detector. Compliance is also cross-cutting (a credential leak is a
+breach-notification event; unsuitable financial advice is a conduct event), so it
+does not partition the space. Obligation belongs on an implementation's policy
+axis, not on the category id.
+
+### `privacy.pii.*` — subcategory registry
 
 Span-level PII detection needs entity-level ids; without a shared registry,
 masking policy (which is written *per entity type*) cannot interoperate.
