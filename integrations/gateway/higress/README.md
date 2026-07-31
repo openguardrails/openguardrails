@@ -225,17 +225,19 @@ match `VERSION`, runs the tests, builds `plugin.wasm`, and `oras push`es the
 gzipped layer under both the version and `latest`. Higress then pulls it straight:
 
 ```yaml
-url: oci://ghcr.io/openguardrails/higress:1.1.0
+url: oci://docker.io/openguardrails/higress:1.1.0
 ```
 
-**GHCR is the primary and needs no setup**: the workflow pushes with its own
-`GITHUB_TOKEN`, which is scoped to this repository and expires with the run — the
-same "no long-lived registry token" rule the npm and PyPI releases follow.
+Publishing needs two repository secrets, `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`
+(a Docker Hub **access token** scoped Read & Write to that one repository, never an
+account password). Missing secrets fail the publish job rather than skipping it — a
+tag with no artifact behind it is worse than a red run.
 
-A Docker Hub mirror is pushed **only when** `DOCKERHUB_USERNAME` and
-`DOCKERHUB_TOKEN` are set (a Docker Hub **access token**, never an account
-password). Without them the step is skipped with a notice: a missing optional
-credential is not a broken release.
+⚠️ GHCR was tried first, because the workflow can push there with its own
+`GITHUB_TOKEN` and store no credential at all. It lost on the thing that matters
+more: a GHCR package created by Actions stays PRIVATE until someone flips it by
+hand in the UI, and a reference a gateway cannot pull anonymously is not a
+release.
 
 `workflow_dispatch` runs the build and packaging without pushing, so the release
 path can be exercised before a tag exists.

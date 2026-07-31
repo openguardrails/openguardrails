@@ -25,14 +25,12 @@ permissions:
 
 env:
   PLUGIN_DIR: integrations/gateway/higress
-  # GHCR is the primary, because it needs no long-lived credential: the job's own
-  # GITHUB_TOKEN is scoped to this repository and expires with the run. That is the
-  # same principle the npm and PyPI releases follow (see RELEASING.md) — a registry
-  # PAT sitting in repository secrets is the thing this repo does not do.
-  IMAGE: ghcr.io/openguardrails/higress
-  # Optional mirror. Pushed only when DOCKERHUB_USERNAME/DOCKERHUB_TOKEN exist, so
-  # the release works out of the box and Docker Hub is a decision, not a dependency.
-  MIRROR_IMAGE: docker.io/openguardrails/higress
+  # Docker Hub, because that is where an operator configuring a gateway expects to
+  # find it and where an anonymous pull just works. GHCR was tried first for the
+  # credential story (see RELEASING.md) and lost on the thing that matters more: a
+  # package it creates is PRIVATE until someone flips it by hand in the UI, and a
+  # registry reference a gateway cannot pull is not a release.
+  IMAGE: docker.io/openguardrails/higress
 
 jobs:
   build:
@@ -96,9 +94,6 @@ jobs:
     needs: build
     if: github.event_name == 'push' || inputs.dry_run == false
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
     steps:
       - uses: actions/download-artifact@v5
         with:
@@ -107,12 +102,26 @@ jobs:
       - name: Install oras
         uses: oras-project/setup-oras@v1
 
-      - name: Push to GHCR
+      # ⚠️ A Docker Hub ACCESS TOKEN, never an account password, and never a literal
+      # here: repository secrets are the only place it lives. Scope it Read & Write
+      # to this one repository. Missing credentials fail the job loudly rather than
+      # skipping — this is THE registry now, so a silent skip would mean a tag with
+      # no artifact behind it.
+      - name: Log in to Docker Hub
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [[ -z "$DOCKERHUB_USERNAME" || -z "$DOCKERHUB_TOKEN" ]]; then
+            echo "::error::DOCKERHUB_USERNAME/DOCKERHUB_TOKEN are not set on this repository"
+            exit 1
+          fi
+          echo "$DOCKERHUB_TOKEN" | oras login docker.io -u "$DOCKERHUB_USERNAME" --password-stdin
+
+      - name: Push the OCI artifact
         env:
           VERSION: ${{ needs.build.outputs.version }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "$GITHUB_TOKEN" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
           # Two tags in one push: the immutable version a deployment should pin,
           # and `latest` for a lab that just wants the newest.
           oras push "$IMAGE:$VERSION,latest" \
@@ -122,26 +131,6 @@ jobs:
             --annotation "org.opencontainers.image.revision=${{ github.sha }}" \
             --annotation "org.opencontainers.image.version=$VERSION" \
             --annotation "org.opencontainers.image.authors=thomas@openguardrails.com" \
-            plugin.tar.gz:application/vnd.oci.image.layer.v1.tar+gzip
-
-      # ⚠️ A Docker Hub ACCESS TOKEN, never a password, and never a literal here.
-      # Absent secrets skip the mirror instead of failing the release: GHCR already
-      # has the artifact, and a missing optional credential is not a broken release.
-      - name: Mirror to Docker Hub, when it is configured
-        env:
-          VERSION: ${{ needs.build.outputs.version }}
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-        run: |
-          if [[ -z "$DOCKERHUB_USERNAME" || -z "$DOCKERHUB_TOKEN" ]]; then
-            echo "::notice::Docker Hub mirror skipped — DOCKERHUB_USERNAME/DOCKERHUB_TOKEN are not set"
-            exit 0
-          fi
-          echo "$DOCKERHUB_TOKEN" | oras login docker.io -u "$DOCKERHUB_USERNAME" --password-stdin
-          oras push "$MIRROR_IMAGE:$VERSION,latest" \
-            --annotation "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
-            --annotation "org.opencontainers.image.revision=${{ github.sha }}" \
-            --annotation "org.opencontainers.image.version=$VERSION" \
             plugin.tar.gz:application/vnd.oci.image.layer.v1.tar+gzip
 
       - name: Summary

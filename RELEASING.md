@@ -21,12 +21,23 @@ in the selected `package.json`, `pyproject.toml`, or — for the Higress plugin 
 `VERSION`.
 
 The Higress plugin is not an npm or PyPI package: it is a WASM binary that a
-gateway pulls as an **OCI artifact**, so it publishes to a registry instead.
-`ghcr.io/openguardrails/higress` is the primary, pushed with the workflow's own
-`GITHUB_TOKEN` — no long-lived credential, same principle as Trusted Publishing.
-A Docker Hub mirror (`docker.io/openguardrails/higress`) is pushed **only if**
-`DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` are set on the repository; without them
-the step is skipped with a notice rather than failing the release.
+gateway pulls as an **OCI artifact**, so it publishes to a registry instead —
+`docker.io/openguardrails/higress`.
+
+⚠️ **It is the one exception to the rule above**, and the exception is deliberate.
+GHCR would have kept it: the workflow can push there with its own `GITHUB_TOKEN`
+and no stored credential at all. But a GHCR package created by Actions is PRIVATE
+until a human flips it in the package settings UI — there is no REST endpoint for
+that — and a registry reference an operator's gateway cannot pull anonymously is
+not a release. Docker Hub is where someone configuring a gateway looks, and an
+anonymous pull works the moment the push does.
+
+So this one release needs two repository secrets, `DOCKERHUB_USERNAME` and
+`DOCKERHUB_TOKEN`. The token must be a Docker Hub **access token** scoped Read &
+Write to that one repository, never an account password, and it is the only
+long-lived registry credential in this repo. Missing secrets fail the publish job
+loudly rather than skipping it: a tag with no artifact behind it is worse than a
+red run.
 
 The Claude Code and Codex integrations are private npm workspaces used for
 local dependency management, builds, and tests. They are distributed through
