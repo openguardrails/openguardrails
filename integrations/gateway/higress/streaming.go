@@ -149,6 +149,14 @@ func isEscapable(ch byte) bool {
 type streamProcessor struct {
 	r *restorer
 
+	// A response that is not an event stream still flows through here in observe
+	// mode, where nothing is buffered: the bytes are passed on untouched and a
+	// bounded copy is kept so the reply can be REPORTED at the end. Buffering the
+	// whole body to read it — the enforce path's `BufferResponseBody` — is a
+	// latency and memory cost an observer has no business imposing.
+	sse bool
+	raw strings.Builder
+
 	lineBuf      string // incomplete SSE line carried across raw chunks
 	contentBuf   string // pending tail of delta.content
 	reasoningBuf string // pending tail of delta.reasoning_content
@@ -164,14 +172,25 @@ type streamToolCall struct {
 	Args strings.Builder
 }
 
-func newStreamProcessor(mapping map[string]string) *streamProcessor {
-	return &streamProcessor{r: newRestorer(mapping), toolCalls: map[int]*streamToolCall{}}
+// maxRawAccum bounds the copy kept of a non-streamed reply. Past it the reply is
+// still delivered whole and simply reported truncated: a huge answer must not
+// turn into a huge allocation inside every Envoy worker.
+const maxRawAccum = 512 * 1024
+
+func newStreamProcessor(mapping map[string]string, sse bool) *streamProcessor {
+	return &streamProcessor{r: newRestorer(mapping), sse: sse, toolCalls: map[int]*streamToolCall{}}
 }
 
 // ProcessChunk restores placeholders in one raw chunk and accumulates what the
 // model produced. Line-oriented: SSE events are newline-delimited and a chunk
 // boundary can fall anywhere, including inside a token.
 func (s *streamProcessor) ProcessChunk(chunk []byte, isLast bool) []byte {
+	if !s.sse {
+		if s.raw.Len() < maxRawAccum {
+			s.raw.Write(chunk)
+		}
+		return chunk
+	}
 	text := s.lineBuf + string(chunk)
 	s.lineBuf = ""
 
@@ -287,6 +306,11 @@ func (s *streamProcessor) field(buf *string, text string, isLast bool) string {
 // — because detecting on the restored text would find the very values we
 // removed and block our own restoration.
 func (s *streamProcessor) Result() (content string, calls []toolCallOut) {
+	if !s.sse {
+		body := gjson.Parse(s.raw.String())
+		return body.Get("choices.0.message.content").String(),
+			toolCallsOf(body.Get("choices.0.message"))
+	}
 	idx := make([]int, 0, len(s.toolCalls))
 	for i := range s.toolCalls {
 		idx = append(idx, i)

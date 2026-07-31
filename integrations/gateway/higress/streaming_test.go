@@ -16,7 +16,7 @@ var streamMapping = map[string]string{
 // feed pushes text through the restorer in the given chunk splits. The splits
 // are the point: a token that straddles a chunk boundary must still restore.
 func feed(chunks []string) string {
-	sp := newStreamProcessor(streamMapping)
+	sp := newStreamProcessor(streamMapping, true)
 	out := ""
 	for i, c := range chunks {
 		out += sp.field(&sp.contentBuf, c, i == len(chunks)-1)
@@ -70,7 +70,7 @@ func split(s string) []string {
 }
 
 func TestStreamRestoresAndReassembles(t *testing.T) {
-	sp := newStreamProcessor(streamMapping)
+	sp := newStreamProcessor(streamMapping, true)
 	chunks := []string{
 		`data: {"choices":[{"delta":{"content":"mail ${OGR_EM"}}]}` + "\n\n",
 		`data: {"choices":[{"delta":{"content":"AIL_1} ok"}}]}` + "\n\n",
@@ -102,7 +102,7 @@ func TestStreamRestoresAndReassembles(t *testing.T) {
 }
 
 func TestStreamReassemblesToolCallDeltas(t *testing.T) {
-	sp := newStreamProcessor(map[string]string{})
+	sp := newStreamProcessor(map[string]string{}, true)
 	chunks := []string{
 		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"shell","arguments":"{\"cmd\":"}}]}}]}` + "\n\n",
 		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"rm -rf /\"}"}}]}}]}` + "\n\n",
@@ -130,7 +130,7 @@ func TestStreamReassemblesToolCallDeltas(t *testing.T) {
 func TestToolCallArgumentsAreRestoredForTheClient(t *testing.T) {
 	// Handing the client `${OGR_EMAIL_1}` as a tool argument means it executes
 	// on a broken value, so the restore has to reach inside the arguments too.
-	sp := newStreamProcessor(streamMapping)
+	sp := newStreamProcessor(streamMapping, true)
 	line := `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"mail","arguments":"{\"to\":\"${OGR_EMAIL_1}\"}"}}]}}]}` + "\n"
 	out := string(sp.ProcessChunk([]byte(line), true))
 	if !strings.Contains(out, "ada@example.com") {
@@ -143,9 +143,55 @@ func TestToolCallArgumentsAreRestoredForTheClient(t *testing.T) {
 }
 
 func TestEmptyMappingIsPassthrough(t *testing.T) {
-	sp := newStreamProcessor(map[string]string{})
+	sp := newStreamProcessor(map[string]string{}, true)
 	in := `data: {"choices":[{"delta":{"content":"__ogr_secret_1__"}}]}` + "\n"
 	if got := string(sp.ProcessChunk([]byte(in), true)); got != in {
 		t.Errorf("empty mapping modified the stream: %q", got)
+	}
+}
+
+func TestANonStreamedReplyIsReportedWithoutBuffering(t *testing.T) {
+	// Observe mode never calls BufferResponseBody, so a plain JSON reply arrives
+	// here in chunks too. The bytes must pass through untouched — an observer that
+	// rewrites a reply is not observing — while a bounded copy is kept so the
+	// answer can still be reported.
+	sp := newStreamProcessor(streamMapping, false)
+	body := `{"choices":[{"message":{"content":"mail ${OGR_EMAIL_1}",` +
+		`"tool_calls":[{"id":"c1","function":{"name":"shell","arguments":"{}"}}]}}]}`
+	out := ""
+	for i := 0; i < len(body); i += 17 {
+		end := i + 17
+		if end > len(body) {
+			end = len(body)
+		}
+		out += string(sp.ProcessChunk([]byte(body[i:end]), end == len(body)))
+	}
+	if out != body {
+		t.Fatalf("the reply was modified in passthrough:\n got %q\nwant %q", out, body)
+	}
+
+	content, calls := sp.Result()
+	if content != "mail ${OGR_EMAIL_1}" {
+		t.Fatalf("content = %q", content)
+	}
+	if len(calls) != 1 || calls[0].Name != "shell" {
+		t.Fatalf("calls = %+v", calls)
+	}
+}
+
+func TestTheAccumulatedCopyIsBounded(t *testing.T) {
+	// A huge answer must not become a huge allocation in every Envoy worker.
+	sp := newStreamProcessor(map[string]string{}, false)
+	chunk := make([]byte, 64*1024)
+	for i := range chunk {
+		chunk[i] = 'x'
+	}
+	for i := 0; i < 16; i++ {
+		if got := sp.ProcessChunk(chunk, i == 15); len(got) != len(chunk) {
+			t.Fatalf("chunk %d was altered", i)
+		}
+	}
+	if sp.raw.Len() > maxRawAccum+len(chunk) {
+		t.Fatalf("accumulated %d bytes, past the bound", sp.raw.Len())
 	}
 }

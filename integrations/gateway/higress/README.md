@@ -38,6 +38,31 @@ safe: install this alongside the old plugin, watch for a week, then flip the
 switch and retire the old one. Rolling back is flipping it back, not
 redeploying.
 
+⚠️ **Observe never buffers and never pauses.** It does not stop the request for a
+verdict, does not hold the reply to read it, and does not rewrite a body. A
+non-streamed answer flows through the streaming hook untouched while a bounded
+copy is kept, so the reply can still be reported without the caller waiting for
+anything. Only enforce buffers, because only enforce can still change the reply.
+
+## Mirror
+
+A second runtime can receive a COPY of every event and decide nothing:
+
+```yaml
+mirror_cluster: "outbound|80||openguardrails-candidate.static"
+mirror_base_url: "http://openguardrails-candidate.static"
+mirror_api_key: "ogr_..."      # falls back to api_key
+```
+
+It answers "what would the new policy have said" without anyone betting on the
+answer. ⚠️ **Dispatched, never awaited, in every mode — including enforce.** A
+mirror is not in the decision, so a slow or dead candidate must cost the caller
+nothing; verified by killing the mirror mid-test, where the request kept its
+normal latency and the plugin logged `[OGR-MIRROR] status=503` and moved on. It
+rides `/ingest` rather than `/evaluate` for the same reason: the mirror runtime
+evaluates on ingest anyway, so its console fills with the same findings and no
+verdict is ever waited for.
+
 ## What one chat request becomes
 
 A gateway sees ONE turn at a time and an OpenAI client re-sends the whole
@@ -134,6 +159,8 @@ the model's context.
 | `fail_mode` | `open` | `closed` refuses when the PDP is unreachable |
 | `redact` | `true` | masking/restoration (enforce only) |
 | `principal_header` | `x-mse-consumer` | which header carries the caller |
+| `mirror_cluster` / `mirror_base_url` | *(unset)* | a candidate runtime that gets copies and gates nothing |
+| `mirror_api_key` | `api_key` | the mirror's own credential, when it differs |
 | `redis_cluster` / `redis_host` | *(unset)* | the shared session store; without it, masking is per-worker |
 | `session_key` | — | **required with `redis_cluster`**: 32 bytes, hex or base64 |
 | `redis_username` / `redis_password` | *(empty)* | |

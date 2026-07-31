@@ -73,6 +73,11 @@ type Config struct {
 	principalHeader string
 	agentID         string
 	store           *store
+
+	// A second runtime that gets a COPY of every event and decides nothing.
+	mirror    wrapper.HttpClient
+	mirrorKey string
+	hasMirror bool
 }
 
 func parseConfig(j gjson.Result, c *Config) error {
@@ -108,6 +113,21 @@ func parseConfig(j gjson.Result, c *Config) error {
 	c.agentID = j.Get("agent_id").String()
 
 	c.client = wrapper.NewClusterClient(wrapper.TargetCluster{Cluster: c.cluster, Host: c.host})
+
+	// Traffic mirroring: a candidate runtime sees the same events and answers
+	// nothing. Fire-and-forget in EVERY mode, including enforce — the mirror must
+	// never be able to slow a request down, let alone stop one, or a shadow
+	// deployment becomes an outage the moment the candidate is unhealthy.
+	if cluster := j.Get("mirror_cluster").String(); cluster != "" {
+		host := strings.TrimPrefix(strings.TrimPrefix(j.Get("mirror_base_url").String(), "https://"), "http://")
+		c.mirror = wrapper.NewClusterClient(wrapper.TargetCluster{Cluster: cluster, Host: host})
+		c.mirrorKey = j.Get("mirror_api_key").String()
+		if c.mirrorKey == "" {
+			c.mirrorKey = c.apiKey
+		}
+		c.hasMirror = true
+		proxywasm.LogWarnf("[OGR-CONFIG] mirror: cluster=%s host=%s (copies only, never gates)", cluster, host)
+	}
 
 	// The shared session store. Optional — without it the plugin still masks and
 	// restores WITHIN one request, but a conversation whose next turn lands on
@@ -275,6 +295,10 @@ func enforceRequest(ctx wrapper.HttpContext, cfg Config, rs *reqState, parsed gj
 
 	judged, rest := splitJudged(events)
 	reportAsync(ctx, cfg, rest)
+	// The primary sees `judged` through /evaluate; the mirror only ever ingests.
+	if judged != nil {
+		mirrorEvents(cfg, []*GuardEvent{judged})
+	}
 	if judged == nil {
 		finishRequest(ctx, cfg, rs, outBody)
 		return
@@ -361,11 +385,19 @@ func onResponseHeaders(ctx wrapper.HttpContext, cfg Config) types.Action {
 	_ = proxywasm.RemoveHttpResponseHeader("content-length")
 
 	contentType, _ := proxywasm.GetHttpResponseHeader("content-type")
-	if strings.Contains(contentType, "text/event-stream") {
-		ctx.SetContext(ctxStreaming, true)
+	sse := strings.Contains(contentType, "text/event-stream")
+	ctx.SetContext(ctxStreaming, sse)
+	if sse {
 		return types.ActionContinue // chunks flow through onStreamingResponseBody
 	}
-	ctx.SetContext(ctxStreaming, false)
+	// ⚠️ OBSERVE NEVER BUFFERS. Holding the whole reply to read it is exactly the
+	// latency an observer must not add; the streaming hook keeps a bounded copy
+	// while the bytes go straight to the caller. Only enforce buffers, because
+	// only enforce can still change the reply — refuse it, or restore what we
+	// masked on the way in.
+	if cfg.mode == modeObserve {
+		return types.ActionContinue
+	}
 	ctx.BufferResponseBody()
 	return types.HeaderStopIteration
 }
@@ -395,6 +427,7 @@ func onResponseBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Acti
 	judged := events[0]
 	rest := events[1:]
 	reportAsync(ctx, cfg, rest)
+	mirrorEvents(cfg, []*GuardEvent{judged})
 	payload, err := json.Marshal(judged)
 	if err != nil {
 		return restoreResponse(ctx, rs, body, content)
@@ -446,7 +479,7 @@ func onStreamingResponseBody(ctx wrapper.HttpContext, cfg Config, chunk []byte, 
 	}
 	sp, _ := ctx.GetContext(ctxStream).(*streamProcessor)
 	if sp == nil {
-		sp = newStreamProcessor(rs.session.Mapping)
+		sp = newStreamProcessor(rs.session.Mapping, ctx.GetBoolContext(ctxStreaming, true))
 		ctx.SetContext(ctxStream, sp)
 	}
 	out := sp.ProcessChunk(chunk, isLast)
@@ -478,9 +511,45 @@ func ogrHeaders(cfg Config) [][2]string {
 // reportAsync posts events to the async ingest endpoint and does not wait. The
 // runtime evaluates them there too, so observe mode still produces findings —
 // it just never makes anyone wait for them.
+//
+// The mirror gets the same batch, always: in enforce mode the primary decides
+// through /evaluate and the mirror still needs the whole picture, or a shadow
+// deployment is comparing against a hole.
 func reportAsync(ctx wrapper.HttpContext, cfg Config, events []*GuardEvent) {
-	if len(events) == 0 {
+	payload := batchPayload(events)
+	if payload == nil {
 		return
+	}
+	post(cfg.client, cfg.apiKey, payload, cfg.timeoutMs, "OGR-INGEST")
+	mirrorAsync(cfg, payload)
+}
+
+// mirrorAsync sends a copy to the candidate runtime and forgets about it.
+//
+// ⚠️ Dispatched, never awaited, in EVERY mode. A mirror exists to answer "what
+// would the new policy have said" — it is not in the decision, so a slow or dead
+// candidate must cost the caller nothing. That is also why it rides /ingest
+// rather than /evaluate: the mirror runtime evaluates on ingest anyway, so its
+// console fills with the same findings without anyone waiting for a verdict.
+func mirrorAsync(cfg Config, payload []byte) {
+	if !cfg.hasMirror || payload == nil {
+		return
+	}
+	post(cfg.mirror, cfg.mirrorKey, payload, cfg.timeoutMs, "OGR-MIRROR")
+}
+
+// mirrorEvents is the mirror-only path, for events the primary saw through a
+// different endpoint (the enforce-mode /evaluate) and must not receive twice.
+func mirrorEvents(cfg Config, events []*GuardEvent) {
+	if !cfg.hasMirror {
+		return
+	}
+	mirrorAsync(cfg, batchPayload(events))
+}
+
+func batchPayload(events []*GuardEvent) []byte {
+	if len(events) == 0 {
+		return nil
 	}
 	if len(events) > maxBatch {
 		proxywasm.LogWarnf("[OGR-INGEST] %d events over the batch cap, sending the newest %d", len(events), maxBatch)
@@ -488,16 +557,23 @@ func reportAsync(ctx wrapper.HttpContext, cfg Config, events []*GuardEvent) {
 	}
 	payload, err := json.Marshal(map[string]any{"batch": events})
 	if err != nil {
-		return
+		return nil
 	}
-	err = cfg.client.Post(pathIngest, ogrHeaders(cfg), payload,
+	return payload
+}
+
+func post(client wrapper.HttpClient, apiKey string, payload []byte, timeoutMs uint32, tag string) {
+	headers := [][2]string{
+		{"Content-Type", "application/json"},
+		{"Authorization", "Bearer " + apiKey},
+	}
+	if err := client.Post(pathIngest, headers, payload,
 		func(status int, _ http.Header, body []byte) {
 			if status != 200 && status != 207 {
-				proxywasm.LogErrorf("[OGR-INGEST] status=%d body=%s", status, truncate(string(body), 256))
+				proxywasm.LogErrorf("[%s] status=%d body=%s", tag, status, truncate(string(body), 256))
 			}
-		}, cfg.timeoutMs)
-	if err != nil {
-		proxywasm.LogErrorf("[OGR-INGEST] dispatch failed: %v", err)
+		}, timeoutMs); err != nil {
+		proxywasm.LogErrorf("[%s] dispatch failed: %v", tag, err)
 	}
 }
 
