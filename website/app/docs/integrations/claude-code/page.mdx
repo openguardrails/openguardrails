@@ -29,7 +29,7 @@ real AMOS Stealer infection happened
 **`PreToolUse` hooks fire *above* the permission system.** A hook returning
 `permissionDecision: "deny"` blocks the call **even in bypass mode** — the one
 place the built-in classifier can't reach. This integration puts an OGR policy
-there. It is the `agent_hook` altitude, the same one the Hermes `pre_tool_call`
+there. It is the `invocation` altitude, the same one the Hermes `pre_tool_call`
 binding uses.
 
 ## Install

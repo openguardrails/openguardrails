@@ -122,7 +122,7 @@ def test_run_emits_audit_records_and_correlates_by_guard_id(tmp_path):
     n = pep.run(iter(lines), out)
     records = [json.loads(l) for l in out.getvalue().splitlines()]
     assert n == 2 == len(records)
-    assert records[0]["event"]["observation_point"] == "sandbox"
+    assert records[0]["event"]["observation_point"] == "execution"
     assert records[0]["event"]["guard_id"] == "ga-shared"
     # once blocked under a shared guard_id, later events stay tightened
     assert records[0]["verdict"]["decision"] == "block"

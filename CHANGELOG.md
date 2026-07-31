@@ -13,6 +13,25 @@ Agent-security observability and degraded-mode operation: keep a PEP safe when
 the runtime is unreachable, attribute multi-agent delegation, and give the
 agent-security threat classes standard IDs.
 
+### Changed (breaking)
+- **`safety.pii.*` → `privacy.pii.*`** — the span-level PII subcategory registry
+  moves to a new normative `privacy.*` domain. `safety.*` is defined as harmful
+  content judged at the content I/O boundary; per-entity masking policy is
+  neither, and the registry's own purpose (interoperable per-entity masking) is a
+  data-handling control. Leaves are unchanged, so the migration is a pure prefix
+  swap: `s/^safety\.pii/privacy.pii/`.
+  - `safety.pii` REMAINS, narrowed to the *content* class — the model uttering
+    personal data in a reply (the reference moderation capability's S11). The two
+    judgments were collapsed onto one id through v0.3.
+  - `security.secret_leak` is unaffected: a leaked credential leads to compromise,
+    so it stays a security threat class rather than a privacy one.
+  - `schema/verdict.schema.json` and `schema/guard-event.schema.json` accept
+    `privacy.*` in category-id patterns, and `categories[].domain` gains
+    `privacy`. A validator pinned to v0.3 REJECTS `privacy.*` ids.
+- **Vendor-namespace rule tightened**: a class with a neutral home in a normative
+  domain MUST use it rather than an `x.<vendor>.*` id. The vendor namespace is
+  for what the standard does not model yet, not a parking space.
+
 ### Added
 - **Adapter degraded mode** (`specification/degraded-mode.md`): a PEP-side
   `on_unreachable` (`block | allow | require_local_approval`) per category-prefix
@@ -53,6 +72,25 @@ agent-security threat classes standard IDs.
   bucket. (`specification/taxonomy.md`)
 
 ### Changed
+- **Placeholder convention is now `${OGR_<TYPE>_<n>}`**, replacing
+  `[PII:<category>:<ref>]` ([local redaction](specification/local-redaction.md#placeholder-convention)).
+  A SHOULD, so no schema change — but the old shape does not survive the trip it
+  exists to make: `[` `]` is a markdown link reference and `__` is escaped to
+  `\_\_` by a model formatting its output, either of which breaks the exact match
+  that restoration depends on. The new shape is delimited, markdown-inert, and
+  keeps the value's kind legible so a judge can still reason about a credential it
+  cannot see. `<n>` MUST be unique across the model's whole context (session
+  scope, not per event), or two values collide on one placeholder and restoration
+  returns the wrong one.
+  - Restoration is specified as a *decision*, not a mechanism: a placeholder is
+    reachable by the model, so an adapter SHOULD judge the placeholder-bearing
+    action before restoring and bind a `ref` to the destinations it may be
+    restored into. An unknown or expired `ref` MUST fail the action.
+  - `operator: replace` is documented as restorable from an enforcement-point
+    map, which is the cheap path for a value that only has to survive the current
+    session — no ciphertext, no key management.
+  - The `redactions` and `modifications` examples also carried pre-v0.4
+    `safety.pii.*` ids; corrected to `security.secret_leak` / `privacy.pii.*`.
 - Wire version `0.3` → `0.4` in schemas (`$id`, `ogr_version`) and examples. All
   new fields and kinds are optional and the taxonomy additions need no schema
   change: a valid v0.3 object is a valid v0.4 object after the version-string bump.

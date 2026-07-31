@@ -1,7 +1,7 @@
 """LangGraph-free core of the binding — the agent-hook decision logic.
 
 A LangGraph developer runs their tools inside a node (a ``ToolNode``). That node
-boundary is OGR's **agent-hook altitude**: the Policy Enforcement Point where a
+boundary is OGR's **invocation altitude**: the Policy Enforcement Point where a
 ``tool_call`` is judged before it executes. This module turns a tool call into an
 OGR ``GuardEvent``, runs it through the reference ``Runtime`` (the PDP) with the
 two bundled detectors, and returns a plain ``ToolDecision`` — no ``langgraph``
@@ -138,7 +138,8 @@ class GuardEngine:
             provenance.extend(extra_provenance)
         ev = GuardEvent(
             kind="tool_call",
-            observation_point="agent_hook",
+            observation_point="invocation",
+            sensor={"id": "openguardrails-langgraph", "class": "in_process"},
             subject={"agent_id": agent_id, "agent_type": "langgraph", "principal": "user"},
             payload={"name": name, "arguments": args if isinstance(args, dict) else {"input": args}},
             event_id=_id("evt"),

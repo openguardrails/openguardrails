@@ -19,7 +19,7 @@ Harmful content/behavior, judged at the content I/O boundary.
 | `safety.violence` | Violent threats or instructions. |
 | `safety.weapons` | Illicit weapons / CBRN uplift. |
 | `safety.illicit` | Other illicit-activity facilitation. |
-| `safety.pii` | Personal data exposure (often `redact`). |
+| `safety.pii` | Personal data uttered in generated content — the model said someone's data out loud. Data *crossing a boundary* is `privacy.pii.*`; see that domain. |
 | `safety.brand` | Brand-safety / off-policy persona. |
 | `safety.topic_violation` | Out-of-scope topic for a constrained agent. |
 | `safety.hallucination` | Unsupported factual claim (where checkable). |
@@ -127,22 +127,56 @@ Semantic buckets:
 driver_license, health_id, bank_card, bank_account, ip_address,
 organization, date_of_birth, credential`
 
+Weak identifiers — data that identifies a person only in combination, but that
+span detectors do report and that masking policy is written on:
+
+`age, gender, date_time, im_account, url`
+
+They are registered rather than left to roll up to the bare `privacy.pii`,
+because collapsing them there makes the one policy question about them
+unanswerable: a chat handle is a way to reach someone and an age is not, and a
+deployment that wants to mask the first and record the second has no id to say
+so with. `date_time` is the general bucket a detector emits when it can see a
+date attached to a person but cannot tell what the date IS; a detector that
+knows it is a birth date emits `date_of_birth`, which is the more specific
+justifiable id.
+
 Ids refine hierarchically — semantic type first, country/variant after:
-`safety.pii.national_id.cn`, `safety.pii.tax_id.de.vat`. A consumer that
+`privacy.pii.national_id.cn`, `privacy.pii.tax_id.de.vat`. A consumer that
 does not know a refined id MUST treat it as its longest known prefix
-(`safety.pii.national_id`, ultimately `safety.pii`). This **rollup rule**
+(`privacy.pii.national_id`, ultimately `privacy.pii`). This **rollup rule**
 lets policy be written once per bucket ("all national ids → redact") with
 global coverage, and lets country-specific detectors ship without registry
 churn.
 
 Mapping from presidio-analyzer entity names (informative): `US_SSN →
-safety.pii.national_id.us`, `US_ITIN → safety.pii.tax_id.us`, `IN_AADHAAR →
-safety.pii.national_id.in`, `PL_PESEL → safety.pii.national_id.pl`,
-`KR_RRN → safety.pii.national_id.kr`, `UK_NHS → safety.pii.health_id.uk`,
-`IT_FISCAL_CODE → safety.pii.tax_id.it`, `CREDIT_CARD →
-safety.pii.bank_card`, `IBAN_CODE → safety.pii.bank_account`,
-`PHONE_NUMBER → safety.pii.phone_number`, `PERSON →
-safety.pii.person_name`, `LOCATION → safety.pii.address`.
+privacy.pii.national_id.us`, `US_ITIN → privacy.pii.tax_id.us`, `IN_AADHAAR →
+privacy.pii.national_id.in`, `PL_PESEL → privacy.pii.national_id.pl`,
+`KR_RRN → privacy.pii.national_id.kr`, `UK_NHS → privacy.pii.health_id.uk`,
+`IT_FISCAL_CODE → privacy.pii.tax_id.it`, `CREDIT_CARD →
+privacy.pii.bank_card`, `IBAN_CODE → privacy.pii.bank_account`,
+`PHONE_NUMBER → privacy.pii.phone_number`, `PERSON →
+privacy.pii.person_name`, `LOCATION → privacy.pii.address`.
+
+> **Moved in v0.4 (breaking).** This registry was rooted at `safety.pii.*`
+> through v0.3. It was misfiled: `safety.*` is defined as harmful content judged
+> at the content I/O boundary, and per-entity masking policy is neither. The
+> leaves are unchanged — the move is a pure prefix swap, so a consumer migrates
+> with `s/^safety\.pii/privacy.pii/`. `safety.pii` survives as the *content*
+> class (see below); credential exposure stays `security.secret_leak`, since a
+> leaked key leads to compromise rather than to a privacy harm.
+
+### `safety.pii` vs `privacy.pii.*`
+
+Two different judgments that v0.3 collapsed onto one id:
+
+| | Judged where | Example | ID |
+|---|---|---|---|
+| Content class | content I/O boundary | the assistant states a customer's home address in a reply | `safety.pii` |
+| Data handling | egress boundary | an agent passes a national ID into a third-party tool call | `privacy.pii.national_id` |
+
+A detector that reports spans with entity types belongs in `privacy.pii.*`. A
+content-safety classifier emitting a per-turn class belongs in `safety.pii`.
 
 ## Reference moderation mapping (informative)
 
@@ -155,6 +189,10 @@ rollup subcategory where the class is narrower than a spec bucket:
 - `safety.violence.threat`
 - `safety.illicit.commercial`, `safety.illicit.ip`, `safety.illicit.sexual_crime`
 - `safety.sexual.minors`
+
+Its S11 class stays `safety.pii`: it judges one turn's content, not a span
+crossing a boundary. The span-level privacy detector reports `privacy.pii.*`
+instead — see that domain.
 
 Three jurisdiction-specific classes (general/sensitive political content, national
 symbols) have no neutral home in the standard and stay under the vendor namespace:
@@ -181,8 +219,11 @@ gate for the standard.
 - A detector MUST use the most specific ID it can justify.
 - Hierarchical rollup: a consumer encountering an unknown id MUST fall back
   to its longest known dotted prefix before treating it as unknown.
+- The normative domains are `safety.*`, `security.*` and `privacy.*`.
 - Unknown/experimental categories MUST be namespaced under
-  `x.<vendor>.<name>` and MUST NOT collide with `safety.*` / `security.*`.
+  `x.<vendor>.<name>` and MUST NOT collide with them. A class that has a
+  neutral home in a normative domain MUST use it rather than a vendor id —
+  the vendor namespace is for what the standard does not yet model.
 - `score` is a detector-reported `0.0`–`1.0`; it is **not** comparable across
   vendors except through the [benchmark](https://github.com/openguardrails/openguardrails/tree/main/benchmarks),
   which is the entire reason the leaderboard exists.

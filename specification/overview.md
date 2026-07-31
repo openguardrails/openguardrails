@@ -38,11 +38,19 @@ The same logical action is often observable at more than one point. OGR treats
 these as **defense in depth** and correlates them with a shared
 [`guard_id`](provenance-and-context.md#guard-context-propagation).
 
-| Altitude | `observation_point` | Sees | Trust property |
-|---|---|---|---|
-| Gateway (AI gateway / LLM proxy) | `gateway` | messages, tool/MCP/skill definitions, tool calls & results — normalized across LLM protocols | richest intent + provenance |
-| Agent hook | `agent_hook` | lifecycle events (pre/post tool, pre/post model) inside the agent loop | cheap, in-process |
-| Sandbox | `sandbox` | real `execve`, network, filesystem behavior | adversary-proof, agent can't bypass |
+| Altitude | `observation_point` | Sees | Trust property | Typical mechanism |
+|---|---|---|---|---|
+| Conversation | `conversation` | messages, tool/MCP/skill definitions, tool calls & results — normalized across LLM protocols | richest intent + provenance | an AI gateway / LLM proxy, or an in-process hook on the model call |
+| Invocation | `invocation` | lifecycle events (pre/post tool, pre/post model) inside the agent loop | cheap, in-process | a framework-native agent hook |
+| Execution | `execution` | real `execve`, network, filesystem behavior | adversary-proof, agent can't bypass | a sandbox (seccomp/landlock), or a kernel-level (eBPF) sensor |
+
+The altitude names are deliberately independent of *how* the observation is
+made — `execution`, for example, is asserted identically by a sandboxed
+process wrapper and a kernel-level eBPF sensor, two unrelated mechanisms
+converging on the same layer. Don't read the altitude as "which integration
+reported this"; that's a separate axis, carried by
+[`sensor`](guard-event.md#sensor) — `sensor.class` says whether the observed
+agent could have evaded the observer, which the altitude alone never answers.
 
 A runtime MUST be able to ingest events from any altitude and SHOULD correlate
 events that share a `guard_id` so a single logical action yields a single

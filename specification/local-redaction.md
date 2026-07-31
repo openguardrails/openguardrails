@@ -54,15 +54,47 @@ span the adapter transformed — metadata only, never originals:
 ```json
 "redactions": [
   { "path": "payload.text", "start": 40, "end": 76,
-    "category": "safety.pii.credential",
-    "operator": "encrypt", "ref": "r-8f2e" }
+    "category": "security.secret_leak",
+    "operator": "replace", "ref": "OGR_SECRET_1" }
 ]
 ```
 
-**Placeholder convention** (SHOULD): the in-payload replacement text is
-`[PII:<category>:<ref>]`, e.g. `[PII:safety.pii.credential:r-8f2e]` — an
-LLM judge can then still reason "a credential flowed into this command"
-without seeing it.
+### Placeholder convention
+
+The in-payload replacement text SHOULD be an environment-variable reference,
+`${OGR_<TYPE>_<n>}` — e.g. `${OGR_SECRET_1}`, `${OGR_EMAIL_2}`. `<TYPE>` names
+the kind of value (derived from `category`), `<n>` distinguishes values of the
+same kind, and `ref` SHOULD be the variable name itself so the two cannot
+disagree.
+
+Four properties this shape is chosen for, each a way the placeholder can be
+destroyed or misapplied in transit:
+
+- **It survives markdown.** A model that formats its output escapes `__` to
+  `\_\_`, so a `__SECRET__1__` token does not come back intact; `[` `]` are a
+  link reference, which is why the earlier `[PII:<category>:<ref>]` convention
+  was withdrawn. `${…}` has no markdown meaning.
+- **Its end is unambiguous.** `${OGR_SECRET_1}x` delimits where
+  `$OGR_SECRET_1x` does not. Restoration MUST match the token exactly and MUST
+  NOT fall back to fuzzy or partial matching — a fuzzy restore lets any
+  approximate reference pull out a real value.
+- **It stays legible to a judge.** Redaction removes the value from the
+  *detector's* view as well as the model's, so an LLM judge must still be able
+  to reason "a credential is flowing to an external host" from the token alone.
+  An opaque ref blinds it. This is why `<TYPE>` is in the name.
+- **`<n>` is unique across the model's whole context, not per event.** A
+  placeholder minted several turns ago is still sitting in that context, so
+  per-event or per-turn numbering lets two different values both be
+  `${OGR_SECRET_1}` and restoration silently returns the wrong one. Adapters
+  SHOULD scope the counter to the session.
+
+Placeholders are *reachable* by the model, which makes restoration a decision
+and not a mechanism: an agent can move a token it cannot read into an outbound
+request, and an unconditional restore would complete an exfiltration the
+detectors can no longer see. An adapter that restores SHOULD therefore judge the
+placeholder-bearing action first and restore only on an allow decision, and
+SHOULD bind a `ref` to the destinations it may be restored into. An unknown or
+expired `ref` MUST fail the action rather than pass the literal token onward.
 
 ## Redactor tiers
 

@@ -1,7 +1,7 @@
 """GatewayEngine — build the OGR runtime and decide on a normalized request.
 
 Protocol parsing lives in `protocols/`; this module is protocol-agnostic. It
-turns a normalized request into `GuardEvent`s (observation_point="gateway"),
+turns a normalized request into `GuardEvent`s (observation_point="conversation"),
 runs them through the shared `openguardrails` runtime, and returns one
 `GatewayDecision` the server acts on.
 """
@@ -107,7 +107,8 @@ class GatewayEngine:
             provenance.append(Provenance(source=m.get("role", "user"), trust=trust,
                                          taint_tags=list(taint)))
         verdicts.append(rt.evaluate(GuardEvent(
-            kind="model_input", observation_point="gateway",
+            kind="model_input", observation_point="conversation",
+            sensor={"id": "openguardrails-gateway", "class": "proxy"},
             subject={"caller": norm.get("caller", "anonymous"), "model": norm.get("model")},
             payload={"messages": msgs, "model": norm.get("model")},
             event_id=_id("evt"), guard_id=guard_id, timestamp=_now(),
@@ -119,7 +120,8 @@ class GatewayEngine:
         #    so the SAME ConfigRules/LLMJudge detectors light up at the gateway.
         for tc in _tool_calls(norm):
             verdicts.append(rt.evaluate(GuardEvent(
-                kind="tool_call", observation_point="gateway",
+                kind="tool_call", observation_point="conversation",
+                sensor={"id": "openguardrails-gateway", "class": "proxy"},
                 subject={"caller": norm.get("caller", "anonymous")},
                 payload={"name": tc["name"], "arguments": tc["arguments"]},
                 event_id=_id("evt"), guard_id=guard_id, timestamp=_now(),
@@ -138,7 +140,8 @@ class GatewayEngine:
         gid = guard_id or _id("gw")
         rt = self._runtime()
         v = rt.evaluate(GuardEvent(
-            kind="model_output", observation_point="gateway",
+            kind="model_output", observation_point="conversation",
+            sensor={"id": "openguardrails-gateway", "class": "proxy"},
             subject={}, payload={"text": text},
             event_id=_id("evt"), guard_id=gid, timestamp=_now(),
             llm_protocol=protocol,

@@ -59,7 +59,7 @@ Hermes needs no fork and no proxy — it already exposes the hooks OGR needs. Th
 | OGR altitude | Hermes surface | Enforces |
 | --- | --- | --- |
 | gateway | `pre_api_request` / `post_api_request` hooks | observe + taint |
-| agent_hook | `pre_tool_call` hook | **block** before dispatch |
+| invocation | `pre_tool_call` hook | **block** before dispatch |
 | (provenance) | `post_tool_call` hook | taint web/MCP results |
 | sandbox | wraps `BaseEnvironment.execute` | run exec under srt / route to OpenShell |
 

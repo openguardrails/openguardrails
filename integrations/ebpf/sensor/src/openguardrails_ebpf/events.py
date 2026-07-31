@@ -1,7 +1,7 @@
-"""Sensor records → OGR GuardEvents at the `sandbox` observation point.
+"""Sensor records → OGR GuardEvents at the `execution` observation point.
 
 specification/guard-event.md assigns real `execve` / `network` / `filesystem`
-behavior to `observation_point: "sandbox"` — the "adversary-proof, agent can't
+behavior to `observation_point: "execution"` — the "adversary-proof, agent can't
 bypass" altitude. This module is the mapping:
 
     exec    → kind "exec"     payload {argv, comm, ...}
@@ -9,7 +9,7 @@ bypass" altitude. This module is the mapping:
     network  → kind "network" payload {host, port, direction}
 
 Correlation follows specification/provenance-and-context.md. The kernel cannot
-carry the `ogr-guardcontext` header, so when an agent-hook adapter propagates
+carry the `ogr-guardcontext` header, so when an invocation-altitude adapter propagates
 one out of band (a file the harness writes before a tool runs), the sensor
 stamps its `guard_id` / `session_id` onto events in the tracked tree; otherwise
 the sensor is the first observer of the action and mints a fresh `guard_id`,
@@ -95,7 +95,11 @@ def to_guard_event(rec: SensorRecord, *, subject: dict, session_id: str | None =
 
     return GuardEvent(
         kind=kind,
-        observation_point="sandbox",
+        observation_point="execution",
+        # kernel class: the observed agent runs in userspace and cannot decline
+        # to be seen by this probe — the one execution-altitude sensor whose
+        # absence of a matching invocation event proves a bypass.
+        sensor={"id": "openguardrails-ebpf", "class": "kernel"},
         subject=subject,
         payload=payload,
         event_id=new_id("evt"),

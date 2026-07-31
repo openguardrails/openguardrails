@@ -19,9 +19,9 @@ pip install openguardrails   # the vendor-neutral reference runtime (zero deps)
 
 Map your framework's hooks to OGR altitudes. You want, in priority order:
 
-- a **pre-tool / pre-exec** hook that can **block** → `agent_hook` altitude
-- the **exec chokepoint** where commands actually run → `sandbox` altitude
-- (optional) the **LLM request/response** boundary → `gateway` altitude
+- a **pre-tool / pre-exec** hook that can **block** → `invocation` altitude
+- the **exec chokepoint** where commands actually run → `execution` altitude
+- (optional) the **LLM request/response** boundary → `conversation` altitude
 - (optional) a **post-tool** hook to taint provenance from web/MCP results
 
 Most agent frameworks have at least the first two. Hermes exposed all four as plugin
@@ -36,7 +36,8 @@ altitude and propagate it (a guard-context) to the exec point so they correlate.
 from openguardrails import GuardEvent, Provenance
 
 ev = GuardEvent(
-    kind="tool_call", observation_point="agent_hook",
+    kind="tool_call", observation_point="invocation",
+    sensor={"id": "my-framework-hook", "class": "in_process"},
     subject={"agent_id": "my-agent", "agent_type": "custom"},
     payload={"name": tool_name, "arguments": args},
     provenance=current_session_provenance(),   # trusted by default; untrusted if tainted
@@ -85,7 +86,7 @@ The Hermes plugin is ~250 lines and demonstrates all four steps:
 
 ## Graceful degradation
 
-If your framework has no sandbox, you still get the `agent_hook` altitude — OGR
+If your framework has no sandbox, you still get the `invocation` altitude — OGR
 enforces on intent, and records that the adversary-proof layer was unavailable. Add
 a sandbox later without changing your policy.
 

@@ -22,8 +22,8 @@
         "required": ["id", "domain"],
         "additionalProperties": false,
         "properties": {
-          "id": { "type": "string", "pattern": "^(safety|security|x)\\.[a-z0-9_.]+$" },
-          "domain": { "enum": ["safety", "security"] },
+          "id": { "type": "string", "pattern": "^(safety|security|privacy|x)\\.[a-z0-9_.]+$" },
+          "domain": { "enum": ["safety", "security", "privacy"] },
           "score": { "type": "number", "minimum": 0, "maximum": 1 }
         }
       }
@@ -59,7 +59,7 @@
         "required": ["category"],
         "additionalProperties": false,
         "properties": {
-          "category": { "type": "string", "pattern": "^(safety|security|x)\\.[a-z0-9_.]+$" },
+          "category": { "type": "string", "pattern": "^(safety|security|privacy|x)\\.[a-z0-9_.]+$" },
           "path":     { "type": "string" },
           "start":    { "type": "integer", "minimum": 0 },
           "end":      { "type": "integer", "minimum": 0 },

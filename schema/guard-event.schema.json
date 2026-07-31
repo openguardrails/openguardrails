@@ -12,7 +12,18 @@
     "guard_id": { "type": "string", "minLength": 1 },
     "session_id": { "type": "string" },
     "timestamp": { "type": "string", "format": "date-time" },
-    "observation_point": { "enum": ["gateway", "agent_hook", "sandbox"] },
+    "observation_point": { "enum": ["conversation", "invocation", "execution"] },
+    "sensor": {
+      "type": "object",
+      "description": "WHICH integration observed this — the mechanism axis, orthogonal to observation_point's altitude.",
+      "required": ["id"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "class": { "enum": ["in_process", "wrapper", "proxy", "kernel"] },
+        "version": { "type": "string" }
+      }
+    },
     "kind": {
       "enum": ["user_input", "model_output", "tool_register", "mcp_connect", "skill_load", "tool_call", "tool_result", "exec", "network", "file", "agent_spawn", "config_change"]
     },
@@ -41,7 +52,7 @@
           "path":     { "type": "string" },
           "start":    { "type": "integer", "minimum": 0 },
           "end":      { "type": "integer", "minimum": 0 },
-          "category": { "type": "string", "pattern": "^(safety|security|x)\\.[a-z0-9_.]+$" },
+          "category": { "type": "string", "pattern": "^(safety|security|privacy|x)\\.[a-z0-9_.]+$" },
           "operator": { "enum": ["replace", "mask", "hash", "encrypt"] },
           "ref":      { "type": "string" }
         }

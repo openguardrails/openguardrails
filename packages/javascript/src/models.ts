@@ -26,9 +26,22 @@ export interface Provenance {
   taintTags?: string[]
 }
 
+/** How evadable an observer is, weakest first. See specification/guard-event.md#sensor. */
+export type SensorClass = "in_process" | "wrapper" | "proxy" | "kernel"
+
+export interface Sensor {
+  /** Stable id of the reporting integration, e.g. `openguardrails-ebpf`. */
+  id: string
+  /** Absent means unknown — consumers MUST treat the sensor as bypassable. */
+  class?: SensorClass
+  version?: string
+}
+
 export interface GuardEvent {
   kind: string // tool_call | exec | tool_result | model_output | network | ...
-  observationPoint: string // gateway | agent_hook | sandbox
+  observationPoint: string // conversation | invocation | execution
+  /** WHICH integration observed it — the mechanism axis, orthogonal to the altitude. */
+  sensor?: Sensor
   subject: Record<string, unknown>
   payload: Record<string, unknown>
   eventId: string

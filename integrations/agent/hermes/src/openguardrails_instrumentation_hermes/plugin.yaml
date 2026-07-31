@@ -7,6 +7,11 @@ hooks:
   - post_tool_call
   - pre_api_request
   - post_api_request
+  # Enforces a blocking content verdict (moderation / off-topic / injection) on the
+  # answer — the only hook Hermes lets a plugin substitute what the user sees.
+  - transform_llm_output
+  # Redacts or withholds a tool result before it re-enters the model's context.
+  - transform_tool_result
 # Optional: ship every GuardEvent to an OpenGuardrails runtime for console
 # visibility (Explorer, findings). Local enforcement is fully authoritative
 # without these — skip any prompt below (leave blank) to stay local-only.

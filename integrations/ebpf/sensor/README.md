@@ -4,7 +4,7 @@ A reference implementation of the OpenGuardrails protocol for eBPF. A small
 CO-RE kernel program observes the three sandbox-altitude actions the OGR spec
 assigns to real kernel behavior — **exec, file open, network connect** — for
 one agent process tree, and a userspace **PEP** maps each to an OGR
-`GuardEvent` (`observation_point: "sandbox"`), asks an OGR **runtime** for a
+`GuardEvent` (`observation_point: "execution"`), asks an OGR **runtime** for a
 `Verdict`, and enforces it. No dependency on any particular agent framework or
 vendor: point it at any process tree and any OGR runtime.
 
@@ -70,7 +70,7 @@ Kernel ops map 1:1 to the spec's sandbox kinds
 | `file` | `file` | `{op: read\|write, path, process}` |
 | `network` | `network` | `{host, port, direction: egress, process}` |
 
-Every event is `observation_point: "sandbox"` and carries a `sensor` block
+Every event is `observation_point: "execution"` and carries a `sensor` block
 (`engine`, `root_pid`) plus the acting `process` (pid/ppid/comm/uid).
 
 ## Decision and enforcement

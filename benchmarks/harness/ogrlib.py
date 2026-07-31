@@ -65,7 +65,7 @@ class Event:
         ev = d["event"]
         prov = [Prov(p["source"], p["trust"], p.get("taint_tags", []))
                 for p in ev.get("provenance", [])]
-        return Event(ev["kind"], ev.get("observation_point", "agent_hook"),
+        return Event(ev["kind"], ev.get("observation_point", "invocation"),
                      ev.get("payload", {}), prov)
 
 

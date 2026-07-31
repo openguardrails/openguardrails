@@ -212,7 +212,7 @@ const plugin: ReturnType<typeof definePluginEntry> = definePluginEntry({
         }
         const ev: GuardEvent = {
           kind: "tool_call",
-          observationPoint: "agent_hook",
+          observationPoint: "invocation",
           subject: {
             // One assistant daemon per machine → machine-scoped identity
             // (identity design §7); client_key is clamped by the runtime to
@@ -261,7 +261,7 @@ const plugin: ReturnType<typeof definePluginEntry> = definePluginEntry({
       const c = ctx as { agentId?: string; sessionKey?: string; messageProvider?: string }
       const ev: GuardEvent = {
         kind: "model_output",
-        observationPoint: "gateway",
+        observationPoint: "conversation",
         subject: {
           agent_id: c.agentId ?? hostAgentId(),
           agent_type: "openclaw",

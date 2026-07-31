@@ -1,9 +1,9 @@
 """OpenGuardrails eBPF sensor — a native OGR reference implementation.
 
-A kernel eBPF program observes the three sandbox-altitude actions the OGR spec
+A kernel eBPF program observes the three execution-altitude actions the OGR spec
 assigns to real kernel behavior (exec, file open, network connect) for one
 agent process tree, and a userspace PEP maps each to an OGR `GuardEvent`
-(`observation_point: "sandbox"`), asks an OGR runtime for a `Verdict`, and
+(`observation_point: "execution"`), asks an OGR runtime for a `Verdict`, and
 enforces it. Developers and security vendors can:
 
 - run it as-is to guard any process tree with any OGR runtime;

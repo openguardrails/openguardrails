@@ -29,13 +29,18 @@ class Provenance:
 @dataclass
 class GuardEvent:
     kind: str                       # see spec: tool_call|exec|tool_result|...
-    observation_point: str          # gateway|agent_hook|sandbox
+    observation_point: str          # conversation|invocation|execution
     subject: dict[str, Any]
     payload: dict[str, Any]
     event_id: str
     guard_id: str
     timestamp: str
     session_id: str | None = None
+    # WHICH integration observed this: {"id", "class"?, "version"?}. The
+    # mechanism axis — orthogonal to observation_point's altitude, because an
+    # eBPF probe and an in-process wrapper both assert "execution" while
+    # differing completely in whether the agent could have evaded them.
+    sensor: dict[str, Any] | None = None
     llm_protocol: str | None = None
     context_refs: list[str] = field(default_factory=list)
     provenance: list[Provenance] = field(default_factory=list)
@@ -72,6 +77,12 @@ class Verdict:
     evidence: list[dict[str, Any]] = field(default_factory=list)
     confidence: float | None = None
     latency_ms: float | None = None
+    # Required by the spec when `decision` is `modify` or `redact`
+    # (specification/verdict.md §modifications): {"kind": "redact", "spans": [
+    #   {"path", "start", "end", "operator", "ref", "replacement"}]}.
+    # An enforcement point that drops this field cannot carry out a redact
+    # decision at all — it can only degrade it to allow (a leak) or to block.
+    modifications: dict[str, Any] | None = None
     ogr_version: str = OGR_VERSION
 
     @classmethod

@@ -28,6 +28,7 @@ Env:
 """
 from __future__ import annotations
 
+import atexit
 import base64
 import dataclasses
 import getpass
@@ -38,6 +39,7 @@ import pathlib
 import queue
 import socket
 import threading
+import time
 import urllib.error
 import urllib.request
 from typing import Any
@@ -54,6 +56,9 @@ except ImportError:  # pragma: no cover - reporter then runs unsigned
 _BATCH_MAX = 50          # ingest accepts up to 100; stay well under
 _FLUSH_SECONDS = 2.0
 _QUEUE_MAX = 1000        # drop-oldest beyond this; observability must not leak memory
+# How long the exit drain may take in total. One ingest POST is capped at 5s, so this
+# allows a couple of batches without letting a dead runtime hold a CLI open.
+_FLUSH_DEADLINE = 6.0
 
 
 def _b64url(raw: bytes) -> str:
@@ -224,12 +229,21 @@ class PlatformReporter:
         self.enabled = bool(self.base_url and self.api_key)
         self._queue: "queue.Queue[dict[str, Any]]" = queue.Queue(maxsize=_QUEUE_MAX)
         self._identity: PepIdentity | None = None
+        self._identity_lock = threading.Lock()
         self._worker: threading.Thread | None = None
         if self.enabled:
             self._worker = threading.Thread(
                 target=self._run, name="ogr-platform-reporter", daemon=True,
             )
             self._worker.start()
+            # Drain on the way out. The worker is a DAEMON thread parked on a 2s
+            # timer, so a short-lived process — `hermes -z`, a one-shot script, a
+            # kanban worker subprocess — exits with the queue still full and every
+            # event in it silently gone. That is how `user_input` went missing from
+            # the console for one-shot runs while `model_output` survived: the
+            # latter also rides the synchronous /evaluate call, which enqueues it
+            # runtime-side. Nothing warns, because nothing failed.
+            atexit.register(self.flush)
 
     def report(self, ev: Any) -> None:
         """Queue one GuardEvent (dataclass or dict). Never raises, never blocks."""
@@ -245,10 +259,53 @@ class PlatformReporter:
             except queue.Empty:
                 pass
 
+    def flush(self, deadline_seconds: float = _FLUSH_DEADLINE) -> int:
+        """Post whatever is queued, synchronously. Returns the number of events sent.
+
+        Runs at interpreter exit, and callable directly by tests and short scripts
+        that would otherwise have to sleep and hope. Bounded by `deadline_seconds`
+        because this is on the process's way out: observability must not hold a CLI
+        open, so a slow or unreachable runtime costs one timeout, not a hang.
+
+        Safe to run alongside the worker — `queue.Queue` hands each event to exactly
+        one of them, so the two can only split a batch, never duplicate one. It does
+        its own enrollment for the case the worker never got that far, which is the
+        common one for a process that lived half a second.
+
+        Not a guarantee: `os._exit`, a signal, or a hard kill skips `atexit`
+        entirely. Events genuinely in flight then are still lost — the queue is
+        memory, by design (`_QUEUE_MAX` drops oldest rather than growing).
+        """
+        if not self.enabled:
+            return 0
+        sent = 0
+        deadline = time.monotonic() + deadline_seconds
+        while time.monotonic() < deadline:
+            batch: list[dict[str, Any]] = []
+            try:
+                while len(batch) < _BATCH_MAX:
+                    batch.append(self._queue.get_nowait())
+            except queue.Empty:
+                pass
+            if not batch:
+                break
+            self._ensure_identity()
+            self._post(batch)
+            sent += len(batch)
+        return sent
+
+    def _ensure_identity(self) -> None:
+        """Enroll once, from whichever thread gets there first."""
+        with self._identity_lock:
+            if self._identity is None:
+                self._identity = PepIdentity()
+            # enroll() is a no-op once guard_id/key_id are known (persisted keyfile),
+            # so this costs one network call per fresh install, not per batch.
+            self._identity.enroll(self.base_url, self.api_key)
+
     # -- background loop ------------------------------------------------------
     def _run(self) -> None:
-        self._identity = PepIdentity()
-        self._identity.enroll(self.base_url, self.api_key)
+        self._ensure_identity()
         batch: list[dict[str, Any]] = []
         while True:
             try:
@@ -299,3 +356,36 @@ def get_reporter() -> PlatformReporter:
     if _reporter is None:
         _reporter = PlatformReporter()
     return _reporter
+
+
+def evaluate(wire: dict[str, Any], timeout: float = 4.0) -> dict[str, Any] | None:
+    """Synchronous signed POST /evaluate — the real PDP's verdict for a single
+    GuardEvent, when a runtime is configured (OGR_RUNTIME_URL + OGR_API_KEY).
+
+    This is the ONE place this integration blocks on the network: callers use
+    it at a real enforcement point (a tool is about to run), so `timeout` is
+    deliberately short — a stalled/cold gateway must not freeze the agent.
+    Returns the parsed verdict dict, or None on ANY failure (not configured,
+    timeout, non-2xx, bad JSON) — the caller decides what None means for its
+    altitude (this module has no opinion on fail-open vs fail-closed)."""
+    reporter = get_reporter()
+    if not reporter.enabled:
+        return None
+    body = json.dumps(wire).encode("utf-8")
+    headers = {
+        "content-type": "application/json",
+        "authorization": f"Bearer {reporter.api_key}",
+    }
+    signature = reporter._identity.signature_header(body) if reporter._identity else None
+    if signature:
+        headers["ogr-batch-signature"] = signature
+    req = urllib.request.Request(
+        reporter.base_url + "/api/public/ogr/v1/evaluate",
+        data=body, method="POST", headers=headers,
+    )
+    try:
+        raw = urllib.request.urlopen(req, timeout=timeout).read()
+        return json.loads(raw.decode("utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("OGR evaluate failed (%s) — caller decides fallback", exc)
+        return None

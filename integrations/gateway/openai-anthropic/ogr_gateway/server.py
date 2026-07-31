@@ -95,7 +95,7 @@ class Handler(BaseHTTPRequestHandler):
             })
         return self._send(200, {
             "service": "openguardrails-gateway",
-            "altitude": "gateway",
+            "altitude": "conversation",
             "routes": protocols.all_paths(),
             "detectors": [d.provider for d in ENGINE.detectors],
             "docs": "https://openguardrails.com/docs/integrations/",

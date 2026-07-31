@@ -52,7 +52,7 @@ class _Enforcer:
 
 
 class HermesAgentGuard(_Enforcer):
-    """Hermes pre-tool hook → OGR (observation_point=agent_hook)."""
+    """Hermes pre-tool hook → OGR (observation_point=invocation)."""
 
     def __init__(self, runtime: Runtime, agent_id: str = "hermes-1", principal: str = "user:tom"):
         super().__init__(runtime)
@@ -63,7 +63,7 @@ class HermesAgentGuard(_Enforcer):
                         context_refs: list[str] | None = None):
         guard_id = _id("ga")
         ev = GuardEvent(
-            kind="tool_call", observation_point="agent_hook",
+            kind="tool_call", observation_point="invocation",
             subject={"agent_id": self.agent_id, "agent_type": "hermes",
                      "principal": self.principal},
             payload={"name": name, "arguments": arguments},
@@ -77,7 +77,7 @@ class HermesAgentGuard(_Enforcer):
 
 
 class GuardedSandbox(_Enforcer):
-    """Sandbox exec interception → OGR (observation_point=sandbox).
+    """Execution-altitude exec interception → OGR (observation_point=execution).
 
     Stand-in for srt/openshell: it does NOT actually run the process; it asks OGR
     first and only proceeds on allow. Inherits guard_id + provenance via the
@@ -93,7 +93,7 @@ class GuardedSandbox(_Enforcer):
              inherited_provenance: list[Provenance] | None = None):
         ctx = decode_guardcontext(guardcontext)
         ev = GuardEvent(
-            kind="exec", observation_point="sandbox",
+            kind="exec", observation_point="execution",
             subject={"agent_id": "hermes-1", "agent_type": "hermes",
                      "sandbox_id": self.sandbox_id},
             payload={"argv": argv, "cwd": cwd, "env_keys": env_keys or []},

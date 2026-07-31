@@ -130,6 +130,10 @@ export function eventToWire(ev: GuardEvent): Record<string, unknown> {
     guard_id: ev.guardId,
     timestamp: ev.timestamp,
     observation_point: ev.observationPoint,
+    // The mechanism axis. Every altitude this plugin reports comes from
+    // JS running inside the agent process, so an agent that stops calling
+    // the hooks stops being observed — `in_process`, never adversary-proof.
+    sensor: ev.sensor ?? { id: "openguardrails-openclaw", class: "in_process" },
     kind: ev.kind,
     subject: ev.subject,
     payload: ev.payload,

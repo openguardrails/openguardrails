@@ -17,7 +17,7 @@ def _rec(**over):
 
 def test_exec_event_is_sandbox_altitude():
     ev = to_guard_event(_rec(argv=["bash", "-c", "id"]), subject=SUBJECT)
-    assert ev.observation_point == "sandbox"
+    assert ev.observation_point == "execution"
     assert ev.kind == "exec"
     assert ev.payload["argv"] == ["bash", "-c", "id"]
     assert ev.payload["process"] == {"pid": 10, "ppid": 9, "comm": "bash"}

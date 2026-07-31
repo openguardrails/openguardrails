@@ -74,18 +74,25 @@ or `security`.
 {
   "kind": "redact",
   "spans": [ { "path": "payload.text", "start": 40, "end": 76,
-               "operator": "encrypt", "ref": "r-8f2e",
-               "replacement": "[PII:safety.pii.email:r-8f2e]" } ]
+               "operator": "replace", "ref": "OGR_EMAIL_1",
+               "replacement": "${OGR_EMAIL_1}" } ]
 }
 ```
 
 `operator` (`replace` default \| `mask` \| `hash` \| `encrypt`) says how the
-span is transformed; `hash` supports stable pseudonyms, `encrypt` supports
-restoration. `ref` is an opaque handle, unique within the verdict: a later
-event or verdict using the same `ref` refers to the same original value. Key
-management and the restore operation are implementation-internal; the
-protocol only guarantees `ref` stability. `replacement` carries a
-placeholder, never the original.
+span is transformed; `hash` supports stable pseudonyms, and both `replace` and
+`encrypt` support restoration — `encrypt` from the ciphertext, `replace` from a
+map the enforcement point holds. `replace` is the cheaper of the two and the one
+to prefer for a value that only has to survive the current session: there is no
+ciphertext and therefore no key to manage.
+
+`ref` is a handle, unique within the verdict: a later event or verdict using the
+same `ref` refers to the same original value. Scoping it to the session is
+RECOMMENDED and stronger — see the
+[placeholder convention](local-redaction.md#placeholder-convention), which also
+covers why restoration must be judged rather than automatic. Key management and
+the restore operation are implementation-internal; the protocol only guarantees
+`ref` stability. `replacement` carries a placeholder, never the original.
 
 ## Example — an LLM detector blocks an injected install command
 

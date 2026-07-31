@@ -40,7 +40,7 @@ def make_event(kind: str, *, subject: dict, payload: dict, session_id: str,
                provenance: list[dict] | None = None,
                authz: dict | None = None, run_id: str | None = None,
                turn: int | None = None) -> dict:
-    """Build a GuardEvent (observation_point='gateway'). `subject` may be empty:
+    """Build a GuardEvent (observation_point='conversation'). `subject` may be empty:
     when the operator does not force an agent identity, the runtime derives the
     Agent from the request's system-prompt self-definition at ingest. `payload`
     is kind-specific (user_input/model_output -> {"text": ...}; tool_call ->
@@ -56,7 +56,10 @@ def make_event(kind: str, *, subject: dict, payload: dict, session_id: str,
         "guard_id": guard_id or new_id("gw"),
         "session_id": session_id,
         "timestamp": _now(),
-        "observation_point": "gateway",
+        "observation_point": "conversation",
+        # proxy class: an agent that talks to a different endpoint is never
+        # seen here at all — evadable from outside the process, not from in it.
+        "sensor": {"id": "openguardrails-mitmproxy", "class": "proxy"},
         "kind": kind,
         "subject": subject,
         "payload": payload,
