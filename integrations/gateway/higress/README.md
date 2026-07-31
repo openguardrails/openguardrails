@@ -222,18 +222,23 @@ git tag higress-v1.0.1 && git push origin higress-v1.0.1
 
 `.github/workflows/publish-higress.yml` refuses a tag whose version does not
 match `VERSION`, runs the tests, builds `plugin.wasm`, and `oras push`es the
-gzipped layer to `docker.io/openguardrails/higress` under both the version and
-`latest`. Higress then pulls it straight:
+gzipped layer under both the version and `latest`. Higress then pulls it straight:
 
 ```yaml
-url: oci://docker.io/openguardrails/higress:1.0.1
+url: oci://ghcr.io/openguardrails/higress:1.1.0
 ```
 
-The workflow needs two repository secrets — `DOCKERHUB_USERNAME` and
-`DOCKERHUB_TOKEN` (a Docker Hub **access token** scoped Read & Write to this one
-repository, never an account password). `workflow_dispatch` runs the build and
-packaging without pushing, so the release path can be exercised before a tag
-exists.
+**GHCR is the primary and needs no setup**: the workflow pushes with its own
+`GITHUB_TOKEN`, which is scoped to this repository and expires with the run — the
+same "no long-lived registry token" rule the npm and PyPI releases follow.
+
+A Docker Hub mirror is pushed **only when** `DOCKERHUB_USERNAME` and
+`DOCKERHUB_TOKEN` are set (a Docker Hub **access token**, never an account
+password). Without them the step is skipped with a notice: a missing optional
+credential is not a broken release.
+
+`workflow_dispatch` runs the build and packaging without pushing, so the release
+path can be exercised before a tag exists.
 
 ## Support
 

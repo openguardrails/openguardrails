@@ -14,9 +14,19 @@ Publishing. No long-lived registry token is stored in GitHub.
 | `gateway-vX.Y.Z` | `integrations/gateway/openai-anthropic/` |
 | `hermes-vX.Y.Z` | `integrations/agent/hermes/` |
 | `langgraph-vX.Y.Z` | `integrations/agent/langgraph/` |
+| `higress-vX.Y.Z` | `integrations/gateway/higress/` |
 
 The workflow rejects a tag when its version does not exactly match the version
-in the selected `package.json` or `pyproject.toml`.
+in the selected `package.json`, `pyproject.toml`, or — for the Higress plugin —
+`VERSION`.
+
+The Higress plugin is not an npm or PyPI package: it is a WASM binary that a
+gateway pulls as an **OCI artifact**, so it publishes to a registry instead.
+`ghcr.io/openguardrails/higress` is the primary, pushed with the workflow's own
+`GITHUB_TOKEN` — no long-lived credential, same principle as Trusted Publishing.
+A Docker Hub mirror (`docker.io/openguardrails/higress`) is pushed **only if**
+`DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` are set on the repository; without them
+the step is skipped with a notice rather than failing the release.
 
 The Claude Code and Codex integrations are private npm workspaces used for
 local dependency management, builds, and tests. They are distributed through
