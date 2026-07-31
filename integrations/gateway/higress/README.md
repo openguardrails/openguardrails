@@ -198,7 +198,7 @@ instance identity, which the OGR sensor does not model yet.
 | `runtime_base_url` | — | used for the Host header |
 | `api_key` | — | the runtime API key; authenticates the SENDER, resolves org + workspace |
 | `mode` | `observe` | `enforce` to act on verdicts |
-| `timeout_ms` | `1000` | the PDP budget, enforce only — nothing waits in observe |
+| `timeout_ms` | `5000` | the PDP budget, enforce only — nothing waits in observe |
 | `fail_mode` | `open` | `closed` refuses when the PDP is unreachable |
 | `principal_header` | `x-mse-consumer` | which header carries the caller |
 | `mirror_cluster` / `mirror_base_url` | *(unset)* | a candidate runtime that gets copies and gates nothing |
@@ -213,11 +213,21 @@ carried by the verdict (`decision: redact` plus `modifications.spans`). A gatewa
 that could turn it off locally would be a second place policy lives — and the
 harder of the two to change.
 
-⚠️ **`timeout_ms` bounds latency by giving up detection.** 1s is performance-first:
-a warm runtime answers in tens of milliseconds, so a caller never feels it. But one
-call fans out to several detectors and a cold model prefill alone can exceed a
-second, and under `fail_mode: open` those requests reach the model **unchecked**.
-That is why the timeout path logs
+⚠️ **`timeout_ms` bounds latency by giving up detection**, and the number matters
+more than it looks. Measured against this runtime:
+
+| | latency |
+|---|---|
+| single request, warm | 233–332 ms |
+| 12 concurrent | 619 ms → 1647 ms, eight of them past 1s |
+
+A 1s budget was tried on those grounds — 3x the single-request figure — and lost
+nine of twelve concurrent requests to the model **unchecked**. Latency scales with
+concurrency, so a budget sitting inside the working distribution means enforcement
+evaporates exactly when the gateway is busy. Hence 5s, and the advice to lower it
+only against numbers from your own runtime.
+
+Whatever the number, the timeout path logs
 
 ```
 [OGR-REQ] request passed UNCHECKED (fail-open): evaluate returned 0 …

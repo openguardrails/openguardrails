@@ -92,17 +92,19 @@ func parseConfig(j gjson.Result, c *Config) error {
 
 	// The PDP budget, in ENFORCE mode only — nothing waits in observe.
 	//
-	// 1s is a performance-first default: a warm runtime answers in tens of
-	// milliseconds, so this is ~10x headroom and a caller never feels it.
+	// ⚠️ 1s was tried and MEASURED WRONG (2026-07-31). A warm single request is
+	// 233-332ms, which makes 1s look like 3x headroom; but latency scales with
+	// concurrency, and twelve simultaneous requests — a quiet minute for an
+	// enterprise gateway — spread 619ms to 1647ms, eight of them past the second.
+	// Live through the gateway, nine of twelve reached the model with no verdict
+	// at all. A budget that sits INSIDE the working distribution is the worst
+	// place for it: enforcement evaporates exactly when the system is busy, which
+	// is when it is most worth having.
 	//
-	// ⚠️ What it buys is bounded latency; what it costs is that a SLOW verdict
-	// becomes NO verdict. One call fans out to several detectors inside the
-	// runtime and a cold model prefill alone can exceed a second, so under
-	// `fail_mode: open` those requests reach the model unchecked. That is a
-	// deliberate trade, not an accident — and it is why the timeout path logs
-	// "passed UNCHECKED" rather than shrugging. Watch that line: if it is not
-	// rare, the budget is wrong for this deployment, not the detector.
-	c.timeoutMs = 1000
+	// 5s clears the measured tail with room, and still bounds the wait. Lower it
+	// against numbers from YOUR runtime, not from a single-request benchmark —
+	// and watch the `unchecked` counter, which is what this trade actually costs.
+	c.timeoutMs = 5000
 	if v := j.Get("timeout_ms"); v.Exists() {
 		c.timeoutMs = uint32(v.Uint())
 	}
