@@ -122,15 +122,21 @@ only in the plugin configuration (`session_key`). The store holds ciphertext; a
 dump of it is useless. That is what keeps the rule intact — a store must not
 become a copy of the data it guards — while still crossing workers.
 
-Requirements, all of them load-bearing:
+Requirements, in order of how load-bearing they are:
 
-- **A gateway-side Redis, not the runtime's.** The runtime's Redis is the
-  platform's (queues, counters); this map belongs to the data plane, where the
-  plaintext is already flowing.
-- **Persistence off** (`--appendonly no --save ""`) and the 30-minute TTL.
 - **`session_key` is required** whenever `redis_cluster` is set. Missing or short
   ⇒ the plugin refuses to load, rather than falling back to storing the session
-  in the clear.
+  in the clear. This is the one that actually protects the map.
+- **The OGR deployment's own Redis is fine** — the same one the runtime uses. The
+  sealing is what keeps the store from becoming a copy of the guarded data, not
+  the choice of host: the key lives only in the plugin's configuration, so the
+  runtime cannot read what the gateway wrote even though it owns the server.
+  A separate instance buys operational isolation, not secrecy.
+- What DOES matter operationally: `maxmemory-policy` must not evict these keys out
+  from under a live conversation (an evicted session degrades to un-restored
+  placeholders reaching the user — visible, not a leak), and the session traffic
+  should not crowd out the runtime's queues. Persisting is harmless: what lands on
+  disk is ciphertext.
 - Rotating the key invalidates live sessions — their placeholders stop restoring,
   visibly. GCM authenticates, so a stale key can never silently decrypt into the
   wrong conversation.
@@ -155,9 +161,8 @@ the model's context.
 | `runtime_base_url` | — | used for the Host header |
 | `api_key` | — | the runtime API key; authenticates the SENDER, resolves org + workspace |
 | `mode` | `observe` | `enforce` to act on verdicts |
-| `timeout_ms` | `30000` | the OUTER hop: one call fans out to several detectors |
+| `timeout_ms` | `1000` | the PDP budget, enforce only — nothing waits in observe |
 | `fail_mode` | `open` | `closed` refuses when the PDP is unreachable |
-| `redact` | `true` | masking/restoration (enforce only) |
 | `principal_header` | `x-mse-consumer` | which header carries the caller |
 | `mirror_cluster` / `mirror_base_url` | *(unset)* | a candidate runtime that gets copies and gates nothing |
 | `mirror_api_key` | `api_key` | the mirror's own credential, when it differs |
@@ -166,9 +171,23 @@ the model's context.
 | `redis_username` / `redis_password` | *(empty)* | |
 | `session_ttl_s` | `1800` | matches the runtime's run-pointer idle TTL |
 
-⚠️ `timeout_ms` is 30000, not the runtime's own 800ms detector budget. A tight
-budget plus fail-open is the silent-failure shape: every request passes and the
-logs look healthy.
+⚠️ **There is no `redact` switch.** Whether to redact is the RUNTIME's decision,
+carried by the verdict (`decision: redact` plus `modifications.spans`). A gateway
+that could turn it off locally would be a second place policy lives — and the
+harder of the two to change.
+
+⚠️ **`timeout_ms` bounds latency by giving up detection.** 1s is performance-first:
+a warm runtime answers in tens of milliseconds, so a caller never feels it. But one
+call fans out to several detectors and a cold model prefill alone can exceed a
+second, and under `fail_mode: open` those requests reach the model **unchecked**.
+That is why the timeout path logs
+
+```
+[OGR-REQ] request passed UNCHECKED (fail-open): evaluate returned 0 …
+```
+
+rather than a bare status code. Grep for it: if it is not rare, the budget is wrong
+for that deployment — raise it, or accept that enforcement is best-effort there.
 
 ## Verified against the live lab (2026-07-30)
 

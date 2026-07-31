@@ -69,7 +69,6 @@ type Config struct {
 	mode            string
 	timeoutMs       uint32
 	failClosed      bool
-	redact          bool
 	principalHeader string
 	agentID         string
 	store           *store
@@ -90,21 +89,24 @@ func parseConfig(j gjson.Result, c *Config) error {
 		c.mode = modeEnforce
 	}
 
-	// ⚠️ 30000, not the runtime's own 800ms detector budget. This is the OUTER
-	// hop: one call fans out to several detectors inside the runtime, and a cold
-	// prefill alone can exceed a second. A tight budget here plus fail-open is
-	// the silent-failure shape — every request passes and the logs look healthy.
-	c.timeoutMs = 30000
+	// The PDP budget, in ENFORCE mode only — nothing waits in observe.
+	//
+	// 1s is a performance-first default: a warm runtime answers in tens of
+	// milliseconds, so this is ~10x headroom and a caller never feels it.
+	//
+	// ⚠️ What it buys is bounded latency; what it costs is that a SLOW verdict
+	// becomes NO verdict. One call fans out to several detectors inside the
+	// runtime and a cold model prefill alone can exceed a second, so under
+	// `fail_mode: open` those requests reach the model unchecked. That is a
+	// deliberate trade, not an accident — and it is why the timeout path logs
+	// "passed UNCHECKED" rather than shrugging. Watch that line: if it is not
+	// rare, the budget is wrong for this deployment, not the detector.
+	c.timeoutMs = 1000
 	if v := j.Get("timeout_ms"); v.Exists() {
 		c.timeoutMs = uint32(v.Uint())
 	}
 
 	c.failClosed = j.Get("fail_mode").String() == "closed"
-
-	c.redact = true
-	if v := j.Get("redact"); v.Exists() {
-		c.redact = v.Bool()
-	}
 
 	c.principalHeader = "x-mse-consumer"
 	if v := j.Get("principal_header").String(); v != "" {
@@ -155,13 +157,13 @@ func parseConfig(j gjson.Result, c *Config) error {
 		}
 		c.store = &store{redis: client, key: key, ttlS: ttl}
 		proxywasm.LogWarnf("[OGR-CONFIG] session store: redis cluster=%s ttl=%ds (sealed)", cluster, ttl)
-	} else if c.mode == modeEnforce && c.redact {
+	} else if c.mode == modeEnforce {
 		proxywasm.LogWarnf("[OGR-CONFIG] ⚠️ no redis_cluster: masking is per-worker, " +
 			"so a conversation's later turns may reach the model unmasked")
 	}
 
-	proxywasm.LogWarnf("[OGR-CONFIG] mode=%s cluster=%s host=%s timeout=%dms fail=%s redact=%v",
-		c.mode, c.cluster, c.host, c.timeoutMs, failLabel(c.failClosed), c.redact)
+	proxywasm.LogWarnf("[OGR-CONFIG] mode=%s cluster=%s host=%s timeout=%dms fail=%s",
+		c.mode, c.cluster, c.host, c.timeoutMs, failLabel(c.failClosed))
 	return nil
 }
 
@@ -281,12 +283,17 @@ func enforceRequest(ctx wrapper.HttpContext, cfg Config, rs *reqState, parsed gj
 	st := rs.session
 	events := deriveRequest(rs.derive, st, parsed)
 
-	// Re-mask everything this session already knows about, on EVERY turn. The
+	// Re-mask everything this session already knows about, on EVERY turn. Not a
+	// plugin setting: WHETHER to redact is the runtime's decision, carried by the
+	// verdict. A gateway that could switch it off locally would be a second place
+	// policy lives, and the harder one to change.
+	//
+	// The
 	// client's own history holds the original plaintext — it never saw our
 	// placeholders, because we restored them on the way back — so a value masked
 	// in turn 1 arrives in the clear again in turn 2.
 	outBody := body
-	if cfg.redact {
+	{
 		if masked, n := maskMessages(outBody, st.redactions()); n > 0 {
 			outBody = masked
 			proxywasm.LogWarnf("[OGR-REQ] re-masked %d history strings", n)
@@ -350,7 +357,7 @@ func onInputVerdict(ctx wrapper.HttpContext, cfg Config, rs *reqState, judged *G
 	outBody string, status int, respBody []byte) {
 	if status != 200 {
 		proxywasm.LogErrorf("[OGR-REQ] evaluate status=%d", status)
-		applyFail(ctx, cfg, rs, "evaluate returned "+strconv.Itoa(status))
+		applyFail(ctx, cfg, rs, "evaluate returned "+strconv.Itoa(status)+" (0 = timeout or unreachable)")
 		return
 	}
 	v := gjson.ParseBytes(respBody)
@@ -364,7 +371,7 @@ func onInputVerdict(ctx wrapper.HttpContext, cfg Config, rs *reqState, judged *G
 		return
 	}
 
-	if decision == "redact" && cfg.redact {
+	if decision == "redact" {
 		if red := learnFromVerdict(rs.session, v, judged.text); len(red) > 0 {
 			if masked, n := maskMessages(outBody, red); n > 0 {
 				outBody = masked
@@ -592,7 +599,12 @@ func applyFail(ctx wrapper.HttpContext, cfg Config, rs *reqState, why string) {
 		answer(ctx, rs, failMessage)
 		return
 	}
-	proxywasm.LogWarnf("[OGR-REQ] fail-open: %s", why)
+	// ⚠️ Say what actually happened. "fail-open" reads like a setting working as
+	// intended; what it means for this request is that nothing judged it. A
+	// deployment that never greps for this line cannot tell a healthy gateway
+	// from one whose PDP has been unreachable for a week.
+	proxywasm.LogWarnf("[OGR-REQ] request passed UNCHECKED (fail-open): %s, session=%s",
+		why, rs.session.ID)
 	proxywasm.ResumeHttpRequest()
 }
 
