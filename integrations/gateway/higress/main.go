@@ -160,9 +160,18 @@ func parseConfig(j gjson.Result, c *Config) error {
 		}
 		c.store = &store{redis: client, key: key, ttlS: ttl}
 		proxywasm.LogWarnf("[OGR-CONFIG] session store: redis cluster=%s ttl=%ds (sealed)", cluster, ttl)
-	} else if c.mode == modeEnforce {
-		proxywasm.LogWarnf("[OGR-CONFIG] ⚠️ no redis_cluster: masking is per-worker, " +
-			"so a conversation's later turns may reach the model unmasked")
+	} else {
+		// ⚠️ In BOTH modes. The store is not only the masking map: `deriveRequest`
+		// reads it to know what has already been reported, so without it every
+		// worker re-reports the whole conversation as new. Measured on this box:
+		// six identical requests produced four user_input and four tool_call
+		// events instead of one each. Observe mode used to say nothing at all
+		// here, which is how a duplicated event stream gets mistaken for traffic.
+		what := "history is re-reported per worker, so events duplicate"
+		if c.mode == modeEnforce {
+			what += "; masking is per-worker, so a conversation's later turns may reach the model unmasked"
+		}
+		proxywasm.LogWarnf("[OGR-CONFIG] ⚠️ no redis_cluster: %s", what)
 	}
 
 	// The beat is registered here because parseConfig is where a configured client

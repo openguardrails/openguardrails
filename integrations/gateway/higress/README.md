@@ -141,8 +141,15 @@ Requirements, in order of how load-bearing they are:
   visibly. GCM authenticates, so a stale key can never silently decrypt into the
   wrong conversation.
 
-Without `redis_cluster` the plugin still masks and restores within one request;
-it logs a warning that later turns may reach the model unmasked.
+⚠️ **The store is not only for masking, so `observe` needs it too.** `deriveRequest`
+reads it to know what has already been reported; without it every worker re-reports
+the whole conversation as new. Measured: six identical requests produced **four**
+`user_input` and **four** `tool_call` events with no Redis, and **one each** with
+it. A duplicated event stream is easy to mistake for traffic, so the plugin warns
+about this at load in both modes.
+
+Without `redis_cluster` the plugin still masks and restores within one request —
+what it loses is everything that has to survive across them.
 
 ⚠️ Concurrent turns of ONE conversation are last-write-wins. Turns of a chat are
 sequential by nature, so the race costs a re-mask, not a leak.
