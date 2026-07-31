@@ -67,3 +67,25 @@ jobs:
           echo "BPFTOOL=$bpftool_path" >> "$GITHUB_ENV"
       - name: Build sensor
         run: make -C integrations/ebpf/sensor/bpf
+
+  higress:
+    # The Higress WASM plugin ("OpenGuardrails Runtime"). Everything worth
+    # testing in it — span offsets, SSE chunk boundaries, sealing the session,
+    # what counts as a NEW event — is ordinary Go and runs on the host; the wasm
+    # build is the compile check for the parts that only exist inside a gateway.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: integrations/gateway/higress/go.sum
+      - name: Test
+        working-directory: integrations/gateway/higress
+        run: |
+          test -z "$(gofmt -l .)" || { echo "::error::gofmt"; gofmt -l .; exit 1; }
+          go vet ./...
+          go test ./...
+      - name: Build plugin.wasm
+        working-directory: integrations/gateway/higress
+        run: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o plugin.wasm .

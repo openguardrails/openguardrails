@@ -1,0 +1,144 @@
+name: Publish Higress plugin
+
+# The Higress WASM plugin ("OpenGuardrails Runtime") ships as an OCI artifact,
+# not a container image: Higress pulls `oci://<repo>:<tag>` and expects a single
+# gzipped tar layer containing `plugin.wasm`. `oras push` produces exactly that.
+#
+# Tag `higress-v<version>` to release. The version in the tag must match the
+# plugin's VERSION file — the same rule the npm and PyPI workflows enforce, and
+# for the same reason: the artifact a gateway pulls has to be traceable to a
+# commit, not to whatever happened to be on the runner.
+
+on:
+  push:
+    tags:
+      - "higress-v*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build and package without pushing"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+env:
+  PLUGIN_DIR: integrations/gateway/higress
+  IMAGE: docker.io/openguardrails/higress
+
+jobs:
+  build:
+    name: Build and test
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: ${{ env.PLUGIN_DIR }}/go.sum
+
+      - name: Resolve and validate version
+        id: version
+        shell: bash
+        run: |
+          version="$(tr -d '[:space:]' < "$PLUGIN_DIR/VERSION")"
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            tag_version="${GITHUB_REF_NAME#higress-v}"
+            if [[ "$tag_version" != "$version" ]]; then
+              echo "::error::Tag version $tag_version does not match $PLUGIN_DIR/VERSION ($version)"
+              exit 1
+            fi
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Publishing version $version"
+
+      # The parts that are easy to get wrong — span offsets, SSE chunk
+      # boundaries, what counts as a NEW event — are ordinary Go and run on the
+      # host. A plugin that only compiles is not a plugin that works.
+      - name: Test
+        working-directory: ${{ env.PLUGIN_DIR }}
+        run: |
+          test -z "$(gofmt -l .)" || { echo "::error::gofmt"; gofmt -l .; exit 1; }
+          go vet ./...
+          go test ./...
+
+      - name: Build plugin.wasm
+        working-directory: ${{ env.PLUGIN_DIR }}
+        run: |
+          GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o plugin.wasm .
+          ls -l plugin.wasm
+
+      - name: Package the OCI layer
+        working-directory: ${{ env.PLUGIN_DIR }}
+        run: tar czf plugin.tar.gz plugin.wasm
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: higress-plugin
+          path: ${{ env.PLUGIN_DIR }}/plugin.tar.gz
+          if-no-files-found: error
+
+  publish:
+    name: Publish ${{ needs.build.outputs.version }}
+    needs: build
+    if: github.event_name == 'push' || inputs.dry_run == false
+    runs-on: ubuntu-latest
+    environment:
+      name: dockerhub
+      url: https://hub.docker.com/r/openguardrails/higress
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: higress-plugin
+
+      - name: Install oras
+        uses: oras-project/setup-oras@v1
+
+      # ⚠️ A Docker Hub access token, not a password, and never a literal in this
+      # file: the repository secrets are the only place a credential lives.
+      # Scope the token to "Read & Write" on this one repository.
+      - name: Log in to Docker Hub
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [[ -z "$DOCKERHUB_USERNAME" || -z "$DOCKERHUB_TOKEN" ]]; then
+            echo "::error::DOCKERHUB_USERNAME/DOCKERHUB_TOKEN are not set on this repository"
+            exit 1
+          fi
+          echo "$DOCKERHUB_TOKEN" | oras login docker.io -u "$DOCKERHUB_USERNAME" --password-stdin
+
+      - name: Push the OCI artifact
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          # Two tags in one push: the immutable version a deployment should pin,
+          # and `latest` for a lab that just wants the newest.
+          oras push "$IMAGE:$VERSION,latest" \
+            --annotation "org.opencontainers.image.title=OpenGuardrails Runtime" \
+            --annotation "org.opencontainers.image.description=Guardrails from an OpenGuardrails runtime, as a Higress WASM plugin" \
+            --annotation "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
+            --annotation "org.opencontainers.image.revision=${{ github.sha }}" \
+            --annotation "org.opencontainers.image.version=$VERSION" \
+            --annotation "org.opencontainers.image.authors=thomas@openguardrails.com" \
+            plugin.tar.gz:application/vnd.oci.image.layer.v1.tar+gzip
+
+      - name: Summary
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          {
+            echo "### Published \`$IMAGE:$VERSION\`"
+            echo
+            echo 'Point a Higress WasmPlugin at it:'
+            echo
+            echo '```yaml'
+            echo "url: oci://$IMAGE:$VERSION"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
