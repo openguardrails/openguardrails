@@ -53,8 +53,9 @@ const (
 	modeObserve = "observe"
 	modeEnforce = "enforce"
 
-	pathEvaluate = "/api/public/ogr/v1/evaluate"
-	pathIngest   = "/api/public/ogr/v1/ingest"
+	pathEvaluate  = "/api/public/ogr/v1/evaluate"
+	pathIngest    = "/api/public/ogr/v1/ingest"
+	pathHeartbeat = "/api/public/ogr/v1/heartbeat"
 
 	maxBatch = 100 // the runtime's ingest cap
 )
@@ -162,8 +163,12 @@ func parseConfig(j gjson.Result, c *Config) error {
 			"so a conversation's later turns may reach the model unmasked")
 	}
 
-	proxywasm.LogWarnf("[OGR-CONFIG] mode=%s cluster=%s host=%s timeout=%dms fail=%s",
-		c.mode, c.cluster, c.host, c.timeoutMs, failLabel(c.failClosed))
+	// The beat is registered here because parseConfig is where a configured client
+	// first exists; RegisterTickFunc is idempotent per plugin load.
+	startHeartbeat(c)
+
+	proxywasm.LogWarnf("[OGR-CONFIG] mode=%s cluster=%s host=%s timeout=%dms fail=%s beat=%ds",
+		c.mode, c.cluster, c.host, c.timeoutMs, failLabel(c.failClosed), heartbeatPeriodMs/1000)
 	return nil
 }
 
@@ -360,6 +365,7 @@ func onInputVerdict(ctx wrapper.HttpContext, cfg Config, rs *reqState, judged *G
 		applyFail(ctx, cfg, rs, "evaluate returned "+strconv.Itoa(status)+" (0 = timeout or unreachable)")
 		return
 	}
+	bump(cntEvaluated, 1)
 	v := gjson.ParseBytes(respBody)
 	decision := v.Get("decision").String()
 	proxywasm.LogWarnf("[OGR-REQ] decision=%s findings=%d session=%s",
@@ -442,6 +448,7 @@ func onResponseBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Acti
 	err = cfg.client.Post(pathEvaluate, ogrHeaders(cfg), payload,
 		func(status int, _ http.Header, respBody []byte) {
 			if status == 200 {
+				bump(cntEvaluated, 1)
 				v := gjson.ParseBytes(respBody)
 				if stopsRequest(v.Get("decision").String()) {
 					_ = proxywasm.ReplaceHttpResponseBody([]byte(refusalBody(rs.model, refusalReason(v))))
@@ -528,6 +535,7 @@ func reportAsync(ctx wrapper.HttpContext, cfg Config, events []*GuardEvent) {
 		return
 	}
 	post(cfg.client, cfg.apiKey, payload, cfg.timeoutMs, "OGR-INGEST")
+	bump(cntIngested, uint64(len(events)))
 	mirrorAsync(cfg, payload)
 }
 
@@ -543,6 +551,7 @@ func mirrorAsync(cfg Config, payload []byte) {
 		return
 	}
 	post(cfg.mirror, cfg.mirrorKey, payload, cfg.timeoutMs, "OGR-MIRROR")
+	bump(cntMirrored, 1)
 }
 
 // mirrorEvents is the mirror-only path, for events the primary saw through a
@@ -603,6 +612,7 @@ func applyFail(ctx wrapper.HttpContext, cfg Config, rs *reqState, why string) {
 	// intended; what it means for this request is that nothing judged it. A
 	// deployment that never greps for this line cannot tell a healthy gateway
 	// from one whose PDP has been unreachable for a week.
+	bump(cntUnchecked, 1)
 	proxywasm.LogWarnf("[OGR-REQ] request passed UNCHECKED (fail-open): %s, session=%s",
 		why, rs.session.ID)
 	proxywasm.ResumeHttpRequest()

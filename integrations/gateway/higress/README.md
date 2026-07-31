@@ -153,6 +153,43 @@ span from a session-scoped counter and returns it in
 as a fallback. Two numbers for one value would put two names for one person in
 the model's context.
 
+## Liveness
+
+Silencing a PEP is the cheapest bypass of an altitude: uninstall the plugin and
+every request is unguarded, with nothing in the console to say so — "no events"
+looks exactly like a quiet afternoon. So the plugin heartbeats every 30s, as the
+**sensor** (`openguardrails-higress-connector`), which the runtime records in
+`pep_sensors`. Silence past the declared `interval_s` is a coverage loss, not an
+absence of risk.
+
+It carries counters, which is the half that catches selective suppression — a PEP
+claiming N sent while N−k arrived:
+
+| counter | meaning |
+|---|---|
+| `evaluated` | verdicts asked for and received |
+| `unchecked` | **requests that reached the model with no verdict behind them** |
+| `ingested` | events reported asynchronously |
+| `mirrored` | batches copied to the candidate runtime |
+
+`unchecked` is the one to alert on: it is what a tight `timeout_ms` plus
+`fail_mode: open` produces, and it is invisible in any other signal.
+
+⚠️ **The counters and the beat live in proxy-wasm SHARED DATA, not Go globals.**
+Envoy gives every worker thread its own Wasm VM, so a package-level counter is one
+number per worker and the tick that reads it runs in yet another. The first cut
+shipped exactly that: heartbeats on schedule carrying `{"evaluated":0}` while the
+gateway was busily evaluating — a reconciliation signal that always says "nothing
+happened", which is worse than none. Shared data is process-wide and CAS-guarded,
+which is what these two facts actually are. The same CAS elects ONE beater per
+period, or the runtime would receive one heartbeat per worker thread (eighteen of
+them on the box this was found on).
+
+⚠️ Process-wide means a multi-POD gateway sends one beat per pod under one sensor
+id, and the runtime's row keeps the last pod's counters. Liveness stays correct —
+silence means every pod is gone — but per-fleet reconciliation would need an
+instance identity, which the OGR sensor does not model yet.
+
 ## Configuration
 
 | Key | Default | Notes |

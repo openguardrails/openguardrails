@@ -28,6 +28,7 @@ const (
 	sensorClass      = "proxy"
 	llmProtocol      = "openai.chat"
 	observationPoint = "conversation"
+	pluginVersion    = "1.2.0"
 
 	maxTranscriptEntries = 64
 	maxEntryText         = 32768

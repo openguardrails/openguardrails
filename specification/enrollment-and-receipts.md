@@ -68,8 +68,25 @@ enrolled PEP SHOULD emit a periodic **heartbeat** over its authenticated
 channel, with the cadence declared at enrollment:
 
 ```
-heartbeat: { interval_s: 30, counters: { events_emitted: 1420, degraded: false } }
+heartbeat: {
+  sensor: { id: "openguardrails-higress-connector", class: "proxy" },
+  interval_s: 30,
+  counters: { events_emitted: 1420, degraded: false }
+}
 ```
+
+A heartbeat identifies its **sender**, and the sender is the PEP: `sensor.id`, the
+same identity its events carry. That is what makes the signal usable for coverage —
+a runtime learns that an integration went dark, which is the bypass this exists to
+catch.
+
+An instrumentation that fronts exactly ONE agent MAY additionally name it
+(`subject.agent_id`), so the agent's liveness rides the same beat. A gateway or
+proxy fronting many agents MUST NOT: its liveness is not any one agent's, and
+attributing it to one would report the other agents as covered by a sensor that
+never spoke for them. Conversely, an agent falling silent behind a live PEP is a
+different fact — "agent idle" — and the whole point of this signal is to keep the
+two apart.
 
 - A runtime SHOULD alert when a PEP misses heartbeats beyond a tolerance and
   MUST treat the gap as a **coverage loss**, not as "no risk". Fleet coverage

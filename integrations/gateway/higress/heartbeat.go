@@ -1,0 +1,159 @@
+package main
+
+import (
+	"encoding/binary"
+	"encoding/json"
+	"net/http"
+	"time"
+
+	"github.com/higress-group/proxy-wasm-go-sdk/proxywasm"
+	"github.com/higress-group/wasm-go/pkg/wrapper"
+)
+
+// Liveness: telling the runtime this integration is still here.
+//
+// Silencing a PEP is the cheapest bypass of an altitude — uninstall the plugin and
+// every request is unguarded, with nothing in the console to say so, because "no
+// events" looks exactly like "a quiet afternoon". The heartbeat is what separates
+// those two, and it is the one signal a PEP must send when it has nothing else to
+// say.
+//
+// ⚠️ It beats as the SENSOR, not as an agent. A gateway fronts many agents, so
+// attributing its liveness to one of them would report the others as covered by a
+// sensor that never spoke for them (specification/enrollment-and-receipts.md).
+//
+// The counters are the second half. A runtime that only knows "the PEP is up"
+// cannot see selective suppression; comparing what the PEP says it sent against
+// what arrived can. `unchecked` is the one to watch — it counts requests that
+// reached the model with no verdict behind them, which is what a tight timeout
+// plus fail-open produces.
+
+const (
+	heartbeatPeriodMs  = 30000
+	heartbeatTimeoutMs = 10000
+)
+
+// ⚠️ COUNTERS AND THE BEAT BOTH LIVE IN SHARED DATA, not in Go globals.
+//
+// Envoy gives every worker thread its own Wasm VM, so a package-level counter is
+// one number per worker and the tick that reads it is running in yet another. The
+// first cut of this shipped exactly that bug: heartbeats arrived on schedule with
+// `{"evaluated":0,"ingested":0}` while the gateway was busily evaluating, which is
+// worse than no counters — it is a reconciliation signal that always says "nothing
+// happened".
+//
+// proxy-wasm's shared data is process-wide and CAS-guarded, which is what these
+// two facts actually are: how much this Envoy has done, and when it last spoke.
+//
+// ⚠️ Process-wide, so a multi-POD gateway sends one beat per pod under one sensor
+// id, and the runtime's row keeps the last one's counters. Liveness is still right
+// (silence means every pod is gone); per-fleet reconciliation would need an
+// instance identity, which the OGR sensor does not model yet.
+const (
+	skCounters = "ogr.counters" // four packed uint64s
+	skBeatAt   = "ogr.beat_at"  // unix seconds of the last beat sent
+	casRetries = 8
+)
+
+// The counter slots, in their packed order.
+const (
+	cntEvaluated = iota // verdicts asked for and received
+	cntUnchecked        // requests that went through with NO verdict
+	cntIngested         // events reported asynchronously
+	cntMirrored         // batches copied to the candidate runtime
+	cntLen
+)
+
+// bump adds to one counter. A lost increment under contention is acceptable —
+// these numbers exist to spot a trend, and spinning on CAS inside a request is
+// not worth a perfectly exact tally.
+func bump(slot int, n uint64) {
+	for i := 0; i < casRetries; i++ {
+		data, cas, err := proxywasm.GetSharedData(skCounters)
+		buf := make([]byte, cntLen*8)
+		if err == nil && len(data) == cntLen*8 {
+			copy(buf, data)
+		}
+		off := slot * 8
+		binary.LittleEndian.PutUint64(buf[off:], binary.LittleEndian.Uint64(buf[off:])+n)
+		if proxywasm.SetSharedData(skCounters, buf, cas) == nil {
+			return
+		}
+	}
+}
+
+func counters() map[string]uint64 {
+	out := map[string]uint64{"evaluated": 0, "unchecked": 0, "ingested": 0, "mirrored": 0}
+	data, _, err := proxywasm.GetSharedData(skCounters)
+	if err != nil || len(data) != cntLen*8 {
+		return out
+	}
+	names := []string{"evaluated", "unchecked", "ingested", "mirrored"}
+	for i, name := range names {
+		out[name] = binary.LittleEndian.Uint64(data[i*8:])
+	}
+	return out
+}
+
+// claimBeat lets exactly ONE VM in this process send this period's beat.
+//
+// Every VM's tick fires, so without this the runtime receives one heartbeat per
+// worker thread — eighteen of them on this box — each overwriting the last. The
+// CAS makes the claim atomic: the loser simply does not send.
+func claimBeat(now int64) bool {
+	data, cas, err := proxywasm.GetSharedData(skBeatAt)
+	var last int64
+	if err == nil && len(data) == 8 {
+		last = int64(binary.LittleEndian.Uint64(data))
+	}
+	if now-last < heartbeatPeriodMs/1000 {
+		return false
+	}
+	buf := make([]byte, 8)
+	binary.LittleEndian.PutUint64(buf, uint64(now))
+	return proxywasm.SetSharedData(skBeatAt, buf, cas) == nil
+}
+
+// startHeartbeat registers the timer at plugin load. proxy-wasm has no threads:
+// OnTick in the root context is the only clock available, and an HTTP callout
+// from there is the ordinary way a plugin talks to anything on its own schedule.
+func startHeartbeat(cfg *Config) {
+	wrapper.RegisterTickFunc(heartbeatPeriodMs, func() {
+		if claimBeat(time.Now().Unix()) {
+			sendHeartbeat(cfg)
+		}
+	})
+}
+
+func sendHeartbeat(cfg *Config) {
+	if cfg == nil || cfg.client == nil {
+		return
+	}
+	c := counters()
+	proxywasm.LogWarnf("[OGR-BEAT] sending: evaluated=%d unchecked=%d ingested=%d mirrored=%d",
+		c["evaluated"], c["unchecked"], c["ingested"], c["mirrored"])
+	payload, err := json.Marshal(map[string]any{
+		"sensor": map[string]any{
+			"id":      sensorName,
+			"class":   sensorClass,
+			"version": pluginVersion,
+		},
+		"interval_s": heartbeatPeriodMs / 1000,
+		"counters":   counters(),
+	})
+	if err != nil {
+		return
+	}
+	// ⚠️ Its OWN budget, not the PDP's. `timeout_ms` is tuned for a caller waiting
+	// on a verdict — 1s by default — and a beat is nobody's latency: sharing that
+	// budget just turned healthy heartbeats into 504s whenever the runtime was
+	// briefly busy, i.e. exactly when liveness matters most.
+	if err := cfg.client.Post(pathHeartbeat, ogrHeaders(*cfg), payload,
+		func(status int, _ http.Header, body []byte) {
+			if status != 200 {
+				proxywasm.LogWarnf("[OGR-BEAT] status=%d body=%s", status, truncate(string(body), 160))
+			}
+		}, heartbeatTimeoutMs); err != nil {
+		proxywasm.LogWarnf("[OGR-BEAT] dispatch failed: %v", err)
+	}
+}

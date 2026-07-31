@@ -33,6 +33,14 @@ agent-security threat classes standard IDs.
   for what the standard does not model yet, not a parking space.
 
 ### Added
+- **Heartbeat identifies the SENDER** ([liveness](specification/enrollment-and-receipts.md#liveness-heartbeat)):
+  `sensor.id`, the same identity a PEP's events carry. The signal exists to catch a
+  silenced integration, so it has to name the integration. An instrumentation that
+  fronts exactly one agent MAY also name it (`subject.agent_id`); a gateway fronting
+  many MUST NOT, because attributing its liveness to one agent reports the others as
+  covered by a sensor that never spoke for them. Clarifying, not breaking: the shape
+  was already `{interval_s, counters}` with no required subject.
+
 - **Adapter degraded mode** (`specification/degraded-mode.md`): a PEP-side
   `on_unreachable` (`block | allow | require_local_approval`) per category-prefix
   for when the enforcement point cannot reach the runtime — runtime-independent
