@@ -188,10 +188,10 @@ type deriveCtx struct {
 	principal      string
 	principalGroup string
 	sessionID      string
-	guardID   string
-	reqID     string
-	seq       int
-	now       string
+	guardID        string
+	reqID          string
+	seq            int
+	now            string
 }
 
 func (d *deriveCtx) event(kind string, payload map[string]any) *GuardEvent {

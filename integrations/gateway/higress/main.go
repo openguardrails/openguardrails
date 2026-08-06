@@ -67,13 +67,13 @@ type Config struct {
 	host    string
 	apiKey  string
 
-	mode            string
-	timeoutMs       uint32
-	failClosed      bool
+	mode                 string
+	timeoutMs            uint32
+	failClosed           bool
 	principalHeader      string
 	principalGroupHeader string
-	agentID         string
-	store           *store
+	agentID              string
+	store                *store
 
 	// A second runtime that gets a COPY of every event and decides nothing.
 	mirror    wrapper.HttpClient
@@ -211,14 +211,14 @@ func failLabel(closed bool) string {
 const (
 	ctxPrincipal      = "ogr_principal"
 	ctxPrincipalGroup = "ogr_principal_group"
-	ctxReqID     = "ogr_req_id"
-	ctxSession   = "ogr_session"
-	ctxStreaming = "ogr_streaming"
-	ctxModel     = "ogr_model"
-	ctxMessages  = "ogr_messages"
-	ctxStream    = "ogr_stream_proc"
-	ctxAnswered  = "ogr_answered"
-	ctxSkip      = "ogr_skip"
+	ctxReqID          = "ogr_req_id"
+	ctxSession        = "ogr_session"
+	ctxStreaming      = "ogr_streaming"
+	ctxModel          = "ogr_model"
+	ctxMessages       = "ogr_messages"
+	ctxStream         = "ogr_stream_proc"
+	ctxAnswered       = "ogr_answered"
+	ctxSkip           = "ogr_skip"
 )
 
 type reqState struct {
@@ -279,10 +279,10 @@ func onRequestBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Actio
 		derive: &deriveCtx{
 			principal:      principal,
 			principalGroup: group,
-			sessionID: sessionID,
-			guardID:   "gw-" + reqID,
-			reqID:     reqID,
-			now:       time.Now().UTC().Format("2006-01-02T15:04:05Z"),
+			sessionID:      sessionID,
+			guardID:        "gw-" + reqID,
+			reqID:          reqID,
+			now:            time.Now().UTC().Format("2006-01-02T15:04:05Z"),
 		},
 		messages:  messages,
 		model:     parsed.Get("model").String(),
