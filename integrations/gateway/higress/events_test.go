@@ -12,11 +12,12 @@ func ctxFor(principal string, body gjson.Result) (*deriveCtx, *sessionState) {
 	messages := body.Get("messages").Array()
 	id := conversationKey(principal, messages)
 	return &deriveCtx{
-		principal: principal,
-		sessionID: id,
-		guardID:   "gw-test",
-		reqID:     "test",
-		now:       "2026-07-30T00:00:00Z",
+		principal:      principal,
+		principalGroup: "dev-team",
+		sessionID:      id,
+		guardID:        "gw-test",
+		reqID:          "test",
+		now:            "2026-07-30T00:00:00Z",
 	}, newSessionState(id)
 }
 
@@ -163,6 +164,12 @@ func TestEventsMarshalToTheWireShape(t *testing.T) {
 	}
 	if got.Get("subject.principal").String() != "alice@acme.io" {
 		t.Error("principal did not reach subject.principal")
+	}
+	// x-mse-consumer-group. The platform resolves it to a workspace, so losing it on
+	// the wire silently puts every agent under the API key's policy set instead of
+	// its own team's.
+	if got.Get("subject.principal_group").String() != "dev-team" {
+		t.Error("consumer group did not reach subject.principal_group")
 	}
 	// agent_id must stay unset: naming the gateway consumer as the agent
 	// collapses every agent behind one API key into a single identity.

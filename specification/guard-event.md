@@ -36,7 +36,8 @@ instructions to a high-privilege one).
 |---|---|---|
 | `agent_id` | MUST | The acting agent. |
 | `agent_type` | SHOULD | e.g. `claude-code.subagent`. |
-| `principal` | SHOULD | The human/service on whose behalf it acts. |
+| `principal` | SHOULD | The human/service on whose behalf it acts. Behind a gateway this is the AUTHENTICATED CALLER — the consumer the gateway verified — not an end user the application happens to be serving. |
+| `principal_group` | MAY | The group `principal` belongs to, as the enforcement point already knows it (e.g. a gateway consumer-group). A grouping the operator maintains, not one the runtime infers. |
 | `sandbox_id` | MAY | Sandbox the action runs in. |
 | `parent_agent_id` | MAY | The agent that spawned this one; SHOULD be set by adapters that observe spawn. |
 | `delegation_chain` | MAY | Agent ids root-first, from the top-level agent to this one; length 1 for a top-level agent. MAY be maintained by the runtime from `agent_spawn` events instead of carried on every event. |
@@ -44,9 +45,33 @@ instructions to a high-privilege one).
 
 ```json
 { "agent_id": "cc-sub-4", "agent_type": "claude-code.subagent", "principal": "user:tom",
-  "sandbox_id": "sbx-7", "parent_agent_id": "cc-main-1",
+  "principal_group": "platform-team", "sandbox_id": "sbx-7",
+  "parent_agent_id": "cc-main-1",
   "delegation_chain": ["cc-main-1", "cc-sub-4"], "attestation": "gateway_api_key" }
 ```
+
+### `principal` and `principal_group` are two different questions
+
+`principal` answers WHO, and it is an authentication fact: the identity the PEP
+verified. `principal_group` answers WHICH GROUP, and it exists because that is where
+authorization is usually organised — a runtime maps it to whatever it calls a policy
+boundary.
+
+They are separate fields rather than one because the industry separates them, and for
+the same reason. AWS IAM refuses to let a group be a `Principal` in a policy, on the
+stated grounds that *"groups relate to permissions, not authentication, and principals
+are authenticated entities"*. A PEP that knows a caller's group MAY send it; a PEP that
+knows only the caller sends `principal` alone and nothing is lost.
+
+⚠️ **Both are CLAIMS.** A runtime MUST resolve `principal_group` only within the tenant
+its channel credential already proves, and MUST NOT let a group name select
+configuration outside it — the field names a group, it does not grant one. Where a PEP
+is enrolled with an assertion scope, the same bounding that applies to `principal`
+applies here.
+
+⚠️ **`principal_group` is not a tenant identifier.** Tenancy comes from the channel
+(the credential the PEP authenticated with); this is a grouping INSIDE that tenant. A
+runtime that read it as the tenant would let any caller name any tenant.
 
 ### `sensor`
 

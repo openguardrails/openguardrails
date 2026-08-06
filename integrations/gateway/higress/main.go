@@ -70,7 +70,8 @@ type Config struct {
 	mode            string
 	timeoutMs       uint32
 	failClosed      bool
-	principalHeader string
+	principalHeader      string
+	principalGroupHeader string
 	agentID         string
 	store           *store
 
@@ -111,9 +112,24 @@ func parseConfig(j gjson.Result, c *Config) error {
 
 	c.failClosed = j.Get("fail_mode").String() == "closed"
 
+	// WHO the gateway authenticated this call as. In IAM terms the principal, and in
+	// the platform the agent's OWNER — an identity the customer's IT admin issued and
+	// can trace back to a person or a project.
 	c.principalHeader = "x-mse-consumer"
 	if v := j.Get("principal_header").String(); v != "" {
 		c.principalHeader = v
+	}
+	/**
+	 * The consumer's GROUP, which the platform maps onto a workspace — a group of
+	 * agents plus one policy set.
+	 *
+	 * Separate from the principal on purpose, and the IAM precedent is exact: AWS
+	 * refuses to let a group be a Principal because "groups relate to permissions, not
+	 * authentication". The consumer authenticates; the group is where policy attaches.
+	 */
+	c.principalGroupHeader = "x-mse-consumer-group"
+	if v := j.Get("principal_group_header").String(); v != "" {
+		c.principalGroupHeader = v
 	}
 	c.agentID = j.Get("agent_id").String()
 
@@ -193,7 +209,8 @@ func failLabel(closed bool) string {
 // --- per-request context ----------------------------------------------------
 
 const (
-	ctxPrincipal = "ogr_principal"
+	ctxPrincipal      = "ogr_principal"
+	ctxPrincipalGroup = "ogr_principal_group"
 	ctxReqID     = "ogr_req_id"
 	ctxSession   = "ogr_session"
 	ctxStreaming = "ogr_streaming"
@@ -227,6 +244,8 @@ func onRequestHeaders(ctx wrapper.HttpContext, cfg Config) types.Action {
 
 	principal, _ := proxywasm.GetHttpRequestHeader(cfg.principalHeader)
 	ctx.SetContext(ctxPrincipal, principal)
+	group, _ := proxywasm.GetHttpRequestHeader(cfg.principalGroupHeader)
+	ctx.SetContext(ctxPrincipalGroup, group)
 
 	reqID, _ := proxywasm.GetHttpRequestHeader("x-request-id")
 	if reqID == "" {
@@ -252,12 +271,14 @@ func onRequestBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Actio
 	}
 
 	principal := ctx.GetStringContext(ctxPrincipal, "")
+	group := ctx.GetStringContext(ctxPrincipalGroup, "")
 	reqID := ctx.GetStringContext(ctxReqID, "")
 	sessionID := conversationKey(principal, messages)
 
 	rs := &reqState{
 		derive: &deriveCtx{
-			principal: principal,
+			principal:      principal,
+			principalGroup: group,
 			sessionID: sessionID,
 			guardID:   "gw-" + reqID,
 			reqID:     reqID,
