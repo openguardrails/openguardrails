@@ -35,6 +35,7 @@
         "agent_id": { "type": "string" },
         "agent_type": { "type": "string" },
         "principal": { "type": "string" },
+        "principal_group": { "type": "string" },
         "sandbox_id": { "type": "string" },
         "parent_agent_id": { "type": "string" },
         "delegation_chain": { "type": "array", "items": { "type": "string" } }

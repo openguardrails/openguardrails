@@ -67,12 +67,13 @@ type Config struct {
 	host    string
 	apiKey  string
 
-	mode            string
-	timeoutMs       uint32
-	failClosed      bool
-	principalHeader string
-	agentID         string
-	store           *store
+	mode                 string
+	timeoutMs            uint32
+	failClosed           bool
+	principalHeader      string
+	principalGroupHeader string
+	agentID              string
+	store                *store
 
 	// A second runtime that gets a COPY of every event and decides nothing.
 	mirror    wrapper.HttpClient
@@ -111,9 +112,24 @@ func parseConfig(j gjson.Result, c *Config) error {
 
 	c.failClosed = j.Get("fail_mode").String() == "closed"
 
+	// WHO the gateway authenticated this call as. In IAM terms the principal, and in
+	// the platform the agent's OWNER — an identity the customer's IT admin issued and
+	// can trace back to a person or a project.
 	c.principalHeader = "x-mse-consumer"
 	if v := j.Get("principal_header").String(); v != "" {
 		c.principalHeader = v
+	}
+	/**
+	 * The consumer's GROUP, which the platform maps onto a workspace — a group of
+	 * agents plus one policy set.
+	 *
+	 * Separate from the principal on purpose, and the IAM precedent is exact: AWS
+	 * refuses to let a group be a Principal because "groups relate to permissions, not
+	 * authentication". The consumer authenticates; the group is where policy attaches.
+	 */
+	c.principalGroupHeader = "x-mse-consumer-group"
+	if v := j.Get("principal_group_header").String(); v != "" {
+		c.principalGroupHeader = v
 	}
 	c.agentID = j.Get("agent_id").String()
 
@@ -193,15 +209,16 @@ func failLabel(closed bool) string {
 // --- per-request context ----------------------------------------------------
 
 const (
-	ctxPrincipal = "ogr_principal"
-	ctxReqID     = "ogr_req_id"
-	ctxSession   = "ogr_session"
-	ctxStreaming = "ogr_streaming"
-	ctxModel     = "ogr_model"
-	ctxMessages  = "ogr_messages"
-	ctxStream    = "ogr_stream_proc"
-	ctxAnswered  = "ogr_answered"
-	ctxSkip      = "ogr_skip"
+	ctxPrincipal      = "ogr_principal"
+	ctxPrincipalGroup = "ogr_principal_group"
+	ctxReqID          = "ogr_req_id"
+	ctxSession        = "ogr_session"
+	ctxStreaming      = "ogr_streaming"
+	ctxModel          = "ogr_model"
+	ctxMessages       = "ogr_messages"
+	ctxStream         = "ogr_stream_proc"
+	ctxAnswered       = "ogr_answered"
+	ctxSkip           = "ogr_skip"
 )
 
 type reqState struct {
@@ -227,6 +244,8 @@ func onRequestHeaders(ctx wrapper.HttpContext, cfg Config) types.Action {
 
 	principal, _ := proxywasm.GetHttpRequestHeader(cfg.principalHeader)
 	ctx.SetContext(ctxPrincipal, principal)
+	group, _ := proxywasm.GetHttpRequestHeader(cfg.principalGroupHeader)
+	ctx.SetContext(ctxPrincipalGroup, group)
 
 	reqID, _ := proxywasm.GetHttpRequestHeader("x-request-id")
 	if reqID == "" {
@@ -252,16 +271,18 @@ func onRequestBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Actio
 	}
 
 	principal := ctx.GetStringContext(ctxPrincipal, "")
+	group := ctx.GetStringContext(ctxPrincipalGroup, "")
 	reqID := ctx.GetStringContext(ctxReqID, "")
 	sessionID := conversationKey(principal, messages)
 
 	rs := &reqState{
 		derive: &deriveCtx{
-			principal: principal,
-			sessionID: sessionID,
-			guardID:   "gw-" + reqID,
-			reqID:     reqID,
-			now:       time.Now().UTC().Format("2006-01-02T15:04:05Z"),
+			principal:      principal,
+			principalGroup: group,
+			sessionID:      sessionID,
+			guardID:        "gw-" + reqID,
+			reqID:          reqID,
+			now:            time.Now().UTC().Format("2006-01-02T15:04:05Z"),
 		},
 		messages:  messages,
 		model:     parsed.Get("model").String(),

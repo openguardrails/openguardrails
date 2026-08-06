@@ -82,12 +82,19 @@ was invisible to the tool_call guardrails: `permission`, `command-danger` and
 `command-rules` judge an ACTION, and no action was ever reported.
 
 Identity: the consumer header (`x-mse-consumer` by default) becomes
-`subject.principal`. **`subject.agent_id` is deliberately left unset** — the
-runtime recognises the agent from the system prompt, and naming the gateway
-consumer as the agent would collapse every agent behind one key into one row. A
-promptless chat application becomes a `chatbot`, one per (principal, sensor).
-`session_id` is derived from (principal + system prompt + first user message), so
-it is stable across turns with no stored state.
+`subject.principal` — WHO the gateway authenticated, which the runtime treats as the
+agent's owner. The consumer-GROUP header (`x-mse-consumer-group`) becomes
+`subject.principal_group`, which the runtime maps to a policy boundary; it is sent
+even when the consumer header is absent, because it still says which group's rules
+apply. Two fields on purpose: a consumer authenticates, a group is where policy
+attaches (see the note in `specification/guard-event.md`).
+
+**`subject.agent_id` is deliberately left unset** — the runtime recognises the agent
+from the system prompt, and naming the gateway consumer as the agent would collapse
+every agent behind one key into one row. A promptless chat application becomes a
+`chatbot`, one per (principal, sensor). `session_id` is derived from (principal +
+system prompt + first user message), so it is stable across turns with no stored
+state.
 
 ## Redaction
 
@@ -208,6 +215,7 @@ instance identity, which the OGR sensor does not model yet.
 | `timeout_ms` | `5000` | the PDP budget, enforce only — nothing waits in observe |
 | `fail_mode` | `open` | `closed` refuses when the PDP is unreachable |
 | `principal_header` | `x-mse-consumer` | which header carries the caller |
+| `principal_group_header` | `x-mse-consumer-group` | which header carries the caller's group |
 | `mirror_cluster` / `mirror_base_url` | *(unset)* | a candidate runtime that gets copies and gates nothing |
 | `mirror_api_key` | `api_key` | the mirror's own credential, when it differs |
 | `redis_cluster` / `redis_host` | *(unset)* | the shared session store; without it, masking is per-worker |
@@ -278,8 +286,8 @@ cp plugin.wasm references/higress_root/openguardrails-runtime.wasm
 # WasmPlugin CR with url: file:///data/openguardrails-runtime.wasm, priority 200
 ```
 
-⚠️ Priority must stay BELOW `key-auth` (310): the consumer header this plugin
-reads as the principal is written by key-auth, and a plugin that runs first sees
+⚠️ Priority must stay BELOW `key-auth` (310): the consumer and consumer-group headers
+this plugin reads are written by key-auth, and a plugin that runs first sees
 no caller at all.
 
 ⚠️ Bumping the version in the CR name is what forces a reload; editing config in

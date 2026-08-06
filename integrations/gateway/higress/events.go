@@ -44,7 +44,11 @@ type sensor struct {
 
 type subject struct {
 	Principal string `json:"principal,omitempty"`
-	AgentID   string `json:"agent_id,omitempty"`
+	// The consumer's group. A runtime EXTENSION, not an OGR v0.4 field: the platform
+	// resolves it to a workspace, always within the org the API key proves, so a group
+	// name can never reach another tenant's configuration.
+	PrincipalGroup string `json:"principal_group,omitempty"`
+	AgentID        string `json:"agent_id,omitempty"`
 }
 
 type transcriptEntry struct {
@@ -181,12 +185,13 @@ func conversationKey(principal string, messages []gjson.Result) string {
 // --- deriving the events ----------------------------------------------------
 
 type deriveCtx struct {
-	principal string
-	sessionID string
-	guardID   string
-	reqID     string
-	seq       int
-	now       string
+	principal      string
+	principalGroup string
+	sessionID      string
+	guardID        string
+	reqID          string
+	seq            int
+	now            string
 }
 
 func (d *deriveCtx) event(kind string, payload map[string]any) *GuardEvent {
@@ -201,19 +206,22 @@ func (d *deriveCtx) event(kind string, payload map[string]any) *GuardEvent {
 		Sensor:           sensor{ID: sensorName, Class: sensorClass},
 		Kind:             kind,
 		LLMProtocol:      llmProtocol,
-		Subject:          subjectOf(d.principal),
+		Subject:          subjectOf(d.principal, d.principalGroup),
 		Payload:          payload,
 	}
 }
 
-func subjectOf(principal string) *subject {
+func subjectOf(principal, group string) *subject {
 	// ⚠️ agent_id is deliberately left unset. The runtime recognises the agent
 	// from the system prompt's self-definition, and naming the gateway consumer
 	// as the agent would collapse every agent behind one API key into one row.
-	if principal == "" {
+	if principal == "" && group == "" {
 		return nil
 	}
-	return &subject{Principal: principal}
+	// ⚠️ The group is sent even when the consumer header is absent: it still says
+	// which workspace's policy set this traffic belongs under, which is the half that
+	// decides what the guardrails do.
+	return &subject{Principal: principal, PrincipalGroup: group}
 }
 
 // deriveRequest returns the events that are NEW in this request, oldest first.

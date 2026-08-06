@@ -33,6 +33,26 @@ agent-security threat classes standard IDs.
   for what the standard does not model yet, not a parking space.
 
 ### Added
+- **`subject.principal_group`** (MAY) — the group `principal` belongs to, as the
+  enforcement point already knows it. A gateway consumer-group is the motivating case:
+  the operator maintains it, it arrives on every request for free, and a runtime can
+  map it to whatever it calls a policy boundary without inferring anything.
+
+  Two fields rather than one, and the reason is the one the industry already settled:
+  `principal` is an AUTHENTICATION fact (the identity the PEP verified), a group is
+  where AUTHORIZATION is organised. AWS IAM refuses to let a group be a `Principal` on
+  exactly those grounds; Azure Entra goes the other way and calls a group a security
+  principal, and this specification follows AWS because a PEP can verify a caller and
+  cannot verify a grouping.
+
+  ⚠️ Both are CLAIMS, and the new one carries a failure mode worth stating: a runtime
+  MUST resolve `principal_group` only inside the tenant its channel credential already
+  proves. It names a group; it does not grant one, and it is NOT a tenant identifier —
+  a runtime reading it as one would let any caller name any tenant.
+
+  Additive and optional, so a v0.4 PEP that omits it stays conformant and a validator
+  pinned to an earlier draft is unaffected.
+
 - **Heartbeat identifies the SENDER** ([liveness](specification/enrollment-and-receipts.md#liveness-heartbeat)):
   `sensor.id`, the same identity a PEP's events carry. The signal exists to catch a
   silenced integration, so it has to name the integration. An instrumentation that
