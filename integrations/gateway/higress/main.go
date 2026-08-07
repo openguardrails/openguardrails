@@ -308,13 +308,11 @@ func onRequestBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Actio
 	principal := ctx.GetStringContext(ctxPrincipal, "")
 	group := ctx.GetStringContext(ctxPrincipalGroup, "")
 	reqID := ctx.GetStringContext(ctxReqID, "")
-	sessionID := conversationKey(principal, messages)
 
 	rs := &reqState{
 		derive: &deriveCtx{
 			principal:      principal,
 			principalGroup: group,
-			sessionID:      sessionID,
 			guardID:        "gw-" + reqID,
 			reqID:          reqID,
 			now:            time.Now().UTC().Format("2006-01-02T15:04:05Z"),
@@ -328,24 +326,41 @@ func onRequestBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Actio
 	ctx.SetContext(ctxModel, rs.model)
 	ctx.SetContext(ctxMessages, string(body))
 
-	// ⚠️ Everything below needs the session first: what is NEW in this request is
-	// only knowable against what we already reported, and history can only be
-	// re-masked from the map. In OBSERVE mode the load happens off the critical
-	// path — the request is already on its way to the model by the time the
-	// callback runs — which is what keeps observe mode free.
-	if cfg.mode == modeObserve {
+	// WHICH CONVERSATION — resolved before anything else, because the session is what
+	// the state below is keyed by.
+	//
+	// ⚠️ This is a Redis round trip now, where it used to be a hash of the first turn.
+	// The anchor was stateless and wrong in a way no amount of care could fix: a
+	// scheduled job repeats its opening message verbatim, so every execution hashed to
+	// one id — 5337 events over 98 hours in one "session" on the real traffic. See
+	// conversation.go. The trip is one GET-equivalent against a Redis this request was
+	// already going to talk to, in front of a model call measured in seconds.
+	scope := principal
+	if scope == "" {
+		scope = ctx.GetStringContext(ctxReqID, "")
+	}
+	digests := prefixDigests(messages)
+	cfg.store.resolveSession(scope, digests, "sess-"+reqID, func(sessionID string) {
+		rs.derive.sessionID = sessionID
+
+		// ⚠️ Everything below needs the session first: what is NEW in this request is
+		// only knowable against what we already reported, and history can only be
+		// re-masked from the map. In OBSERVE mode this whole chain happens off the
+		// critical path — the request is already on its way to the model — which is
+		// what keeps observe mode free.
 		cfg.store.load(sessionID, sessionID, func(st *sessionState) {
 			rs.session = st
-			reportAsync(ctx, cfg, deriveRequest(rs.derive, st, parsed))
-			cfg.store.save(sessionID, st)
+			if cfg.mode == modeObserve {
+				reportAsync(ctx, cfg, deriveRequest(rs.derive, st, parsed))
+				cfg.store.save(sessionID, st)
+				return
+			}
+			enforceRequest(ctx, cfg, rs, parsed, string(body))
 		})
+	})
+	if cfg.mode == modeObserve {
 		return types.ActionContinue
 	}
-
-	cfg.store.load(sessionID, sessionID, func(st *sessionState) {
-		rs.session = st
-		enforceRequest(ctx, cfg, rs, parsed, string(body))
-	})
 	return types.ActionPause
 }
 

@@ -166,25 +166,6 @@ func transcriptOf(messages []gjson.Result) []transcriptEntry {
 	return entries
 }
 
-// conversationKey identifies a conversation WITHOUT any stored state: the same
-// client re-sending its history produces the same key on every turn. Keyed on
-// the principal too, so two people whose conversations open identically are not
-// merged into one session.
-func conversationKey(principal string, messages []gjson.Result) string {
-	h := sha256.New()
-	h.Write([]byte(principal))
-	h.Write([]byte{0})
-	h.Write([]byte(systemPrompt(messages)))
-	h.Write([]byte{0})
-	for _, m := range messages {
-		if m.Get("role").String() == "user" {
-			h.Write([]byte(textOf(m)))
-			break
-		}
-	}
-	return "sess-" + hex.EncodeToString(h.Sum(nil))[:24]
-}
-
 // --- deriving the events ----------------------------------------------------
 
 type deriveCtx struct {

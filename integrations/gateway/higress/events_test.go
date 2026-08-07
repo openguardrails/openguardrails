@@ -8,17 +8,15 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-func ctxFor(principal string, body gjson.Result) (*deriveCtx, *sessionState) {
-	messages := body.Get("messages").Array()
-	id := conversationKey(principal, messages)
+func ctxFor(principal string, _ gjson.Result) (*deriveCtx, *sessionState) {
 	return &deriveCtx{
 		principal:      principal,
 		principalGroup: "dev-team",
-		sessionID:      id,
+		sessionID:      "sess-test",
 		guardID:        "gw-test",
 		reqID:          "test",
 		now:            "2026-07-30T00:00:00Z",
-	}, newSessionState(id)
+	}, newSessionState("sess-test")
 }
 
 func kinds(events []*GuardEvent) []string {
@@ -91,16 +89,63 @@ func TestToolRegisterRepeatsWhenTheToolSetCHANGES(t *testing.T) {
 	}
 }
 
-func TestSessionKeyIsStableAcrossTurnsAndSplitsByPrincipal(t *testing.T) {
+// The conversation CHAIN replaced a hash anchored on the first turn (see
+// conversation.go). What has to hold is no longer "the key is stable as the
+// conversation grows" — that property is exactly what made a cron job's every
+// execution one 98-hour session — but "turn N+1 can find turn N, and nothing else can".
+func TestChainLinksTheNextTurnToThisOne(t *testing.T) {
 	first := gjson.Parse(agentTurn).Get("messages").Array()
 	longer := gjson.Parse(strings.Replace(agentTurn, `{"role":"user","content":"now check the disk"}`,
-		`{"role":"user","content":"now check the disk"},{"role":"user","content":"more"}`, 1)).Get("messages").Array()
+		`{"role":"user","content":"now check the disk"},{"role":"assistant","content":"ok"},{"role":"user","content":"more"}`, 1)).Get("messages").Array()
 
-	if conversationKey("alice@acme.io", first) != conversationKey("alice@acme.io", longer) {
-		t.Error("session key moved when the conversation grew")
+	published := chainWriteDigest(prefixDigests(first))
+	if published == "" {
+		t.Fatal("a request with a conversation published no fingerprint")
 	}
-	if conversationKey("alice@acme.io", first) == conversationKey("bob@acme.io", first) {
-		t.Error("two people's identical openings collapsed into one session")
+	var found bool
+	for _, d := range chainLookupDigests(prefixDigests(longer)) {
+		if d == published {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("the next turn does not look up the fingerprint this one published")
+	}
+}
+
+func TestChainDoesNotSpliceIdenticalOpenings(t *testing.T) {
+	// Two people opening with the same words must not become one session. The rule
+	// that guarantees it: the FULL conversation is never a lookup candidate, so a
+	// first turn matches nothing and mints.
+	first := gjson.Parse(agentTurn).Get("messages").Array()
+	one := gjson.Parse(`{"messages":[{"role":"user","content":"hi"}]}`).Get("messages").Array()
+	if got := chainLookupDigests(prefixDigests(one)); len(got) != 0 {
+		t.Errorf("a first turn looked something up: %v", got)
+	}
+	if chainWriteDigest(prefixDigests(one)) == chainWriteDigest(prefixDigests(first)) {
+		t.Error("two different conversations published the same fingerprint")
+	}
+}
+
+func TestChainSurvivesAChangingSystemPrompt(t *testing.T) {
+	// Practically every agent prompt carries a clock. If the digest included the
+	// system message no turn would ever match its predecessor — and the failure is
+	// silent: every request simply opens a new session, exactly as before.
+	withClock := func(ts string) []gjson.Result {
+		return gjson.Parse(`{"messages":[{"role":"system","content":"You are helpful. Current time: ` + ts +
+			`"},{"role":"user","content":"hello"}]}`).Get("messages").Array()
+	}
+	if chainWriteDigest(prefixDigests(withClock("09:00"))) !=
+		chainWriteDigest(prefixDigests(withClock("09:41"))) {
+		t.Error("the system prompt leaked into the conversation fingerprint")
+	}
+}
+
+func TestChainAbsorbsWhitespaceJitter(t *testing.T) {
+	a := gjson.Parse(`{"messages":[{"role":"user","content":"check   the\n disk"}]}`).Get("messages").Array()
+	b := gjson.Parse(`{"messages":[{"role":"user","content":" check the disk "}]}`).Get("messages").Array()
+	if chainWriteDigest(prefixDigests(a)) != chainWriteDigest(prefixDigests(b)) {
+		t.Error("re-serialisation jitter broke the chain")
 	}
 }
 

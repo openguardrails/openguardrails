@@ -89,3 +89,68 @@ func (s *store) save(cacheKey string, st *sessionState) {
 		proxywasm.LogErrorf("[OGR-STORE] redis SETEX dispatch failed: %v", err)
 	}
 }
+
+// The chain lookup+publish, in ONE atomic step.
+//
+// Sequential GETs would be several round trips on the request path and, worse, would
+// race: two concurrent turns of one conversation could both miss, both mint, and both
+// publish — splitting the conversation exactly where it is busiest.
+//
+// ⚠️ Keys are Lua KEYS, never built inside the script, so a clustered Redis can route
+// it. They share a hash tag (see `chainKey`) which is what puts them in one slot.
+const chainScript = `
+local n = tonumber(ARGV[3])
+local sid
+for i = 1, n do
+  local hit = redis.call('GET', KEYS[i])
+  if hit then sid = hit break end
+end
+if not sid then sid = ARGV[1] end
+local writeK = KEYS[n + 1]
+if writeK ~= '' then
+  redis.call('SETEX', writeK, tonumber(ARGV[2]), sid)
+end
+return sid
+`
+
+// resolveSession decides WHICH conversation this request continues, then hands the
+// callback its id.
+//
+// `minted` is used when nothing matched — a conversation's first turn, and the correct
+// answer there. The callback ALWAYS runs: a store that is down degrades to "every
+// request is its own session", which is the pre-chaining behaviour, never to a dropped
+// request.
+//
+// ⚠️ The publish happens even on a miss, and that is what makes the NEXT turn findable.
+// A version that only published on a hit would chain nothing, forever, silently.
+func (s *store) resolveSession(scope string, digests []string, minted string, cb func(string)) {
+	lookups := chainLookupDigests(digests)
+	write := chainWriteDigest(digests)
+	if s == nil || s.redis == nil || (len(lookups) == 0 && write == "") {
+		cb(minted)
+		return
+	}
+	keys := make([]interface{}, 0, len(lookups)+1)
+	for _, d := range lookups {
+		keys = append(keys, chainKey(scope, d))
+	}
+	if write != "" {
+		keys = append(keys, chainKey(scope, write))
+	} else {
+		// The script still expects the slot; "" tells it there is nothing to publish.
+		keys = append(keys, "")
+	}
+	err := s.redis.Eval(chainScript, len(keys), keys,
+		[]interface{}{minted, s.ttlS, len(lookups)},
+		func(response resp.Value) {
+			if sid := response.String(); sid != "" {
+				cb(sid)
+				return
+			}
+			cb(minted)
+		})
+	if err != nil {
+		proxywasm.LogErrorf("[OGR-STORE] redis EVAL dispatch failed: %v", err)
+		cb(minted)
+	}
+}
