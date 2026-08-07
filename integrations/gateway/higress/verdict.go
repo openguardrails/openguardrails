@@ -77,35 +77,37 @@ func refusalBody(model, reason string) string {
 	return string(out)
 }
 
-// refusalStream renders the same refusal as an SSE stream, for a request that
-// asked for one. A streaming client discards a non-SSE body, so returning the
-// object form here would show the user an empty reply and hide the reason.
+// refusalStream is `refusalBody` for a stream: the refusal delivered as the assistant
+// message, in SSE frames, so the buffered lane substitutes an answer the client
+// renders normally rather than a transport error it retries.
 func refusalStream(model, reason string) string {
-	type delta struct {
-		Role    string `json:"role,omitempty"`
-		Content string `json:"content,omitempty"`
-	}
-	type choice struct {
-		Index        int     `json:"index"`
-		Delta        delta   `json:"delta"`
-		FinishReason *string `json:"finish_reason"`
-	}
-	frame := func(c choice) string {
-		out, err := json.Marshal(struct {
-			ID      string   `json:"id"`
-			Object  string   `json:"object"`
-			Model   string   `json:"model"`
-			Choices []choice `json:"choices"`
-		}{"chatcmpl-ogr-refusal", "chat.completion.chunk", model, []choice{c}})
-		if err != nil {
-			return ""
-		}
-		return "data: " + string(out) + "\n\n"
-	}
-	stop := "content_filter"
-	var b strings.Builder
-	b.WriteString(frame(choice{Delta: delta{Role: "assistant", Content: reason}}))
-	b.WriteString(frame(choice{Delta: delta{}, FinishReason: &stop}))
-	b.WriteString("data: [DONE]\n\n")
-	return b.String()
+	first, _ := json.Marshal(map[string]any{
+		"id": "chatcmpl-ogr", "object": "chat.completion.chunk", "model": model,
+		"choices": []map[string]any{{"index": 0,
+			"delta": map[string]any{"role": "assistant", "content": reason}}},
+	})
+	// ⚠️ `content_filter`, not `stop`, even though the caller never saw the model's
+	// own answer. The finish reason states WHY the turn ended, and a client that logs
+	// or retries on it must be able to tell a refusal from a completed reply.
+	last, _ := json.Marshal(map[string]any{
+		"id": "chatcmpl-ogr", "object": "chat.completion.chunk", "model": model,
+		"choices": []map[string]any{{"index": 0, "delta": map[string]any{},
+			"finish_reason": "content_filter"}},
+	})
+	return "data: " + string(first) + "\n\ndata: " + string(last) + "\n\ndata: [DONE]\n\n"
+}
+
+// contentFilterFrames ends a passthrough stream the final judgement refused.
+//
+// ⚠️ This is a RETRACTION, not a block. The text is already on the caller's screen;
+// the frame is what tells an OpenAI-compatible client to take the message back. A
+// deployment that cannot accept that exposure has to be on the buffered lane, which is
+// what `x.ogr.output_mode` exists to decide.
+func contentFilterFrames(model string) string {
+	last, _ := json.Marshal(map[string]any{
+		"id": "chatcmpl-ogr", "object": "chat.completion.chunk", "model": model,
+		"choices": []map[string]any{{"index": 0, "delta": map[string]any{},
+			"finish_reason": "content_filter"}},
+	})
+	return "data: " + string(last) + "\n\ndata: [DONE]\n\n"
 }

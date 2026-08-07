@@ -61,6 +61,11 @@ const (
 	cntUnchecked        // requests that went through with NO verdict
 	cntIngested         // events reported asynchronously
 	cntMirrored         // batches copied to the candidate runtime
+	// ⚠️ APPEND ONLY, and never reorder. The slots are packed positionally into one
+	// shared-data blob; an insert in the middle silently re-reads every existing
+	// counter as its neighbour. A length change is safe — `bump` starts from zero
+	// when the stored blob is not `cntLen*8` bytes.
+	cntStreamStopped // streamed answers refused or retracted at end of stream
 	cntLen
 )
 

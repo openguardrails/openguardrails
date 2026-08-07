@@ -230,6 +230,16 @@ type reqState struct {
 	messages  []gjson.Result
 	model     string
 	streaming bool
+
+	// Which lane the RUNTIME put this answer on (`x.ogr.output_mode`), and whether
+	// this filter has taken ownership of the response stream to serve it. See
+	// lanes.go.
+	bufferOutput bool
+	laneOwned    bool
+	// The withheld answer, on the buffered lane only. Kept as the model's own bytes
+	// so a released answer is byte-identical — re-rendering from the parsed content
+	// would drop tool_calls, ids and usage.
+	held []byte
 }
 
 // --- request path -----------------------------------------------------------
@@ -427,6 +437,10 @@ func onInputVerdict(ctx wrapper.HttpContext, cfg Config, rs *reqState, judged *G
 		return
 	}
 
+	// Decide the response lane before the request goes anywhere: arming the pause
+	// has to happen before the response phase begins.
+	armLanes(ctx, cfg, rs, v)
+
 	if decision == "redact" {
 		if red := learnFromVerdict(rs.session, v, judged.text); len(red) > 0 {
 			if masked, n := maskMessages(outBody, red); n > 0 {
@@ -571,12 +585,16 @@ func onStreamingResponseBody(ctx wrapper.HttpContext, cfg Config, chunk []byte, 
 	// with the real judgement at end of stream in both. If mid-stream detection comes
 	// back it may only switch lanes (passthrough -> buffer); it may never cut.
 
+	// Enforcing on a stream: the lanes own the flow from here (lanes.go). Everything
+	// the caller receives goes out by injection, including this chunk, and the whole
+	// answer is judged once at end of stream.
+	if rs.laneOwned {
+		return laneChunk(ctx, cfg, rs, out, isLast)
+	}
+
 	if isLast {
-		// ⚠️ This is the REPORT, and it is where the answer becomes a record: one
-		// event for the whole reply, whatever the stream was judged in between
-		// (those calls carry `ogr-partial` and store nothing). What cannot be
-		// retracted here is the text already delivered — cutting is the streaming
-		// guard's job, above, while bytes are still flowing.
+		// Observe mode: the answer becomes a RECORD and nothing more. One event for
+		// the whole reply — there is no verdict to wait for and nothing to stop.
 		content, calls := sp.Result()
 		if content != "" || len(calls) > 0 {
 			events := deriveResponse(rs.derive, rs.session, content, calls, rs.messages)
