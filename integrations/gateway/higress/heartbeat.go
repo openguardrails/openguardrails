@@ -145,7 +145,7 @@ func sendHeartbeat(cfg *Config) {
 		return
 	}
 	// ⚠️ Its OWN budget, not the PDP's. `timeout_ms` is tuned for a caller waiting
-	// on a verdict — 1s by default — and a beat is nobody's latency: sharing that
+	// on a verdict — 5s by default — and a beat is nobody's latency: sharing that
 	// budget just turned healthy heartbeats into 504s whenever the runtime was
 	// briefly busy, i.e. exactly when liveness matters most.
 	if err := cfg.client.Post(pathHeartbeat, ogrHeaders(*cfg), payload,

@@ -223,6 +223,21 @@ instance identity, which the OGR sensor does not model yet.
 | `redis_username` / `redis_password` | *(empty)* | |
 | `session_ttl_s` | `1800` | matches the runtime's run-pointer idle TTL |
 
+⚠️ **`principal_header` and `principal_group_header` are only as trustworthy as
+the edge that writes them.** The plugin reports whatever arrives on them. Measured
+on the lab gateway: a request authenticating as consumer `carol` that carried its
+own `x-mse-consumer: root-admin` and `x-mse-consumer-group: platform-admins` was
+reported as exactly that — `key-auth` (priority 310, so it does run first) sets
+the headers when they are absent but did not overwrite the caller's.
+
+That is one hole with two different sizes. A forged `principal` misattributes the
+audit trail; a forged group changes WHICH POLICY SET applies, because the platform
+maps the group to a workspace — so a caller who picks their own group picks their
+own guardrails. Strip `x-mse-consumer` and `x-mse-consumer-group` from client
+requests at the edge, before AUTHN, or point these two keys at headers no client
+can reach. Verify it on your own deployment rather than assuming your auth plugin
+does it; ours did not.
+
 ⚠️ **There is no `redact` switch.** Whether to redact is the RUNTIME's decision,
 carried by the verdict (`decision: redact` plus `modifications.spans`). A gateway
 that could turn it off locally would be a second place policy lives — and the

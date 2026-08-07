@@ -29,3 +29,7 @@ htmlcov/
 
 # mitmproxy runtime log
 integrations/gateway/mitmproxy/log
+
+# Higress WASM plugin build output (make build / make push)
+integrations/gateway/higress/plugin.wasm
+integrations/gateway/higress/plugin.tar.gz

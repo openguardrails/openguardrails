@@ -523,6 +523,18 @@ func onStreamingResponseBody(ctx wrapper.HttpContext, cfg Config, chunk []byte, 
 	if !ok || rs == nil {
 		return chunk
 	}
+	// ⚠️ A refusal is OURS, not the model's. `answer` ends the request with a
+	// locally generated body, and that body still reaches this hook — so without
+	// this the plugin derives a `model_output` from its own refusal text and
+	// ingests it. Two costs, both bad for a thing whose output is evidence: the
+	// audit trail gains a record of something no model ever said, and the runtime
+	// evaluates on ingest, so the refusal is judged by the guardrails that
+	// produced it. `onResponseHeaders` and `onResponseBody` have always checked
+	// this; the streaming hook was the hole, and it swallowed BOTH response
+	// shapes, because a locally generated JSON body arrives here too.
+	if ctx.GetBoolContext(ctxAnswered, false) {
+		return chunk
+	}
 	sp, _ := ctx.GetContext(ctxStream).(*streamProcessor)
 	if sp == nil {
 		sp = newStreamProcessor(rs.session.Mapping, ctx.GetBoolContext(ctxStreaming, true))
