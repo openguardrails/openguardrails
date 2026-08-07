@@ -96,6 +96,59 @@ every agent behind one key into one row. A promptless chat application becomes a
 system prompt + first user message), so it is stable across turns with no stored
 state.
 
+## Judging a STREAMED answer
+
+A buffered reply can be held, judged and refused, because nothing has left the
+gateway yet. A stream has already started: the first token is on the wire before
+there is anything to judge. Holding it until the answer is complete would trade
+away the only thing streaming buys.
+
+So the stream is judged AS IT GROWS. Chunks pass through untouched; every
+`stream_judge_chars` new characters the answer SO FAR goes to the PDP, one call
+in flight at a time; a verdict that blocks stops the REST of the answer and
+appends a refusal frame with `finish_reason: content_filter`, which every
+OpenAI-compatible client renders.
+
+Measured on the lab gateway (147-character answer, upstream pacing 6 chars per
+60ms, median of 5):
+
+| | TTFT | total |
+|---|---|---|
+| streamed, judging OFF | 75 ms | 1524 ms |
+| streamed, judging ON | 79 ms | 1528 ms |
+| buffered — the only way to judge before delivery | **1735 ms** | 1735 ms |
+
+⚠️ **What the caller has already read cannot be taken back.** That is a property
+of streaming, not of this design; a deployment that can accept NO exposure has to
+use `stream: false` and pay the table's third row. What this buys is that the
+rest of the answer never arrives, and the measured cost of a cut is the judge's
+own latency — about 200–250 ms of tokens past the window boundary:
+
+| where the unsafe part sits | delivered | withheld |
+|---|---|---|
+| first sentence | 144 of 189 chars | 45 |
+| middle of a long answer | 378 of 441 chars | 63 |
+| **last ~30 characters** | **all of it** | **0** |
+
+The last row is the shape of the residual gap: an answer that turns unsafe after
+the final window boundary is never judged before it ends. It is still REPORTED
+and judged whole at end of stream, so the console and the SIEM see it — the turn
+just is not interrupted. Lower `stream_judge_chars` to shrink that tail, at one
+PDP call per window.
+
+| Key | Default | Notes |
+|---|---|---|
+| `stream_judge` | `true` in enforce | `false` restores report-only streaming |
+| `stream_judge_chars` | `120` | new characters between judgments |
+| `stream_judge_max` | `8` | judgments per stream; past it the answer is still reported whole |
+
+⚠️ Interim judgments carry **`ogr-partial: 1`**, which tells the runtime to decide
+and record nothing (see the runtime's `docs/api.md`). Without it one answer lands
+in the console as five fragments, every finding's occurrence count rises with the
+length of the reply, and session risk accumulates once per window — three
+counters that would then be measuring verbosity. The answer is reported once,
+whole, at end of stream, under the same event id the judgments used.
+
 ## Redaction
 
 The runtime never returns plaintext: a verdict carries span OFFSETS and no
@@ -114,6 +167,23 @@ with a Chinese prompt on 2026-07-30.
 ⚠️ Restoration matches the mapping's OWN KEYS, not a token syntax, and absorbs
 markdown escaping (`${OGR\_EMAIL\_1}` — a model formatting its answer). A whole
 token must still match: a restorer that guesses is an exfiltration oracle.
+
+⚠️ **A tool call's ARGUMENTS are restored the same way as prose, and that is the
+half that matters.** An unrestored line of prose is a defect the reader can see;
+an unrestored `{"to": "${OGR_EMAIL_1}"}` is an agent acting on a value that names
+nothing, with nothing in the reply to say so. Both response shapes cover it now
+(fixed 2026-08-06): the buffered path rewrites `tool_calls[].function.arguments`
+alongside the content, and the streaming path carries a pending tail PER call
+index — arguments arrive token-sized, so a fourteen-character placeholder
+practically never fits inside one delta, and restoring only the deltas that
+happened to contain a whole token restored nothing at all.
+
+⚠️ **Whatever the restorer is holding back is flushed before the stream closes.**
+It withholds anything that might be the start of a token; if the answer ENDS
+there, nothing can complete it, so it is written out as one more frame ahead of
+the `finish_reason` / `[DONE]`. It used to be dropped — an answer ending in `$`,
+or in the first characters of a placeholder, silently lost its last few
+characters, and only the caller could ever have noticed.
 
 ### Where the plaintext lives: sealed, in a gateway-side Redis
 
@@ -222,6 +292,9 @@ instance identity, which the OGR sensor does not model yet.
 | `session_key` | — | **required with `redis_cluster`**: 32 bytes, hex or base64 |
 | `redis_username` / `redis_password` | *(empty)* | |
 | `session_ttl_s` | `1800` | matches the runtime's run-pointer idle TTL |
+| `stream_judge` | `true` in enforce | judge a streamed answer as it grows; `false` = report only |
+| `stream_judge_chars` | `120` | new characters between judgments |
+| `stream_judge_max` | `8` | judgments per stream |
 
 ⚠️ **`principal_header` and `principal_group_header` are only as trustworthy as
 the edge that writes them.** The plugin reports whatever arrives on them. Measured

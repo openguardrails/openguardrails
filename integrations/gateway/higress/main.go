@@ -75,6 +75,12 @@ type Config struct {
 	agentID              string
 	store                *store
 
+	// Judging a STREAMED answer as it grows (streamjudge.go). Enforce only:
+	// observe never touches a body and never waits for anything.
+	streamJudge      bool
+	streamJudgeChars int
+	streamJudgeMax   int
+
 	// A second runtime that gets a COPY of every event and decides nothing.
 	mirror    wrapper.HttpClient
 	mirrorKey string
@@ -132,6 +138,26 @@ func parseConfig(j gjson.Result, c *Config) error {
 		c.principalGroupHeader = v
 	}
 	c.agentID = j.Get("agent_id").String()
+
+	/**
+	 * Streaming output detection. ON by default in enforce mode: without it the
+	 * model's output side is judged only for a BUFFERED reply, and the ordinary
+	 * shape of chat traffic — an SSE stream — reaches the caller whole no matter
+	 * what the verdict says. It costs one PDP call per `stream_judge_chars` of
+	 * answer and nothing in TTFT; `false` restores the report-only behaviour.
+	 */
+	c.streamJudge = c.mode == modeEnforce
+	if v := j.Get("stream_judge"); v.Exists() {
+		c.streamJudge = v.Bool() && c.mode == modeEnforce
+	}
+	c.streamJudgeChars = defaultStreamJudgeChars
+	if v := j.Get("stream_judge_chars"); v.Exists() && v.Int() > 0 {
+		c.streamJudgeChars = int(v.Int())
+	}
+	c.streamJudgeMax = defaultStreamJudgeMax
+	if v := j.Get("stream_judge_max"); v.Exists() && v.Int() > 0 {
+		c.streamJudgeMax = int(v.Int())
+	}
 
 	c.client = wrapper.NewClusterClient(wrapper.TargetCluster{Cluster: c.cluster, Host: c.host})
 
@@ -194,9 +220,17 @@ func parseConfig(j gjson.Result, c *Config) error {
 	// first exists; RegisterTickFunc is idempotent per plugin load.
 	startHeartbeat(c)
 
-	proxywasm.LogWarnf("[OGR-CONFIG] mode=%s cluster=%s host=%s timeout=%dms fail=%s beat=%ds",
-		c.mode, c.cluster, c.host, c.timeoutMs, failLabel(c.failClosed), heartbeatPeriodMs/1000)
+	proxywasm.LogWarnf("[OGR-CONFIG] mode=%s cluster=%s host=%s timeout=%dms fail=%s beat=%ds stream_judge=%s",
+		c.mode, c.cluster, c.host, c.timeoutMs, failLabel(c.failClosed), heartbeatPeriodMs/1000,
+		streamJudgeLabel(c))
 	return nil
+}
+
+func streamJudgeLabel(c *Config) string {
+	if !c.streamJudge {
+		return "off"
+	}
+	return "every " + strconv.Itoa(c.streamJudgeChars) + " chars, max " + strconv.Itoa(c.streamJudgeMax)
 }
 
 func failLabel(closed bool) string {
@@ -217,6 +251,7 @@ const (
 	ctxModel          = "ogr_model"
 	ctxMessages       = "ogr_messages"
 	ctxStream         = "ogr_stream_proc"
+	ctxStreamGuard    = "ogr_stream_guard"
 	ctxAnswered       = "ogr_answered"
 	ctxSkip           = "ogr_skip"
 )
@@ -462,7 +497,7 @@ func onResponseBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Acti
 	events := deriveResponse(rs.derive, rs.session, content, calls, rs.messages)
 	if cfg.mode == modeObserve {
 		reportAsync(ctx, cfg, events)
-		return restoreResponse(ctx, rs, body, content)
+		return restoreResponse(rs, body)
 	}
 
 	// Enforce: judge the model's own output, then restore our placeholders.
@@ -475,7 +510,7 @@ func onResponseBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Acti
 	mirrorEvents(cfg, []*GuardEvent{judged})
 	payload, err := json.Marshal(judged)
 	if err != nil {
-		return restoreResponse(ctx, rs, body, content)
+		return restoreResponse(rs, body)
 	}
 	err = cfg.client.Post(pathEvaluate, ogrHeaders(cfg), payload,
 		func(status int, _ http.Header, respBody []byte) {
@@ -492,29 +527,21 @@ func onResponseBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Acti
 				proxywasm.ResumeHttpResponse()
 				return
 			}
-			if restored := restoreString(content, rs.session.Mapping); restored != content {
-				if next, err := setContent(string(body), restored); err == nil {
-					_ = proxywasm.ReplaceHttpResponseBody([]byte(next))
-				}
+			if next, changed := restoreBody(string(body), rs.session.Mapping); changed {
+				_ = proxywasm.ReplaceHttpResponseBody([]byte(next))
 			}
 			proxywasm.ResumeHttpResponse()
 		}, cfg.timeoutMs)
 	if err != nil {
-		return restoreResponse(ctx, rs, body, content)
+		return restoreResponse(rs, body)
 	}
 	return types.ActionPause
 }
 
-func restoreResponse(ctx wrapper.HttpContext, rs *reqState, body []byte, content string) types.Action {
-	restored := restoreString(content, rs.session.Mapping)
-	if restored == content {
-		return types.ActionContinue
+func restoreResponse(rs *reqState, body []byte) types.Action {
+	if next, changed := restoreBody(string(body), rs.session.Mapping); changed {
+		_ = proxywasm.ReplaceHttpResponseBody([]byte(next))
 	}
-	next, err := setContent(string(body), restored)
-	if err != nil {
-		return types.ActionContinue
-	}
-	_ = proxywasm.ReplaceHttpResponseBody([]byte(next))
 	return types.ActionContinue
 }
 
@@ -542,14 +569,45 @@ func onStreamingResponseBody(ctx wrapper.HttpContext, cfg Config, chunk []byte, 
 	}
 	out := sp.ProcessChunk(chunk, isLast)
 
+	// Judge the answer AS IT GROWS (streamjudge.go). The chunk above is already
+	// restored and on its way; this only decides whether the REST of the answer
+	// gets to follow it, so nothing here can delay the first token.
+	sg, _ := ctx.GetContext(ctxStreamGuard).(*streamGuard)
+	if cfg.streamJudge && sp.sse {
+		if sg == nil {
+			sg = &streamGuard{}
+			ctx.SetContext(ctxStreamGuard, sg)
+		}
+		switch {
+		case sg.cut:
+			// The rest of the answer is dropped. The upstream keeps sending and
+			// we keep ACCUMULATING it — what the model produced is evidence, and
+			// the report at end of stream is where it belongs — but none of it
+			// reaches the caller.
+			out = sg.tail(rs.model)
+		case !isLast:
+			if runes := sp.ContentRunes(); sg.dueForJudgment(runes, cfg.streamJudgeChars, cfg.streamJudgeMax) {
+				content, _ := sp.Result()
+				judgeStream(cfg, rs, sg, content, runes)
+			}
+		}
+	}
+
 	if isLast {
-		// ⚠️ The bytes are already on their way to the client, so this is a
-		// REPORT, not a gate: a streamed answer cannot be retracted. Reporting it
-		// is still the whole point — without this the model's output side is
-		// invisible for the ordinary shape of chat traffic.
+		// ⚠️ This is the REPORT, and it is where the answer becomes a record: one
+		// event for the whole reply, whatever the stream was judged in between
+		// (those calls carry `ogr-partial` and store nothing). What cannot be
+		// retracted here is the text already delivered — cutting is the streaming
+		// guard's job, above, while bytes are still flowing.
 		content, calls := sp.Result()
 		if content != "" || len(calls) > 0 {
-			reportAsync(ctx, cfg, deriveResponse(rs.derive, rs.session, content, calls, rs.messages))
+			events := deriveResponse(rs.derive, rs.session, content, calls, rs.messages)
+			// The same id the interim judgments used, so the answer is ONE row
+			// in the store rather than one per window.
+			if sg != nil && sg.eventID != "" && len(events) > 0 && events[0].Kind == "model_output" {
+				events[0].EventID = sg.eventID
+			}
+			reportAsync(ctx, cfg, events)
 		}
 	}
 	return out
