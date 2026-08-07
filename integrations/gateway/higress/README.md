@@ -98,49 +98,56 @@ state.
 
 ## Judging a STREAMED answer
 
-A buffered reply can be held, judged and refused, because nothing has left the
-gateway yet. A stream has already started: the first token is on the wire before
-there is anything to judge. Holding it until the answer is complete would trade
-away the only thing streaming buys.
+**Not while it grows.** That is what this plugin used to do — every N characters,
+cutting the rest of the answer on a hit — and the pipeline measured it directly
+(`openguardrails-pipeline/docs/STREAMING_GUARDRAIL.md`, truncated-agent eval on the
+trained 35B-A3B):
 
-So the stream is judged AS IT GROWS. Chunks pass through untouched; every
-`stream_judge_chars` new characters the answer SO FAR goes to the PDP, one call
-in flight at a time; a verdict that blocks stops the REST of the answer and
-appends a refusal frame with `finish_reason: content_filter`, which every
-OpenAI-compatible client renders.
+| Agent reply visible | 25% | 50% | 75% | 100% |
+|---|---|---|---|---|
+| `mt_harm_correct` false positives | **0.353** | **0.294** | 0.000 | 0.000 |
+| violation recall | 0.88 | 0.87 | 0.85 | 0.90 |
 
-Measured on the lab gateway (147-character answer, upstream pacing 6 chars per
-60ms, median of 5):
+Recall barely moves — violations show up early — while false positives go up 2.3x,
+and all of it lands on ONE shape: the reply that agrees on the surface and corrects
+underneath.
 
-| | TTFT | total |
-|---|---|---|
-| streamed, judging OFF | 75 ms | 1524 ms |
-| streamed, judging ON | 79 ms | 1528 ms |
-| buffered — the only way to judge before delivery | **1735 ms** | 1735 ms |
+> User: 自杀是对的吗
+> Agent: 是的，很多人有这种念头——但这个想法是错的，……
 
-⚠️ **What the caller has already read cannot be taken back.** That is a property
-of streaming, not of this design; a deployment that can accept NO exposure has to
-use `stream: false` and pay the table's third row. What this buys is that the
-rest of the answer never arrives, and the measured cost of a cut is the judge's
-own latency — about 200–250 ms of tokens past the window boundary:
+Early in the stream only "是的，很多人有这种念头" exists. The turn happens at a clause
+boundary, not a token boundary, so the judgement is not merely early — it is wrong by
+construction. **Early detection is a fit prefilter and an unfit blocking criterion.**
 
-| where the unsafe part sits | delivered | withheld |
-|---|---|---|
-| first sentence | 144 of 189 chars | 45 |
-| middle of a long answer | 378 of 441 chars | 63 |
-| **last ~30 characters** | **all of it** | **0** |
+### Two lanes, decided by the INPUT verdict
 
-The last row is the shape of the residual gap: an answer that turns unsafe after
-the final window boundary is never judged before it ends. It is still REPORTED
-and judged whole at end of stream, so the console and the SIEM see it — the turn
-just is not interrupted. Lower `stream_judge_chars` to shrink that tail, at one
-PDP call per window.
+The input side and the output side are different questions and must not share a
+judgement: the input asks whether the QUESTION is soliciting something, the output
+asks whether the REPLY is a violation in the context of that question. A harmful
+question answered with a refusal is SAFE, and a detector that reads only the question
+marks all of those — 1,533 refusals in the real corpus.
 
-| Key | Default | Notes |
-|---|---|---|
-| `stream_judge` | `true` in enforce | `false` restores report-only streaming |
-| `stream_judge_chars` | `120` | new characters between judgments |
-| `stream_judge_max` | `8` | judgments per stream; past it the answer is still reported whole |
+```
+question ─┬─► model prefill ──────────────► first token ──► …
+          └─► input check (parallel, ~258ms, off the TTFT path)
+                ├─ hit  → BUFFER the answer, judge it whole, release or refuse
+                │         (a true block: the caller never saw it)
+                └─ miss → PASS THROUGH, judge whole at end of stream,
+                          on a hit emit finish_reason: "content_filter"
+                          (a retraction: the caller may already have read it)
+```
+
+⚠️ **Both lanes get the final check.** Skipping it when the input looked clean is
+cheaper — 58% of traffic — and was measured and rejected: 46 of 400 real
+violating replies (**11.5%**) have a question the input side never flags, and those
+are exactly the ones nothing else catches (model drift, hallucinated defamation, an
+attack that only shows in the answer).
+
+⚠️ **The retraction lane cannot un-deliver bytes.** A deployment that can accept no
+exposure must force the buffered lane (or `stream: false`), and pay the latency.
+
+If mid-stream detection returns, it may only switch a stream from the passthrough
+lane to the buffered one. It may never cut.
 
 ⚠️ Interim judgments carry **`ogr-partial: 1`**, which tells the runtime to decide
 and record nothing (see the runtime's `docs/api.md`). Without it one answer lands
@@ -292,9 +299,6 @@ instance identity, which the OGR sensor does not model yet.
 | `session_key` | — | **required with `redis_cluster`**: 32 bytes, hex or base64 |
 | `redis_username` / `redis_password` | *(empty)* | |
 | `session_ttl_s` | `1800` | matches the runtime's run-pointer idle TTL |
-| `stream_judge` | `true` in enforce | judge a streamed answer as it grows; `false` = report only |
-| `stream_judge_chars` | `120` | new characters between judgments |
-| `stream_judge_max` | `8` | judgments per stream |
 
 ⚠️ **`principal_header` and `principal_group_header` are only as trustworthy as
 the edge that writes them.** The plugin reports whatever arrives on them. Measured

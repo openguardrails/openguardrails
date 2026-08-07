@@ -77,9 +77,6 @@ type Config struct {
 
 	// Judging a STREAMED answer as it grows (streamjudge.go). Enforce only:
 	// observe never touches a body and never waits for anything.
-	streamJudge      bool
-	streamJudgeChars int
-	streamJudgeMax   int
 
 	// A second runtime that gets a COPY of every event and decides nothing.
 	mirror    wrapper.HttpClient
@@ -138,26 +135,6 @@ func parseConfig(j gjson.Result, c *Config) error {
 		c.principalGroupHeader = v
 	}
 	c.agentID = j.Get("agent_id").String()
-
-	/**
-	 * Streaming output detection. ON by default in enforce mode: without it the
-	 * model's output side is judged only for a BUFFERED reply, and the ordinary
-	 * shape of chat traffic — an SSE stream — reaches the caller whole no matter
-	 * what the verdict says. It costs one PDP call per `stream_judge_chars` of
-	 * answer and nothing in TTFT; `false` restores the report-only behaviour.
-	 */
-	c.streamJudge = c.mode == modeEnforce
-	if v := j.Get("stream_judge"); v.Exists() {
-		c.streamJudge = v.Bool() && c.mode == modeEnforce
-	}
-	c.streamJudgeChars = defaultStreamJudgeChars
-	if v := j.Get("stream_judge_chars"); v.Exists() && v.Int() > 0 {
-		c.streamJudgeChars = int(v.Int())
-	}
-	c.streamJudgeMax = defaultStreamJudgeMax
-	if v := j.Get("stream_judge_max"); v.Exists() && v.Int() > 0 {
-		c.streamJudgeMax = int(v.Int())
-	}
 
 	c.client = wrapper.NewClusterClient(wrapper.TargetCluster{Cluster: c.cluster, Host: c.host})
 
@@ -220,17 +197,9 @@ func parseConfig(j gjson.Result, c *Config) error {
 	// first exists; RegisterTickFunc is idempotent per plugin load.
 	startHeartbeat(c)
 
-	proxywasm.LogWarnf("[OGR-CONFIG] mode=%s cluster=%s host=%s timeout=%dms fail=%s beat=%ds stream_judge=%s",
-		c.mode, c.cluster, c.host, c.timeoutMs, failLabel(c.failClosed), heartbeatPeriodMs/1000,
-		streamJudgeLabel(c))
+	proxywasm.LogWarnf("[OGR-CONFIG] mode=%s cluster=%s host=%s timeout=%dms fail=%s beat=%ds",
+		c.mode, c.cluster, c.host, c.timeoutMs, failLabel(c.failClosed), heartbeatPeriodMs/1000)
 	return nil
-}
-
-func streamJudgeLabel(c *Config) string {
-	if !c.streamJudge {
-		return "off"
-	}
-	return "every " + strconv.Itoa(c.streamJudgeChars) + " chars, max " + strconv.Itoa(c.streamJudgeMax)
 }
 
 func failLabel(closed bool) string {
@@ -251,7 +220,6 @@ const (
 	ctxModel          = "ogr_model"
 	ctxMessages       = "ogr_messages"
 	ctxStream         = "ogr_stream_proc"
-	ctxStreamGuard    = "ogr_stream_guard"
 	ctxAnswered       = "ogr_answered"
 	ctxSkip           = "ogr_skip"
 )
@@ -584,29 +552,24 @@ func onStreamingResponseBody(ctx wrapper.HttpContext, cfg Config, chunk []byte, 
 	}
 	out := sp.ProcessChunk(chunk, isLast)
 
-	// Judge the answer AS IT GROWS (streamjudge.go). The chunk above is already
-	// restored and on its way; this only decides whether the REST of the answer
-	// gets to follow it, so nothing here can delay the first token.
-	sg, _ := ctx.GetContext(ctxStreamGuard).(*streamGuard)
-	if cfg.streamJudge && sp.sse {
-		if sg == nil {
-			sg = &streamGuard{}
-			ctx.SetContext(ctxStreamGuard, sg)
-		}
-		switch {
-		case sg.cut:
-			// The rest of the answer is dropped. The upstream keeps sending and
-			// we keep ACCUMULATING it — what the model produced is evidence, and
-			// the report at end of stream is where it belongs — but none of it
-			// reaches the caller.
-			out = sg.tail(rs.model)
-		case !isLast:
-			if runes := sp.ContentRunes(); sg.dueForJudgment(runes, cfg.streamJudgeChars, cfg.streamJudgeMax) {
-				content, _ := sp.Result()
-				judgeStream(cfg, rs, sg, content, runes)
-			}
-		}
-	}
+	// ⚠️ NO MID-STREAM JUDGEMENT. It was here — every `stream_judge_chars`, cutting
+	// the rest of the answer on a hit — and the pipeline then measured exactly that
+	// (`docs/STREAMING_GUARDRAIL.md`, truncated-agent eval on the trained 35B-A3B):
+	//
+	//   Agent reply visible   25%     50%     75%    100%
+	//   mt_harm_correct FP    0.353   0.294   0.000  0.000
+	//
+	// Recall barely moves (0.88 @25% vs 0.90 @100%) — violations show up early — but
+	// false positives go up 2.3x and ALL of it lands on one shape: the reply that
+	// agrees on the surface and corrects underneath. "自杀是对的吗" answered with
+	// "是的，很多人有这种念头——但这个想法是错的" reads as agreement until the clause
+	// that turns it, and the turn happens at a clause boundary, not a token boundary.
+	// Early judgement is a fit PREFILTER and an unfit BLOCKING CRITERION.
+	//
+	// The replacement is two lanes decided by the INPUT verdict — buffer when the
+	// question already looks like it is soliciting something, pass through otherwise —
+	// with the real judgement at end of stream in both. If mid-stream detection comes
+	// back it may only switch lanes (passthrough -> buffer); it may never cut.
 
 	if isLast {
 		// ⚠️ This is the REPORT, and it is where the answer becomes a record: one
@@ -617,11 +580,6 @@ func onStreamingResponseBody(ctx wrapper.HttpContext, cfg Config, chunk []byte, 
 		content, calls := sp.Result()
 		if content != "" || len(calls) > 0 {
 			events := deriveResponse(rs.derive, rs.session, content, calls, rs.messages)
-			// The same id the interim judgments used, so the answer is ONE row
-			// in the store rather than one per window.
-			if sg != nil && sg.eventID != "" && len(events) > 0 && events[0].Kind == "model_output" {
-				events[0].EventID = sg.eventID
-			}
 			reportAsync(ctx, cfg, events)
 		}
 	}
