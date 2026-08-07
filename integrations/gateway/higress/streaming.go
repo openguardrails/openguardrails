@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -161,15 +163,28 @@ type streamProcessor struct {
 	contentBuf   string // pending tail of delta.content
 	reasoningBuf string // pending tail of delta.reasoning_content
 
-	content   strings.Builder
-	toolCalls map[int]*streamToolCall
-	finish    string
+	content strings.Builder
+	// Counted as it arrives, never recomputed: the streaming judge asks "how
+	// much is new" on EVERY chunk, and measuring the accumulated string each
+	// time makes one answer quadratic in its own length.
+	contentRunes int
+	toolCalls    map[int]*streamToolCall
+	finish       string
 }
+
+// ContentRunes is the length of the answer so far in CHARACTERS — the unit the
+// judging window is expressed in, and the only one that means the same thing in
+// Chinese as in English.
+func (s *streamProcessor) ContentRunes() int { return s.contentRunes }
 
 type streamToolCall struct {
 	ID   string
 	Name string
 	Args strings.Builder
+	// The restorer's held-back tail for THIS call's arguments. Per index,
+	// because two calls stream interleaved and one's half-token must never be
+	// completed by the other's next delta.
+	pending string
 }
 
 // maxRawAccum bounds the copy kept of a non-streamed reply. Past it the reply is
@@ -212,7 +227,10 @@ func (s *streamProcessor) ProcessChunk(chunk []byte, isLast bool) []byte {
 		}
 	}
 	if isLast {
-		s.contentBuf, s.reasoningBuf = "", ""
+		// Backstop for a stream that ends with neither a finish_reason nor a
+		// [DONE] — a dropped upstream connection. Nothing more is coming, so
+		// what is held back is text.
+		result = append(result, s.flushPending()...)
 	}
 	return result
 }
@@ -223,17 +241,28 @@ func (s *streamProcessor) processLine(line string, isLast bool) string {
 	}
 	data := line[6:]
 	if data == "[DONE]" {
-		return line
+		return s.flushPending() + line
 	}
 	parsed := gjson.Parse(data)
 	if !parsed.IsObject() {
 		return line
+	}
+	// ⚠️ The stream is ENDING, so nothing more can complete a half-matched
+	// token: whatever the restorer is holding is text, and it has to be written
+	// out BEFORE the frame that closes the answer. Without this it was silently
+	// dropped — an answer ending in `$`, or in the first characters of a
+	// placeholder, simply lost its last few characters, and only the client
+	// could ever have noticed.
+	prefix := ""
+	if fr := parsed.Get("choices.0.finish_reason"); fr.Exists() && fr.Type == gjson.String {
+		prefix = s.flushPending()
 	}
 	modified := data
 
 	if dc := parsed.Get("choices.0.delta.content"); dc.Exists() && dc.Type == gjson.String {
 		original := dc.String()
 		s.content.WriteString(original)
+		s.contentRunes += utf8.RuneCountInString(original)
 		if restored := s.field(&s.contentBuf, original, isLast); restored != original {
 			if next, err := sjson.Set(modified, "choices.0.delta.content", restored); err == nil {
 				modified = next
@@ -273,11 +302,18 @@ func (s *streamProcessor) processLine(line string, isLast bool) string {
 				acc.Name = name
 			}
 			if args := tc.Get("function.arguments"); args.Exists() && args.Type == gjson.String {
-				acc.Args.WriteString(args.String())
-				// Restore per delta only when the whole token fits in it; a token
-				// split across argument deltas is repaired by the caller from the
-				// accumulated string, which is what the client's JSON parse sees.
-				if restored := restoreString(args.String(), s.r.mapping); restored != args.String() {
+				original := args.String()
+				acc.Args.WriteString(original)
+				// ⚠️ Restored the SAME way as prose — through the pending tail —
+				// because a token split across two argument deltas is the normal
+				// case, not the exception: the deltas are token-sized and the
+				// placeholder is fourteen characters. Restoring only when a whole
+				// token fits inside one delta is what handed the client
+				// `{"to": "${OGR_EMAIL_1}"}` and made it act on a value that
+				// names nothing. The client's JSON parse sees the concatenation,
+				// so what matters is that the SEQUENCE comes out restored, not
+				// that any one delta does.
+				if restored := s.field(&acc.pending, original, isLast); restored != original {
 					path := "choices.0.delta.tool_calls." + strconv.Itoa(n) + ".function.arguments"
 					if next, err := sjson.Set(modified, path, restored); err == nil {
 						modified = next
@@ -291,7 +327,63 @@ func (s *streamProcessor) processLine(line string, isLast bool) string {
 		s.finish = fr.String()
 	}
 
-	return "data: " + modified
+	return prefix + "data: " + modified
+}
+
+// flushPending renders everything the restorer is still holding — prose,
+// reasoning, and each tool call's arguments — as ONE extra SSE frame, and
+// forgets it. A frame rather than bare bytes because the client parses frames:
+// text written outside one is not part of the answer, it is a protocol error.
+func (s *streamProcessor) flushPending() string {
+	type fn struct {
+		Arguments string `json:"arguments"`
+	}
+	type call struct {
+		Index    int `json:"index"`
+		Function fn  `json:"function"`
+	}
+	type delta struct {
+		Content   string `json:"content,omitempty"`
+		Reasoning string `json:"reasoning_content,omitempty"`
+		ToolCalls []call `json:"tool_calls,omitempty"`
+	}
+
+	d := delta{Content: s.contentBuf, Reasoning: s.reasoningBuf}
+	s.contentBuf, s.reasoningBuf = "", ""
+	for _, i := range s.callIndexes() {
+		tc := s.toolCalls[i]
+		if tc.pending == "" {
+			continue
+		}
+		d.ToolCalls = append(d.ToolCalls, call{Index: i, Function: fn{Arguments: tc.pending}})
+		tc.pending = ""
+	}
+	if d.Content == "" && d.Reasoning == "" && len(d.ToolCalls) == 0 {
+		return ""
+	}
+
+	type choice struct {
+		Index int   `json:"index"`
+		Delta delta `json:"delta"`
+	}
+	out, err := json.Marshal(struct {
+		ID      string   `json:"id"`
+		Object  string   `json:"object"`
+		Choices []choice `json:"choices"`
+	}{"chatcmpl-ogr-flush", "chat.completion.chunk", []choice{{Delta: d}}})
+	if err != nil {
+		return ""
+	}
+	return "data: " + string(out) + "\n\n"
+}
+
+func (s *streamProcessor) callIndexes() []int {
+	idx := make([]int, 0, len(s.toolCalls))
+	for i := range s.toolCalls {
+		idx = append(idx, i)
+	}
+	sort.Ints(idx)
+	return idx
 }
 
 func (s *streamProcessor) field(buf *string, text string, isLast bool) string {

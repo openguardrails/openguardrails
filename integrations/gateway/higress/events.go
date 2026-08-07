@@ -31,7 +31,7 @@ const (
 	// Reported in the heartbeat, so it is how a deployment learns which build is
 	// in the VM. Kept honest by TestPluginVersionMatchesTheVERSIONFile — 1.3.0
 	// and 1.4.0 both shipped while this still said 1.2.0.
-	pluginVersion = "1.4.0"
+	pluginVersion = "1.5.0"
 
 	maxTranscriptEntries = 64
 	maxEntryText         = 32768
