@@ -19,7 +19,7 @@ platform's HTTP contract, so every runtime concept had to be squeezed through it
 | Squeezed through the old contract | Here |
 |---|---|
 | Thirteen GuardEvent kinds became two (`user_input`, `model_output`) | every kind the traffic actually contains — see below |
-| Streaming replies were never reported at all | the stream is reassembled and reported |
+| Streaming replies were never reported at all | the stream is reassembled and reported, in every protocol |
 | `flag` had to become "pass", `require_approval` a refusal | the Verdict is read as-is |
 | Batching had no place in the wire shape | `/ingest` takes up to 100 events per call |
 | An extra network hop (adapter process) per request | gone |
@@ -30,6 +30,13 @@ platform's HTTP contract, so every runtime concept had to be squeezed through it
 mode: observe   # report only: never pauses a request, never touches a body
 mode: enforce   # evaluate before the model sees the prompt, honour the verdict
 ```
+
+The two endpoints follow from it, and the rule is applied in exactly one place:
+
+| mode | where events go |
+|---|---|
+| `observe` | **everything to `/ingest`.** Nothing waits; nothing is refusable, because the request is already gone. |
+| `enforce` | **the turn to `/evaluate`** — one event, blocking — and the history to `/ingest`. |
 
 **Observe still detects.** The runtime evaluates on ingest too, so the console
 fills with findings while the gateway stays a mirror — the events go out
@@ -63,23 +70,67 @@ rides `/ingest` rather than `/evaluate` for the same reason: the mirror runtime
 evaluates on ingest anyway, so its console fills with the same findings and no
 verdict is ever waited for.
 
-## What one chat request becomes
+## Which protocols it reads
 
-A gateway sees ONE turn at a time and an OpenAI client re-sends the whole
-conversation every request, so the only question is what is NEW:
+Three, natively, each with its own adapter under [`protocol/`](protocol/README.md):
 
-| Evidence in the payload | Event |
+| client speaks | path | `llm_protocol` |
+|---|---|---|
+| Chat Completions | `…/chat/completions` | `openai.chat` |
+| Responses | `…/responses` | `openai.responses` |
+| Anthropic Messages | `…/messages` | `anthropic.messages` |
+
+Detected per request from the path, falling back to the body shape, and reported on
+every event. There is **no normalization to a single protocol**: each adapter parses
+its own wire format into a neutral turn/action model, and each renders its own
+refusal, its own masking paths and its own SSE reader. A refused Anthropic caller gets
+an Anthropic reply.
+
+⚠️ It is the **client's** protocol, never the upstream provider's. The plugin runs at
+priority 200 and ai-proxy at 100, so on the request it sees the body before ai-proxy
+translates it and on the response after ai-proxy has translated back — both times, the
+shape the caller chose.
+
+## What one request becomes
+
+A gateway sees ONE turn at a time and every client re-sends the whole conversation
+every request, so the only question is what is NEW — and, for enforcement, **what has
+not happened yet**.
+
+**One turn is one event.** The refusable half of each phase is a *single* GuardEvent
+carrying the whole turn:
+
+| phase | one event | payload |
+|---|---|---|
+| request | `user_input`, or `tool_result` when the turn is an agent continuation | `{text?, tool_results:[{tool_call_id,name,result,status}], tools?[]}` |
+| response | `model_output` | `{text, reasoning?, tool_calls:[{id,name,arguments}]}` |
+
+A reply that says "closing it" and calls three tools is **one generation**. Split into
+four events it loses exactly what a judge needs — that the sentence and the actions came
+from the same prompt — and "delete the backups" is a different act when the sentence
+beside it says *as you asked* than when it says *I will tidy up first*. `payload.arguments`
+is the argument **object**, not a JSON string of it, so the runtime can recover the bare
+command a shell action carries.
+
+Everything else is **history**, itemised on `/ingest`, because those are independent past
+facts nothing composes:
+
+| evidence | event |
 |---|---|
-| `tools[]` (first sight, and again whenever the set CHANGES — that is what a rug-pull looks like) | `tool_register` |
-| `messages[].role == "tool"` not seen before | `tool_result` |
-| `assistant.tool_calls[]` in the history | `tool_call` (already ran; reported, not gated) |
-| the newest user message | `user_input` |
-| the response's content | `model_output` |
-| the response's `tool_calls` — **the only copy still stoppable** | `tool_call` |
+| an action already executed by the client | `tool_call` |
+| an outcome already read by the model | `tool_result` |
+| the declared tool inventory, when the set CHANGED | `tool_register` (one per tool) |
 
-The old shape (one `user_input` per request) is why a whole gateway deployment
-was invisible to the tool_call guardrails: `permission`, `command-danger` and
-`command-rules` judge an ACTION, and no action was ever reported.
+**The agent loop is why this is not just "the newest user message".** The loop is
+`user input → model output → actions → outcomes → model output → …`, and only the first
+leg has a user turn in it. A continuation re-sends the conversation with tool outcomes
+appended and no new user message; a gateway that looks for the newest user turn finds one
+it already judged, judges nothing, and lets the continuation through — while the events
+still reach the platform as a report, so nothing looks broken.
+
+An earlier shape (one `user_input` per request) is also why a whole deployment was
+invisible to the tool_call guardrails: `permission`, `command-danger` and `command-rules`
+judge an ACTION, and no action was ever reported.
 
 Identity: the consumer header (`x-mse-consumer` by default) becomes
 `subject.principal` — WHO the gateway authenticated, which the runtime treats as the
@@ -98,49 +149,56 @@ state.
 
 ## Judging a STREAMED answer
 
-A buffered reply can be held, judged and refused, because nothing has left the
-gateway yet. A stream has already started: the first token is on the wire before
-there is anything to judge. Holding it until the answer is complete would trade
-away the only thing streaming buys.
+**Not while it grows.** That is what this plugin used to do — every N characters,
+cutting the rest of the answer on a hit — and the pipeline measured it directly
+(`openguardrails-pipeline/docs/STREAMING_GUARDRAIL.md`, truncated-agent eval on the
+trained 35B-A3B):
 
-So the stream is judged AS IT GROWS. Chunks pass through untouched; every
-`stream_judge_chars` new characters the answer SO FAR goes to the PDP, one call
-in flight at a time; a verdict that blocks stops the REST of the answer and
-appends a refusal frame with `finish_reason: content_filter`, which every
-OpenAI-compatible client renders.
+| Agent reply visible | 25% | 50% | 75% | 100% |
+|---|---|---|---|---|
+| `mt_harm_correct` false positives | **0.353** | **0.294** | 0.000 | 0.000 |
+| violation recall | 0.88 | 0.87 | 0.85 | 0.90 |
 
-Measured on the lab gateway (147-character answer, upstream pacing 6 chars per
-60ms, median of 5):
+Recall barely moves — violations show up early — while false positives go up 2.3x,
+and all of it lands on ONE shape: the reply that agrees on the surface and corrects
+underneath.
 
-| | TTFT | total |
-|---|---|---|
-| streamed, judging OFF | 75 ms | 1524 ms |
-| streamed, judging ON | 79 ms | 1528 ms |
-| buffered — the only way to judge before delivery | **1735 ms** | 1735 ms |
+> User: 自杀是对的吗
+> Agent: 是的，很多人有这种念头——但这个想法是错的，……
 
-⚠️ **What the caller has already read cannot be taken back.** That is a property
-of streaming, not of this design; a deployment that can accept NO exposure has to
-use `stream: false` and pay the table's third row. What this buys is that the
-rest of the answer never arrives, and the measured cost of a cut is the judge's
-own latency — about 200–250 ms of tokens past the window boundary:
+Early in the stream only "是的，很多人有这种念头" exists. The turn happens at a clause
+boundary, not a token boundary, so the judgement is not merely early — it is wrong by
+construction. **Early detection is a fit prefilter and an unfit blocking criterion.**
 
-| where the unsafe part sits | delivered | withheld |
-|---|---|---|
-| first sentence | 144 of 189 chars | 45 |
-| middle of a long answer | 378 of 441 chars | 63 |
-| **last ~30 characters** | **all of it** | **0** |
+### Two lanes, decided by the INPUT verdict
 
-The last row is the shape of the residual gap: an answer that turns unsafe after
-the final window boundary is never judged before it ends. It is still REPORTED
-and judged whole at end of stream, so the console and the SIEM see it — the turn
-just is not interrupted. Lower `stream_judge_chars` to shrink that tail, at one
-PDP call per window.
+The input side and the output side are different questions and must not share a
+judgement: the input asks whether the QUESTION is soliciting something, the output
+asks whether the REPLY is a violation in the context of that question. A harmful
+question answered with a refusal is SAFE, and a detector that reads only the question
+marks all of those — 1,533 refusals in the real corpus.
 
-| Key | Default | Notes |
-|---|---|---|
-| `stream_judge` | `true` in enforce | `false` restores report-only streaming |
-| `stream_judge_chars` | `120` | new characters between judgments |
-| `stream_judge_max` | `8` | judgments per stream; past it the answer is still reported whole |
+```
+question ─┬─► model prefill ──────────────► first token ──► …
+          └─► input check (parallel, ~258ms, off the TTFT path)
+                ├─ hit  → BUFFER the answer, judge it whole, release or refuse
+                │         (a true block: the caller never saw it)
+                └─ miss → PASS THROUGH, judge whole at end of stream,
+                          on a hit emit finish_reason: "content_filter"
+                          (a retraction: the caller may already have read it)
+```
+
+⚠️ **Both lanes get the final check.** Skipping it when the input looked clean is
+cheaper — 58% of traffic — and was measured and rejected: 46 of 400 real
+violating replies (**11.5%**) have a question the input side never flags, and those
+are exactly the ones nothing else catches (model drift, hallucinated defamation, an
+attack that only shows in the answer).
+
+⚠️ **The retraction lane cannot un-deliver bytes.** A deployment that can accept no
+exposure must force the buffered lane (or `stream: false`), and pay the latency.
+
+If mid-stream detection returns, it may only switch a stream from the passthrough
+lane to the buffered one. It may never cut.
 
 ⚠️ Interim judgments carry **`ogr-partial: 1`**, which tells the runtime to decide
 and record nothing (see the runtime's `docs/api.md`). Without it one answer lands
@@ -184,6 +242,48 @@ there, nothing can complete it, so it is written out as one more frame ahead of
 the `finish_reason` / `[DONE]`. It used to be dropped — an answer ending in `$`,
 or in the first characters of a placeholder, silently lost its last few
 characters, and only the caller could ever have noticed.
+
+### Which text a span indexes: the path registration contract
+
+One event carries a whole turn, so it holds SEVERAL texts. A verdict finding names the
+one its offsets index in its own `path`; the plugin resolves that path against its own
+copy and slices there. These are the paths this build registers:
+
+| path | text |
+|---|---|
+| `payload.text` | the user's new words, or the model's prose |
+| `payload.reasoning` | thinking / reasoning |
+| `payload.tool_results.N.result` | each outcome fed back to the model |
+| `payload.tool_calls.N.arguments.command` | the bare command an action carries |
+| `payload.tool_calls.N.command` | alias for the same |
+| `payload.tool_calls.N` | the synthesized `name {json}` composite — **attribution only** |
+| `payload.tools.N.description` | each declared tool, when the set CHANGED |
+| `payload.result`, `payload.arguments.command`, `payload.command`, `""` | the itemised history events |
+
+⚠️ **This is a contract, and breaking it is silent.** A well-formed path the plugin
+never registered is not an error — it resolves to nothing, the span is dropped, and no
+value is masked. That looks exactly like a workspace with no redaction policy. The
+`unresolved_spans` counter exists for precisely this and is the only signal.
+
+⚠️ **The bare command is a separate path from the composite, and it is the one that
+matters.** For a command-bearing action the runtime judges the command STRING — the
+Layer-1 gate parses it and the judge was trained on command strings, not on
+`name {json}` — so the offsets index `arguments.command`. Registering only the composite
+means every redaction against a shell command is dropped.
+
+⚠️ **A span against a synthesized text is never sliced.** The composite exists nowhere
+on the wire, so offsets into it cannot be written back into any message. The runtime
+marks those texts and emits no offsets for them; the plugin additionally refuses to
+resolve a PATHLESS span whenever the turn holds more than one text, because "it must
+mean the primary text" would slice one string's offsets out of another — the same
+corruption in a new place.
+
+⚠️ **The runtime's fallback field names (`payload.content`, `payload.message`,
+`payload.output`, `payload.tool_results.N.output`, `…N.content`) are deliberately NOT
+registered.** This plugin always emits the primary field, so a fallback firing means the
+wire shape changed. Registering them pre-emptively would convert that signal into
+silence. Do not "fix" an `unresolved_spans` rise by adding them — find out why the
+primary field went missing.
 
 ### Where the plaintext lives: sealed, in a gateway-side Redis
 
@@ -252,12 +352,198 @@ claiming N sent while N−k arrived:
 | counter | meaning |
 |---|---|
 | `evaluated` | verdicts asked for and received |
-| `unchecked` | **requests that reached the model with no verdict behind them** |
+| `unchecked` | **traffic that passed with no verdict behind it** — a request that reached the model, or a reply that reached the caller |
 | `ingested` | events reported asynchronously |
 | `mirrored` | batches copied to the candidate runtime |
+| `stream_stopped` | streamed answers refused or retracted at end of stream |
+| `unresolved_spans` | **redaction spans whose `path` named no text this build holds** |
 
 `unchecked` is the one to alert on: it is what a tight `timeout_ms` plus
-`fail_mode: open` produces, and it is invisible in any other signal.
+`fail_mode: open` produces, and it is invisible in any other signal. With one
+`model_output` costing the runtime one judge call per tool call, a parallel-tool turn
+enters the degraded region by construction — and fail-open makes that failure *faster
+and quieter than success*, so throughput improves while detection stops.
+
+`unresolved_spans` is the second one, and it fails the other way: nothing is masked, no
+error is raised, and the deployment is indistinguishable from one with no redaction
+policy. It moves when this plugin and the runtime disagree about a payload path — see
+the registration contract above.
+
+⚠️ **`unchecked` is a FLOOR, not a total.** It counts what *this* filter could not get a
+verdict for. The runtime can also lose an individual detector call — per-text fan-out
+means one action's judge can abort while the rest answer — and it has a log for that but
+no counter, so those never reach any number here. Where the two sides disagree about how
+much went unjudged, the runtime is the side that cannot be asked. Alert on `unchecked`,
+but do not read a zero as "everything was judged".
+
+### 🔴 A partial verdict, and why `fail_mode: closed` needs one more field
+
+⚠️ **The gap is in the contract between this plugin and the runtime, not in either
+side's code — and the violating pairing is the OUT-OF-THE-BOX default.**
+
+The plugin's promise to an operator who sets `closed` is: *if we could not judge it, it
+does not go through.* That holds for the calls this filter makes — a timeout or an
+unreachable PDP refuses the turn. It does not hold one level down.
+
+One event carries a whole turn, so the runtime fans out per text: a `model_output` with
+five tool calls is five judge calls. If one times out, the runtime catches it,
+contributes no findings for that action, and returns a verdict that **looks complete** —
+four actions judged, one never looked at, `decision: allow`, HTTP 200.
+
+The two fail modes are unrelated knobs:
+
+| plugin `fail_mode` | runtime `OGR_DETECTOR_FAIL_MODE` | result |
+|---|---|---|
+| `open` | either | passes unjudged — bad in the ordinary, visible way |
+| `closed` | `closed` | safe: the runtime's regex mock is a weak judgement, but it IS one |
+| **`closed`** | **`open`** (the runtime default) | **an unjudged action passes while the deployment believes that is impossible** |
+
+The last row is the stock configuration, not a misconfiguration someone has to reach
+for. It is worse than fail-open, because the operator paid latency for a guarantee that
+was not delivered. At the measured 20% over-budget share at concurrency 8, it is the
+expected case for a parallel-tool agent.
+
+**The fix is `x.ogr.unjudged` on the verdict**, and it is live on both sides as of
+2026-08-09. It carries the payload paths that reached a detector and got no judgement,
+deduped, in the same vocabulary as a finding's `path` (`""` for the primary or
+synthesized text); length is the count; **absent or empty means every routed text was
+fully judged**, which is the one assertion fail-closed hangs on.
+
+⚠️ **Coverage, not attendance.** A path appears if *any* guardrail routed to it failed to
+judge it — not only when every one did. A `payload.tool_calls.0` read by three tool
+judges, one of which hit a capability error, appears: two guardrails answering does not
+make the path covered. The weaker reading — "somebody looked at it" — would be the
+original defect surviving in a narrower and much harder-to-find form, reporting full
+coverage while an action went unjudged by the guardrail most likely to catch it.
+
+**The plugin does not interpret the entries.** The security property is *non-emptiness*:
+something was routed and came back unjudged. Entries go to the log verbatim, for a
+human. Being defensive about the vocabulary costs nothing; interpreting it would break
+the moment the runtime added a kind — and would break by under-reporting, which is the
+direction that silently passes traffic.
+
+Under `closed` a non-empty list refuses the turn, with a message distinct from the
+transport failure (the service answered, it just did not answer about everything); under
+`open` it passes and bumps `unchecked`.
+
+⚠️ The runtime half was never a schema change alone. Its transport catch *already
+logged* these failures and still returned an empty finding list, so the engine above it
+believed the detector ran and found nothing — the fix was making the fact **returnable**
+on every detector failure path. Its budget test asserted `resolves.toEqual([])` on a
+timeout: the defect stated as an expectation, passing for months.
+
+### Where the plaintext lives: sealed, in a gateway-side Redis
+
+The session (token→value map, plus what has already been reported) **cannot live
+in this process**. Envoy gives every worker thread its own Wasm VM and
+round-robins connections across them, so turn 1 and turn 2 of one conversation
+land in different VMs — measured, not theoretical: workers 712 then 701 on two
+consecutive requests. A Go global re-masks nothing on turn 2 and re-reports the
+whole history as new.
+
+So it is shared through Redis, **sealed with AES-256-GCM** under a key that lives
+only in the plugin configuration (`session_key`). The store holds ciphertext; a
+dump of it is useless. That is what keeps the rule intact — a store must not
+become a copy of the data it guards — while still crossing workers.
+
+Requirements, in order of how load-bearing they are:
+
+- **`session_key` is required** whenever `redis_cluster` is set. Missing or short
+  ⇒ the plugin refuses to load, rather than falling back to storing the session
+  in the clear. This is the one that actually protects the map.
+- **The OGR deployment's own Redis is fine** — the same one the runtime uses. The
+  sealing is what keeps the store from becoming a copy of the guarded data, not
+  the choice of host: the key lives only in the plugin's configuration, so the
+  runtime cannot read what the gateway wrote even though it owns the server.
+  A separate instance buys operational isolation, not secrecy.
+- What DOES matter operationally: `maxmemory-policy` must not evict these keys out
+  from under a live conversation (an evicted session degrades to un-restored
+  placeholders reaching the user — visible, not a leak), and the session traffic
+  should not crowd out the runtime's queues. Persisting is harmless: what lands on
+  disk is ciphertext.
+- Rotating the key invalidates live sessions — their placeholders stop restoring,
+  visibly. GCM authenticates, so a stale key can never silently decrypt into the
+  wrong conversation.
+
+⚠️ **The store is not only for masking, so `observe` needs it too.** `deriveRequest`
+reads it to know what has already been reported; without it every worker re-reports
+the whole conversation as new. Measured: six identical requests produced **four**
+`user_input` and **four** `tool_call` events with no Redis, and **one each** with
+it. A duplicated event stream is easy to mistake for traffic, so the plugin warns
+about this at load in both modes.
+
+Without `redis_cluster` the plugin still masks and restores within one request —
+what it loses is everything that has to survive across them.
+
+⚠️ Concurrent turns of ONE conversation are last-write-wins. Turns of a chat are
+sequential by nature, so the race costs a re-mask, not a leak.
+
+**The token is the runtime's.** `evaluate` already mints `${OGR_<TYPE>_<n>}` per
+span from a session-scoped counter and returns it in
+`modifications.spans[].replacement`; the plugin uses that and only mints its own
+as a fallback. Two numbers for one value would put two names for one person in
+the model's context.
+
+## Liveness
+
+Silencing a PEP is the cheapest bypass of an altitude: uninstall the plugin and
+every request is unguarded, with nothing in the console to say so — "no events"
+looks exactly like a quiet afternoon. So the plugin heartbeats every 30s, as the
+**sensor** (`openguardrails-higress-connector`), which the runtime records in
+`pep_sensors`. Silence past the declared `interval_s` is a coverage loss, not an
+absence of risk.
+
+It carries counters, which is the half that catches selective suppression — a PEP
+claiming N sent while N−k arrived:
+
+| counter | meaning |
+|---|---|
+| `evaluated` | verdicts asked for and received |
+| `unchecked` | **traffic that passed with no verdict behind it** — a request that reached the model, or a reply that reached the caller |
+| `ingested` | events reported asynchronously |
+| `mirrored` | batches copied to the candidate runtime |
+| `stream_stopped` | streamed answers refused or retracted at end of stream |
+| `unresolved_spans` | **redaction spans whose `path` named no text this build holds** |
+
+`unchecked` is the one to alert on: it is what a tight `timeout_ms` plus
+`fail_mode: open` produces, and it is invisible in any other signal. With one
+`model_output` costing the runtime one judge call per tool call, a parallel-tool turn
+enters the degraded region by construction — and fail-open makes that failure *faster
+and quieter than success*, so throughput improves while detection stops.
+
+`unresolved_spans` is the second one, and it fails the other way: nothing is masked, no
+error is raised, and the deployment is indistinguishable from one with no redaction
+policy. It moves when this plugin and the runtime disagree about a payload path — see
+the registration contract above.
+
+⚠️ **`unchecked` is a FLOOR, not a total.** It counts what *this* filter could not get a
+verdict for. The runtime can also lose an individual detector call — per-text fan-out
+means one action's judge can abort while the rest answer — and it has a log for that but
+no counter, so those never reach any number here. Where the two sides disagree about how
+much went unjudged, the runtime is the side that cannot be asked. Alert on `unchecked`,
+but do not read a zero as "everything was judged".
+
+### 🔴 A partial verdict is indistinguishable from a complete one
+
+⚠️ **`fail_mode: closed` does not currently mean what it says, and the gap is in the
+contract rather than in either side's code.**
+
+The plugin's promise to an operator who sets `closed` is: *if we could not judge it, it
+does not go through.* That promise holds for the calls this filter makes — a timeout or
+an unreachable PDP refuses the turn. It does **not** hold one level down. One event now
+carries a whole turn, so the runtime fans out per text: a `model_output` with five tool
+calls is five judge calls. If one of them times out, the runtime catches it, contributes
+no findings for that action, and returns a verdict **that looks complete** — four actions
+judged, one never looked at, `decision: allow`, HTTP 200.
+
+Nothing on the wire distinguishes that from a turn where every text was judged and
+nothing was found. So the plugin allows it, and a fail-closed deployment has passed an
+unjudged action while believing it cannot. Given the measured 20% over-budget share at
+concurrency 8, this is the expected case for a parallel-tool agent, not a tail event.
+
+Closing it needs the verdict to say how much of the turn was actually judged — a count,
+or the paths that were not. The plugin will honour its fail mode on that signal as soon
+as one exists; until then, treat `fail_mode: closed` as covering transport failures only.
 
 ⚠️ **The counters and the beat live in proxy-wasm SHARED DATA, not Go globals.**
 Envoy gives every worker thread its own Wasm VM, so a package-level counter is one
@@ -282,8 +568,8 @@ instance identity, which the OGR sensor does not model yet.
 | `runtime_base_url` | — | used for the Host header |
 | `api_key` | — | the runtime API key; authenticates the SENDER, resolves org + workspace |
 | `mode` | `observe` | `enforce` to act on verdicts |
-| `timeout_ms` | `5000` | the PDP budget, enforce only — nothing waits in observe |
-| `fail_mode` | `open` | `closed` refuses when the PDP is unreachable |
+| `timeout_ms` | `5000` | the PDP budget, enforce only — nothing waits in observe. A CEILING for the worst case, not a target; the runtime's `OGR_MODEL_TIMEOUT_MS` must fit strictly inside it |
+| `fail_mode` | `open` | `closed` refuses when the PDP is unreachable. ⚠️ Covers transport failures only — see "A partial verdict" above |
 | `principal_header` | `x-mse-consumer` | which header carries the caller |
 | `principal_group_header` | `x-mse-consumer-group` | which header carries the caller's group |
 | `mirror_cluster` / `mirror_base_url` | *(unset)* | a candidate runtime that gets copies and gates nothing |
@@ -292,9 +578,6 @@ instance identity, which the OGR sensor does not model yet.
 | `session_key` | — | **required with `redis_cluster`**: 32 bytes, hex or base64 |
 | `redis_username` / `redis_password` | *(empty)* | |
 | `session_ttl_s` | `1800` | matches the runtime's run-pointer idle TTL |
-| `stream_judge` | `true` in enforce | judge a streamed answer as it grows; `false` = report only |
-| `stream_judge_chars` | `120` | new characters between judgments |
-| `stream_judge_max` | `8` | judgments per stream |
 
 ⚠️ **`principal_header` and `principal_group_header` are only as trustworthy as
 the edge that writes them.** The plugin reports whatever arrives on them. Measured
@@ -327,8 +610,45 @@ more than it looks. Measured against this runtime:
 A 1s budget was tried on those grounds — 3x the single-request figure — and lost
 nine of twelve concurrent requests to the model **unchecked**. Latency scales with
 concurrency, so a budget sitting inside the working distribution means enforcement
-evaporates exactly when the gateway is busy. Hence 5s, and the advice to lower it
-only against numbers from your own runtime.
+evaporates exactly when the gateway is busy.
+
+⚠️ **5s is a CEILING, not a target.** It is what a person will tolerate once, on a bad
+request — the tail, not the middle. A deployment whose *average* sits near it has
+already failed its users even though no counter fired: nothing timed out, nothing went
+unjudged, and every request took five seconds. Expected latency belongs far below this.
+
+⚠️ **The budgets must be ordered, outermost longest — and they all fit inside this
+one:** `timeout_ms` > the runtime's `OGR_MODEL_TIMEOUT_MS` > the model gateway's own.
+Equal budgets are not ordered; 5s here against 5s there makes "who trips first" a race,
+so a slow turn can abort at the plugin while the runtime is still answering, and then
+nothing can say what was slow — the plugin logs `status=0`, the runtime sees a client
+that hung up, and the capability that actually blew the budget is named by neither.
+
+⚠️ **Order the chain by lowering the INNER budgets, never by raising this one.** Raising
+it was tried (8s) and reverted: it buys ordering by spending the user's patience, which
+is the one resource in this chain that is not ours to spend. The runtime's inline model
+budget has to be 5s *minus its own overhead* — policy resolution, Redis, serialisation,
+network — not equal to it.
+
+🔴 **The chain is NOT ordered in the shipped defaults, as of 2026-08-08.** This plugin's
+`timeout_ms` and the runtime's `OGR_MODEL_TIMEOUT_MS` are both `5000`, so which trips
+first is a race. When this filter wins it, the runtime is still working on an answer
+nobody will read, and neither side can name the slow capability: we log a bare
+`status=0`, the runtime logs a client that hung up. The timeout log says so explicitly
+rather than leaving it to be rediscovered. Lowering the runtime's inline budget below
+this one is the fix, and it is **pending a measurement of that side's non-model
+overhead** — an estimate written down would become load-bearing, so nobody has picked a
+number. Until then, treat a `status=0` as unattributed rather than as evidence about the
+model.
+
+⚠️ **It is a fan-out budget too.** A `model_output` carrying N tool calls costs the
+runtime N concurrent judge calls (measured there: 20% of gateway calls over budget at
+concurrency 8, **72% at 16**), so a turn with several parallel tool calls pushes the
+*middle* of the distribution toward the ceiling — which is exactly what the ceiling is
+not for. Fail-open then makes that failure *faster and quieter than success*: the turn
+passes unjudged and throughput improves, so `unchecked` is the number that tells you.
+One gateway call judging N actions with per-action attribution is the real fix and lives
+in the pipeline's capability interface, not here.
 
 Whatever the number, the timeout path logs
 

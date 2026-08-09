@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/openguardrails/higress/protocol"
+
 	"github.com/tidwall/gjson"
 )
 
@@ -117,11 +119,11 @@ func TestTheRuntimesTokenWins(t *testing.T) {
 	v := gjson.Parse(`{"decision":"redact","modifications":{"spans":[
 	  {"path":"payload.text","start":5,"end":21,"operator":"replace","ref":"OGR_EMAIL_7","replacement":"${OGR_EMAIL_7}"}]}}`)
 
-	red := learnFromVerdict(st, v, text)
+	red, _ := learnFromVerdict(st, v, judgedOn(text))
 	if st.Mapping["${OGR_EMAIL_7}"] != "kate@example.com" {
 		t.Fatalf("mapping = %v", st.Mapping)
 	}
-	if got := maskString(text, red); got != "mail ${OGR_EMAIL_7} now" {
+	if got := protocol.MaskString(text, red); got != "mail ${OGR_EMAIL_7} now" {
 		t.Fatalf("masked = %q", got)
 	}
 	if len(st.Counters) != 0 {
@@ -135,8 +137,8 @@ func TestVerdictWithoutModificationsFallsBackToLocalMinting(t *testing.T) {
 	v := gjson.Parse(`{"decision":"redact","findings":[
 	  {"category":"privacy.pii.email","start":5,"end":21}]}`)
 
-	red := learnFromVerdict(st, v, text)
-	if got := maskString(text, red); got != "mail ${OGR_EMAIL_1} now" {
+	red, _ := learnFromVerdict(st, v, judgedOn(text))
+	if got := protocol.MaskString(text, red); got != "mail ${OGR_EMAIL_1} now" {
 		t.Fatalf("masked = %q", got)
 	}
 }

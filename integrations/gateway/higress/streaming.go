@@ -1,416 +1,86 @@
 package main
 
 import (
-	"encoding/json"
-	"sort"
-	"strconv"
 	"strings"
-	"unicode/utf8"
 
+	"github.com/openguardrails/higress/protocol"
 	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
 )
 
-// SSE handling: restore placeholders inline, and reassemble what the model
-// produced so the stream can still be REPORTED as a model_output plus the
-// tool_calls it asked for.
+// Reading the model's reply, streamed or not.
 //
 // ⚠️ Reassembly is not a nicety. A streaming reply is the ordinary shape of chat
-// traffic, and a connector that only reports non-streaming replies makes the
-// model's whole output side invisible — which is exactly what the previous
-// connector did (its `process_output` is documented as "not called for STREAMING
-// responses"), leaving a 230:21 request-to-response ratio in the event store.
-
-// --- the restorer -----------------------------------------------------------
-
-// restorer replaces placeholders in a byte stream by matching THE MAPPING'S OWN
-// KEYS, never a hard-coded token syntax. `${OGR_EMAIL_1}` and a legacy
-// `__ogr_email_1__` both restore with no configuration, the buffer bound is
-// derived from the longest key, and a rendered `\` before punctuation is
-// absorbed — a model that formats its answer as markdown emits
-// `${OGR\_EMAIL\_1}`, and a restorer that does not know that leaves the user
-// reading a placeholder instead of their own data.
+// traffic, and a connector that only reports non-streaming replies makes the model's
+// whole output side invisible — which is exactly what the previous connector did (its
+// `process_output` is documented as "not called for STREAMING responses"), leaving a
+// 230:21 request-to-response ratio in the event store.
 //
-// ⚠️ A WHOLE key must still match. Restoration MUST NOT fall back to fuzzy or
-// prefix matching: a restorer that guesses is an exfiltration oracle — an
-// attacker who can make the model emit near-miss tokens reads back values it was
-// never shown. The defined unescape is the only latitude taken.
-type restorer struct {
-	mapping map[string]string
-	keys    []string // longest first, so a key is never shadowed by a prefix
-	maxRaw  int      // longest key's worst case: every byte preceded by an escape
-	starts  [256]bool
-}
+// ⚠️ And it must be reassembly for THIS protocol. There used to be a
+// `streamReassemblySupported()` that answered true for `openai.chat` and false for the
+// other two, because the reader hard-coded `choices.0.delta.*`: fed an Anthropic or a
+// Responses stream it accumulated nothing, `Result()` came back empty, and the output
+// side of every streamed answer went unreported. That is gone — each protocol brings
+// its own decoder (protocol/sse.go), so there is no longer a protocol whose stream this
+// build can only shrug at.
 
-func newRestorer(mapping map[string]string) *restorer {
-	r := &restorer{mapping: mapping}
-	longest := 0
-	for k := range mapping {
-		if k == "" {
-			continue
-		}
-		r.keys = append(r.keys, k)
-		if len(k) > longest {
-			longest = len(k)
-		}
-		r.starts[k[0]] = true
-	}
-	sort.Slice(r.keys, func(i, j int) bool { return len(r.keys[i]) > len(r.keys[j]) })
-	r.starts['\\'] = true // a key may begin at an escaped first character
-	r.maxRaw = longest*2 + 2
-	return r
-}
-
-// extract replaces every complete key in text and splits the remainder into
-// output and a pending tail that may be the beginning of a key. With isLast,
-// nothing is held back: a partial token at end-of-stream is just text.
-func (r *restorer) extract(text string, isLast bool) (output string, pending string) {
-	if len(r.keys) == 0 || text == "" {
-		return text, ""
-	}
-	out := make([]byte, 0, len(text)+32)
-	i := 0
-	for i < len(text) {
-		if !r.starts[text[i]] {
-			out = append(out, text[i])
-			i++
-			continue
-		}
-		key, raw, partial := r.matchAt(text, i)
-		if raw > 0 {
-			out = append(out, r.mapping[key]...)
-			i += raw
-			continue
-		}
-		if partial && !isLast && len(text)-i <= r.maxRaw {
-			return string(out), text[i:]
-		}
-		out = append(out, text[i])
-		i++
-	}
-	return string(out), ""
-}
-
-// matchAt tries every key at i, longest first, returning the key that matched
-// and the RAW byte span it covers (escapes make that longer than the key), or
-// partial=true when the text ran out before any key completed.
-func (r *restorer) matchAt(text string, i int) (key string, raw int, partial bool) {
-	for _, k := range r.keys {
-		n, status := matchKey(text, i, k)
-		if status == matchFull {
-			return k, n, false
-		}
-		if status == matchTruncated {
-			partial = true // keep looking: a SHORTER key may still match in full
-		}
-	}
-	return "", 0, partial
-}
-
-const (
-	matchNone = iota
-	matchFull
-	matchTruncated // the text ended before the key did
-)
-
-func matchKey(text string, i int, key string) (int, int) {
-	p := i
-	for k := 0; k < len(key); k++ {
-		if p >= len(text) {
-			return 0, matchTruncated
-		}
-		if text[p] == '\\' && key[k] != '\\' {
-			if p+1 >= len(text) {
-				return 0, matchTruncated // the escaped character has not arrived
-			}
-			if isEscapable(text[p+1]) {
-				p++
-			}
-		}
-		if text[p] != key[k] {
-			return 0, matchNone
-		}
-		p++
-	}
-	return p - i, matchFull
-}
-
-// isEscapable reports whether ch is punctuation a markdown renderer escapes.
-// A fixed list on purpose: a backslash before anything else stays literal, so
-// `C:\name` can never be read as an escape inside a token.
-func isEscapable(ch byte) bool {
-	switch ch {
-	case '_', '*', '$', '{', '}', '[', ']', '(', ')', '#', '+', '-', '.', '!', '`', '~', '|', '<', '>', '\\':
-		return true
-	}
-	return false
-}
-
-// --- the SSE processor ------------------------------------------------------
-
-type streamProcessor struct {
-	r *restorer
-
-	// A response that is not an event stream still flows through here in observe
-	// mode, where nothing is buffered: the bytes are passed on untouched and a
-	// bounded copy is kept so the reply can be REPORTED at the end. Buffering the
-	// whole body to read it — the enforce path's `BufferResponseBody` — is a
-	// latency and memory cost an observer has no business imposing.
-	sse bool
-	raw strings.Builder
-
-	lineBuf      string // incomplete SSE line carried across raw chunks
-	contentBuf   string // pending tail of delta.content
-	reasoningBuf string // pending tail of delta.reasoning_content
-
-	content strings.Builder
-	// Counted as it arrives, never recomputed: the streaming judge asks "how
-	// much is new" on EVERY chunk, and measuring the accumulated string each
-	// time makes one answer quadratic in its own length.
-	contentRunes int
-	toolCalls    map[int]*streamToolCall
-	finish       string
-}
-
-// ContentRunes is the length of the answer so far in CHARACTERS — the unit the
-// judging window is expressed in, and the only one that means the same thing in
-// Chinese as in English.
-func (s *streamProcessor) ContentRunes() int { return s.contentRunes }
-
-type streamToolCall struct {
-	ID   string
-	Name string
-	Args strings.Builder
-	// The restorer's held-back tail for THIS call's arguments. Per index,
-	// because two calls stream interleaved and one's half-token must never be
-	// completed by the other's next delta.
-	pending string
-}
-
-// maxRawAccum bounds the copy kept of a non-streamed reply. Past it the reply is
-// still delivered whole and simply reported truncated: a huge answer must not
-// turn into a huge allocation inside every Envoy worker.
+// maxRawAccum bounds the copy kept of a non-streamed reply. Past it the reply is still
+// delivered whole and simply reported truncated: a huge answer must not turn into a
+// huge allocation inside every Envoy worker.
 const maxRawAccum = 512 * 1024
 
-func newStreamProcessor(mapping map[string]string, sse bool) *streamProcessor {
-	return &streamProcessor{r: newRestorer(mapping), sse: sse, toolCalls: map[int]*streamToolCall{}}
+type streamProcessor struct {
+	proto protocol.Protocol
+
+	// sse distinguishes a real event stream from a plain body flowing through this
+	// hook. A non-streamed response still passes here in OBSERVE mode, where nothing
+	// is buffered: the bytes are passed on untouched and a bounded copy is kept so the
+	// reply can be REPORTED at the end. Buffering the whole body to read it — the
+	// enforce path's `BufferResponseBody` — is a latency and memory cost an observer
+	// has no business imposing.
+	sse  bool
+	scan *protocol.Scanner
+	raw  strings.Builder
+	// bytes is how much the upstream actually sent. It is the evidence that separates
+	// "the model said nothing" from "we could not read a single frame of what it sent"
+	// — two states that look identical from an empty Result and mean opposite things.
+	bytes int
 }
 
-// ProcessChunk restores placeholders in one raw chunk and accumulates what the
-// model produced. Line-oriented: SSE events are newline-delimited and a chunk
-// boundary can fall anywhere, including inside a token.
+func newStreamProcessor(proto protocol.Protocol, mapping map[string]string, sse bool) *streamProcessor {
+	s := &streamProcessor{proto: proto, sse: sse}
+	if sse {
+		s.scan = protocol.NewScanner(proto.NewDecoder(protocol.NewRestorer(mapping)))
+	}
+	return s
+}
+
+// ProcessChunk restores placeholders in one raw chunk and accumulates what the model
+// produced.
 func (s *streamProcessor) ProcessChunk(chunk []byte, isLast bool) []byte {
+	s.bytes += len(chunk)
 	if !s.sse {
 		if s.raw.Len() < maxRawAccum {
 			s.raw.Write(chunk)
 		}
 		return chunk
 	}
-	text := s.lineBuf + string(chunk)
-	s.lineBuf = ""
-
-	result := make([]byte, 0, len(chunk)+64)
-	start := 0
-	for i := 0; i < len(text); i++ {
-		if text[i] == '\n' {
-			result = append(result, s.processLine(text[start:i], isLast)...)
-			result = append(result, '\n')
-			start = i + 1
-		}
-	}
-	if start < len(text) {
-		tail := text[start:]
-		if isLast {
-			result = append(result, s.processLine(tail, true)...)
-		} else {
-			s.lineBuf = tail
-		}
-	}
-	if isLast {
-		// Backstop for a stream that ends with neither a finish_reason nor a
-		// [DONE] — a dropped upstream connection. Nothing more is coming, so
-		// what is held back is text.
-		result = append(result, s.flushPending()...)
-	}
-	return result
+	return s.scan.Chunk(chunk, isLast)
 }
 
-func (s *streamProcessor) processLine(line string, isLast bool) string {
-	if !strings.HasPrefix(line, "data: ") {
-		return line
-	}
-	data := line[6:]
-	if data == "[DONE]" {
-		return s.flushPending() + line
-	}
-	parsed := gjson.Parse(data)
-	if !parsed.IsObject() {
-		return line
-	}
-	// ⚠️ The stream is ENDING, so nothing more can complete a half-matched
-	// token: whatever the restorer is holding is text, and it has to be written
-	// out BEFORE the frame that closes the answer. Without this it was silently
-	// dropped — an answer ending in `$`, or in the first characters of a
-	// placeholder, simply lost its last few characters, and only the client
-	// could ever have noticed.
-	prefix := ""
-	if fr := parsed.Get("choices.0.finish_reason"); fr.Exists() && fr.Type == gjson.String {
-		prefix = s.flushPending()
-	}
-	modified := data
+// Bytes is how much the upstream sent.
+func (s *streamProcessor) Bytes() int { return s.bytes }
 
-	if dc := parsed.Get("choices.0.delta.content"); dc.Exists() && dc.Type == gjson.String {
-		original := dc.String()
-		s.content.WriteString(original)
-		s.contentRunes += utf8.RuneCountInString(original)
-		if restored := s.field(&s.contentBuf, original, isLast); restored != original {
-			if next, err := sjson.Set(modified, "choices.0.delta.content", restored); err == nil {
-				modified = next
-			}
-		}
-	}
+// SawBytes reports whether there was anything to read at all.
+func (s *streamProcessor) SawBytes() bool { return s.bytes > 0 }
 
-	if rc := parsed.Get("choices.0.delta.reasoning_content"); rc.Exists() && rc.Type == gjson.String {
-		original := rc.String()
-		if restored := s.field(&s.reasoningBuf, original, isLast); restored != original {
-			if next, err := sjson.Set(modified, "choices.0.delta.reasoning_content", restored); err == nil {
-				modified = next
-			}
-			if parsed.Get("choices.0.delta.reasoning").Exists() {
-				if next, err := sjson.Set(modified, "choices.0.delta.reasoning", restored); err == nil {
-					modified = next
-				}
-			}
-		}
-	}
-
-	// tool_calls arrive as deltas that concatenate by index. They are also the
-	// one place a placeholder MUST be restored whole: handing the client
-	// `${OGR_EMAIL_1}` as a tool argument means it executes on a broken value.
-	if tcs := parsed.Get("choices.0.delta.tool_calls"); tcs.IsArray() {
-		for n, tc := range tcs.Array() {
-			idx := int(tc.Get("index").Int())
-			acc := s.toolCalls[idx]
-			if acc == nil {
-				acc = &streamToolCall{}
-				s.toolCalls[idx] = acc
-			}
-			if id := tc.Get("id").String(); id != "" {
-				acc.ID = id
-			}
-			if name := tc.Get("function.name").String(); name != "" {
-				acc.Name = name
-			}
-			if args := tc.Get("function.arguments"); args.Exists() && args.Type == gjson.String {
-				original := args.String()
-				acc.Args.WriteString(original)
-				// ⚠️ Restored the SAME way as prose — through the pending tail —
-				// because a token split across two argument deltas is the normal
-				// case, not the exception: the deltas are token-sized and the
-				// placeholder is fourteen characters. Restoring only when a whole
-				// token fits inside one delta is what handed the client
-				// `{"to": "${OGR_EMAIL_1}"}` and made it act on a value that
-				// names nothing. The client's JSON parse sees the concatenation,
-				// so what matters is that the SEQUENCE comes out restored, not
-				// that any one delta does.
-				if restored := s.field(&acc.pending, original, isLast); restored != original {
-					path := "choices.0.delta.tool_calls." + strconv.Itoa(n) + ".function.arguments"
-					if next, err := sjson.Set(modified, path, restored); err == nil {
-						modified = next
-					}
-				}
-			}
-		}
-	}
-
-	if fr := parsed.Get("choices.0.finish_reason"); fr.Exists() && fr.Type == gjson.String {
-		s.finish = fr.String()
-	}
-
-	return prefix + "data: " + modified
-}
-
-// flushPending renders everything the restorer is still holding — prose,
-// reasoning, and each tool call's arguments — as ONE extra SSE frame, and
-// forgets it. A frame rather than bare bytes because the client parses frames:
-// text written outside one is not part of the answer, it is a protocol error.
-func (s *streamProcessor) flushPending() string {
-	type fn struct {
-		Arguments string `json:"arguments"`
-	}
-	type call struct {
-		Index    int `json:"index"`
-		Function fn  `json:"function"`
-	}
-	type delta struct {
-		Content   string `json:"content,omitempty"`
-		Reasoning string `json:"reasoning_content,omitempty"`
-		ToolCalls []call `json:"tool_calls,omitempty"`
-	}
-
-	d := delta{Content: s.contentBuf, Reasoning: s.reasoningBuf}
-	s.contentBuf, s.reasoningBuf = "", ""
-	for _, i := range s.callIndexes() {
-		tc := s.toolCalls[i]
-		if tc.pending == "" {
-			continue
-		}
-		d.ToolCalls = append(d.ToolCalls, call{Index: i, Function: fn{Arguments: tc.pending}})
-		tc.pending = ""
-	}
-	if d.Content == "" && d.Reasoning == "" && len(d.ToolCalls) == 0 {
-		return ""
-	}
-
-	type choice struct {
-		Index int   `json:"index"`
-		Delta delta `json:"delta"`
-	}
-	out, err := json.Marshal(struct {
-		ID      string   `json:"id"`
-		Object  string   `json:"object"`
-		Choices []choice `json:"choices"`
-	}{"chatcmpl-ogr-flush", "chat.completion.chunk", []choice{{Delta: d}}})
-	if err != nil {
-		return ""
-	}
-	return "data: " + string(out) + "\n\n"
-}
-
-func (s *streamProcessor) callIndexes() []int {
-	idx := make([]int, 0, len(s.toolCalls))
-	for i := range s.toolCalls {
-		idx = append(idx, i)
-	}
-	sort.Ints(idx)
-	return idx
-}
-
-func (s *streamProcessor) field(buf *string, text string, isLast bool) string {
-	*buf += text
-	output, pending := s.r.extract(*buf, isLast)
-	*buf = pending
-	return output
-}
-
-// Result returns what the model produced, for the model_output / tool_call
-// events. The content is the text AS PRODUCED — still carrying our placeholders
-// — because detecting on the restored text would find the very values we
-// removed and block our own restoration.
-func (s *streamProcessor) Result() (content string, calls []toolCallOut) {
+// Result is what the model produced.
+//
+// ⚠️ The text is AS PRODUCED — still carrying our placeholders — because detecting on
+// the restored text would find the very values we removed and block our own
+// restoration.
+func (s *streamProcessor) Result() protocol.Output {
 	if !s.sse {
-		body := gjson.Parse(s.raw.String())
-		return body.Get("choices.0.message.content").String(),
-			toolCallsOf(body.Get("choices.0.message"))
+		return s.proto.ParseResponse(gjson.Parse(s.raw.String()))
 	}
-	idx := make([]int, 0, len(s.toolCalls))
-	for i := range s.toolCalls {
-		idx = append(idx, i)
-	}
-	sort.Ints(idx)
-	for _, i := range idx {
-		tc := s.toolCalls[i]
-		calls = append(calls, toolCallOut{ID: tc.ID, Name: tc.Name, Arguments: tc.Args.String()})
-	}
-	return s.content.String(), calls
+	return s.scan.Output()
 }

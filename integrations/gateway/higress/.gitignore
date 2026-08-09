@@ -1,0 +1,3 @@
+# Build outputs: `go build ./...` drops the package binary here, `make` the wasm.
+higress
+plugin.wasm
