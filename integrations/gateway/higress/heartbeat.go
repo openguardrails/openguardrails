@@ -65,7 +65,8 @@ const (
 	// shared-data blob; an insert in the middle silently re-reads every existing
 	// counter as its neighbour. A length change is safe — `bump` starts from zero
 	// when the stored blob is not `cntLen*8` bytes.
-	cntStreamStopped // streamed answers refused or retracted at end of stream
+	cntStreamStopped   // streamed answers refused or retracted at end of stream
+	cntUnresolvedSpans // redaction spans whose `path` named no text we hold
 	cntLen
 )
 

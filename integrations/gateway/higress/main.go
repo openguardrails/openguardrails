@@ -1,22 +1,41 @@
 // OpenGuardrails Runtime — a Higress WASM plugin that speaks OGR to an
 // OpenGuardrails runtime directly.
 //
-// It replaces the previous pair (the `og-connector-higress-go` WASM plugin plus
-// a Python adapter process): that connector was written against the
-// previous-generation platform's HTTP contract, so every runtime concept had to be squeezed through it — thirteen
-// GuardEvent kinds became two, `flag` became "pass", batching had no place, and
-// the whole tool_call side of a policy was unreachable. Speaking OGR natively
+// It replaces the previous pair (the `og-connector-higress-go` WASM plugin plus a
+// Python adapter process): that connector was written against the previous-generation
+// platform's HTTP contract, so every runtime concept had to be squeezed through it —
+// thirteen GuardEvent kinds became two, `flag` became "pass", batching had no place,
+// and the whole tool_call side of a policy was unreachable. Speaking OGR natively
 // removes the translation AND the extra network hop.
 //
 // One switch decides how much it does:
 //
 //	mode: observe   report only. Never pauses the request, never touches a body.
-//	                Detection still runs (the runtime evaluates on ingest), so the
+//	                Every event goes to /ingest, which evaluates on arrival, so the
 //	                console fills with findings while the gateway stays a mirror.
-//	mode: enforce   evaluate before the model sees the prompt and honour the
-//	                verdict: refuse, or mask and let it through.
+//	mode: enforce   put everything that has not happened yet to /evaluate, wait for
+//	                the verdict, and honour it: refuse, or mask and let it through.
 //
 // Rolling back is switching the mode, not redeploying.
+//
+// # The two endpoints
+//
+// ⚠️ The rule is by MODE first and by REFUSABILITY second:
+//
+//	observe  →  everything to /ingest.  Nothing waits. Nothing is refusable.
+//	enforce  →  THE TURN to /evaluate, blocking, and the history to /ingest.
+//
+// "Refusable" is not a synonym for "important" — it means the model, or the caller,
+// has not seen it yet. Everything else is evidence, and evidence does not belong on a
+// blocking path. The split itself is computed once, in `deriveRequest` /
+// `deriveResponse`, and arrives here as the two fields of a `derived` (events.go); the
+// only thing this file decides is which endpoint each half goes to.
+//
+// ⚠️ `/evaluate` takes exactly ONE event: the turn. There is no batch form, because a
+// turn is not divisible — a reply that says something and calls three tools is one
+// generation, and the batch endpoint only ever existed to reassemble a decision out of
+// fragments the plugin should not have produced. `/ingest` stays a batch endpoint,
+// which is right for what it carries: independent past facts.
 package main
 
 import (
@@ -30,6 +49,7 @@ import (
 	"github.com/higress-group/proxy-wasm-go-sdk/proxywasm"
 	"github.com/higress-group/proxy-wasm-go-sdk/proxywasm/types"
 	"github.com/higress-group/wasm-go/pkg/wrapper"
+	"github.com/openguardrails/higress/protocol"
 	"github.com/tidwall/gjson"
 )
 
@@ -75,9 +95,6 @@ type Config struct {
 	agentID              string
 	store                *store
 
-	// Judging a STREAMED answer as it grows (streamjudge.go). Enforce only:
-	// observe never touches a body and never waits for anything.
-
 	// A second runtime that gets a COPY of every event and decides nothing.
 	mirror    wrapper.HttpClient
 	mirrorKey string
@@ -96,18 +113,42 @@ func parseConfig(j gjson.Result, c *Config) error {
 
 	// The PDP budget, in ENFORCE mode only — nothing waits in observe.
 	//
+	// ⚠️ 5s IS A CEILING, NOT A TARGET, and the distinction is the whole design. It is
+	// what a person will tolerate ONCE, on a bad request — the tail, not the middle. A
+	// deployment whose average sits near it has already failed the user even though no
+	// counter fired: nothing timed out, nothing was unjudged, and every request took
+	// five seconds. Expected latency belongs far below this; the number exists to bound
+	// the worst case.
+	//
 	// ⚠️ 1s was tried and MEASURED WRONG (2026-07-31). A warm single request is
 	// 233-332ms, which makes 1s look like 3x headroom; but latency scales with
-	// concurrency, and twelve simultaneous requests — a quiet minute for an
-	// enterprise gateway — spread 619ms to 1647ms, eight of them past the second.
-	// Live through the gateway, nine of twelve reached the model with no verdict
-	// at all. A budget that sits INSIDE the working distribution is the worst
-	// place for it: enforcement evaporates exactly when the system is busy, which
-	// is when it is most worth having.
+	// concurrency, and twelve simultaneous requests — a quiet minute for an enterprise
+	// gateway — spread 619ms to 1647ms, eight of them past the second. Live through the
+	// gateway, nine of twelve reached the model with no verdict at all. A budget that
+	// sits INSIDE the working distribution is the worst place for it: enforcement
+	// evaporates exactly when the system is busy, which is when it is most worth having.
 	//
-	// 5s clears the measured tail with room, and still bounds the wait. Lower it
-	// against numbers from YOUR runtime, not from a single-request benchmark —
-	// and watch the `unchecked` counter, which is what this trade actually costs.
+	// ⚠️ THE BUDGETS MUST BE ORDERED, outermost longest — this plugin > the runtime's
+	// `OGR_MODEL_TIMEOUT_MS` > the model gateway's own — AND THEY ALL FIT INSIDE THIS
+	// ONE. Equal budgets are not ordered, and 5s here against 5s there was the bug:
+	// whoever tripped first was a race, so a slow turn could abort HERE while the
+	// runtime was still answering, and then nothing can say what was slow. The plugin
+	// sees `status=0`, the runtime sees a client that hung up, and the capability that
+	// actually blew the budget is named by neither.
+	//
+	// ⚠️ Ordering is bought by lowering the INNER budgets, never by raising this one.
+	// Raising it was tried (8s) and reverted: it orders the chain by spending the user's
+	// patience, which is the one resource here that is not ours. The runtime's inline
+	// model budget has to be this minus its own overhead — policy resolution, Redis,
+	// serialisation, network — not equal to it.
+	//
+	// ⚠️ It is also the fan-out budget. One `model_output` carrying N tool calls costs
+	// the runtime N concurrent judge calls — measured there at 20% of gateway calls over
+	// budget at concurrency 8, and 72% at 16 — so a turn with several parallel tool
+	// calls pushes the MIDDLE of the distribution toward the ceiling, which is precisely
+	// what the ceiling is not for. Fail-open then makes that failure faster and quieter
+	// than success: the turn passes unjudged, latency improves, and only the `unchecked`
+	// counter says anything happened. Watch it.
 	c.timeoutMs = 5000
 	if v := j.Get("timeout_ms"); v.Exists() {
 		c.timeoutMs = uint32(v.Uint())
@@ -138,10 +179,10 @@ func parseConfig(j gjson.Result, c *Config) error {
 
 	c.client = wrapper.NewClusterClient(wrapper.TargetCluster{Cluster: c.cluster, Host: c.host})
 
-	// Traffic mirroring: a candidate runtime sees the same events and answers
-	// nothing. Fire-and-forget in EVERY mode, including enforce — the mirror must
-	// never be able to slow a request down, let alone stop one, or a shadow
-	// deployment becomes an outage the moment the candidate is unhealthy.
+	// Traffic mirroring: a candidate runtime sees the same events and answers nothing.
+	// Fire-and-forget in EVERY mode, including enforce — the mirror must never be able
+	// to slow a request down, let alone stop one, or a shadow deployment becomes an
+	// outage the moment the candidate is unhealthy.
 	if cluster := j.Get("mirror_cluster").String(); cluster != "" {
 		host := strings.TrimPrefix(strings.TrimPrefix(j.Get("mirror_base_url").String(), "https://"), "http://")
 		c.mirror = wrapper.NewClusterClient(wrapper.TargetCluster{Cluster: cluster, Host: host})
@@ -154,15 +195,15 @@ func parseConfig(j gjson.Result, c *Config) error {
 	}
 
 	// The shared session store. Optional — without it the plugin still masks and
-	// restores WITHIN one request, but a conversation whose next turn lands on
-	// another Envoy worker re-masks nothing, because that worker's Wasm VM has
-	// its own empty memory. See session.go.
+	// restores WITHIN one request, but a conversation whose next turn lands on another
+	// Envoy worker re-masks nothing, because that worker's Wasm VM has its own empty
+	// memory. See session.go.
 	if cluster := j.Get("redis_cluster").String(); cluster != "" {
 		key, err := parseSessionKey(j.Get("session_key").String())
 		if err != nil {
-			// ⚠️ Refuse to load rather than fall back to storing the map in the
-			// clear: the only reason this store is allowed to hold the session at
-			// all is that what it holds is sealed.
+			// ⚠️ Refuse to load rather than fall back to storing the map in the clear:
+			// the only reason this store is allowed to hold the session at all is that
+			// what it holds is sealed.
 			return fmt.Errorf("redis_cluster is set but %w", err)
 		}
 		client := wrapper.NewRedisClusterClient(wrapper.TargetCluster{
@@ -180,12 +221,12 @@ func parseConfig(j gjson.Result, c *Config) error {
 		c.store = &store{redis: client, key: key, ttlS: ttl}
 		proxywasm.LogWarnf("[OGR-CONFIG] session store: redis cluster=%s ttl=%ds (sealed)", cluster, ttl)
 	} else {
-		// ⚠️ In BOTH modes. The store is not only the masking map: `deriveRequest`
-		// reads it to know what has already been reported, so without it every
-		// worker re-reports the whole conversation as new. Measured on this box:
-		// six identical requests produced four user_input and four tool_call
-		// events instead of one each. Observe mode used to say nothing at all
-		// here, which is how a duplicated event stream gets mistaken for traffic.
+		// ⚠️ In BOTH modes. The store is not only the masking map: `deriveRequest` reads
+		// it to know what has already been reported, so without it every worker
+		// re-reports the whole conversation as new. Measured on this box: six identical
+		// requests produced four user_input and four tool_call events instead of one
+		// each. Observe mode used to say nothing at all here, which is how a duplicated
+		// event stream gets mistaken for traffic.
 		what := "history is re-reported per worker, so events duplicate"
 		if c.mode == modeEnforce {
 			what += "; masking is per-worker, so a conversation's later turns may reach the model unmasked"
@@ -197,8 +238,9 @@ func parseConfig(j gjson.Result, c *Config) error {
 	// first exists; RegisterTickFunc is idempotent per plugin load.
 	startHeartbeat(c)
 
-	proxywasm.LogWarnf("[OGR-CONFIG] mode=%s cluster=%s host=%s timeout=%dms fail=%s beat=%ds",
-		c.mode, c.cluster, c.host, c.timeoutMs, failLabel(c.failClosed), heartbeatPeriodMs/1000)
+	proxywasm.LogWarnf("[OGR-CONFIG] mode=%s cluster=%s host=%s timeout=%dms fail=%s beat=%ds protocols=%s",
+		c.mode, c.cluster, c.host, c.timeoutMs, failLabel(c.failClosed), heartbeatPeriodMs/1000,
+		strings.Join(protocolNames(), ","))
 	return nil
 }
 
@@ -207,6 +249,16 @@ func failLabel(closed bool) string {
 		return "closed"
 	}
 	return "open"
+}
+
+// protocolNames is logged at load so a deployment can see, without reading the build,
+// which client protocols this plugin understands.
+func protocolNames() []string {
+	var out []string
+	for _, p := range protocol.All() {
+		out = append(out, p.Name())
+	}
+	return out
 }
 
 // --- per-request context ----------------------------------------------------
@@ -218,27 +270,46 @@ const (
 	ctxSession        = "ogr_session"
 	ctxStreaming      = "ogr_streaming"
 	ctxModel          = "ogr_model"
-	ctxMessages       = "ogr_messages"
+	ctxPath           = "ogr_path"
+	ctxBody           = "ogr_body"
 	ctxStream         = "ogr_stream_proc"
 	ctxAnswered       = "ogr_answered"
 	ctxSkip           = "ogr_skip"
 )
 
 type reqState struct {
-	session   *sessionState
-	derive    *deriveCtx
-	messages  []gjson.Result
+	session *sessionState
+	derive  *deriveCtx
+
+	// The CLIENT's protocol adapter. Everything that has to know a wire shape goes
+	// through it: reading the reply, masking the forwarded body, restoring the
+	// placeholders, and rendering a refusal.
+	//
+	// ⚠️ The CLIENT's, never the upstream provider's. This filter runs at priority 200
+	// and ai-proxy at 100, so on the request we see the body BEFORE ai-proxy translates
+	// it, and on the response we see it AFTER ai-proxy has translated back — both
+	// times, the shape the caller chose. Provider independence is what our position
+	// buys; client-protocol independence is what it costs, and the protocol package is
+	// that cost paid.
+	proto protocol.Protocol
+	conv  *protocol.Conversation
+
 	model     string
 	streaming bool
 
+	// The turn in flight: the event the verdict is about (so its span offsets can be
+	// resolved back to the bytes they name), and the phase it came from, whose session
+	// marks may only be committed if the turn goes through.
+	judged  *GuardEvent
+	pending *derived
+
 	// Which lane the RUNTIME put this answer on (`x.ogr.output_mode`), and whether
-	// this filter has taken ownership of the response stream to serve it. See
-	// lanes.go.
+	// this filter has taken ownership of the response stream to serve it. See lanes.go.
 	bufferOutput bool
 	laneOwned    bool
-	// The withheld answer, on the buffered lane only. Kept as the model's own bytes
-	// so a released answer is byte-identical — re-rendering from the parsed content
-	// would drop tool_calls, ids and usage.
+	// The withheld answer, on the buffered lane only. Kept as the model's own bytes so
+	// a released answer is byte-identical — re-rendering from the parsed content would
+	// drop tool_calls, ids and usage.
 	held []byte
 }
 
@@ -246,14 +317,23 @@ type reqState struct {
 
 func onRequestHeaders(ctx wrapper.HttpContext, cfg Config) types.Action {
 	path, _ := proxywasm.GetHttpRequestHeader(":path")
-	if !strings.Contains(path, "/chat/completions") {
-		// Not chat traffic: this plugin has nothing to say about it, and reading
+	if !protocol.IsCompletionPath(path) {
+		// Not completion traffic: this plugin has nothing to say about it, and reading
 		// the body of an unrelated API would only cost latency.
+		//
+		// ⚠️ This test used to be `strings.Contains(path, "/chat/completions")`, and that
+		// one line was the entire reason a `/v1/messages` or `/v1/responses` client got
+		// ZERO guardrail coverage: the body was never opened, so nothing downstream could
+		// notice. Every observable signal said healthy — HTTP 200 to the caller, no
+		// warning, no error, no counter, no event. Measured 2026-08-08.
 		ctx.SetContext(ctxSkip, true)
 		ctx.DontReadRequestBody()
 		ctx.DontReadResponseBody()
 		return types.ActionContinue
 	}
+	// The path is the same signal ai-proxy keys on. Kept for the body phase, where the
+	// shape check can refine it.
+	ctx.SetContext(ctxPath, path)
 
 	principal, _ := proxywasm.GetHttpRequestHeader(cfg.principalHeader)
 	ctx.SetContext(ctxPrincipal, principal)
@@ -266,8 +346,8 @@ func onRequestHeaders(ctx wrapper.HttpContext, cfg Config) types.Action {
 	}
 	ctx.SetContext(ctxReqID, reqID)
 
-	// The body may be rewritten (masking) and the response must not arrive
-	// compressed, or neither restoration nor detection can read it.
+	// The body may be rewritten (masking) and the response must not arrive compressed,
+	// or neither restoration nor detection can read it.
 	_ = proxywasm.RemoveHttpRequestHeader("content-length")
 	_ = proxywasm.RemoveHttpRequestHeader("accept-encoding")
 	return types.HeaderStopIteration
@@ -278,14 +358,38 @@ func onRequestBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Actio
 		return types.ActionContinue
 	}
 	parsed := gjson.ParseBytes(body)
-	messages := parsed.Get("messages").Array()
-	if len(messages) == 0 {
-		return types.ActionContinue
-	}
-
 	principal := ctx.GetStringContext(ctxPrincipal, "")
 	group := ctx.GetStringContext(ctxPrincipalGroup, "")
 	reqID := ctx.GetStringContext(ctxReqID, "")
+	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+
+	// WHICH PROTOCOL. The path first (the same signal ai-proxy keys on), the body shape
+	// as a fallback.
+	proto := protocol.Detect(ctx.GetStringContext(ctxPath, ""), parsed)
+
+	var conv *protocol.Conversation
+	readable := false
+	if proto != nil {
+		conv, readable = proto.ParseRequest(parsed)
+	}
+	if !readable {
+		// ⚠️ We recognised a completion request and could not read a conversation out of
+		// it. SAY SO. The alternative is what shipped until now: `batchPayload` returns
+		// nil for an empty slice, the post is skipped, and the traffic leaves no trace
+		// anywhere — indistinguishable from a healthy gateway with nothing to report.
+		name := ""
+		if proto != nil {
+			name = proto.Name()
+		}
+		proxywasm.LogWarnf("[OGR-REQ] unreadable body: protocol=%q bytes=%d — reporting an unparsed signal, this request is NOT judged",
+			name, len(body))
+		d := &deriveCtx{
+			principal: principal, principalGroup: group,
+			guardID: "gw-" + reqID, reqID: reqID, now: now, protocol: name,
+		}
+		ingest(ctx, cfg, []*GuardEvent{unparsedEvent(d, "user_input", "protocol not readable by this plugin", len(body))})
+		return types.ActionContinue
+	}
 
 	rs := &reqState{
 		derive: &deriveCtx{
@@ -293,47 +397,53 @@ func onRequestBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Actio
 			principalGroup: group,
 			guardID:        "gw-" + reqID,
 			reqID:          reqID,
-			now:            time.Now().UTC().Format("2006-01-02T15:04:05Z"),
+			now:            now,
+			protocol:       proto.Name(),
 		},
-		messages:  messages,
-		model:     parsed.Get("model").String(),
-		streaming: parsed.Get("stream").Bool(),
+		proto:     proto,
+		conv:      conv,
+		model:     conv.Model,
+		streaming: conv.Stream,
 	}
 	ctx.SetContext(ctxSession, rs)
 	ctx.SetContext(ctxStreaming, rs.streaming)
 	ctx.SetContext(ctxModel, rs.model)
-	ctx.SetContext(ctxMessages, string(body))
+	ctx.SetContext(ctxBody, string(body))
 
 	// WHICH CONVERSATION — resolved before anything else, because the session is what
 	// the state below is keyed by.
 	//
-	// ⚠️ This is a Redis round trip now, where it used to be a hash of the first turn.
-	// The anchor was stateless and wrong in a way no amount of care could fix: a
-	// scheduled job repeats its opening message verbatim, so every execution hashed to
-	// one id — 5337 events over 98 hours in one "session" on the real traffic. See
+	// ⚠️ This is a Redis round trip, where it used to be a hash of the first turn. The
+	// anchor was stateless and wrong in a way no amount of care could fix: a scheduled
+	// job repeats its opening message verbatim, so every execution hashed to one id —
+	// 5337 events over 98 hours in one "session" on the real traffic. See
 	// conversation.go. The trip is one GET-equivalent against a Redis this request was
 	// already going to talk to, in front of a model call measured in seconds.
 	scope := principal
 	if scope == "" {
-		scope = ctx.GetStringContext(ctxReqID, "")
+		scope = reqID
 	}
-	digests := prefixDigests(messages)
+	digests := prefixDigests(conv)
 	cfg.store.resolveSession(scope, digests, "sess-"+reqID, func(sessionID string) {
 		rs.derive.sessionID = sessionID
 
 		// ⚠️ Everything below needs the session first: what is NEW in this request is
 		// only knowable against what we already reported, and history can only be
 		// re-masked from the map. In OBSERVE mode this whole chain happens off the
-		// critical path — the request is already on its way to the model — which is
-		// what keeps observe mode free.
+		// critical path — the request is already on its way to the model — which is what
+		// keeps observe mode free.
 		cfg.store.load(sessionID, sessionID, func(st *sessionState) {
 			rs.session = st
+			dv := deriveRequest(rs.derive, st, conv)
 			if cfg.mode == modeObserve {
-				reportAsync(ctx, cfg, deriveRequest(rs.derive, st, parsed))
+				// Nothing is refusable in observe: the request is already gone, so there
+				// is no verdict to hold the marks for.
+				ingest(ctx, cfg, dv.All())
+				dv.Commit(st)
 				cfg.store.save(sessionID, st)
 				return
 			}
-			enforceRequest(ctx, cfg, rs, parsed, string(body))
+			enforceRequest(ctx, cfg, rs, dv, string(body))
 		})
 	})
 	if cfg.mode == modeObserve {
@@ -342,48 +452,46 @@ func onRequestBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Actio
 	return types.ActionPause
 }
 
-// enforceRequest runs once the session is in hand: derive, re-mask the history
-// from what we already know, and put the newest user turn to the PDP.
-func enforceRequest(ctx wrapper.HttpContext, cfg Config, rs *reqState, parsed gjson.Result, body string) {
+// enforceRequest re-masks the history from what we already know and puts everything
+// the model has not seen yet to the PDP.
+func enforceRequest(ctx wrapper.HttpContext, cfg Config, rs *reqState, dv *derived, body string) {
 	st := rs.session
-	events := deriveRequest(rs.derive, st, parsed)
 
-	// Re-mask everything this session already knows about, on EVERY turn. Not a
-	// plugin setting: WHETHER to redact is the runtime's decision, carried by the
-	// verdict. A gateway that could switch it off locally would be a second place
-	// policy lives, and the harder one to change.
+	// Re-mask everything this session already knows about, on EVERY turn. Not a plugin
+	// setting: WHETHER to redact is the runtime's decision, carried by the verdict. A
+	// gateway that could switch it off locally would be a second place policy lives,
+	// and the harder one to change.
 	//
-	// The
-	// client's own history holds the original plaintext — it never saw our
-	// placeholders, because we restored them on the way back — so a value masked
-	// in turn 1 arrives in the clear again in turn 2.
+	// The client's own history holds the original plaintext — it never saw our
+	// placeholders, because we restored them on the way back — so a value masked in
+	// turn 1 arrives in the clear again in turn 2.
 	outBody := body
-	{
-		if masked, n := maskMessages(outBody, st.redactions()); n > 0 {
-			outBody = masked
-			proxywasm.LogWarnf("[OGR-REQ] re-masked %d history strings", n)
-		}
+	if masked, n := rs.proto.Mask(outBody, st.redactions()); n > 0 {
+		outBody = masked
+		proxywasm.LogWarnf("[OGR-REQ] re-masked %d history strings", n)
 	}
 
-	judged, rest := splitJudged(events)
-	reportAsync(ctx, cfg, rest)
-	// The primary sees `judged` through /evaluate; the mirror only ever ingests.
-	if judged != nil {
-		mirrorEvents(cfg, []*GuardEvent{judged})
-	}
-	if judged == nil {
+	ingest(ctx, cfg, dv.Report)
+	// The primary sees the turn through /evaluate; the mirror only ever ingests, so it
+	// still needs its own copy or a shadow deployment is comparing against a hole.
+	mirrorEvents(cfg, judgedOnly(dv))
+
+	rs.judged = dv.Judged
+	rs.pending = dv
+	if dv.Judged == nil {
+		dv.Commit(st)
 		finishRequest(ctx, cfg, rs, outBody)
 		return
 	}
-
-	payload, err := json.Marshal(judged)
+	payload, err := json.Marshal(dv.Judged)
 	if err != nil {
+		dv.Commit(st)
 		finishRequest(ctx, cfg, rs, outBody)
 		return
 	}
 	err = cfg.client.Post(pathEvaluate, ogrHeaders(cfg), payload,
 		func(status int, _ http.Header, respBody []byte) {
-			onInputVerdict(ctx, cfg, rs, judged, outBody, status, respBody)
+			onInputVerdict(ctx, cfg, rs, outBody, status, respBody)
 		}, cfg.timeoutMs)
 	if err != nil {
 		proxywasm.LogErrorf("[OGR-REQ] evaluate dispatch failed: %v", err)
@@ -394,56 +502,64 @@ func enforceRequest(ctx wrapper.HttpContext, cfg Config, rs *reqState, parsed gj
 // finishRequest writes the session back and lets the request go.
 func finishRequest(ctx wrapper.HttpContext, cfg Config, rs *reqState, outBody string) {
 	cfg.store.save(rs.derive.sessionID, rs.session)
-	if outBody != ctx.GetStringContext(ctxMessages, "") {
+	if outBody != ctx.GetStringContext(ctxBody, "") {
 		if err := proxywasm.ReplaceHttpRequestBody([]byte(outBody)); err != nil {
-			// ⚠️ If the buffer is no longer writable here the prompt reaches the
-			// model UNMASKED while every log says "masked". Fail loudly.
+			// ⚠️ If the buffer is no longer writable here the prompt reaches the model
+			// UNMASKED while every log says "masked". Fail loudly.
 			proxywasm.LogErrorf("[OGR-REQ] request body replace FAILED: %v", err)
 		}
-		ctx.SetContext(ctxMessages, outBody)
+		ctx.SetContext(ctxBody, outBody)
 	}
 	proxywasm.ResumeHttpRequest()
 }
 
-// splitJudged separates the one event an enforcing gateway can still stop from
-// the ones it can only report. Everything in a request's history has already
-// run on the client; the newest user turn has not reached the model yet.
-func splitJudged(events []*GuardEvent) (*GuardEvent, []*GuardEvent) {
-	for i, e := range events {
-		if e.Kind == "user_input" {
-			rest := append(append([]*GuardEvent{}, events[:i]...), events[i+1:]...)
-			return e, rest
-		}
-	}
-	return nil, events
-}
-
-func onInputVerdict(ctx wrapper.HttpContext, cfg Config, rs *reqState, judged *GuardEvent,
+func onInputVerdict(ctx wrapper.HttpContext, cfg Config, rs *reqState,
 	outBody string, status int, respBody []byte) {
 	if status != 200 {
-		proxywasm.LogErrorf("[OGR-REQ] evaluate status=%d", status)
-		applyFail(ctx, cfg, rs, "evaluate returned "+strconv.Itoa(status)+" (0 = timeout or unreachable)")
+		proxywasm.LogErrorf("[OGR-REQ] evaluate status=%d body=%s", status, truncate(string(respBody), 256))
+		why := "evaluate returned " + strconv.Itoa(status)
+		if status == 0 {
+			why += " (timeout or unreachable)" + unorderedBudgetHint
+		}
+		applyFail(ctx, cfg, rs, why)
 		return
 	}
 	bump(cntEvaluated, 1)
-	v := gjson.ParseBytes(respBody)
-	decision := v.Get("decision").String()
-	proxywasm.LogWarnf("[OGR-REQ] decision=%s findings=%d session=%s",
-		decision, len(v.Get("findings").Array()), rs.session.ID)
+	v := parseVerdict(respBody)
+	proxywasm.LogWarnf("[OGR-REQ] decision=%s kind=%s session=%s",
+		v.Decision(), rs.judged.Kind, rs.session.ID)
 
-	if stopsRequest(decision) {
+	if v.Stops() {
+		// ⚠️ NOT committed. The turn did not go through, so nothing about it may be
+		// recorded as "already reported" — otherwise the retry of a blocked prompt
+		// derives no refusable event, never reaches /evaluate, and goes to the model.
 		cfg.store.save(rs.derive.sessionID, rs.session)
-		answer(ctx, rs, refusalReason(v))
+		answer(ctx, rs, v.Reason())
 		return
 	}
+	if partiallyJudged("REQ", v, cfg.failClosed) {
+		// Same non-commit rule: the turn did not go through, so a retry must be judged
+		// again rather than skipped as already reported.
+		cfg.store.save(rs.derive.sessionID, rs.session)
+		answer(ctx, rs, partialMessage)
+		return
+	}
+	rs.commit()
 
-	// Decide the response lane before the request goes anywhere: arming the pause
-	// has to happen before the response phase begins.
+	// Decide the response lane before the request goes anywhere: arming the pause has
+	// to happen before the response phase begins.
 	armLanes(ctx, cfg, rs, v)
 
-	if decision == "redact" {
-		if red := learnFromVerdict(rs.session, v, judged.text); len(red) > 0 {
-			if masked, n := maskMessages(outBody, red); n > 0 {
+	// ⚠️ Each finding is resolved against the text ITS OWN `path` names. The judged
+	// event carries the whole turn, so it has several — the user's words and each tool
+	// outcome — and slicing one finding's offsets out of the wrong one yields a fragment
+	// that matches nothing, leaving the value the verdict asked us to remove on its way
+	// to the model while the log says "masked".
+	if v.Redacts() {
+		red, unresolved := learnFromVerdict(rs.session, v.Result(), rs.judged)
+		logUnresolvedSpans(unresolved)
+		if len(red) > 0 {
+			if masked, n := rs.proto.Mask(outBody, rs.session.redactions()); n > 0 {
 				outBody = masked
 				proxywasm.LogWarnf("[OGR-REQ] masked %d strings, %d tokens live", n, len(rs.session.Mapping))
 			}
@@ -468,10 +584,9 @@ func onResponseHeaders(ctx wrapper.HttpContext, cfg Config) types.Action {
 		return types.ActionContinue // chunks flow through onStreamingResponseBody
 	}
 	// ⚠️ OBSERVE NEVER BUFFERS. Holding the whole reply to read it is exactly the
-	// latency an observer must not add; the streaming hook keeps a bounded copy
-	// while the bytes go straight to the caller. Only enforce buffers, because
-	// only enforce can still change the reply — refuse it, or restore what we
-	// masked on the way in.
+	// latency an observer must not add; the streaming hook keeps a bounded copy while
+	// the bytes go straight to the caller. Only enforce buffers, because only enforce
+	// can still change the reply — refuse it, or restore what we masked on the way in.
 	if cfg.mode == modeObserve {
 		return types.ActionContinue
 	}
@@ -484,47 +599,64 @@ func onResponseBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Acti
 	if !ok || rs == nil || ctx.GetBoolContext(ctxAnswered, false) {
 		return types.ActionContinue
 	}
-	parsed := gjson.ParseBytes(body)
-	content := parsed.Get("choices.0.message.content").String()
-	calls := toolCallsOf(parsed.Get("choices.0.message"))
-	if content == "" && len(calls) == 0 {
+	// ⚠️ Read the reply in the CLIENT's protocol. For every provider that is not
+	// Anthropic-native, ai-proxy has already translated the reply back to the client's
+	// shape below us, so this is the shape that arrives either way.
+	out := rs.proto.ParseResponse(gjson.ParseBytes(body))
+	if out.Empty() {
 		return types.ActionContinue
 	}
 
-	events := deriveResponse(rs.derive, rs.session, content, calls, rs.messages)
+	dv := deriveResponse(rs.derive, rs.session, out, rs.conv)
 	if cfg.mode == modeObserve {
-		reportAsync(ctx, cfg, events)
+		ingest(ctx, cfg, dv.All())
+		dv.Commit(rs.session)
 		return restoreResponse(rs, body)
 	}
 
-	// Enforce: judge the model's own output, then restore our placeholders.
+	// Enforce: judge everything the model produced, then restore our placeholders.
 	// ⚠️ Detect BEFORE restoring. The text still carries the placeholders; if we
-	// restored first, the privacy guardrail would find the very values we
-	// removed and block our own restoration.
-	judged := events[0]
-	rest := events[1:]
-	reportAsync(ctx, cfg, rest)
-	mirrorEvents(cfg, []*GuardEvent{judged})
-	payload, err := json.Marshal(judged)
+	// restored first, the privacy guardrail would find the very values we removed and
+	// block our own restoration.
+	ingest(ctx, cfg, dv.Report)
+	mirrorEvents(cfg, judgedOnly(dv))
+	rs.judged, rs.pending = dv.Judged, dv
+	if dv.Judged == nil {
+		rs.commit()
+		return restoreResponse(rs, body)
+	}
+	payload, err := json.Marshal(dv.Judged)
 	if err != nil {
+		rs.commit()
 		return restoreResponse(rs, body)
 	}
 	err = cfg.client.Post(pathEvaluate, ogrHeaders(cfg), payload,
 		func(status int, _ http.Header, respBody []byte) {
 			if status == 200 {
 				bump(cntEvaluated, 1)
-				v := gjson.ParseBytes(respBody)
-				if stopsRequest(v.Get("decision").String()) {
-					_ = proxywasm.ReplaceHttpResponseBody([]byte(refusalBody(rs.model, refusalReason(v))))
+				v := parseVerdict(respBody)
+				if v.Stops() {
+					// Refused: the reply never reaches the caller, so nothing about it is
+					// recorded as reported.
+					_ = proxywasm.ReplaceHttpResponseBody([]byte(rs.proto.Refuse(rs.model, v.Reason())))
 					proxywasm.ResumeHttpResponse()
 					return
 				}
-			} else if cfg.failClosed {
-				_ = proxywasm.ReplaceHttpResponseBody([]byte(refusalBody(rs.model, failMessage)))
-				proxywasm.ResumeHttpResponse()
-				return
+				if partiallyJudged("RESP", v, cfg.failClosed) {
+					_ = proxywasm.ReplaceHttpResponseBody([]byte(rs.proto.Refuse(rs.model, partialMessage)))
+					proxywasm.ResumeHttpResponse()
+					return
+				}
+				rs.commit()
+			} else {
+				evaluateFailed("RESP", status, cfg.failClosed)
+				if cfg.failClosed {
+					_ = proxywasm.ReplaceHttpResponseBody([]byte(rs.proto.Refuse(rs.model, failMessage)))
+					proxywasm.ResumeHttpResponse()
+					return
+				}
 			}
-			if next, changed := restoreBody(string(body), rs.session.Mapping); changed {
+			if next, changed := rs.proto.Restore(string(body), rs.session.Mapping); changed {
 				_ = proxywasm.ReplaceHttpResponseBody([]byte(next))
 			}
 			proxywasm.ResumeHttpResponse()
@@ -535,8 +667,16 @@ func onResponseBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Acti
 	return types.ActionPause
 }
 
+// commit records the in-flight phase, once it is known the turn was not refused.
+func (rs *reqState) commit() {
+	if rs.pending != nil {
+		rs.pending.Commit(rs.session)
+		rs.pending = nil
+	}
+}
+
 func restoreResponse(rs *reqState, body []byte) types.Action {
-	if next, changed := restoreBody(string(body), rs.session.Mapping); changed {
+	if next, changed := rs.proto.Restore(string(body), rs.session.Mapping); changed {
 		_ = proxywasm.ReplaceHttpResponseBody([]byte(next))
 	}
 	return types.ActionContinue
@@ -547,66 +687,149 @@ func onStreamingResponseBody(ctx wrapper.HttpContext, cfg Config, chunk []byte, 
 	if !ok || rs == nil {
 		return chunk
 	}
-	// ⚠️ A refusal is OURS, not the model's. `answer` ends the request with a
-	// locally generated body, and that body still reaches this hook — so without
-	// this the plugin derives a `model_output` from its own refusal text and
-	// ingests it. Two costs, both bad for a thing whose output is evidence: the
-	// audit trail gains a record of something no model ever said, and the runtime
-	// evaluates on ingest, so the refusal is judged by the guardrails that
-	// produced it. `onResponseHeaders` and `onResponseBody` have always checked
-	// this; the streaming hook was the hole, and it swallowed BOTH response
-	// shapes, because a locally generated JSON body arrives here too.
+	// ⚠️ A refusal is OURS, not the model's. `answer` ends the request with a locally
+	// generated body, and that body still reaches this hook — so without this the
+	// plugin derives a `model_output` from its own refusal text and ingests it. Two
+	// costs, both bad for a thing whose output is evidence: the audit trail gains a
+	// record of something no model ever said, and the runtime evaluates on ingest, so
+	// the refusal is judged by the guardrails that produced it.
 	if ctx.GetBoolContext(ctxAnswered, false) {
 		return chunk
 	}
 	sp, _ := ctx.GetContext(ctxStream).(*streamProcessor)
 	if sp == nil {
-		sp = newStreamProcessor(rs.session.Mapping, ctx.GetBoolContext(ctxStreaming, true))
+		sp = newStreamProcessor(rs.proto, rs.session.Mapping, ctx.GetBoolContext(ctxStreaming, true))
 		ctx.SetContext(ctxStream, sp)
 	}
 	out := sp.ProcessChunk(chunk, isLast)
 
-	// ⚠️ NO MID-STREAM JUDGEMENT. It was here — every `stream_judge_chars`, cutting
-	// the rest of the answer on a hit — and the pipeline then measured exactly that
+	// ⚠️ NO MID-STREAM JUDGEMENT. It was here — every `stream_judge_chars`, cutting the
+	// rest of the answer on a hit — and the pipeline then measured exactly that
 	// (`docs/STREAMING_GUARDRAIL.md`, truncated-agent eval on the trained 35B-A3B):
 	//
 	//   Agent reply visible   25%     50%     75%    100%
 	//   mt_harm_correct FP    0.353   0.294   0.000  0.000
 	//
 	// Recall barely moves (0.88 @25% vs 0.90 @100%) — violations show up early — but
-	// false positives go up 2.3x and ALL of it lands on one shape: the reply that
-	// agrees on the surface and corrects underneath. "自杀是对的吗" answered with
-	// "是的，很多人有这种念头——但这个想法是错的" reads as agreement until the clause
-	// that turns it, and the turn happens at a clause boundary, not a token boundary.
-	// Early judgement is a fit PREFILTER and an unfit BLOCKING CRITERION.
+	// false positives go up 2.3x and ALL of it lands on one shape: the reply that agrees
+	// on the surface and corrects underneath. "自杀是对的吗" answered with
+	// "是的，很多人有这种念头——但这个想法是错的" reads as agreement until the clause that
+	// turns it, and the turn happens at a clause boundary, not a token boundary. Early
+	// judgement is a fit PREFILTER and an unfit BLOCKING CRITERION.
 	//
 	// The replacement is two lanes decided by the INPUT verdict — buffer when the
 	// question already looks like it is soliciting something, pass through otherwise —
 	// with the real judgement at end of stream in both. If mid-stream detection comes
 	// back it may only switch lanes (passthrough -> buffer); it may never cut.
 
-	// Enforcing on a stream: the lanes own the flow from here (lanes.go). Everything
-	// the caller receives goes out by injection, including this chunk, and the whole
-	// answer is judged once at end of stream.
+	// Enforcing on a stream: the lanes own the flow from here (lanes.go). Everything the
+	// caller receives goes out by injection, including this chunk, and the whole answer
+	// is judged once at end of stream.
 	if rs.laneOwned {
 		return laneChunk(ctx, cfg, rs, out, isLast)
 	}
 
 	if isLast {
-		// Observe mode: the answer becomes a RECORD and nothing more. One event for
-		// the whole reply — there is no verdict to wait for and nothing to stop.
-		content, calls := sp.Result()
-		if content != "" || len(calls) > 0 {
-			events := deriveResponse(rs.derive, rs.session, content, calls, rs.messages)
-			reportAsync(ctx, cfg, events)
+		// Observe mode: the answer becomes a RECORD and nothing more. There is no
+		// verdict to wait for and nothing to stop.
+		result := sp.Result()
+		switch {
+		case !result.Empty():
+			dv := deriveResponse(rs.derive, rs.session, result, rs.conv)
+			ingest(ctx, cfg, dv.All())
+			dv.Commit(rs.session)
+		case sp.SawBytes():
+			// ⚠️ An empty result here means one of two very different things: the model
+			// said nothing, or we could not read a single frame of what it sent. Only the
+			// second is a hole, and it must not look like the first.
+			reportUnreadableStream(ctx, cfg, rs, sp)
 		}
 	}
 	return out
 }
 
+// reportUnreadableStream says, out loud and on the wire, that the model's OUTPUT side
+// of this request was never judged because nothing could be reassembled out of the
+// bytes that arrived. The request side still was.
+//
+// ⚠️ The silence this replaces is the expensive kind: the caller gets its answer, the
+// gateway logs a clean 200, and the only trace of an unjudged reply is an event that
+// was never sent.
+func reportUnreadableStream(ctx wrapper.HttpContext, cfg Config, rs *reqState, sp *streamProcessor) {
+	proxywasm.LogWarnf("[OGR-RESP] %d stream bytes reassembled to nothing on %s — the model's output side of this request is NOT judged",
+		sp.Bytes(), rs.proto.Name())
+	ingest(ctx, cfg, []*GuardEvent{
+		unparsedEvent(rs.derive, "model_output", "stream not reassembled by this build", sp.Bytes()),
+	})
+}
+
 // --- talking to the runtime -------------------------------------------------
 
 const failMessage = "The AI guardrail service is unavailable and this deployment is configured to fail closed."
+
+// partialMessage is distinct from failMessage on purpose: the guardrail service ANSWERED,
+// it just did not answer about all of this turn. Telling an operator "unavailable" would
+// send them looking at connectivity for a service that is up.
+const partialMessage = "Part of this turn could not be evaluated and this deployment is configured to fail closed."
+
+// unorderedBudgetHint is appended to a `status=0`, because that status is exactly as
+// informative as the budget chain is ordered.
+//
+// ⚠️ As of 2026-08-08 the chain is NOT ordered in the shipped defaults: this plugin's
+// `timeout_ms` and the runtime's `OGR_MODEL_TIMEOUT_MS` are both 5000, so which one
+// trips first is a race. When this filter wins it, the runtime is still working on an
+// answer nobody will read, and neither side can name the slow capability — we log a
+// bare 0, and the runtime logs a client that hung up. Lowering the runtime's inline
+// budget below this one is the fix; it is pending a measurement of that side's
+// non-model overhead.
+const unorderedBudgetHint = "; if the runtime's own model budget is not strictly BELOW this plugin's timeout_ms, a 0 may be this filter aborting a runtime that was still answering — the slow capability is then unattributable on either side"
+
+// partiallyJudged reports a verdict that covered only part of the turn, and answers
+// whether the caller must refuse it.
+//
+// ⚠️ This is the fail-closed promise, kept one level deeper than transport. An operator
+// who sets `closed` is told: if we could not judge it, it does not go through. Without
+// this check that holds only for calls THIS filter makes — the runtime losing one
+// action's judge call inside a 200 would pass an unjudged action while the deployment
+// believed that impossible, which is worse than fail-open, because the latency was paid
+// for a guarantee that was not delivered.
+//
+// ⚠️ Inert until the runtime populates `x.ogr.unjudged`: absent means everything was
+// judged, which is exactly today's behaviour. Reader first, writer second — that is the
+// only safe order for a two-sided contract that gates a security property.
+func partiallyJudged(phase string, v verdict, failClosed bool) bool {
+	if !v.Partial() {
+		return false
+	}
+	unjudged := v.Unjudged()
+	if v.MustRefusePartial(failClosed) {
+		proxywasm.LogWarnf("[OGR-%s] the runtime judged only part of this turn (%d unjudged: %s) — REFUSING, fail_mode=closed",
+			phase, len(unjudged), strings.Join(unjudged, " "))
+		return true
+	}
+	bump(cntUnchecked, 1)
+	proxywasm.LogWarnf("[OGR-%s] the runtime judged only part of this turn (%d unjudged: %s) — passed anyway, fail_mode=open",
+		phase, len(unjudged), strings.Join(unjudged, " "))
+	return false
+}
+
+// evaluateFailed reports an /evaluate call that did not answer, and says what it cost.
+//
+// ⚠️ The reply-side calls used to take this branch in SILENCE: fail-open let the model's
+// answer through unjudged with no log, no counter and a clean 200. That is the same hole
+// the request side already had closed, in the direction nobody was looking.
+func evaluateFailed(phase string, status int, failClosed bool) {
+	why := "evaluate returned " + strconv.Itoa(status)
+	if status == 0 {
+		why += " (timeout or unreachable)" + unorderedBudgetHint
+	}
+	if failClosed {
+		proxywasm.LogWarnf("[OGR-%s] %s — failing CLOSED", phase, why)
+		return
+	}
+	bump(cntUnchecked, 1)
+	proxywasm.LogWarnf("[OGR-%s] the model's reply reached the caller UNJUDGED (fail-open): %s", phase, why)
+}
 
 func ogrHeaders(cfg Config) [][2]string {
 	return [][2]string{
@@ -615,14 +838,52 @@ func ogrHeaders(cfg Config) [][2]string {
 	}
 }
 
-// reportAsync posts events to the async ingest endpoint and does not wait. The
-// runtime evaluates them there too, so observe mode still produces findings —
-// it just never makes anyone wait for them.
+// judgedOnly is the mirror's copy of the turn.
+func judgedOnly(dv *derived) []*GuardEvent {
+	if dv.Judged == nil {
+		return nil
+	}
+	return []*GuardEvent{dv.Judged}
+}
+
+// logToolCap and logActionCap say out loud that a turn was truncated.
 //
-// The mirror gets the same batch, always: in enforce mode the primary decides
-// through /evaluate and the mirror still needs the whole picture, or a shadow
-// deployment is comparing against a hole.
-func reportAsync(ctx wrapper.HttpContext, cfg Config, events []*GuardEvent) {
+// ⚠️ A cap that silently drops part of a turn is a cap that silently drops enforcement:
+// what is not in the event is not judged, and nothing downstream can tell a short turn
+// from a trimmed one.
+func logToolCap(declared, limit int) {
+	proxywasm.LogWarnf("[OGR-REQ] ⚠️ %d tools declared, carrying the first %d — the rest are NOT judged",
+		declared, limit)
+}
+
+// logUnresolvedSpans reports redaction spans that named a text this event cannot
+// slice.
+//
+// ⚠️ The failure it catches is a path-syntax disagreement between this plugin and the
+// runtime, and it is otherwise invisible: every span is dropped, no value is masked, no
+// error is raised, and the deployment looks exactly like one with no redaction policy.
+func logUnresolvedSpans(n int) {
+	if n == 0 {
+		return
+	}
+	bump(cntUnresolvedSpans, uint64(n))
+	proxywasm.LogWarnf("[OGR-REQ] ⚠️ %d redaction spans named a text this event cannot slice — nothing was masked for them; check that the runtime's finding `path` matches a payload path this build registers",
+		n)
+}
+
+func logActionCap(asked, limit int) {
+	proxywasm.LogWarnf("[OGR-RESP] ⚠️ the model asked for %d actions, carrying the first %d — the rest are NOT judged",
+		asked, limit)
+}
+
+// ingest posts events to the async endpoint and does not wait. The runtime evaluates
+// them there too, so observe mode still produces findings — it just never makes anyone
+// wait for them.
+//
+// The mirror gets the same batch, always: in enforce mode the primary decides through
+// /evaluate and the mirror still needs the whole picture, or a shadow deployment is
+// comparing against a hole.
+func ingest(ctx wrapper.HttpContext, cfg Config, events []*GuardEvent) {
 	payload := batchPayload(events)
 	if payload == nil {
 		return
@@ -634,11 +895,11 @@ func reportAsync(ctx wrapper.HttpContext, cfg Config, events []*GuardEvent) {
 
 // mirrorAsync sends a copy to the candidate runtime and forgets about it.
 //
-// ⚠️ Dispatched, never awaited, in EVERY mode. A mirror exists to answer "what
-// would the new policy have said" — it is not in the decision, so a slow or dead
-// candidate must cost the caller nothing. That is also why it rides /ingest
-// rather than /evaluate: the mirror runtime evaluates on ingest anyway, so its
-// console fills with the same findings without anyone waiting for a verdict.
+// ⚠️ Dispatched, never awaited, in EVERY mode. A mirror exists to answer "what would
+// the new policy have said" — it is not in the decision, so a slow or dead candidate
+// must cost the caller nothing. That is also why it rides /ingest rather than
+// /evaluate: the mirror runtime evaluates on ingest anyway, so its console fills with
+// the same findings without anyone waiting for a verdict.
 func mirrorAsync(cfg Config, payload []byte) {
 	if !cfg.hasMirror || payload == nil {
 		return
@@ -647,8 +908,8 @@ func mirrorAsync(cfg Config, payload []byte) {
 	bump(cntMirrored, 1)
 }
 
-// mirrorEvents is the mirror-only path, for events the primary saw through a
-// different endpoint (the enforce-mode /evaluate) and must not receive twice.
+// mirrorEvents is the mirror-only path, for events the primary saw through /evaluate
+// and must not receive twice.
 func mirrorEvents(cfg Config, events []*GuardEvent) {
 	if !cfg.hasMirror {
 		return
@@ -688,40 +949,38 @@ func post(client wrapper.HttpClient, apiKey string, payload []byte, timeoutMs ui
 
 // --- failure handling -------------------------------------------------------
 
-func failAction(ctx wrapper.HttpContext, cfg Config, rs *reqState, why string) types.Action {
-	if !cfg.failClosed {
-		return types.ActionContinue
-	}
-	answer(ctx, rs, failMessage)
-	return types.ActionPause
-}
-
 func applyFail(ctx wrapper.HttpContext, cfg Config, rs *reqState, why string) {
 	if cfg.failClosed {
 		answer(ctx, rs, failMessage)
 		return
 	}
+	// ⚠️ NOT committed either, so an exact retry of this turn is judged again rather
+	// than skipped as already-reported. The cost is bounded: once the model has
+	// answered, the turn is no longer new input (protocol.Conversation.NewInput), so
+	// the following turn does not re-report it — only a true replay does, and a replay
+	// of traffic nothing judged is precisely what we want a second chance at.
+	//
 	// ⚠️ Say what actually happened. "fail-open" reads like a setting working as
-	// intended; what it means for this request is that nothing judged it. A
-	// deployment that never greps for this line cannot tell a healthy gateway
-	// from one whose PDP has been unreachable for a week.
+	// intended; what it means for this request is that nothing judged it. A deployment
+	// that never greps for this line cannot tell a healthy gateway from one whose PDP
+	// has been unreachable for a week.
 	bump(cntUnchecked, 1)
 	proxywasm.LogWarnf("[OGR-REQ] request passed UNCHECKED (fail-open): %s, session=%s",
 		why, rs.session.ID)
 	proxywasm.ResumeHttpRequest()
 }
 
-// answer ends the request with a refusal the caller's client can render, in the
-// shape the caller asked for.
+// answer ends the request with a refusal the caller's client can render, in the shape
+// the caller asked for — rendered by the caller's own protocol adapter.
 func answer(ctx wrapper.HttpContext, rs *reqState, reason string) {
 	ctx.SetContext(ctxAnswered, true)
 	if rs.streaming {
 		_ = proxywasm.SendHttpResponse(200,
 			[][2]string{{"content-type", "text/event-stream"}, {"cache-control", "no-cache"}},
-			[]byte(refusalStream(rs.model, reason)), -1)
+			[]byte(rs.proto.RefuseStream(rs.model, reason)), -1)
 		return
 	}
 	_ = proxywasm.SendHttpResponse(200,
 		[][2]string{{"content-type", "application/json"}},
-		[]byte(refusalBody(rs.model, reason)), -1)
+		[]byte(rs.proto.Refuse(rs.model, reason)), -1)
 }

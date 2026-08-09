@@ -4,7 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 
-	"github.com/tidwall/gjson"
+	"github.com/openguardrails/higress/protocol"
 )
 
 // WHICH CONVERSATION this request continues.
@@ -45,26 +45,15 @@ const (
 	digestSep = "\x00"
 )
 
-// chainableTurns returns the messages a fingerprint is taken over: everything but the
-// system/developer prompt.
-//
 // ⚠️ EXCLUDING THE SYSTEM PROMPT IS LOAD-BEARING, and leaving it in is the failure mode
 // that would disable this whole mechanism without a single error. Practically every
 // agent prompt carries a clock ("Current time: …"), so it differs on every request of
 // one conversation; a digest including it never matches its own previous turn, every
 // request opens a fresh session, and the result is indistinguishable from having no
 // chaining at all. Nothing is lost: the chain is already scoped to one consumer.
-func chainableTurns(messages []gjson.Result) []gjson.Result {
-	out := make([]gjson.Result, 0, len(messages))
-	for _, m := range messages {
-		switch m.Get("role").String() {
-		case "system", "developer":
-			continue
-		}
-		out = append(out, m)
-	}
-	return out
-}
+//
+// The exclusion is now structural rather than a filter: protocol.Conversation keeps the
+// system prompt in its own field, so the turns a digest runs over cannot contain it.
 
 // collapseSpaces folds every run of whitespace into one space and trims the ends, so
 // the re-serialisation jitter between one request and the next cannot break a chain.
@@ -92,25 +81,34 @@ func collapseSpaces(s string) string {
 //
 // Chained rather than re-hashed per prefix (h_k = sha256(h_{k-1} ‖ turn_k)), so every
 // candidate a lookup can want falls out of one pass.
-func prefixDigests(messages []gjson.Result) []string {
-	turns := chainableTurns(messages)
-	digests := make([]string, 0, len(turns)+1)
+func prefixDigests(conv *protocol.Conversation) []string {
+	digests := make([]string, 0, len(conv.Turns)+1)
 	digests = append(digests, "")
 	running := ""
-	for _, m := range turns {
+	for _, t := range conv.Turns {
 		h := sha256.New()
 		h.Write([]byte(running))
 		h.Write([]byte(digestSep))
-		h.Write([]byte(m.Get("role").String()))
+		h.Write([]byte(t.Role))
 		h.Write([]byte(digestSep))
-		h.Write([]byte(collapseSpaces(textOf(m))))
-		// A tool_call is part of what happened on that turn and the next request will
+		h.Write([]byte(collapseSpaces(t.Text)))
+		// An action is part of what happened on that turn and the next request will
 		// carry it back verbatim, so it belongs in the fingerprint.
-		for _, tc := range m.Get("tool_calls").Array() {
+		for _, a := range t.Actions {
 			h.Write([]byte(digestSep))
-			h.Write([]byte(tc.Get("function.name").String()))
+			h.Write([]byte(a.Name))
 			h.Write([]byte(digestSep))
-			h.Write([]byte(collapseSpaces(tc.Get("function.arguments").String())))
+			h.Write([]byte(collapseSpaces(a.Arguments)))
+		}
+		// So is an outcome. ⚠️ Without it, the two requests of one agent step — "here
+		// are the results" and a retry of the same — fingerprint identically to the
+		// step before them, and a long tool-only stretch of a run chains on a prefix
+		// that stopped growing.
+		if t.Outcome != nil {
+			h.Write([]byte(digestSep))
+			h.Write([]byte(t.Outcome.CallID))
+			h.Write([]byte(digestSep))
+			h.Write([]byte(collapseSpaces(t.Outcome.Text)))
 		}
 		running = hex.EncodeToString(h.Sum(nil))[:32]
 		digests = append(digests, running)

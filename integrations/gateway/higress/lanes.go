@@ -6,7 +6,6 @@ import (
 
 	"github.com/higress-group/proxy-wasm-go-sdk/proxywasm"
 	"github.com/higress-group/wasm-go/pkg/wrapper"
-	"github.com/tidwall/gjson"
 )
 
 // TWO LANES FOR A STREAMED ANSWER.
@@ -52,11 +51,11 @@ import (
 //
 // Called from the input verdict handler — `NeedPauseStreamingResponse` must be set
 // before the response phase begins.
-func armLanes(ctx wrapper.HttpContext, cfg Config, rs *reqState, v gjson.Result) {
+func armLanes(ctx wrapper.HttpContext, cfg Config, rs *reqState, v verdict) {
 	// The runtime only states a lane on an input judgement, and only a streaming
 	// request has lanes to choose between. Absent = the pre-lane behaviour, which is
 	// the passthrough one.
-	rs.bufferOutput = v.Get("x\\.ogr\\.output_mode").String() == "buffer"
+	rs.bufferOutput = v.BuffersOutput()
 	if cfg.mode != modeEnforce || !rs.streaming {
 		return
 	}
@@ -98,23 +97,35 @@ func judgeFinal(ctx wrapper.HttpContext, cfg Config, rs *reqState) {
 		rs.finish(nil)
 		return
 	}
-	content, calls := sp.Result()
-	if content == "" && len(calls) == 0 {
+	out := sp.Result()
+	if out.Empty() {
+		// ⚠️ Same fork as the observe path: nothing said, or nothing readable. Only the
+		// second is a hole, and it has to be reported as one.
+		if sp.SawBytes() {
+			reportUnreadableStream(ctx, cfg, rs, sp)
+		}
 		rs.finish(nil)
 		return
 	}
 
-	events := deriveResponse(rs.derive, rs.session, content, calls, rs.messages)
-	if len(events) == 0 {
+	dv := deriveResponse(rs.derive, rs.session, out, rs.conv)
+	ingest(ctx, cfg, dv.Report)
+	if dv.Judged == nil {
+		dv.Commit(rs.session)
 		rs.finish(nil)
 		return
 	}
-	judged := events[0]
-	reportAsync(ctx, cfg, events[1:])
-	mirrorEvents(cfg, []*GuardEvent{judged})
+	// ⚠️ The WHOLE reply in one judgement: the prose and every action it asks for, as
+	// the one generation they are. This used to judge `events[0]` and send the rest to
+	// /ingest, so a reply that said something AND called a tool had its action reported
+	// rather than refused — and the batch that replaced it made the runtime rank
+	// fragment decisions back into an answer about the turn.
+	mirrorEvents(cfg, judgedOnly(dv))
+	rs.judged, rs.pending = dv.Judged, dv
 
-	payload, err := json.Marshal(judged)
+	payload, err := json.Marshal(dv.Judged)
 	if err != nil {
+		rs.commit()
 		rs.finish(nil)
 		return
 	}
@@ -122,8 +133,9 @@ func judgeFinal(ctx wrapper.HttpContext, cfg Config, rs *reqState) {
 		func(status int, _ http.Header, respBody []byte) {
 			if status != 200 {
 				// Fail mode decides, exactly as it does on the request side. Note the
-				// asymmetry the medium forces: failing CLOSED on the passthrough lane
-				// can only retract, because the answer has already been read.
+				// asymmetry the medium forces: failing CLOSED on the passthrough lane can
+				// only retract, because the answer has already been read.
+				evaluateFailed("LANE", status, cfg.failClosed)
 				if cfg.failClosed {
 					rs.finishBlocked(failMessage)
 					return
@@ -132,11 +144,17 @@ func judgeFinal(ctx wrapper.HttpContext, cfg Config, rs *reqState) {
 				return
 			}
 			bump(cntEvaluated, 1)
-			v := gjson.ParseBytes(respBody)
-			if stopsRequest(v.Get("decision").String()) {
-				rs.finishBlocked(refusalReason(v))
+			v := parseVerdict(respBody)
+			if v.Stops() {
+				// Refused: nothing about this reply is recorded as reported.
+				rs.finishBlocked(v.Reason())
 				return
 			}
+			if partiallyJudged("LANE", v, cfg.failClosed) {
+				rs.finishBlocked(partialMessage)
+				return
+			}
+			rs.commit()
 			rs.finish(nil)
 		}, cfg.timeoutMs)
 	if err != nil {
@@ -168,13 +186,13 @@ func (rs *reqState) finishBlocked(reason string) {
 	if rs.bufferOutput {
 		rs.held = nil
 		if err := proxywasm.InjectEncodedDataToFilterChain(
-			[]byte(refusalStream(rs.model, reason)), true); err != nil {
+			[]byte(rs.proto.RefuseStream(rs.model, reason)), true); err != nil {
 			proxywasm.LogErrorf("[OGR-LANE] refusal inject failed: %v", err)
 		}
 		return
 	}
 	if err := proxywasm.InjectEncodedDataToFilterChain(
-		[]byte(contentFilterFrames(rs.model)), true); err != nil {
+		[]byte(rs.proto.Retract(rs.model)), true); err != nil {
 		proxywasm.LogErrorf("[OGR-LANE] retraction inject failed: %v", err)
 	}
 }
