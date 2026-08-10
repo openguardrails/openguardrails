@@ -70,7 +70,7 @@ const (
 	// Reported in the heartbeat, so it is how a deployment learns which build is in
 	// the VM. Kept honest by TestPluginVersionMatchesTheVERSIONFile — 1.3.0 and 1.4.0
 	// both shipped while this still said 1.2.0.
-	pluginVersion = "1.6.0"
+	pluginVersion = "1.7.0"
 
 	maxTranscriptEntries = 64
 	maxEntryText         = 32768
@@ -422,30 +422,25 @@ type derived struct {
 	Judged *GuardEvent
 	Report []*GuardEvent
 
-	// marks are the session updates this phase implies — "we have now reported this
-	// user turn / this call id / this tool set" — held until the caller knows the turn
-	// was not refused.
-	marks []func(*sessionState)
-	// seen dedupes within ONE derivation pass, now that the session is not written to
-	// as we go.
+	// seen dedupes within ONE derivation pass: a request carrying the same call twice
+	// must not derive it twice. Within a pass only — nothing here outlives the request.
 	seen map[string]bool
 }
 
-// Commit records what this phase reported.
+// Commit is now a no-op, and the security property it used to carry holds BY
+// CONSTRUCTION.
 //
-// ⚠️ CALLED ONLY WHEN THE TURN WENT THROUGH, and that is a security property rather
-// than bookkeeping. The marks are what make `deriveRequest` skip an input it has
-// already reported — so committing them for a turn that was REFUSED means the retry of
-// a blocked prompt derives nothing refusable, `/evaluate` is never called, and the
-// second attempt reaches the model. Send it twice and the block is gone.
-func (dv *derived) Commit(st *sessionState) {
-	for _, m := range dv.marks {
-		m(st)
-	}
-	dv.marks = nil
-}
-
-func (dv *derived) mark(f func(*sessionState)) { dv.marks = append(dv.marks, f) }
+// It existed because the marks it applied ("we have now reported this user turn") were
+// what made `deriveRequest` skip an input on the next request — so committing them for
+// a REFUSED turn meant the retry of a blocked prompt derived nothing refusable,
+// `/evaluate` was never called, and the second attempt reached the model. Send it twice
+// and the block was gone; the fix was to commit only on the way through.
+//
+// With no state surviving the request there is nothing to commit and nothing to skip:
+// every request re-derives its refusable turn from the conversation it carries, so a
+// retry is always judged again. Kept as a call site so the ordering stays legible and
+// so re-introducing per-conversation state has an obvious place to hook.
+func (dv *derived) Commit(_ *sessionState) {}
 
 // claim reports whether this pass has already handled an id, so one request carrying
 // the same call twice does not derive it twice.
@@ -559,11 +554,10 @@ func deriveRequest(d *deriveCtx, st *sessionState, conv *protocol.Conversation) 
 			// double-count findings on every turn of a long conversation; history still
 			// gets MASKED, from the session's accumulated map, with no second detector
 			// pass.
-			if t.Text == "" || st.sawUserText(t.Text) {
+			if t.Text == "" {
 				continue
 			}
 			userText = t.Text
-			dv.mark(func(s *sessionState) { s.markUserText(t.Text) })
 
 		case protocol.RoleTool:
 			// ⚠️ THE AGENT LOOP'S REFUSABLE INPUT. The tool has already run — we cannot
@@ -574,11 +568,8 @@ func deriveRequest(d *deriveCtx, st *sessionState, conv *protocol.Conversation) 
 				continue
 			}
 			id := t.Outcome.CallID
-			if id != "" {
-				if st.seenResult(id) || !dv.claim("r:"+id) {
-					continue
-				}
-				dv.mark(func(s *sessionState) { s.markResult(id) })
+			if id != "" && !dv.claim("r:"+id) {
+				continue
 			}
 			results = append(results, outcomePayload(t.Outcome))
 			resultTexts = append(resultTexts, t.Outcome.Text)
@@ -589,13 +580,21 @@ func deriveRequest(d *deriveCtx, st *sessionState, conv *protocol.Conversation) 
 	// rug-pull looks like, and it is refusable because the model has not read the new
 	// list yet. It rides the turn rather than becoming its own judged event: it is
 	// context for this turn, not a separate thing happening.
+	/*
+	 * ⚠️ SENT ON EVERY TURN NOW, and the "did it change" question moved to the runtime
+	 * (`policy-engine/toolsFingerprint.ts`). It is a fact about a CONVERSATION, so
+	 * answering it here required remembering a hash across requests — one of the four
+	 * things that made this filter stateful. The runtime holds the session, so it holds
+	 * the digest, and it drops `payload.tools` from what it judges when nothing moved.
+	 *
+	 * ⚠️ The rug-pull surface is unaffected: a description rewritten under a running
+	 * agent still reaches the judge the turn it changes, and it now also survives this
+	 * plugin restarting or its store being unavailable, neither of which it used to.
+	 */
 	toolsChanged := ""
 	if len(conv.Tools) > 0 {
-		if h := hashOf(toolsFingerprint(conv.Tools)); h != st.ToolsHash {
-			toolsChanged = h
-			dv.mark(func(s *sessionState) { s.setToolsHash(h) })
-			payload["tools"] = toolsPayload(conv.Tools)
-		}
+		toolsChanged = hashOf(toolsFingerprint(conv.Tools))
+		payload["tools"] = toolsPayload(conv.Tools)
 	}
 
 	// Every tool DESCRIPTION is its own text: a description rewritten under us is the
@@ -651,10 +650,9 @@ func deriveRequest(d *deriveCtx, st *sessionState, conv *protocol.Conversation) 
 		case protocol.RoleAssistant:
 			for _, a := range t.Actions {
 				id := a.ID
-				if id == "" || st.seenCall(id) || !dv.claim("c:"+id) {
+				if id == "" || !dv.claim("c:"+id) {
 					continue
 				}
-				dv.mark(func(s *sessionState) { s.markCall(id) })
 				dv.report(attach(toolCallEvent(d, a)))
 			}
 		case protocol.RoleTool:
@@ -662,10 +660,9 @@ func deriveRequest(d *deriveCtx, st *sessionState, conv *protocol.Conversation) 
 				continue
 			}
 			id := t.Outcome.CallID
-			if id == "" || st.seenResult(id) || !dv.claim("r:"+id) {
+			if id == "" || !dv.claim("r:"+id) {
 				continue
 			}
-			dv.mark(func(s *sessionState) { s.markResult(id) })
 			dv.report(attach(toolResultEvent(d, t.Outcome)))
 		}
 	}
@@ -735,11 +732,6 @@ func deriveResponse(d *deriveCtx, st *sessionState, out protocol.Output,
 	for i, a := range out.Actions {
 		if i >= maxActionsPerTurn {
 			break
-		}
-		if id := a.ID; id != "" {
-			// Recorded so the next request does not re-report the same action out of its
-			// re-sent history.
-			dv.mark(func(s *sessionState) { s.markCall(id) })
 		}
 		calls = append(calls, actionPayload(a))
 		// ⚠️ Registered so a finding ABOUT AN ACTION has somewhere to resolve to — both
@@ -814,6 +806,23 @@ func toolsPayload(tools []protocol.ToolDef) []map[string]any {
 // The turn's own actions and outcomes ride the judged event instead; these record what
 // the client executed while we were not looking, which are independent past facts.
 
+// stableID gives a HISTORY event an identity derived from the fact it reports, not from
+// the request that happened to carry it.
+//
+// ⚠️ This is what replaced the plugin's cross-request "already reported" set. A client
+// re-sends its whole conversation every turn, so the same executed action is carried by
+// every subsequent request; the plugin used to remember which ids it had reported, in
+// Redis, which is one of the four things that made it stateful. A deterministic id makes
+// the re-report IDEMPOTENT instead: `/ingest` keys its queue job on
+// (workspace, event_id) and the analytics row is merge-on-write on the same id, so the
+// tenth report of one action collapses onto the first.
+//
+// ⚠️ Only for facts that are IMMUTABLE once they happen — an executed call, its outcome,
+// a declared tool. The JUDGED turn keeps a per-request id on purpose: a retry of a
+// refused prompt is a NEW decision and must be judged again, and giving it a stable id
+// would let the store treat the second attempt as a duplicate of the first.
+func stableID(kind, key string) string { return "evt-" + kind + "-" + hashOf(key) }
+
 func toolCallEvent(d *deriveCtx, a protocol.Action) *GuardEvent {
 	p := actionPayload(a)
 	// The itemised kind names the id `call_id`, matching the OGR payload sketch for
@@ -821,6 +830,7 @@ func toolCallEvent(d *deriveCtx, a protocol.Action) *GuardEvent {
 	p["call_id"] = a.ID
 	delete(p, "id")
 	e := d.event("tool_call", p)
+	e.EventID = stableID("tc", a.ID)
 	// Here the action IS the payload, so the composite sits at the empty path and the
 	// bare command at `payload.arguments.command`.
 	registerAction(e, "", a)
@@ -829,6 +839,7 @@ func toolCallEvent(d *deriveCtx, a protocol.Action) *GuardEvent {
 
 func toolResultEvent(d *deriveCtx, o *protocol.Outcome) *GuardEvent {
 	e := d.event("tool_result", outcomePayload(o))
+	e.EventID = stableID("tr", o.CallID)
 	e.withText("payload.result", o.Text)
 	return e
 }

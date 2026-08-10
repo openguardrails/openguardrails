@@ -67,8 +67,35 @@ const (
 	// when the stored blob is not `cntLen*8` bytes.
 	cntStreamStopped   // streamed answers refused or retracted at end of stream
 	cntUnresolvedSpans // redaction spans whose `path` named no text we hold
+	cntUnreadable      // bodies we recognised and could not parse — NOT judged
+	cntTruncated       // tools or actions dropped by a cap — NOT judged
+	cntRefused         // turns this filter refused (block, fail-closed, partial-closed)
 	cntLen
 )
+
+// counterNames is the ONLY place a slot gets a wire name, and it is indexed BY the
+// slot so the two cannot drift.
+//
+// ⚠️ They did drift, and that is why this exists. `counters()` used to carry its own
+// four-element list while the slots had grown to six — so `stream_stopped` and
+// `unresolved_spans` were faithfully incremented on every occurrence and then dropped
+// on the floor, and the runtime received a heartbeat that said they had never
+// happened. A counter that is collected and not reported is worse than no counter: it
+// reads as evidence of absence.
+//
+// This matters more now than it did, because `log.go` silences those warnings by
+// default and the counter is what carries them instead.
+var counterNames = [cntLen]string{
+	cntEvaluated:       "evaluated",
+	cntUnchecked:       "unchecked",
+	cntIngested:        "ingested",
+	cntMirrored:        "mirrored",
+	cntStreamStopped:   "stream_stopped",
+	cntUnresolvedSpans: "unresolved_spans",
+	cntUnreadable:      "unreadable",
+	cntTruncated:       "truncated",
+	cntRefused:         "refused",
+}
 
 // bump adds to one counter. A lost increment under contention is acceptable —
 // these numbers exist to spot a trend, and spinning on CAS inside a request is
@@ -89,14 +116,19 @@ func bump(slot int, n uint64) {
 }
 
 func counters() map[string]uint64 {
-	out := map[string]uint64{"evaluated": 0, "unchecked": 0, "ingested": 0, "mirrored": 0}
+	// Every slot, always, even at zero: "this counter is 0" and "this build does not
+	// have that counter" are different facts, and a runtime comparing beats across a
+	// fleet needs to tell them apart.
+	out := make(map[string]uint64, cntLen)
+	for _, name := range counterNames {
+		out[name] = 0
+	}
 	data, _, err := proxywasm.GetSharedData(skCounters)
 	if err != nil || len(data) != cntLen*8 {
 		return out
 	}
-	names := []string{"evaluated", "unchecked", "ingested", "mirrored"}
-	for i, name := range names {
-		out[name] = binary.LittleEndian.Uint64(data[i*8:])
+	for slot, name := range counterNames {
+		out[name] = binary.LittleEndian.Uint64(data[slot*8:])
 	}
 	return out
 }
@@ -136,8 +168,8 @@ func sendHeartbeat(cfg *Config) {
 		return
 	}
 	c := counters()
-	proxywasm.LogWarnf("[OGR-BEAT] sending: evaluated=%d unchecked=%d ingested=%d mirrored=%d",
-		c["evaluated"], c["unchecked"], c["ingested"], c["mirrored"])
+	logInfof("[OGR-BEAT] sending: evaluated=%d unchecked=%d ingested=%d mirrored=%d refused=%d unreadable=%d",
+		c["evaluated"], c["unchecked"], c["ingested"], c["mirrored"], c["refused"], c["unreadable"])
 	payload, err := json.Marshal(map[string]any{
 		"sensor": map[string]any{
 			"id":      sensorName,
@@ -156,10 +188,15 @@ func sendHeartbeat(cfg *Config) {
 	// briefly busy, i.e. exactly when liveness matters most.
 	if err := cfg.client.Post(pathHeartbeat, ogrHeaders(*cfg), payload,
 		func(status int, _ http.Header, body []byte) {
+			// ⚠️ An ERROR, not a warning, and so never silenced by `log_level`. A beat
+			// that does not arrive makes the platform mark this sensor dark, which is
+			// indistinguishable from the plugin having been uninstalled — the exact
+			// bypass the heartbeat exists to catch. It is also once per 30s, so it can
+			// never be the thing that floods a log.
 			if status != 200 {
-				proxywasm.LogWarnf("[OGR-BEAT] status=%d body=%s", status, truncate(string(body), 160))
+				proxywasm.LogErrorf("[OGR-BEAT] status=%d body=%s", status, truncate(string(body), 160))
 			}
 		}, heartbeatTimeoutMs); err != nil {
-		proxywasm.LogWarnf("[OGR-BEAT] dispatch failed: %v", err)
+		proxywasm.LogErrorf("[OGR-BEAT] dispatch failed: %v", err)
 	}
 }

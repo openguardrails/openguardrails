@@ -1,75 +1,66 @@
 package main
 
-import (
-	"encoding/json"
-	"sync"
-	"time"
-)
+// The plugin's only state — and it lives for ONE REQUEST.
+//
+// ⚠️ **THIS FILE USED TO BE THE REASON THE PLUGIN NEEDED REDIS.** It held four facts
+// across requests, all of them about a conversation rather than about a request:
+//
+//	1. the placeholder map, `${OGR_PHONE_1}` -> the number, to restore the reply;
+//	2. the same map by value, so a turn-1 value re-masked to its established token when
+//	   the client re-sent the whole conversation in the clear on turn 2;
+//	3. which user turn / tool_call ids / tool set had already been reported, so history
+//	   was not re-reported every turn;
+//	4. the conversation chain, i.e. which session this request continued.
+//
+// None of it could live in Go memory: Envoy gives every worker thread its own Wasm VM
+// and round-robins connections, so turn 1 and turn 2 of one conversation land in
+// different VMs (measured — workers 712 then 701 on consecutive requests). So it went
+// to Redis, sealed, and this filter became a stateful data-plane element with a store
+// to operate, a key to rotate, and a second implementation of the runtime's own session
+// algorithm.
+//
+// All four moved to the runtime on 2026-08-10 (docs/proposals/stateless-pep.md):
+//
+//	1+2. `x.ogr.redaction_map` on the verdict — every placeholder whose value appears in
+//	     THIS request, which is exactly the set this turn must mask and restore.
+//	3.   `protocol.Conversation.NewInput()` is purely structural (everything after the
+//	     last assistant turn), so what is NEW needs no memory; the tool set rides every
+//	     turn and the runtime drops it when its digest has not moved.
+//	4.   `x.ogr.session_id` — the runtime derives it from `authz.transcript`, which this
+//	     plugin was already sending.
+//
+// ⚠️ And the VM argument evaporates with them: a request's REQUEST and RESPONSE phases
+// run in the same VM. Only turns of a conversation land in different ones, and nothing
+// here spans turns any more.
+//
+// ⚠️ What did NOT move is the work: this filter still parses three protocols, rewrites
+// request and response bodies, and owns the response flow. "Only forwarding" was never
+// reachable — masking means changing bytes, and only the thing in the path can.
 
-// The connector's only state, and the reason it needs any.
+// sessionState is the masking context for one request.
 //
-//  1. **The placeholder map.** A verdict carries span OFFSETS and no matched
-//     text, by design — the platform must not become a copy of the data it
-//     guards. So the party that already holds the plaintext does the masking and
-//     keeps token->value itself. That party is this plugin.
-//  2. **History has to stay masked.** An OpenAI client re-sends the whole
-//     conversation and its own history holds the ORIGINAL plaintext — it never
-//     saw our placeholders, because we restored them on the way back. Re-masking
-//     known values with the SAME token is both the leak fix and what keeps the
-//     model's context coherent across turns.
-//  3. **Only what is NEW should be reported.** Without remembering which
-//     tool_call ids and which user turn we already sent, every request would
-//     re-report the entire history and the console would count one action once
-//     per remaining turn.
-//
-// ⚠️ It CANNOT live in this process. Envoy gives every worker thread its own
-// Wasm VM and round-robins connections across them, so turn 1 and turn 2 of one
-// conversation land in different VMs — measured, not theoretical (workers 712
-// then 701 on two consecutive requests). A Go global re-masks nothing on turn 2
-// and re-reports the whole history as new.
-//
-// So the state is shared through Redis, SEALED (crypto.go): the store holds
-// ciphertext only. The in-VM map below is a cache in front of it, not the
-// source of truth.
-//
-// ⚠️ Concurrent turns of ONE conversation are last-write-wins. Turns of a chat
-// are sequential by nature, so this is a real but narrow race: two in-flight
-// requests of the same session can lose one side's newly learned pairs, which
-// costs a re-mask, not a leak.
-
-const (
-	sessionTTL      = 30 * time.Minute // matches the runtime's run-pointer idle TTL
-	maxSessions     = 4096
-	maxTokens       = 256 // placeholders remembered per session
-	maxTrackedCalls = 256 // tool_call ids remembered per session
-)
-
+// The name is kept because it is what every call site says, and because the map it
+// holds IS session-scoped — it is just that the runtime is what makes it so now.
 type sessionState struct {
-	ID        string
-	ToolsHash string
+	// The runtime's session id, read off the verdict. Diagnostics only: nothing here
+	// keys on it, which is why an older runtime returning none costs nothing.
+	ID string
 
-	Mapping  map[string]string // token -> plaintext
-	ByValue  map[string]string // plaintext -> token
-	Counters map[string]int    // placeholder type -> highest number minted locally
+	Mapping map[string]string // token -> plaintext
+	ByValue map[string]string // plaintext -> token
 
-	calls    map[string]bool
-	results  map[string]bool
-	userHash string
-
-	dirty    bool
-	lastSeen time.Time
+	// Local placeholder numbering, used ONLY when a verdict carried neither a
+	// `modifications` block nor a redaction map — see `learnValues`. Per request, so
+	// the numbering restarts; that is sound precisely because it is a fallback for a
+	// verdict that named no tokens of its own.
+	Counters map[string]int
 }
 
-// wire is what actually goes to the store, sealed. Short keys because every
-// session pays for them on every turn.
-type wire struct {
-	M  map[string]string `json:"m,omitempty"`  // token -> plaintext
-	C  map[string]int    `json:"c,omitempty"`  // local counters
-	K  []string          `json:"k,omitempty"`  // tool_call ids seen
-	R  []string          `json:"r,omitempty"`  // tool_result ids seen
-	U  string            `json:"u,omitempty"`  // hash of the last reported user turn
-	TH string            `json:"th,omitempty"` // hash of the declared tool set
-}
+/**
+ * The most placeholders one request may carry. A turn past this is not being redacted,
+ * it is being copied — and the runtime applies the same bound to what it returns.
+ */
+const maxTokens = 256
 
 func newSessionState(id string) *sessionState {
 	return &sessionState{
@@ -77,157 +68,42 @@ func newSessionState(id string) *sessionState {
 		Mapping:  map[string]string{},
 		ByValue:  map[string]string{},
 		Counters: map[string]int{},
-		calls:    map[string]bool{},
-		results:  map[string]bool{},
-		lastSeen: time.Now(),
 	}
 }
 
-func (s *sessionState) encode() ([]byte, error) {
-	w := wire{M: s.Mapping, C: s.Counters, U: s.userHash, TH: s.ToolsHash}
-	for id := range s.calls {
-		w.K = append(w.K, id)
+// adopt takes the runtime's answer for this request.
+//
+// ⚠️ It is not merged into anything that outlives the request — that is the whole
+// change. The map already contains the sticky half (values bound on earlier turns whose
+// text is in this request) because the runtime filtered its session map down to what
+// this request actually contains.
+func (s *sessionState) adopt(m map[string]string) {
+	for token, value := range m {
+		s.remember(token, value)
 	}
-	for id := range s.results {
-		w.R = append(w.R, id)
-	}
-	return json.Marshal(w)
 }
 
-func decodeSession(id string, blob []byte) *sessionState {
-	st := newSessionState(id)
-	var w wire
-	if err := json.Unmarshal(blob, &w); err != nil {
-		return st // an unreadable blob starts a fresh session, never a partial one
-	}
-	if w.M != nil {
-		st.Mapping = w.M
-		for token, value := range w.M {
-			st.ByValue[value] = token
-		}
-	}
-	if w.C != nil {
-		st.Counters = w.C
-	}
-	for _, id := range w.K {
-		st.calls[id] = true
-	}
-	for _, id := range w.R {
-		st.results[id] = true
-	}
-	st.userHash, st.ToolsHash = w.U, w.TH
-	return st
-}
-
-func (s *sessionState) seenCall(id string) bool   { return s.calls[id] }
-func (s *sessionState) seenResult(id string) bool { return s.results[id] }
-
-func (s *sessionState) markCall(id string) {
-	if len(s.calls) >= maxTrackedCalls {
-		s.calls = map[string]bool{}
-	}
-	s.calls[id] = true
-	s.dirty = true
-}
-
-func (s *sessionState) markResult(id string) {
-	if len(s.results) >= maxTrackedCalls {
-		s.results = map[string]bool{}
-	}
-	s.results[id] = true
-	s.dirty = true
-}
-
-// sawUserText answers "have we already reported this user turn?". A retry of the
-// same request must not mint a second user_input, and an agent loop continuing
-// with tool results re-sends the SAME last user message every time.
-func (s *sessionState) sawUserText(text string) bool { return s.userHash == hashOf(text) }
-
-func (s *sessionState) markUserText(text string) {
-	s.userHash = hashOf(text)
-	s.dirty = true
-}
-
-func (s *sessionState) setToolsHash(h string) {
-	s.ToolsHash = h
-	s.dirty = true
-}
-
-// nextNumber reserves the next placeholder number for a type. Only used when the
-// verdict did not carry the runtime's own token (see redactionsFromVerdict).
-func (s *sessionState) nextNumber(typeName string) int {
-	s.Counters[typeName]++
-	s.dirty = true
-	return s.Counters[typeName]
-}
-
-// remember binds a value to a token for the rest of the session. A value that
-// already has one keeps it — that is what makes turn 3's history mask to the
-// same string the model saw in turn 1.
+// remember binds a value to a token for the rest of THIS request.
 func (s *sessionState) remember(token, value string) {
 	if len(s.Mapping) >= maxTokens {
 		return
 	}
 	s.Mapping[token] = value
 	s.ByValue[value] = token
-	s.dirty = true
 }
 
-// redactions renders the session's whole map as masking instructions, so every
-// resent turn of the history is masked with its established token.
+// nextNumber reserves the next placeholder number for a type. Fallback path only.
+func (s *sessionState) nextNumber(typeName string) int {
+	s.Counters[typeName]++
+	return s.Counters[typeName]
+}
+
+// redactions renders the map as masking instructions, so every resent turn of the
+// history is masked with the token the model already saw.
 func (s *sessionState) redactions() []Redaction {
 	out := make([]Redaction, 0, len(s.ByValue))
 	for value, token := range s.ByValue {
 		out = append(out, Redaction{Token: token, Value: value})
 	}
 	return out
-}
-
-// --- the in-VM cache --------------------------------------------------------
-
-var (
-	sessionsMu sync.Mutex
-	sessions   = map[string]*sessionState{}
-)
-
-func cachedSession(key string) *sessionState {
-	sessionsMu.Lock()
-	defer sessionsMu.Unlock()
-	if st, ok := sessions[key]; ok {
-		if time.Since(st.lastSeen) < sessionTTL {
-			st.lastSeen = time.Now()
-			return st
-		}
-		delete(sessions, key)
-	}
-	return nil
-}
-
-func cacheSession(key string, st *sessionState) {
-	sessionsMu.Lock()
-	defer sessionsMu.Unlock()
-	st.lastSeen = time.Now()
-	if len(sessions) >= maxSessions {
-		evictOldest(time.Now())
-	}
-	sessions[key] = st
-}
-
-// evictOldest drops expired sessions, and if none are expired, the single least
-// recently used one. An evicted session degrades exactly like one that idled
-// out: the shared copy in Redis is still authoritative.
-func evictOldest(now time.Time) {
-	oldestKey, oldest := "", now
-	for k, st := range sessions {
-		if now.Sub(st.lastSeen) >= sessionTTL {
-			delete(sessions, k)
-			continue
-		}
-		if st.lastSeen.Before(oldest) {
-			oldestKey, oldest = k, st.lastSeen
-		}
-	}
-	if len(sessions) >= maxSessions && oldestKey != "" {
-		delete(sessions, oldestKey)
-	}
 }
