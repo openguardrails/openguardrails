@@ -225,6 +225,58 @@ export default function MissionPage() {
         </p>
       </section>
 
+      {/* Weak-to-strong in practice */}
+      <section className="container-x py-12">
+        <p className="eyebrow mb-3">The method, and where we practice it</p>
+        <h2 className="text-3xl font-bold mb-4 max-w-3xl">
+          Weak-to-strong generalization, run as production experiments
+        </h2>
+        <div className="space-y-5 text-[15px] sm:text-base text-zinc-700 leading-relaxed max-w-3xl">
+          <p>
+            This is not our conjecture alone. OpenAI&apos;s superalignment team — under Ilya
+            Sutskever and Jan Leike — showed that a weak supervisor can elicit strong capabilities
+            from a far stronger model:{" "}
+            <a
+              href="https://openai.com/index/weak-to-strong-generalization/"
+              className="text-accent hover:underline"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Weak-to-Strong Generalization: Eliciting Strong Capabilities with Weak Supervision
+            </a>
+            . We treat that result as an engineering mandate: if humanity will one day supervise
+            intelligence far beyond its own, the supervision stack must be built and battle-tested{" "}
+            <em>before</em> the gap opens. So we run the experiment now, with small models
+            supervising models 100× their parameters, in three production arenas:
+          </p>
+          <ul className="list-disc pl-6 space-y-3">
+            <li>
+              <a href="https://flaw0.com" className="text-accent hover:underline" target="_blank" rel="noopener noreferrer">
+                flaw0.com
+              </a>{" "}
+              — small models <strong>red-team</strong> agents built on models 100× their size,
+              before those agents are trusted.
+            </li>
+            <li>
+              <strong>OpenGuardrails</strong> — small models judge every action of a 100×-larger
+              model <strong>at runtime</strong>, under policy the human owns.
+            </li>
+            <li>
+              <a href="https://malware0.com" className="text-accent hover:underline" target="_blank" rel="noopener noreferrer">
+                malware0.com
+              </a>{" "}
+              — small models <strong>reverse-analyze in real time</strong> the adversarial
+              malware that 100×-larger models write.
+            </li>
+          </ul>
+          <p>
+            Tested before it ships. Guarded while it runs. Clear-eyed about what it touches. That
+            is what it takes before a person can hand real work to an AI — and every day these
+            systems hold, the weak-over-strong bet earns another data point.
+          </p>
+        </div>
+      </section>
+
       {/* III. Aesthetics of trust */}
       <section className="container-x py-12">
         <p className="eyebrow mb-3">III · A new aesthetics of trust</p>

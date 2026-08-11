@@ -1,0 +1,103 @@
+export const metadata = {
+  title: "POST /v1/heartbeat — OpenGuardrails API",
+  description: "PEP liveness over the authenticated channel, so the runtime can tell 'agent idle' from 'PEP went dark'. Fields, identity rules, live-but-idle registration.",
+};
+
+# POST /v1/heartbeat
+
+**PEP liveness** over the authenticated channel. Uninstalling or silencing a
+PEP is the cheapest bypass of an altitude, and without a beat the runtime
+cannot distinguish "agent idle" (fine) from "PEP went dark" (a coverage
+loss). The heartbeat keeps those two facts apart.
+
+A heartbeat is **transport-level**: it is *not* a GuardEvent, has no `kind`,
+and carries no guarded action. It authenticates like any request on the PEP's
+channel.
+
+```
+POST {base_url}/v1/heartbeat
+Authorization: Bearer ogr_<key>
+Content-Type: application/json
+```
+
+## Request
+
+At least one of `sensor.id` / `subject.agent_id` must be present.
+
+```json
+{
+  "sensor": {"id": "ogr.higress", "class": "proxy", "version": "0.3.1"},
+  "subject": {"agent_id": "build-agent-3"},
+  "interval_s": 30,
+  "counters": {"events_sent": 120, "evaluate_errors": 0}
+}
+```
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `sensor` | object | one-of | The PEP identifying **itself** — same `id`/`class`/`version` its events carry |
+| `subject` | object | one-of | The **agent** whose liveness rides this beat (`agent_id`) |
+| `interval_s` | number | optional | Declared cadence; lets the runtime compute "missed beats" |
+| `counters` | object | optional | Free-form counters (e.g. `events_sent`, `evaluate_errors`) — the runtime reconciles them against delivered events to catch selective suppression |
+
+**Who a heartbeat speaks for.** The sender is the PEP — `sensor.id`. An
+instrumentation fronting exactly **one** agent may additionally name it in
+`subject.agent_id`, so the agent's liveness rides the same beat. A gateway or
+proxy fronting **many** agents must not: its liveness is not any one agent's,
+and attributing it would report agents as covered by a sensor that never
+spoke for them.
+
+## Response — `200`
+
+```json
+{ "ok": true }
+```
+
+A heartbeat **registers a live-but-idle agent**: fleet coverage reflects
+enrolled PEPs that have not yet emitted a single event. Deploy the PEP, start
+the beat, and the runtime knows the altitude is covered before the first
+guarded action arrives.
+
+## Example
+
+```bash
+curl -s $OGR_RUNTIME/v1/heartbeat \
+  -H "Authorization: Bearer $OGR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"sensor": {"id": "ogr.higress", "class": "proxy"}, "interval_s": 30}'
+```
+
+### Python
+
+```python
+from openguardrails import RuntimeClient
+
+client = RuntimeClient()
+client.heartbeat(
+    sensor={"id": "ogr.higress", "class": "proxy", "version": "0.3.1"},
+    interval_s=30,
+    counters={"events_sent": 120, "evaluate_errors": 0},
+)
+```
+
+### JavaScript
+
+```ts
+import { RuntimeClient } from "@openguardrails/core"
+
+const client = new RuntimeClient()
+await client.heartbeat({
+  sensor: { id: "ogr.higress", class: "proxy", version: "0.3.1" },
+  interval_s: 30,
+  counters: { events_sent: 120, evaluate_errors: 0 },
+})
+```
+
+## Operational semantics
+
+- A runtime alerts when a PEP misses beats beyond a tolerance, and treats the
+  gap as a **coverage loss** — never as "no risk".
+- `counters`, combined with reconnect replay of
+  [degraded-mode](/api/docs/reference/config/) buffers, is what makes *selective event
+  suppression* detectable: a PEP reporting N emitted while N−k arrived is a
+  finding, not noise.

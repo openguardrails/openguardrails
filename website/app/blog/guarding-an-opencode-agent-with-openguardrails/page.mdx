@@ -60,12 +60,12 @@ optional gate in `PermissionV2` for the `allow → ask` path; once it lands,
 
 opencode also has **no built-in syscall sandbox** — `bash` runs on the host. OGR's
 sandbox altitude would mean wrapping the spawner (a core change) or running opencode
-inside a container / [srt](/docs/plugins/hermes-srt/). The `agent_hook` altitude
+inside a container / [srt](/api/docs/plugins/hermes-srt/). The `agent_hook` altitude
 above, though, works today and stops the download-and-execute class.
 
 ---
 
 *Same `GuardEvent → Verdict` model as every OGR integration — only the binding
 differs. [Spec](https://github.com/openguardrails/openguardrails) ·
-[GuardEvent & Verdict](/docs/api/objects/guard-event/) ·
+[GuardEvent & Verdict](/api/docs/reference/objects/guard-event/) ·
 [`@openguardrails/core`](https://www.npmjs.com/package/@openguardrails/core).*

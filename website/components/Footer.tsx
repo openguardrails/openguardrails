@@ -6,10 +6,10 @@ const COLUMNS: Column[] = [
   {
     title: "API",
     links: [
-      { label: "Quickstart", href: "/docs/quickstart/" },
-      { label: "API reference", href: "/docs/api/" },
-      { label: "Concepts", href: "/docs/concepts/altitudes/" },
-      { label: "Instrument your agent", href: "/docs/instrument-your-agent/" },
+      { label: "Quickstart", href: "/api/docs/quickstart/" },
+      { label: "API reference", href: "/api/docs/reference/" },
+      { label: "Concepts", href: "/api/docs/concepts/altitudes/" },
+      { label: "Instrument your agent", href: "/api/docs/instrument-your-agent/" },
     ],
   },
   {
@@ -56,8 +56,19 @@ export default function Footer() {
             </span>
           </a>
           <p className="text-sm text-zinc-600 mb-4">
-            The open guardrails layer for AI agents — one API, SDKs, and plugins to observe and
-            stop unsafe agent actions.
+            Open runtime guardrails for AI agents — small models supervising models 100× their
+            size, on every action, while it runs.
+          </p>
+          <p className="text-sm text-zinc-600 mb-4">
+            Sister experiments:{" "}
+            <a href="https://flaw0.com" className="hover:text-zinc-900 underline underline-offset-2" target="_blank" rel="noopener noreferrer">
+              flaw0.com
+            </a>{" "}
+            (red team) ·{" "}
+            <a href="https://malware0.com" className="hover:text-zinc-900 underline underline-offset-2" target="_blank" rel="noopener noreferrer">
+              malware0.com
+            </a>{" "}
+            (malware analysis)
           </p>
           <p className="text-sm text-zinc-500">
             <a href="mailto:thomas@openguardrails.com" className="hover:text-zinc-900">
