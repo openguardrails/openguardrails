@@ -81,7 +81,7 @@ Example (Hermes):
 - Same OGR policy model compiles to different backends:
   personal/srt (OS-level, no containers) and multi-tenant/OpenShell (containers +
   egress proxy). Same model, different policy per threat model.
-- Reference: https://openguardrails.com/docs/configuring-policy/
+- Reference: https://openguardrails.com/docs/concepts/policy/
 
 ## Runtimes / SDKs
 
@@ -93,11 +93,24 @@ Example (Hermes):
 - Neutral benchmark + harness: https://github.com/openguardrails/openguardrails/tree/main/benchmarks
 - Reproduce from the repository root: python3 benchmarks/harness/run.py
 
+## Site map
+
+- Home: https://openguardrails.com/
+- Docs: https://openguardrails.com/docs/
+- Getting started: https://openguardrails.com/docs/quickstart/
+- API reference (Runtime API): https://openguardrails.com/docs/api/
+- Runtime (reference PDP, self-hosting): https://openguardrails.com/runtime/
+- Resources hub: https://openguardrails.com/resources/
+- Integration showcase: https://openguardrails.com/resources/showcase/
+- Community: https://openguardrails.com/resources/community/
+- Blog: https://openguardrails.com/blog/
+- Mission: https://openguardrails.com/mission/
+- Donate: https://openguardrails.com/donate/
+- Agent guide (human-readable): https://openguardrails.com/agent/
+- This skill, fetchable: https://openguardrails.com/skill/
+
 ## Links
 
-- Agent guide (human-readable): https://openguardrails.com/agent/
-- Docs: https://openguardrails.com/docs/
-- Getting started: https://openguardrails.com/docs/getting-started/
 - Spec: https://github.com/openguardrails/openguardrails
 - Benchmark: https://github.com/openguardrails/openguardrails/tree/main/benchmarks
 - Runnable PoC (Hermes + sandbox): https://github.com/openguardrails/openguardrails-poc

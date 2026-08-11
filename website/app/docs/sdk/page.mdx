@@ -1,0 +1,32 @@
+export const metadata = {
+  title: "SDKs — OpenGuardrails Docs",
+  description: "The two official OGR SDKs: openguardrails on PyPI and @openguardrails/core on npm. In-process runtime plus RuntimeClient for the hosted Runtime API.",
+};
+
+# SDKs
+
+Two official language bindings implement the OGR contract. Both are
+zero-dependency, both speak protocol `0.4`, and both have the same two
+halves:
+
+- an **in-process `Runtime`** — evaluate GuardEvents locally against a
+  policy and detectors, no server involved;
+- a **`RuntimeClient`** — the HTTP client for a hosted
+  [Runtime API](/docs/api/), with auth, request signing, batching, and error
+  types.
+
+| | Python | JavaScript / TypeScript |
+| --- | --- | --- |
+| Package | [`openguardrails`](https://pypi.org/project/openguardrails/) | [`@openguardrails/core`](https://www.npmjs.com/package/@openguardrails/core) |
+| Install | `pip install openguardrails` | `npm install @openguardrails/core` |
+| Models | snake_case dataclasses (`GuardEvent`, `Verdict`) | camelCase interfaces; client maps to/from the wire |
+| Signing | `Ed25519Signer` (optional `cryptography`) | `createNodeSigner` (lazy `node:crypto`) |
+| Batching | `BatchingIngestor` background thread; `ingest` auto-chunks | `ingest` single batch (≤ 100); chunk yourself |
+| Errors | `RuntimeAPIError`, `RateLimitedError` | `RuntimeApiError`, `RateLimitedError` |
+| Docs | [Python SDK](/docs/sdk/python/) | [JavaScript SDK](/docs/sdk/javascript/) |
+
+Integrations normally don't install these directly — a
+[plugin](/docs/plugins/) depends on its language's core and pulls it in
+automatically. Reach for the SDK when you are
+[instrumenting your own agent](/docs/instrument-your-agent/) or building a
+new integration.

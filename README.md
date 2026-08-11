@@ -52,7 +52,22 @@ Without OGR, securing an agent is an `N × M × L × S` integration problem: eve
 agent, every detector vendor, every LLM protocol, every sandbox wired pairwise.
 OGR collapses it to `N + M + L + S` — integrate once against the contract.
 
-## The six normative components
+## Three layers: API → SDK → Plugin
+
+Everything in this repo sits in one of three layers, each built on the one
+below it:
+
+| Layer | What it is | Where |
+|---|---|---|
+| **API** | The wire contract a runtime (PDP) exposes: `POST /v1/evaluate`, `POST /v1/ingest`, enrollment, heartbeat, config, approvals — carrying `GuardEvent`s and returning `Verdict`s. | [Runtime API binding](specification/runtime-api.md) + [JSON Schemas](schema/) |
+| **SDK** | Language bindings that wrap the API — serialization, auth, request signing, batching — plus the in-process runtime for local evaluation. | [`packages/python`](packages/python/) (`openguardrails`), [`packages/javascript`](packages/javascript/) (`@openguardrails/core`) |
+| **Plugin** | A hook for one surface — agent, gateway, sandbox, eBPF — that observes actions, builds events, and enforces verdicts, using an SDK for everything below. | [`integrations/`](integrations/) |
+
+A plugin never speaks HTTP or hand-rolls wire mapping itself; that is the
+SDK's job. An SDK never invents endpoints; the API is the single normative
+surface.
+
+## The normative components
 
 | Component | What it defines | OTel analogue |
 |---|---|---|
@@ -63,6 +78,7 @@ OGR collapses it to `N + M + L + S` — integrate once against the contract.
 | [composition](specification/composition.md) | How multiple vendors' verdicts combine into one decision | — |
 | [enrollment & receipts](specification/enrollment-and-receipts.md) | How PEPs authenticate to a runtime, and how approvals become verifiable payload-bound artifacts | — |
 | [attestation](specification/attestation.md) | How strongly identity claims are verified — one ladder for subject assertions and channel auth, with gateway multiplexing guidance | — |
+| [Runtime API](specification/runtime-api.md) | The HTTP binding a runtime exposes: `/v1/evaluate`, `/v1/ingest`, enrollment, heartbeat, config, approvals | OTLP/HTTP |
 
 Risk categories live in the [taxonomy](specification/taxonomy.md) (`safety.*` and
 `security.*`), versioned and swappable — the contract references category IDs but
@@ -93,8 +109,8 @@ the [overview](specification/overview.md).
 | Path | What it contains |
 |---|---|
 | [`specification/`](specification/) and [`schema/`](schema/) | Normative protocol, schemas, taxonomy, conformance, and governance. |
-| [`packages/python/`](packages/python/) | `openguardrails` Python core runtime (PyPI). |
-| [`packages/javascript/`](packages/javascript/) | `@openguardrails/core` JavaScript/TypeScript core runtime (npm). |
+| [`packages/python/`](packages/python/) | `openguardrails` — the Python SDK: in-process runtime + `RuntimeClient` for the Runtime API (PyPI). |
+| [`packages/javascript/`](packages/javascript/) | `@openguardrails/core` — the JavaScript/TypeScript SDK: in-process runtime + `RuntimeClient` (npm). |
 | [`integrations/`](integrations/) | Agent, gateway, sandbox, and eBPF integration categories. |
 | [`benchmarks/`](benchmarks/) | Neutral detector benchmark and leaderboard. |
 | [`examples/`](examples/) | Runnable examples and integration index. |
@@ -106,16 +122,16 @@ centralizes source, issues, pull requests, CI, and cross-component changes.
 See [MONOREPO.md](MONOREPO.md) for the former-repository mapping and rollout
 checklist, and [RELEASING.md](RELEASING.md) for npm/PyPI release tags.
 
-### Core runtimes and integrations
+### SDKs and plugins
 
-The Python and JavaScript packages implement the same OGR core contract. Every
-integration depends on the core for its language:
+The Python and JavaScript packages implement the same OGR contract — each is
+the SDK for its language, and every plugin depends on it:
 
-- Python integrations depend on `openguardrails`.
-- JavaScript/TypeScript integrations depend on `@openguardrails/core`.
-- End users normally install only the integration; pip or npm installs its core
+- Python plugins depend on `openguardrails`.
+- JavaScript/TypeScript plugins depend on `@openguardrails/core`.
+- End users normally install only the plugin; pip or npm installs its SDK
   dependency automatically. Self-contained marketplace plugins may bundle the
-  core so they can run without a separate install step.
+  SDK so they can run without a separate install step.
 
 ### Integration categories
 
@@ -128,6 +144,8 @@ integration depends on the core for its language:
 | | Hermes | [`integrations/agent/hermes`](integrations/agent/hermes/) |
 | | LangGraph | [`integrations/agent/langgraph`](integrations/agent/langgraph/) |
 | **Gateway hook** | OpenAI · Anthropic | [`integrations/gateway/openai-anthropic`](integrations/gateway/openai-anthropic/) |
+| | Higress (Go/WASM) | [`integrations/gateway/higress`](integrations/gateway/higress/) |
+| | mitmproxy | [`integrations/gateway/mitmproxy`](integrations/gateway/mitmproxy/) |
 | **Sandbox hook** | Anthropic srt · NVIDIA OpenShell | [`integrations/sandbox`](integrations/sandbox/) — standalone examples planned |
 | **eBPF** | OGR reference sensor (kernel process · filesystem · network events) | [`integrations/ebpf/sensor`](integrations/ebpf/sensor/) |
 

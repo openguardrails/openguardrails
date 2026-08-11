@@ -9,6 +9,13 @@ enrolls its own Ed25519 key (`OGR_INSTANCE` names it, keyfile per instance)
 and asserts `subject.agent_id = hermes-<instance>` with a `client_key`
 attestation claim — the runtime clamps that to the key's enrollment scope.
 
+Transport is the core SDK (`openguardrails.client`): `RuntimeClient` speaks
+the canonical `/v1/*` paths against OGR_RUNTIME_URL and falls back to the
+legacy `/api/public/ogr` mount automatically; `BatchingIngestor` is the
+fire-and-forget batch thread; `Ed25519Signer` holds the keypair. This module
+keeps only what is Hermes-specific: instance naming, keyfile persistence,
+enroll-once semantics, and the never-block/never-raise reporting contract.
+
 Enabled only when OGR_RUNTIME_URL + OGR_API_KEY are set; everything is
 best-effort and never blocks or fails a hook.
 
@@ -16,42 +23,32 @@ Env:
   OGR_RUNTIME_URL   runtime base URL (unset = reporter disabled)
   OGR_API_KEY       workspace API key (bootstrap token for enrollment)
   OGR_INSTANCE      instance name, default: hostname, plus the HERMES_HOME
-                     basename when that's set to a non-default path (Hermes'
-                     own mechanism for running genuinely separate instances
-                     on one machine, each with its own config/session
-                     history — two processes sharing the default home are
-                     the same logical install and collapse to one instance;
-                     session_id already tells their conversations apart).
-                     Set explicitly to override either signal.
+                    basename when that's set to a non-default path (Hermes'
+                    own mechanism for running genuinely separate instances
+                    on one machine, each with its own config/session
+                    history — two processes sharing the default home are
+                    the same logical install and collapse to one instance;
+                    session_id already tells their conversations apart).
+                    Set explicitly to override either signal.
   OGR_PRINCIPAL     principal override, default "user:<login>"
   OGR_KEYFILE       keypair path, default ~/.ogr/hermes-<instance>-ed25519.json
 """
 from __future__ import annotations
 
-import atexit
-import base64
-import dataclasses
 import getpass
 import json
 import logging
 import os
 import pathlib
-import queue
 import socket
 import threading
 import time
-import urllib.error
-import urllib.request
 from typing import Any
 
-logger = logging.getLogger("ogr.platform")
+from openguardrails import BatchingIngestor, Ed25519Signer, RuntimeClient
+from openguardrails.client import event_to_wire  # noqa: F401 - re-exported (bridge, tests)
 
-try:
-    from cryptography.hazmat.primitives import serialization
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-    _HAVE_CRYPTO = True
-except ImportError:  # pragma: no cover - reporter then runs unsigned
-    _HAVE_CRYPTO = False
+logger = logging.getLogger("ogr.platform")
 
 _BATCH_MAX = 50          # ingest accepts up to 100; stay well under
 _FLUSH_SECONDS = 2.0
@@ -59,10 +56,7 @@ _QUEUE_MAX = 1000        # drop-oldest beyond this; observability must not leak 
 # How long the exit drain may take in total. One ingest POST is capped at 5s, so this
 # allows a couple of batches without letting a dead runtime hold a CLI open.
 _FLUSH_DEADLINE = 6.0
-
-
-def _b64url(raw: bytes) -> str:
-    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+_REQUEST_TIMEOUT = 5.0   # enroll + ingest POSTs
 
 
 def instance_name() -> str:
@@ -120,7 +114,13 @@ def subject_for(**extra: Any) -> dict[str, Any]:
 
 
 class PepIdentity:
-    """Per-instance Ed25519 enrollment identity (mitmproxy PepIdentity pattern)."""
+    """Per-instance Ed25519 enrollment identity (mitmproxy PepIdentity pattern).
+
+    Wraps the SDK's `Ed25519Signer`, keeping the Hermes-owned parts: the
+    keyfile location and format ({"private_key": b64url seed, "guard_id",
+    "key_id"}), enroll-once semantics, and graceful unsigned degradation when
+    `cryptography` is missing or the keyfile is unusable.
+    """
 
     def __init__(self, keyfile: str | None = None):
         self.keyfile = pathlib.Path(
@@ -130,67 +130,46 @@ class PepIdentity:
         )
         self.guard_id: str | None = None
         self.key_id: str | None = None
-        self._key: "Ed25519PrivateKey | None" = None
-        if _HAVE_CRYPTO:
-            self._load_or_create()
+        self._signer: Ed25519Signer | None = None
+        self._load_or_create()
 
     def _load_or_create(self) -> None:
         try:
             if self.keyfile.exists():
                 stored = json.loads(self.keyfile.read_text())
-                raw = base64.urlsafe_b64decode(stored["private_key"] + "==")
-                self._key = Ed25519PrivateKey.from_private_bytes(raw)
+                self._signer = Ed25519Signer(stored["private_key"])
                 self.guard_id = stored.get("guard_id")
                 self.key_id = stored.get("key_id")
             else:
-                self._key = Ed25519PrivateKey.generate()
+                self._signer = Ed25519Signer()
                 self._persist()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 - includes missing `cryptography`
             logger.warning("OGR PEP identity unavailable (%s) — reporting unsigned", exc)
-            self._key = None
+            self._signer = None
 
     def _persist(self) -> None:
-        raw = self._key.private_bytes(  # type: ignore[union-attr]
-            serialization.Encoding.Raw,
-            serialization.PrivateFormat.Raw,
-            serialization.NoEncryption(),
-        )
         self.keyfile.parent.mkdir(parents=True, exist_ok=True)
         self.keyfile.write_text(json.dumps({
-            "private_key": _b64url(raw),
+            "private_key": self._signer.private_key_b64url(),  # type: ignore[union-attr]
             "guard_id": self.guard_id,
             "key_id": self.key_id,
         }))
         self.keyfile.chmod(0o600)
 
     def public_key_b64url(self) -> str | None:
-        if not self._key:
-            return None
-        return _b64url(self._key.public_key().public_bytes(
-            serialization.Encoding.Raw, serialization.PublicFormat.Raw,
-        ))
+        return self._signer.public_key_b64url() if self._signer else None
 
     def enroll(self, base_url: str, api_key: str, timeout: float = 5.0) -> bool:
-        if not self._key:
+        if not self._signer:
             return False
         if self.guard_id and self.key_id:
             return True
-        req = urllib.request.Request(
-            base_url.rstrip("/") + "/api/public/ogr/v1/enroll",
-            data=json.dumps({
-                "public_key": self.public_key_b64url(),
-                "guard_id": f"hermes-hook-{instance_name()}",
-                "name": f"hermes hook ({instance_name()})",
-            }).encode("utf-8"),
-            method="POST",
-            headers={
-                "content-type": "application/json",
-                "authorization": f"Bearer {api_key}",
-            },
-        )
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                cred = json.loads(resp.read().decode("utf-8"))
+            cred = RuntimeClient(base_url, api_key, timeout=timeout).enroll(
+                self.public_key_b64url(),
+                guard_id=f"hermes-hook-{instance_name()}",
+                name=f"hermes hook ({instance_name()})",
+            )
             self.guard_id = cred["guard_id"]
             self.key_id = cred["key_id"]
             self._persist()
@@ -201,63 +180,58 @@ class PepIdentity:
             return False
 
     def signature_header(self, body: bytes) -> str | None:
-        if not self._key or not self.key_id:
+        if not self._signer or not self.key_id:
             return None
-        header = _b64url(json.dumps(
-            {"alg": "EdDSA", "kid": self.key_id, "b64": False, "crit": ["b64"]},
-            separators=(",", ":"),
-        ).encode("utf-8"))
-        signature = self._key.sign(header.encode("ascii") + b"." + body)
-        return f"{header}..{_b64url(signature)}"
+        self._signer.key_id = self.key_id
+        return self._signer.signature_header(body)
 
 
-def event_to_wire(ev: Any) -> dict[str, Any]:
-    """Python-core GuardEvent dataclass → OGR wire dict (drop empties)."""
-    d = dataclasses.asdict(ev)
-    wire = {k: v for k, v in d.items() if v not in (None, [], "")}
-    if not wire.get("provenance"):
-        wire.pop("provenance", None)
-    return wire
+class PlatformReporter(BatchingIngestor):
+    """Fire-and-forget batcher: GuardEvents → signed POST /ingest.
 
-
-class PlatformReporter:
-    """Fire-and-forget batcher: GuardEvents → signed POST /ingest."""
+    The queue, worker thread, exit drain, and ingest transport are the SDK's
+    `BatchingIngestor` + `RuntimeClient`; this subclass adds the enabled-only-
+    when-configured gate and the lazy enroll-once identity that signs bodies.
+    """
 
     def __init__(self) -> None:
         self.base_url = os.environ.get("OGR_RUNTIME_URL", "").rstrip("/")
         self.api_key = os.environ.get("OGR_API_KEY", "")
         self.enabled = bool(self.base_url and self.api_key)
-        self._queue: "queue.Queue[dict[str, Any]]" = queue.Queue(maxsize=_QUEUE_MAX)
         self._identity: PepIdentity | None = None
         self._identity_lock = threading.Lock()
-        self._worker: threading.Thread | None = None
-        if self.enabled:
-            self._worker = threading.Thread(
-                target=self._run, name="ogr-platform-reporter", daemon=True,
-            )
-            self._worker.start()
-            # Drain on the way out. The worker is a DAEMON thread parked on a 2s
-            # timer, so a short-lived process — `hermes -z`, a one-shot script, a
-            # kanban worker subprocess — exits with the queue still full and every
-            # event in it silently gone. That is how `user_input` went missing from
-            # the console for one-shot runs while `model_output` survived: the
-            # latter also rides the synchronous /evaluate call, which enqueues it
-            # runtime-side. Nothing warns, because nothing failed.
-            atexit.register(self.flush)
+        if not self.enabled:
+            self.client = None
+            return
+        # Drain on the way out (BatchingIngestor registers atexit). The worker
+        # is a DAEMON thread parked on a 2s timer, so a short-lived process —
+        # `hermes -z`, a one-shot script, a kanban worker subprocess — exits
+        # with the queue still full and every event in it silently gone. That
+        # is how `user_input` went missing from the console for one-shot runs
+        # while `model_output` survived: the latter also rides the synchronous
+        # /evaluate call, which enqueues it runtime-side. Nothing warns,
+        # because nothing failed.
+        super().__init__(
+            RuntimeClient(self.base_url, self.api_key,
+                          timeout=_REQUEST_TIMEOUT, signer=self._body_signature),
+            batch_max=_BATCH_MAX, flush_seconds=_FLUSH_SECONDS,
+            queue_max=_QUEUE_MAX, flush_deadline=_FLUSH_DEADLINE,
+        )
+        # Synchronous /evaluate shares the identity but keeps its own client:
+        # its timeout is the caller's enforcement-point budget, not the
+        # reporter's batch budget.
+        self._eval_client = RuntimeClient(
+            self.base_url, self.api_key, signer=self._body_signature)
+
+    def _body_signature(self, body: bytes) -> str | None:
+        """RuntimeClient signer hook — signs once the identity is enrolled."""
+        return self._identity.signature_header(body) if self._identity else None
 
     def report(self, ev: Any) -> None:
         """Queue one GuardEvent (dataclass or dict). Never raises, never blocks."""
         if not self.enabled:
             return
-        wire = event_to_wire(ev) if dataclasses.is_dataclass(ev) else dict(ev)
-        try:
-            self._queue.put_nowait(wire)
-        except queue.Full:
-            try:  # drop-oldest keeps the newest signal
-                self._queue.get_nowait()
-                self._queue.put_nowait(wire)
-            except queue.Empty:
-                pass
+        self.submit(ev)
 
     def flush(self, deadline_seconds: float = _FLUSH_DEADLINE) -> int:
         """Post whatever is queued, synchronously. Returns the number of events sent.
@@ -281,12 +255,7 @@ class PlatformReporter:
         sent = 0
         deadline = time.monotonic() + deadline_seconds
         while time.monotonic() < deadline:
-            batch: list[dict[str, Any]] = []
-            try:
-                while len(batch) < _BATCH_MAX:
-                    batch.append(self._queue.get_nowait())
-            except queue.Empty:
-                pass
+            batch = self._drain(_BATCH_MAX)
             if not batch:
                 break
             self._ensure_identity()
@@ -301,51 +270,12 @@ class PlatformReporter:
                 self._identity = PepIdentity()
             # enroll() is a no-op once guard_id/key_id are known (persisted keyfile),
             # so this costs one network call per fresh install, not per batch.
-            self._identity.enroll(self.base_url, self.api_key)
+            self._identity.enroll(self.base_url, self.api_key,
+                                  timeout=_REQUEST_TIMEOUT)
 
-    # -- background loop ------------------------------------------------------
     def _run(self) -> None:
         self._ensure_identity()
-        batch: list[dict[str, Any]] = []
-        while True:
-            try:
-                batch.append(self._queue.get(timeout=_FLUSH_SECONDS))
-                while len(batch) < _BATCH_MAX:
-                    batch.append(self._queue.get_nowait())
-            except queue.Empty:
-                pass
-            if batch:
-                self._post(batch)
-                batch = []
-
-    def _post(self, batch: list[dict[str, Any]]) -> None:
-        body = json.dumps({"batch": batch}).encode("utf-8")
-        headers = {
-            "content-type": "application/json",
-            "authorization": f"Bearer {self.api_key}",
-        }
-        signature = self._identity.signature_header(body) if self._identity else None
-        if signature:
-            headers["ogr-batch-signature"] = signature
-        req = urllib.request.Request(
-            self.base_url + "/api/public/ogr/v1/ingest",
-            data=body, method="POST", headers=headers,
-        )
-        try:
-            raw = urllib.request.urlopen(req, timeout=5.0).read()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("OGR ingest failed (%s) — %d events dropped", exc, len(batch))
-            return
-        try:
-            rejected = [
-                r for r in json.loads(raw.decode("utf-8")).get("results", [])
-                if r.get("status", 200) >= 300
-            ]
-        except Exception:  # noqa: BLE001
-            return
-        if rejected:
-            logger.warning("OGR ingest rejected %d/%d events: %s",
-                            len(rejected), len(batch), rejected)
+        BatchingIngestor._run(self)
 
 
 _reporter: PlatformReporter | None = None
@@ -356,6 +286,15 @@ def get_reporter() -> PlatformReporter:
     if _reporter is None:
         _reporter = PlatformReporter()
     return _reporter
+
+
+def _verdict_wire(v: Any) -> dict[str, Any]:
+    """SDK Verdict dataclass → the parsed wire dict callers historically got
+    (empty optionals absent, runtime extension keys such as `degraded` kept)."""
+    wire = {k: val for k, val in v.to_dict().items()
+            if val is not None and val != []}
+    wire.update(getattr(v, "extensions", {}))
+    return wire
 
 
 def evaluate(wire: dict[str, Any], timeout: float = 4.0) -> dict[str, Any] | None:
@@ -371,21 +310,10 @@ def evaluate(wire: dict[str, Any], timeout: float = 4.0) -> dict[str, Any] | Non
     reporter = get_reporter()
     if not reporter.enabled:
         return None
-    body = json.dumps(wire).encode("utf-8")
-    headers = {
-        "content-type": "application/json",
-        "authorization": f"Bearer {reporter.api_key}",
-    }
-    signature = reporter._identity.signature_header(body) if reporter._identity else None
-    if signature:
-        headers["ogr-batch-signature"] = signature
-    req = urllib.request.Request(
-        reporter.base_url + "/api/public/ogr/v1/evaluate",
-        data=body, method="POST", headers=headers,
-    )
+    client = reporter._eval_client
+    client.timeout = timeout
     try:
-        raw = urllib.request.urlopen(req, timeout=timeout).read()
-        return json.loads(raw.decode("utf-8"))
+        return _verdict_wire(client.evaluate(wire))
     except Exception as exc:  # noqa: BLE001
         logger.warning("OGR evaluate failed (%s) — caller decides fallback", exc)
         return None

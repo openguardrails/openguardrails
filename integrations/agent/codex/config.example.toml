@@ -20,10 +20,11 @@ matcher = "Bash|apply_patch|Read|Edit|Write|WebFetch|mcp__.*"
 
 # Configure auto mode via environment (the hook reads these; export them in your
 # shell profile so Codex's hook process inherits them):
-#   OGR_SERVER=https://your-ogr-runtime:8878   # default http://127.0.0.1:8878
-#   OGR_ENROLL_TOKEN=et-…                       # required: your OGR tenant token
+#   OGR_RUNTIME_URL=https://your-ogr-runtime:8878  # default http://127.0.0.1:8878
+#   OGR_API_KEY=ogr_…                               # required: workspace API key
+#   (OGR_SERVER / OGR_ENROLL_TOKEN still work as legacy aliases)
 #   OGR_AGENT_ID=codex-<hostname>               # stable PEP identity
-#   OGR_STATE_DIR=~/.codex/openguardrails       # PEP credential + denial counters
+#   OGR_STATE_DIR=~/.codex/openguardrails       # PEP key material + denial counters
 #   OGR_AUTOMODE_POLICY=/path/to/automode-policy.json   # optional prose policy
 
 # --- Guardrail: block dangerous calls even under bypassed approvals ----------

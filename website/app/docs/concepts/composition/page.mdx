@@ -7,12 +7,12 @@ export const metadata = {
 
 You rarely want a single detector. You want your deterministic config rules **and**
 an LLM judge **and** maybe a third-party guard model — and one decision out the
-other side. Composition is how OGR merges multiple `Verdict`s into the single
-decision it enforces.
+other side. Composition is how OGR merges multiple
+[Verdicts](/docs/api/objects/verdict/) into the single decision it enforces.
 
 ## Strategies
 
-Set per risk category in `policy.json`:
+Set per risk category (or category prefix) in your policy:
 
 | Strategy | Behavior | Use for |
 | --- | --- | --- |
@@ -31,11 +31,27 @@ Set per risk category in `policy.json`:
 }
 ```
 
+`short_circuit: true` lets the runtime stop once a `block` is reached, so an
+expensive model provider is skipped when a cheap rule already blocked.
+
 ## Fail-closed vs fail-open
 
 `on_all_failed` (and `on_timeout`) decide what happens when detectors error or time
 out. Security categories fail **closed** (`block`); low-risk categories fail
-**open** (`allow`). This is policy, not code — you choose per category.
+**open** (`allow`). This is policy, not code — you choose per category, explicitly.
+
+Note this is the **runtime ↔ detectors** side. The complementary
+**PEP ↔ runtime** side — what an enforcement point does when it cannot reach the
+runtime at all — is [degraded mode](/docs/api/config/), configured via
+`GET /v1/config`.
+
+## Composing modifications
+
+When the effective decision is `redact`, the effective `modifications.spans` are
+the **union** of spans from all contributing `redact` verdicts, with overlapping
+spans on the same path merged to the covering range. Whole-payload rewrites don't
+merge — the winning provider supplies `modifications`, other proposals land in
+`evidence`.
 
 ## Why composition matters
 
@@ -43,6 +59,8 @@ Detectors have complementary blind spots. On the OGR benchmark, a config detecto
 (macro-F1 0.45) and an LLM judge (0.41) **composed** reach 0.625 — better than
 either alone. OGR is a referee: detectors compete on the
 [leaderboard](https://github.com/openguardrails/openguardrails/tree/main/benchmarks), and you
-compose the ones that win on your categories.
+compose the ones that win on your categories. The `provider` field on every
+verdict is what makes that attribution — and per-vendor metering — possible.
 
-Next: see it end to end in the **[Integrations](/docs/integrations/)**.
+Next: **[Policy](/docs/concepts/policy/)** — the file where composition,
+sandbox boundaries, and rules live.

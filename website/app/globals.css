@@ -3,26 +3,29 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 body {
-  @apply bg-ink text-zinc-100 antialiased;
-  background-image: radial-gradient(60% 50% at 50% 0%, rgba(96, 165, 250, 0.08), transparent 70%);
+  @apply bg-white text-zinc-900 antialiased;
 }
 
+/* Shared layout container (max-w-6xl). Used across all pages. */
 .container-x {
   @apply max-w-6xl mx-auto px-6 sm:px-8;
 }
 
+/* Light card: white surface, hairline zinc border. */
 .card {
-  @apply bg-white/[0.02] border border-white/[0.07] rounded-2xl;
+  @apply bg-white border border-zinc-200 rounded-2xl;
 }
 
+/* Light code block: GitHub-style light gray with dark text. */
 .codeblock {
-  @apply font-mono text-[12.5px] leading-relaxed text-zinc-300 bg-black/40 border border-white/[0.07] rounded-xl p-5 overflow-x-auto whitespace-pre;
+  @apply font-mono text-[12.5px] leading-relaxed text-zinc-800 bg-[#f6f8fa] border border-zinc-200 rounded-xl p-5 overflow-x-auto whitespace-pre;
 }
 
+/* Small uppercase section label in the accent color. */
 .eyebrow {
   @apply text-xs font-semibold uppercase tracking-[0.3em] text-accent;
 }

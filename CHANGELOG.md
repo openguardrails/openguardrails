@@ -33,6 +33,14 @@ agent-security threat classes standard IDs.
   for what the standard does not model yet, not a parking space.
 
 ### Added
+- **Runtime API binding** (`specification/runtime-api.md`) — the normative
+  HTTP surface a runtime exposes, previously implemented by six clients with
+  no spec text: canonical `/v1/*` paths (`evaluate`, `ingest`, `enroll`,
+  `heartbeat`, `config`, `approvals`, `health`), Bearer workspace-key auth,
+  the `ogr-partial` interim-judgment header, the `ogr-batch-signature`
+  detached-JWS attestation header, error shapes, the 207 ingest envelope, and
+  the sanctioned extension fields (`run_id`, `turn`, `authz`, `x.ogr.*`).
+  Anchors the API → SDK → Plugin layering.
 - **`subject.principal_group`** (MAY) — the group `principal` belongs to, as the
   enforcement point already knows it. A gateway consumer-group is the motivating case:
   the operator maintains it, it arrives on every request for free, and a runtime can

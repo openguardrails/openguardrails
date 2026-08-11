@@ -7,8 +7,9 @@ export const metadata = {
 
 Guard [Claude Code](https://code.claude.com) with an OpenGuardrails policy, shipped
 as a **plugin**. It registers a `PreToolUse` hook that turns each risky tool call
-into an OGR `GuardEvent`, evaluates it against a policy you own, and returns a
-`Verdict` — **deny, ask, or allow** — *before* the call runs.
+into an OGR [GuardEvent](/docs/api/objects/guard-event/), evaluates it against a
+policy you own, and returns a [Verdict](/docs/api/objects/verdict/) — **deny, ask,
+or allow** — *before* the call runs.
 
 Repo: [openguardrails-instrumentation-claude-code](https://github.com/openguardrails/openguardrails/tree/main/integrations/agent/claude-code).
 
@@ -55,7 +56,7 @@ from a local checkout: `/plugin marketplace add /path/to/the/repo`.
 | everything else | **allow** (silent) |
 
 The rules and egress allow-list live in `policy/policy.json` — the OGR policy you
-own ([how to configure](/docs/configuring-policy/)). `PreToolUse` hooks compose
+own ([how to configure](/docs/concepts/policy/)). `PreToolUse` hooks compose
 **most-restrictive-wins**, which is OGR's `deny-wins`. On a benign call the hook
 stays silent. It **fails open** on its own internal errors (a guardrail must never
 brick the agent) and **fails closed** on a matched rule.
@@ -67,9 +68,9 @@ stop the download-and-execute class. The extension point is the whole idea: a
 vendor implements one interface, `evaluate(GuardEvent) → Verdict`, and composes
 alongside these rules (`deny-wins` / quorum) **without changing the plugin or
 Claude Code**. Threat-intel / IOC, a prompt-injection model, an LLM judge over your
-own model — all plug in behind the same `GuardEvent`. See the
-[spec](https://github.com/openguardrails/openguardrails) and
-[GuardEvent & Verdict](/docs/concepts/event-verdict/).
+own model — all plug in behind the same GuardEvent. See the
+[GuardEvent](/docs/api/objects/guard-event/) and
+[Verdict](/docs/api/objects/verdict/) references.
 
 ## Honest limits
 

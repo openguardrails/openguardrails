@@ -1,0 +1,46 @@
+export const metadata = {
+  title: "GET /v1/health — OpenGuardrails API",
+  description: "Unauthenticated runtime liveness: 200 when the runtime can serve decisions, 503 otherwise.",
+};
+
+# GET /v1/health
+
+Unauthenticated liveness. The only endpoint that requires no API key — usable
+by load balancers, uptime probes, and a PEP deciding whether the runtime is
+back after a [degraded-mode](/docs/api/config/) episode.
+
+```
+GET {base_url}/v1/health
+```
+
+## Response
+
+| Status | Body | Meaning |
+| --- | --- | --- |
+| `200` | `{"status": "ok", "version": "..."}` | The runtime can serve decisions |
+| `503` | `{"status": "error", ...}` | It cannot — treat as unreachable |
+
+## Example
+
+```bash
+curl -s $OGR_RUNTIME/v1/health
+```
+
+```json
+{ "status": "ok", "version": "0.4.2" }
+```
+
+Neither SDK wraps this endpoint — hit it with any HTTP client:
+
+```python
+import json, urllib.request
+health = json.load(urllib.request.urlopen(f"{base_url}/v1/health", timeout=2))
+```
+
+```ts
+const health = await (await fetch(`${baseUrl}/v1/health`)).json()
+```
+
+"Healthy" means **can serve decisions** — not merely "process is up". A
+runtime that is up but cannot reach its detectors or storage should answer
+503, so PEPs fail over to degraded mode instead of timing out per call.

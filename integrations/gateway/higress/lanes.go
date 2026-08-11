@@ -129,7 +129,7 @@ func judgeFinal(ctx wrapper.HttpContext, cfg Config, rs *reqState) {
 		rs.finish(nil)
 		return
 	}
-	err = cfg.client.Post(pathEvaluate, ogrHeaders(cfg), payload,
+	err = cfg.client.Post(cfg.evaluatePath, ogrHeaders(cfg), payload,
 		func(status int, _ http.Header, respBody []byte) {
 			if status != 200 {
 				// Fail mode decides, exactly as it does on the request side. Note the

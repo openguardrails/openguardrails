@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 // ../../../packages/javascript/dist/models.js
-var OGR_VERSION = "0.1";
+var OGR_VERSION = "0.4";
 var DECISIONS = ["block", "require_approval", "redact", "modify", "allow"];
 function severity(decision) {
   return DECISIONS.indexOf(decision);

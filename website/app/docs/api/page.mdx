@@ -1,0 +1,155 @@
+export const metadata = {
+  title: "API reference — OpenGuardrails Docs",
+  description: "The OGR Runtime API: base URL and mounting, authentication, request signing, versioning, errors, rate limits, and extension fields.",
+};
+
+# Runtime API
+
+This is the **HTTP binding of the OGR contract** — the API a runtime (Policy
+Decision Point) exposes and an interception point (Policy Enforcement Point,
+PEP) or SDK calls. Both official SDKs ([Python](/docs/sdk/python/),
+[JavaScript](/docs/sdk/javascript/)) wrap exactly this surface.
+
+All requests and responses are JSON, UTF-8, `Content-Type: application/json`.
+Field names on the wire are `snake_case`, exactly as in the published JSON
+Schemas.
+
+## Endpoints
+
+| Endpoint | Purpose |
+| --- | --- |
+| [`POST /v1/evaluate`](/docs/api/evaluate/) | Synchronous decision: one GuardEvent in, one Verdict out |
+| [`POST /v1/ingest`](/docs/api/ingest/) | Asynchronous observation: record a batch of events |
+| [`POST /v1/enroll`](/docs/api/enroll/) | Bind a PEP's Ed25519 key to the workspace |
+| [`POST /v1/heartbeat`](/docs/api/heartbeat/) | PEP liveness ("agent idle" vs "PEP went dark") |
+| [`GET /v1/config`](/docs/api/config/) | Degraded-mode directives for when the runtime is unreachable |
+| [`GET /v1/approvals`](/docs/api/approvals/) | Poll the human decision behind `require_approval` |
+| [`GET /v1/health`](/docs/api/health/) | Unauthenticated liveness |
+
+Two object pages document every wire field:
+[the GuardEvent object](/docs/api/objects/guard-event/) and
+[the Verdict object](/docs/api/objects/verdict/).
+
+## Base URL and mounting
+
+Canonical endpoint paths are rooted at `/v1/`, served relative to a single
+**base URL**. The base URL may include a deployment-specific prefix (the
+reference runtime also mounts the same handlers under `/api/public/ogr`).
+Clients must construct request URLs by joining a configured base URL with the
+canonical `/v1/...` paths — and must not hard-code any other prefix:
+
+```
+base URL  https://ogr.example.com         →  POST https://ogr.example.com/v1/evaluate
+base URL  https://host/api/public/ogr     →  POST https://host/api/public/ogr/v1/evaluate
+```
+
+The SDK clients follow this rule: pass the full prefix as `base_url` /
+`baseUrl` and they append `/v1/...`.
+
+## Authentication
+
+Every endpoint except `/v1/health` requires a **workspace API key**:
+
+```
+Authorization: Bearer ogr_<key>
+```
+
+The key scopes the request to one workspace: every event lands in, and every
+policy resolves from, that workspace. A missing or invalid key produces
+`401 {"error": "unauthorized"}`.
+
+The static key authenticates the **channel**, not the **sensor**. Events
+arriving with only the workspace key are capped at the channel's attestation
+ceiling (`self_declared`) — a claim like `subject.agent_id` is recorded, but
+not trusted at more than face value.
+
+## Request signing and attestation
+
+A PEP that has [enrolled](/docs/api/enroll/) an Ed25519 key can raise that
+ceiling per request by signing the request body:
+
+```
+ogr-batch-signature: <detached JWS>
+```
+
+The value is a detached compact JWS (RFC 7515 Appendix F) over the **exact raw
+request body bytes**, with protected header:
+
+```json
+{"alg": "EdDSA", "kid": "<key_id from enroll>", "b64": false, "crit": ["b64"]}
+```
+
+so the header value is `b64url(header) + ".." + b64url(signature)`, and the
+signing input is `ascii(b64url(header)) || "." || raw_body`.
+
+The runtime verifies the signature against the enrolled public key. A valid
+signature **raises the channel's attestation ceiling** for the events in that
+request. An absent or invalid signature does **not** reject the request — the
+events simply land at the unenrolled floor. Signing is additive trust, never a
+gate.
+
+Both SDKs produce this header for you:
+[`Ed25519Signer`](/docs/sdk/python/) in Python,
+[`createNodeSigner`](/docs/sdk/javascript/) in JS.
+
+## Versioning
+
+The canonical schema version is `ogr_version: "0.4"`, carried on every
+GuardEvent and Verdict. A runtime accepts events from `0.1` through the
+current version and normalizes on read; clients should always send the
+current version.
+
+## Errors
+
+Error bodies are JSON with a stable `error` code:
+
+| Status | Body | Meaning |
+| --- | --- | --- |
+| `400` | `{"error": "invalid_event", "details": [...]}` | Body failed GuardEvent schema validation; `details` lists per-field issues |
+| `400` | `{"error": "invalid_body"}` / endpoint-specific | Malformed request for non-event endpoints |
+| `401` | `{"error": "unauthorized"}` | Missing or invalid API key |
+| `403` | `{"error": "key_revoked"}` | Enrolled key exists but was revoked |
+| `404` | endpoint-specific | Unknown resource (e.g. [approval not found](/docs/api/approvals/)) |
+| `429` | `{"error": "rate_limited", "limit": n}` | Rate limit exhausted |
+| `5xx` | — | Runtime failure; clients apply [degraded mode](/docs/api/config/) |
+
+## Rate limits
+
+A runtime rate-limits per API key; the reference default is **600
+requests/minute** in a fixed window. An exhausted limit produces
+`429 {"error": "rate_limited", "limit": 600}`.
+
+Back off on 429 — and critically, treat a 429 on `/v1/evaluate` **like an
+unreachable runtime**: apply your [degraded-mode](/docs/api/config/) policy.
+Never fail open on gated categories just because the runtime said "slow down".
+
+## Extension fields
+
+The schemas close their objects (`additionalProperties: false`); extensions
+ride in two sanctioned places:
+
+- **Runtime request extensions** on a GuardEvent, accepted by both `evaluate`
+  and `ingest`:
+  - `run_id` (string) — authoritative run attribution from adapters that can
+    observe the agent lifecycle.
+  - `turn` (zero-based integer) — turn attribution within the run.
+  - `authz` (object) — the authorization envelope judged in auto-mode.
+
+  A runtime ignores unknown extensions rather than rejecting them.
+- **`x.ogr.*` keys** on Verdicts and findings (e.g. `x.ogr.session_id`,
+  `x.ogr.unjudged`, `x.ogr.whitelisted`). Vendors extend under
+  `x.<vendor>.*`. Clients must pass through keys they do not understand —
+  both SDKs preserve them (`verdict.extensions` in Python; verbatim keys on
+  the verdict object in JS).
+
+## Conformance
+
+A **runtime** conforms if it serves all endpoints above with the stated
+semantics, validates events against the published schemas, enforces the
+authentication and attestation-ceiling rules, records evaluate/ingest
+idempotently, and never silently drops an event it accepted.
+
+A **client/SDK** conforms if it joins configured base URLs with canonical
+paths, sends valid `0.4` events, treats evaluate failure as degraded mode
+(never fail-open on gated categories), reports streamed answers once through
+ingest after partial evaluates, and passes through extension keys unchanged.

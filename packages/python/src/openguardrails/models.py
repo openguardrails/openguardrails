@@ -1,13 +1,13 @@
-"""OGR v0.1 wire types — GuardEvent, Verdict, Provenance.
+"""OGR v0.4 wire types — GuardEvent, Verdict, Provenance.
 
-Stdlib only. These mirror openguardrails-spec/schema/*.schema.json.
+Stdlib only. These mirror schema/*.schema.json (protocol 0.4).
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
 from typing import Any
 
-OGR_VERSION = "0.1"
+OGR_VERSION = "0.4"
 
 # Decision severity order (most severe first) — see composition.md.
 DECISIONS = ["block", "require_approval", "redact", "modify", "allow"]

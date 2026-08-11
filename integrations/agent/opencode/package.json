@@ -32,7 +32,7 @@
     "openguardrails"
   ],
   "dependencies": {
-    "@openguardrails/core": "^0.1.0"
+    "@openguardrails/core": "^0.2.0"
   },
   "peerDependencies": {
     "@opencode-ai/plugin": "*"

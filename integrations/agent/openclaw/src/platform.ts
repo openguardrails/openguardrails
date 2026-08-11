@@ -9,28 +9,56 @@
  * `openclaw-<hostname>` with a `client_key` attestation claim — the runtime
  * clamps the claim to the key's enrollment scope.
  *
+ * Transport, signing and wire mapping come from `@openguardrails/core`'s
+ * RuntimeClient (canonical `/v1/...` paths; the client's mount-compat
+ * fallback discovers deployments that only serve `/api/public/ogr`). What
+ * stays here is what is openclaw-specific: the key file, the enroll-once
+ * cache, the batch queue, and the default sensor.
+ *
  * Local enforcement stays authoritative; reporting is fire-and-forget and is
  * enabled only when OGR_RUNTIME_URL + OGR_API_KEY are set. Any failure —
  * missing key material, failed enrollment, an unreachable runtime — leaves
  * the plugin running exactly as before.
  */
-import { createHash, createPrivateKey, generateKeyPairSync, sign, type KeyObject } from "node:crypto"
+import { createPrivateKey, generateKeyPairSync, type KeyObject } from "node:crypto"
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir, hostname } from "node:os"
 import { dirname, join } from "node:path"
 
-import type { GuardEvent } from "@openguardrails/core"
+import {
+  RuntimeClient,
+  createNodeSigner,
+  eventToWire as coreEventToWire,
+  type GuardEvent,
+  type Sensor,
+  type Signer,
+} from "@openguardrails/core"
 
 const BATCH_MAX = 50
 const FLUSH_MS = 2000
 const QUEUE_MAX = 1000
 
+// The mechanism axis. Every altitude this plugin reports comes from JS
+// running inside the agent process, so an agent that stops calling the hooks
+// stops being observed — `in_process`, never adversary-proof. The default
+// lives HERE, not in the core: the SDK deliberately doesn't invent a sensor.
+const DEFAULT_SENSOR: Sensor = { id: "openguardrails-openclaw", class: "in_process" }
+
 export function hostAgentId(): string {
   return `openclaw-${hostname()}`
 }
 
-function b64url(raw: Buffer): string {
-  return raw.toString("base64url")
+function withDefaultSensor(ev: GuardEvent): GuardEvent {
+  return ev.sensor ? ev : { ...ev, sensor: DEFAULT_SENSOR }
+}
+
+/**
+ * JS-core camelCase GuardEvent → OGR wire (snake_case, empties dropped),
+ * with this plugin's default sensor applied. Delegates to the core's
+ * canonical converter.
+ */
+export function eventToWire(ev: GuardEvent): Record<string, unknown> {
+  return coreEventToWire(withDefaultSensor(ev))
 }
 
 class PepIdentity {
@@ -86,23 +114,17 @@ class PepIdentity {
     return this.key ? this.jwk().x : null
   }
 
-  async enroll(baseUrl: string, apiKey: string): Promise<boolean> {
+  async enroll(client: RuntimeClient): Promise<boolean> {
     if (!this.key) return false
     if (this.guardId && this.keyId) return true
     try {
-      const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/public/ogr/v1/enroll`, {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify({
-          public_key: this.publicKeyB64url(),
-          guard_id: `openclaw-hook-${hostname()}`,
-          name: `openclaw hook (${hostname()})`,
-        }),
+      const cred = await client.enroll({
+        publicKey: this.publicKeyB64url()!,
+        guardId: `openclaw-hook-${hostname()}`,
+        name: `openclaw hook (${hostname()})`,
       })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const cred = (await res.json()) as { guard_id: string; key_id: string }
-      this.guardId = cred.guard_id
-      this.keyId = cred.key_id
+      this.guardId = cred.guardId
+      this.keyId = cred.keyId
       this.persist()
       console.info(`[openguardrails] enrolled: ${this.guardId} (${this.keyId})`)
       return true
@@ -112,64 +134,47 @@ class PepIdentity {
     }
   }
 
-  signatureHeader(body: Buffer): string | null {
+  /** A Signer for the enrolled key, or null before/without enrollment. */
+  async signer(): Promise<Signer | null> {
     if (!this.key || !this.keyId) return null
-    const header = b64url(Buffer.from(JSON.stringify(
-      { alg: "EdDSA", kid: this.keyId, b64: false, crit: ["b64"] },
-    )))
-    const sig = sign(null, Buffer.concat([Buffer.from(header, "ascii"), Buffer.from("."), body]), this.key)
-    return `${header}..${b64url(sig)}`
+    return createNodeSigner(this.key, this.keyId)
   }
-}
-
-/** JS-core camelCase GuardEvent → OGR wire (snake_case, empties dropped). */
-export function eventToWire(ev: GuardEvent): Record<string, unknown> {
-  const wire: Record<string, unknown> = {
-    ogr_version: ev.ogrVersion ?? "0.3",
-    event_id: ev.eventId,
-    guard_id: ev.guardId,
-    timestamp: ev.timestamp,
-    observation_point: ev.observationPoint,
-    // The mechanism axis. Every altitude this plugin reports comes from
-    // JS running inside the agent process, so an agent that stops calling
-    // the hooks stops being observed — `in_process`, never adversary-proof.
-    sensor: ev.sensor ?? { id: "openguardrails-openclaw", class: "in_process" },
-    kind: ev.kind,
-    subject: ev.subject,
-    payload: ev.payload,
-  }
-  if (ev.sessionId) wire.session_id = ev.sessionId
-  if (ev.llmProtocol) wire.llm_protocol = ev.llmProtocol
-  if (ev.contextRefs?.length) wire.context_refs = ev.contextRefs
-  if (ev.provenance?.length) {
-    wire.provenance = ev.provenance.map((p) => ({
-      source: p.source,
-      trust: p.trust,
-      ...(p.ref ? { ref: p.ref } : {}),
-      ...(p.taintTags?.length ? { taint_tags: p.taintTags } : {}),
-    }))
-  }
-  return wire
 }
 
 class PlatformReporter {
   readonly enabled: boolean
-  private readonly baseUrl: string
-  private readonly apiKey: string
+  private client: RuntimeClient | null = null
   private identity: PepIdentity | null = null
-  private enrolling: Promise<boolean> | null = null
-  private queue: Record<string, unknown>[] = []
+  private signer: Signer | null = null
+  private enrolling: Promise<void> | null = null
+  private queue: GuardEvent[] = []
   private timer: ReturnType<typeof setInterval> | null = null
 
   constructor() {
-    this.baseUrl = (process.env.OGR_RUNTIME_URL ?? "").replace(/\/$/, "")
-    this.apiKey = process.env.OGR_API_KEY ?? ""
-    this.enabled = Boolean(this.baseUrl && this.apiKey)
+    const baseUrl = process.env.OGR_RUNTIME_URL ?? ""
+    const apiKey = process.env.OGR_API_KEY ?? ""
+    this.enabled = Boolean(baseUrl && apiKey)
     if (this.enabled) {
+      // The delegating signer lets requests go out unsigned until enrollment
+      // lands — the runtime accepts them at the unenrolled attestation floor.
+      this.client = new RuntimeClient({
+        baseUrl,
+        apiKey,
+        signer: { sign: (body) => this.signer?.sign(body) ?? null },
+      })
       this.identity = new PepIdentity()
-      this.enrolling = this.identity.enroll(this.baseUrl, this.apiKey)
+      this.enrolling = this.enroll()
       this.timer = setInterval(() => void this.flush(), FLUSH_MS)
       this.timer.unref?.()
+    }
+  }
+
+  private async enroll(): Promise<void> {
+    if (!(await this.identity!.enroll(this.client!))) return
+    try {
+      this.signer = await this.identity!.signer()
+    } catch (err) {
+      console.warn(`[openguardrails] signer unavailable (${String(err)}) — reporting unsigned`)
     }
   }
 
@@ -177,27 +182,15 @@ class PlatformReporter {
   report(ev: GuardEvent): void {
     if (!this.enabled) return
     if (this.queue.length >= QUEUE_MAX) this.queue.shift()
-    this.queue.push(eventToWire(ev))
+    this.queue.push(withDefaultSensor(ev))
   }
 
   async flush(): Promise<void> {
     if (!this.enabled || this.queue.length === 0) return
     await this.enrolling
     const batch = this.queue.splice(0, BATCH_MAX)
-    const body = Buffer.from(JSON.stringify({ batch }), "utf8")
-    const headers: Record<string, string> = {
-      "content-type": "application/json",
-      authorization: `Bearer ${this.apiKey}`,
-    }
-    const signature = this.identity?.signatureHeader(body)
-    if (signature) headers["ogr-batch-signature"] = signature
     try {
-      const res = await fetch(`${this.baseUrl}/api/public/ogr/v1/ingest`, {
-        method: "POST",
-        headers,
-        body,
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      await this.client!.ingest(batch)
     } catch (err) {
       console.warn(`[openguardrails] ingest failed (${String(err)}) — ${batch.length} events dropped`)
     }

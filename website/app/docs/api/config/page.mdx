@@ -1,0 +1,95 @@
+export const metadata = {
+  title: "GET /v1/config — OpenGuardrails API",
+  description: "The degraded-mode contract: what a PEP does with a gated action when it cannot reach the runtime. on_unreachable, longest-prefix match, caching guidance.",
+};
+
+# GET /v1/config
+
+The **degraded-mode contract**: what a PEP does with a gated action when it
+**cannot reach the runtime** — timeout, `429`, `5xx`, or network partition. A
+runtime outage (or an attacker-induced partition) must not force a binary
+choice between blocking every unattended agent and silently allowing gated
+actions; this endpoint is where the deployer's answer lives.
+
+```
+GET {base_url}/v1/config
+Authorization: Bearer ogr_<key>
+```
+
+## Response — `200`
+
+```json
+{ "on_unreachable": { "security.*": "block", "safety.*": "allow" } }
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `on_unreachable` | object | Map of category prefix → action, applied by the PEP while the runtime is unreachable |
+
+Keys are [taxonomy](https://github.com/openguardrails/openguardrails/blob/main/specification/taxonomy.md)
+category prefixes (`security.*`, `security.malicious_command`, `safety.*`,
+…). The PEP applies **longest-prefix match**: an entry for
+`security.malicious_command` beats one for `security.*`.
+
+Values:
+
+| Value | Meaning while unreachable |
+| --- | --- |
+| `block` | Deny the gated action |
+| `allow` | Permit the gated action (explicit fail-open) |
+| `require_local_approval` | Suspend; a human approves through a channel that does **not** depend on runtime availability (in-terminal prompt, in-session ask) |
+
+## Defaults are conservative
+
+A category with no entry defaults to `block` for `security.*`. The `safety.*`
+default is the deployer's explicit choice. Enforcement is entirely the
+**PEP's** responsibility — the runtime is only the config source; by
+definition it is not there when the config applies.
+
+`require_local_approval` is the intended middle path: it avoids both
+approval-fatigue-inducing hard blocks and the worst outcome, silent
+fail-open. An approval that would itself require calling the runtime does not
+qualify.
+
+## Caching guidance
+
+Fetch and cache this at startup, and refresh periodically (each successful
+refresh replaces the cache). The cached copy is what you consult at the exact
+moment the runtime is unreachable — a PEP that fetches config lazily on first
+failure has no policy when it needs one. Also remember: a `429` on
+`/v1/evaluate` counts as unreachable and triggers this same policy.
+
+## Example
+
+```bash
+curl -s $OGR_RUNTIME/v1/config -H "Authorization: Bearer $OGR_API_KEY"
+```
+
+### Python
+
+```python
+from openguardrails import RuntimeClient
+
+client = RuntimeClient()
+config = client.get_config()
+on_unreachable = config.get("on_unreachable", {})
+# cache it; consult with longest-prefix match when evaluate fails
+```
+
+### JavaScript
+
+```ts
+import { RuntimeClient } from "@openguardrails/core"
+
+const client = new RuntimeClient()
+const config = await client.getConfig()
+const onUnreachable = config.onUnreachable ?? {}   // wire key on_unreachable, camelCased
+```
+
+## Related
+
+- [Degraded-mode specification](https://github.com/openguardrails/openguardrails/blob/main/specification/degraded-mode.md)
+  — normative requirements: local hard rules stay enforced, loud
+  entering/leaving signaling, buffered events replayed (batch-signed) on
+  reconnect, queue-with-timeout for unattended agents.
+- [`POST /v1/evaluate` failure handling](/docs/api/evaluate/#failure-handling).

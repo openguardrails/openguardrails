@@ -3,7 +3,7 @@ OpenGuardrails runtime PDP.
 
     agent --HTTPS--> mitmproxy (this addon) --> LLM API
                          │
-                         └── GuardEvent → POST /api/public/ogr/v1/evaluate → Verdict
+                         └── GuardEvent → POST /v1/evaluate → Verdict
 
 Every intercepted LLM request/response is normalized into an OGR GuardEvent and
 evaluated by the runtime. A `block` / `require_approval` verdict short-circuits
@@ -238,7 +238,7 @@ class OGRGateway:
 
     async def _evaluate(self, event: dict) -> dict | None:
         """Call the PDP off the event loop; None on transport/PDP failure."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         try:
             return await loop.run_in_executor(None, self.client.evaluate, event)
         except Exception as exc:  # noqa: BLE001 - map any failure to fail mode

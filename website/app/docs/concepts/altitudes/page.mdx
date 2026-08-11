@@ -20,7 +20,7 @@ The altitude is named for the **layer**, never for the integration that reports
 it: an eBPF probe, a seccomp sandbox and a framework's own in-process wrapper all
 assert `execution`. Which one it was, and therefore whether the agent could have
 evaded it, is carried separately by
-[`sensor`](/docs/concepts/event-verdict/) — `sensor.class` is
+[`sensor`](/docs/api/objects/guard-event/#sensor) — `sensor.class` is
 `in_process` \| `wrapper` \| `proxy` \| `kernel`, weakest to strongest.
 
 ## Why three, not one
@@ -36,9 +36,9 @@ evaded it, is carried separately by
   it has the least intent (just an argv and an env).
 
 Defense-in-depth means each altitude covers the others' blind spots. In the
-[Hermes integration](/docs/integrations/agent/hermes-srt/), the invocation hook
-blocks on intent and a real sandbox ([srt](/docs/integrations/agent/hermes-srt/) or
-[OpenShell](/docs/integrations/agent/hermes-openshell/)) enforces on behavior.
+[Hermes plugin](/docs/plugins/hermes-srt/), the invocation hook
+blocks on intent and a real sandbox ([srt](/docs/plugins/hermes-srt/) or
+[OpenShell](/docs/plugins/hermes-openshell/)) enforces on behavior.
 
 ## Correlation by guard_id
 
@@ -58,5 +58,5 @@ If an agent has no sandbox (e.g. Hermes' `local` backend with no srt), OGR still
 enforces at the invocation altitude — you lose the adversary-proof layer, not the
 protocol. The verdict records which altitudes were available.
 
-Next: **[GuardEvent & Verdict](/docs/concepts/event-verdict/)** — the wire types
-each altitude emits.
+Next: **[the GuardEvent object](/docs/api/objects/guard-event/)** — the wire type
+each altitude emits — and **[Provenance & guard-context](/docs/concepts/provenance/)**.

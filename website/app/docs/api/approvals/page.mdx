@@ -1,0 +1,96 @@
+export const metadata = {
+  title: "GET /v1/approvals — OpenGuardrails API",
+  description: "Poll the human decision behind a require_approval verdict: pending, approved, denied, expired — and the 404 not_found shape.",
+};
+
+# GET /v1/approvals
+
+Polls the **human decision** behind a `require_approval`
+[verdict](/docs/api/objects/verdict/), so a blocking hook can suspend the
+action and wait.
+
+```
+GET {base_url}/v1/approvals?guard_id=<guard_id>
+Authorization: Bearer ogr_<key>
+```
+
+## Query parameters
+
+| Parameter | Required | Description |
+| --- | --- | --- |
+| `guard_id` | required | The logical action awaiting approval — the `guard_id` from the event/verdict that returned `require_approval` |
+
+## Response
+
+| Status | Body | Meaning |
+| --- | --- | --- |
+| `200` | `{"status": "pending" \| "approved" \| "denied" \| "expired", "decided_at"?}` | Current state; `decided_at` (RFC 3339) present once decided |
+| `400` | endpoint-specific | `guard_id` missing |
+| `404` | `{"status": "not_found"}` | No approval request matches this `guard_id` |
+
+Statuses:
+
+| `status` | Meaning |
+| --- | --- |
+| `pending` | Waiting on the approver — keep polling |
+| `approved` | Granted; proceed with the action |
+| `denied` | Refused; treat as block |
+| `expired` | The window closed undecided; treat as unapproved |
+| `not_found` | (404 body) Nothing to wait on for this `guard_id` |
+
+## Example
+
+```bash
+curl -s "$OGR_RUNTIME/v1/approvals?guard_id=g_7a41" \
+  -H "Authorization: Bearer $OGR_API_KEY"
+```
+
+```json
+{ "status": "approved", "decided_at": "2026-08-11T09:32:41Z" }
+```
+
+### Python
+
+```python
+import time
+from openguardrails import RuntimeClient
+
+client = RuntimeClient()
+
+while True:
+    approval = client.get_approval("g_7a41")
+    # the 404 body {"status": "not_found"} is returned, not raised,
+    # so pollers branch on status alone
+    if approval["status"] != "pending":
+        break
+    time.sleep(2)
+
+proceed = approval["status"] == "approved"
+```
+
+### JavaScript
+
+```ts
+import { RuntimeClient } from "@openguardrails/core"
+
+const client = new RuntimeClient()
+
+let status = "pending"
+while (status === "pending") {
+  ;({ status } = await client.getApproval("g_7a41"))
+  if (status === "pending") await new Promise((r) => setTimeout(r, 2000))
+}
+
+const proceed = status === "approved"
+```
+
+Note the JS client throws `RuntimeApiError` (with `status === 404`) for an
+unknown `guard_id`; the Python client folds the 404 body into the return
+value.
+
+## Beyond polling: approval receipts
+
+Polling answers "did a human say yes". For an approval an enforcement point
+can **verify** rather than believe — runtime-signed, bound to the exact
+payload digest, propagated in the `ogr-receipt` header — see
+[Enrollment & approval receipts](https://github.com/openguardrails/openguardrails/blob/main/specification/enrollment-and-receipts.md).

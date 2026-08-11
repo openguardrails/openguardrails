@@ -1,0 +1,173 @@
+export const metadata = {
+  title: "Python SDK — OpenGuardrails Docs",
+  description: "The openguardrails Python package: GuardEvent/Verdict dataclasses, the in-process Runtime, RuntimeClient for the Runtime API, Ed25519 signing, batching, and error handling.",
+};
+
+# Python SDK
+
+```bash
+pip install openguardrails
+```
+
+The `openguardrails` package is stdlib-only (zero dependencies) and has two
+halves: an **in-process `Runtime`** for local evaluation, and a
+**`RuntimeClient`** for a hosted [Runtime API](/docs/api/). Models are
+dataclasses mirroring the wire schemas.
+
+```python
+from openguardrails import (
+    GuardEvent, Verdict, Provenance, Category,   # models
+    Runtime,                                     # in-process PDP
+    RuntimeClient, Ed25519Signer,                # Runtime API client + signing
+    BatchingIngestor,                            # background ingest
+    RuntimeAPIError, RateLimitedError,           # errors
+    event_to_wire, verdict_from_wire,            # wire mapping
+)
+```
+
+## The two halves
+
+**In-process `Runtime`** — build a PDP inside your process from a policy and
+detectors; nothing leaves the machine:
+
+```python
+from openguardrails import Runtime, load_policy
+
+runtime = Runtime(detectors=[...], policy=load_policy("policy.json"))
+verdict = runtime.evaluate(event)
+```
+
+**`RuntimeClient`** — call a hosted runtime over HTTP. The rest of this page
+covers it.
+
+## RuntimeClient
+
+```python
+RuntimeClient(base_url=None, api_key=None, *, timeout=4.0, signer=None)
+```
+
+| Parameter | Default | Description |
+| --- | --- | --- |
+| `base_url` | `$OGR_RUNTIME_URL` | API root. The client appends the canonical `/v1/...` paths, so a runtime mounted behind a prefix takes the full prefix here (`https://host/api/public/ogr` → `.../api/public/ogr/v1/evaluate`) |
+| `api_key` | `$OGR_API_KEY` | Workspace key, sent as `Authorization: Bearer ogr_...` |
+| `timeout` | `4.0` | Per-request timeout, seconds |
+| `signer` | `None` | Signs request bodies for `ogr-batch-signature` — an `Ed25519Signer`, any object with `signature_header(body: bytes) -> str \| None`, or a bare callable |
+
+Raises `ValueError` at construction if neither argument nor environment
+provides a base URL / key.
+
+### `evaluate(event, *, partial=False) -> Verdict`
+
+One GuardEvent to [`POST /v1/evaluate`](/docs/api/evaluate/); returns the
+composed `Verdict`. `partial=True` sends `ogr-partial: 1` (interim judgment
+on streamed content — decide but record nothing). Response extension keys
+(`x.ogr.session_id`, `x.ogr.unjudged`, …) land on `verdict.extensions`.
+
+```python
+verdict = client.evaluate(event)
+if verdict.decision != "allow":
+    block(verdict.reasons)
+unjudged = verdict.extensions.get("x.ogr.unjudged")
+```
+
+### `ingest(events) -> list[dict]`
+
+[`POST /v1/ingest`](/docs/api/ingest/). Accepts any iterable of `GuardEvent`
+or wire dicts; batches longer than `INGEST_BATCH_MAX` (100) are split into
+multiple requests, results concatenated in submission order — each
+`{"id", "status", "error"?}` exactly as the 207 body reported them.
+
+### `enroll(public_key, guard_id=None, name=None) -> dict`
+
+[`POST /v1/enroll`](/docs/api/enroll/). `public_key` is raw 32-byte Ed25519
+bytes or its base64url string. Returns `{"guard_id", "key_id"}`.
+
+### `heartbeat(sensor=None, subject=None, interval_s=None, counters=None) -> dict`
+
+[`POST /v1/heartbeat`](/docs/api/heartbeat/). Returns `{"ok": True}`.
+
+### `get_config() -> dict`
+
+[`GET /v1/config`](/docs/api/config/) — degraded-mode directives:
+`{"on_unreachable": {"security.*": "block", ...}}`. Fetch at startup, cache,
+refresh periodically.
+
+### `get_approval(guard_id) -> dict`
+
+[`GET /v1/approvals`](/docs/api/approvals/). Returns
+`{"status": "pending" | "approved" | "denied" | "expired"}` — and folds the
+404 body `{"status": "not_found"}` into the return value instead of raising,
+so pollers branch on `status` alone.
+
+## Signing — `Ed25519Signer`
+
+Produces the detached-JWS
+[`ogr-batch-signature`](/docs/api/#request-signing-and-attestation) header.
+Requires the optional `cryptography` package (lazy import; the core stays
+zero-dependency).
+
+```python
+from openguardrails import RuntimeClient, Ed25519Signer
+
+signer = Ed25519Signer()                        # or Ed25519Signer(saved_seed, key_id)
+client = RuntimeClient(signer=signer)
+
+cred = client.enroll(signer.public_key_b64url(), name="my-pep")
+signer.key_id = cred["key_id"]                  # unsigned until key_id is set
+
+seed = signer.private_key_b64url()              # persist alongside key_id
+```
+
+## Batching — `BatchingIngestor`
+
+Fire-and-forget observability: `submit()` events, a daemon thread posts them
+via `client.ingest`, and an atexit hook drains what a short-lived process
+would otherwise lose. Never raises, never blocks; a full queue drops the
+**oldest** event, and a dead runtime costs bounded time on exit, not a hang.
+
+```python
+from openguardrails import BatchingIngestor, RuntimeClient
+
+ingestor = BatchingIngestor(RuntimeClient(), batch_max=50,
+                            flush_seconds=2.0, queue_max=1000)
+ingestor.submit(event)          # returns immediately
+ingestor.flush()                # optional synchronous drain (tests, one-shots)
+```
+
+## Error handling
+
+```python
+from openguardrails import RuntimeAPIError, RateLimitedError
+
+try:
+    verdict = client.evaluate(event)
+except RateLimitedError as exc:      # 429 — exc.limit is the advertised limit
+    verdict = degraded_mode(event)   # treat like unreachable, never fail open
+except RuntimeAPIError as exc:       # any other non-2xx — exc.status, exc.error, exc.body
+    verdict = degraded_mode(event)
+except (OSError, TimeoutError):      # transport failure (urllib.error.URLError is an OSError)
+    verdict = degraded_mode(event)
+```
+
+| Exception | When | Attributes |
+| --- | --- | --- |
+| `RuntimeAPIError` | Any non-2xx response | `status`, `body` (parsed JSON or raw text), `error` (API code, e.g. `"unauthorized"`, `"invalid_event"`) |
+| `RateLimitedError` | HTTP 429 (subclass) | plus `limit` |
+| `urllib.error.URLError` / `TimeoutError` | Transport failure | propagate as-is |
+
+**Degraded mode is your job**: the SDK surfaces failures; your PEP applies
+the [`/v1/config`](/docs/api/config/) policy and must not default to allow
+for gated categories.
+
+## Wire mapping
+
+The dataclass ↔ JSON translation lives in one place and is exported:
+
+- `event_to_wire(event)` — `GuardEvent` (or wire dict) → wire dict. Drops
+  empty optionals so the result validates against the schema; dict input
+  passes through, so extension fields (`run_id`, `turn`, `authz`) survive.
+- `verdict_from_wire(wire)` — wire dict → `Verdict`; unmodeled keys
+  (`x.ogr.*`, `findings`, `degraded`, …) are preserved on
+  `verdict.extensions`.
+
+Useful when you log wire traffic, or pre-build wire dicts for a hot path.

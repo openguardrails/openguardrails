@@ -60,23 +60,28 @@ class EmbeddedPDP:
 
 
 class RemotePDP:
-    """Remote PDP over the public evaluate endpoint (GuardEvent in, Verdict out)."""
+    """Remote PDP over the public evaluate endpoint (GuardEvent in, Verdict out).
+
+    Transport is the SDK's `RuntimeClient` (canonical `/v1/evaluate`, with an
+    automatic fallback to the legacy `/api/public/ogr` mount). Construction is
+    lazy and any failure — including a missing API key — surfaces from
+    `evaluate`, where the PEP's degraded-mode handling catches it: the sensor
+    must record with a degraded verdict, never crash at startup
+    (specification/degraded-mode.md)."""
 
     def __init__(self, base_url: str, api_key: str, timeout: float = 2.0):
-        import urllib.request  # noqa: PLC0415 — stdlib, kept local to the remote path
-        self._request = urllib.request.Request
-        self._urlopen = urllib.request.urlopen
-        self.endpoint = base_url.rstrip("/") + "/api/public/ogr/v1/evaluate"
-        self.api_key = api_key
-        self.timeout = timeout
+        from openguardrails.client import RuntimeClient  # noqa: PLC0415 — kept local to the remote path
+        self._make_client = lambda: RuntimeClient(base_url, api_key, timeout=timeout)
+        self._client = None
 
     def evaluate(self, ev: GuardEvent) -> dict:
-        req = self._request(
-            self.endpoint, data=json.dumps(ev.to_dict()).encode("utf-8"), method="POST",
-            headers={"content-type": "application/json",
-                     "authorization": f"Bearer {self.api_key}"})
-        with self._urlopen(req, timeout=self.timeout) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+        if self._client is None:
+            self._client = self._make_client()
+        verdict = self._client.evaluate(ev)
+        wire = {k: v for k, v in verdict.to_dict().items()
+                if v is not None and v != []}
+        wire.update(getattr(verdict, "extensions", {}))
+        return wire
 
 
 @dataclass

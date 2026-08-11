@@ -1,9 +1,10 @@
-"""Client for the OpenGuardrails runtime PDP (POST /api/public/ogr/v1/evaluate).
+"""Client for the OpenGuardrails runtime PDP (POST /v1/evaluate).
 
 The addon is a Policy Enforcement Point (PEP): it observes the LLM wire protocol
-and asks the runtime (the PDP) for a Verdict on each GuardEvent. This module is a
-dependency-light (stdlib only) blocking client; the addon calls `evaluate` in an
-executor so the mitmproxy event loop never blocks.
+and asks the runtime (the PDP) for a Verdict on each GuardEvent. Transport is
+the core SDK's `RuntimeClient` (canonical `/v1/*` paths, with an automatic
+fallback to the legacy `/api/public/ogr` mount); `evaluate` is blocking, so the
+addon calls it in an executor and the mitmproxy event loop never blocks.
 
 Protocol: OGR 0.3 — GuardEvent in, Verdict out. See
 https://github.com/openguardrails/openguardrails/tree/main/schema
@@ -11,11 +12,10 @@ https://github.com/openguardrails/openguardrails/tree/main/schema
 from __future__ import annotations
 
 import itertools
-import json
 import secrets
-import urllib.error
-import urllib.request
 from datetime import datetime, timezone
+
+from openguardrails import RuntimeClient
 
 OGR_VERSION = "0.3"
 _seq = itertools.count(1)
@@ -49,7 +49,8 @@ def make_event(kind: str, *, subject: dict, payload: dict, session_id: str,
     `authz` is the runtime's reasoning-blind authorization envelope
     (transcript / agent_system_prompt / authorization) that scope-aware
     guardrails such as `yolo` consume. It rides on guardEventExtSchema, an
-    additive runtime extension off the OGR wire GuardEvent."""
+    additive runtime extension off the OGR wire GuardEvent — the SDK's dict
+    passthrough (`event_to_wire`) keeps it, and `run_id`/`turn`, on the wire."""
     event = {
         "ogr_version": OGR_VERSION,
         "event_id": new_id("evt"),
@@ -77,32 +78,29 @@ def make_event(kind: str, *, subject: dict, payload: dict, session_id: str,
 
 
 class OGRClient:
-    """Thin PDP client. `evaluate` is blocking; run it off the event loop."""
+    """Thin PDP client over the SDK. `evaluate` is blocking; run it off the
+    event loop. `identity` (an enrolled PepIdentity) signs every request body
+    so the runtime can raise this channel's attestation ceiling
+    (specification/attestation.md)."""
 
     def __init__(self, base_url: str, api_key: str, timeout: float = 2.0,
                  identity=None):
-        self.endpoint = base_url.rstrip("/") + "/api/public/ogr/v1/evaluate"
-        self.api_key = api_key
-        self.timeout = timeout
-        # Optional PepIdentity: when enrolled, every request body is signed so
-        # the runtime can raise this channel's attestation ceiling
-        # (specification/attestation.md).
         self.identity = identity
+        # An empty api_key keeps the addon constructible (it warns and lets
+        # every evaluate fail into the configured fail mode, as before).
+        self._client = (RuntimeClient(base_url, api_key, timeout=timeout,
+                                      signer=identity)
+                        if api_key else None)
 
     def evaluate(self, event: dict) -> dict:
         """POST one GuardEvent, return the Verdict dict. Raises on transport or
         non-2xx (the caller maps that to its fail mode)."""
-        data = json.dumps(event).encode("utf-8")
-        headers = {
-            "content-type": "application/json",
-            "authorization": f"Bearer {self.api_key}",
-        }
-        if self.identity is not None:
-            signature = self.identity.signature_header(data)
-            if signature:
-                headers["ogr-batch-signature"] = signature
-        req = urllib.request.Request(
-            self.endpoint, data=data, method="POST", headers=headers,
-        )
-        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+        if self._client is None:
+            raise RuntimeError("OGR_API_KEY is not set")
+        verdict = self._client.evaluate(event)
+        # Callers consume the wire dict (decision/reasons plus runtime
+        # extension keys such as `suggest_answer`), not the SDK dataclass.
+        wire = {k: v for k, v in verdict.to_dict().items()
+                if v is not None and v != []}
+        wire.update(getattr(verdict, "extensions", {}))
+        return wire

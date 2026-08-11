@@ -66,19 +66,19 @@ export default function BlogIndex() {
   return (
     <>
       <h1 className="text-3xl font-bold tracking-tight mb-2">Blog</h1>
-      <p className="text-zinc-400 mb-10">
+      <p className="text-zinc-600 mb-10">
         Operational guides for vendor-neutral agent safety &amp; security.
       </p>
       <ul className="space-y-8">
         {POSTS.map((p) => (
-          <li key={p.slug} className="border-b border-white/[0.06] pb-8">
+          <li key={p.slug} className="border-b border-zinc-200 pb-8">
             <p className="text-xs uppercase tracking-[0.2em] text-zinc-500 mb-2">{p.date}</p>
             <a href={`/blog/${p.slug}/`} className="block group">
               <h2 className="text-xl font-semibold group-hover:text-accent transition-colors">
                 {p.title}
               </h2>
             </a>
-            <p className="text-zinc-400 mt-2 leading-relaxed">{p.blurb}</p>
+            <p className="text-zinc-600 mt-2 leading-relaxed">{p.blurb}</p>
             <a
               href={`/blog/${p.slug}/`}
               className="inline-block mt-3 text-accent text-sm font-semibold hover:underline"

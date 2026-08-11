@@ -4,7 +4,7 @@ eBPF-based OGR integrations observe (and, with an LSM sensor, enforce) process,
 filesystem, and network activity at the kernel boundary — below the agent
 harness and any tool-layer guard, so an agent cannot bypass them by shelling
 out, linking an SDK, or spawning a subprocess. They map kernel events to OGR
-`GuardEvent`s at the `sandbox` observation point — the altitude the spec
+`GuardEvent`s at the `execution` observation point — the altitude the spec
 assigns to real `execve` / network / filesystem behavior — and preserve
 `guard_id` correlation with the agent, gateway, and sandbox layers. An eBPF
 adapter never invents a separate wire contract.

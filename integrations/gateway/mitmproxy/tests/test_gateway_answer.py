@@ -15,7 +15,7 @@ CHAT_PATH = "/v1/chat/completions"
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 def _flow(req_body: dict, method=b"POST"):

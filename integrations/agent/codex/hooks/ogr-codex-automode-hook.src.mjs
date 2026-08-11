@@ -3,13 +3,16 @@
  * OpenGuardrails (OGR) — Codex PermissionRequest hook: AUTO MODE (source).
  *
  * Bundled by `npm run build` into ./ogr-codex-automode-hook.mjs (which
- * config.toml runs). This is the SOURCE — edit here, then rebuild.
+ * config.toml runs). This is the SOURCE — edit here, then rebuild. The bundle
+ * inlines `@openguardrails/core` (RuntimeClient + Ed25519 signing), so the
+ * built artifact stays a self-contained single file.
  *
  * What it does: Codex runs PermissionRequest hooks in the approval path,
  * BEFORE the guardian or the user approval prompt. This hook is an OGR
- * agent-hook PEP: it wraps the pending tool call in a `tool_call` GuardEvent,
- * asks an OpenGuardrails runtime (`POST /api/v1/decide`), and maps the
- * Verdict back:
+ * agent-hook PEP speaking the spec runtime API (specification/runtime-api.md):
+ * it enrolls an Ed25519 key once via `POST /v1/enroll`, wraps the pending
+ * tool call in a `tool_call` GuardEvent, asks the runtime for a Verdict via
+ * `POST /v1/evaluate`, and maps the decision back:
  *
  *   allow             → auto-approve (the user never sees a prompt)
  *   block             → deny, classifier's reason goes back to the model
@@ -18,13 +21,14 @@
  *   runtime down /
  *   timeout / error   → abstain (fail closed to ask — never silently allow)
  *
- * The GuardEvent payload carries the OGR agent-hook extension keys:
+ * The GuardEvent carries the sanctioned `authz` extension envelope:
  * `transcript` — a reasoning-blind projection of the session (user text +
  * bare assistant tool calls; assistant prose and tool outputs are dropped so
- * a prompt-injected agent cannot argue the classifier into an allow) — and
- * `policy` (prose environment/allow/soft_deny slots). tool_call receipt
- * digests cover only ["name","arguments"], so these extensions never
- * invalidate approval receipts.
+ * a prompt-injected agent cannot argue the classifier into an allow) —
+ * `instruction` (the latest user ask) and `authorization` (prose
+ * environment/allow/soft_deny slots from OGR_AUTOMODE_POLICY). tool_call
+ * receipt digests cover only ["name","arguments"], so the envelope never
+ * invalidates approval receipts.
  *
  * A denial-escalation backstop (3 consecutive / 20 total denials per turn,
  * persisted under the state dir) hands control back to the human instead of
@@ -34,16 +38,20 @@
  * REMOVES prompts for safe calls, that one BLOCKS dangerous calls even when
  * approvals are bypassed.
  */
+import { generateKeyPairSync } from "node:crypto"
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { hostname } from "node:os"
 import { join } from "node:path"
 
-const OGR_VERSION = "0.2"
+import { RuntimeClient, createNodeSigner } from "@openguardrails/core"
 
 // --- configuration (env with sane defaults) ---------------------------------
 
-const SERVER = (process.env.OGR_SERVER || "http://127.0.0.1:8878").replace(/\/+$/, "")
-const ENROLL_TOKEN = process.env.OGR_ENROLL_TOKEN || ""
+// OGR_SERVER / OGR_ENROLL_TOKEN are legacy aliases kept for existing installs.
+const RUNTIME_URL = (
+  process.env.OGR_RUNTIME_URL || process.env.OGR_SERVER || "http://127.0.0.1:8878"
+).replace(/\/+$/, "")
+const API_KEY = process.env.OGR_API_KEY || process.env.OGR_ENROLL_TOKEN || ""
 const STATE_DIR =
   process.env.OGR_STATE_DIR || join(process.env.HOME || ".", ".codex", "openguardrails")
 const AGENT_ID = process.env.OGR_AGENT_ID || `codex-${hostname()}`
@@ -74,7 +82,7 @@ function readJson(path, fallback) {
 
 function writeJson(path, value) {
   mkdirSync(STATE_DIR, { recursive: true })
-  writeFileSync(path, JSON.stringify(value))
+  writeFileSync(path, JSON.stringify(value), { mode: 0o600 })
 }
 
 /** Abstain: empty stdout tells Codex "no decision" and its own prompt runs. */
@@ -155,83 +163,90 @@ function loadDenials(sessionId, turnId) {
   return state
 }
 
-// --- OGR PEP client (enroll once, decide per call) ---------------------------
+// --- OGR PEP client (enroll once, evaluate per call) -------------------------
 
 const pepStatePath = () => join(STATE_DIR, "pep-state.json")
 
-async function post(path, body, headers = {}) {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
-  try {
-    return await fetch(`${SERVER}${path}`, {
-      method: "POST",
-      headers: { "content-type": "application/json", ...headers },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    })
-  } finally {
-    clearTimeout(timer)
-  }
+// The signer is attached after enrollment resolves the key id; until then
+// requests go out unsigned and land at the unenrolled attestation floor.
+let signer = null
+
+function makeClient() {
+  return new RuntimeClient({
+    baseUrl: RUNTIME_URL,
+    apiKey: API_KEY, // RuntimeClient throws when empty → abstain path
+    timeoutMs: TIMEOUT_MS,
+    signer: { sign: (body) => (signer ? signer.sign(body) : null) },
+  })
 }
 
-/** Returns {agentId, credential}; caches across hook invocations on disk. */
-async function ensureEnrolled(forceFresh) {
+/**
+ * Returns {guard_id, key_id, d, x}; cached across hook invocations on disk.
+ * `forceFresh` mints a NEW keypair — a revoked key must not be re-enrolled.
+ */
+async function ensureEnrolled(client, forceFresh) {
   if (!forceFresh) {
     const cached = readJson(pepStatePath(), null)
-    if (cached?.server === SERVER && cached?.agent_id && cached?.credential) {
-      return { agentId: cached.agent_id, credential: cached.credential }
+    if (cached?.server === RUNTIME_URL && cached?.guard_id && cached?.key_id && cached?.d) {
+      return cached
     }
   }
-  if (!ENROLL_TOKEN) throw new Error("OGR_ENROLL_TOKEN is not set")
-  const resp = await post("/api/v1/enroll", {
-    enroll_token: ENROLL_TOKEN,
-    agent_type: "codex",
-    agent_id: AGENT_ID,
-    heartbeat_interval_s: 60,
+  const { privateKey } = generateKeyPairSync("ed25519")
+  const jwk = privateKey.export({ format: "jwk" })
+  const cred = await client.enroll({
+    publicKey: jwk.x,
+    guardId: AGENT_ID,
+    name: `codex auto mode (${hostname()})`,
   })
-  if (!resp.ok) throw new Error(`enroll returned HTTP ${resp.status}`)
-  const data = await resp.json()
-  writeJson(pepStatePath(), {
-    server: SERVER,
-    agent_id: data.agent_id,
-    credential: data.credential,
-  })
-  return { agentId: data.agent_id, credential: data.credential }
+  const state = { server: RUNTIME_URL, guard_id: cred.guardId, key_id: cred.keyId, d: jwk.d, x: jwk.x }
+  writeJson(pepStatePath(), state)
+  return state
+}
+
+async function attachSigner(state) {
+  signer = await createNodeSigner({ d: state.d, x: state.x }, state.key_id)
 }
 
 let seq = 0
 const id = (p) => `${p}-${Date.now().toString(36)}${(seq++).toString(36)}`
 
-function buildGuardEvent(agentId, input, transcript, policy) {
-  const payload = { name: input.tool_name, arguments: input.tool_input ?? {} }
-  if (transcript.length) payload.transcript = transcript
-  if (policy) payload.policy = policy
-  return {
-    ogr_version: OGR_VERSION,
-    event_id: id("evt"),
-    guard_id: id("ga"),
-    session_id: input.session_id ?? null,
-    timestamp: new Date().toISOString(),
-    observation_point: "agent_hook",
-    kind: "tool_call",
-    subject: { agent_id: agentId, agent_type: "codex" },
-    payload,
-    content_encoding: "raw",
+function buildGuardEvent(input, transcript, policy) {
+  const authz = {}
+  if (transcript.length) {
+    authz.transcript = transcript
+    const lastUser = [...transcript].reverse().find((t) => t.role === "user")
+    if (lastUser?.text) authz.instruction = lastUser.text
   }
+  if (policy) authz.authorization = policy
+  const event = {
+    kind: "tool_call",
+    observationPoint: "invocation",
+    sensor: { id: "openguardrails-codex-automode", class: "in_process" },
+    subject: { agent_id: AGENT_ID, agent_type: "codex", attestation: "client_key" },
+    payload: { name: input.tool_name, arguments: input.tool_input ?? {} },
+    eventId: id("evt"),
+    guardId: id("ga"),
+    timestamp: new Date().toISOString(),
+    provenance: [],
+  }
+  if (input.session_id) event.sessionId = input.session_id
+  if (Object.keys(authz).length) event.authz = authz
+  return event
 }
 
-/** POST /api/v1/decide with one re-enroll retry on a stale credential. */
+/** POST /v1/evaluate with one fresh-key re-enroll retry on a 401/403. */
 async function decide(input, transcript, policy) {
-  let { agentId, credential } = await ensureEnrolled(false)
-  let event = buildGuardEvent(agentId, input, transcript, policy)
-  let resp = await post("/api/v1/decide", event, { authorization: `Bearer ${credential}` })
-  if (resp.status === 401 || resp.status === 403) {
-    ;({ agentId, credential } = await ensureEnrolled(true))
-    event = buildGuardEvent(agentId, input, transcript, policy)
-    resp = await post("/api/v1/decide", event, { authorization: `Bearer ${credential}` })
+  const client = makeClient()
+  await attachSigner(await ensureEnrolled(client, false))
+  try {
+    return await client.evaluate(buildGuardEvent(input, transcript, policy))
+  } catch (err) {
+    // A rejected credential (revoked/stale key, runtime reset): enroll a
+    // fresh key once and retry. Anything else propagates → abstain.
+    if (err?.status !== 401 && err?.status !== 403) throw err
+    await attachSigner(await ensureEnrolled(client, true))
+    return await client.evaluate(buildGuardEvent(input, transcript, policy))
   }
-  if (!resp.ok) throw new Error(`decide returned HTTP ${resp.status}`)
-  return resp.json()
 }
 
 // --- main --------------------------------------------------------------------

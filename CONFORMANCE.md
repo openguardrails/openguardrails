@@ -4,7 +4,7 @@ OGR conformance is intentionally narrow: it is about *speaking the wire*, not
 about detection quality. Quality is measured separately by
 [`openguardrails-bench`](https://github.com/openguardrails/openguardrails/tree/main/benchmarks).
 
-There are four conformance roles. An implementation may play more than one.
+There are five conformance roles. An implementation may play more than one.
 
 ## Detector conformance
 
@@ -84,7 +84,11 @@ A runtime (the Policy Decision Point) is **OGR-conformant** if it:
    `require_approval` decision completes, with bindings and expiry per
    [Enrollment & approval receipts](specification/enrollment-and-receipts.md);
 4. distributes and rotates its verification keys so PEPs can validate every
-   receipt for its full lifetime (overlapping rotation windows).
+   receipt for its full lifetime (overlapping rotation windows);
+5. when it speaks HTTP, serves the endpoints and semantics of the
+   [Runtime API binding](specification/runtime-api.md) — canonical `/v1/*`
+   paths, schema validation, attestation ceilings, idempotent ingest, and the
+   documented error shapes.
 
 ## Self-certification
 
