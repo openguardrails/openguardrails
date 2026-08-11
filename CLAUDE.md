@@ -3,12 +3,19 @@
 This is a monorepo. Run commands from the repository root unless a component
 README explicitly says otherwise.
 
-`packages/python` (`openguardrails`) and `packages/javascript`
-(`@openguardrails/core`) are the two language implementations of the OGR core
-runtime. Python integrations depend on the Python core; JavaScript/TypeScript
-integrations depend on the JS core. Users normally install an integration and
-receive its core dependency automatically. Self-contained marketplace plugins
-may bundle the core and require no separate runtime install.
+The repo is layered **API → SDK → Plugin**. The API layer is the normative
+Runtime API binding (`specification/runtime-api.md`: `/v1/evaluate`,
+`/v1/ingest`, enroll, heartbeat, config, approvals) plus the JSON Schemas in
+`schema/` (GuardEvent, Verdict). The SDK layer is `packages/python`
+(`openguardrails`) and `packages/javascript` (`@openguardrails/core`) — each
+combines the in-process runtime with a `RuntimeClient` that wraps the API
+(wire mapping, auth, signing, batching). The plugin layer is everything under
+`integrations/`. Plugins must not hand-roll HTTP clients or wire mapping —
+that belongs in the SDK; new endpoints or wire fields belong in the spec
+first. Python plugins depend on the Python SDK; JavaScript/TypeScript plugins
+depend on the JS SDK. Users normally install a plugin and receive its SDK
+dependency automatically. Self-contained marketplace plugins may bundle the
+SDK and require no separate install.
 
 OGR supports three integration points: agent hooks, gateway hooks, and sandbox
 hooks. All bindings and runnable integration examples belong under
@@ -19,7 +26,7 @@ The fourth directory category, `integrations/ebpf`, holds kernel-level
 integrations. `integrations/ebpf/sensor` is the native OGR eBPF reference
 implementation (a CO-RE kernel program under `bpf/` plus a userspace PEP in
 `src/openguardrails_ebpf/`). Such integrations must map their events to an OGR
-observation point (`sandbox`) rather than inventing a separate wire contract.
+observation point (`execution`) rather than inventing a separate wire contract.
 
 ## Validation
 
