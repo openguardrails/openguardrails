@@ -157,7 +157,7 @@ export default function AgentPage() {
           <a href="/llms.txt" className="rounded-lg px-5 py-3 bg-accent text-white font-semibold hover:bg-blue-700 transition font-mono">
             /llms.txt
           </a>
-          <a href="/docs/concepts/policy/" className="rounded-lg px-5 py-3 border border-zinc-300 font-semibold hover:bg-zinc-50 transition">
+          <a href="/api/docs/concepts/policy/" className="rounded-lg px-5 py-3 border border-zinc-300 font-semibold hover:bg-zinc-50 transition">
             Policy reference
           </a>
           <a href={`${GH}/openguardrails`} className="rounded-lg px-5 py-3 border border-zinc-300 font-semibold hover:bg-zinc-50 transition">

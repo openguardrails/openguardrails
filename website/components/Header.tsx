@@ -9,7 +9,7 @@ type Tab = { label: string; href: string; isActive: (pathname: string) => boolea
 
 const TABS: Tab[] = [
   { label: "Home", href: "/", isActive: (p) => p === "/" },
-  { label: "API", href: "/docs/", isActive: (p) => p.startsWith("/docs") },
+  { label: "API", href: "/api/docs/", isActive: (p) => p.startsWith("/api/docs") },
   { label: "Runtime", href: "/runtime/", isActive: (p) => p.startsWith("/runtime") },
   {
     label: "Resources",
@@ -74,7 +74,7 @@ export default function Header() {
             <GitHubIcon />
           </a>
           <a
-            href="/docs/quickstart/"
+            href="/api/docs/quickstart/"
             className="text-sm font-semibold rounded-lg px-4 py-2 bg-accent text-white hover:bg-blue-700 transition"
           >
             Get started
@@ -128,7 +128,7 @@ export default function Header() {
               GitHub
             </a>
             <a
-              href="/docs/quickstart/"
+              href="/api/docs/quickstart/"
               className="mt-2 mb-1 text-sm font-semibold rounded-lg px-4 py-2.5 bg-accent text-white text-center hover:bg-blue-700 transition"
             >
               Get started

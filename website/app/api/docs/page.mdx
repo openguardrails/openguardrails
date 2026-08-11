@@ -1,0 +1,58 @@
+export const metadata = {
+  title: "Introduction — OpenGuardrails Docs",
+  description: "OpenGuardrails (OGR) is an open guardrails contract for AI agents: a GuardEvent goes in, a Verdict comes out. API, SDKs, and plugins.",
+};
+
+# Introduction
+
+OpenGuardrails (OGR) is an **open guardrails contract for AI agents**. The whole
+protocol fits in one sentence: an interception point observes an agent action,
+packages it as a [**GuardEvent**](/api/docs/reference/objects/guard-event/), submits it to a
+runtime, and gets back a [**Verdict**](/api/docs/reference/objects/verdict/) — `allow`,
+`block`, `require_approval`, `modify`, or `redact` — which it enforces before the
+action proceeds.
+
+Because the contract is neutral, **any** agent framework, **any** gateway,
+**any** sandbox, and **any** safety/security detector interoperate without
+custom glue. You wire an agent once, then swap detectors and enforcement
+backends as configuration.
+
+## The layering: API → SDK → Plugin
+
+Everything in these docs sits on one of three layers:
+
+| Layer | What it is | Where documented |
+| --- | --- | --- |
+| **API** | The wire contract: the `/v1/*` HTTP endpoints plus the GuardEvent and Verdict JSON Schemas. Anything that speaks it conforms. | [API reference](/api/docs/reference/) |
+| **SDK** | A language binding wrapping the API — serialization, auth, request signing, batching. `openguardrails` on PyPI, `@openguardrails/core` on npm. | [SDKs](/api/docs/sdk/) |
+| **Plugin** | A hook for one surface (agent, gateway, sandbox, eBPF) built on an SDK — install it and a real agent is guarded with no code. | [Plugins](/api/docs/plugins/) |
+
+Work at the lowest layer you need: install a [plugin](/api/docs/plugins/) if one
+exists for your stack, use an [SDK](/api/docs/sdk/) to instrument your own agent,
+and drop to the raw [API](/api/docs/reference/) only when you are implementing a runtime
+or a binding for a new language.
+
+## What the contract standardizes
+
+- **[GuardEvent](/api/docs/reference/objects/guard-event/)** — one observed action at one
+  of three [altitudes](/api/docs/concepts/altitudes/) (`conversation`,
+  `invocation`, `execution`), with [provenance](/api/docs/concepts/provenance/)
+  describing where its inputs came from.
+- **[Verdict](/api/docs/reference/objects/verdict/)** — a detector's decision, with risk
+  categories from a shared taxonomy (`safety.*`, `security.*`, `privacy.*`).
+- **[Composition](/api/docs/concepts/composition/)** — how a runtime merges many
+  detectors' verdicts into the one decision that is enforced.
+- **The [Runtime API](/api/docs/reference/)** — the HTTP binding every SDK ships with:
+  evaluate, ingest, enrollment, heartbeat, degraded-mode config, approvals.
+
+## Where to go next
+
+- **[Quickstart](/api/docs/quickstart/)** — first verdict in minutes: curl, then
+  the Python and JS SDKs, then a plugin.
+- **[API reference](/api/docs/reference/)** — every endpoint, header, error, and field.
+- **[Instrument your agent](/api/docs/instrument-your-agent/)** — connect a
+  framework OGR doesn't know about yet.
+
+OGR is Apache-2.0 and governance-neutral. Detectors compete on a
+[neutral benchmark](https://github.com/openguardrails/openguardrails/tree/main/benchmarks);
+you compose the winners.

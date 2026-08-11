@@ -29,23 +29,23 @@ function Hero() {
       <div className="max-w-3xl">
         <p className="eyebrow mb-5">Open source · Apache-2.0</p>
         <h1 className="text-4xl sm:text-6xl font-bold tracking-tight leading-[1.05] text-zinc-900">
-          The open guardrails layer for <span className="text-accent">AI agents</span>
+          Open runtime guardrails for <span className="text-accent">AI agents</span>
         </h1>
         <p className="mt-6 text-lg text-zinc-600 leading-relaxed">
-          One API, SDKs, and plugins to observe and stop unsafe agent actions. Every tool call,
+          One API, SDKs, and plugins that judge every agent action while it runs. Each tool call,
           message, or syscall becomes a <span className="font-mono text-zinc-900">GuardEvent</span>;
           your policy returns a <span className="font-mono text-zinc-900">Verdict</span> before it
-          runs.
+          executes.
         </p>
         <div className="mt-8 flex flex-wrap items-center gap-3">
           <a
-            href="/docs/quickstart/"
+            href="/api/docs/quickstart/"
             className="rounded-lg px-5 py-3 bg-accent text-white font-semibold hover:bg-blue-700 transition"
           >
             Get started
           </a>
           <a
-            href="/docs/api/"
+            href="/api/docs/reference/"
             className="rounded-lg px-5 py-3 border border-zinc-300 font-semibold text-zinc-900 hover:bg-zinc-50 transition"
           >
             API reference
@@ -79,20 +79,20 @@ function ThreeLayers() {
           plugins on top of those. Integrate at whichever layer fits your stack.
         </p>
         <div className="grid md:grid-cols-3 gap-5">
-          <LinkCard href="/docs/api/" eyebrow="01 · API" title="The runtime contract" cta="API reference">
+          <LinkCard href="/api/docs/reference/" eyebrow="01 · API" title="The runtime contract" cta="API reference">
             <span className="font-mono text-zinc-800">POST /v1/evaluate</span> and{" "}
             <span className="font-mono text-zinc-800">POST /v1/ingest</span> over two schemas —{" "}
             <span className="font-mono text-zinc-800">GuardEvent</span> in,{" "}
             <span className="font-mono text-zinc-800">Verdict</span> out. Any client, any detector,
             one wire contract.
           </LinkCard>
-          <LinkCard href="/docs/" eyebrow="02 · SDK" title="In-process runtime + client" cta="SDK docs">
+          <LinkCard href="/api/docs/" eyebrow="02 · SDK" title="In-process runtime + client" cta="SDK docs">
             <span className="font-mono text-zinc-800">openguardrails</span> on PyPI and{" "}
             <span className="font-mono text-zinc-800">@openguardrails/core</span> on npm. Run the
             runtime in-process or point a <span className="font-mono text-zinc-800">RuntimeClient</span>{" "}
             at a shared one.
           </LinkCard>
-          <LinkCard href="/docs/" eyebrow="03 · Plugins" title="Hooks for your stack" cta="Browse integrations">
+          <LinkCard href="/api/docs/" eyebrow="03 · Plugins" title="Hooks for your stack" cta="Browse integrations">
             Agent hooks, gateway hooks, sandbox hooks, and an eBPF sensor — built on the SDKs, so
             adding a guardrail to Claude Code or a gateway is an install, not an integration
             project.
@@ -154,7 +154,7 @@ function Altitudes() {
       </div>
       <p className="mt-5 text-sm text-zinc-500">
         Read more in{" "}
-        <a href="/docs/concepts/altitudes/" className="text-accent hover:underline">
+        <a href="/api/docs/concepts/altitudes/" className="text-accent hover:underline">
           the three altitudes
         </a>
         .
@@ -260,6 +260,76 @@ function BenchmarkTeaser() {
   );
 }
 
+function WeakToStrong() {
+  return (
+    <section className="border-y border-zinc-200 bg-zinc-50">
+      <div className="container-x py-16">
+        <p className="eyebrow mb-3">Why we build this</p>
+        <h2 className="text-3xl sm:text-4xl font-bold text-zinc-900 mb-4 max-w-3xl">
+          Small models, supervising models 100× their size — at runtime
+        </h2>
+        <p className="text-zinc-600 max-w-3xl leading-relaxed">
+          Our mission is to let people hand real work to AI with confidence. Our method follows{" "}
+          <a
+            href="https://openai.com/index/weak-to-strong-generalization/"
+            className="text-accent hover:underline"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            weak-to-strong generalization
+          </a>{" "}
+          — the research agenda from Ilya Sutskever&apos;s superalignment team: a weak supervisor
+          can elicit and constrain the behavior of a far stronger model. We practice it in
+          production today, so the supervision holds when the gap gets wider.
+        </p>
+        <div className="mt-10 grid md:grid-cols-3 gap-4">
+          <div className="card p-6">
+            <p className="eyebrow mb-3">Before it ships</p>
+            <h3 className="font-semibold text-zinc-900 mb-2">
+              <a href="https://flaw0.com" className="hover:text-accent" target="_blank" rel="noopener noreferrer">
+                flaw0.com ↗
+              </a>
+            </h3>
+            <p className="text-sm text-zinc-600 leading-relaxed">
+              Small models red-teaming agents built on models 100× their parameters — the
+              adversarial test an agent must pass before you trust it.
+            </p>
+          </div>
+          <div className="card p-6 border-accent/40">
+            <p className="eyebrow mb-3">While it runs</p>
+            <h3 className="font-semibold text-zinc-900 mb-2">OpenGuardrails</h3>
+            <p className="text-sm text-zinc-600 leading-relaxed">
+              Policy-based action guardrails: every tool call, message, and syscall judged at
+              runtime by supervisors far smaller than the model they constrain. You are here.
+            </p>
+          </div>
+          <div className="card p-6">
+            <p className="eyebrow mb-3">What it touches</p>
+            <h3 className="font-semibold text-zinc-900 mb-2">
+              <a href="https://malware0.com" className="hover:text-accent" target="_blank" rel="noopener noreferrer">
+                malware0.com ↗
+              </a>
+            </h3>
+            <p className="text-sm text-zinc-600 leading-relaxed">
+              Small models reverse-analyzing adversarial malware written by models 100× their
+              size — in real time, before an agent opens the file.
+            </p>
+          </div>
+        </div>
+        <p className="mt-8 text-zinc-700 max-w-3xl leading-relaxed">
+          An agent you can trust with real work is <strong>red-team tested</strong>, has{" "}
+          <strong>policy-based guardrails on every action at runtime</strong>, and can{" "}
+          <strong>analyze the hostile files it encounters</strong>. Anything less is hope, not
+          supervision.{" "}
+          <a href="/mission/" className="text-accent hover:underline">
+            Read the mission →
+          </a>
+        </p>
+      </div>
+    </section>
+  );
+}
+
 export default function Page() {
   return (
     <main>
@@ -267,6 +337,7 @@ export default function Page() {
       <ThreeLayers />
       <Altitudes />
       <Integrations />
+      <WeakToStrong />
       <BenchmarkTeaser />
     </main>
   );

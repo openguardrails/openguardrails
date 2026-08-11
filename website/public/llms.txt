@@ -1,9 +1,14 @@
 # OpenGuardrails (OGR)
 
-> The open standard and neutral benchmark for AI agent safety & security. OGR is
-> designed to be installed and operated BY an agent: you draft a policy, your human
-> operator approves it, and the runtime enforces it on you or the agents you
-> orchestrate. This file tells an agent how to use OGR. Read it fully before acting.
+> Open runtime guardrails for AI agents: an open standard, SDKs, and plugins that
+> judge every agent action (tool call, message, syscall) while it runs — GuardEvent
+> in, Verdict out. Built on the weak-to-strong bet: small models supervising models
+> 100× their size (sister experiments: https://flaw0.com red-teams frontier-model
+> agents, https://malware0.com reverse-analyzes frontier-model malware in real
+> time). OGR is designed to be installed and operated BY an agent: you draft a
+> policy, your human operator approves it, and the runtime enforces it on you or
+> the agents you orchestrate. This file tells an agent how to use OGR. Read it
+> fully before acting.
 
 ## Get the skill (start here)
 
@@ -81,7 +86,7 @@ Example (Hermes):
 - Same OGR policy model compiles to different backends:
   personal/srt (OS-level, no containers) and multi-tenant/OpenShell (containers +
   egress proxy). Same model, different policy per threat model.
-- Reference: https://openguardrails.com/docs/concepts/policy/
+- Reference: https://openguardrails.com/api/docs/concepts/policy/
 
 ## Runtimes / SDKs
 
@@ -96,9 +101,9 @@ Example (Hermes):
 ## Site map
 
 - Home: https://openguardrails.com/
-- Docs: https://openguardrails.com/docs/
-- Getting started: https://openguardrails.com/docs/quickstart/
-- API reference (Runtime API): https://openguardrails.com/docs/api/
+- Docs: https://openguardrails.com/api/docs/
+- Getting started: https://openguardrails.com/api/docs/quickstart/
+- API reference (Runtime API): https://openguardrails.com/api/docs/reference/
 - Runtime (reference PDP, self-hosting): https://openguardrails.com/runtime/
 - Resources hub: https://openguardrails.com/resources/
 - Integration showcase: https://openguardrails.com/resources/showcase/

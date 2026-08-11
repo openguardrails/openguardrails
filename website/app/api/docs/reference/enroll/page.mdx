@@ -1,0 +1,112 @@
+export const metadata = {
+  title: "POST /v1/enroll — OpenGuardrails API",
+  description: "Bind a PEP's Ed25519 public key to the workspace so its signed requests carry a verifiable identity. 200 vs 201, invalid_public_key, key_revoked.",
+};
+
+# POST /v1/enroll
+
+Binds a PEP's **Ed25519 public key** to the workspace, so its future requests
+can carry a verifiable identity via the
+[`ogr-batch-signature`](/api/docs/reference/#request-signing-and-attestation) header.
+The workspace API key is the **bootstrap credential**: it authorizes the
+enrollment; the enrolled key then authenticates the PEP itself, raising the
+attestation ceiling above the shared-key floor.
+
+```
+POST {base_url}/v1/enroll
+Authorization: Bearer ogr_<key>
+Content-Type: application/json
+```
+
+## Request
+
+```json
+{
+  "public_key": "<base64url raw 32-byte Ed25519 public key>",
+  "guard_id": "optional stable PEP id",
+  "name": "optional display name"
+}
+```
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `public_key` | string | required | base64url encoding of the raw 32-byte Ed25519 public key (no PEM, no padding) |
+| `guard_id` | string | optional | Stable id for this PEP; omit to let the runtime mint one |
+| `name` | string | optional | Human-readable display name for fleet views |
+
+## Response
+
+| Status | Body | Meaning |
+| --- | --- | --- |
+| `201` | `{"guard_id", "key_id", "max_attestation"}` | First enrollment of this key. `key_id` is the `kid` your signer must use; `max_attestation` is the ceiling this channel can now reach |
+| `200` | `{"guard_id", "key_id"}` | Idempotent re-enrollment of the **same** key — safe to call on every startup |
+| `400` | `{"error": "invalid_public_key"}` | Not a valid base64url raw 32-byte Ed25519 key |
+| `403` | `{"error": "key_revoked"}` | This key was revoked. A revoked key can **not** be resurrected by re-enrolling — generate a new keypair |
+
+## Enrollment flow
+
+1. Generate an Ed25519 keypair (or load a persisted one).
+2. `POST /v1/enroll` with the base64url public key.
+3. Store the returned `key_id`; configure your signer with it.
+4. Sign every subsequent `evaluate`/`ingest` body — the runtime verifies
+   against the enrolled key and raises the events' attestation ceiling.
+
+### Python — `Ed25519Signer`
+
+```python
+from openguardrails import RuntimeClient, Ed25519Signer
+
+signer = Ed25519Signer()                     # fresh keypair (or pass a saved seed)
+client = RuntimeClient(signer=signer)
+
+cred = client.enroll(signer.public_key_b64url(), name="my-pep")
+signer.key_id = cred["key_id"]               # signing starts once key_id is set
+
+# persist for next start: signer.private_key_b64url() + cred["key_id"]
+```
+
+`Ed25519Signer` needs the optional `cryptography` package
+(`pip install cryptography`); the core SDK stays zero-dependency. Until
+`key_id` is set the signer returns `None` and requests simply go unsigned.
+
+### JavaScript — `createNodeSigner`
+
+```ts
+import { generateKeyPairSync } from "node:crypto"
+import { RuntimeClient, createNodeSigner } from "@openguardrails/core"
+
+const { publicKey, privateKey } = generateKeyPairSync("ed25519")
+const publicKeyB64url = Buffer.from(
+  (publicKey.export({ format: "jwk" }) as { x: string }).x, "base64url",
+).toString("base64url")     // JWK "x" is already the raw key, base64url
+
+const bootstrap = new RuntimeClient()               // unsigned, workspace key only
+const { keyId } = await bootstrap.enroll({ publicKey: publicKeyB64url, name: "my-pep" })
+
+const signer = await createNodeSigner(privateKey, keyId)
+const client = new RuntimeClient({ signer })        // now signs evaluate/ingest bodies
+```
+
+`createNodeSigner` lazily imports `node:crypto`, so `@openguardrails/core`
+itself keeps working in edge/WASM runtimes that never call it.
+
+### curl
+
+```bash
+curl -s $OGR_RUNTIME/v1/enroll \
+  -H "Authorization: Bearer $OGR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"public_key": "'"$PUBKEY_B64URL"'", "name": "my-pep"}'
+```
+
+```json
+{ "guard_id": "g_7a41", "key_id": "k_0291", "max_attestation": "client_key" }
+```
+
+## Notes
+
+- Enrollment is what makes [heartbeats](/api/docs/reference/heartbeat/) and signed
+  [degraded-mode buffers](/api/docs/reference/config/) attributable to a specific PEP.
+- Key custody (HSM, enclave) and enrollment bootstrap trust (tokens, device
+  posture) are deployment concerns — the API standardizes the outcome, not
+  the ceremony.

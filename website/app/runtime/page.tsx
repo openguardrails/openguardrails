@@ -91,7 +91,7 @@ function Hero() {
             Self-host it
           </a>
           <a
-            href="/docs/api/"
+            href="/api/docs/reference/"
             className="rounded-lg px-5 py-3 border border-zinc-300 font-semibold text-zinc-900 hover:bg-zinc-50 transition"
           >
             The API it serves
@@ -275,7 +275,7 @@ function TheApi() {
         implement a conforming runtime; every OGR SDK and plugin will speak to it unchanged.
       </p>
       <div className="grid sm:grid-cols-3 gap-5 max-w-4xl">
-        <LinkCard href="/docs/api/" eyebrow="Reference" title="API reference" cta="Read">
+        <LinkCard href="/api/docs/reference/" eyebrow="Reference" title="API reference" cta="Read">
           Every endpoint, header, and error shape, with request and response examples.
         </LinkCard>
         <LinkCard
