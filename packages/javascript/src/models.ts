@@ -1,11 +1,11 @@
 /**
- * OGR v0.1 wire types — GuardEvent, Verdict, Provenance, Category.
+ * OGR wire types — GuardEvent, Verdict, Provenance, Category.
  *
  * The TypeScript port of the OpenGuardrails spec types — the SAME contract the
  * Python `openguardrails` package implements. Zero dependencies.
  */
 
-export const OGR_VERSION = "0.1"
+export const OGR_VERSION = "0.4"
 
 /** Decision severity order, most severe first (spec: composition.md). */
 export const DECISIONS = ["block", "require_approval", "redact", "modify", "allow"] as const
