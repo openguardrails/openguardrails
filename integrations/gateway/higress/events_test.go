@@ -130,14 +130,30 @@ func TestAnAgentContinuationIsStillRefusable(t *testing.T) {
 	}
 }
 
-func TestATurnWithNoNewInputRefusesNothing(t *testing.T) {
+func TestAnExactReplayIsJUDGEDAGAIN(t *testing.T) {
+	/*
+	 * ⚠️ A DELIBERATE BEHAVIOUR CHANGE (2026-08-10), and the direction matters.
+	 *
+	 * This used to assert that replaying an identical request derived nothing — true
+	 * only because the plugin remembered, across requests, which outcomes it had already
+	 * reported. That memory is gone with the store, and `NewInput()` is structural: the
+	 * tool outcomes at the end of a continuation ARE the new input, and nothing in the
+	 * request says whether we have seen them before.
+	 *
+	 * So an exact replay is judged again. That is the safe direction — the cost is a
+	 * redundant judgement, where the opposite (suppressing a turn we think we have seen)
+	 * is how a retried prompt reaches the model unjudged. The double REPORT is absorbed
+	 * downstream instead: history events carry ids derived from the action, so the store
+	 * collapses them (see TestReReportedHistoryCarriesTheSAMEEventID).
+	 */
 	d, st := ctxFor("alice@acme.io")
-	allowed(d, st, conv(t, agentContinuation))
-	// Replay: everything has been seen, so there is nothing left to judge — and
-	// nothing to re-report either.
-	dv := deriveRequest(d, st, conv(t, agentContinuation))
-	if dv.Judged != nil || len(dv.Report) != 0 {
-		t.Fatalf("replay produced judged=%v report=%q", dv.Judged, kinds(dv.Report))
+	first := allowed(d, st, conv(t, agentContinuation))
+	if first.Judged == nil {
+		t.Fatal("nothing judged on the first pass")
+	}
+	dv := deriveRequest(d, newSessionState(""), conv(t, agentContinuation))
+	if dv.Judged == nil || dv.Judged.Kind != first.Judged.Kind {
+		t.Fatalf("replay judged %v, want the same refusable turn as %v", dv.Judged, first.Judged)
 	}
 }
 
@@ -162,34 +178,78 @@ func TestARefusedTurnIsStillJudgedWhenItIsRetried(t *testing.T) {
 	}
 }
 
-func TestHistoryIsReportedOnlyOnce(t *testing.T) {
-	d, st := ctxFor("alice@acme.io")
-	allowed(d, st, conv(t, agentTurn))
-
-	// The client re-sends the whole conversation on the next turn. Only what is new
-	// may be reported, or one action is counted once per remaining turn.
+func TestReReportedHistoryCarriesTheSAMEEventID(t *testing.T) {
+	// ⚠️ THE PLUGIN NO LONGER REMEMBERS WHAT IT REPORTED — that was cross-request state
+	// in a Redis of its own, and it is gone (docs/proposals/stateless-pep.md). A client
+	// re-sends its whole conversation every turn, so the same executed action IS carried
+	// again; what stops it being counted twice is that its id is derived from the action
+	// rather than from the request. `/ingest` keys its queue job on (workspace,
+	// event_id) and the analytics row is merge-on-write on the same id, so the second
+	// report collapses onto the first.
 	second := strings.Replace(agentTurn,
 		`{"role":"user","content":"now check the disk"}`,
 		`{"role":"user","content":"now check the disk"},{"role":"assistant","content":"ok"},{"role":"user","content":"and the logs"}`, 1)
-	dv := deriveRequest(d, st, conv(t, second))
-	if dv.Judged == nil || dv.Judged.Kind != "user_input" {
-		t.Fatalf("second turn judged = %v, want just the new user turn", dv.Judged)
+
+	// Two SEPARATE requests carrying the same past actions — different request ids,
+	// different session state, as two turns of one conversation really are.
+	a, _ := ctxFor("alice@acme.io")
+	b, _ := ctxFor("alice@acme.io")
+	b.reqID = "test-2"
+	first := deriveRequest(a, newSessionState(""), conv(t, second))
+	again := deriveRequest(b, newSessionState(""), conv(t, second))
+
+	ids := func(dv *derived) map[string]string {
+		out := map[string]string{}
+		for _, e := range dv.Report {
+			if e.Kind == "tool_call" || e.Kind == "tool_result" {
+				out[e.Kind+":"+e.EventID] = e.Kind
+			}
+		}
+		return out
 	}
-	if _, ok := dv.Judged.Payload["tool_results"]; ok {
-		t.Error("an already-reported outcome was fed back into the judged turn")
+	got, want := ids(again), ids(first)
+	if len(want) == 0 {
+		t.Fatal("no history reported to compare")
 	}
-	if got := kinds(dv.Report); got != "" {
-		t.Fatalf("second turn re-reported %q", got)
+	for k := range want {
+		if _, ok := got[k]; !ok {
+			t.Errorf("history id %q did not repeat across requests — the store cannot "+
+				"collapse the re-report, so one action is counted once per remaining turn", k)
+		}
 	}
 }
 
-func TestToolRegisterRepeatsWhenTheToolSetCHANGES(t *testing.T) {
+func TestTheJudgedTurnKeepsAPerRequestID(t *testing.T) {
+	// ⚠️ The counterpart of the rule above, and the reason it is not applied to
+	// everything: a retry of a REFUSED prompt is a new decision that must be judged and
+	// recorded again. A stable id would let the store read the second attempt as a
+	// duplicate of the first.
 	d, st := ctxFor("alice@acme.io")
-	allowed(d, st, conv(t, agentTurn))
+	a := deriveRequest(d, st, conv(t, agentTurn))
+	d2, st2 := ctxFor("alice@acme.io")
+	d2.reqID = "test-retry"
+	b := deriveRequest(d2, st2, conv(t, agentTurn))
+	if a.Judged == nil || b.Judged == nil {
+		t.Fatal("nothing judged")
+	}
+	if a.Judged.EventID == b.Judged.EventID {
+		t.Error("two separate requests produced one judged event id")
+	}
+}
 
-	// A rug-pull: same conversation, a tool description that changed under us.
+func TestTheToolSetRidesEveryTurn(t *testing.T) {
+	// ⚠️ "Has it CHANGED" is a fact about a conversation, so answering it here needed
+	// memory across requests. It moved to the runtime
+	// (`policy-engine/toolsFingerprint.ts`), which drops `payload.tools` from what it
+	// judges when the digest has not moved. This side simply always sends them — which
+	// also means a rug-pull survives this plugin restarting, and it did not before.
+	d, st := ctxFor("alice@acme.io")
+	first := allowed(d, st, conv(t, agentTurn))
+	if first.Judged == nil || first.Judged.Payload["tools"] == nil {
+		t.Fatalf("first turn carried no tool set: %v", first.Judged)
+	}
 	swapped := strings.Replace(agentTurn, "run a command", "run a command (updated)", 1)
-	dv := allowed(d, st, conv(t, swapped))
+	dv := allowed(d, newSessionState(""), conv(t, swapped))
 	if dv.Judged == nil || dv.Judged.Payload["tools"] == nil {
 		t.Fatalf("a changed tool set did not reach the judged turn: %v", dv.Judged)
 	}
@@ -229,77 +289,11 @@ func TestManyToolsCannotDisplaceTheTurnsOwnInput(t *testing.T) {
 // exactly what made a cron job's every execution one 98-hour session — but "turn N+1
 // can find turn N, and nothing else can".
 
-func TestChainLinksTheNextTurnToThisOne(t *testing.T) {
-	longer := strings.Replace(agentTurn, `{"role":"user","content":"now check the disk"}`,
-		`{"role":"user","content":"now check the disk"},{"role":"assistant","content":"ok"},{"role":"user","content":"more"}`, 1)
-
-	published := chainWriteDigest(prefixDigests(conv(t, agentTurn)))
-	if published == "" {
-		t.Fatal("a request with a conversation published no fingerprint")
-	}
-	var found bool
-	for _, d := range chainLookupDigests(prefixDigests(conv(t, longer))) {
-		if d == published {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("the next turn does not look up the fingerprint this one published")
-	}
-}
-
-func TestChainAdvancesWhenOnlyAToolResultWasAppended(t *testing.T) {
-	// An agent step appends an outcome and nothing else. If outcomes did not feed the
-	// digest, this request would publish the same fingerprint as the one before it and
-	// a tool-only stretch of a run would stop chaining.
-	before := `{"model":"m","messages":[
-	  {"role":"user","content":"go"},
-	  {"role":"assistant","tool_calls":[{"id":"c1","function":{"name":"f","arguments":"{}"}}]}]}`
-	after := strings.Replace(before, `"arguments":"{}"}}]}]}`,
-		`"arguments":"{}"}}]},{"role":"tool","tool_call_id":"c1","content":"the answer"}]}`, 1)
-
-	if chainWriteDigest(prefixDigests(conv(t, before))) ==
-		chainWriteDigest(prefixDigests(conv(t, after))) {
-		t.Error("appending a tool result did not advance the conversation fingerprint")
-	}
-}
-
-func TestChainDoesNotSpliceIdenticalOpenings(t *testing.T) {
-	// Two people opening with the same words must not become one session. The rule that
-	// guarantees it: the FULL conversation is never a lookup candidate, so a first turn
-	// matches nothing and mints.
-	one := conv(t, `{"messages":[{"role":"user","content":"hi"}]}`)
-	if got := chainLookupDigests(prefixDigests(one)); len(got) != 0 {
-		t.Errorf("a first turn looked something up: %v", got)
-	}
-	if chainWriteDigest(prefixDigests(one)) == chainWriteDigest(prefixDigests(conv(t, agentTurn))) {
-		t.Error("two different conversations published the same fingerprint")
-	}
-}
-
-func TestChainSurvivesAChangingSystemPrompt(t *testing.T) {
-	// Practically every agent prompt carries a clock. If the digest included the system
-	// message no turn would ever match its predecessor — and the failure is silent:
-	// every request simply opens a new session, exactly as before.
-	withClock := func(ts string) *protocol.Conversation {
-		return conv(t, `{"messages":[{"role":"system","content":"You are helpful. Current time: `+ts+
-			`"},{"role":"user","content":"hello"}]}`)
-	}
-	if chainWriteDigest(prefixDigests(withClock("09:00"))) !=
-		chainWriteDigest(prefixDigests(withClock("09:41"))) {
-		t.Error("the system prompt leaked into the conversation fingerprint")
-	}
-}
-
-func TestChainAbsorbsWhitespaceJitter(t *testing.T) {
-	a := conv(t, `{"messages":[{"role":"user","content":"check   the\n disk"}]}`)
-	b := conv(t, `{"messages":[{"role":"user","content":" check the disk "}]}`)
-	if chainWriteDigest(prefixDigests(a)) != chainWriteDigest(prefixDigests(b)) {
-		t.Error("re-serialisation jitter broke the chain")
-	}
-}
-
-// --- the response phase -------------------------------------------------------
+// ⚠️ The conversation-chain tests that stood here moved WITH the algorithm on
+// 2026-08-10. The plugin no longer derives a session: it sends `authz.transcript` and
+// the runtime answers with `x.ogr.session_id`. Two implementations of one algorithm is
+// how they drift, and the runtime's is the one with the replay harness
+// (`policy-engine/__tests__/sessionDerivation.test.ts`, against a real Redis).
 
 func TestAReplyThatTalksAndActsRefusesBOTH(t *testing.T) {
 	d, st := ctxFor("alice@acme.io")

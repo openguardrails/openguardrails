@@ -285,51 +285,47 @@ wire shape changed. Registering them pre-emptively would convert that signal int
 silence. Do not "fix" an `unresolved_spans` rise by adding them — find out why the
 primary field went missing.
 
-### Where the plaintext lives: sealed, in a gateway-side Redis
+### No state survives a request
 
-The session (token→value map, plus what has already been reported) **cannot live
-in this process**. Envoy gives every worker thread its own Wasm VM and
-round-robins connections across them, so turn 1 and turn 2 of one conversation
-land in different VMs — measured, not theoretical: workers 712 then 701 on two
-consecutive requests. A Go global re-masks nothing on turn 2 and re-reports the
-whole history as new.
+**This plugin keeps nothing across requests, and it used to keep four things.** The
+placeholder map, the same map by value (so a value masked in turn 1 re-masked to the
+same token when the client re-sent the conversation in the clear on turn 2), what had
+already been reported, and which session a request continued.
 
-So it is shared through Redis, **sealed with AES-256-GCM** under a key that lives
-only in the plugin configuration (`session_key`). The store holds ciphertext; a
-dump of it is useless. That is what keeps the rule intact — a store must not
-become a copy of the data it guards — while still crossing workers.
+None of it could live in Go memory: Envoy gives every worker thread its own Wasm VM and
+round-robins connections, so turn 1 and turn 2 of one conversation land in different VMs
+— measured, workers 712 then 701 on consecutive requests. So it went to Redis, sealed,
+and this filter became a stateful data-plane element with a store to run and a key to
+rotate.
 
-Requirements, in order of how load-bearing they are:
+All four moved to the runtime on 2026-08-10. Each was a fact about a CONVERSATION, and
+the runtime is the side that knows conversations:
 
-- **`session_key` is required** whenever `redis_cluster` is set. Missing or short
-  ⇒ the plugin refuses to load, rather than falling back to storing the session
-  in the clear. This is the one that actually protects the map.
-- **The OGR deployment's own Redis is fine** — the same one the runtime uses. The
-  sealing is what keeps the store from becoming a copy of the guarded data, not
-  the choice of host: the key lives only in the plugin's configuration, so the
-  runtime cannot read what the gateway wrote even though it owns the server.
-  A separate instance buys operational isolation, not secrecy.
-- What DOES matter operationally: `maxmemory-policy` must not evict these keys out
-  from under a live conversation (an evicted session degrades to un-restored
-  placeholders reaching the user — visible, not a leak), and the session traffic
-  should not crowd out the runtime's queues. Persisting is harmless: what lands on
-  disk is ciphertext.
-- Rotating the key invalidates live sessions — their placeholders stop restoring,
-  visibly. GCM authenticates, so a stale key can never silently decrypt into the
-  wrong conversation.
+| was | is |
+|---|---|
+| token→value map, restoring the reply | `x.ogr.redaction_map` on the verdict |
+| re-masking resent history | the same map — the runtime returns every placeholder whose value appears in THIS request |
+| what was already reported | history events carry ids derived from the ACTION, so a re-report collapses in the store |
+| which session this continued | `x.ogr.session_id` — the runtime derives it from `authz.transcript`, which we already send |
 
-⚠️ **The store is not only for masking, so `observe` needs it too.** `deriveRequest`
-reads it to know what has already been reported; without it every worker re-reports
-the whole conversation as new. Measured: six identical requests produced **four**
-`user_input` and **four** `tool_call` events with no Redis, and **one each** with
-it. A duplicated event stream is easy to mistake for traffic, so the plugin warns
-about this at load in both modes.
+And the VM argument goes with them: a request's REQUEST and RESPONSE phases run in the
+same VM. Only turns of a conversation land in different ones, and nothing here spans
+turns any more.
 
-Without `redis_cluster` the plugin still masks and restores within one request —
-what it loses is everything that has to survive across them.
+⚠️ **`redis_cluster`, `redis_host`, `redis_username`, `redis_password`, `session_key`
+and `session_ttl_s` are gone.** A config still carrying them loads fine; they are
+ignored. Delete them — a `session_key` in a config file reads like something is still
+being protected by it.
 
-⚠️ Concurrent turns of ONE conversation are last-write-wins. Turns of a chat are
-sequential by nature, so the race costs a re-mask, not a leak.
+⚠️ **Deploy the RUNTIME first.** Against one that does not return those fields the plugin
+still masks and restores WITHIN a request, but a value first detected on an earlier turn
+is no longer re-masked, so resent history reaches the model in the clear. Same
+reader-first rule as `x.ogr.unjudged`.
+
+⚠️ **An exact replay is now judged again.** `NewInput()` is structural — the outcomes at
+the end of a continuation ARE the new input — and nothing in a request says whether we
+have seen it before. The cost is a redundant judgement; the opposite (suppressing a turn
+we believe we have seen) is how a retried prompt reaches the model unjudged.
 
 **The token is the runtime's.** `evaluate` already mints `${OGR_<TYPE>_<n>}` per
 span from a session-scoped counter and returns it in
@@ -432,134 +428,6 @@ believed the detector ran and found nothing — the fix was making the fact **re
 on every detector failure path. Its budget test asserted `resolves.toEqual([])` on a
 timeout: the defect stated as an expectation, passing for months.
 
-### Where the plaintext lives: sealed, in a gateway-side Redis
-
-The session (token→value map, plus what has already been reported) **cannot live
-in this process**. Envoy gives every worker thread its own Wasm VM and
-round-robins connections across them, so turn 1 and turn 2 of one conversation
-land in different VMs — measured, not theoretical: workers 712 then 701 on two
-consecutive requests. A Go global re-masks nothing on turn 2 and re-reports the
-whole history as new.
-
-So it is shared through Redis, **sealed with AES-256-GCM** under a key that lives
-only in the plugin configuration (`session_key`). The store holds ciphertext; a
-dump of it is useless. That is what keeps the rule intact — a store must not
-become a copy of the data it guards — while still crossing workers.
-
-Requirements, in order of how load-bearing they are:
-
-- **`session_key` is required** whenever `redis_cluster` is set. Missing or short
-  ⇒ the plugin refuses to load, rather than falling back to storing the session
-  in the clear. This is the one that actually protects the map.
-- **The OGR deployment's own Redis is fine** — the same one the runtime uses. The
-  sealing is what keeps the store from becoming a copy of the guarded data, not
-  the choice of host: the key lives only in the plugin's configuration, so the
-  runtime cannot read what the gateway wrote even though it owns the server.
-  A separate instance buys operational isolation, not secrecy.
-- What DOES matter operationally: `maxmemory-policy` must not evict these keys out
-  from under a live conversation (an evicted session degrades to un-restored
-  placeholders reaching the user — visible, not a leak), and the session traffic
-  should not crowd out the runtime's queues. Persisting is harmless: what lands on
-  disk is ciphertext.
-- Rotating the key invalidates live sessions — their placeholders stop restoring,
-  visibly. GCM authenticates, so a stale key can never silently decrypt into the
-  wrong conversation.
-
-⚠️ **The store is not only for masking, so `observe` needs it too.** `deriveRequest`
-reads it to know what has already been reported; without it every worker re-reports
-the whole conversation as new. Measured: six identical requests produced **four**
-`user_input` and **four** `tool_call` events with no Redis, and **one each** with
-it. A duplicated event stream is easy to mistake for traffic, so the plugin warns
-about this at load in both modes.
-
-Without `redis_cluster` the plugin still masks and restores within one request —
-what it loses is everything that has to survive across them.
-
-⚠️ Concurrent turns of ONE conversation are last-write-wins. Turns of a chat are
-sequential by nature, so the race costs a re-mask, not a leak.
-
-**The token is the runtime's.** `evaluate` already mints `${OGR_<TYPE>_<n>}` per
-span from a session-scoped counter and returns it in
-`modifications.spans[].replacement`; the plugin uses that and only mints its own
-as a fallback. Two numbers for one value would put two names for one person in
-the model's context.
-
-## Liveness
-
-Silencing a PEP is the cheapest bypass of an altitude: uninstall the plugin and
-every request is unguarded, with nothing in the console to say so — "no events"
-looks exactly like a quiet afternoon. So the plugin heartbeats every 30s, as the
-**sensor** (`openguardrails-higress-connector`), which the runtime records in
-`pep_sensors`. Silence past the declared `interval_s` is a coverage loss, not an
-absence of risk.
-
-It carries counters, which is the half that catches selective suppression — a PEP
-claiming N sent while N−k arrived:
-
-| counter | meaning |
-|---|---|
-| `evaluated` | verdicts asked for and received |
-| `unchecked` | **traffic that passed with no verdict behind it** — a request that reached the model, or a reply that reached the caller |
-| `ingested` | events reported asynchronously |
-| `mirrored` | batches copied to the candidate runtime |
-| `stream_stopped` | streamed answers refused or retracted at end of stream |
-| `unresolved_spans` | **redaction spans whose `path` named no text this build holds** |
-
-`unchecked` is the one to alert on: it is what a tight `timeout_ms` plus
-`fail_mode: open` produces, and it is invisible in any other signal. With one
-`model_output` costing the runtime one judge call per tool call, a parallel-tool turn
-enters the degraded region by construction — and fail-open makes that failure *faster
-and quieter than success*, so throughput improves while detection stops.
-
-`unresolved_spans` is the second one, and it fails the other way: nothing is masked, no
-error is raised, and the deployment is indistinguishable from one with no redaction
-policy. It moves when this plugin and the runtime disagree about a payload path — see
-the registration contract above.
-
-⚠️ **`unchecked` is a FLOOR, not a total.** It counts what *this* filter could not get a
-verdict for. The runtime can also lose an individual detector call — per-text fan-out
-means one action's judge can abort while the rest answer — and it has a log for that but
-no counter, so those never reach any number here. Where the two sides disagree about how
-much went unjudged, the runtime is the side that cannot be asked. Alert on `unchecked`,
-but do not read a zero as "everything was judged".
-
-### 🔴 A partial verdict is indistinguishable from a complete one
-
-⚠️ **`fail_mode: closed` does not currently mean what it says, and the gap is in the
-contract rather than in either side's code.**
-
-The plugin's promise to an operator who sets `closed` is: *if we could not judge it, it
-does not go through.* That promise holds for the calls this filter makes — a timeout or
-an unreachable PDP refuses the turn. It does **not** hold one level down. One event now
-carries a whole turn, so the runtime fans out per text: a `model_output` with five tool
-calls is five judge calls. If one of them times out, the runtime catches it, contributes
-no findings for that action, and returns a verdict **that looks complete** — four actions
-judged, one never looked at, `decision: allow`, HTTP 200.
-
-Nothing on the wire distinguishes that from a turn where every text was judged and
-nothing was found. So the plugin allows it, and a fail-closed deployment has passed an
-unjudged action while believing it cannot. Given the measured 20% over-budget share at
-concurrency 8, this is the expected case for a parallel-tool agent, not a tail event.
-
-Closing it needs the verdict to say how much of the turn was actually judged — a count,
-or the paths that were not. The plugin will honour its fail mode on that signal as soon
-as one exists; until then, treat `fail_mode: closed` as covering transport failures only.
-
-⚠️ **The counters and the beat live in proxy-wasm SHARED DATA, not Go globals.**
-Envoy gives every worker thread its own Wasm VM, so a package-level counter is one
-number per worker and the tick that reads it runs in yet another. The first cut
-shipped exactly that: heartbeats on schedule carrying `{"evaluated":0}` while the
-gateway was busily evaluating — a reconciliation signal that always says "nothing
-happened", which is worse than none. Shared data is process-wide and CAS-guarded,
-which is what these two facts actually are. The same CAS elects ONE beater per
-period, or the runtime would receive one heartbeat per worker thread (eighteen of
-them on the box this was found on).
-
-⚠️ Process-wide means a multi-POD gateway sends one beat per pod under one sensor
-id, and the runtime's row keeps the last pod's counters. Liveness stays correct —
-silence means every pod is gone — but per-fleet reconciliation would need an
-instance identity, which the OGR sensor does not model yet.
-
 ## Configuration
 
 | Key | Default | Notes |
@@ -574,10 +442,7 @@ instance identity, which the OGR sensor does not model yet.
 | `principal_group_header` | `x-mse-consumer-group` | which header carries the caller's group |
 | `mirror_cluster` / `mirror_base_url` | *(unset)* | a candidate runtime that gets copies and gates nothing |
 | `mirror_api_key` | `api_key` | the mirror's own credential, when it differs |
-| `redis_cluster` / `redis_host` | *(unset)* | the shared session store; without it, masking is per-worker |
-| `session_key` | — | **required with `redis_cluster`**: 32 bytes, hex or base64 |
-| `redis_username` / `redis_password` | *(empty)* | |
-| `session_ttl_s` | `1800` | matches the runtime's run-pointer idle TTL |
+| `log_level` | `quiet` | `quiet` \| `info` \| `debug`. Quiet prints only what says the deployment is broken; everything describing a REQUEST is behind `info`. Anything unrecognised is quiet — the failure mode of this setting is disk. |
 
 ⚠️ **`principal_header` and `principal_group_header` are only as trustworthy as
 the edge that writes them.** The plugin reports whatever arrives on them. Measured
@@ -671,7 +536,7 @@ Local hermes -> Higress -> runtime, GLM-5.2 upstream:
 | refusal, both response shapes | JSON body and an SSE frame + `[DONE]`; the model never saw the prompt |
 | redaction, end to end, real verdict | `decision=redact findings=2` from the runtime's own privacy guardrail (a tenant `custom_entities` regex, which needs no model), prompt masked, client got the plaintext back — buffered AND streamed |
 | the platform stored nothing | every stored copy reads `${OGR_EMAIL_1}`; a `LIKE '%<address>%'` over `content_preview` and `payload` returns 0 rows |
-| multi-turn across workers | turn 1 on worker 722 masked, turn 2 on worker 700 `re-masked 2` from the sealed store — and only the NEW user turn was reported, so the dedup markers crossed too |
+| multi-turn across workers | turn 1 masked; turn 2 on a DIFFERENT worker re-masked the resent history from `x.ogr.redaction_map`, with no gateway-side store involved |
 | the store holds ciphertext | the Redis value is base64 AES-GCM; grepping it for the address returns 0 |
 
 ## Build and test

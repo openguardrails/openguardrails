@@ -135,3 +135,43 @@ func (v verdict) MustRefusePartial(failClosed bool) bool { return failClosed && 
 func (v verdict) BuffersOutput() bool {
 	return v.root.Get("x\\.ogr\\.output_mode").String() == "buffer"
 }
+
+// SessionID is the conversation the RUNTIME assembled this event into.
+//
+// ⚠️ The plugin used to answer this itself, by fingerprinting the conversation prefix
+// and chaining requests through its own Redis (`conversation.go` + `store.go`). That was
+// one of two implementations of one algorithm — the runtime has always had the other
+// (`worker/services/sessionDerivation.ts`) — and the only reason a data-plane filter
+// needed a shared store at all. Since the runtime derives it inline and returns it, this
+// side just reads the answer. Empty against an older runtime, which costs nothing: the
+// id is used for logs, not for behaviour.
+func (v verdict) SessionID() string { return v.root.Get("x\\.ogr\\.session_id").String() }
+
+// RedactionMap is `${OGR_TYPE_N}` -> the plaintext it stands for, for every placeholder
+// whose value appears in the request this verdict answers.
+//
+// ⚠️ **THIS IS WHAT REPLACED THE SESSION STORE**, and it carries more than this turn's
+// findings. A client re-sends the whole conversation in the CLEAR every turn — its own
+// history holds the original values, because we restored our placeholders on the way
+// back — so a number masked in turn 1 arrives unmasked in turn 2 and something has to
+// remember the binding. The runtime remembers it (session-scoped, TTL-bounded) and sends
+// back the subset present in THIS request, which is exactly the set this turn has to
+// re-mask. Nothing has to survive the request here.
+//
+// ⚠️ Empty against an older runtime. The fallback is `learnFromVerdict`, which recovers
+// this turn's OWN values from the span offsets — correct for restoring the reply, but
+// with no memory of earlier turns, so history goes unmasked. Ship the runtime first.
+func (v verdict) RedactionMap() map[string]string {
+	m := v.root.Get("x\\.ogr\\.redaction_map")
+	if !m.Exists() {
+		return nil
+	}
+	out := map[string]string{}
+	m.ForEach(func(k, val gjson.Result) bool {
+		if token, plain := k.String(), val.String(); token != "" && plain != "" {
+			out[token] = plain
+		}
+		return true
+	})
+	return out
+}
