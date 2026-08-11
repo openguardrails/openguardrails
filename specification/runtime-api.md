@@ -30,6 +30,8 @@ Plugin   a hook for one surface (agent, gateway, sandbox, eBPF) built on an SDK
   under [`schema/`](../schema/).
 - Canonical schema version: `ogr_version: "0.4"`. A runtime SHOULD accept
   events from `0.1` through the current version and normalize on read.
+- A machine-readable OpenAPI 3.1 description of this binding is maintained at
+  [`../schema/runtime-api.openapi.yaml`](../schema/runtime-api.openapi.yaml).
 
 ## Base URL and mounting
 
