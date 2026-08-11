@@ -100,4 +100,7 @@ jobs:
           path: package
 
       - name: Publish to npm
-        run: npm publish package/*.tgz --access public
+        # The leading ./ is load-bearing: npm 11's spec parser reads a bare
+        # "package/foo.tgz" as a GitHub owner/repo shorthand and tries git,
+        # while an explicit path prefix forces the local-tarball spec.
+        run: npm publish ./package/*.tgz --access public
