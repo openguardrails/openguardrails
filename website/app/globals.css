@@ -6,6 +6,12 @@
   color-scheme: light;
 }
 
+/* Fragment jumps must clear the sticky h-16 header, or the target heading
+   lands hidden underneath it. */
+html {
+  scroll-padding-top: 5rem;
+}
+
 body {
   @apply bg-white text-zinc-900 antialiased;
 }
