@@ -18,10 +18,12 @@ const HOOK = join(
 
 // --- mock OGR runtime ---------------------------------------------------------
 
+// The mock speaks the spec runtime API (specification/runtime-api.md):
+// POST /v1/enroll → {guard_id, key_id}; POST /v1/evaluate → a Verdict.
 let decideHandler = () => ({ status: 200, body: { decision: "allow" } })
 let enrollHandler = () => ({
   status: 200,
-  body: { agent_id: "codex-test", credential: "cred-1" },
+  body: { guard_id: "codex-test", key_id: "key-1" },
 })
 const requests = []
 
@@ -30,8 +32,13 @@ const server = createServer((req, res) => {
   req.on("data", (chunk) => (raw += chunk))
   req.on("end", () => {
     const body = raw ? JSON.parse(raw) : {}
-    requests.push({ path: req.url, body, auth: req.headers.authorization ?? "" })
-    const handler = req.url === "/api/v1/enroll" ? enrollHandler : decideHandler
+    requests.push({
+      path: req.url,
+      body,
+      auth: req.headers.authorization ?? "",
+      signature: req.headers["ogr-batch-signature"] ?? "",
+    })
+    const handler = req.url === "/v1/enroll" ? enrollHandler : decideHandler
     const { status, body: out } = handler(body)
     res.writeHead(status, { "content-type": "application/json" })
     res.end(JSON.stringify(out))
@@ -52,6 +59,11 @@ function runHook(payload, { stateDir, env = {} } = {}) {
     const child = spawn("node", [HOOK], {
       env: {
         ...process.env,
+        // The default runs exercise the LEGACY aliases (OGR_SERVER /
+        // OGR_ENROLL_TOKEN) so alias support stays covered; the canonical
+        // vars are blanked so the outer environment can't leak in.
+        OGR_RUNTIME_URL: "",
+        OGR_API_KEY: "",
         OGR_SERVER: SERVER,
         OGR_ENROLL_TOKEN: "et-test",
         OGR_STATE_DIR: stateDir,
@@ -141,26 +153,56 @@ test("runtime unreachable → abstain", async () => {
   )
 })
 
-test("missing enroll token → abstain", async () => {
+test("missing API key (and legacy token) → abstain", async () => {
   eq(
-    (await runHook(payload("ls"), { stateDir: freshStateDir(), env: { OGR_ENROLL_TOKEN: "" } })).kind,
+    (
+      await runHook(payload("ls"), {
+        stateDir: freshStateDir(),
+        env: { OGR_ENROLL_TOKEN: "", OGR_API_KEY: "" },
+      })
+    ).kind,
     "abstain",
   )
 })
 
-test("enrollment is cached across invocations, stale credential re-enrolls", async () => {
+test("canonical OGR_RUNTIME_URL/OGR_API_KEY take precedence over legacy aliases", async () => {
+  decideHandler = () => ({ status: 200, body: { decision: "allow" } })
+  eq(
+    (
+      await runHook(payload("ls"), {
+        stateDir: freshStateDir(),
+        // Legacy vars point nowhere; the canonical pair must win.
+        env: { OGR_RUNTIME_URL: SERVER, OGR_API_KEY: "ogr_test", OGR_SERVER: "http://127.0.0.1:1" },
+      })
+    ).kind,
+    "allow",
+  )
+})
+
+test("enrollment is cached across invocations, a rejected key re-enrolls fresh", async () => {
   const stateDir = freshStateDir()
   decideHandler = () => ({ status: 200, body: { decision: "allow" } })
   requests.length = 0
   await runHook(payload("ls"), { stateDir })
   await runHook(payload("ls"), { stateDir })
-  const enrolls = requests.filter((r) => r.path === "/api/v1/enroll")
+  const enrolls = requests.filter((r) => r.path === "/v1/enroll")
   eq(enrolls.length, 1)
+  if (!enrolls[0].body.public_key) throw new Error("enroll carried no Ed25519 public key")
+  // The workspace API key authenticates the channel...
+  eq(enrolls[0].auth, "Bearer et-test")
+  // ...and the enrolled key signs each evaluate body (detached JWS header).
+  const evaluates = requests.filter((r) => r.path === "/v1/evaluate")
+  eq(evaluates.length, 2)
+  for (const r of evaluates) {
+    eq(r.auth, "Bearer et-test")
+    if (!r.signature.includes("..")) throw new Error(`evaluate not signed: "${r.signature}"`)
+  }
 
-  // Now the credential goes stale: first decide 401s, hook re-enrolls once.
+  // Now the key is rejected: first evaluate 401s, hook re-enrolls once (a
+  // fresh keypair — a revoked key must not be resurrected) and retries.
   requests.length = 0
   let first = true
-  enrollHandler = () => ({ status: 200, body: { agent_id: "codex-test", credential: "cred-2" } })
+  enrollHandler = () => ({ status: 200, body: { guard_id: "codex-test", key_id: "key-2" } })
   decideHandler = () => {
     if (first) {
       first = false
@@ -170,9 +212,9 @@ test("enrollment is cached across invocations, stale credential re-enrolls", asy
   }
   // The mock can't inspect auth per-call order here, so assert via traffic shape.
   eq((await runHook(payload("ls"), { stateDir })).kind, "allow")
-  eq(requests.filter((r) => r.path === "/api/v1/enroll").length, 1)
-  eq(requests.filter((r) => r.path === "/api/v1/decide").length, 2)
-  enrollHandler = () => ({ status: 200, body: { agent_id: "codex-test", credential: "cred-1" } })
+  eq(requests.filter((r) => r.path === "/v1/enroll").length, 1)
+  eq(requests.filter((r) => r.path === "/v1/evaluate").length, 2)
+  enrollHandler = () => ({ status: 200, body: { guard_id: "codex-test", key_id: "key-1" } })
 })
 
 test("denial escalation: 3rd consecutive deny abstains to the human", async () => {
@@ -198,7 +240,7 @@ test("allow resets the consecutive denial counter", async () => {
   eq((await runHook(payload("x3"), { stateDir })).kind, "deny")
 })
 
-test("transcript is reasoning-blind and rides in the GuardEvent payload", async () => {
+test("transcript is reasoning-blind and rides in the authz envelope", async () => {
   const stateDir = freshStateDir()
   const rollout = join(stateDir, "rollout.jsonl")
   const lines = [
@@ -242,29 +284,30 @@ test("transcript is reasoning-blind and rides in the GuardEvent payload", async 
   decideHandler = () => ({ status: 200, body: { decision: "allow" } })
   requests.length = 0
   await runHook(payload("rm -rf build", { transcript_path: rollout }), { stateDir })
-  const decide = requests.find((r) => r.path === "/api/v1/decide")
+  const decide = requests.find((r) => r.path === "/v1/evaluate")
   eq(decide.body.kind, "tool_call")
-  eq(decide.body.observation_point, "agent_hook")
-  eq(decide.body.payload.name, "Bash")
-  eq(decide.body.payload.transcript, [
+  eq(decide.body.observation_point, "invocation")
+  eq(decide.body.payload, { name: "Bash", arguments: { command: "rm -rf build" } })
+  eq(decide.body.authz.transcript, [
     { role: "user", text: "clean the build dir" },
     { role: "assistant", tool: "exec_command", input: { cmd: "rm -rf build" } },
   ])
+  eq(decide.body.authz.instruction, "clean the build dir")
   const serialized = JSON.stringify(decide.body)
   if (serialized.includes("trust me") || serialized.includes("SECRET OUTPUT")) {
     throw new Error("assistant prose or tool output leaked into the transcript")
   }
 })
 
-test("policy file rides in the GuardEvent payload", async () => {
+test("policy file rides in authz.authorization", async () => {
   const stateDir = freshStateDir()
   const policyPath = join(stateDir, "automode-policy.json")
   writeFileSync(policyPath, JSON.stringify({ soft_deny: ["never push to remote branches"] }))
   decideHandler = () => ({ status: 200, body: { decision: "allow" } })
   requests.length = 0
   await runHook(payload("git status"), { stateDir, env: { OGR_AUTOMODE_POLICY: policyPath } })
-  const decide = requests.find((r) => r.path === "/api/v1/decide")
-  eq(decide.body.payload.policy, { soft_deny: ["never push to remote branches"] })
+  const decide = requests.find((r) => r.path === "/v1/evaluate")
+  eq(decide.body.authz.authorization, { soft_deny: ["never push to remote branches"] })
 })
 
 test("non-PermissionRequest payload → abstain", async () => {

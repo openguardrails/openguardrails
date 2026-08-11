@@ -76,8 +76,10 @@ Every event is `observation_point: "execution"` and carries a `sensor` block
 ## Decision and enforcement
 
 The PEP submits each event to a PDP — the embedded reference `Runtime` (default)
-or a remote OGR endpoint (`--runtime-url`). Two detectors compose behind the
-embedded runtime:
+or a remote OGR endpoint (`--runtime-url`, the deployment's base URL: the SDK
+client speaks the canonical `/v1/*` API paths and falls back to the legacy
+`/api/public/ogr` mount automatically on older runtimes). Two detectors
+compose behind the embedded runtime:
 
 - the core `ConfigRulesDetector` — exec command regexes + network egress
   allow-list (`security.malicious_command`, `security.ssrf`);

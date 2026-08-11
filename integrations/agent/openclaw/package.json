@@ -1,6 +1,6 @@
 {
   "name": "openguardrails-instrumentation-openclaw",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Guard an OpenClaw assistant's tool calls and channel traffic through the OpenGuardrails (OGR) protocol \u2014 agent-configurable text/regex guardrails, or use your own model as the judge. No core changes.",
   "type": "module",
   "license": "Apache-2.0",
@@ -46,7 +46,7 @@
     "openguardrails"
   ],
   "dependencies": {
-    "@openguardrails/core": "^0.1.0"
+    "@openguardrails/core": "^0.2.0"
   },
   "peerDependencies": {
     "openclaw": "*"

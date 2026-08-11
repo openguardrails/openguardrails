@@ -37,8 +37,8 @@ Then point auto mode at your OGR runtime by exporting a few env vars (in your
 shell profile, so Codex's `sh -lc` hook process inherits them):
 
 ```bash
-export OGR_SERVER="https://your-ogr-runtime:8878"   # default http://127.0.0.1:8878
-export OGR_ENROLL_TOKEN="et-…"                       # from your OGR tenant
+export OGR_RUNTIME_URL="https://your-ogr-runtime:8878"  # default http://127.0.0.1:8878
+export OGR_API_KEY="ogr_…"                               # your workspace API key
 ```
 
 That's it. Safe calls now run without a prompt; the runtime decides.
@@ -54,21 +54,26 @@ automatically):
 
 | Var | Default | Meaning |
 |---|---|---|
-| `OGR_SERVER` | `http://127.0.0.1:8878` | OGR runtime base URL |
-| `OGR_ENROLL_TOKEN` | *(required)* | PEP enrollment token for your tenant |
+| `OGR_RUNTIME_URL` | `http://127.0.0.1:8878` | OGR runtime base URL (canonical `/v1/...` paths are appended; legacy alias: `OGR_SERVER`) |
+| `OGR_API_KEY` | *(required)* | Workspace API key, sent as `Authorization: Bearer` (legacy alias: `OGR_ENROLL_TOKEN`) |
 | `OGR_AGENT_ID` | `codex-<hostname>` | Stable PEP identity |
 | `OGR_TIMEOUT_MS` | `10000` | Per-decision timeout |
 | `OGR_MAX_CONSECUTIVE_DENIALS` | `3` | Denials in a row before deferring the rest of the turn to you |
 | `OGR_MAX_TOTAL_DENIALS` | `20` | Total denials per turn before deferring |
 | `OGR_AUTOMODE_POLICY` | *(none)* | Path to a JSON file with prose `{environment, allow, soft_deny}` slots forwarded to the classifier |
-| `OGR_STATE_DIR` | `${PLUGIN_DATA}` | Where the PEP credential and per-turn denial counters are cached |
+| `OGR_STATE_DIR` | `${PLUGIN_DATA}` | Where the PEP's Ed25519 key material and per-turn denial counters are cached |
 
 ## How auto mode maps OGR to Codex
 
-`hooks/ogr-codex-automode-hook.src.mjs` reads the `PermissionRequest` payload on
-stdin, enrolls once as an OGR PEP (credential cached on disk across
-invocations), builds a `tool_call` `GuardEvent`, and calls
-`POST /api/v1/decide`:
+`hooks/ogr-codex-automode-hook.src.mjs` reads the `PermissionRequest` payload
+on stdin and speaks the spec runtime API
+([`specification/runtime-api.md`](../../../specification/runtime-api.md))
+through `@openguardrails/core`'s `RuntimeClient` (bundled into the built hook,
+so the artifact stays a self-contained single file). It enrolls an Ed25519 key
+once via `POST /v1/enroll` (key material cached on disk across invocations;
+request bodies are then signed with the detached-JWS `ogr-batch-signature`
+header), builds a `tool_call` `GuardEvent` (`observation_point: invocation`),
+and asks for a Verdict via `POST /v1/evaluate`:
 
 | OGR `Verdict.decision` | Auto-mode hook output | User sees |
 |---|---|---|
@@ -77,11 +82,14 @@ invocations), builds a `tool_call` `GuardEvent`, and calls
 | `require_approval` / `modify` / `redact` | *(empty stdout = abstain)* | Codex's own approval prompt — **you** are the approver in an interactive CLI |
 | runtime down / timeout / error | *(abstain)* | Codex's own prompt — **fail closed to ask**, never a silent allow |
 
-**Reasoning-blind transcript.** The `GuardEvent` payload carries a projection of
-the session containing only user text and bare assistant tool calls — assistant
-prose and tool *outputs* are stripped, so a prompt-injected agent cannot argue
-the classifier into an allow. (`tool_call` receipt digests cover only
-`["name","arguments"]`, so this extension never invalidates approval receipts.)
+**Reasoning-blind transcript.** The `GuardEvent` carries the sanctioned `authz`
+extension envelope: `authz.transcript` is a projection of the session
+containing only user text and bare assistant tool calls — assistant prose and
+tool *outputs* are stripped, so a prompt-injected agent cannot argue the
+classifier into an allow. `authz.instruction` is the latest user ask, and
+`authz.authorization` carries the prose policy slots from
+`OGR_AUTOMODE_POLICY`. (`tool_call` receipt digests cover only
+`["name","arguments"]`, so the envelope never invalidates approval receipts.)
 
 **Denial-escalation backstop.** If the classifier keeps denying the same turn
 (3 in a row / 20 total by default), auto mode stops deciding and hands control

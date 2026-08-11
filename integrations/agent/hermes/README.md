@@ -177,11 +177,13 @@ the altitude that saw them first.
 
 Set `OGR_RUNTIME_URL` + `OGR_API_KEY` and the plugin also ships every
 GuardEvent to an OpenGuardrails runtime — fire-and-forget, local enforcement
-stays authoritative. On first use it enrolls a per-instance Ed25519 key
-(`POST /enroll`, the API key is the bootstrap token) and signs each batch
-with `OGR-Batch-Signature`, so the runtime records this instance's identity
-at its enrollment scope instead of an unverified claim
-(spec: `specification/attestation.md`).
+stays authoritative. `OGR_RUNTIME_URL` is the deployment's base URL: the SDK
+client speaks the canonical `/v1/*` API paths and falls back to the legacy
+`/api/public/ogr` mount automatically on older runtimes. On first use it
+enrolls a per-instance Ed25519 key (`POST /v1/enroll`, the API key is the
+bootstrap token) and signs each batch with `OGR-Batch-Signature`, so the
+runtime records this instance's identity at its enrollment scope instead of
+an unverified claim (spec: `specification/attestation.md`).
 
 Hermes is the "many instances per machine" case: name each one with
 `OGR_INSTANCE` (default `default`). The instance asserts

@@ -10,7 +10,7 @@ when the policy says `block` / `require_approval`.
    agent  ──HTTPS──▶  mitmproxy (this addon)  ──▶  LLM API (OpenAI / Anthropic)
                           │
                           ▼  GuardEvent
-              runtime  POST /api/public/ogr/v1/evaluate  ──▶  Verdict
+              runtime  POST /v1/evaluate  ──▶  Verdict
               (your policy: moderation, injection, … ;  model served by vLLM)
 ```
 
@@ -240,7 +240,7 @@ A prompt that trips the moderation policy comes back as:
 
 | Var | Default | Meaning |
 |-----|---------|---------|
-| `OGR_RUNTIME_URL` | `http://localhost:3000` | runtime base URL (PDP) |
+| `OGR_RUNTIME_URL` | `http://localhost:3000` | deployment base URL of the runtime (PDP); the SDK speaks canonical `/v1/*` paths and falls back to the legacy `/api/public/ogr` mount automatically |
 | `OGR_API_KEY` | — | workspace key, `Authorization: Bearer` (required) |
 | `OGR_AGENT_ID` | — | operator override for `subject.agent_id`; unset (recommended) lets the runtime derive the Agent from the system prompt |
 | `OGR_AGENT_TYPE` | — | optional `subject.agent_type` override |
