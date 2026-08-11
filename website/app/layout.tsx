@@ -1,24 +1,26 @@
 import type { Metadata } from "next";
+import Header from "@/components/Header";
+import Footer from "@/components/Footer";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "OpenGuardrails — the open standard & benchmark for AI agent safety & security",
+  title: "OpenGuardrails",
   description:
-    "A vendor-neutral protocol that lets any agent, sandbox, and LLM use any safety/security vendor — and a neutral benchmark that ranks them.",
+    "The open guardrails layer for AI agents — one API, SDKs, and plugins to observe and stop unsafe agent actions.",
   keywords: [
     "AI agent security",
-    "agent safety standard",
+    "agent guardrails",
+    "guardrails API",
     "prompt injection",
     "MCP security",
-    "guardrails benchmark",
-    "agent guardrails standard",
     "LLM security",
+    "agent safety",
   ],
   metadataBase: new URL("https://openguardrails.com"),
   openGraph: {
-    title: "OpenGuardrails — the open standard for AI agent safety & security",
+    title: "OpenGuardrails",
     description:
-      "One protocol for every agent, sandbox, and LLM. One benchmark that ranks every vendor.",
+      "The open guardrails layer for AI agents — one API, SDKs, and plugins to observe and stop unsafe agent actions.",
     url: "https://openguardrails.com",
     siteName: "OpenGuardrails",
     type: "website",
@@ -28,7 +30,11 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className="scroll-smooth">
-      <body>{children}</body>
+      <body className="min-h-screen flex flex-col">
+        <Header />
+        <div className="flex-1">{children}</div>
+        <Footer />
+      </body>
     </html>
   );
 }

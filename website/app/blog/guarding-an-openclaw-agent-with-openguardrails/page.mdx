@@ -57,12 +57,12 @@ smoke-verified against OpenClaw `2026.6.10`.
 OpenClaw is one more binding of the same contract. The interesting throughline
 across our integrations is *what each agent's hook can do*: opencode can block but
 not yet ask ([fix in flight](https://github.com/anomalyco/opencode/pull/34329)),
-Claude Code's [`PreToolUse` hook](/docs/integrations/agent/claude-code/) blocks even in
+Claude Code's [`PreToolUse` hook](/docs/plugins/claude-code/) blocks even in
 bypass mode, and OpenClaw asks natively. The `GuardEvent → Verdict` core never
 changes — only the binding does.
 
 ---
 
 *[Spec](https://github.com/openguardrails/openguardrails) ·
-[GuardEvent & Verdict](/docs/concepts/event-verdict/) ·
+[GuardEvent & Verdict](/docs/api/objects/guard-event/) ·
 [`@openguardrails/core`](https://www.npmjs.com/package/@openguardrails/core).*

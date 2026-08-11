@@ -5,8 +5,8 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        ink: "#09090b",
-        accent: "#60a5fa",
+        // Primary accent for links, CTAs, and active states (tailwind blue-600).
+        accent: "#2563eb",
       },
       fontFamily: {
         sans: ["ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "Roboto", "sans-serif"],

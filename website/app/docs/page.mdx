@@ -1,45 +1,58 @@
 export const metadata = {
-  title: "What is OpenGuardrails — Docs",
-  description: "OpenGuardrails (OGR) is a vendor-neutral protocol for AI agent safety & security: one policy, every agent, every sandbox, every detector.",
+  title: "Introduction — OpenGuardrails Docs",
+  description: "OpenGuardrails (OGR) is an open guardrails contract for AI agents: a GuardEvent goes in, a Verdict comes out. API, SDKs, and plugins.",
 };
 
-# What is OpenGuardrails
+# Introduction
 
-OpenGuardrails (OGR) is a **vendor-neutral protocol** for AI agent safety &
-security. It defines a small, stable contract — `GuardEvent`, `Verdict`,
-provenance, and policy composition — so that **any** agent, **any** sandbox, and
-**any** safety/security detector can interoperate without custom glue.
+OpenGuardrails (OGR) is an **open guardrails contract for AI agents**. The whole
+protocol fits in one sentence: an interception point observes an agent action,
+packages it as a [**GuardEvent**](/docs/api/objects/guard-event/), submits it to a
+runtime, and gets back a [**Verdict**](/docs/api/objects/verdict/) — `allow`,
+`block`, `require_approval`, `modify`, or `redact` — which it enforces before the
+action proceeds.
 
-You wire OGR into an agent once, then swap detectors and enforcement backends as
-data, not code — and every decision can **allow, block, or require approval**
-before the action runs.
+Because the contract is neutral, **any** agent framework, **any** gateway,
+**any** sandbox, and **any** safety/security detector interoperate without
+custom glue. You wire an agent once, then swap detectors and enforcement
+backends as configuration.
 
-> One policy. Every agent, every sandbox, every detector.
+## The layering: API → SDK → Plugin
 
-## The problem
+Everything in these docs sits on one of three layers:
 
-Securing an agent today is an **N×M×L×S** mess: every Agent framework integrates
-with every safety Model, every LLM protocol, and every Sandbox, by hand. Change
-one and you rewrite the glue. OGR collapses this to **N+M+L+S**: each side speaks
-one protocol.
+| Layer | What it is | Where documented |
+| --- | --- | --- |
+| **API** | The wire contract: the `/v1/*` HTTP endpoints plus the GuardEvent and Verdict JSON Schemas. Anything that speaks it conforms. | [API reference](/docs/api/) |
+| **SDK** | A language binding wrapping the API — serialization, auth, request signing, batching. `openguardrails` on PyPI, `@openguardrails/core` on npm. | [SDKs](/docs/sdk/) |
+| **Plugin** | A hook for one surface (agent, gateway, sandbox, eBPF) built on an SDK — install it and a real agent is guarded with no code. | [Plugins](/docs/plugins/) |
 
-## How it fits together
+Work at the lowest layer you need: install a [plugin](/docs/plugins/) if one
+exists for your stack, use an [SDK](/docs/sdk/) to instrument your own agent,
+and drop to the raw [API](/docs/api/) only when you are implementing a runtime
+or a binding for a new language.
 
-An agent emits **GuardEvents** at up to three **altitudes** — the LLM gateway, the
-agent's tool hooks, and the sandbox where code actually runs. A **Runtime** fans
-each event out to one or more **detectors** (your config rules, an LLM judge, a
-third-party guard model), **composes** their **Verdicts** into one decision
-(`allow` / `block` / `require_approval` / `modify` / `redact`), and enforces it.
-**Provenance** labels (trusted vs. untrusted inputs) travel with the event, so the
-*same* command can be allowed from the user but blocked when it originated from an
-untrusted web page.
+## What the contract standardizes
 
-## Start here
+- **[GuardEvent](/docs/api/objects/guard-event/)** — one observed action at one
+  of three [altitudes](/docs/concepts/altitudes/) (`conversation`,
+  `invocation`, `execution`), with [provenance](/docs/concepts/provenance/)
+  describing where its inputs came from.
+- **[Verdict](/docs/api/objects/verdict/)** — a detector's decision, with risk
+  categories from a shared taxonomy (`safety.*`, `security.*`, `privacy.*`).
+- **[Composition](/docs/concepts/composition/)** — how a runtime merges many
+  detectors' verdicts into the one decision that is enforced.
+- **The [Runtime API](/docs/api/)** — the HTTP binding every SDK ships with:
+  evaluate, ingest, enrollment, heartbeat, degraded-mode config, approvals.
 
-- **[Getting started](/docs/getting-started/)** — secure a real agent in 5 minutes.
-- **[The three altitudes](/docs/concepts/altitudes/)** — where OGR intercepts & enforces.
-- **[Integrations](/docs/integrations/)** — Hermes + srt (personal) and Hermes + OpenShell (team).
-- **[Configure a policy](/docs/configuring-policy/)** — security as one JSON file.
+## Where to go next
+
+- **[Quickstart](/docs/quickstart/)** — first verdict in minutes: curl, then
+  the Python and JS SDKs, then a plugin.
+- **[API reference](/docs/api/)** — every endpoint, header, error, and field.
+- **[Instrument your agent](/docs/instrument-your-agent/)** — connect a
+  framework OGR doesn't know about yet.
 
 OGR is Apache-2.0 and governance-neutral. Detectors compete on a
-[neutral benchmark](https://github.com/openguardrails/openguardrails/tree/main/benchmarks); you compose the winners.
+[neutral benchmark](https://github.com/openguardrails/openguardrails/tree/main/benchmarks);
+you compose the winners.

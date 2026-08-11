@@ -35,32 +35,9 @@ const USES = [
   "Maintaining the agent, sandbox, and gateway integrations people rely on in production.",
 ];
 
-function TopBar() {
-  return (
-    <header className="sticky top-0 z-30 backdrop-blur bg-ink/70 border-b border-white/[0.06]">
-      <div className="container-x flex items-center justify-between h-16">
-        <a href="/" className="flex items-center gap-2.5 font-bold tracking-tight">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.svg" alt="OpenGuardrails" className="h-7 w-auto" />
-          <span>Open<span className="text-accent">Guardrails</span></span>
-          <span className="ml-2 text-xs font-normal text-zinc-500 border-l border-white/10 pl-2">Donate</span>
-        </a>
-        <nav className="hidden md:flex items-center gap-7 text-sm text-zinc-400">
-          <a href="/" className="hover:text-white transition-colors">Home</a>
-          <a href="/mission/" className="hover:text-white transition-colors">Mission</a>
-          <a href="/docs/" className="hover:text-white transition-colors">Docs</a>
-          <a href={GH} className="hover:text-white transition-colors">GitHub</a>
-        </nav>
-      </div>
-    </header>
-  );
-}
-
 export default function DonatePage() {
   return (
     <main>
-      <TopBar />
-
       {/* Hero + donate box */}
       <section className="container-x pt-24 pb-12 text-center">
         <p className="eyebrow mb-5">Fund AGI endgame safety</p>
@@ -68,12 +45,12 @@ export default function DonatePage() {
           Help keep human authority over{" "}
           <span className="text-accent">strong AI</span>.
         </h1>
-        <p className="mt-7 max-w-2xl mx-auto text-lg text-zinc-400">
+        <p className="mt-7 max-w-2xl mx-auto text-lg text-zinc-600">
           OpenGuardrails builds a controllable weak-AI supervision layer so people can hand real work
           to strong AI without handing over judgment. Donations fund that mission — directly.
         </p>
 
-        <div className="card p-8 border-accent/25 max-w-xl mx-auto mt-10 text-left">
+        <div className="card p-8 border-blue-200 max-w-xl mx-auto mt-10 text-left">
           <p className="eyebrow mb-4 text-center">Choose an amount</p>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
             {PRESETS.map((p) => (
@@ -84,8 +61,8 @@ export default function DonatePage() {
                 rel="noopener noreferrer"
                 className={`relative rounded-xl px-4 py-4 text-center font-semibold border transition ${
                   p.note
-                    ? "bg-accent/15 border-accent/40 text-accent hover:bg-accent/25"
-                    : "border-white/15 text-zinc-200 hover:bg-white/5"
+                    ? "bg-blue-50 border-blue-200 text-accent hover:bg-blue-100"
+                    : "border-zinc-300 text-zinc-900 hover:bg-zinc-50"
                 }`}
               >
                 {p.label}
@@ -101,7 +78,7 @@ export default function DonatePage() {
             href={STRIPE_DONATE_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className="block rounded-lg px-5 py-3 bg-accent text-ink font-semibold text-center hover:bg-blue-300 transition"
+            className="block rounded-lg px-5 py-3 bg-accent text-white font-semibold text-center hover:bg-blue-700 transition"
           >
             Donate any amount →
           </a>
@@ -111,7 +88,7 @@ export default function DonatePage() {
         </div>
         <p className="mt-6 max-w-xl mx-auto text-xs text-zinc-600 leading-relaxed">
           OpenGuardrails is a US-registered solo LLC, not a 501(c)(3). Donations are gifts to the
-          mission and are <span className="text-zinc-400">not tax-deductible</span>.
+          mission and are <span className="text-zinc-600">not tax-deductible</span>.
         </p>
       </section>
 
@@ -121,7 +98,7 @@ export default function DonatePage() {
         <h2 className="text-3xl font-bold mb-6">All of it funds the mission</h2>
         <ul className="space-y-4">
           {USES.map((u) => (
-            <li key={u} className="flex gap-3 text-[15px] text-zinc-300 leading-relaxed">
+            <li key={u} className="flex gap-3 text-[15px] text-zinc-700 leading-relaxed">
               <span className="text-accent mt-0.5 shrink-0">→</span>
               <span>{u}</span>
             </li>
@@ -134,7 +111,7 @@ export default function DonatePage() {
         <div className="card p-8">
           <p className="eyebrow mb-3">Why a donation goes where it should</p>
           <h2 className="text-2xl font-bold mb-4">Owned so the mission can&apos;t be bent</h2>
-          <div className="space-y-4 text-[15px] text-zinc-300 leading-relaxed">
+          <div className="space-y-4 text-[15px] text-zinc-700 leading-relaxed">
             <p>
               OpenGuardrails is a solo LLC, founder-funded and 100% founder-held, so it doesn&apos;t
               have to treat shareholder profit as the final goal. It runs more like a public-benefit
@@ -142,7 +119,7 @@ export default function DonatePage() {
             </p>
             <p>
               We sustain the work two ways — direct donations and commercial projects — and{" "}
-              <span className="text-zinc-100 font-semibold">all of that income goes to AGI endgame
+              <span className="text-zinc-900 font-semibold">all of that income goes to AGI endgame
               safety.</span> Within six months we&apos;ll seat a social-responsibility committee to
               hold us to these commitments.
             </p>
@@ -159,22 +136,22 @@ export default function DonatePage() {
         <h2 className="text-3xl font-bold mb-6">Money is one of several</h2>
         <div className="grid sm:grid-cols-3 gap-5">
           <div className="card p-6">
-            <h3 className="text-[15px] font-semibold mb-2 text-zinc-100">Sponsor a commercial project</h3>
-            <p className="text-sm text-zinc-400 leading-relaxed">
+            <h3 className="text-[15px] font-semibold mb-2 text-zinc-900">Sponsor a commercial project</h3>
+            <p className="text-sm text-zinc-600 leading-relaxed">
               Need OGR deployed or extended for your org? Commercial work funds the mission too.{" "}
               <a href="mailto:thomas@openguardrails.com" className="text-accent hover:underline">Email us</a>.
             </p>
           </div>
           <div className="card p-6">
-            <h3 className="text-[15px] font-semibold mb-2 text-zinc-100">Contribute on GitHub</h3>
-            <p className="text-sm text-zinc-400 leading-relaxed">
+            <h3 className="text-[15px] font-semibold mb-2 text-zinc-900">Contribute on GitHub</h3>
+            <p className="text-sm text-zinc-600 leading-relaxed">
               Spec, detectors, integrations, the benchmark — contribute from anywhere.{" "}
               <a href={GH} className="text-accent hover:underline">github.com/openguardrails</a>.
             </p>
           </div>
           <div className="card p-6">
-            <h3 className="text-[15px] font-semibold mb-2 text-zinc-100">Spread the word</h3>
-            <p className="text-sm text-zinc-400 leading-relaxed">
+            <h3 className="text-[15px] font-semibold mb-2 text-zinc-900">Spread the word</h3>
+            <p className="text-sm text-zinc-600 leading-relaxed">
               Star the repos, share the mission, and bring the weak-over-strong idea to people who
               are handing real work to AI.
             </p>
@@ -184,25 +161,18 @@ export default function DonatePage() {
 
       <section className="container-x py-12 max-w-3xl mx-auto">
         <div className="flex flex-wrap items-center gap-3">
-          <a href={STRIPE_DONATE_URL} target="_blank" rel="noopener noreferrer" className="rounded-lg px-5 py-3 bg-accent text-ink font-semibold hover:bg-blue-300 transition">
+          <a href={STRIPE_DONATE_URL} target="_blank" rel="noopener noreferrer" className="rounded-lg px-5 py-3 bg-accent text-white font-semibold hover:bg-blue-700 transition">
             Donate →
           </a>
-          <a href="/mission/" className="rounded-lg px-5 py-3 border border-white/15 font-semibold hover:bg-white/5 transition">
+          <a href="/mission/" className="rounded-lg px-5 py-3 border border-zinc-300 font-semibold hover:bg-zinc-50 transition">
             Read the mission
           </a>
-          <a href="mailto:thomas@openguardrails.com" className="rounded-lg px-5 py-3 border border-white/15 font-semibold hover:bg-white/5 transition">
+          <a href="mailto:thomas@openguardrails.com" className="rounded-lg px-5 py-3 border border-zinc-300 font-semibold hover:bg-zinc-50 transition">
             thomas@openguardrails.com
           </a>
         </div>
       </section>
 
-      <footer className="border-t border-white/[0.06] mt-6 py-10">
-        <div className="container-x text-sm text-zinc-500">
-          <a href="/" className="hover:text-white">← Back to home</a>
-          <span className="mx-3 text-zinc-700">·</span>
-          OpenGuardrails — donations and commercial income both fund AGI endgame safety.
-        </div>
-      </footer>
     </main>
   );
 }

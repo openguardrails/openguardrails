@@ -1,23 +1,24 @@
 export const metadata = {
-  title: "Instrument your own agent — OpenGuardrails Docs",
-  description: "Connect any agent framework to OGR in four steps: find your interception points, emit GuardEvents, evaluate against a Runtime, and enforce the verdict.",
+  title: "Instrument your agent — OpenGuardrails Docs",
+  description: "Connect any agent framework to OGR in four steps: find your interception points, emit GuardEvents, evaluate with the SDK RuntimeClient, and enforce the verdict.",
 };
 
-# Instrument your own agent
+# Instrument your agent
 
-The Hermes integration is a worked example, not a special case. Any agent framework
-connects to OGR the same way. If your framework exposes a tool/exec lifecycle, you
-can secure it.
+The [existing plugins](/docs/plugins/) are worked examples, not special cases.
+Any agent framework connects to OGR the same way. If your framework exposes a
+tool/exec lifecycle, you can secure it.
 
 ```bash
-pip install openguardrails   # the vendor-neutral reference runtime (zero deps)
+pip install openguardrails        # or: npm install @openguardrails/core
 ```
 
 ## The four steps
 
 ### 1. Find your interception points
 
-Map your framework's hooks to OGR altitudes. You want, in priority order:
+Map your framework's hooks to OGR [altitudes](/docs/concepts/altitudes/). You
+want, in priority order:
 
 - a **pre-tool / pre-exec** hook that can **block** → `invocation` altitude
 - the **exec chokepoint** where commands actually run → `execution` altitude
@@ -29,11 +30,13 @@ hooks, so no forking was needed.
 
 ### 2. Emit a GuardEvent at each point
 
-Translate the hook's arguments into a `GuardEvent`. Mint a `guard_id` at the first
-altitude and propagate it (a guard-context) to the exec point so they correlate.
+Translate the hook's arguments into a
+[GuardEvent](/docs/api/objects/guard-event/). Mint a `guard_id` at the first
+altitude and propagate it (a [guard-context](/docs/concepts/provenance/)) to the
+exec point so they correlate.
 
 ```python
-from openguardrails import GuardEvent, Provenance
+from openguardrails import GuardEvent
 
 ev = GuardEvent(
     kind="tool_call", observation_point="invocation",
@@ -41,44 +44,60 @@ ev = GuardEvent(
     subject={"agent_id": "my-agent", "agent_type": "custom"},
     payload={"name": tool_name, "arguments": args},
     provenance=current_session_provenance(),   # trusted by default; untrusted if tainted
-    guard_id=guard_id, session_id=session_id,
+    event_id=new_event_id(), guard_id=guard_id,
+    timestamp=now_rfc3339(), session_id=session_id,
 )
 ```
 
-### 3. Evaluate against a Runtime
+### 3. Evaluate with the SDK RuntimeClient
 
-Build one `Runtime` from your `policy.json` and ask it for a decision.
+Don't hand-roll HTTP — the [SDK client](/docs/sdk/python/) wraps the
+[Runtime API](/docs/api/) (auth, signing, wire mapping, errors):
 
 ```python
-from openguardrails import Runtime
-from openguardrails.detectors.config_rules import ConfigRulesDetector
-from openguardrails.detectors.llm_judge import LLMJudgeDetector
+from openguardrails import RuntimeClient, RuntimeAPIError
 
-runtime = Runtime(
-    detectors=[ConfigRulesDetector(policy["config_rules"]), LLMJudgeDetector()],
-    policy=policy,
-)
-verdict = runtime.evaluate(ev)
+client = RuntimeClient()          # OGR_RUNTIME_URL + OGR_API_KEY
+
+try:
+    verdict = client.evaluate(ev)             # POST /v1/evaluate
+except (RuntimeAPIError, OSError):
+    verdict = apply_on_unreachable(ev)        # cached GET /v1/config policy —
+                                              # never fail open on security.*
 ```
+
+Cache the [degraded-mode config](/docs/api/config/) at startup so the
+`except` branch has a policy to apply. For purely local evaluation (no hosted
+runtime), the SDK also ships an in-process `Runtime` you can build from a
+policy and detectors — same `evaluate(event) → Verdict` shape.
 
 ### 4. Enforce the verdict
 
 ```python
-if verdict.decision not in ("allow", "modify", "redact"):
+if verdict.decision in ("block", "require_approval"):
     return block(reason=verdict.reasons)   # your framework's "don't run this" path
+if verdict.decision in ("modify", "redact"):
+    apply(verdict.modifications)           # transform, then proceed
 ```
 
-At the `sandbox` altitude, "enforce" can also mean **run the command under a real
-sandbox** ([srt](/docs/integrations/agent/hermes-srt/) /
-[OpenShell](/docs/integrations/agent/hermes-openshell/)) compiled from the same policy —
+For `require_approval` you can instead suspend and poll
+[`GET /v1/approvals`](/docs/api/approvals/) until a human decides. At the
+`execution` altitude, "enforce" can also mean **run the command under a real
+sandbox** ([srt](/docs/plugins/hermes-srt/) /
+[OpenShell](/docs/plugins/hermes-openshell/)) compiled from the same policy —
 so a rephrased command can't bypass the intent check.
+
+Also report what you observe but don't gate — transcript, tool results —
+through [`/v1/ingest`](/docs/api/ingest/) (`BatchingIngestor` makes it
+fire-and-forget), and [enroll](/docs/api/enroll/) a key so your events carry a
+verifiable identity.
 
 ## Reference implementation
 
 The Hermes plugin is ~250 lines and demonstrates all four steps:
 
 - [`bridge.py`](https://github.com/openguardrails/openguardrails/blob/main/integrations/agent/hermes/src/openguardrails_instrumentation_hermes/bridge.py)
-  — hook callbacks ↔ GuardEvent, Runtime, provenance/taint, guard-context.
+  — hook callbacks ↔ GuardEvent, provenance/taint, guard-context.
 - [`sandbox_guard.py`](https://github.com/openguardrails/openguardrails/blob/main/integrations/agent/hermes/src/openguardrails_instrumentation_hermes/sandbox_guard.py)
   — wrap the exec chokepoint; run under srt when configured.
 - [`__init__.py`](https://github.com/openguardrails/openguardrails/blob/main/integrations/agent/hermes/src/openguardrails_instrumentation_hermes/__init__.py)
@@ -90,5 +109,5 @@ If your framework has no sandbox, you still get the `invocation` altitude — OG
 enforces on intent, and records that the adversary-proof layer was unavailable. Add
 a sandbox later without changing your policy.
 
-Start from **[Configure a policy](/docs/configuring-policy/)** and adapt the bridge
-to your framework's hooks.
+Start from **[Policy](/docs/concepts/policy/)** and adapt the bridge to your
+framework's hooks.

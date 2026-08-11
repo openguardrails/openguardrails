@@ -70,32 +70,9 @@ const BUILDING = [
   },
 ];
 
-function TopBar() {
-  return (
-    <header className="sticky top-0 z-30 backdrop-blur bg-ink/70 border-b border-white/[0.06]">
-      <div className="container-x flex items-center justify-between h-16">
-        <a href="/" className="flex items-center gap-2.5 font-bold tracking-tight">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.svg" alt="OpenGuardrails" className="h-7 w-auto" />
-          <span>Open<span className="text-accent">Guardrails</span></span>
-          <span className="ml-2 text-xs font-normal text-zinc-500 border-l border-white/10 pl-2">Mission</span>
-        </a>
-        <nav className="hidden md:flex items-center gap-7 text-sm text-zinc-400">
-          <a href="/" className="hover:text-white transition-colors">Home</a>
-          <a href="/docs/" className="hover:text-white transition-colors">Docs</a>
-          <a href="/agent/" className="hover:text-white transition-colors">For agents</a>
-          <a href={`${GH}/openguardrails`} className="hover:text-white transition-colors">Spec</a>
-        </nav>
-      </div>
-    </header>
-  );
-}
-
 export default function MissionPage() {
   return (
     <main>
-      <TopBar />
-
       {/* Hero */}
       <section className="container-x pt-24 pb-12 text-center">
         <p className="eyebrow mb-5">AGI Endgame Safety · Weak over Strong</p>
@@ -105,7 +82,7 @@ export default function MissionPage() {
           supervising strong intelligence you{" "}
           <span className="text-accent">cannot fully trust</span>.
         </h1>
-        <p className="mt-7 max-w-2xl mx-auto text-lg text-zinc-400">
+        <p className="mt-7 max-w-2xl mx-auto text-lg text-zinc-600">
           OpenGuardrails&apos; mission is to let people hand real work to AI with confidence — not
           blind trust in AI, but every real action it takes kept inside a system of human
           authorization.
@@ -114,9 +91,9 @@ export default function MissionPage() {
 
       {/* Core claim */}
       <section className="container-x py-8">
-        <div className="card p-8 border-accent/25 max-w-3xl mx-auto text-center">
+        <div className="card p-8 border-blue-200 max-w-3xl mx-auto text-center">
           <p className="eyebrow mb-3">Core claim</p>
-          <p className="text-xl sm:text-2xl font-semibold leading-snug text-zinc-100">
+          <p className="text-xl sm:text-2xl font-semibold leading-snug text-zinc-900">
             AGI may enter everyday production systems within three years. By then the question is no
             longer &ldquo;can AI help me&rdquo; — it&apos;s{" "}
             <span className="text-accent">&ldquo;how do I know it isn&apos;t steering me toward an
@@ -129,7 +106,7 @@ export default function MissionPage() {
       <section className="container-x py-14 max-w-3xl mx-auto">
         <p className="eyebrow mb-3">Manifesto</p>
         <h2 className="text-3xl font-bold mb-5">Living inside strong intelligence you don&apos;t control</h2>
-        <div className="space-y-5 text-[15px] sm:text-base text-zinc-300 leading-relaxed">
+        <div className="space-y-5 text-[15px] sm:text-base text-zinc-700 leading-relaxed">
           <p>
             The next generation of AI won&apos;t just answer questions. It will write your code, send
             your email, negotiate, place bets, place orders, and schedule other agents — changing the
@@ -144,7 +121,7 @@ export default function MissionPage() {
           </p>
           <p>
             OpenGuardrails starts from a plain but counterintuitive judgment:{" "}
-            <span className="text-zinc-100 font-semibold">the layer that supervises strong
+            <span className="text-zinc-900 font-semibold">the layer that supervises strong
             intelligence should not try to be a stronger intelligence.</span> It should be weaker,
             slower, narrower, more decomposable. Its value is not being smarter than AGI — it is
             staying closer to the boundary of human intent, and being easier to constrain, inspect,
@@ -166,22 +143,22 @@ export default function MissionPage() {
         <div className="grid md:grid-cols-2 gap-5">
           <div className="card p-7">
             <h3 className="text-lg font-semibold mb-2">Strong vs. Strong</h3>
-            <p className="text-sm text-zinc-400 leading-relaxed">
+            <p className="text-sm text-zinc-600 leading-relaxed">
               One strong AI against another — cyber offense and defense, intelligence, war, financial
               infrastructure, nation-scale security. The currency is speed, force, game theory,
               suppression and counter.
             </p>
           </div>
-          <div className="card p-7 border-accent/25">
+          <div className="card p-7 border-blue-200">
             <h3 className="text-lg font-semibold mb-2">Weak over Strong</h3>
-            <p className="text-sm text-zinc-400 leading-relaxed">
+            <p className="text-sm text-zinc-600 leading-relaxed">
               A controllable weak AI supervising a stronger one — everyday work, life, transactions,
               and delegated agents. The currency isn&apos;t defeating the strong AI; it&apos;s keeping
               human control that stays understandable, reversible, and verifiable.
             </p>
           </div>
         </div>
-        <p className="mt-6 text-zinc-300 leading-relaxed max-w-3xl text-[15px] sm:text-base">
+        <p className="mt-6 text-zinc-700 leading-relaxed max-w-3xl text-[15px] sm:text-base">
           OpenGuardrails builds the second. Most people will never own a nation-scale adversarial
           system, but everyone will face agents that execute, reason, and persuade better than they
           do. Civilian AGI safety is not a shrunken war machine — it is the reinvention of the
@@ -193,7 +170,7 @@ export default function MissionPage() {
       <section className="container-x py-12 max-w-3xl mx-auto">
         <div className="card p-8">
           <p className="eyebrow mb-3">An ordinary workday, 2029</p>
-          <div className="space-y-5 text-[15px] text-zinc-300 leading-relaxed">
+          <div className="space-y-5 text-[15px] text-zinc-700 leading-relaxed">
             <p>
               Your coding agent has already opened the PR. Your trading agent has already found the
               arbitrage window. Your life agent is handling insurance, a lease, and medical bills.
@@ -215,7 +192,7 @@ export default function MissionPage() {
       <section className="container-x py-12 max-w-3xl mx-auto">
         <p className="eyebrow mb-3">II · Weak intelligence as a human instrument</p>
         <h2 className="text-3xl font-bold mb-5">Weakness as an engineering constraint</h2>
-        <div className="space-y-5 text-[15px] sm:text-base text-zinc-300 leading-relaxed">
+        <div className="space-y-5 text-[15px] sm:text-base text-zinc-700 leading-relaxed">
           <p>
             We usually read &ldquo;weak&rdquo; as a defect. In AGI safety it can be a design choice. A
             brake need not be stronger than the engine; a fuse need not be more complex than the grid;
@@ -234,14 +211,14 @@ export default function MissionPage() {
       {/* Flow diagram */}
       <section className="container-x pb-12">
         <div className="codeblock max-w-4xl mx-auto text-[11px] sm:text-[12.5px]">{FLOW}</div>
-        <p className="mt-6 text-zinc-300 leading-relaxed max-w-3xl mx-auto text-[15px] sm:text-base">
+        <p className="mt-6 text-zinc-700 leading-relaxed max-w-3xl mx-auto text-[15px] sm:text-base">
           The point of Weak over Strong is not for the weak model to beat the strong one task by task.
           It is for the strong model to release its capability under human intent. A strong model may
           know more — but it doesn&apos;t natively know what is &ldquo;good&rdquo; for you. It may plan
           better — but it doesn&apos;t natively hold your risk preference. It can explain anything —
           but explanation itself can be a tool of control. So OpenGuardrails extends supervision from
-          the <span className="text-zinc-100 font-semibold">answer</span> to the{" "}
-          <span className="text-zinc-100 font-semibold">action</span>: who proposed it, on what basis,
+          the <span className="text-zinc-900 font-semibold">answer</span> to the{" "}
+          <span className="text-zinc-900 font-semibold">action</span>: who proposed it, on what basis,
           what evidence is missing, whether it is reversible, whether it needs a second opinion,
           whether a one-step authorization should become many, whether the human should be made to
           slow down.
@@ -254,7 +231,7 @@ export default function MissionPage() {
         <h2 className="text-3xl font-bold mb-4 max-w-3xl">
           Trust is not &ldquo;I believe it.&rdquo; It is an institution.
         </h2>
-        <p className="text-zinc-300 leading-relaxed max-w-3xl mb-8 text-[15px] sm:text-base">
+        <p className="text-zinc-700 leading-relaxed max-w-3xl mb-8 text-[15px] sm:text-base">
           Real trust is an institutional relationship: I know what it may and may not do; I know when
           it must stop; I know how we review its mistakes; I know it cannot use capabilities I
           don&apos;t understand to route around my authorization.
@@ -262,8 +239,8 @@ export default function MissionPage() {
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
           {PRINCIPLES.map((p) => (
             <div key={p.t} className="card p-6">
-              <h3 className="text-[15px] font-semibold mb-2 text-zinc-100">{p.t}</h3>
-              <p className="text-sm text-zinc-400 leading-relaxed">{p.d}</p>
+              <h3 className="text-[15px] font-semibold mb-2 text-zinc-900">{p.t}</h3>
+              <p className="text-sm text-zinc-600 leading-relaxed">{p.d}</p>
             </div>
           ))}
         </div>
@@ -273,7 +250,7 @@ export default function MissionPage() {
       <section className="container-x py-12 max-w-3xl mx-auto">
         <p className="eyebrow mb-3">IV · Company will, aligned to the mission</p>
         <h2 className="text-3xl font-bold mb-5">Owned so the mission can&apos;t be bent</h2>
-        <div className="space-y-5 text-[15px] sm:text-base text-zinc-300 leading-relaxed">
+        <div className="space-y-5 text-[15px] sm:text-base text-zinc-700 leading-relaxed">
           <p>
             OpenGuardrails is registered as a solo LLC: funded by the founder, who holds 100% of the
             shares. The purpose of that structure is that OpenGuardrails does not have to treat
@@ -306,7 +283,7 @@ export default function MissionPage() {
         <h2 className="text-3xl font-bold mb-4 max-w-3xl">
           The seatbelt AGI must wear before it enters ordinary life
         </h2>
-        <p className="text-zinc-300 leading-relaxed max-w-3xl mb-8 text-[15px] sm:text-base">
+        <p className="text-zinc-700 leading-relaxed max-w-3xl mb-8 text-[15px] sm:text-base">
           OpenGuardrails is not another model provider, not another chat assistant, not a traditional
           enterprise gateway. It is the authorization and supervision layer that lets real work be
           handed to AI.
@@ -316,9 +293,9 @@ export default function MissionPage() {
             <div key={b.n} className="card p-7">
               <div className="flex items-baseline gap-3 mb-2">
                 <span className="text-accent font-bold text-lg">{b.n}</span>
-                <h3 className="text-lg font-semibold text-zinc-100">{b.t}</h3>
+                <h3 className="text-lg font-semibold text-zinc-900">{b.t}</h3>
               </div>
-              <p className="text-sm text-zinc-400 leading-relaxed">{b.d}</p>
+              <p className="text-sm text-zinc-600 leading-relaxed">{b.d}</p>
             </div>
           ))}
         </div>
@@ -326,13 +303,13 @@ export default function MissionPage() {
 
       {/* Closing */}
       <section className="container-x py-14 max-w-3xl mx-auto">
-        <div className="space-y-5 text-[15px] sm:text-base text-zinc-300 leading-relaxed">
+        <div className="space-y-5 text-[15px] sm:text-base text-zinc-700 leading-relaxed">
           <p>
             The AGI endgame is not &ldquo;humans vs. AI.&rdquo; The endgame question is: can every
-            person have an agent <span className="text-zinc-100 font-semibold">weak enough — and
+            person have an agent <span className="text-zinc-900 font-semibold">weak enough — and
             therefore controllable enough — to hold their authorization boundary for them?</span>
           </p>
-          <p className="text-xl font-semibold text-zinc-100">
+          <p className="text-xl font-semibold text-zinc-900">
             When strong intelligence begins to act on a person&apos;s behalf, the unit of safety is no
             longer the model. The unit of safety is authorization.
           </p>
@@ -344,28 +321,21 @@ export default function MissionPage() {
           </p>
         </div>
         <div className="mt-9 flex flex-wrap items-center gap-3">
-          <a href="/donate/" className="rounded-lg px-5 py-3 bg-accent text-ink font-semibold hover:bg-blue-300 transition">
+          <a href="/donate/" className="rounded-lg px-5 py-3 bg-accent text-white font-semibold hover:bg-blue-700 transition">
             Fund the mission
           </a>
-          <a href="mailto:thomas@openguardrails.com" className="rounded-lg px-5 py-3 border border-white/15 font-semibold hover:bg-white/5 transition">
+          <a href="mailto:thomas@openguardrails.com" className="rounded-lg px-5 py-3 border border-zinc-300 font-semibold hover:bg-zinc-50 transition">
             thomas@openguardrails.com
           </a>
-          <a href="/agent/" className="rounded-lg px-5 py-3 border border-white/15 font-semibold hover:bg-white/5 transition">
+          <a href="/agent/" className="rounded-lg px-5 py-3 border border-zinc-300 font-semibold hover:bg-zinc-50 transition">
             For agents
           </a>
-          <a href={`${GH}/openguardrails`} className="rounded-lg px-5 py-3 border border-white/15 font-semibold hover:bg-white/5 transition">
+          <a href={`${GH}/openguardrails`} className="rounded-lg px-5 py-3 border border-zinc-300 font-semibold hover:bg-zinc-50 transition">
             Read the spec
           </a>
         </div>
       </section>
 
-      <footer className="border-t border-white/[0.06] mt-6 py-10">
-        <div className="container-x text-sm text-zinc-500">
-          <a href="/" className="hover:text-white">← Back to home</a>
-          <span className="mx-3 text-zinc-700">·</span>
-          OpenGuardrails — Weak over Strong. The unit of safety is authorization.
-        </div>
-      </footer>
     </main>
   );
 }

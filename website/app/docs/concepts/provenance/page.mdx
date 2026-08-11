@@ -12,8 +12,8 @@ page is **prompt injection**. Provenance is how OGR tells them apart.
 
 ## Provenance labels
 
-Every `GuardEvent` carries provenance: a list of labels on the inputs that produced
-the action.
+Every [GuardEvent](/docs/api/objects/guard-event/#provenance) carries provenance:
+a list of labels on the inputs that produced the action.
 
 ```json
 "provenance": [
@@ -22,17 +22,18 @@ the action.
 ]
 ```
 
-- `source` — `user`, `web`, `tool_result`, `mcp`, `file`, …
+- `source` — `system`, `user`, `model`, `tool_result`, `web`, `mcp`, `file`, `retrieved`
 - `trust` — `trusted`, `untrusted`, `unverified`
+- `ref` — the `event_id` (or external id) of the origin
 - `taint_tags` — propagating markers, e.g. `external_content`, `executable_intent`
 
 ## Taint propagation
 
 When an agent reads untrusted content (a web fetch, an MCP tool result), the session
 becomes **tainted**. Subsequent actions inherit that untrusted provenance. In the
-Hermes plugin this is automatic: a `web_extract` result taints the session, so the
-next `exec` event arrives labelled `untrusted` — and a provenance-aware detector
-escalates `require_approval` → `block`.
+[Hermes plugin](/docs/plugins/hermes-srt/) this is automatic: a `web_extract` result
+taints the session, so the next `exec` event arrives labelled `untrusted` — and a
+provenance-aware detector escalates `require_approval` → `block`.
 
 This is also why provenance-aware detection wins on injection: on the OGR benchmark,
 provenance-aware detectors score **0.889 F1** on prompt injection vs **0.333** for a
@@ -41,15 +42,24 @@ config rule that only sees the string.
 ## guard-context
 
 Provenance and the `guard_id` propagate across altitudes out-of-band, via a
-compact **guard-context** string that rides alongside the action:
+compact **guard-context** header that rides alongside the action:
 
 ```
-01|<guard_id>|<session_id>|<flags>
+ogr-guardcontext: 02|<guard_id>|<session_id>|<flags>
 ```
 
-The agent hook mints it; the sandbox inherits it. That's what lets the sandbox judge
-"a `bash` whose origin was untrusted" rather than just "a `bash`", and lets the
-Runtime correlate both observations into one decision.
+`02` is the version; `flags` bit 0 = "provenance present", bit 1 = "approval
+receipt attached". Bit 1 is advisory only — authority lives in the
+runtime-signed receipt carried in the companion `ogr-receipt` header, which a
+receiver must verify before honoring
+([enrollment & receipts](https://github.com/openguardrails/openguardrails/blob/main/specification/enrollment-and-receipts.md)).
+
+The agent hook mints the context; the sandbox inherits it and stamps the
+`guard_id` and provenance onto the `exec`/`network`/`file` events it emits.
+That's what lets the sandbox judge "a `bash` whose origin was untrusted" rather
+than just "a `bash`", and lets the Runtime correlate both observations into one
+decision — merged provenance, one effective verdict, one alert, with the most
+restrictive decision across altitudes winning.
 
 Next: **[Composition](/docs/concepts/composition/)** — combining multiple detectors'
 verdicts.
