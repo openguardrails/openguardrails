@@ -186,7 +186,7 @@ func sendHeartbeat(cfg *Config) {
 	// on a verdict — 5s by default — and a beat is nobody's latency: sharing that
 	// budget just turned healthy heartbeats into 504s whenever the runtime was
 	// briefly busy, i.e. exactly when liveness matters most.
-	if err := cfg.client.Post(pathHeartbeat, ogrHeaders(*cfg), payload,
+	if err := cfg.client.Post(cfg.heartbeatPath, ogrHeaders(*cfg), payload,
 		func(status int, _ http.Header, body []byte) {
 			// ⚠️ An ERROR, not a warning, and so never silenced by `log_level`. A beat
 			// that does not arrive makes the platform mark this sensor dark, which is

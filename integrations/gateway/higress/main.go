@@ -72,9 +72,13 @@ const (
 	modeObserve = "observe"
 	modeEnforce = "enforce"
 
-	pathEvaluate  = "/api/public/ogr/v1/evaluate"
-	pathIngest    = "/api/public/ogr/v1/ingest"
-	pathHeartbeat = "/api/public/ogr/v1/heartbeat"
+	// The canonical endpoint paths (specification/runtime-api.md): clients MUST
+	// join a configured base with `/v1/...` and hard-code no other prefix. The
+	// prefix this build joins them onto is `base_path`, "" by default; the
+	// reference runtime's legacy mount is reached with `base_path: /api/public/ogr`.
+	pathEvaluate  = "/v1/evaluate"
+	pathIngest    = "/v1/ingest"
+	pathHeartbeat = "/v1/heartbeat"
 
 	maxBatch = 100 // the runtime's ingest cap
 )
@@ -86,6 +90,16 @@ type Config struct {
 	host    string
 	apiKey  string
 
+	// WHERE the endpoints live on the runtime: the mount prefix the canonical
+	// /v1/* paths are joined onto. "" is the canonical root; a deployment still
+	// on the legacy mount sets `base_path: /api/public/ogr`. A WASM filter
+	// cannot cheaply probe-and-fall-back per request, so the mount is explicit
+	// configuration, not discovery.
+	basePath      string
+	evaluatePath  string
+	ingestPath    string
+	heartbeatPath string
+
 	mode                 string
 	timeoutMs            uint32
 	failClosed           bool
@@ -94,15 +108,36 @@ type Config struct {
 	agentID              string
 
 	// A second runtime that gets a COPY of every event and decides nothing.
-	mirror    wrapper.HttpClient
-	mirrorKey string
-	hasMirror bool
+	mirror           wrapper.HttpClient
+	mirrorKey        string
+	mirrorIngestPath string
+	hasMirror        bool
+}
+
+// normalizeBasePath cleans a configured mount prefix so joining it with the
+// canonical /v1/* paths cannot produce `//v1/...` or `prefix/v1/...`:
+// "" stays "" (the canonical root), anything else becomes "/prefix" with no
+// trailing slash.
+func normalizeBasePath(s string) string {
+	s = strings.TrimRight(strings.TrimSpace(s), "/")
+	if s == "" {
+		return ""
+	}
+	if !strings.HasPrefix(s, "/") {
+		s = "/" + s
+	}
+	return s
 }
 
 func parseConfig(j gjson.Result, c *Config) error {
 	c.cluster = j.Get("runtime_cluster").String()
 	c.host = strings.TrimPrefix(strings.TrimPrefix(j.Get("runtime_base_url").String(), "https://"), "http://")
 	c.apiKey = j.Get("api_key").String()
+
+	c.basePath = normalizeBasePath(j.Get("base_path").String())
+	c.evaluatePath = c.basePath + pathEvaluate
+	c.ingestPath = c.basePath + pathIngest
+	c.heartbeatPath = c.basePath + pathHeartbeat
 
 	c.mode = modeObserve
 	if v := j.Get("mode").String(); v == modeEnforce {
@@ -192,8 +227,16 @@ func parseConfig(j gjson.Result, c *Config) error {
 		if c.mirrorKey == "" {
 			c.mirrorKey = c.apiKey
 		}
+		// The mirror's own mount, because a shadow deployment exists precisely so
+		// the two runtimes need not be the same build. Unset inherits `base_path`;
+		// an explicit "" means the canonical root.
+		mirrorBase := c.basePath
+		if v := j.Get("mirror_base_path"); v.Exists() {
+			mirrorBase = normalizeBasePath(v.String())
+		}
+		c.mirrorIngestPath = mirrorBase + pathIngest
 		c.hasMirror = true
-		logInfof("[OGR-CONFIG] mirror: cluster=%s host=%s (copies only, never gates)", cluster, host)
+		logInfof("[OGR-CONFIG] mirror: cluster=%s host=%s base_path=%q (copies only, never gates)", cluster, host, mirrorBase)
 	}
 
 	/*
@@ -222,8 +265,8 @@ func parseConfig(j gjson.Result, c *Config) error {
 	// not per request. An operator has to be able to confirm what actually loaded —
 	// silence at startup is indistinguishable from a plugin that never loaded at all,
 	// which is the failure this whole integration exists to make visible.
-	proxywasm.LogWarnf("[OGR-CONFIG] mode=%s cluster=%s host=%s timeout=%dms fail=%s beat=%ds log=%s protocols=%s",
-		c.mode, c.cluster, c.host, c.timeoutMs, failLabel(c.failClosed), heartbeatPeriodMs/1000,
+	proxywasm.LogWarnf("[OGR-CONFIG] mode=%s cluster=%s host=%s base_path=%q timeout=%dms fail=%s beat=%ds log=%s protocols=%s",
+		c.mode, c.cluster, c.host, c.basePath, c.timeoutMs, failLabel(c.failClosed), heartbeatPeriodMs/1000,
 		logLevelName(logLevel), strings.Join(protocolNames(), ","))
 	return nil
 }
@@ -463,7 +506,7 @@ func enforceRequest(ctx wrapper.HttpContext, cfg Config, rs *reqState, dv *deriv
 		finishRequest(ctx, cfg, rs, outBody)
 		return
 	}
-	err = cfg.client.Post(pathEvaluate, ogrHeaders(cfg), payload,
+	err = cfg.client.Post(cfg.evaluatePath, ogrHeaders(cfg), payload,
 		func(status int, _ http.Header, respBody []byte) {
 			onInputVerdict(ctx, cfg, rs, outBody, status, respBody)
 		}, cfg.timeoutMs)
@@ -672,7 +715,7 @@ func onResponseBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Acti
 		rs.commit()
 		return restoreResponse(rs, body)
 	}
-	err = cfg.client.Post(pathEvaluate, ogrHeaders(cfg), payload,
+	err = cfg.client.Post(cfg.evaluatePath, ogrHeaders(cfg), payload,
 		func(status int, _ http.Header, respBody []byte) {
 			if status == 200 && parseVerdict(respBody).Usable() {
 				bump(cntEvaluated, 1)
@@ -961,7 +1004,7 @@ func ingest(ctx wrapper.HttpContext, cfg Config, events []*GuardEvent) {
 	if payload == nil {
 		return
 	}
-	post(cfg.client, cfg.apiKey, payload, cfg.timeoutMs, "OGR-INGEST")
+	post(cfg.client, cfg.apiKey, cfg.ingestPath, payload, cfg.timeoutMs, "OGR-INGEST")
 	bump(cntIngested, uint64(len(events)))
 	mirrorAsync(cfg, payload)
 }
@@ -977,7 +1020,7 @@ func mirrorAsync(cfg Config, payload []byte) {
 	if !cfg.hasMirror || payload == nil {
 		return
 	}
-	post(cfg.mirror, cfg.mirrorKey, payload, cfg.timeoutMs, "OGR-MIRROR")
+	post(cfg.mirror, cfg.mirrorKey, cfg.mirrorIngestPath, payload, cfg.timeoutMs, "OGR-MIRROR")
 	bump(cntMirrored, 1)
 }
 
@@ -1006,12 +1049,12 @@ func batchPayload(events []*GuardEvent) []byte {
 	return payload
 }
 
-func post(client wrapper.HttpClient, apiKey string, payload []byte, timeoutMs uint32, tag string) {
+func post(client wrapper.HttpClient, apiKey, path string, payload []byte, timeoutMs uint32, tag string) {
 	headers := [][2]string{
 		{"Content-Type", "application/json"},
 		{"Authorization", "Bearer " + apiKey},
 	}
-	if err := client.Post(pathIngest, headers, payload,
+	if err := client.Post(path, headers, payload,
 		func(status int, _ http.Header, body []byte) {
 			if status != 200 && status != 207 {
 				logConditionf(tag+".status", "[%s] status=%d body=%s", tag, status, truncate(string(body), 256))

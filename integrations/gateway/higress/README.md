@@ -7,8 +7,8 @@ is its plugin name.
 
 ```
    client ──▶ Higress ──▶ OpenGuardrails Runtime (WASM) ──▶ runtime
-                              │                    POST /api/public/ogr/v1/{evaluate,ingest}
-                              ▼
+                              │                    POST {base_path}/v1/{evaluate,ingest}
+                              ▼                    (base_path defaults to "", the canonical /v1/* root)
                           LLM upstream
 ```
 
@@ -59,6 +59,7 @@ A second runtime can receive a COPY of every event and decide nothing:
 mirror_cluster: "outbound|80||openguardrails-candidate.static"
 mirror_base_url: "http://openguardrails-candidate.static"
 mirror_api_key: "ogr_..."      # falls back to api_key
+mirror_base_path: ""           # falls back to base_path; a candidate need not share the primary's mount
 ```
 
 It answers "what would the new policy have said" without anyone betting on the
@@ -434,6 +435,7 @@ timeout: the defect stated as an expectation, passing for months.
 |---|---|---|
 | `runtime_cluster` | — | Envoy cluster, e.g. `outbound\|80\|\|openguardrails-runtime.static` |
 | `runtime_base_url` | — | used for the Host header |
+| `base_path` | `""` | the mount prefix the canonical `/v1/*` endpoint paths are joined onto — see "Which paths it calls" below |
 | `api_key` | — | the runtime API key; authenticates the SENDER, resolves org + workspace |
 | `mode` | `observe` | `enforce` to act on verdicts |
 | `timeout_ms` | `5000` | the PDP budget, enforce only — nothing waits in observe. A CEILING for the worst case, not a target; the runtime's `OGR_MODEL_TIMEOUT_MS` must fit strictly inside it |
@@ -442,7 +444,37 @@ timeout: the defect stated as an expectation, passing for months.
 | `principal_group_header` | `x-mse-consumer-group` | which header carries the caller's group |
 | `mirror_cluster` / `mirror_base_url` | *(unset)* | a candidate runtime that gets copies and gates nothing |
 | `mirror_api_key` | `api_key` | the mirror's own credential, when it differs |
+| `mirror_base_path` | `base_path` | the mirror's own mount, when it differs — a candidate runtime need not be the same build as the primary |
 | `log_level` | `quiet` | `quiet` \| `info` \| `debug`. Quiet prints only what says the deployment is broken; everything describing a REQUEST is behind `info`. Anything unrecognised is quiet — the failure mode of this setting is disk. |
+
+### Which paths it calls
+
+The canonical endpoint paths are rooted at **`/v1/`** (`specification/runtime-api.md`):
+the plugin joins `base_path` with `/v1/evaluate`, `/v1/ingest` and `/v1/heartbeat`,
+and hard-codes no other prefix. The default `base_path: ""` targets the canonical
+root every conformant runtime serves.
+
+```yaml
+# default — a runtime serving the canonical /v1/* root
+base_path: ""
+
+# an un-upgraded reference runtime that only serves the legacy mount
+base_path: /api/public/ogr
+```
+
+⚠️ **This changed in 1.8.0.** Through 1.7.x the legacy prefix was hard-coded:
+every call went to `/api/public/ogr/v1/*`, and nothing could point the plugin
+anywhere else. A deployment upgrading the plugin against a runtime that serves
+only the legacy mount must set `base_path: /api/public/ogr` — the reference
+runtime serves both mounts, so most deployments set nothing.
+
+The mount is **configuration, not discovery**: a WASM filter cannot cheaply
+probe a 404 and fall back per request, and a guardrail that silently switched
+paths would make "which endpoint is being called" one more thing the logs have
+to be trusted about. What loaded is printed once, at startup, in the
+`[OGR-CONFIG]` line (`base_path=""`). A wrong `base_path` is loud in the other
+direction too: every `/evaluate` comes back non-200, which is `fail_mode`
+territory, not silence.
 
 ⚠️ **`principal_header` and `principal_group_header` are only as trustworthy as
 the edge that writes them.** The plugin reports whatever arrives on them. Measured
