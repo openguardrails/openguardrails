@@ -194,9 +194,9 @@ func sendHeartbeat(cfg *Config) {
 			// bypass the heartbeat exists to catch. It is also once per 30s, so it can
 			// never be the thing that floods a log.
 			if status != 200 {
-				proxywasm.LogErrorf("[OGR-BEAT] status=%d body=%s", status, truncate(string(body), 160))
+				logConditionf("beat.status", "[OGR-BEAT] status=%d body=%s", status, truncate(string(body), 160))
 			}
 		}, heartbeatTimeoutMs); err != nil {
-		proxywasm.LogErrorf("[OGR-BEAT] dispatch failed: %v", err)
+		logConditionf("beat.dispatch", "[OGR-BEAT] dispatch failed: %v", err)
 	}
 }

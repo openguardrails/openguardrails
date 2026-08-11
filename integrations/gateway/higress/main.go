@@ -468,7 +468,7 @@ func enforceRequest(ctx wrapper.HttpContext, cfg Config, rs *reqState, dv *deriv
 			onInputVerdict(ctx, cfg, rs, outBody, status, respBody)
 		}, cfg.timeoutMs)
 	if err != nil {
-		proxywasm.LogErrorf("[OGR-REQ] evaluate dispatch failed: %v", err)
+		logConditionf("req.dispatch", "[OGR-REQ] evaluate dispatch failed: %v", err)
 		applyFail(ctx, cfg, rs, "evaluate dispatch failed")
 	}
 }
@@ -489,7 +489,7 @@ func finishRequest(ctx wrapper.HttpContext, cfg Config, rs *reqState, outBody st
 func onInputVerdict(ctx wrapper.HttpContext, cfg Config, rs *reqState,
 	outBody string, status int, respBody []byte) {
 	if status != 200 {
-		proxywasm.LogErrorf("[OGR-REQ] evaluate status=%d body=%s", status, truncate(string(respBody), 256))
+		logConditionf("req.status", "[OGR-REQ] evaluate status=%d body=%s", status, truncate(string(respBody), 256))
 		why := "evaluate returned " + strconv.Itoa(status)
 		if status == 0 {
 			why += " (timeout or unreachable)" + unorderedBudgetHint
@@ -514,7 +514,7 @@ func onInputVerdict(ctx wrapper.HttpContext, cfg Config, rs *reqState,
 	 * runtime: honour `fail_mode`, and count it as unchecked rather than as evaluated.
 	 */
 	if v.Decision() == "" {
-		proxywasm.LogErrorf(
+		logConditionf("req.nodecision",
 			"[OGR-REQ] evaluate returned 200 with no decision (%d bytes) — treating as a FAILURE, not an allow: %s",
 			len(respBody), truncate(string(respBody), 200))
 		applyFail(ctx, cfg, rs, "evaluate returned 200 with no decision")
@@ -693,7 +693,7 @@ func onResponseBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Acti
 			} else {
 				if status == 200 {
 					// A 200 that is not a verdict — see verdict.Usable.
-					proxywasm.LogErrorf("[OGR-RESP] evaluate returned 200 with no decision (%d bytes)",
+					logConditionf("resp.nodecision", "[OGR-RESP] evaluate returned 200 with no decision (%d bytes)",
 						len(respBody))
 					status = 0
 				}
@@ -1014,10 +1014,10 @@ func post(client wrapper.HttpClient, apiKey string, payload []byte, timeoutMs ui
 	if err := client.Post(pathIngest, headers, payload,
 		func(status int, _ http.Header, body []byte) {
 			if status != 200 && status != 207 {
-				proxywasm.LogErrorf("[%s] status=%d body=%s", tag, status, truncate(string(body), 256))
+				logConditionf(tag+".status", "[%s] status=%d body=%s", tag, status, truncate(string(body), 256))
 			}
 		}, timeoutMs); err != nil {
-		proxywasm.LogErrorf("[%s] dispatch failed: %v", tag, err)
+		logConditionf(tag+".dispatch", "[%s] dispatch failed: %v", tag, err)
 	}
 }
 

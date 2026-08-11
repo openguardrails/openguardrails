@@ -146,7 +146,7 @@ func judgeFinal(ctx wrapper.HttpContext, cfg Config, rs *reqState) {
 			v := parseVerdict(respBody)
 			// A 200 that is not a verdict is a FAILURE, not an allow — see verdict.Usable.
 			if !v.Usable() {
-				proxywasm.LogErrorf("[OGR-LANE] evaluate returned 200 with no decision (%d bytes)",
+				logConditionf("lane.nodecision", "[OGR-LANE] evaluate returned 200 with no decision (%d bytes)",
 					len(respBody))
 				evaluateFailed("LANE", 0, cfg.failClosed)
 				if cfg.failClosed {
@@ -170,7 +170,7 @@ func judgeFinal(ctx wrapper.HttpContext, cfg Config, rs *reqState) {
 			rs.finish(nil)
 		}, cfg.timeoutMs)
 	if err != nil {
-		proxywasm.LogErrorf("[OGR-LANE] final evaluate dispatch failed: %v", err)
+		logConditionf("lane.dispatch", "[OGR-LANE] final evaluate dispatch failed: %v", err)
 		rs.finish(nil)
 	}
 }
