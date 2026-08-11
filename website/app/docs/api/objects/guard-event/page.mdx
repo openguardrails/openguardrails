@@ -27,7 +27,7 @@ The object is closed (`additionalProperties: false`) apart from the
 | `timestamp` | string | required | RFC 3339 / ISO 8601 UTC date-time |
 | `observation_point` | enum | required | `conversation` \| `invocation` \| `execution` — the **altitude**: *what layer* was seen |
 | `sensor` | object | optional (recommended) | *Which* integration saw it, and how evadable that observer is — see [`sensor`](#sensor) |
-| `kind` | enum | required | What happened — see [Kinds](#kinds) |
+| `kind` | enum | required | What happened — see [Kinds](#kind) |
 | `llm_protocol` | enum \| null | optional | `openai.chat` \| `openai.responses` \| `anthropic.messages` \| `null`. Set by adapters observing at the `conversation` altitude |
 | `subject` | object | required | Who is acting — see [`subject`](#subject) |
 | `payload` | object | required | Kind-specific body — see [Payload shapes](#payload-shapes-per-kind) |

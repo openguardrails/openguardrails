@@ -4,14 +4,14 @@ import type { ReactNode } from "react";
 // Styles MDX markdown with the site's light theme. Required by @next/mdx.
 export function useMDXComponents(components: MDXComponents): MDXComponents {
   return {
-    h1: ({ children }) => (
-      <h1 className="text-3xl sm:text-4xl font-bold tracking-tight text-zinc-900 mt-2 mb-4 scroll-mt-24">{children}</h1>
+    h1: ({ children, id }) => (
+      <h1 id={id} className="text-3xl sm:text-4xl font-bold tracking-tight text-zinc-900 mt-2 mb-4 scroll-mt-24">{children}</h1>
     ),
-    h2: ({ children }) => (
-      <h2 className="text-2xl font-semibold tracking-tight text-zinc-900 mt-12 mb-3 scroll-mt-24 border-b border-zinc-200 pb-2">{children}</h2>
+    h2: ({ children, id }) => (
+      <h2 id={id} className="text-2xl font-semibold tracking-tight text-zinc-900 mt-12 mb-3 scroll-mt-24 border-b border-zinc-200 pb-2">{children}</h2>
     ),
-    h3: ({ children }) => (
-      <h3 className="text-lg font-semibold mt-8 mb-2 scroll-mt-24 text-zinc-900">{children}</h3>
+    h3: ({ children, id }) => (
+      <h3 id={id} className="text-lg font-semibold mt-8 mb-2 scroll-mt-24 text-zinc-900">{children}</h3>
     ),
     p: ({ children }) => <p className="text-zinc-700 leading-relaxed my-4">{children}</p>,
     ul: ({ children }) => <ul className="list-disc pl-6 my-4 space-y-1.5 text-zinc-700">{children}</ul>,
