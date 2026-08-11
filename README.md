@@ -108,14 +108,14 @@ the [overview](specification/overview.md).
 
 | Path | What it contains |
 |---|---|
-| [`specification/`](specification/) and [`schema/`](schema/) | Normative protocol, schemas, taxonomy, conformance, and governance. |
+| [`specification/`](specification/) and [`schema/`](schema/) | Normative protocol, schemas (JSON Schemas + OpenAPI), taxonomy, conformance, and governance. |
 | [`packages/python/`](packages/python/) | `openguardrails` — the Python SDK: in-process runtime + `RuntimeClient` for the Runtime API (PyPI). |
 | [`packages/javascript/`](packages/javascript/) | `@openguardrails/core` — the JavaScript/TypeScript SDK: in-process runtime + `RuntimeClient` (npm). |
 | [`integrations/`](integrations/) | Agent, gateway, sandbox, and eBPF integration categories. |
 | [`benchmarks/`](benchmarks/) | Neutral detector benchmark and leaderboard. |
 | [`examples/`](examples/) | Runnable examples and integration index. |
 | [`skills/openguardrails/`](skills/openguardrails/) | Agent skill for drafting and enforcing policies. |
-| [`website/`](website/) | Source for [openguardrails.com](https://openguardrails.com). |
+| — | [openguardrails.com](https://openguardrails.com) lives in a separate repository; this repo holds the protocol, SDKs, and plugins it documents. |
 
 Packages remain independently versioned and published. The monorepo only
 centralizes source, issues, pull requests, CI, and cross-component changes.

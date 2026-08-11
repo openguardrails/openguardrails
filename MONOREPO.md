@@ -21,7 +21,7 @@ centralized here.
 | `openguardrails-bench` | `benchmarks/` |
 | `openguardrails-examples` | `examples/` |
 | `openguardrails-skill` | `skills/openguardrails/` |
-| `openguardrails.com` | `website/` |
+| `openguardrails.com` | moved out again 2026-08-11 → private `openguardrails-website` repo (the site is not useful to protocol contributors) |
 
 The `.github` repository remains separate because GitHub requires
 `.github/profile/README.md` to render the organization profile.
