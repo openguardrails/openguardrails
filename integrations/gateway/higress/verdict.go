@@ -175,3 +175,15 @@ func (v verdict) RedactionMap() map[string]string {
 	})
 	return out
 }
+
+// Usable reports whether this is a VERDICT at all.
+//
+// ⚠️ A 200 is not a verdict. An empty body, an HTML error page from something in front
+// of the runtime, or a JSON document of another shape all parse without error and
+// answer `""` to every question — so every "did it stop?" test says no and the traffic
+// goes through as an ALLOW that nobody made. `fail_mode` does not cover it, because
+// fail_mode is consulted on non-200 and transport failures only.
+//
+// Every caller of `parseVerdict` on a 200 must gate on this and route a false through
+// the same failure path as an unreachable runtime.
+func (v verdict) Usable() bool { return v.Decision() != "" }

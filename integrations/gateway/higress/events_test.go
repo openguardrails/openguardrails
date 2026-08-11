@@ -696,3 +696,33 @@ func TestThePartialCheckDoesNotInterpretTheEntries(t *testing.T) {
 		}
 	}
 }
+
+// ⚠️ A 200 IS NOT A VERDICT, and reading one as an allow is the worst shape a guardrail
+// failure can take: the caller pays the latency, the counters record an evaluation, and
+// the traffic goes through unjudged with nothing refusing it.
+//
+// Found live on 2026-08-11 by pointing the plugin at a cluster with nothing behind it:
+// the request succeeded and the only trace was `decision=` with an empty value — and
+// only at `log_level: info`, so at the default it was completely silent. `fail_mode`
+// never saw it, because fail_mode is consulted on non-200 and transport failures only.
+func TestABodyThatIsNotAVerdictIsNotAnAllow(t *testing.T) {
+	for _, body := range []string{
+		``,
+		`{}`,
+		`<html><body>502 Bad Gateway</body></html>`,
+		`{"error":"upstream unavailable"}`,
+		`{"decision":""}`,
+		`null`,
+	} {
+		if parseVerdict([]byte(body)).Usable() {
+			t.Errorf("body %q reads as a usable verdict — it would pass traffic as an ALLOW "+
+				"that nobody decided", truncate(body, 40))
+		}
+	}
+	// ...while a real verdict of every decision stays usable, including `allow`.
+	for _, d := range []string{"allow", "flag", "redact", "block", "require_approval"} {
+		if !parseVerdict([]byte(`{"decision":"` + d + `"}`)).Usable() {
+			t.Errorf("decision %q is not usable", d)
+		}
+	}
+}

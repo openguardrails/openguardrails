@@ -497,8 +497,30 @@ func onInputVerdict(ctx wrapper.HttpContext, cfg Config, rs *reqState,
 		applyFail(ctx, cfg, rs, why)
 		return
 	}
-	bump(cntEvaluated, 1)
 	v := parseVerdict(respBody)
+	/*
+	 * ⚠️ **A 200 IS NOT A VERDICT.** Until 2026-08-11 anything that parsed to an empty
+	 * decision — an empty body, an HTML error page from a proxy in front of the runtime,
+	 * a JSON document of some other shape — fell through every branch below and reached
+	 * `rs.commit()`, i.e. the model, as an ALLOW. `fail_mode` never saw it, because
+	 * fail_mode is only consulted on a non-200 or a transport failure.
+	 *
+	 * That is the worst shape a guardrail failure can take: the caller pays the latency,
+	 * the counter records an evaluation that happened, and the traffic goes through
+	 * unjudged. Found by pointing the plugin at a cluster with nothing behind it and
+	 * watching the request succeed with `decision=` empty.
+	 *
+	 * A verdict must SAY something. No decision ⇒ treat it exactly like an unreachable
+	 * runtime: honour `fail_mode`, and count it as unchecked rather than as evaluated.
+	 */
+	if v.Decision() == "" {
+		proxywasm.LogErrorf(
+			"[OGR-REQ] evaluate returned 200 with no decision (%d bytes) — treating as a FAILURE, not an allow: %s",
+			len(respBody), truncate(string(respBody), 200))
+		applyFail(ctx, cfg, rs, "evaluate returned 200 with no decision")
+		return
+	}
+	bump(cntEvaluated, 1)
 	// The runtime's answer for which conversation this was. Diagnostics only.
 	rs.session.ID = v.SessionID()
 	logInfof("[OGR-REQ] decision=%s kind=%s session=%s",
@@ -652,7 +674,7 @@ func onResponseBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Acti
 	}
 	err = cfg.client.Post(pathEvaluate, ogrHeaders(cfg), payload,
 		func(status int, _ http.Header, respBody []byte) {
-			if status == 200 {
+			if status == 200 && parseVerdict(respBody).Usable() {
 				bump(cntEvaluated, 1)
 				v := parseVerdict(respBody)
 				if v.Stops() {
@@ -669,6 +691,12 @@ func onResponseBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Acti
 				}
 				rs.commit()
 			} else {
+				if status == 200 {
+					// A 200 that is not a verdict — see verdict.Usable.
+					proxywasm.LogErrorf("[OGR-RESP] evaluate returned 200 with no decision (%d bytes)",
+						len(respBody))
+					status = 0
+				}
 				evaluateFailed("RESP", status, cfg.failClosed)
 				if cfg.failClosed {
 					_ = proxywasm.ReplaceHttpResponseBody([]byte(rs.proto.Refuse(rs.model, failMessage)))
