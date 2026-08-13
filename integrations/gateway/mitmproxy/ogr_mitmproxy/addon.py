@@ -40,6 +40,11 @@ from mitmproxy import http
 
 from . import protocols
 from .ogr_client import OGRClient, make_event, new_id
+
+# Protocols the runtime's derivation classifies from the raw body (v0.6
+# developer path). openai.responses stays on the parsed fallback until the
+# derivation learns it.
+RAW_FORWARD_PROTOCOLS = ("openai.chat", "anthropic.messages")
 from .pep_identity import PepIdentity
 
 logger = logging.getLogger("ogr.gateway")
@@ -320,10 +325,20 @@ class OGRGateway:
         guard_id = protocols.new_guard_id()
         flow.metadata["ogr_guard_id"] = guard_id
 
-        event = make_event(
-            "user_input", subject=self._subject(), payload={"text": text},
-            session_id=session_id, guard_id=guard_id, llm_protocol=proto,
-            provenance=[{"source": "user", "trust": "unverified"}])
+        if proto in RAW_FORWARD_PROTOCOLS:
+            # v0.6 developer path: forward the UNTOUCHED body; the runtime
+            # classifies it (new user words, fed-back outcomes, tool
+            # definitions) — this gateway decomposes nothing.
+            event = make_event(
+                "llm_request", subject=self._subject(), payload=body,
+                session_id=session_id, guard_id=guard_id, llm_protocol=proto)
+        else:
+            # openai.responses: the runtime's derivation does not classify it
+            # yet, so the parsed fallback keeps this traffic judged.
+            event = make_event(
+                "user_input", subject=self._subject(), payload={"text": text},
+                session_id=session_id, guard_id=guard_id, llm_protocol=proto,
+                provenance=[{"source": "user", "trust": "unverified"}])
         verdict = await self._evaluate(event)
 
         if verdict is None:
@@ -371,7 +386,7 @@ class OGRGateway:
             if verdict is None:
                 # PDP unreachable. Fail-closed blocks; fail-open must keep
                 # OBSERVING — an early return here silently drops the rest of
-                # this request's telemetry (model_input and its model_output).
+                # this request's remaining telemetry.
                 if self.fail_closed:
                     flow.response = self._fail_closed_block(proto)
                     return
@@ -381,8 +396,8 @@ class OGRGateway:
                     proto, verdict, protocols.wants_stream(body))
                 return
 
-        # One Run has one external user instruction. Subsequent model requests
-        # in that Run are model_input Turns, not new user instructions/Runs.
+        # One Run has one external user instruction; later model requests in
+        # the Run are continuations, not new instructions/Runs.
         if run_key in self._run_verdicts:
             self._run_verdicts.move_to_end(run_key)
             user_verdict = self._run_verdicts[run_key]
@@ -406,20 +421,11 @@ class OGRGateway:
                 proto, user_verdict, protocols.wants_stream(body))
             return
 
-        model_event = make_event(
-            "model_input", subject=self._subject(),
-            payload=protocols.model_input_payload(proto, body),
-            session_id=session_id, llm_protocol=proto,
-            run_id=run_id, turn=turn,
-            provenance=[{"source": "system", "trust": "trusted"},
-                        {"source": "user", "trust": "unverified"}])
-        verdict = await self._evaluate(model_event)
-        if verdict is None:
-            if self.fail_closed:
-                flow.response = self._fail_closed_block(proto)
-            return
-        if verdict.get("decision") in BLOCKING:
-            flow.response = self._deny(proto, verdict, protocols.wants_stream(body))
+        # v0.6: no full-transcript `model_input` event any more — the new
+        # input of this request was judged above (tool_results itemised, the
+        # instruction once per run), and re-judging history every roundtrip
+        # is exactly what the new-input-only rule exists to stop. The kind
+        # also left the wire vocabulary.
 
     def _is_own_response(self, flow: http.HTTPFlow) -> bool:
         """True if WE generated flow.response (a block error or a 代答 answer).
@@ -470,14 +476,23 @@ class OGRGateway:
             return
         if not self.check_response or streaming:
             return
-        text = protocols.parse_response(proto, body)
-        if not text:
-            return
-
-        event = make_event(
-            "model_output", subject=self._subject(), payload={"text": text},
-            session_id=self._session(flow), guard_id=flow.metadata.get("ogr_guard_id"),
-            llm_protocol=proto, provenance=[{"source": "model", "trust": "unverified"}])
+        if proto in RAW_FORWARD_PROTOCOLS:
+            # v0.6 developer path: the UNTOUCHED response body, judged before
+            # the client acts on it — prose AND tool calls, classified by the
+            # runtime.
+            event = make_event(
+                "llm_response", subject=self._subject(), payload=body,
+                session_id=self._session(flow),
+                guard_id=flow.metadata.get("ogr_guard_id"),
+                llm_protocol=proto)
+        else:
+            text = protocols.parse_response(proto, body)
+            if not text:
+                return
+            event = make_event(
+                "model_output", subject=self._subject(), payload={"text": text},
+                session_id=self._session(flow), guard_id=flow.metadata.get("ogr_guard_id"),
+                llm_protocol=proto, provenance=[{"source": "model", "trust": "unverified"}])
         verdict = await self._evaluate(event)
 
         if verdict is None:

@@ -10,11 +10,13 @@ class OpenAIChat:
     request_paths = ("/v1/chat/completions",)
 
     def parse(self, body: dict) -> dict:
+        # v0.6: the engine takes the UNTOUCHED body (the runtime-twin
+        # `derive_llm_event` classifies it); this adapter only names the
+        # protocol, the model (for the stub), and the self-declared caller.
         return {
             "protocol": self.name,
+            "llm_protocol": "openai.chat",
             "model": body.get("model"),
-            "messages": body.get("messages", []),
-            "tools": body.get("tools") or body.get("functions") or [],
             "caller": body.get("user", "anonymous"),
         }
 

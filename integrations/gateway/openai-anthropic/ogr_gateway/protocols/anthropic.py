@@ -10,16 +10,12 @@ class AnthropicMessages:
     request_paths = ("/v1/messages",)
 
     def parse(self, body: dict) -> dict:
-        # Anthropic carries the system prompt in a top-level `system` field.
-        messages = []
-        if body.get("system"):
-            messages.append({"role": "system", "content": body["system"]})
-        messages.extend(body.get("messages", []))
+        # v0.6: the engine takes the UNTOUCHED body; this adapter only names
+        # the protocol, the model (for the stub), and the caller.
         return {
             "protocol": self.name,
+            "llm_protocol": "anthropic.messages",
             "model": body.get("model"),
-            "messages": messages,
-            "tools": body.get("tools") or [],
             "caller": (body.get("metadata") or {}).get("user_id", "anonymous"),
         }
 

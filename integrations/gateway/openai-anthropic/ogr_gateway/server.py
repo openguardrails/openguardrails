@@ -113,8 +113,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(400, {"error": {"message": "invalid JSON body",
                                               "type": "bad_request"}})
 
+        # v0.6 developer path: the UNTOUCHED body goes to the engine; the
+        # protocol adapter only extracts the self-declared caller and formats
+        # protocol-native refusals.
         norm = proto.parse(body)
-        decision = ENGINE.inspect_request(norm)
+        decision = ENGINE.inspect_request(
+            body, protocol=norm.get("llm_protocol"), caller=norm.get("caller"))
 
         if decision.decision == "block":
             return self._send(*proto.block_response(decision))

@@ -34,7 +34,7 @@
 import type { Context } from "@deepseek-ai/cordis"
 import z from "@deepseek-ai/schemastery"
 import type { Agent } from "@deepseek-ai/dsh-agent"
-import type { ContentBlock } from "@deepseek-ai/dsh-llm"
+import type { ContentBlock, GenerateOptions, StreamChunk } from "@deepseek-ai/dsh-llm"
 import type {
   PostToolDecision,
   PreToolDecision,
@@ -56,9 +56,11 @@ import {
   loadGuardrailsConfig,
   type GuardrailsOptions,
   type JudgeConfig,
+  type LlmMode,
   type ResolvedConfig,
   type TaintConfig,
 } from "./config.js"
+import { LLM_PROTOCOL, requestBody, ResponseAccumulator } from "./llm-wire.js"
 import { openAICompatibleBackend } from "./own-model.js"
 import { hostAgentId, PlatformReporter } from "./platform.js"
 
@@ -72,6 +74,12 @@ export const name = "openguardrails"
  * events, `ctx.approval` — is read opportunistically, so a composition without
  * them still gets tool-call enforcement.
  */
+// ⚠️ An ARRAY, and only `tools`. This Cordis's `Inject` object form maps
+// service name → intercept config, NOT `{required, optional}` — writing the
+// latter silently declares dependencies on services literally named "required"
+// and "optional", which never resolve, and the plugin never applies at all.
+// There is no optional-inject syntax; `llm` is read opportunistically with
+// `ctx.get("llm")` instead, the same way the in-tree hook bridges do it.
 export const inject = ["tools"]
 
 /** Plugin config: an OGR policy plus the two axes a deployment tunes. */
@@ -96,6 +104,12 @@ const TaintSchema: z<TaintConfig> = z.object({
     .description("Case-insensitive regex over the tool name selecting untrusted-content tools"),
 })
 
+const LlmModeSchema = z.union([
+  z.const("off").description("do not emit"),
+  z.const("observe").description("emit, act on nothing"),
+  z.const("enforce").description("emit, wait for the Verdict, act on it"),
+]).default("off")
+
 export const Config: z<Config> = z.object({
   policy: z.any().description("Inline OGR policy; overrides the workspace file and the default"),
   policyPath: z.string().description("Policy file; relative paths resolve against the session workspace"),
@@ -104,6 +118,8 @@ export const Config: z<Config> = z.object({
   taint: TaintSchema.description("Per-agent taint propagation from untrusted tool results"),
   failClosed: z.boolean().default(false)
     .description("Deny any call that reached the monotonic guard without an OGR verdict"),
+  llmRequest: LlmModeSchema.description("Emit llm_request (the assembled provider request body) before each model call"),
+  llmResponse: LlmModeSchema.description("Emit llm_response (the provider response body) after the model answers"),
 })
 
 /**
@@ -431,6 +447,158 @@ export function apply(ctx: Context, config: Config): void {
   // ingested content in derived history and must keep the mark.
   ctx.on("agent/session-start", ({ agent, source }) => {
     if (source === "startup" || source === "clear") taint.clear(agent)
+  })
+
+  // ---- conversation altitude: the OGR v0.6 developer path -----------------
+  installLlmGuard(ctx, config, { agentId, reporter, warn })
+}
+
+/**
+ * The `llm_request` / `llm_response` half: forward the raw model traffic and
+ * act on the verdicts.
+ *
+ * This is the v0.6 developer path, and it is deliberately a different shape
+ * from the tool-call half above. There, the plugin decomposes a dsh event into
+ * a `tool_call` GuardEvent and a LOCAL `Runtime` judges it. Here it decomposes
+ * nothing: the request body and the response body go to the runtime, which
+ * derives the new user words, the tool outcomes being fed back, the model's
+ * prose, every tool call it asks for, and the declared tool inventory. That
+ * classification was every PEP's private burden through v0.5; it is not this
+ * plugin's job any more.
+ *
+ * The consequence is that these two kinds have NO local fallback — the
+ * bundled detectors judge commands, not conversations. Both modes therefore
+ * require `OGR_RUNTIME_URL` + `OGR_API_KEY`, and both say so loudly when they
+ * are switched on without one.
+ */
+function installLlmGuard(
+  ctx: Context,
+  config: Config,
+  deps: { agentId: string; reporter: PlatformReporter; warn: (message: string) => void },
+): void {
+  const requestMode: LlmMode = config.llmRequest ?? "off"
+  const responseMode: LlmMode = config.llmResponse ?? "off"
+  if (requestMode === "off" && responseMode === "off") return
+
+  const { agentId, reporter, warn } = deps
+  if (!reporter.enabled) {
+    warn(
+      "llmRequest/llmResponse need a runtime (set OGR_RUNTIME_URL and OGR_API_KEY) — "
+      + "these kinds carry the raw provider body for the RUNTIME to classify, and there is no local fallback. Not registering.",
+    )
+    return
+  }
+  // Deliberately NO "is the llm service loaded?" check here. `apply` runs as
+  // soon as `tools` resolves, which in a normal cordis.yml is before the LLM
+  // adapter has finished loading — an eager check reports a missing service
+  // that arrives milliseconds later. Registering the listener unconditionally
+  // is both correct and harmless: without an LLM service nothing dispatches
+  // `llm/stream`, and every real dsh deployment has one (it is the spine).
+
+  /** One conversation-altitude event, fully typed (no `as GuardEvent` escape). */
+  const conversationEvent = (
+    kind: "llm_request" | "llm_response",
+    options: GenerateOptions,
+    payload: Record<string, unknown>,
+    source: string,
+  ): GuardEvent => ({
+    kind,
+    observationPoint: "conversation",
+    agentId,
+    agentType: "dsh",
+    attestation: "client_key",
+    llmProtocol: LLM_PROTOCOL,
+    payload,
+    timestamp: new Date().toISOString(),
+    provenance: [{ source, trust: "unverified" }],
+    ...options.sessionId ? { sessionId: String(options.sessionId) } : {},
+  })
+
+  /**
+   * The chunk a blocked step yields instead of the model's answer. `error` is
+   * the honest finish kind: the step did not stop because the model stopped,
+   * and the loop's own error handling is what should see it.
+   */
+  const blockedChunk = (verdict: Verdict, what: string): StreamChunk => ({
+    type: "finish",
+    reason: {
+      kind: "error",
+      failure: {
+        message: `[OpenGuardrails] ${what} blocked: ${brief(verdict)}`,
+        code: "ogr_blocked",
+      },
+    },
+  })
+
+  ctx.on("llm/stream", (options, next): AsyncIterable<StreamChunk> => {
+    // An auxiliary call (compaction, session titling) is machinery, not the
+    // agent's conversation with the user; judging it would bill a round trip
+    // for a summary of history the runtime has already seen.
+    if (options.purpose !== undefined) return next()
+
+    return (async function* guarded(): AsyncIterable<StreamChunk> {
+      if (requestMode !== "off") {
+        // The assembled request is exactly where trusted and untrusted content
+        // have already been mixed — that is what the runtime reads.
+        const ev = conversationEvent("llm_request", options, requestBody(options), "model_input")
+
+        if (requestMode === "enforce") {
+          const verdict = await reporter.evaluate(ev)
+          // A missing verdict (runtime down, timeout) is NOT an allow, but it
+          // is not a block either: this altitude has no human gate, and
+          // failing a whole turn closed on an unreachable runtime would take
+          // the agent down with it. Say so, and let the tool-call altitude —
+          // which does fail closed — carry the enforcement.
+          if (!verdict) {
+            warn("llm_request got no verdict — proceeding; enforcement falls back to the tool-call altitude")
+          } else if (verdict.decision === "block" || verdict.decision === "require_approval") {
+            // `require_approval` cannot be answered here: `ctx.approval` keys a
+            // question to an agent and a tool, and a model call is neither.
+            // Restrict-only means the safe direction is to stop the call.
+            yield blockedChunk(verdict, "this model call was")
+            return
+          }
+        } else {
+          reporter.report(ev)
+        }
+      }
+
+      if (responseMode === "off") {
+        yield* next()
+        return
+      }
+
+      const accumulator = new ResponseAccumulator(options.model)
+      const buffered: StreamChunk[] = []
+      for await (const chunk of next()) {
+        accumulator.push(chunk)
+        // `observe` streams through untouched — the whole point of not
+        // enforcing here is that first-token latency stays untouched too.
+        if (responseMode === "observe") yield chunk
+        else buffered.push(chunk)
+      }
+
+      // An aborted or empty stream has no complete answer to judge.
+      if (!accumulator.complete || accumulator.empty) {
+        if (responseMode === "enforce") yield* buffered
+        return
+      }
+
+      const ev = conversationEvent("llm_response", options, accumulator.body(), "model")
+
+      if (responseMode === "observe") {
+        reporter.report(ev)
+        return
+      }
+
+      const verdict = await reporter.evaluate(ev)
+      if (verdict && (verdict.decision === "block" || verdict.decision === "require_approval")) {
+        yield blockedChunk(verdict, "the model's answer was")
+        return
+      }
+      if (!verdict) warn("llm_response got no verdict — releasing the answer")
+      yield* buffered
+    })()
   })
 }
 

@@ -43,6 +43,21 @@ export interface TaintConfig {
   toolResultPattern?: string
 }
 
+/**
+ * What this plugin does with one of the two v0.6 developer-path kinds.
+ *
+ * - `off` — do not emit it at all.
+ * - `observe` — emit it and act on nothing (fire-and-forget; zero added
+ *   latency on the model call).
+ * - `enforce` — emit it, wait for the Verdict, and act on it.
+ *
+ * `observe` and `enforce` both require a configured runtime
+ * (`OGR_RUNTIME_URL` + `OGR_API_KEY`). These kinds carry the raw provider
+ * body precisely so the RUNTIME can classify it; the plugin's local detector
+ * chain has nothing to say about one, so there is no local fallback.
+ */
+export type LlmMode = "off" | "observe" | "enforce"
+
 export interface GuardrailsOptions {
   /** Inline OGR policy; overrides both the workspace file and the default. */
   policy?: Policy
@@ -54,6 +69,19 @@ export interface GuardrailsOptions {
   guardToolResults?: boolean
   /** Per-agent taint propagation from untrusted tool results. */
   taint?: TaintConfig
+  /**
+   * Emit `llm_request` — the assembled provider request body — before each
+   * model call (OGR v0.6 developer path). Under `enforce` a `block` verdict
+   * stops the call: the model is never reached. Default `off`.
+   */
+  llmRequest?: LlmMode
+  /**
+   * Emit `llm_response` — the provider response body — after the model
+   * answers. Under `enforce` the stream is buffered until the Verdict lands,
+   * so that "before the agent acts on it" is literally true; that costs one
+   * runtime round trip of first-token latency per step. Default `off`.
+   */
+  llmResponse?: LlmMode
   /**
    * Re-assert an OGR `block` as a monotonic tool-registry guard, and deny any
    * call that reached the guard without an OGR verdict (default false).
@@ -125,6 +153,8 @@ export interface ResolvedConfig {
   guardToolResults: boolean
   taint: Required<TaintConfig>
   failClosed: boolean
+  llmRequest: LlmMode
+  llmResponse: LlmMode
 }
 
 /** Where the workspace-local, agent-editable policy lives. */
@@ -188,5 +218,7 @@ export function loadGuardrailsConfig(
       toolResultPattern: options?.taint?.toolResultPattern ?? DEFAULT_TAINT_TOOL_PATTERN,
     },
     failClosed: options?.failClosed ?? false,
+    llmRequest: options?.llmRequest ?? "off",
+    llmResponse: options?.llmResponse ?? "off",
   }
 }

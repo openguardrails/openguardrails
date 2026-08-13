@@ -7,6 +7,7 @@
 import { type GuardEvent, type ResolvedGuardEvent, type Verdict, severity } from "./models.js"
 import { type Composition, compose, selectRule } from "./composition.js"
 import { type Detector, appliesTo } from "./detectors/index.js"
+import { deriveLlmEvent } from "./llm-derive.js"
 
 export interface Policy {
   composition?: Composition
@@ -36,7 +37,10 @@ export class Runtime {
   async evaluate(ev: GuardEvent): Promise<Verdict> {
     // OGR v0.6: identifiers are born at the runtime. An in-process Runtime IS
     // the PDP, so it assigns what the caller did not send: event identity
-    // always, guard group defaulting to the event itself.
+    // always, guard group defaulting to the event itself. Raw provider
+    // bodies (llm_request/llm_response) are classified here too — the PDP's
+    // job, wherever the PDP runs.
+    deriveLlmEvent(ev)
     if (!ev.eventId) ev.eventId = mintEventId()
     if (!ev.guardId) ev.guardId = ev.eventId
     const rev = ev as ResolvedGuardEvent

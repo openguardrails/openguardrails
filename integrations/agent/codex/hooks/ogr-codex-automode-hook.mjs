@@ -177,6 +177,41 @@ var RuntimeClient = class {
     return verdictFromWire(wire);
   }
   /**
+   * The developer path in one call: forward the UNTOUCHED provider request
+   * body BEFORE it goes to the model. The runtime classifies it (new user
+   * words, fed-back tool outcomes, tool definitions) and answers with the
+   * composed Verdict.
+   *
+   * ```ts
+   * const verdict = await client.guardRequest(chatCompletionsBody)
+   * if (verdict.decision === "block") refuse(verdict.reasons)
+   * ```
+   */
+  async guardRequest(body, options = {}) {
+    return this.evaluate({
+      kind: "llm_request",
+      payload: body,
+      llmProtocol: options.llmProtocol,
+      sessionId: options.sessionId,
+      agentId: options.agentId,
+      provenance: []
+    }, options);
+  }
+  /**
+   * The other half: forward the UNTOUCHED provider response AFTER the model
+   * answers and BEFORE the agent acts on it.
+   */
+  async guardResponse(body, options = {}) {
+    return this.evaluate({
+      kind: "llm_response",
+      payload: body,
+      llmProtocol: options.llmProtocol,
+      sessionId: options.sessionId,
+      agentId: options.agentId,
+      provenance: []
+    }, options);
+  }
+  /**
    * Report a batch of GuardEvents: `POST /v1/ingest` with `{"batch": [...]}`
    * (at most {@link INGEST_BATCH_MAX}). The response is always HTTP 207 with
    * one result per event; per-event failures come back as results, not

@@ -10,6 +10,7 @@ import time
 
 from .composition import compose, select_rule
 from .detectors import Detector
+from .llm_derive import derive_llm_event
 from .models import GuardEvent, Verdict, severity
 
 
@@ -21,8 +22,10 @@ class Runtime:
 
     # -- main entry point -----------------------------------------------
     def evaluate(self, ev: GuardEvent) -> Verdict:
-        # OGR v0.6: identifiers are born at the runtime. An in-process Runtime
-        # IS the PDP, so it assigns what the caller did not send.
+        # OGR v0.6: identifiers are born at the runtime, and raw provider
+        # bodies (llm_request/llm_response) are classified here — the PDP's
+        # job, wherever the PDP runs.
+        derive_llm_event(ev)
         if not ev.event_id:
             ev.event_id = f"evt-{int(time.time() * 1000):x}-{secrets.token_hex(6)}"
         if not ev.guard_id:

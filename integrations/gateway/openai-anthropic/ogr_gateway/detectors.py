@@ -56,10 +56,10 @@ def find_secrets(text: str) -> list[dict]:
 
 
 class ContentGuardDetector(Detector):
-    """Inspects model_input / model_output text for injection and secret leakage."""
+    """Inspects the derived conversation shapes (user_input / tool_result / model_output) for injection and secret leakage."""
 
     provider = "ogr.gateway.content_guard"
-    handles = ("model_input", "model_output")
+    handles = ("user_input", "tool_result", "model_output")
 
     def __init__(self, config: dict | None = None):
         cfg = config or {}
@@ -69,10 +69,19 @@ class ContentGuardDetector(Detector):
 
     # -- helpers --------------------------------------------------------
     def _segments(self, ev: GuardEvent) -> list[tuple[str, str]]:
-        """Return (trust, text) pairs to scan."""
-        if ev.kind == "model_input":
-            return [(m.get("trust", "unverified"), m.get("content", "") or "")
-                    for m in ev.payload.get("messages", [])]
+        """Return (trust, text) pairs to scan — over the DERIVED judged shape
+        (`derive_llm_event`): the system prompt is trusted, the user's words
+        unverified, fed-back tool outcomes untrusted, model output model-
+        authored."""
+        if ev.kind in ("user_input", "tool_result"):
+            segs: list[tuple[str, str]] = []
+            if ev.payload.get("system"):
+                segs.append(("trusted", str(ev.payload["system"])))
+            if ev.payload.get("text"):
+                segs.append(("unverified", str(ev.payload["text"])))
+            for r in ev.payload.get("tool_results", []) or []:
+                segs.append(("untrusted", str(r.get("result", ""))))
+            return segs
         # model_output — the completion is authored by the model
         return [("model", ev.payload.get("text", "") or "")]
 
