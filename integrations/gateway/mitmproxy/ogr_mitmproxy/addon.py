@@ -57,11 +57,16 @@ class OGRGateway:
     def __init__(self) -> None:
         self.runtime = os.environ.get("OGR_RUNTIME_URL", "http://localhost:3000")
         self.api_key = os.environ.get("OGR_API_KEY", "")
-        # Agent identity is the RUNTIME's job: it recognises the agent from the
-        # system prompt's self-definition at ingest. OGR_AGENT_ID/OGR_AGENT_TYPE
-        # remain as explicit operator overrides only — no default.
+        # The OGR v0.5 agent five-tuple, all operator-configured and all
+        # optional. Unset, the runtime falls back to the identity floor: the
+        # agent is derived from the API key (one key, one default agent) and
+        # every session is attributed to one user.
         self.agent_id = os.environ.get("OGR_AGENT_ID", "")
         self.agent_type = os.environ.get("OGR_AGENT_TYPE", "")
+        self.agent_workspace = os.environ.get("OGR_AGENT_WORKSPACE", "")
+        self.agent_owner = os.environ.get("OGR_AGENT_OWNER", "")
+        # Per-session by nature; a static value only fits a single-user proxy.
+        self.agent_user = os.environ.get("OGR_AGENT_USER", "")
         # fail-closed: if the runtime is unreachable, block rather than pass the call.
         self.fail_closed = _truthy(os.environ.get("OGR_FAIL_MODE_CLOSED"), True)
         # also moderate the model's completion on the way back.
@@ -127,6 +132,12 @@ class OGRGateway:
             s["agent_id"] = self.agent_id
         if self.agent_type:
             s["agent_type"] = self.agent_type
+        if self.agent_workspace:
+            s["agent_workspace"] = self.agent_workspace
+        if self.agent_owner:
+            s["agent_owner"] = self.agent_owner
+        if self.agent_user:
+            s["agent_user"] = self.agent_user
         return s
 
     def _session(self, flow: http.HTTPFlow) -> str:

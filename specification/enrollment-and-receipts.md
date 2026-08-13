@@ -36,7 +36,7 @@ enrollment a PEP MUST hold:
    Credentials SHOULD be short-lived and renewed automatically;
 2. the runtime's current verification keys;
 3. a recorded **assertion scope**: the workspaces this PEP may write into,
-   the `subject.principal` namespaces it may name (exact values or prefix
+   the `subject.agent_id` namespaces it may name (exact values or prefix
    patterns), and the maximum [attestation level](attestation.md) it may
    declare. The scope bounds the blast radius of a compromised PEP.
 
@@ -110,7 +110,7 @@ runtime-signed statement of *what* was approved, *by whom*, *until when*.
 
 | Claim | Req | Description |
 |---|---|---|
-| `ogr_version` | MUST | `"0.4"`. |
+| `ogr_version` | MUST | `"0.5"`. |
 | `receipt_id` | MUST | Unique id for this receipt. |
 | `issuer` | MUST | Runtime identity; pairs with the JWS `kid`. |
 | `scope` | MUST | `single_action` \| `pre_authorization`. |
@@ -118,7 +118,7 @@ runtime-signed statement of *what* was approved, *by whom*, *until when*.
 | `session_id` | SHOULD | Session binding. |
 | `bindings` | MUST for `single_action` | Array of `{ kind, payload_digest }` — one entry per altitude-projection of the approved action the runtime can derive. |
 | `constraints` | MUST for `pre_authorization` | See below. |
-| `approver` | MUST | Principal who approved, e.g. `user:tom`. |
+| `approver` | MUST | The human who approved, e.g. `user:tom`. |
 | `approved_at` | MUST | RFC 3339. |
 | `expires_at` | MUST | RFC 3339. `single_action` expiry SHOULD be minutes. |
 
@@ -147,7 +147,7 @@ and bound to the exact payload via `bindings`. This is what satisfying a
 
 | Field | Description |
 |---|---|
-| `session_id` / `principal` | Binds the grant to a session or principal. |
+| `session_id` / `agent_id` | Binds the grant to a session or an agent. |
 | `kinds` | Event kinds the grant covers. |
 | `max_uses` | Use budget. Accounted by the runtime when online; best-effort locally in degraded mode, reconciled on reconnect. |
 | `match` | Opaque, deployment-defined matcher evaluated by the PEP (e.g. compiled policy). A PEP that cannot interpret `match` MUST NOT honor the grant offline. |

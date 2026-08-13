@@ -28,7 +28,7 @@ on_unreachable:
 |---|---|
 | `block` | Deny the gated action. |
 | `allow` | Permit the gated action (fail open). |
-| `require_local_approval` | Suspend the action; the human principal approves through a channel that does not depend on runtime availability. |
+| `require_local_approval` | Suspend the action; a human approver decides through a channel that does not depend on runtime availability. |
 
 A category with no entry defaults to `block` for `security.*`; the `safety.*`
 default is the deployer's explicit choice. A blanket hard-`block` default is

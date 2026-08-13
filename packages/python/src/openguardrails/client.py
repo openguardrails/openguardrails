@@ -8,7 +8,7 @@ The OGR layering is API → SDK → Plugin: a runtime exposes the HTTP API
 Stdlib only — the package's zero-dependency promise holds. Ed25519 request
 signing (`Ed25519Signer`) is optional and imports `cryptography` lazily.
 
-Wire contract (protocol 0.4):
+Wire contract (protocol 0.5):
   /v1/evaluate    one GuardEvent in, one Verdict out (extension keys such as
                   `x.ogr.session_id` pass through). Header `ogr-partial: 1`
                   requests an interim judgment on streaming content.
@@ -79,6 +79,12 @@ def event_to_wire(ev: GuardEvent | dict[str, Any]) -> dict[str, Any]:
     """
     d = dataclasses.asdict(ev) if dataclasses.is_dataclass(ev) else dict(ev)
     wire = _drop_empties(d)
+    # A key-only caller asserts no identity: an empty subject leaves the wire
+    # entirely and the runtime derives the agent from the API key.
+    if isinstance(wire.get("subject"), dict):
+        wire["subject"] = _drop_empties(wire["subject"])
+        if not wire["subject"]:
+            del wire["subject"]
     if isinstance(wire.get("sensor"), dict):
         wire["sensor"] = _drop_empties(wire["sensor"])
     if isinstance(wire.get("provenance"), list):

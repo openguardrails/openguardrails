@@ -100,12 +100,22 @@ type Config struct {
 	ingestPath    string
 	heartbeatPath string
 
-	mode                 string
-	timeoutMs            uint32
-	failClosed           bool
-	principalHeader      string
-	principalGroupHeader string
+	mode       string
+	timeoutMs  uint32
+	failClosed bool
+
+	// The OGR v0.5 agent identity: which header carries each field, plus static
+	// fallbacks for a route that fronts exactly one agent. agent_user has no
+	// static fallback on purpose — a constant user IS the runtime's default.
+	agentIDHeader        string
+	agentTypeHeader      string
+	agentWorkspaceHeader string
+	agentOwnerHeader     string
+	agentUserHeader      string
 	agentID              string
+	agentType            string
+	agentWorkspace       string
+	agentOwner           string
 
 	// A second runtime that gets a COPY of every event and decides nothing.
 	mirror           wrapper.HttpClient
@@ -193,26 +203,46 @@ func parseConfig(j gjson.Result, c *Config) error {
 
 	c.failClosed = j.Get("fail_mode").String() == "closed"
 
-	// WHO the gateway authenticated this call as. In IAM terms the principal, and in
-	// the platform the agent's OWNER — an identity the customer's IT admin issued and
-	// can trace back to a person or a project.
-	c.principalHeader = "x-mse-consumer"
-	if v := j.Get("principal_header").String(); v != "" {
-		c.principalHeader = v
-	}
 	/**
-	 * The consumer's GROUP, which the platform maps onto a workspace — a group of
-	 * agents plus one policy set.
+	 * The OGR v0.5 agent identity (agent_id / agent_type / agent_workspace /
+	 * agent_owner / agent_user). OGR is agent-centric: the consumer the gateway
+	 * authenticated IS the agent, and the consumer-group is the agent's WORKSPACE —
+	 * a group of agents plus one policy set. Owner and user are attributes the
+	 * platform records on the agent and the session; they decide nothing.
 	 *
-	 * Separate from the principal on purpose, and the IAM precedent is exact: AWS
-	 * refuses to let a group be a Principal because "groups relate to permissions, not
-	 * authentication". The consumer authenticates; the group is where policy attaches.
+	 * Every field's source header is configurable, because not every deployment
+	 * puts these facts in the MSE consumer headers. Static `agent_id` /
+	 * `agent_type` / `agent_workspace` / `agent_owner` config values back the
+	 * headers up for a route that fronts exactly one agent. A deployment that
+	 * configures nothing still works: the runtime derives the agent from the API
+	 * key (one key, one default agent) and attributes every session to one user.
 	 */
-	c.principalGroupHeader = "x-mse-consumer-group"
-	if v := j.Get("principal_group_header").String(); v != "" {
-		c.principalGroupHeader = v
+	c.agentIDHeader = "x-mse-consumer"
+	if v := j.Get("agent_id_header").String(); v != "" {
+		c.agentIDHeader = v
+	}
+	c.agentWorkspaceHeader = "x-mse-consumer-group"
+	if v := j.Get("agent_workspace_header").String(); v != "" {
+		c.agentWorkspaceHeader = v
+	}
+	c.agentTypeHeader = "x-ogr-agent-type"
+	if v := j.Get("agent_type_header").String(); v != "" {
+		c.agentTypeHeader = v
+	}
+	c.agentOwnerHeader = "x-ogr-agent-owner"
+	if v := j.Get("agent_owner_header").String(); v != "" {
+		c.agentOwnerHeader = v
+	}
+	// Per-session by nature: for an agent serving many people the value changes
+	// per request, so it can only ever come from the traffic.
+	c.agentUserHeader = "x-ogr-agent-user"
+	if v := j.Get("agent_user_header").String(); v != "" {
+		c.agentUserHeader = v
 	}
 	c.agentID = j.Get("agent_id").String()
+	c.agentType = j.Get("agent_type").String()
+	c.agentWorkspace = j.Get("agent_workspace").String()
+	c.agentOwner = j.Get("agent_owner").String()
 
 	c.client = wrapper.NewClusterClient(wrapper.TargetCluster{Cluster: c.cluster, Host: c.host})
 
@@ -291,8 +321,12 @@ func protocolNames() []string {
 // --- per-request context ----------------------------------------------------
 
 const (
-	ctxPrincipal      = "ogr_principal"
-	ctxPrincipalGroup = "ogr_principal_group"
+	ctxAgentID        = "ogr_agent_id"
+	ctxAgentType      = "ogr_agent_type"
+	ctxAgentWorkspace = "ogr_agent_workspace"
+	ctxAgentOwner     = "ogr_agent_owner"
+	ctxAgentUser      = "ogr_agent_user"
+	ctxViaConsumer    = "ogr_via_consumer"
 	ctxReqID          = "ogr_req_id"
 	ctxSession        = "ogr_session"
 	ctxStreaming      = "ogr_streaming"
@@ -363,10 +397,32 @@ func onRequestHeaders(ctx wrapper.HttpContext, cfg Config) types.Action {
 	// shape check can refine it.
 	ctx.SetContext(ctxPath, path)
 
-	principal, _ := proxywasm.GetHttpRequestHeader(cfg.principalHeader)
-	ctx.SetContext(ctxPrincipal, principal)
-	group, _ := proxywasm.GetHttpRequestHeader(cfg.principalGroupHeader)
-	ctx.SetContext(ctxPrincipalGroup, group)
+	// The agent identity, header first, static config as fallback. The consumer
+	// header is the one identity this gateway itself authenticated; whether
+	// agent_id came from it decides the attestation stamp downstream.
+	agentID, _ := proxywasm.GetHttpRequestHeader(cfg.agentIDHeader)
+	ctx.SetContext(ctxViaConsumer, agentID != "")
+	if agentID == "" {
+		agentID = cfg.agentID
+	}
+	ctx.SetContext(ctxAgentID, agentID)
+	agentType, _ := proxywasm.GetHttpRequestHeader(cfg.agentTypeHeader)
+	if agentType == "" {
+		agentType = cfg.agentType
+	}
+	ctx.SetContext(ctxAgentType, agentType)
+	workspace, _ := proxywasm.GetHttpRequestHeader(cfg.agentWorkspaceHeader)
+	if workspace == "" {
+		workspace = cfg.agentWorkspace
+	}
+	ctx.SetContext(ctxAgentWorkspace, workspace)
+	owner, _ := proxywasm.GetHttpRequestHeader(cfg.agentOwnerHeader)
+	if owner == "" {
+		owner = cfg.agentOwner
+	}
+	ctx.SetContext(ctxAgentOwner, owner)
+	user, _ := proxywasm.GetHttpRequestHeader(cfg.agentUserHeader)
+	ctx.SetContext(ctxAgentUser, user)
 
 	reqID, _ := proxywasm.GetHttpRequestHeader("x-request-id")
 	if reqID == "" {
@@ -381,13 +437,25 @@ func onRequestHeaders(ctx wrapper.HttpContext, cfg Config) types.Action {
 	return types.HeaderStopIteration
 }
 
+// subjectFromCtx assembles the request's agent identity from what the header
+// phase stored. nil when the request carried nothing — the key-only floor.
+func subjectFromCtx(ctx wrapper.HttpContext, cfg Config) *subject {
+	return subjectOf(
+		ctx.GetStringContext(ctxAgentID, ""),
+		ctx.GetStringContext(ctxAgentType, ""),
+		ctx.GetStringContext(ctxAgentWorkspace, ""),
+		ctx.GetStringContext(ctxAgentOwner, ""),
+		ctx.GetStringContext(ctxAgentUser, ""),
+		ctx.GetBoolContext(ctxViaConsumer, false),
+	)
+}
+
 func onRequestBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Action {
 	if ctx.GetBoolContext(ctxSkip, false) || len(body) == 0 {
 		return types.ActionContinue
 	}
 	parsed := gjson.ParseBytes(body)
-	principal := ctx.GetStringContext(ctxPrincipal, "")
-	group := ctx.GetStringContext(ctxPrincipalGroup, "")
+	subj := subjectFromCtx(ctx, cfg)
 	reqID := ctx.GetStringContext(ctxReqID, "")
 	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
 
@@ -413,7 +481,7 @@ func onRequestBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Actio
 		logInfof("[OGR-REQ] unreadable body: protocol=%q bytes=%d — reporting an unparsed signal, this request is NOT judged",
 			name, len(body))
 		d := &deriveCtx{
-			principal: principal, principalGroup: group,
+			subj:    subj,
 			guardID: "gw-" + reqID, reqID: reqID, now: now, protocol: name,
 		}
 		ingest(ctx, cfg, []*GuardEvent{unparsedEvent(d, "user_input", "protocol not readable by this plugin", len(body))})
@@ -422,12 +490,11 @@ func onRequestBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Actio
 
 	rs := &reqState{
 		derive: &deriveCtx{
-			principal:      principal,
-			principalGroup: group,
-			guardID:        "gw-" + reqID,
-			reqID:          reqID,
-			now:            now,
-			protocol:       proto.Name(),
+			subj:     subj,
+			guardID:  "gw-" + reqID,
+			reqID:    reqID,
+			now:      now,
+			protocol: proto.Name(),
 		},
 		proto:     proto,
 		conv:      conv,

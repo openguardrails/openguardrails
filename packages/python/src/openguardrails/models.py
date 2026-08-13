@@ -1,13 +1,33 @@
-"""OGR v0.4 wire types — GuardEvent, Verdict, Provenance.
+"""OGR v0.5 wire types — GuardEvent, Verdict, Subject, Provenance.
 
-Stdlib only. These mirror schema/*.schema.json (protocol 0.4).
+Stdlib only. These mirror schema/*.schema.json (protocol 0.5).
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
-from typing import Any
+from typing import Any, TypedDict
 
-OGR_VERSION = "0.4"
+OGR_VERSION = "0.5"
+
+
+class Subject(TypedDict, total=False):
+    """Which agent is acting — the five-field agent identity plus actor lineage.
+
+    Every field is optional: an empty subject (or none at all) is the key-only
+    floor, where the runtime derives the agent from the API key (one key, one
+    default agent) and attributes every session to one user. See
+    specification/guard-event.md#subject.
+    """
+
+    agent_id: str          # org-unique agent identity; absent → derived from the API key
+    agent_type: str        # kind of agent ("hermes", "openclaw", "smartwork") — a label, not an identity
+    agent_workspace: str   # named group of agents; absent → the API key's workspace
+    agent_owner: str       # builder / responsible party — an attribute, never a policy boundary
+    agent_user: str        # who is using the agent THIS session; absent → one user
+    sandbox_id: str
+    parent_agent_id: str
+    delegation_chain: list[str]
+    attestation: str       # self_declared|inferred|network|mtls|gateway_api_key|client_key
 
 # Decision severity order (most severe first) — see composition.md.
 DECISIONS = ["block", "require_approval", "redact", "modify", "allow"]
@@ -30,7 +50,8 @@ class Provenance:
 class GuardEvent:
     kind: str                       # see spec: tool_call|exec|tool_result|...
     observation_point: str          # conversation|invocation|execution
-    subject: dict[str, Any]
+    # {} is the key-only floor: the runtime derives the agent from the API key.
+    subject: Subject
     payload: dict[str, Any]
     event_id: str
     guard_id: str

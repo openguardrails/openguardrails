@@ -43,7 +43,7 @@ test("eventToWire emits every schema-required key in snake_case", () => {
     assert.ok(key in wire, `missing required wire key: ${key}`)
   }
   assert.equal(wire.ogr_version, OGR_VERSION)
-  assert.equal(wire.ogr_version, "0.4")
+  assert.equal(wire.ogr_version, "0.5")
   assert.equal(wire.event_id, "evt-1")
   assert.equal(wire.guard_id, "ga-1")
   assert.equal(wire.observation_point, "invocation")
@@ -80,7 +80,7 @@ test("eventToWire passes extension fields through verbatim", () => {
 
 test("verdictFromWire maps snake_case and passes extension keys through", () => {
   const verdict = verdictFromWire({
-    ogr_version: "0.4",
+    ogr_version: "0.5",
     event_id: "evt-1",
     guard_id: "ga-1",
     provider: "runtime",
@@ -97,7 +97,7 @@ test("verdictFromWire maps snake_case and passes extension keys through", () => 
   assert.equal(verdict.decision, "block")
   assert.equal(verdict.latencyMs, 12)
   assert.equal(verdict.confidence, 0.8)
-  assert.equal(verdict.ogrVersion, "0.4")
+  assert.equal(verdict.ogrVersion, "0.5")
   assert.equal(verdict["x.ogr.session_id"], "sess-9")
   assert.deepEqual(verdict.modifications, { kind: "redact" })
   assert.deepEqual(verdict.categories, [{ id: "security.exfiltration", domain: "security", score: 0.9 }])
@@ -152,7 +152,7 @@ test("evaluate posts one wire event to <prefix>/v1/evaluate and maps the verdict
   handler = () => ({
     status: 200,
     json: {
-      ogr_version: "0.4",
+      ogr_version: "0.5",
       event_id: "evt-1",
       guard_id: "ga-1",
       provider: "runtime",
@@ -169,7 +169,7 @@ test("evaluate posts one wire event to <prefix>/v1/evaluate and maps the verdict
   assert.equal(requests[0].headers["content-type"], "application/json")
   assert.equal(requests[0].headers["ogr-partial"], undefined)
   assert.equal(requests[0].body.event_id, "evt-1")
-  assert.equal(requests[0].body.ogr_version, "0.4")
+  assert.equal(requests[0].body.ogr_version, "0.5")
   assert.equal(verdict.decision, "allow")
   assert.equal(verdict.eventId, "evt-1")
   assert.equal(verdict["x.ogr.session_id"], "sess-1")

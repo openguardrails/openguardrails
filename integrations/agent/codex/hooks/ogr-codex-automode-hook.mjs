@@ -8,7 +8,7 @@ import { hostname } from "node:os";
 import { join } from "node:path";
 
 // ../../../packages/javascript/dist/models.js
-var OGR_VERSION = "0.4";
+var OGR_VERSION = "0.5";
 
 // ../../../packages/javascript/dist/client.js
 var RuntimeApiError = class extends Error {
@@ -60,9 +60,10 @@ function eventToWire(ev) {
     timestamp: ev.timestamp,
     observation_point: ev.observationPoint,
     kind: ev.kind,
-    subject: ev.subject,
     payload: ev.payload
   };
+  if (ev.subject && Object.keys(ev.subject).length)
+    wire.subject = ev.subject;
   if (ev.sensor)
     wire.sensor = ev.sensor;
   if (ev.sessionId)

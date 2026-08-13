@@ -22,9 +22,13 @@
  * the agent), fail CLOSED on a matched dangerous rule.
  */
 import { readFileSync } from "node:fs"
+import { hostname } from "node:os"
 import { fileURLToPath } from "node:url"
 import { dirname, join } from "node:path"
 import { Runtime, ConfigRulesDetector, OGR_VERSION } from "@openguardrails/core"
+
+// OGR v0.5 agent identity: machine-scoped by default, org-unique per host.
+const AGENT_ID = process.env.OGR_AGENT_ID || `claude-code-${hostname()}`
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 
@@ -65,8 +69,8 @@ function buildGuardEvent(tool, command) {
   const guardId = id("g")
   return {
     kind: "exec",
-    observationPoint: "agent_hook",
-    subject: { tool },
+    observationPoint: "invocation",
+    subject: { agent_id: AGENT_ID, agent_type: "claude-code" },
     payload: { argv: [String(command ?? "")], tool, name: tool },
     eventId: id("e"),
     guardId,

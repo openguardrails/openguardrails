@@ -133,20 +133,29 @@ An earlier shape (one `user_input` per request) is also why a whole deployment w
 invisible to the tool_call guardrails: `permission`, `command-danger` and `command-rules`
 judge an ACTION, and no action was ever reported.
 
-Identity: the consumer header (`x-mse-consumer` by default) becomes
-`subject.principal` — WHO the gateway authenticated, which the runtime treats as the
-agent's owner. The consumer-GROUP header (`x-mse-consumer-group`) becomes
-`subject.principal_group`, which the runtime maps to a policy boundary; it is sent
-even when the consumer header is absent, because it still says which group's rules
-apply. Two fields on purpose: a consumer authenticates, a group is where policy
-attaches (see the note in `specification/guard-event.md`).
+Identity (OGR v0.5, agent-centric): the consumer header (`x-mse-consumer` by
+default) becomes **`subject.agent_id`** — the consumer the gateway authenticated
+IS the agent, one consumer credential, one agent row. The consumer-GROUP header
+(`x-mse-consumer-group`) becomes **`subject.agent_workspace`** — the agent's
+workspace, a group of AGENTS plus one policy set, not a human org chart; it is
+sent even when the consumer header is absent, because it still says which
+workspace's rules apply. Three more headers (all renameable, see the config
+table) carry the descriptive half of the five-tuple: `subject.agent_type` (what
+kind of agent — `hermes`, `openclaw`, or the team's own name for it),
+`subject.agent_owner` (the builder / responsible party), and
+`subject.agent_user` (who is using the agent THIS session — per-request by
+nature, for an agent serving many people). Owner and user are attributes the
+platform records on the agent and the session; they never select policy.
 
-**`subject.agent_id` is deliberately left unset** — the runtime recognises the agent
-from the system prompt, and naming the gateway consumer as the agent would collapse
-every agent behind one key into one row. A promptless chat application becomes a
-`chatbot`, one per (principal, sensor). `session_id` is derived from (principal +
-system prompt + first user message), so it is stable across turns with no stored
-state.
+One consumer credential driving several different harnesses at once still
+reports ONE `agent_id` — that is a usage error, and the runtime surfaces it as
+a **shadow agent** signal when the same `agent_id` arrives with differing
+`agent_type` values, rather than splitting the inventory.
+
+A route that sends none of these headers still works: the runtime derives the
+agent from the API key (one key, one default agent) and attributes every
+session to one user. `session_id` is derived by the runtime, stable across
+turns with no stored state.
 
 ## Judging a STREAMED answer
 
@@ -440,8 +449,12 @@ timeout: the defect stated as an expectation, passing for months.
 | `mode` | `observe` | `enforce` to act on verdicts |
 | `timeout_ms` | `5000` | the PDP budget, enforce only — nothing waits in observe. A CEILING for the worst case, not a target; the runtime's `OGR_MODEL_TIMEOUT_MS` must fit strictly inside it |
 | `fail_mode` | `open` | `closed` refuses when the PDP is unreachable. ⚠️ Covers transport failures only — see "A partial verdict" above |
-| `principal_header` | `x-mse-consumer` | which header carries the caller |
-| `principal_group_header` | `x-mse-consumer-group` | which header carries the caller's group |
+| `agent_id_header` | `x-mse-consumer` | which header carries the agent's identity — the consumer IS the agent |
+| `agent_workspace_header` | `x-mse-consumer-group` | which header carries the agent's workspace (a group of agents, one policy set) |
+| `agent_type_header` | `x-ogr-agent-type` | which header carries the kind of agent |
+| `agent_owner_header` | `x-ogr-agent-owner` | which header carries the agent's builder / responsible party |
+| `agent_user_header` | `x-ogr-agent-user` | which header carries who is using the agent this session |
+| `agent_id` / `agent_type` / `agent_workspace` / `agent_owner` | *(unset)* | static fallbacks when the header is absent, for a route fronting exactly one agent. No static `agent_user` — a constant user is already the runtime's default |
 | `mirror_cluster` / `mirror_base_url` | *(unset)* | a candidate runtime that gets copies and gates nothing |
 | `mirror_api_key` | `api_key` | the mirror's own credential, when it differs |
 | `mirror_base_path` | `base_path` | the mirror's own mount, when it differs — a candidate runtime need not be the same build as the primary |
@@ -476,19 +489,20 @@ to be trusted about. What loaded is printed once, at startup, in the
 direction too: every `/evaluate` comes back non-200, which is `fail_mode`
 territory, not silence.
 
-⚠️ **`principal_header` and `principal_group_header` are only as trustworthy as
-the edge that writes them.** The plugin reports whatever arrives on them. Measured
-on the lab gateway: a request authenticating as consumer `carol` that carried its
-own `x-mse-consumer: root-admin` and `x-mse-consumer-group: platform-admins` was
+⚠️ **The identity headers are only as trustworthy as the edge that writes
+them.** The plugin reports whatever arrives on them. Measured on the lab
+gateway: a request authenticating as consumer `carol` that carried its own
+`x-mse-consumer: root-admin` and `x-mse-consumer-group: platform-admins` was
 reported as exactly that — `key-auth` (priority 310, so it does run first) sets
 the headers when they are absent but did not overwrite the caller's.
 
-That is one hole with two different sizes. A forged `principal` misattributes the
-audit trail; a forged group changes WHICH POLICY SET applies, because the platform
-maps the group to a workspace — so a caller who picks their own group picks their
-own guardrails. Strip `x-mse-consumer` and `x-mse-consumer-group` from client
-requests at the edge, before AUTHN, or point these two keys at headers no client
-can reach. Verify it on your own deployment rather than assuming your auth plugin
+That is one hole with two different sizes. A forged `agent_id` (or owner/user)
+misattributes the audit trail; a forged **workspace** changes WHICH POLICY SET
+applies, because the platform maps it to a workspace — so a caller who picks
+their own workspace picks their own guardrails. Strip `x-mse-consumer` and
+`x-mse-consumer-group` (and whatever you point the owner/user/type headers at)
+from client requests at the edge, before AUTHN, or use headers no client can
+reach. Verify it on your own deployment rather than assuming your auth plugin
 does it; ours did not.
 
 ⚠️ **There is no `redact` switch.** Whether to redact is the RUNTIME's decision,

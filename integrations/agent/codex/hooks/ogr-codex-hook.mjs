@@ -3,11 +3,12 @@
 
 // hooks/ogr-codex-hook.src.mjs
 import { readFileSync } from "node:fs";
+import { hostname } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 // ../../../packages/javascript/dist/models.js
-var OGR_VERSION = "0.4";
+var OGR_VERSION = "0.5";
 var DECISIONS = ["block", "require_approval", "redact", "modify", "allow"];
 function severity(decision) {
   return DECISIONS.indexOf(decision);
@@ -216,6 +217,7 @@ var ConfigRulesDetector = class {
 };
 
 // hooks/ogr-codex-hook.src.mjs
+var AGENT_ID = process.env.OGR_AGENT_ID || `codex-${hostname()}`;
 var HERE = dirname(fileURLToPath(import.meta.url));
 function readStdin() {
   try {
@@ -244,8 +246,8 @@ function buildGuardEvent(tool, command) {
   const guardId = id("g");
   return {
     kind: "exec",
-    observationPoint: "agent_hook",
-    subject: { tool, agentType: "codex" },
+    observationPoint: "invocation",
+    subject: { agent_id: AGENT_ID, agent_type: "codex" },
     payload: { argv: [String(command ?? "")], tool, name: tool },
     eventId: id("e"),
     guardId,

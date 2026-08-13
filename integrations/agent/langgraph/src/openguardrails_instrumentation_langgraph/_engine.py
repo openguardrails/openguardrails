@@ -140,7 +140,10 @@ class GuardEngine:
             kind="tool_call",
             observation_point="invocation",
             sensor={"id": "openguardrails-langgraph", "class": "in_process"},
-            subject={"agent_id": agent_id, "agent_type": "langgraph", "principal": "user"},
+            # OGR v0.5 five-tuple: id + type here; workspace/owner/user are
+            # deployment facts this in-process binding cannot know, so they are
+            # left to the runtime's API-key identity floor.
+            subject={"agent_id": agent_id, "agent_type": "langgraph"},
             payload={"name": name, "arguments": args if isinstance(args, dict) else {"input": args}},
             event_id=_id("evt"),
             guard_id=_id("ga"),

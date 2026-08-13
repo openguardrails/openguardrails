@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 
 from openguardrails import RuntimeClient
 
-OGR_VERSION = "0.3"
+OGR_VERSION = "0.5"
 _seq = itertools.count(1)
 # Per-process tag folded into every generated id. A bare counter reuses
 # evt-/gw-/session-/run- ids after a gateway restart, and the runtime's
@@ -41,9 +41,10 @@ def make_event(kind: str, *, subject: dict, payload: dict, session_id: str,
                authz: dict | None = None, run_id: str | None = None,
                turn: int | None = None) -> dict:
     """Build a GuardEvent (observation_point='conversation'). `subject` may be empty:
-    when the operator does not force an agent identity, the runtime derives the
-    Agent from the request's system-prompt self-definition at ingest. `payload`
-    is kind-specific (user_input/model_output -> {"text": ...}; tool_call ->
+    when the operator asserts no agent identity, the runtime falls back to the
+    identity floor — the agent is derived from the API key (one key, one default
+    agent) and every session is attributed to one user. `payload` is
+    kind-specific (user_input/model_output -> {"text": ...}; tool_call ->
     {"name","arguments"}).
 
     `authz` is the runtime's reasoning-blind authorization envelope

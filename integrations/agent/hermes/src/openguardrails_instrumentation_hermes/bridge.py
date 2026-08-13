@@ -384,15 +384,16 @@ def _take_guardcontext() -> tuple[str, str, list[Provenance], str, str, str]:
 # --------------------------------------------------------------------------- #
 # provenance / taint
 # --------------------------------------------------------------------------- #
-def _principal_provenance() -> list[Provenance]:
+def _user_provenance() -> list[Provenance]:
     return [Provenance("user", "trusted")]
 
 
 def _provenance_for(session_id: str) -> list[Provenance]:
-    """Provenance to attach to an action: the principal, PLUS any untrusted
-    content the session has ingested (which is what makes injection dangerous).
+    """Provenance to attach to an action: the user's own input, PLUS any
+    untrusted content the session has ingested (which is what makes injection
+    dangerous).
     """
-    prov = _principal_provenance()
+    prov = _user_provenance()
     prov.extend(_session_taint.get(session_id, []))
     return prov
 

@@ -38,6 +38,29 @@ ROLE_PROVENANCE: dict[str, tuple[str, list[str]]] = {
 _seq = itertools.count(1)
 
 
+def _subject(norm: dict[str, Any] | None = None) -> dict[str, str]:
+    """The OGR v0.5 agent five-tuple this gateway can honestly assert.
+
+    The agent identity is operator configuration (`OGR_AGENT_*` env vars —
+    this example gateway fronts one deployment); the request body's
+    self-declared user (`user` / `metadata.user_id`) is `agent_user` — WHO is
+    using the agent this session, an unauthenticated claim the runtime clamps.
+    Nothing configured and nothing declared → an empty subject, the API-key
+    identity floor.
+    """
+    s: dict[str, str] = {}
+    for key, env in (("agent_id", "OGR_AGENT_ID"), ("agent_type", "OGR_AGENT_TYPE"),
+                     ("agent_workspace", "OGR_AGENT_WORKSPACE"),
+                     ("agent_owner", "OGR_AGENT_OWNER")):
+        v = os.environ.get(env, "").strip()
+        if v:
+            s[key] = v
+    caller = (norm or {}).get("caller")
+    if caller and caller != "anonymous":
+        s["agent_user"] = str(caller)
+    return s
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -109,7 +132,7 @@ class GatewayEngine:
         verdicts.append(rt.evaluate(GuardEvent(
             kind="model_input", observation_point="conversation",
             sensor={"id": "openguardrails-gateway", "class": "proxy"},
-            subject={"caller": norm.get("caller", "anonymous"), "model": norm.get("model")},
+            subject=_subject(norm),
             payload={"messages": msgs, "model": norm.get("model")},
             event_id=_id("evt"), guard_id=guard_id, timestamp=_now(),
             session_id=session_id, llm_protocol=norm.get("protocol"),
@@ -122,7 +145,7 @@ class GatewayEngine:
             verdicts.append(rt.evaluate(GuardEvent(
                 kind="tool_call", observation_point="conversation",
                 sensor={"id": "openguardrails-gateway", "class": "proxy"},
-                subject={"caller": norm.get("caller", "anonymous")},
+                subject=_subject(norm),
                 payload={"name": tc["name"], "arguments": tc["arguments"]},
                 event_id=_id("evt"), guard_id=guard_id, timestamp=_now(),
                 session_id=session_id, llm_protocol=norm.get("protocol"),
@@ -142,7 +165,7 @@ class GatewayEngine:
         v = rt.evaluate(GuardEvent(
             kind="model_output", observation_point="conversation",
             sensor={"id": "openguardrails-gateway", "class": "proxy"},
-            subject={}, payload={"text": text},
+            subject=_subject(), payload={"text": text},
             event_id=_id("evt"), guard_id=gid, timestamp=_now(),
             llm_protocol=protocol,
             provenance=[Provenance(source="model", trust="model")],

@@ -5,7 +5,7 @@
  * Python `openguardrails` package implements. Zero dependencies.
  */
 
-export const OGR_VERSION = "0.4"
+export const OGR_VERSION = "0.5"
 
 /** Decision severity order, most severe first (spec: composition.md). */
 export const DECISIONS = ["block", "require_approval", "redact", "modify", "allow"] as const
@@ -26,6 +26,40 @@ export interface Provenance {
   taintTags?: string[]
 }
 
+/** How strongly an identity claim was verified, weakest first. See specification/attestation.md. */
+export type AttestationLevel =
+  | "self_declared"
+  | "inferred"
+  | "network"
+  | "mtls"
+  | "gateway_api_key"
+  | "client_key"
+
+/**
+ * Which agent is acting — the five-field agent identity plus actor lineage.
+ * Keys are snake_case because the subject is passed to the wire verbatim.
+ * A key-only caller omits the subject entirely; the runtime then derives the
+ * agent from the API key (one key, one default agent) and attributes every
+ * session to one user. See specification/guard-event.md#subject.
+ */
+export interface Subject {
+  /** The acting agent, unique within the organization. Absent → derived from the API key. */
+  agent_id?: string
+  /** What kind of agent (`hermes`, `openclaw`, `claude-code.subagent`, `smartwork`). A label, not an identity. */
+  agent_type?: string
+  /** The workspace (named group of agents) this agent belongs to. Absent → the API key's workspace. */
+  agent_workspace?: string
+  /** The agent's builder or responsible party, e.g. `user:tom`. An attribute, never a policy boundary. */
+  agent_owner?: string
+  /** Who is using the agent in THIS session. Absent → every session is one user. */
+  agent_user?: string
+  sandbox_id?: string
+  parent_agent_id?: string
+  delegation_chain?: string[]
+  /** How the PEP verified the identity fields; the runtime clamps it to the channel ceiling. */
+  attestation?: AttestationLevel
+}
+
 /** How evadable an observer is, weakest first. See specification/guard-event.md#sensor. */
 export type SensorClass = "in_process" | "wrapper" | "proxy" | "kernel"
 
@@ -42,7 +76,8 @@ export interface GuardEvent {
   observationPoint: string // conversation | invocation | execution
   /** WHICH integration observed it — the mechanism axis, orthogonal to the altitude. */
   sensor?: Sensor
-  subject: Record<string, unknown>
+  /** Omitted only by a key-only caller; the runtime then derives the agent from the API key. */
+  subject?: Subject
   payload: Record<string, unknown>
   eventId: string
   guardId: string
