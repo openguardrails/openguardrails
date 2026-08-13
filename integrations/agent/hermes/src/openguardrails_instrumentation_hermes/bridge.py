@@ -171,6 +171,8 @@ def _report(ev: GuardEvent, turn_id: str = "", turn: int | None = None) -> None:
     get_reporter().report(_wire(ev, turn_id, turn))
 
 
+
+
 # The wire caps run_id at 64 characters (guardEventExtSchema). Hermes' turn_id is
 # `<session>:<task>:<uuid8>`, and whenever task_id is a UUID rather than the session
 # id that comes to 68 — so ingest 400'd the event with `run_id: Too big`, per event,
@@ -206,7 +208,7 @@ def _report_spawn(child_id: str) -> None:
             kind="agent_spawn", observation_point="invocation",
             subject=subject_for(),
             payload={"child_agent_id": child_id, "child_agent_type": "hermes.subagent"},
-            event_id=_id("evt"), guard_id=_id("ga"), timestamp=_now(),
+            timestamp=_now(),
         )
         _report(ev)
     except Exception as exc:  # noqa: BLE001
@@ -349,8 +351,16 @@ def _evaluate(ev: GuardEvent, turn_id: str = "", turn: int | None = None) -> Ver
         # derive a fresh run and the turn's two halves land in different runs.
         data = _evaluate_via_runtime(_wire(ev, turn_id, turn), timeout=_EVALUATE_TIMEOUT)
         if data is not None:
+            # v0.6: /evaluate RECORDED the event, and with runtime-born ids
+            # there is no eval-once marker to absorb a duplicate — so the
+            # decision path must never be followed by a report of the same
+            # event. Recording happened; only the verdict comes back.
             return _verdict_from_wire(ev, data)
-        _audit("evaluate", f"runtime /evaluate unreachable for {ev.event_id} — failing open")
+        # Unreachable runtime: the fail-open verdict decides locally, and the
+        # fire-and-forget report below is the event's ONLY chance to exist on
+        # the platform (delivered when the reporter's queue reconnects).
+        _audit("evaluate", "runtime /evaluate unreachable — failing open")
+        _report(ev, turn_id, turn)
         return Verdict.allow(ev, "ogr.runtime", "runtime /evaluate unreachable — failed open")
     return get_runtime().evaluate(ev)
 
@@ -571,7 +581,7 @@ def on_pre_api_request(session_id="", task_id="", turn_id="", api_request_id="",
             kind="user_input", observation_point="conversation",
             subject=subject_for(**_lineage_for(task_id)),
             payload=payload,
-            event_id=_id("evt"), guard_id=_id("ga"), timestamp=_now(),
+            timestamp=_now(),
             session_id=session_id,
         ), turn_id, turn)
     except Exception as exc:  # noqa: BLE001
@@ -617,7 +627,7 @@ def on_post_api_request(session_id="", task_id="", turn_id="", api_request_id=""
             kind="model_output", observation_point="conversation",
             subject=subject_for(**_lineage_for(task_id)),
             payload=payload,
-            event_id=_id("evt"), guard_id=_id("ga"), timestamp=_now(),
+            timestamp=_now(),
             session_id=session_id,
         )
         # Same order as on_pre_tool_call: decide first, then report. Both carry the
@@ -625,7 +635,6 @@ def on_post_api_request(session_id="", task_id="", turn_id="", api_request_id=""
         # eval-once marker), so this is one judgement reaching the console once —
         # not a second model call, and not a duplicate row.
         verdict = _evaluate(ev, turn_id, turn)
-        _report(ev, turn_id, turn)
         _audit("conversation", f"model_output {_verdict_brief(verdict)}")
         if verdict.decision not in _ALLOW_DECISIONS:
             # The judged text rides along: redact spans index into THIS string, and
@@ -787,8 +796,7 @@ def on_pre_tool_call(tool_name="", args=None, session_id="", tool_call_id="",
         event_id=_id("evt"), guard_id=guard_id, timestamp=_now(),
         session_id=session_id, provenance=provenance,
     )
-    verdict = _evaluate(ev, turn_id, turn)
-    _report(ev, turn_id, turn)  # fire-and-forget platform observability
+    verdict = _evaluate(ev, turn_id, turn)  # /evaluate records; no re-report (v0.6)
 
     # hand the guard-context to the execution wrapper for the SAME logical action
     _set_guardcontext(guard_id, session_id, provenance, task_id, turn_id, api_request_id)
@@ -838,7 +846,7 @@ def on_post_tool_call(tool_name="", args=None, result=None, session_id="",
             kind="tool_result", observation_point="invocation",
             subject=subject_for(**_lineage_for(task_id)),
             payload=payload,
-            event_id=_id("evt"), guard_id=_id("ga"), timestamp=_now(),
+            timestamp=_now(),
             session_id=session_id,
         )
         # Same decide-here / act-there split as the answer: this hook is
@@ -848,7 +856,6 @@ def on_post_tool_call(tool_name="", args=None, result=None, session_id="",
         # a page full of personal data should not become context just because the
         # agent fetched it.
         verdict = _evaluate(ev, turn_id, turn)
-        _report(ev, turn_id, turn)
         if verdict.decision not in _ALLOW_DECISIONS:
             _audit("invocation", f"tool_result {tool_name} {_verdict_brief(verdict)}")
             _pending_result_action[tool_call_key(session_id, tool_call_id)] = (verdict, text)
@@ -914,8 +921,7 @@ def guard_exec(command: str, cwd: str = "/workspace") -> tuple[bool, str]:
         event_id=_id("evt"), guard_id=guard_id, timestamp=_now(),
         session_id=session_id, provenance=provenance,
     )
-    verdict = _evaluate(ev)
-    _report(ev, turn_id, turn)
+    verdict = _evaluate(ev)  # /evaluate records; no re-report (v0.6)
     allowed = verdict.decision in _ALLOW_DECISIONS
     _audit("execution", f"argv={['bash', '-c', command]} secret_env={env_keys} "
                       f"{_verdict_brief(verdict)}")

@@ -181,13 +181,13 @@ function makeClient() {
 }
 
 /**
- * Returns {guard_id, key_id, d, x}; cached across hook invocations on disk.
+ * Returns {pep_id, key_id, d, x}; cached across hook invocations on disk.
  * `forceFresh` mints a NEW keypair — a revoked key must not be re-enrolled.
  */
 async function ensureEnrolled(client, forceFresh) {
   if (!forceFresh) {
     const cached = readJson(pepStatePath(), null)
-    if (cached?.server === RUNTIME_URL && cached?.guard_id && cached?.key_id && cached?.d) {
+    if (cached?.server === RUNTIME_URL && cached?.pep_id && cached?.key_id && cached?.d) {
       return cached
     }
   }
@@ -195,10 +195,10 @@ async function ensureEnrolled(client, forceFresh) {
   const jwk = privateKey.export({ format: "jwk" })
   const cred = await client.enroll({
     publicKey: jwk.x,
-    guardId: AGENT_ID,
+    pepId: AGENT_ID,
     name: `codex auto mode (${hostname()})`,
   })
-  const state = { server: RUNTIME_URL, guard_id: cred.guardId, key_id: cred.keyId, d: jwk.d, x: jwk.x }
+  const state = { server: RUNTIME_URL, pep_id: cred.pepId, key_id: cred.keyId, d: jwk.d, x: jwk.x }
   writeJson(pepStatePath(), state)
   return state
 }

@@ -59,8 +59,7 @@ class HermesAgentGuard(_Enforcer):
         self.agent_id, self.agent_user = agent_id, agent_user
 
     def guard_tool_call(self, name: str, arguments: dict, session_id: str,
-                        provenance: list[Provenance] | None = None,
-                        context_refs: list[str] | None = None):
+                        provenance: list[Provenance] | None = None):
         guard_id = _id("ga")
         ev = GuardEvent(
             kind="tool_call", observation_point="invocation",
@@ -69,7 +68,6 @@ class HermesAgentGuard(_Enforcer):
             payload={"name": name, "arguments": arguments},
             event_id=_id("evt"), guard_id=guard_id, timestamp=_now(),
             session_id=session_id, provenance=provenance or [],
-            context_refs=context_refs or [],
         )
         allowed, verdict = self._enforce(ev)
         gctx = encode_guardcontext(guard_id, session_id, bool(provenance))

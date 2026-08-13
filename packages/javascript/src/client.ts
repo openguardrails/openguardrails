@@ -48,12 +48,13 @@ export interface EvaluateOptions {
 export interface EnrollRequest {
   /** base64url raw 32-byte Ed25519 public key. */
   publicKey: string
-  guardId?: string
+  /** Stable id of the ENROLLING SENSOR — unrelated to the per-action guard_id on events. */
+  pepId?: string
   name?: string
 }
 
 export interface EnrollResponse {
-  guardId: string
+  pepId: string
   keyId: string
 }
 
@@ -62,11 +63,6 @@ export interface IngestResult {
   id: string
   status: number
   error?: string
-}
-
-export interface RuntimeConfig {
-  onUnreachable?: Record<string, unknown>
-  [key: string]: unknown
 }
 
 export type ApprovalState = "pending" | "approved" | "denied" | "expired"
@@ -129,7 +125,6 @@ const EVENT_FIELDS = new Set([
   "timestamp",
   "sessionId",
   "llmProtocol",
-  "contextRefs",
   "provenance",
   "ogrVersion",
 ])
@@ -142,20 +137,21 @@ const EVENT_FIELDS = new Set([
 export function eventToWire(ev: GuardEvent): Record<string, unknown> {
   const wire: Record<string, unknown> = {
     ogr_version: ev.ogrVersion ?? OGR_VERSION,
-    event_id: ev.eventId,
-    guard_id: ev.guardId,
-    timestamp: ev.timestamp,
-    observation_point: ev.observationPoint,
     kind: ev.kind,
     payload: ev.payload,
   }
+  // OGR v0.6: event identity is born at the runtime and returned on the
+  // response — a locally minted eventId never goes on the wire. guard_id
+  // does, but only as an explicit correlation hint.
+  if (ev.guardId) wire.guard_id = ev.guardId
+  if (ev.timestamp) wire.timestamp = ev.timestamp
+  if (ev.observationPoint) wire.observation_point = ev.observationPoint
   // A key-only caller sends no subject at all; the runtime derives the agent
   // from the API key (spec: the identity floor).
   if (ev.subject && Object.keys(ev.subject).length) wire.subject = ev.subject
   if (ev.sensor) wire.sensor = ev.sensor
   if (ev.sessionId) wire.session_id = ev.sessionId
   if (ev.llmProtocol) wire.llm_protocol = ev.llmProtocol
-  if (ev.contextRefs?.length) wire.context_refs = ev.contextRefs
   if (ev.provenance?.length) {
     wire.provenance = ev.provenance.map((p) => ({
       source: p.source,
@@ -178,8 +174,6 @@ const VERDICT_FIELDS = new Set([
   "decision",
   "categories",
   "reasons",
-  "evidence",
-  "confidence",
   "latency_ms",
 ])
 
@@ -197,8 +191,6 @@ export function verdictFromWire(wire: Record<string, unknown>): Verdict {
     categories: wire.categories ?? [],
     reasons: wire.reasons ?? [],
   }
-  if (wire.evidence !== undefined) verdict.evidence = wire.evidence
-  if (wire.confidence !== undefined) verdict.confidence = wire.confidence
   if (wire.latency_ms !== undefined) verdict.latencyMs = wire.latency_ms
   if (wire.ogr_version !== undefined) verdict.ogrVersion = wire.ogr_version
   for (const [key, value] of Object.entries(wire)) {
@@ -269,30 +261,21 @@ export class RuntimeClient {
     return ((wire as { results?: IngestResult[] }).results ?? []) as IngestResult[]
   }
 
-  /** Enroll an Ed25519 public key: `POST /v1/enroll` → `{guardId, keyId}`. */
+  /** Enroll an Ed25519 public key: `POST /v1/enroll` → `{pepId, keyId}`. */
   async enroll(request: EnrollRequest): Promise<EnrollResponse> {
     const body: Record<string, unknown> = { public_key: request.publicKey }
-    if (request.guardId) body.guard_id = request.guardId
+    if (request.pepId) body.pep_id = request.pepId
     if (request.name) body.name = request.name
     const wire = (await this.request("POST", "/v1/enroll", { body })) as {
-      guard_id: string
+      pep_id: string
       key_id: string
     }
-    return { guardId: wire.guard_id, keyId: wire.key_id }
+    return { pepId: wire.pep_id, keyId: wire.key_id }
   }
 
   /** Liveness ping: `POST /v1/heartbeat` → `{ok: true}`. */
   async heartbeat(extra: Record<string, unknown> = {}): Promise<{ ok: boolean }> {
     return (await this.request("POST", "/v1/heartbeat", { body: extra })) as { ok: boolean }
-  }
-
-  /** Fetch runtime-pushed client config: `GET /v1/config`. */
-  async getConfig(): Promise<RuntimeConfig> {
-    const wire = (await this.request("GET", "/v1/config")) as Record<string, unknown>
-    const { on_unreachable, ...rest } = wire
-    const config: RuntimeConfig = { ...rest }
-    if (on_unreachable !== undefined) config.onUnreachable = on_unreachable as Record<string, unknown>
-    return config
   }
 
   /** Poll a pending approval: `GET /v1/approvals?guard_id=...`. */

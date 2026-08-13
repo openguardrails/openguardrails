@@ -110,7 +110,7 @@ runtime-signed statement of *what* was approved, *by whom*, *until when*.
 
 | Claim | Req | Description |
 |---|---|---|
-| `ogr_version` | MUST | `"0.5"`. |
+| `ogr_version` | MUST | `"0.6"`. |
 | `receipt_id` | MUST | Unique id for this receipt. |
 | `issuer` | MUST | Runtime identity; pairs with the JWS `kid`. |
 | `scope` | MUST | `single_action` \| `pre_authorization`. |

@@ -81,7 +81,6 @@ class ContentGuardDetector(Detector):
         t0 = time.perf_counter()
         cats: list[Category] = []
         reasons: list[str] = []
-        evidence: list[dict] = []
         decision = "allow"
 
         for trust, text in self._segments(ev):
@@ -103,11 +102,9 @@ class ContentGuardDetector(Detector):
                 decision = _tighten(decision, "redact" if self.redact_secrets else "block")
                 cats.append(Category("security.secret_leak", "security", 0.95))
                 reasons.append(f"{hit['label']} present in {trust} text")
-                evidence.append({"type": "redact", **hit})
 
         v = Verdict(ev.event_id, ev.guard_id, self.provider, decision,
-                    categories=cats, reasons=reasons or ["no content finding"],
-                    evidence=evidence)
+                    categories=cats, reasons=reasons or ["no content finding"])
         v.latency_ms = round((time.perf_counter() - t0) * 1000, 3)
         return v
 

@@ -5,6 +5,9 @@ observation points, fans out to detectors, composes one effective verdict.
 """
 from __future__ import annotations
 
+import secrets
+import time
+
 from .composition import compose, select_rule
 from .detectors import Detector
 from .models import GuardEvent, Verdict, severity
@@ -14,23 +17,16 @@ class Runtime:
     def __init__(self, detectors: list[Detector], policy: dict):
         self.detectors = detectors
         self.composition = policy.get("composition", {})
-        self._events: dict[str, GuardEvent] = {}          # event_id -> event
         self._by_guard: dict[str, Verdict] = {}           # guard_id -> effective verdict so far
-
-    # -- provenance propagation -----------------------------------------
-    def _enrich(self, ev: GuardEvent) -> GuardEvent:
-        """Inherit provenance from referenced prior events (spec: derived actions
-        inherit the union of their source context's provenance)."""
-        for ref in ev.context_refs:
-            prior = self._events.get(ref)
-            if prior:
-                ev.provenance.extend(prior.provenance)
-        return ev
 
     # -- main entry point -----------------------------------------------
     def evaluate(self, ev: GuardEvent) -> Verdict:
-        self._enrich(ev)
-        self._events[ev.event_id] = ev
+        # OGR v0.6: identifiers are born at the runtime. An in-process Runtime
+        # IS the PDP, so it assigns what the caller did not send.
+        if not ev.event_id:
+            ev.event_id = f"evt-{int(time.time() * 1000):x}-{secrets.token_hex(6)}"
+        if not ev.guard_id:
+            ev.guard_id = ev.event_id
 
         verdicts = [d.evaluate(ev) for d in self.detectors if d.applies_to(ev)]
         rule = select_rule(verdicts, self.composition)

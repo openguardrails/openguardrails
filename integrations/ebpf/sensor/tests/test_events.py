@@ -24,7 +24,9 @@ def test_exec_event_is_sandbox_altitude():
     assert ev.payload["sensor"] == {"engine": "ogr-ebpf", "root_pid": 5}
     assert ev.subject["sandbox_id"] == "sbx-5"
     assert ev.session_id == "run-5"
-    assert ev.guard_id.startswith("ga-")
+    # v0.6: no local guard_id without a propagated guard-context — the
+    # runtime assigns one and correlates server-side.
+    assert ev.guard_id is None
 
 
 def test_file_event_carries_op_and_path():

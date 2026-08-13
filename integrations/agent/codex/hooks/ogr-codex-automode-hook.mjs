@@ -8,7 +8,7 @@ import { hostname } from "node:os";
 import { join } from "node:path";
 
 // ../../../packages/javascript/dist/models.js
-var OGR_VERSION = "0.5";
+var OGR_VERSION = "0.6";
 
 // ../../../packages/javascript/dist/client.js
 var RuntimeApiError = class extends Error {
@@ -48,20 +48,21 @@ var EVENT_FIELDS = /* @__PURE__ */ new Set([
   "timestamp",
   "sessionId",
   "llmProtocol",
-  "contextRefs",
   "provenance",
   "ogrVersion"
 ]);
 function eventToWire(ev) {
   const wire = {
     ogr_version: ev.ogrVersion ?? OGR_VERSION,
-    event_id: ev.eventId,
-    guard_id: ev.guardId,
-    timestamp: ev.timestamp,
-    observation_point: ev.observationPoint,
     kind: ev.kind,
     payload: ev.payload
   };
+  if (ev.guardId)
+    wire.guard_id = ev.guardId;
+  if (ev.timestamp)
+    wire.timestamp = ev.timestamp;
+  if (ev.observationPoint)
+    wire.observation_point = ev.observationPoint;
   if (ev.subject && Object.keys(ev.subject).length)
     wire.subject = ev.subject;
   if (ev.sensor)
@@ -70,8 +71,6 @@ function eventToWire(ev) {
     wire.session_id = ev.sessionId;
   if (ev.llmProtocol)
     wire.llm_protocol = ev.llmProtocol;
-  if (ev.contextRefs?.length)
-    wire.context_refs = ev.contextRefs;
   if (ev.provenance?.length) {
     wire.provenance = ev.provenance.map((p) => ({
       source: p.source,
@@ -94,8 +93,6 @@ var VERDICT_FIELDS = /* @__PURE__ */ new Set([
   "decision",
   "categories",
   "reasons",
-  "evidence",
-  "confidence",
   "latency_ms"
 ]);
 function verdictFromWire(wire) {
@@ -107,10 +104,6 @@ function verdictFromWire(wire) {
     categories: wire.categories ?? [],
     reasons: wire.reasons ?? []
   };
-  if (wire.evidence !== void 0)
-    verdict.evidence = wire.evidence;
-  if (wire.confidence !== void 0)
-    verdict.confidence = wire.confidence;
   if (wire.latency_ms !== void 0)
     verdict.latencyMs = wire.latency_ms;
   if (wire.ogr_version !== void 0)
@@ -169,28 +162,19 @@ var RuntimeClient = class {
     });
     return wire.results ?? [];
   }
-  /** Enroll an Ed25519 public key: `POST /v1/enroll` → `{guardId, keyId}`. */
+  /** Enroll an Ed25519 public key: `POST /v1/enroll` → `{pepId, keyId}`. */
   async enroll(request) {
     const body = { public_key: request.publicKey };
-    if (request.guardId)
-      body.guard_id = request.guardId;
+    if (request.pepId)
+      body.pep_id = request.pepId;
     if (request.name)
       body.name = request.name;
     const wire = await this.request("POST", "/v1/enroll", { body });
-    return { guardId: wire.guard_id, keyId: wire.key_id };
+    return { pepId: wire.pep_id, keyId: wire.key_id };
   }
   /** Liveness ping: `POST /v1/heartbeat` → `{ok: true}`. */
   async heartbeat(extra = {}) {
     return await this.request("POST", "/v1/heartbeat", { body: extra });
-  }
-  /** Fetch runtime-pushed client config: `GET /v1/config`. */
-  async getConfig() {
-    const wire = await this.request("GET", "/v1/config");
-    const { on_unreachable, ...rest } = wire;
-    const config = { ...rest };
-    if (on_unreachable !== void 0)
-      config.onUnreachable = on_unreachable;
-    return config;
   }
   /** Poll a pending approval: `GET /v1/approvals?guard_id=...`. */
   async getApproval(guardId) {
@@ -373,7 +357,7 @@ function makeClient() {
 async function ensureEnrolled(client, forceFresh) {
   if (!forceFresh) {
     const cached = readJson(pepStatePath(), null);
-    if (cached?.server === RUNTIME_URL && cached?.guard_id && cached?.key_id && cached?.d) {
+    if (cached?.server === RUNTIME_URL && cached?.pep_id && cached?.key_id && cached?.d) {
       return cached;
     }
   }
@@ -381,10 +365,10 @@ async function ensureEnrolled(client, forceFresh) {
   const jwk = privateKey.export({ format: "jwk" });
   const cred = await client.enroll({
     publicKey: jwk.x,
-    guardId: AGENT_ID,
+    pepId: AGENT_ID,
     name: `codex auto mode (${hostname()})`
   });
-  const state = { server: RUNTIME_URL, guard_id: cred.guardId, key_id: cred.keyId, d: jwk.d, x: jwk.x };
+  const state = { server: RUNTIME_URL, pep_id: cred.pepId, key_id: cred.keyId, d: jwk.d, x: jwk.x };
   writeJson(pepStatePath(), state);
   return state;
 }

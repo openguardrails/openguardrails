@@ -4,7 +4,7 @@
  * Port of the Python reference (spec: composition.md). The deployer owns the
  * choice of strategy; OGR owns the mechanism.
  */
-import { type Category, type GuardEvent, type Verdict, type Decision, severity, OGR_VERSION } from "./models.js"
+import { type Category, type GuardEvent, type ResolvedGuardEvent, type Verdict, type Decision, severity, OGR_VERSION } from "./models.js"
 
 export const COMPOSED_PROVIDER = "ogr.runtime/composed"
 
@@ -16,17 +16,17 @@ export interface CompositionRule {
 
 export type Composition = Record<string, CompositionRule>
 
-function merge(ev: GuardEvent, decision: Decision, verdicts: Verdict[], reasonPrefix: string): Verdict {
+function merge(ev: ResolvedGuardEvent, decision: Decision, verdicts: Verdict[], reasonPrefix: string): Verdict {
   const cats = new Map<string, Category>()
   const reasons: string[] = []
-  const evidence: Array<Record<string, unknown>> = []
+  const trace: Array<Record<string, unknown>> = []
   for (const v of verdicts) {
     for (const c of v.categories) {
       const existing = cats.get(c.id)
       if (!existing || c.score > existing.score) cats.set(c.id, c)
     }
     for (const r of v.reasons) reasons.push(`[${v.provider}] ${r}`)
-    evidence.push({ provider: v.provider, decision: v.decision, latencyMs: v.latencyMs })
+    trace.push({ provider: v.provider, decision: v.decision, latencyMs: v.latencyMs })
   }
   return {
     eventId: ev.eventId,
@@ -35,15 +35,17 @@ function merge(ev: GuardEvent, decision: Decision, verdicts: Verdict[], reasonPr
     decision,
     categories: [...cats.values()],
     reasons: [reasonPrefix, ...reasons],
-    evidence,
+    // Per-provider composition trace — an x.ogr extension, not a wire field
+    // (v0.6 removed the unconsumed `evidence`).
+    "x.ogr.composition": trace,
     ogrVersion: OGR_VERSION,
-  }
+  } as Verdict
 }
 
 const mostSevere = (verdicts: Verdict[]): Verdict =>
   verdicts.reduce((a, b) => (severity(b.decision) < severity(a.decision) ? b : a))
 
-export function compose(ev: GuardEvent, verdicts: Verdict[], rule: CompositionRule): Verdict {
+export function compose(ev: ResolvedGuardEvent, verdicts: Verdict[], rule: CompositionRule): Verdict {
   const strategy = rule.strategy ?? "deny-wins"
   if (verdicts.length === 0) {
     return {

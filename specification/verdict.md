@@ -9,17 +9,22 @@ verdict per detector and [composes](composition.md) them into a single
 | Field | Type | Req | Description |
 |---|---|---|---|
 | `ogr_version` | string | MUST | Spec version. |
-| `event_id` | string | MUST | The `GuardEvent` being judged. |
-| `guard_id` | string | MUST | Copied from the event. |
+| `event_id` | string | MUST | The judged event's identity, **assigned by the runtime at ingress** ([GuardEvent § identifiers](guard-event.md#identifiers-are-born-at-the-runtime)) and returned here — this is how the caller learns it. |
+| `guard_id` | string | MUST | The event's guard group: the client's propagated value when one was sent, else runtime-assigned. What `GET /v1/approvals` polls by. |
 | `provider` | string | MUST | Detector identity (for attribution / metering / benchmark). |
 | `decision` | enum | MUST | See **Decisions**. |
 | `categories` | array | SHOULD | Matched risk categories with scores. |
 | `modifications` | object | MAY | Required only when `decision` is `modify` or `redact`. |
-| `reasons` | array<string> | SHOULD | Human-readable justification. |
-| `evidence` | array<object> | MAY | Structured pointers (spans, matched rule ids, fetched-artifact hashes). |
+| `reasons` | array<string> | SHOULD | Human-readable justification — the one-line WHY. |
 | `findings` | array | SHOULD (span detectors) | Normalized detection results — *what was found*, as opposed to `decision`/`modifications` (*what to do*). |
 | `latency_ms` | number | MAY | Detector self-reported latency. |
-| `confidence` | number | MAY | `0.0`–`1.0`. |
+
+The WHY of a verdict has exactly three layers with distinct jobs:
+`categories` (taxonomy ids + scores, for policy and analytics), `findings`
+(per-detection structure with spans, for the findings pipeline), `reasons`
+(prose, for humans). v0.5's `evidence` and `confidence` are removed: the
+former duplicated `findings` and nothing consumed it, the latter duplicated
+`categories[].score`. Composition traces ride `x.ogr.*` extension keys.
 
 ## Decisions
 
@@ -98,7 +103,7 @@ the restore operation are implementation-internal; the protocol only guarantees
 
 ```json
 {
-  "ogr_version": "0.5",
+  "ogr_version": "0.6",
   "event_id": "evt-9f2",
   "guard_id": "ga-1a2b",
   "provider": "ogr.poc.llm_judge",
@@ -112,8 +117,6 @@ the restore operation are implementation-internal; the protocol only guarantees
     "command originated from untrusted web content (provenance: web/untrusted)",
     "env exposes AWS_SECRET_ACCESS_KEY to the spawned process"
   ],
-  "evidence": [ { "type": "provenance_ref", "event_id": "evt-7c1" } ],
-  "confidence": 0.9,
   "latency_ms": 120
 }
 ```

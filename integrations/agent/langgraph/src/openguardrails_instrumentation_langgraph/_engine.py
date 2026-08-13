@@ -145,8 +145,6 @@ class GuardEngine:
             # left to the runtime's API-key identity floor.
             subject={"agent_id": agent_id, "agent_type": "langgraph"},
             payload={"name": name, "arguments": args if isinstance(args, dict) else {"input": args}},
-            event_id=_id("evt"),
-            guard_id=_id("ga"),
             timestamp=_now(),
             session_id=session_id,
             provenance=provenance,

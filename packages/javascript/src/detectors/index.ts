@@ -5,14 +5,14 @@
  * surface security/safety vendors implement and compete behind. `evaluate` may
  * be sync or async (e.g. a hosted model call).
  */
-import type { GuardEvent, Verdict } from "../models.js"
+import type { GuardEvent, ResolvedGuardEvent, Verdict } from "../models.js"
 
 export interface Detector {
   /** Stable identity used for attribution / metering / benchmark. */
   readonly provider: string
   /** Event kinds this detector handles; empty == all kinds. */
   readonly handles?: readonly string[]
-  evaluate(ev: GuardEvent): Verdict | Promise<Verdict>
+  evaluate(ev: ResolvedGuardEvent): Verdict | Promise<Verdict>
   appliesTo?(ev: GuardEvent): boolean
 }
 

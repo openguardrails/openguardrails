@@ -29,7 +29,7 @@ from openguardrails.client import event_to_wire, verdict_from_wire  # noqa: E402
 SCHEMA_DIR = HERE.parents[3] / "schema"
 API_KEY = "ogr_test_key"
 VERDICT_WIRE = {
-    "ogr_version": "0.5", "event_id": "evt-1", "guard_id": "ga-1",
+    "ogr_version": "0.6", "event_id": "evt-srv-1", "guard_id": "ga-1",
     "provider": "ogr.runtime", "decision": "block",
     "categories": [{"id": "security.exfiltration", "domain": "security", "score": 0.9}],
     "reasons": ["curl to unlisted host"],
@@ -66,25 +66,26 @@ class _Handler(BaseHTTPRequestHandler):
             return self._reply(401, {"error": "unauthorized"})
         path = urlparse(self.path).path
         if path.endswith("/v1/evaluate"):
-            if body.get("event_id") == "evt-rate":
+            # v0.6: no client event_id on the wire — the mock keys off guard_id
+            # (the one id a client may still send, as a correlation hint).
+            if body.get("guard_id") == "ga-rate":
                 return self._reply(429, {"error": "rate_limited", "limit": 10})
-            if body.get("event_id") == "evt-bad":
+            if body.get("guard_id") == "ga-bad":
                 return self._reply(400, {"error": "invalid_event",
                                          "details": ["payload: required"]})
-            verdict = dict(VERDICT_WIRE, event_id=body.get("event_id", "evt-1"))
-            return self._reply(200, verdict)
+            return self._reply(200, dict(VERDICT_WIRE))
         if path.endswith("/v1/ingest"):
+            # v0.6: the runtime assigns ids; results pair with the batch BY ORDER.
             results = []
             for i, ev in enumerate(body.get("batch", [])):
-                if ev.get("event_id") == "evt-reject":
-                    results.append({"id": ev["event_id"], "status": 400,
+                if ev.get("guard_id") == "ga-reject":
+                    results.append({"id": None, "status": 400,
                                     "error": "invalid_event"})
                 else:
-                    results.append({"id": ev.get("event_id", f"evt-{i}"),
-                                    "status": 202})
+                    results.append({"id": f"evt-srv-{i}", "status": 201})
             return self._reply(207, {"results": results})
         if path.endswith("/v1/enroll"):
-            return self._reply(201, {"guard_id": "ga-enrolled",
+            return self._reply(201, {"pep_id": "pep-enrolled",
                                      "key_id": "cafe0123cafe0123"})
         if path.endswith("/v1/heartbeat"):
             return self._reply(200, {"ok": True})
@@ -95,9 +96,6 @@ class _Handler(BaseHTTPRequestHandler):
         if self.headers.get("authorization") != f"Bearer {API_KEY}":
             return self._reply(401, {"error": "unauthorized"})
         parsed = urlparse(self.path)
-        if parsed.path.endswith("/v1/config"):
-            return self._reply(200, {"on_unreachable": {"security.*": "block",
-                                                        "safety.*": "allow"}})
         if parsed.path.endswith("/v1/approvals"):
             guard_id = parse_qs(parsed.query).get("guard_id", [""])[0]
             if guard_id == "ga-known":
@@ -167,7 +165,7 @@ def make_event(**over):
         kind="exec", observation_point="execution",
         subject={"agent_id": "agent-1", "agent_type": "test"},
         payload={"command": "curl evil.example"},
-        event_id="evt-1", guard_id="ga-1",
+        guard_id="ga-1",
         timestamp="2026-08-11T00:00:00Z", session_id="sess-1",
         sensor={"id": "test-sensor", "class": "in_process", "version": None},
         provenance=[Provenance(source="web", trust="untrusted")],
@@ -188,7 +186,9 @@ def test_evaluate_roundtrip(server, client):
     assert req["path"] == "/api/public/ogr/v1/evaluate"  # prefix + canonical path
     assert req["headers"]["authorization"] == f"Bearer {API_KEY}"
     assert "ogr-partial" not in req["headers"]
-    assert req["body"]["ogr_version"] == "0.5"
+    assert req["body"]["ogr_version"] == "0.6"
+    assert "event_id" not in req["body"]  # identity is born at the runtime
+    assert v.event_id == "evt-srv-1"      # ...and learned from the verdict
     assert "llm_protocol" not in req["body"]  # empty optionals dropped
 
 
@@ -199,7 +199,7 @@ def test_evaluate_partial_header(server, client):
 
 def test_evaluate_rate_limited(client):
     with pytest.raises(RateLimitedError) as exc:
-        client.evaluate(make_event(event_id="evt-rate"))
+        client.evaluate(make_event(guard_id="ga-rate"))
     assert exc.value.status == 429
     assert exc.value.error == "rate_limited"
     assert exc.value.limit == 10
@@ -207,7 +207,7 @@ def test_evaluate_rate_limited(client):
 
 def test_evaluate_invalid_event(client):
     with pytest.raises(RuntimeAPIError) as exc:
-        client.evaluate(make_event(event_id="evt-bad"))
+        client.evaluate(make_event(guard_id="ga-bad"))
     assert exc.value.status == 400
     assert exc.value.error == "invalid_event"
     assert exc.value.body["details"] == ["payload: required"]
@@ -241,31 +241,33 @@ def test_missing_config_raises(monkeypatch):
 # -- ingest -----------------------------------------------------------------
 
 def test_ingest_parses_207_results(server, client):
-    results = client.ingest([make_event(event_id="evt-a"),
-                             make_event(event_id="evt-reject")])
-    assert results == [{"id": "evt-a", "status": 202},
-                       {"id": "evt-reject", "status": 400,
+    results = client.ingest([make_event(guard_id="ga-a"),
+                             make_event(guard_id="ga-reject")])
+    # v0.6: ids are runtime-assigned and pair with the batch BY ORDER.
+    assert results == [{"id": "evt-srv-0", "status": 201},
+                       {"id": None, "status": 400,
                         "error": "invalid_event"}]
     req = server.requests[-1]
     assert req["path"] == "/api/public/ogr/v1/ingest"
-    assert [e["event_id"] for e in req["body"]["batch"]] == ["evt-a", "evt-reject"]
+    assert all("event_id" not in e for e in req["body"]["batch"])
+    assert [e["guard_id"] for e in req["body"]["batch"]] == ["ga-a", "ga-reject"]
 
 
 def test_ingest_chunks_batches_of_100(server, client):
-    events = [make_event(event_id=f"evt-{i:03d}") for i in range(101)]
+    events = [make_event(guard_id=f"ga-{i:03d}") for i in range(101)]
     results = client.ingest(events)
     assert len(results) == 101  # concatenated across requests
     ingest_reqs = [r for r in server.requests if r["path"].endswith("/v1/ingest")]
     assert [len(r["body"]["batch"]) for r in ingest_reqs] == [100, 1]
 
 
-# -- enroll / heartbeat / config / approvals --------------------------------
+# -- enroll / heartbeat / approvals -----------------------------------------
 
 def test_enroll(server, client):
-    cred = client.enroll(b"\x01" * 32, guard_id="my-pep", name="my pep")
-    assert cred == {"guard_id": "ga-enrolled", "key_id": "cafe0123cafe0123"}
+    cred = client.enroll(b"\x01" * 32, pep_id="my-pep", name="my pep")
+    assert cred == {"pep_id": "pep-enrolled", "key_id": "cafe0123cafe0123"}
     body = server.requests[-1]["body"]
-    assert body["guard_id"] == "my-pep"
+    assert body["pep_id"] == "my-pep"
     assert body["name"] == "my pep"
     # raw bytes are b64url-encoded (unpadded) for the wire
     assert base64.urlsafe_b64decode(body["public_key"] + "==") == b"\x01" * 32
@@ -277,12 +279,6 @@ def test_heartbeat(server, client):
     body = server.requests[-1]["body"]
     assert body == {"sensor": {"id": "test-sensor"}, "interval_s": 30,
                     "counters": {"events": 5}}
-
-
-def test_get_config(server, client):
-    cfg = client.get_config()
-    assert cfg["on_unreachable"]["security.*"] == "block"
-    assert server.requests[-1]["method"] == "GET"
 
 
 def test_get_approval_pending_and_not_found(client):
@@ -310,8 +306,7 @@ def test_legacy_mount_fallback_discovers_and_caches(legacy_server):
 def test_legacy_mount_fallback_covers_get_and_approvals(legacy_server):
     c = RuntimeClient(f"http://127.0.0.1:{legacy_server.server_address[1]}",
                       API_KEY, timeout=5.0)
-    assert c.get_config()["on_unreachable"]["security.*"] == "block"
-    # approvals semantics survive the legacy mount (mount already cached)
+    # approvals semantics survive the legacy mount
     assert c.get_approval("ga-known") == {"status": "pending"}
     assert c.get_approval("ga-unknown") == {"status": "not_found"}
 
@@ -346,7 +341,7 @@ def test_no_fallback_when_base_url_already_carries_the_legacy_mount(
         f"http://127.0.0.1:{legacy_server.server_address[1]}"
         "/wrong/api/public/ogr", API_KEY, timeout=5.0)
     with pytest.raises(RuntimeAPIError) as exc:
-        c.get_config()
+        c.get_approval("ga-known")
     assert exc.value.status == 404
     assert len(legacy_server.requests) == 1
 
@@ -381,6 +376,7 @@ def test_event_to_wire_matches_schema_structure():
 def test_event_to_wire_passes_dicts_through_with_extensions():
     wire = event_to_wire({"event_id": "evt-1", "run_id": "run-9", "turn": 0,
                           "authz": {"transcript": "t"}, "llm_protocol": None})
+    assert "event_id" not in wire          # v0.6: stripped even from dict input
     assert wire["run_id"] == "run-9"       # runtime extension fields survive
     assert wire["turn"] == 0               # falsy-but-meaningful kept
     assert wire["authz"] == {"transcript": "t"}
@@ -438,10 +434,10 @@ def test_ed25519_signer_detached_jws(server):
 def test_batching_ingestor_flush(server, client):
     from openguardrails import BatchingIngestor
     ing = BatchingIngestor(client, flush_seconds=60.0)  # worker parked; flush drives
-    ing.submit(make_event(event_id="evt-q1"))
-    ing.submit(make_event(event_id="evt-q2"))
+    ing.submit(make_event(guard_id="ga-q1"))
+    ing.submit(make_event(guard_id="ga-q2"))
     assert ing.flush() == 2
     ingest_reqs = [r for r in server.requests if r["path"].endswith("/v1/ingest")]
-    sent = [e["event_id"] for r in ingest_reqs for e in r["body"]["batch"]]
-    assert sent == ["evt-q1", "evt-q2"]
+    sent = [e["guard_id"] for r in ingest_reqs for e in r["body"]["batch"]]
+    assert sent == ["ga-q1", "ga-q2"]
     assert ing.flush() == 0  # queue drained

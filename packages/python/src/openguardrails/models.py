@@ -1,13 +1,13 @@
-"""OGR v0.5 wire types — GuardEvent, Verdict, Subject, Provenance.
+"""OGR v0.6 wire types — GuardEvent, Verdict, Subject, Provenance.
 
-Stdlib only. These mirror schema/*.schema.json (protocol 0.5).
+Stdlib only. These mirror schema/*.schema.json (protocol 0.6).
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
 from typing import Any, TypedDict
 
-OGR_VERSION = "0.5"
+OGR_VERSION = "0.6"
 
 
 class Subject(TypedDict, total=False):
@@ -53,9 +53,13 @@ class GuardEvent:
     # {} is the key-only floor: the runtime derives the agent from the API key.
     subject: Subject
     payload: dict[str, Any]
-    event_id: str
-    guard_id: str
-    timestamp: str
+    # OGR v0.6: event identity is born at the runtime — never sent on the
+    # wire, assigned locally by an in-process Runtime, returned on verdicts.
+    event_id: str | None = None
+    # Correlation hint across observation points; absent = the event itself.
+    guard_id: str | None = None
+    # Absent = the runtime's receive time.
+    timestamp: str | None = None
     session_id: str | None = None
     # WHICH integration observed this: {"id", "class"?, "version"?}. The
     # mechanism axis — orthogonal to observation_point's altitude, because an
@@ -63,7 +67,6 @@ class GuardEvent:
     # differing completely in whether the agent could have evaded them.
     sensor: dict[str, Any] | None = None
     llm_protocol: str | None = None
-    context_refs: list[str] = field(default_factory=list)
     provenance: list[Provenance] = field(default_factory=list)
     ogr_version: str = OGR_VERSION
 
@@ -95,8 +98,6 @@ class Verdict:
     decision: str            # allow|block|require_approval|modify|redact
     categories: list[Category] = field(default_factory=list)
     reasons: list[str] = field(default_factory=list)
-    evidence: list[dict[str, Any]] = field(default_factory=list)
-    confidence: float | None = None
     latency_ms: float | None = None
     # Required by the spec when `decision` is `modify` or `redact`
     # (specification/verdict.md §modifications): {"kind": "redact", "spans": [

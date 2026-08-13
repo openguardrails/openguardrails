@@ -147,10 +147,9 @@ class GatewayEngine:
                 sensor={"id": "openguardrails-gateway", "class": "proxy"},
                 subject=_subject(norm),
                 payload={"name": tc["name"], "arguments": tc["arguments"]},
-                event_id=_id("evt"), guard_id=guard_id, timestamp=_now(),
+                guard_id=guard_id, timestamp=_now(),
                 session_id=session_id, llm_protocol=norm.get("protocol"),
                 # tool calls proposed off the back of the prompt inherit its provenance
-                context_refs=[],
                 provenance=[Provenance(source="model", trust="unverified")],
             )))
 

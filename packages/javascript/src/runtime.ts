@@ -4,7 +4,7 @@
  * Ingests GuardEvents, propagates provenance, correlates by guardId across
  * observation points, fans out to detectors, composes one effective verdict.
  */
-import { type GuardEvent, type Verdict, severity } from "./models.js"
+import { type GuardEvent, type ResolvedGuardEvent, type Verdict, severity } from "./models.js"
 import { type Composition, compose, selectRule } from "./composition.js"
 import { type Detector, appliesTo } from "./detectors/index.js"
 
@@ -13,9 +13,17 @@ export interface Policy {
   [key: string]: unknown
 }
 
+let idSeq = 0
+
+/** Runtime-assigned event id (OGR v0.6: identifiers are born at the PDP). */
+function mintEventId(): string {
+  idSeq += 1
+  const rand = globalThis.crypto?.randomUUID?.().slice(0, 12) ?? Math.floor(Math.random() * 1e9).toString(36)
+  return `evt-${Date.now().toString(36)}-${idSeq.toString(36)}-${rand}`
+}
+
 export class Runtime {
   private readonly composition: Composition
-  private readonly events = new Map<string, GuardEvent>() // eventId -> event
   private readonly byGuard = new Map<string, Verdict>() // guardId -> effective verdict so far
 
   constructor(
@@ -25,34 +33,29 @@ export class Runtime {
     this.composition = policy.composition ?? {}
   }
 
-  /** Inherit provenance from referenced prior events. */
-  private enrich(ev: GuardEvent): GuardEvent {
-    for (const ref of ev.contextRefs ?? []) {
-      const prior = this.events.get(ref)
-      if (prior) ev.provenance.push(...prior.provenance)
-    }
-    return ev
-  }
-
   async evaluate(ev: GuardEvent): Promise<Verdict> {
-    this.enrich(ev)
-    this.events.set(ev.eventId, ev)
+    // OGR v0.6: identifiers are born at the runtime. An in-process Runtime IS
+    // the PDP, so it assigns what the caller did not send: event identity
+    // always, guard group defaulting to the event itself.
+    if (!ev.eventId) ev.eventId = mintEventId()
+    if (!ev.guardId) ev.guardId = ev.eventId
+    const rev = ev as ResolvedGuardEvent
 
-    const applicable = this.detectors.filter((d) => appliesTo(d, ev))
-    const verdicts = await Promise.all(applicable.map((d) => Promise.resolve(d.evaluate(ev))))
+    const applicable = this.detectors.filter((d) => appliesTo(d, rev))
+    const verdicts = await Promise.all(applicable.map((d) => Promise.resolve(d.evaluate(rev))))
 
     const rule = selectRule(verdicts, this.composition)
-    const effective = compose(ev, verdicts, rule)
+    const effective = compose(rev, verdicts, rule)
 
     // guardId correlation: a later altitude can only tighten a prior decision.
-    const prior = this.byGuard.get(ev.guardId)
+    const prior = this.byGuard.get(rev.guardId)
     if (prior && severity(prior.decision) < severity(effective.decision)) {
       effective.decision = prior.decision
       effective.reasons.push(
         `[correlation] tightened to prior decision '${prior.decision}' from earlier observation point`,
       )
     }
-    this.byGuard.set(ev.guardId, effective)
+    this.byGuard.set(rev.guardId, effective)
     return effective
   }
 }
