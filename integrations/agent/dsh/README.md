@@ -10,7 +10,30 @@ documented interception points — no external hook protocol, no subprocess, no
 patched loop. It is *restrict-only*: it can stop a would-run tool call or
 withhold a would-be-returned tool result, never loosen one.
 
-## What it does
+## Two halves, two altitudes
+
+The plugin guards at two of OGR's three altitudes, and the two halves are
+deliberately different in kind:
+
+| | **the sensor path** (`invocation`) | **the developer path** (`conversation`) |
+|---|---|---|
+| Kinds | `tool_call`, `tool_result` | `llm_request`, `llm_response` |
+| dsh seam | `tools/pre-execute`, `tools/post-execute`, `ctx.tools.guard()` | `llm/stream` |
+| Who judges | a **local** `Runtime` you configure | **the runtime** you point it at |
+| Needs a server | no | yes |
+| Default | on | off |
+
+The sensor path declares what the LLM wire cannot show — a pending invocation,
+with its arguments, before dispatch — and a local detector chain judges it. The
+developer path forwards the **untouched provider body** and decomposes nothing:
+the runtime derives the new user words, the tool outcomes being fed back, the
+model's prose, every tool call it asks for, and the declared tool inventory.
+Classifying the conversation was every PEP's private burden through v0.5; v0.6
+made it the runtime's job, and this plugin does not do it.
+
+Run either, or both. They are independent switches.
+
+## The sensor path — tool calls
 
 Each intercepted event becomes an OGR `GuardEvent`, runs through a `Runtime`
 built from **your own policy** (deterministic text/regex rules, plus optionally
@@ -150,16 +173,70 @@ Default `false`, because the failure mode is a denied call rather than a
 missing guard, and that is the deployment's decision to make. The plugin's test
 suite asserts both directions against a real dsh tool registry.
 
+## The developer path — raw model traffic
+
+`llmRequest` and `llmResponse` each take `off` (default) · `observe` · `enforce`.
+
+```yaml
+config:
+  llmRequest: enforce     # judged BEFORE the request reaches the model
+  llmResponse: enforce    # judged AFTER the answer, BEFORE the agent acts on it
+```
+
+| | `llm_request` | `llm_response` |
+|---|---|---|
+| Emitted | before each model call | when the answer is complete |
+| Payload | the assembled request body — messages, the system slot, the tool inventory | the response body — prose, `tool_calls`, `finish_reason` |
+| `enforce` blocks by | never calling the model | withholding the whole answer |
+| Latency under `enforce` | one runtime round trip per step | one round trip, and the stream is buffered until the verdict lands |
+| Latency under `observe` | none — fire-and-forget | none — streams through untouched |
+
+Both need `OGR_RUNTIME_URL` + `OGR_API_KEY`. There is no local fallback and the
+plugin will not pretend otherwise: switched on without a runtime, it logs why
+and registers nothing. The bundled detectors judge commands, not conversations
+— that is the whole point of the split.
+
+**Auxiliary calls are skipped.** A `purpose` of `compaction` or `session-title`
+is machinery, not the agent's conversation with the user; judging it would bill
+a round trip to re-read history the runtime has already seen.
+
+**An unreachable runtime does not fail the turn closed.** This altitude has no
+human gate, and killing a whole turn because a server blinked would take the
+agent down with it. The plugin says so in the log and proceeds; the tool-call
+altitude — which *does* fail closed, see below — is what carries enforcement
+in that window.
+
+**`require_approval` blocks here.** `ctx.approval` keys a question to an agent
+and a tool, and a model call is neither, so there is nothing to ask. Stopping
+is the restrict-only direction.
+
+### One honest caveat about "untouched"
+
+The spec says these kinds carry the untouched provider body. A dsh plugin
+cannot literally do that: `llm/stream` runs on `GenerateOptions`, dsh's
+provider-**neutral** request, and each adapter (`dsh-llm-deepseek`,
+`dsh-llm-pi-ai`, …) maps it to the wire afterwards. So what this plugin sends
+is a faithful **projection** into `openai.chat`, and `llm_protocol` names the
+shape actually emitted rather than the shape the adapter will send.
+
+Everything the runtime classifies from survives the projection: the system
+slot leads the message list, tool results become `tool`-role messages keyed by
+`tool_call_id` (so "outcomes fed back" stay distinguishable from "new user
+words"), and the tool inventory travels in `tools`. What is lost is
+provider-specific transport — `reasoningEffort`, and the adapter's own
+header/metadata mapping. `reasoning` blocks are dropped because no
+`openai.chat` request body carries them.
+
 ## Where it deliberately does not hook
 
-- **Model output.** dsh's `llm/stream` is a waterfall over an `AsyncIterable`;
-  guarding the assistant's text there means buffering the stream and paying for
-  it in first-token latency. Enforcement stays at the tool boundary, which is
-  the altitude that carries the side effect.
 - **`fs/write-intent` / `fs/edit-intent`.** Filesystem mutations already flow
   through `tools/pre-execute` as their tool call. A dedicated
   `execution`-altitude sensor belongs in an eBPF or sandbox integration, not
   in an in-process plugin.
+- **Per-token streaming content.** `llm_response` is judged once, whole. There
+  is no partial-content mode: the runtime's `ogr-partial` header exists, but a
+  guard that re-judges every delta pays a round trip per token for a verdict
+  that can only tighten at the end anyway.
 
 ## Known limitations
 
@@ -169,6 +246,10 @@ suite asserts both directions against a real dsh tool registry.
   `{ name, result }` payload does not carry. The event this plugin emits is
   spec-conformant and complete — a deployment's own detector receives the whole
   payload — but `guardToolResults` gains you little until you plug one in.
+- **`llmResponse: enforce` buffers the stream.** That is what makes "BEFORE the
+  agent acts on it" literally true, and it costs the runtime round trip in
+  first-token latency. Use `observe` when you want the record without the bill.
+- **The projection is not the wire body** — see the caveat above.
 - The OGR `Runtime` retains one entry per `guard_id` for altitude correlation
   and never evicts, so a long-lived harness process grows with the number of
   tool calls. This is SDK behavior, shared with every OGR integration.

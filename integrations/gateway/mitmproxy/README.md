@@ -58,13 +58,23 @@ restarts with an identical opening prompt is NOT merged into the older inferred
 Session once that Session has grown past it. Transcript-only title/summary
 helper calls are passed upstream but excluded from the primary Agent timeline.
 
-Agent identity (OGR v0.5 five-tuple) is operator-configured via
+Agent identity (the flat agent five-tuple) is operator-configured via
 `OGR_AGENT_ID` / `OGR_AGENT_TYPE` / `OGR_AGENT_WORKSPACE` / `OGR_AGENT_OWNER`
 / `OGR_AGENT_USER`, and every field is optional: unset, the runtime falls
 back to the identity floor — the agent is derived from the API key (one key,
 one default agent) and every session is attributed to one user.
 
-### Codex (ChatGPT backend, WebSocket)
+### v0.6: raw forwarding
+
+For `openai.chat` and `anthropic.messages` traffic the addon forwards the
+UNTOUCHED provider bodies as `llm_request` / `llm_response` — the runtime
+classifies them (new user words, fed-back tool outcomes, tool definitions,
+the model's prose and calls). No client-side decomposition, and no
+full-transcript re-judging per roundtrip. `openai.responses` stays on the
+parsed fallback until the runtime's derivation learns it; the Codex
+WebSocket path keeps its reconstructed per-kind events.
+
+## Codex (ChatGPT backend, WebSocket)
 
 Codex in ChatGPT-login mode does not use plain HTTP — it opens a **WebSocket** to
 `chatgpt.com/backend-api/codex/responses` and sends each turn as a Responses-API

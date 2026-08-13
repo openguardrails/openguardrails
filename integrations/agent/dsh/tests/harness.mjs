@@ -69,7 +69,25 @@ export async function boot(config = {}, tools = ["bash"]) {
       ...options.agent ? { agent: options.agent } : {},
     })
 
-  return { ctx, call, warnings }
+  /**
+   * Dispatch one `llm/stream` waterfall exactly as `LlmRuntime.stream()` does
+   * (`ctx.waterfall(service, 'llm/stream', options, next)`) and drain it.
+   *
+   * The waterfall itself is Cordis's real one — what is substituted is the
+   * ADAPTER at the end of the chain, which in a test has to be a fake either
+   * way. `this` is bound to a placeholder because the plugin's listener never
+   * touches it.
+   */
+  const stream = async (options, chunks) => {
+    const out = []
+    const iterable = ctx.waterfall({}, "llm/stream", options, async function* () {
+      for (const chunk of chunks) yield chunk
+    })
+    for await (const chunk of iterable) out.push(chunk)
+    return out
+  }
+
+  return { ctx, call, stream, warnings }
 }
 
 /** Let Cordis settle its fibers (plugin apply is asynchronous). */

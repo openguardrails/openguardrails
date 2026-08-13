@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from openguardrails import GuardEvent, Provenance, Runtime, Verdict
+from openguardrails import GuardEvent, Provenance, Runtime, Verdict, derive_llm_event
 from openguardrails.detectors.config_rules import ConfigRulesDetector
 from openguardrails.detectors.llm_judge import LLMJudgeDetector
 from openguardrails.models import severity
@@ -38,14 +38,14 @@ ROLE_PROVENANCE: dict[str, tuple[str, list[str]]] = {
 _seq = itertools.count(1)
 
 
-def _subject(norm: dict[str, Any] | None = None) -> dict[str, str]:
-    """The OGR v0.5 agent five-tuple this gateway can honestly assert.
+def _subject(caller: str | None = None) -> dict[str, str]:
+    """The flat agent identity kwargs this gateway can honestly assert.
 
     The agent identity is operator configuration (`OGR_AGENT_*` env vars —
     this example gateway fronts one deployment); the request body's
     self-declared user (`user` / `metadata.user_id`) is `agent_user` — WHO is
     using the agent this session, an unauthenticated claim the runtime clamps.
-    Nothing configured and nothing declared → an empty subject, the API-key
+    Nothing configured and nothing declared → no identity fields, the API-key
     identity floor.
     """
     s: dict[str, str] = {}
@@ -55,7 +55,6 @@ def _subject(norm: dict[str, Any] | None = None) -> dict[str, str]:
         v = os.environ.get(env, "").strip()
         if v:
             s[key] = v
-    caller = (norm or {}).get("caller")
     if caller and caller != "anonymous":
         s["agent_user"] = str(caller)
     return s
@@ -114,62 +113,76 @@ class GatewayEngine:
         return Runtime(detectors=self.detectors, policy=self.policy)
 
     # -- request inspection --------------------------------------------
-    def inspect_request(self, norm: dict[str, Any]) -> GatewayDecision:
-        """norm = {protocol, model, messages:[{role,content,tool_calls?}], tools?}"""
+    def inspect_request(self, body: dict[str, Any], *, protocol: str | None = None,
+                        caller: str | None = None,
+                        session_id: str | None = None) -> GatewayDecision:
+        """The developer path (v0.6): the UNTOUCHED provider request body in,
+        one decision out. The SDK's `derive_llm_event` — the same classifier
+        the hosted runtime runs — turns it into the judged shape; this
+        gateway decomposes nothing."""
         rt = self._runtime()
         guard_id = _id("gw")
-        session_id = norm.get("session_id") or _id("sess")
-        verdicts: list[Verdict] = []
-
-        # 1) the prompt on the wire — one model_input event
-        msgs, provenance = [], []
-        for m in norm.get("messages", []):
-            trust, taint = ROLE_PROVENANCE.get(m.get("role", "user"), ("unverified", []))
-            text = _content_text(m.get("content"))
-            msgs.append({"role": m.get("role"), "trust": trust, "content": text})
-            provenance.append(Provenance(source=m.get("role", "user"), trust=trust,
-                                         taint_tags=list(taint)))
-        verdicts.append(rt.evaluate(GuardEvent(
-            kind="model_input", observation_point="conversation",
+        ev = GuardEvent(
+            kind="llm_request", observation_point="conversation",
             sensor_id="openguardrails-gateway", sensor_type="proxy",
-            **_subject(norm),
-            payload={"messages": msgs, "model": norm.get("model")},
-            event_id=_id("evt"), guard_id=guard_id, timestamp=_now(),
-            session_id=session_id, llm_protocol=norm.get("protocol"),
-            provenance=provenance,
-        )))
+            **_subject(caller),
+            payload=body,
+            guard_id=guard_id, timestamp=_now(),
+            session_id=session_id or _id("sess"), llm_protocol=protocol,
+        )
+        derive_llm_event(ev)
+        # Provenance from the derived shape: the user's words are unverified
+        # (a gateway serves callers it does not fully trust); fed-back tool
+        # outcomes are untrusted — that taint is what escalates an injected
+        # instruction hiding in a result.
+        prov = [Provenance("user", "unverified")]
+        if ev.payload.get("tool_results"):
+            prov.append(Provenance("tool_result", "untrusted", taint_tags=["tool_result"]))
+        ev.provenance = prov
+        verdicts = [rt.evaluate(ev)]
 
-        # 2) any tool_call carried in the request — same events the agent hook emits,
-        #    so the SAME ConfigRules/LLMJudge detectors light up at the gateway.
-        for tc in _tool_calls(norm):
-            verdicts.append(rt.evaluate(GuardEvent(
-                kind="tool_call", observation_point="conversation",
-                sensor_id="openguardrails-gateway", sensor_type="proxy",
-                **_subject(norm),
-                payload={"name": tc["name"], "arguments": tc["arguments"]},
-                guard_id=guard_id, timestamp=_now(),
-                session_id=session_id, llm_protocol=norm.get("protocol"),
-                # tool calls proposed off the back of the prompt inherit its provenance
-                provenance=[Provenance(source="model", trust="unverified")],
-            )))
-
-        redactions = [s for m in msgs for s in find_secrets(m["content"])]
+        texts = [str(ev.payload.get("text", "")), str(ev.payload.get("system", ""))]
+        texts += [str(r.get("result", "")) for r in ev.payload.get("tool_results", [])]
+        redactions = [s for t in texts for s in find_secrets(t)]
         return self._decide(guard_id, verdicts, redactions)
 
     # -- response inspection -------------------------------------------
-    def inspect_response(self, text: str, *, protocol: str | None = None,
+    def inspect_response(self, body: dict[str, Any] | str, *,
+                         protocol: str | None = None,
                          guard_id: str | None = None) -> GatewayDecision:
+        """The other half: the UNTOUCHED provider response body in (a bare
+        string is accepted for text-only callers), one decision out. Every
+        tool call the model asks for is also judged individually, so the
+        core ConfigRules/LLMJudge detectors light up at the gateway."""
         gid = guard_id or _id("gw")
         rt = self._runtime()
-        v = rt.evaluate(GuardEvent(
-            kind="model_output", observation_point="conversation",
-            sensor_id="openguardrails-gateway", sensor_type="proxy",
-            **_subject(), payload={"text": text},
-            event_id=_id("evt"), guard_id=gid, timestamp=_now(),
-            llm_protocol=protocol,
-            provenance=[Provenance(source="model", trust="model")],
-        ))
-        return self._decide(gid, [v], find_secrets(text))
+        if isinstance(body, str):
+            ev = GuardEvent(
+                kind="model_output", observation_point="conversation",
+                sensor_id="openguardrails-gateway", sensor_type="proxy",
+                **_subject(), payload={"text": body},
+                guard_id=gid, timestamp=_now(), llm_protocol=protocol,
+                provenance=[Provenance(source="model", trust="model")],
+            )
+        else:
+            ev = GuardEvent(
+                kind="llm_response", observation_point="conversation",
+                sensor_id="openguardrails-gateway", sensor_type="proxy",
+                **_subject(), payload=body,
+                guard_id=gid, timestamp=_now(), llm_protocol=protocol,
+                provenance=[Provenance(source="model", trust="model")],
+            )
+            derive_llm_event(ev)
+        verdicts = [rt.evaluate(ev)]
+        for tc in ev.payload.get("tool_calls", []) or []:
+            verdicts.append(rt.evaluate(GuardEvent(
+                kind="tool_call", observation_point="conversation",
+                sensor_id="openguardrails-gateway", sensor_type="proxy",
+                payload={"name": tc.get("name", ""), "arguments": tc.get("arguments", {})},
+                guard_id=gid, timestamp=_now(), llm_protocol=ev.llm_protocol,
+                provenance=[Provenance(source="model", trust="unverified")],
+            )))
+        return self._decide(gid, verdicts, find_secrets(str(ev.payload.get("text", ""))))
 
     # -- shared ---------------------------------------------------------
     def _decide(self, guard_id: str, verdicts: list[Verdict],

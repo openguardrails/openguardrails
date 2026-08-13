@@ -23,6 +23,20 @@
           toolResults: true
           toolResultPattern: 'web|fetch|search|browser|curl|http|^mcp_|_mcp_'
 
+        # ── The OGR v0.6 developer path: forward the raw model traffic and let
+        # the RUNTIME classify it. `off` (default) | `observe` | `enforce`.
+        # Both need OGR_RUNTIME_URL + OGR_API_KEY — there is no local fallback,
+        # because the bundled detectors judge commands, not conversations.
+        #
+        #   llmRequest:  enforce   # a block verdict means the model is never called
+        #   llmResponse: enforce   # a block verdict withholds the whole answer
+        #
+        # `enforce` on the response buffers the stream until the verdict lands
+        # (that is what makes "before the agent acts on it" true) and costs one
+        # runtime round trip of first-token latency. `observe` costs nothing.
+        llmRequest: 'off'
+        llmResponse: 'off'
+
         # Deny a call that reached the monotonic guard with no OGR verdict —
         # the signature of a `tools/pre-execute` listener that short-circuited
         # the waterfall before this plugin ran. Off by default: the failure

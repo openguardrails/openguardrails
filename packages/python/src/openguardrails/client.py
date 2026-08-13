@@ -298,6 +298,37 @@ class RuntimeClient:
             results.extend(body.get("results", []))
         return results
 
+    def guard_request(self, body: dict[str, Any], *,
+                      llm_protocol: str | None = None,
+                      session_id: str | None = None,
+                      agent_id: str | None = None,
+                      partial: bool = False) -> Verdict:
+        """The developer path in one call: forward the UNTOUCHED provider
+        request body BEFORE it goes to the model. The runtime classifies it
+        (new user words, fed-back tool outcomes, tool definitions) and
+        answers with the composed Verdict.
+
+            verdict = client.guard_request(chat_completions_body)
+            if verdict.decision == "block":
+                refuse(verdict.reasons)
+        """
+        return self.evaluate(GuardEvent(
+            kind="llm_request", payload=body, llm_protocol=llm_protocol,
+            session_id=session_id, agent_id=agent_id,
+        ), partial=partial)
+
+    def guard_response(self, body: dict[str, Any], *,
+                       llm_protocol: str | None = None,
+                       session_id: str | None = None,
+                       agent_id: str | None = None,
+                       partial: bool = False) -> Verdict:
+        """The other half: forward the UNTOUCHED provider response AFTER
+        the model answers and BEFORE the agent acts on it."""
+        return self.evaluate(GuardEvent(
+            kind="llm_response", payload=body, llm_protocol=llm_protocol,
+            session_id=session_id, agent_id=agent_id,
+        ), partial=partial)
+
     def enroll(self, public_key: str | bytes, pep_id: str | None = None,
                name: str | None = None) -> dict[str, Any]:
         """POST /v1/enroll; returns `{"pep_id", "key_id"}`.

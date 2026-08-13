@@ -31,6 +31,7 @@ import {
   eventToWire as coreEventToWire,
   type GuardEvent,
   type Signer,
+  type Verdict,
 } from "@openguardrails/core"
 
 const BATCH_MAX = 50
@@ -194,6 +195,28 @@ export class PlatformReporter {
       this.signer = await this.identity!.signer()
     } catch (err) {
       this.log.warn(`[openguardrails] signer unavailable (${String(err)}) — reporting unsigned`)
+    }
+  }
+
+  /**
+   * Evaluate ONE GuardEvent synchronously against the runtime and return its
+   * Verdict — the developer path (`llm_request`/`llm_response`), where the
+   * classification is the RUNTIME's job and a local detector chain has nothing
+   * useful to say.
+   *
+   * Returns `null` when reporting is not configured or the call failed, which
+   * the caller reads as "no opinion". Deciding what a missing verdict means is
+   * the caller's job, not this transport's: an observational site ignores it,
+   * an enforcing site consults its own fail-closed setting.
+   */
+  async evaluate(ev: GuardEvent): Promise<Verdict | null> {
+    if (!this.enabled) return null
+    await this.enrolling
+    try {
+      return await this.client!.evaluate(withDefaultSensor(ev))
+    } catch (err) {
+      this.log.warn(`[openguardrails] evaluate failed (${String(err)}) — no verdict`)
+      return null
     }
   }
 

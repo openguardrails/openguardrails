@@ -45,6 +45,15 @@ export interface EvaluateOptions {
   partial?: boolean
 }
 
+/** Options for the one-call developer path (guardRequest / guardResponse). */
+export interface GuardCallOptions extends EvaluateOptions {
+  /** Protocol hint; the runtime also sniffs the body shape. */
+  llmProtocol?: string
+  sessionId?: string
+  /** Identity refinement; absent, the API key's default agent. */
+  agentId?: string
+}
+
 export interface EnrollRequest {
   /** base64url raw 32-byte Ed25519 public key. */
   publicKey: string
@@ -262,6 +271,55 @@ export class RuntimeClient {
       sign: true,
     })
     return verdictFromWire(wire as Record<string, unknown>)
+  }
+
+  /**
+   * The developer path in one call: forward the UNTOUCHED provider request
+   * body BEFORE it goes to the model. The runtime classifies it (new user
+   * words, fed-back tool outcomes, tool definitions) and answers with the
+   * composed Verdict.
+   *
+   * ```ts
+   * const verdict = await client.guardRequest(chatCompletionsBody)
+   * if (verdict.decision === "block") refuse(verdict.reasons)
+   * ```
+   */
+  async guardRequest(
+    body: Record<string, unknown>,
+    options: GuardCallOptions = {},
+  ): Promise<Verdict> {
+    return this.evaluate(
+      {
+        kind: "llm_request",
+        payload: body,
+        llmProtocol: options.llmProtocol,
+        sessionId: options.sessionId,
+        agentId: options.agentId,
+        provenance: [],
+      },
+      options,
+    )
+  }
+
+  /**
+   * The other half: forward the UNTOUCHED provider response AFTER the model
+   * answers and BEFORE the agent acts on it.
+   */
+  async guardResponse(
+    body: Record<string, unknown>,
+    options: GuardCallOptions = {},
+  ): Promise<Verdict> {
+    return this.evaluate(
+      {
+        kind: "llm_response",
+        payload: body,
+        llmProtocol: options.llmProtocol,
+        sessionId: options.sessionId,
+        agentId: options.agentId,
+        provenance: [],
+      },
+      options,
+    )
   }
 
   /**
