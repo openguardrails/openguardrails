@@ -199,9 +199,6 @@ where JCS is RFC 8785 and the digest input is the kind-specific subset of
 | `exec` | `{ argv, cwd }` |
 | `network` | `{ host, port, direction }` |
 | `file` | `{ op, path }` |
-| `tool_register` | `{ name, description, schema }` |
-| `mcp_connect` | `{ server, url }` |
-| `skill_load` | `{ name, source, content_ref }` |
 
 Subsets exclude fields that legitimately differ between observation and
 execution (e.g. `env_keys`) so digests are stable across altitudes for the same

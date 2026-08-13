@@ -1,0 +1,46 @@
+# OpenGuardrails on DeepSeek Harness — a patch overlay for the `dsh web`
+# profile. Apply it with:
+#
+#     dsh web --patch integrations/agent/dsh/cordis.example.yml
+#
+# In a deployment that owns its whole plugin tree, drop the `insert:` wrapper
+# and paste the entry into `cordis.yml` directly.
+
+- insert:
+    - id: openguardrails
+      name: 'openguardrails-instrumentation-dsh'
+      config:
+        # Also evaluate tool RESULTS, not just tool calls. See the README's
+        # "Known limitations" for what the bundled reference detectors do and
+        # do not judge here.
+        guardToolResults: true
+
+        # Per-agent taint from untrusted tool results. A result whose TOOL NAME
+        # matches the pattern is content the agent did not author — the
+        # indirect prompt-injection vector — and marks the agent, so its later
+        # privileged calls escalate.
+        taint:
+          toolResults: true
+          toolResultPattern: 'web|fetch|search|browser|curl|http|^mcp_|_mcp_'
+
+        # Deny a call that reached the monotonic guard with no OGR verdict —
+        # the signature of a `tools/pre-execute` listener that short-circuited
+        # the waterfall before this plugin ran. Off by default: the failure
+        # mode is a denied call, and that is the deployment's call to make.
+        failClosed: false
+
+        # "Use your own model as the guardrail" — any OpenAI-compatible chat
+        # endpoint. Omit the whole block to judge with the built-in
+        # deterministic heuristic backend instead. BOTH baseURL and model are
+        # required; a half-written block is ignored with a warning.
+        #
+        # judge:
+        #   baseURL: https://api.deepseek.com/v1
+        #   model: deepseek-v4-flash
+        #   apiKey: !!js process.env.DEEPSEEK_API_KEY
+
+        # The policy itself normally lives in the workspace at
+        # `.dsh/guardrails.json` so the agent can edit its own guardrails.
+        # Point elsewhere with `policyPath`, or inline it with `policy`.
+        #
+        # policyPath: guards/openguardrails.json

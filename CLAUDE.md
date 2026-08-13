@@ -59,6 +59,7 @@ GitHub Environment: `npm`
 | `js-vX.Y.Z` | `@openguardrails/core` |
 | `openclaw-vX.Y.Z` | `openguardrails-instrumentation-openclaw` |
 | `opencode-vX.Y.Z` | `openguardrails-instrumentation-opencode` |
+| `dsh-vX.Y.Z` | `openguardrails-instrumentation-dsh` |
 
 `integrations/agent/claude-code` and `integrations/agent/codex` are private npm workspaces.
 They use npm for builds and tests but are distributed as marketplace plugins;

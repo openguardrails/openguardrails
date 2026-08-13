@@ -33,7 +33,7 @@
         "invocation",
         "execution"
       ],
-      "description": "The altitude. Absent, the runtime defaults it from kind (transcript kinds -> conversation; tool_call/tool_result/agent_spawn/config_change -> invocation; exec/network/file -> execution)."
+      "description": "The altitude. Absent, the runtime defaults it from kind (llm_request/llm_response/user_input/model_output -> conversation; tool_call/tool_result/agent_spawn -> invocation; exec/network/file -> execution)."
     },
     "agent_id": {
       "type": "string",
@@ -92,18 +92,16 @@
     },
     "kind": {
       "enum": [
+        "llm_request",
+        "llm_response",
         "user_input",
         "model_output",
-        "tool_register",
-        "mcp_connect",
-        "skill_load",
         "tool_call",
         "tool_result",
         "exec",
         "network",
         "file",
-        "agent_spawn",
-        "config_change"
+        "agent_spawn"
       ]
     },
     "llm_protocol": {

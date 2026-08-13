@@ -141,6 +141,7 @@ the SDK for its language, and every plugin depends on it:
 | | Codex | [`integrations/agent/codex`](integrations/agent/codex/) |
 | | opencode | [`integrations/agent/opencode`](integrations/agent/opencode/) |
 | | OpenClaw | [`integrations/agent/openclaw`](integrations/agent/openclaw/) |
+| | DeepSeek Harness (`dsh`) | [`integrations/agent/dsh`](integrations/agent/dsh/) |
 | | Hermes | [`integrations/agent/hermes`](integrations/agent/hermes/) |
 | | LangGraph | [`integrations/agent/langgraph`](integrations/agent/langgraph/) |
 | **Gateway hook** | OpenAI · Anthropic | [`integrations/gateway/openai-anthropic`](integrations/gateway/openai-anthropic/) |

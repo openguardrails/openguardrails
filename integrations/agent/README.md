@@ -7,6 +7,7 @@ Agent integrations turn tool and framework lifecycle events into OGR
 |---|---|
 | Claude Code | [`claude-code/`](claude-code/) |
 | Codex | [`codex/`](codex/) |
+| DeepSeek Harness (`dsh`) | [`dsh/`](dsh/) |
 | Hermes | [`hermes/`](hermes/) |
 | LangGraph | [`langgraph/`](langgraph/) |
 | OpenClaw | [`openclaw/`](openclaw/) |

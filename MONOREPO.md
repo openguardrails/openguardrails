@@ -13,6 +13,7 @@ centralized here.
 | `openguardrails-js` | `packages/javascript/` |
 | `openguardrails-instrumentation-claude-code` | `integrations/agent/claude-code/` |
 | `openguardrails-instrumentation-codex` | `integrations/agent/codex/` |
+| `openguardrails-instrumentation-dsh` | `integrations/agent/dsh/` |
 | `openguardrails-instrumentation-hermes` | `integrations/agent/hermes/` |
 | `openguardrails-instrumentation-langgraph` | `integrations/agent/langgraph/` |
 | `openguardrails-instrumentation-openclaw` | `integrations/agent/openclaw/` |
