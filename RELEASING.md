@@ -10,6 +10,7 @@ Publishing. No long-lived registry token is stored in GitHub.
 | `js-vX.Y.Z` | `packages/javascript/` |
 | `openclaw-vX.Y.Z` | `integrations/agent/openclaw/` |
 | `opencode-vX.Y.Z` | `integrations/agent/opencode/` |
+| `dsh-vX.Y.Z` | `integrations/agent/dsh/` |
 | `python-vX.Y.Z` | `packages/python/` |
 | `gateway-vX.Y.Z` | `integrations/gateway/openai-anthropic/` |
 | `hermes-vX.Y.Z` | `integrations/agent/hermes/` |

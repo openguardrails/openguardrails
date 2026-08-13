@@ -40,6 +40,22 @@ shrinks to `kind` + `payload`, and everything nothing consumed is gone.
   on verdicts available as a push channel.
 - **`context_refs` is removed** — never consumed; `provenance[].ref` already
   carries the relationship with trust semantics attached.
+- **Raw LLM traffic becomes the developer path**: two new kinds,
+  **`llm_request`** (the untouched provider request body, sent BEFORE it
+  goes to the model) and **`llm_response`** (the untouched provider
+  response, sent BEFORE the agent acts on it). The RUNTIME derives the
+  classification — new user words, fed-back tool outcomes, the model's
+  prose and tool calls, the declared tool inventory — which through v0.5
+  was every PEP's private burden (the reference gateway alone carried ~800
+  lines of it). A developer integration is now: forward the request, act on
+  the verdict, forward the response, act on the verdict.
+- **Four kinds leave the wire**: `tool_register`, `mcp_connect`,
+  `skill_load` (their facts ride the `tools` array and the system prompt of
+  `llm_request`, where the runtime classifies them; no integration ever
+  emitted the standalone kinds) and `config_change` (never emitted). The
+  wire vocabulary is 10 kinds, of which a developer needs exactly two.
+  Approval-receipt bindings shrink to the four enforceable projections
+  (`tool_call`, `exec`, `network`, `file`).
 - **`subject` and `sensor` are flattened into top-level scalar fields** —
   `agent_id`, `agent_type`, `agent_workspace`, `agent_owner`, `agent_user`,
   `sandbox_id`, `parent_agent_id`, `delegation_chain`, `attestation`,

@@ -690,6 +690,11 @@ func deriveRequest(d *deriveCtx, st *sessionState, conv *protocol.Conversation) 
 
 	// The itemised tool inventory, for the record. The judged turn already carries the
 	// same definitions for the decision; these are what a console lists.
+	//
+	// TODO(v0.6 phase 2): `tool_register` left the wire spec — the runtime accepts it
+	// transitionally from this plugin only. When this gateway becomes a raw forwarder
+	// (kind llm_request/llm_response, runtime-side classification), these itemised
+	// rows and the whole derivation above disappear with it.
 	if toolsChanged != "" {
 		for i, t := range conv.Tools {
 			if i >= maxToolsPerRegister {

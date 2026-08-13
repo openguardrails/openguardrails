@@ -18,7 +18,7 @@ API key and two fields.
 | `guard_id` | string | MAY | Correlation HINT: stable across observation points for one logical action, sent only by deployments that actually propagate it ([guard-context](provenance-and-context.md#guard-context-propagation)). Absent, the runtime assigns one and correlates altitudes itself ([below](#identifiers-are-born-at-the-runtime)). |
 | `session_id` | string | SHOULD | Conversation / agent-run id. Enables stateful, multi-turn detection. Absent, the runtime derives sessions itself. |
 | `timestamp` | string | SHOULD | RFC 3339 / ISO 8601 UTC — when the unit was OBSERVED. Absent = the runtime's receive time; only buffered/replayed events need it explicitly. |
-| `observation_point` | enum | SHOULD | `conversation` \| `invocation` \| `execution`. The altitude — *what* was seen. Absent, the runtime defaults it from `kind`: transcript kinds → `conversation`, `tool_call`/`tool_result`/`agent_spawn`/`config_change` → `invocation`, `exec`/`network`/`file` → `execution`. Assert it explicitly whenever the default is wrong for your vantage point (a gateway seeing `tool_call` still observes at `conversation`). |
+| `observation_point` | enum | SHOULD | `conversation` \| `invocation` \| `execution`. The altitude — *what* was seen. Absent, the runtime defaults it from `kind`: `llm_request`/`llm_response`/`user_input`/`model_output` → `conversation`, `tool_call`/`tool_result`/`agent_spawn` → `invocation`, `exec`/`network`/`file` → `execution`. Assert it explicitly whenever the default is wrong for your vantage point (a gateway seeing `tool_call` still observes at `conversation`). |
 | `agent_id` | string | SHOULD | The acting agent, unique within the organization. Absent, derived from the API key ([identity floor](#the-api-key-is-the-identity-floor)). |
 | `agent_type` | string | SHOULD | What kind of agent (`hermes`, `openclaw`, `smartwork`). A label, not an identity — see the [shadow-agent rule](#one-agent_id-one-agent). |
 | `agent_workspace` | string | MAY | The named group of AGENTS this one belongs to. Absent, the API key's workspace. |
@@ -163,39 +163,69 @@ SHOULD NOT collapse it into the altitude.
 
 ## Kinds
 
-A runtime MUST accept all kinds; a detector MAY declare which kinds it handles. A
-detector MAY also declare which `content_encoding` values it can meaningfully
-judge; one that receives an encoding it did not declare MUST abstain (`allow`
-with a reason) rather than judge blind (see
-[detector encoding capability](local-redaction.md#detector-encoding-capability)).
+There are two ways into the runtime, and the kind vocabulary reflects them.
+
+**The developer path: forward the raw LLM traffic.** An application that
+holds a chat-completion request does not decompose anything — it sends the
+body it was about to give the model, and the body the model returned, and
+acts on the verdicts:
+
+| `kind` | Emitted when | `payload` |
+|---|---|---|
+| `llm_request` | BEFORE the request goes to the model | the untouched provider request body (`messages`, `tools`, ...) in the protocol named by `llm_protocol` |
+| `llm_response` | AFTER the model answers, BEFORE the agent acts on it | the untouched provider response body |
+
+The RUNTIME derives the classification from the raw body: the new user
+words, the tool outcomes being fed back, the model's prose and every tool
+call it asks for, and the declared tool inventory (whose *definitions* are
+themselves an attack surface — description injection, rug-pulls — and are
+judged from the `tools` array where they already travel). Classifying the
+conversation was every PEP's private burden through v0.5; the reference
+gateway alone carried ~800 lines of it. It is the runtime's job.
+`llm_protocol` (`openai.chat` | `anthropic.messages` | ...) is a hint; a
+runtime SHOULD also detect the protocol from the body shape.
+
+**The sensor path: declare what the LLM wire cannot show.** These kinds
+exist because their facts never appear in any model request — a kernel
+probe holds an `execve`, not a messages array:
 
 | `kind` | Emitted when | `payload` shape (informative) |
 |---|---|---|
-| `user_input` | user message enters the loop | `{ "text": "..." }` |
-| `model_output` | LLM produces text/tool calls | `{ "text": "...", "tool_calls": [...] }` |
-| `tool_register` | a tool is made available | `{ "name": "...", "description": "...", "schema": {...} }` |
-| `mcp_connect` | an MCP server is attached | `{ "server": "...", "url": "...", "tools": [...] }` |
-| `skill_load` | a skill is loaded | `{ "name": "...", "source": "...", "content_ref": "..." }` |
-| `tool_call` | agent invokes a tool | `{ "name": "shell.exec", "arguments": {...} }` |
-| `tool_result` | a tool returns | `{ "name": "...", "result": "..." }` |
+| `tool_call` | an agent hook holds an invocation, pre-dispatch | `{ "name": "shell.exec", "arguments": {...} }` |
+| `tool_result` | a tool returns, pre-feedback | `{ "name": "...", "result": "..." }` |
 | `exec` | the execution altitude runs a process | `{ "argv": [...], "cwd": "...", "env_keys": [...] }` |
 | `network` | the execution altitude opens a connection | `{ "host": "...", "port": 443, "direction": "egress" }` |
 | `file` | the execution altitude reads/writes a path | `{ "op": "write", "path": "..." }` |
 | `agent_spawn` | an agent creates/delegates to a sub-agent | `{ "child_agent_id": "...", "child_agent_type": "...", "granted_scopes": [...] }` |
-| `config_change` | the adapter's own guardrail config changes | `{ "target": "permissions\|hooks\|mcp_allowlist\|skills\|other", "path": "...", "diff_ref": "..." }` |
+| `user_input` / `model_output` | a simple integration reports one side of a turn directly | `{ "text": "..." }` / `{ "text": "...", "tool_calls": [...] }` |
 
-`tool_register`, `mcp_connect`, and `skill_load` exist because the **definition**
-of a tool/MCP/skill is itself an attack surface (description injection,
-rug-pulls, malicious skill content) — detectable at load time, before any call.
+A detector MAY declare which kinds it handles, and MAY declare which
+`content_encoding` values it can meaningfully judge; one that receives an
+encoding it did not declare MUST abstain (`allow` with a reason) rather
+than judge blind (see
+[detector encoding capability](local-redaction.md#detector-encoding-capability)).
 
-`agent_spawn` makes delegation itself a guarded, detectable action — the hook for
-an "inherited scope exceeds task requirement" detector, and the source a runtime
-can build `delegation_chain` from. `config_change` lets an
-invocation-altitude adapter report mutation of its **own** guardrail surface
-(settings/permissions, hook definitions, MCP allowlists, skill directories)
-with semantics that an execution-altitude `file` write loses — configuration
-integrity is a named attack target, and editing the agent's own security
-config is a first move against the `invocation` altitude.
+**Removed in v0.6**: `tool_register`, `mcp_connect`, `skill_load` (their
+facts ride the `tools` array and the system prompt of `llm_request`, where
+the runtime classifies them — no integration ever emitted the standalone
+kinds) and `config_change` (never emitted; an agent's config edits surface
+as `file`/`exec` at the execution altitude). `agent_spawn` stays: delegation
+is a guarded action and the source a runtime builds `delegation_chain` from.
+
+## Example — the developer path
+
+```json
+{ "kind": "llm_request", "llm_protocol": "openai.chat",
+  "payload": { "model": "gpt-5", "messages": [ ... ], "tools": [ ... ] } }
+```
+
+```json
+{ "kind": "llm_response", "llm_protocol": "openai.chat",
+  "payload": { "choices": [ { "message": { "content": "...", "tool_calls": [ ... ] } } ] } }
+```
+
+Forward the request, act on the verdict; forward the response, act on the
+verdict. Nothing is decomposed client-side.
 
 ## Example — minimal conformant event
 

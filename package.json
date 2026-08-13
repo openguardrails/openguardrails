@@ -8,7 +8,8 @@
     "integrations/agent/claude-code",
     "integrations/agent/codex",
     "integrations/agent/openclaw",
-    "integrations/agent/opencode"
+    "integrations/agent/opencode",
+    "integrations/agent/dsh"
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",

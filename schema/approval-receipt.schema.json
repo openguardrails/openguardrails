@@ -56,10 +56,7 @@
               "tool_call",
               "exec",
               "network",
-              "file",
-              "tool_register",
-              "mcp_connect",
-              "skill_load"
+              "file"
             ]
           },
           "payload_digest": {
