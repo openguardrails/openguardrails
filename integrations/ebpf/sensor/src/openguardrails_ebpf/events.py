@@ -71,7 +71,8 @@ def to_guard_event(rec: SensorRecord, *, subject: dict, session_id: str | None =
                    timestamp: str | None = None) -> GuardEvent:
     """Build the sandbox-altitude GuardEvent for one sensor record.
 
-    `subject` carries at least `agent_id`; `sandbox_id` defaults to the tree
+    `subject` is the flat identity kwargs (at least `agent_id`), splatted
+    into the event; `sandbox_id` defaults to the tree
     root so events from one sensor run share a sandbox identity.
     """
     kind = KIND_MAP[rec.kind]
@@ -99,8 +100,8 @@ def to_guard_event(rec: SensorRecord, *, subject: dict, session_id: str | None =
         # kernel class: the observed agent runs in userspace and cannot decline
         # to be seen by this probe — the one execution-altitude sensor whose
         # absence of a matching invocation event proves a bypass.
-        sensor={"id": "openguardrails-ebpf", "class": "kernel"},
-        subject=subject,
+        sensor_id="openguardrails-ebpf", sensor_type="kernel",
+        **subject,
         payload=payload,
         # v0.6: event identity is born at the runtime. guard_id rides only as
         # the propagated guard-context — the one strong cross-altitude link.

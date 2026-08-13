@@ -221,8 +221,11 @@ function buildGuardEvent(input, transcript, policy) {
   const event = {
     kind: "tool_call",
     observationPoint: "invocation",
-    sensor: { id: "openguardrails-codex-automode", class: "in_process" },
-    subject: { agent_id: AGENT_ID, agent_type: "codex", attestation: "client_key" },
+    sensorId: "openguardrails-codex-automode",
+    sensorType: "in_process",
+    agentId: AGENT_ID,
+    agentType: "codex",
+    attestation: "client_key",
     payload: { name: input.tool_name, arguments: input.tool_input ?? {} },
     eventId: id("evt"),
     guardId: id("ga"),

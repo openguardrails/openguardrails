@@ -134,16 +134,16 @@ invisible to the tool_call guardrails: `permission`, `command-danger` and `comma
 judge an ACTION, and no action was ever reported.
 
 Identity (OGR v0.5, agent-centric): the consumer header (`x-mse-consumer` by
-default) becomes **`subject.agent_id`** — the consumer the gateway authenticated
+default) becomes **`agent_id`** — the consumer the gateway authenticated
 IS the agent, one consumer credential, one agent row. The consumer-GROUP header
-(`x-mse-consumer-group`) becomes **`subject.agent_workspace`** — the agent's
+(`x-mse-consumer-group`) becomes **`agent_workspace`** — the agent's
 workspace, a group of AGENTS plus one policy set, not a human org chart; it is
 sent even when the consumer header is absent, because it still says which
 workspace's rules apply. Three more headers (all renameable, see the config
-table) carry the descriptive half of the five-tuple: `subject.agent_type` (what
+table) carry the descriptive half of the five-tuple: `agent_type` (what
 kind of agent — `hermes`, `openclaw`, or the team's own name for it),
-`subject.agent_owner` (the builder / responsible party), and
-`subject.agent_user` (who is using the agent THIS session — per-request by
+`agent_owner` (the builder / responsible party), and
+`agent_user` (who is using the agent THIS session — per-request by
 nature, for an agent serving many people). Owner and user are attributes the
 platform records on the agent and the session; they never select policy.
 

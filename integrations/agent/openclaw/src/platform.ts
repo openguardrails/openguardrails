@@ -30,7 +30,6 @@ import {
   createNodeSigner,
   eventToWire as coreEventToWire,
   type GuardEvent,
-  type Sensor,
   type Signer,
 } from "@openguardrails/core"
 
@@ -42,14 +41,16 @@ const QUEUE_MAX = 1000
 // running inside the agent process, so an agent that stops calling the hooks
 // stops being observed — `in_process`, never adversary-proof. The default
 // lives HERE, not in the core: the SDK deliberately doesn't invent a sensor.
-const DEFAULT_SENSOR: Sensor = { id: "openguardrails-openclaw", class: "in_process" }
+const DEFAULT_SENSOR_ID = "openguardrails-openclaw"
 
 export function hostAgentId(): string {
   return `openclaw-${hostname()}`
 }
 
 function withDefaultSensor(ev: GuardEvent): GuardEvent {
-  return ev.sensor ? ev : { ...ev, sensor: DEFAULT_SENSOR }
+  return ev.sensorId
+    ? ev
+    : { ...ev, sensorId: DEFAULT_SENSOR_ID, sensorType: "in_process" }
 }
 
 /**

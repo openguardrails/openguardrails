@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://openguardrails.com/schema/0.6/guard-event.schema.json",
   "title": "GuardEvent",
-  "description": "A unit observed at an OGR interception point.",
+  "description": "A unit observed at an OGR interception point. All fields are flat, top-level snake_case; objects are reserved for inherently structured data (payload, provenance, redactions).",
   "type": "object",
   "required": [
     "kind",
@@ -35,30 +35,60 @@
       ],
       "description": "The altitude. Absent, the runtime defaults it from kind (transcript kinds -> conversation; tool_call/tool_result/agent_spawn/config_change -> invocation; exec/network/file -> execution)."
     },
-    "sensor": {
-      "type": "object",
-      "description": "WHICH integration observed this \u2014 the mechanism axis, orthogonal to observation_point's altitude.",
-      "required": [
-        "id"
-      ],
-      "additionalProperties": false,
-      "properties": {
-        "id": {
-          "type": "string",
-          "minLength": 1
-        },
-        "class": {
-          "enum": [
-            "in_process",
-            "wrapper",
-            "proxy",
-            "kernel"
-          ]
-        },
-        "version": {
-          "type": "string"
-        }
+    "agent_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "agent_type": {
+      "type": "string"
+    },
+    "agent_workspace": {
+      "type": "string"
+    },
+    "agent_owner": {
+      "type": "string"
+    },
+    "agent_user": {
+      "type": "string"
+    },
+    "sandbox_id": {
+      "type": "string"
+    },
+    "parent_agent_id": {
+      "type": "string"
+    },
+    "delegation_chain": {
+      "type": "array",
+      "items": {
+        "type": "string"
       }
+    },
+    "attestation": {
+      "enum": [
+        "self_declared",
+        "inferred",
+        "network",
+        "mtls",
+        "gateway_api_key",
+        "client_key"
+      ]
+    },
+    "sensor_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable id of the reporting integration, e.g. openguardrails-ebpf."
+    },
+    "sensor_type": {
+      "enum": [
+        "in_process",
+        "wrapper",
+        "proxy",
+        "kernel"
+      ],
+      "description": "How evadable the observer is, weakest first. Absent, consumers MUST treat the sensor as bypassable."
+    },
+    "sensor_version": {
+      "type": "string"
     },
     "kind": {
       "enum": [
@@ -83,51 +113,6 @@
         "anthropic.messages",
         null
       ]
-    },
-    "subject": {
-      "type": "object",
-      "description": "Which agent is acting \u2014 the five-field agent identity plus actor lineage. A key-only caller omits it entirely; the runtime derives the agent from the API key.",
-      "additionalProperties": false,
-      "properties": {
-        "agent_id": {
-          "type": "string",
-          "minLength": 1
-        },
-        "agent_type": {
-          "type": "string"
-        },
-        "agent_workspace": {
-          "type": "string"
-        },
-        "agent_owner": {
-          "type": "string"
-        },
-        "agent_user": {
-          "type": "string"
-        },
-        "sandbox_id": {
-          "type": "string"
-        },
-        "parent_agent_id": {
-          "type": "string"
-        },
-        "delegation_chain": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "attestation": {
-          "enum": [
-            "self_declared",
-            "inferred",
-            "network",
-            "mtls",
-            "gateway_api_key",
-            "client_key"
-          ]
-        }
-      }
     },
     "payload": {
       "type": "object"

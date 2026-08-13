@@ -411,33 +411,33 @@ func TestEventsMarshalToTheWireShape(t *testing.T) {
 	}
 	got := gjson.ParseBytes(blob).Get("batch.0")
 	for _, field := range []string{"ogr_version", "guard_id", "session_id",
-		"timestamp", "observation_point", "sensor.id", "kind", "llm_protocol", "payload"} {
+		"timestamp", "observation_point", "sensor_id", "sensor_type", "kind", "llm_protocol", "payload"} {
 		if !got.Get(field).Exists() {
 			t.Errorf("missing %s in %s", field, got.Raw)
 		}
 	}
 	// The consumer IS the agent: one consumer credential, one agent row.
-	if got.Get("subject.agent_id").String() != "alice@acme.io" {
-		t.Error("consumer did not reach subject.agent_id")
+	if got.Get("agent_id").String() != "alice@acme.io" {
+		t.Error("consumer did not reach agent_id")
 	}
 	// x-mse-consumer-group is the agent's WORKSPACE. The platform resolves it to a
 	// workspace, so losing it on the wire silently puts every agent under the API
 	// key's policy set instead of its own workspace's.
-	if got.Get("subject.agent_workspace").String() != "dev-agents" {
-		t.Error("consumer group did not reach subject.agent_workspace")
+	if got.Get("agent_workspace").String() != "dev-agents" {
+		t.Error("consumer group did not reach agent_workspace")
 	}
-	if got.Get("subject.agent_type").String() != "smartwork" {
-		t.Error("agent type did not reach subject.agent_type")
+	if got.Get("agent_type").String() != "smartwork" {
+		t.Error("agent type did not reach agent_type")
 	}
-	if got.Get("subject.agent_owner").String() != "user:tom" {
-		t.Error("owner did not reach subject.agent_owner")
+	if got.Get("agent_owner").String() != "user:tom" {
+		t.Error("owner did not reach agent_owner")
 	}
-	if got.Get("subject.agent_user").String() != "user:lily" {
-		t.Error("user did not reach subject.agent_user")
+	if got.Get("agent_user").String() != "user:lily" {
+		t.Error("user did not reach agent_user")
 	}
 	// An agent_id from the consumer header is an identity this gateway itself
 	// authenticated — it must say so, or the runtime clamps it to self-declared.
-	if got.Get("subject.attestation").String() != "gateway_api_key" {
+	if got.Get("attestation").String() != "gateway_api_key" {
 		t.Error("consumer-authenticated identity missing the gateway_api_key stamp")
 	}
 	// v0.6: no client event_id on the wire at all — identity is born at the

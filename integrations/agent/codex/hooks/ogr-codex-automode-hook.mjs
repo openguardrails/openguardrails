@@ -40,8 +40,18 @@ var COMPAT_MOUNT = "/api/public/ogr";
 var EVENT_FIELDS = /* @__PURE__ */ new Set([
   "kind",
   "observationPoint",
-  "sensor",
-  "subject",
+  "agentId",
+  "agentType",
+  "agentWorkspace",
+  "agentOwner",
+  "agentUser",
+  "sandboxId",
+  "parentAgentId",
+  "delegationChain",
+  "attestation",
+  "sensorId",
+  "sensorType",
+  "sensorVersion",
   "payload",
   "eventId",
   "guardId",
@@ -63,10 +73,30 @@ function eventToWire(ev) {
     wire.timestamp = ev.timestamp;
   if (ev.observationPoint)
     wire.observation_point = ev.observationPoint;
-  if (ev.subject && Object.keys(ev.subject).length)
-    wire.subject = ev.subject;
-  if (ev.sensor)
-    wire.sensor = ev.sensor;
+  if (ev.agentId)
+    wire.agent_id = ev.agentId;
+  if (ev.agentType)
+    wire.agent_type = ev.agentType;
+  if (ev.agentWorkspace)
+    wire.agent_workspace = ev.agentWorkspace;
+  if (ev.agentOwner)
+    wire.agent_owner = ev.agentOwner;
+  if (ev.agentUser)
+    wire.agent_user = ev.agentUser;
+  if (ev.sandboxId)
+    wire.sandbox_id = ev.sandboxId;
+  if (ev.parentAgentId)
+    wire.parent_agent_id = ev.parentAgentId;
+  if (ev.delegationChain?.length)
+    wire.delegation_chain = ev.delegationChain;
+  if (ev.attestation)
+    wire.attestation = ev.attestation;
+  if (ev.sensorId)
+    wire.sensor_id = ev.sensorId;
+  if (ev.sensorType)
+    wire.sensor_type = ev.sensorType;
+  if (ev.sensorVersion)
+    wire.sensor_version = ev.sensorVersion;
   if (ev.sessionId)
     wire.session_id = ev.sessionId;
   if (ev.llmProtocol)
@@ -388,8 +418,11 @@ function buildGuardEvent(input, transcript, policy) {
   const event = {
     kind: "tool_call",
     observationPoint: "invocation",
-    sensor: { id: "openguardrails-codex-automode", class: "in_process" },
-    subject: { agent_id: AGENT_ID, agent_type: "codex", attestation: "client_key" },
+    sensorId: "openguardrails-codex-automode",
+    sensorType: "in_process",
+    agentId: AGENT_ID,
+    agentType: "codex",
+    attestation: "client_key",
     payload: { name: input.tool_name, arguments: input.tool_input ?? {} },
     eventId: id("evt"),
     guardId: id("ga"),

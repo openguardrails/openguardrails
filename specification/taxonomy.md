@@ -63,7 +63,7 @@ System compromise, judged on actions and data flow.
 | `security.tool_poisoning` | Malicious tool/MCP **definition** (hidden instructions in descriptions/schemas). |
 | `security.memory_poisoning` | Persistent/cross-session corruption of agent memory — instructions implanted in memory that survive across sessions. |
 | `security.resource_exhaustion` | Loop amplification, runaway API spend, action/order spam — abuse judged on action rates and volume. |
-| `security.shadow_agent` | Several agents hiding behind one identity — the same `subject.agent_id` observed with differing `agent_type` values (one credential driving multiple harnesses). An identity-governance signal emitted by the runtime, not a content judgment. |
+| `security.shadow_agent` | Several agents hiding behind one identity — the same `agent_id` observed with differing `agent_type` values (one credential driving multiple harnesses). An identity-governance signal emitted by the runtime, not a content judgment. |
 
 ### `security.secret_leak.*` — credential-kind subcategories
 

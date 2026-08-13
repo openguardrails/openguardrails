@@ -25,7 +25,7 @@ function makeEvent(extra = {}) {
   return {
     kind: "tool_call",
     observationPoint: "invocation",
-    subject: { agent_id: "test-agent" },
+    agentId: "test-agent",
     payload: { name: "bash", arguments: { command: "ls" } },
     eventId: "evt-1",
     guardId: "ga-1",
@@ -58,20 +58,23 @@ test("eventToWire sends the minimal event as exactly {ogr_version, kind, payload
 
 test("eventToWire drops empty optionals and maps provenance", () => {
   const bare = eventToWire(makeEvent())
-  for (const key of ["session_id", "llm_protocol", "provenance", "sensor"]) {
+  for (const key of ["session_id", "llm_protocol", "provenance", "sensor_id", "agent_type"]) {
     assert.ok(!(key in bare), `empty optional leaked onto the wire: ${key}`)
   }
   const full = eventToWire(
     makeEvent({
       sessionId: "s1",
       llmProtocol: "anthropic.messages",
-      sensor: { id: "test-sensor", class: "in_process" },
+      sensorId: "test-sensor",
+      sensorType: "in_process",
       provenance: [{ source: "web", trust: "untrusted", taintTags: ["injection"] }],
     }),
   )
   assert.equal(full.session_id, "s1")
   assert.equal(full.llm_protocol, "anthropic.messages")
-  assert.deepEqual(full.sensor, { id: "test-sensor", class: "in_process" })
+  assert.equal(full.sensor_id, "test-sensor")
+  assert.equal(full.sensor_type, "in_process")
+  assert.equal(full.agent_id, "test-agent")   // flat on the wire — no envelope
   assert.deepEqual(full.provenance, [{ source: "web", trust: "untrusted", taint_tags: ["injection"] }])
 })
 
@@ -212,11 +215,11 @@ test("429 maps to RateLimitedError with the limit", async () => {
 })
 
 test("400 invalid_event keeps the details on the error body", async () => {
-  handler = () => ({ status: 400, json: { error: "invalid_event", details: ["subject: required"] } })
+  handler = () => ({ status: 400, json: { error: "invalid_event", details: ["payload: required"] } })
   await assert.rejects(client().evaluate(makeEvent()), (err) => {
     assert.ok(err instanceof RuntimeApiError)
     assert.equal(err.code, "invalid_event")
-    assert.deepEqual(err.body.details, ["subject: required"])
+    assert.deepEqual(err.body.details, ["payload: required"])
     return true
   })
 })

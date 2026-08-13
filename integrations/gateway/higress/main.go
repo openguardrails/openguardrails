@@ -439,7 +439,7 @@ func onRequestHeaders(ctx wrapper.HttpContext, cfg Config) types.Action {
 
 // subjectFromCtx assembles the request's agent identity from what the header
 // phase stored. nil when the request carried nothing — the key-only floor.
-func subjectFromCtx(ctx wrapper.HttpContext, cfg Config) *subject {
+func subjectFromCtx(ctx wrapper.HttpContext, cfg Config) identity {
 	return subjectOf(
 		ctx.GetStringContext(ctxAgentID, ""),
 		ctx.GetStringContext(ctxAgentType, ""),

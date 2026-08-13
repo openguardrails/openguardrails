@@ -35,51 +35,41 @@ export type AttestationLevel =
   | "gateway_api_key"
   | "client_key"
 
+/** How evadable an observer is, weakest first. See specification/guard-event.md#the-sensor-axis. */
+export type SensorType = "in_process" | "wrapper" | "proxy" | "kernel"
+
 /**
- * Which agent is acting — the five-field agent identity plus actor lineage.
- * Keys are snake_case because the subject is passed to the wire verbatim.
- * A key-only caller omits the subject entirely; the runtime then derives the
- * agent from the API key (one key, one default agent) and attributes every
- * session to one user. See specification/guard-event.md#subject.
+ * OGR v0.6 GuardEvent: all fields are FLAT, top-level — the identity fields
+ * are scalars and the `agent`/`sensor` prefixes are the namespace (no
+ * subject/sensor envelope). Objects are reserved for inherently structured
+ * data: payload, provenance. A key-only caller sends only kind + payload;
+ * the runtime derives everything else.
  */
-export interface Subject {
-  /** The acting agent, unique within the organization. Absent → derived from the API key. */
-  agent_id?: string
-  /** What kind of agent (`hermes`, `openclaw`, `claude-code.subagent`, `smartwork`). A label, not an identity. */
-  agent_type?: string
-  /** The workspace (named group of agents) this agent belongs to. Absent → the API key's workspace. */
-  agent_workspace?: string
-  /** The agent's builder or responsible party, e.g. `user:tom`. An attribute, never a policy boundary. */
-  agent_owner?: string
-  /** Who is using the agent in THIS session. Absent → every session is one user. */
-  agent_user?: string
-  sandbox_id?: string
-  parent_agent_id?: string
-  delegation_chain?: string[]
-  /** How the PEP verified the identity fields; the runtime clamps it to the channel ceiling. */
-  attestation?: AttestationLevel
-}
-
-/** How evadable an observer is, weakest first. See specification/guard-event.md#sensor. */
-export type SensorClass = "in_process" | "wrapper" | "proxy" | "kernel"
-
-export interface Sensor {
-  /** Stable id of the reporting integration, e.g. `openguardrails-ebpf`. */
-  id: string
-  /** Absent means unknown — consumers MUST treat the sensor as bypassable. */
-  class?: SensorClass
-  version?: string
-}
-
 export interface GuardEvent {
   kind: string // tool_call | exec | tool_result | model_output | network | ...
+  payload: Record<string, unknown>
   /** Absent = derived from `kind` by the runtime (transcript → conversation, actions → invocation, exec/network/file → execution). */
   observationPoint?: string // conversation | invocation | execution
+  /** The acting agent, org-unique. Absent → derived from the API key. */
+  agentId?: string
+  /** What kind of agent (`hermes`, `openclaw`, `smartwork`). A label, not an identity. */
+  agentType?: string
+  /** The named group of agents this one belongs to. Absent → the API key's workspace. */
+  agentWorkspace?: string
+  /** The agent's builder / responsible party. An attribute, never a policy boundary. */
+  agentOwner?: string
+  /** Who is using the agent THIS session. Absent → every session is one user. */
+  agentUser?: string
+  sandboxId?: string
+  parentAgentId?: string
+  delegationChain?: string[]
+  /** How the PEP verified the identity fields; the runtime clamps it to the channel ceiling. */
+  attestation?: AttestationLevel
   /** WHICH integration observed it — the mechanism axis, orthogonal to the altitude. */
-  sensor?: Sensor
-  /** Omitted only by a key-only caller; the runtime then derives the agent from the API key. */
-  subject?: Subject
-  payload: Record<string, unknown>
+  sensorId?: string
+  /** Absent means unknown — consumers MUST treat the sensor as bypassable. */
+  sensorType?: SensorType
+  sensorVersion?: string
   /**
    * OGR v0.6: event identity is born at the runtime — never sent on the wire,
    * assigned locally by an in-process Runtime, returned on every Verdict.

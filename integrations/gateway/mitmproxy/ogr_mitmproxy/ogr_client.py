@@ -62,9 +62,10 @@ def make_event(kind: str, *, subject: dict, payload: dict, session_id: str,
         "observation_point": "conversation",
         # proxy class: an agent that talks to a different endpoint is never
         # seen here at all — evadable from outside the process, not from in it.
-        "sensor": {"id": "openguardrails-mitmproxy", "class": "proxy"},
+        "sensor_id": "openguardrails-mitmproxy",
+        "sensor_type": "proxy",
         "kind": kind,
-        "subject": subject,
+        **subject,
         "payload": payload,
     }
     if llm_protocol:

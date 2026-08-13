@@ -1,5 +1,5 @@
 """OpenGuardrails SDK: in-process reference runtime + client for the Runtime API."""
-from .models import GuardEvent, Verdict, Subject, Provenance, Category, OGR_VERSION
+from .models import GuardEvent, Verdict, Provenance, Category, OGR_VERSION
 from .runtime import Runtime
 from .policy import merge_policy, resolve_policy, load_policy
 from .client import (

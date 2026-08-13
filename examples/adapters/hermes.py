@@ -63,8 +63,8 @@ class HermesAgentGuard(_Enforcer):
         guard_id = _id("ga")
         ev = GuardEvent(
             kind="tool_call", observation_point="invocation",
-            subject={"agent_id": self.agent_id, "agent_type": "hermes",
-                     "agent_user": self.agent_user},
+            agent_id=self.agent_id, agent_type="hermes",
+            agent_user=self.agent_user,
             payload={"name": name, "arguments": arguments},
             event_id=_id("evt"), guard_id=guard_id, timestamp=_now(),
             session_id=session_id, provenance=provenance or [],
@@ -92,8 +92,8 @@ class GuardedSandbox(_Enforcer):
         ctx = decode_guardcontext(guardcontext)
         ev = GuardEvent(
             kind="exec", observation_point="execution",
-            subject={"agent_id": "hermes-1", "agent_type": "hermes",
-                     "sandbox_id": self.sandbox_id},
+            agent_id="hermes-1", agent_type="hermes",
+            sandbox_id=self.sandbox_id,
             payload={"argv": argv, "cwd": cwd, "env_keys": env_keys or []},
             event_id=_id("evt"), guard_id=ctx["guard_id"], timestamp=_now(),
             session_id=ctx["session_id"],

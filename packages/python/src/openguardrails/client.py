@@ -16,7 +16,7 @@ Wire contract (protocol 0.6):
                   {"results": [{"id", "status", "error"?}, ...]}.
   /v1/enroll      {"public_key": b64url raw 32-byte Ed25519, "pep_id"?,
                   "name"?} → 200/201 {"pep_id", "key_id"}.
-  /v1/heartbeat   {"sensor"?, "subject"?, "interval_s"?, "counters"?} → {"ok"}.
+  /v1/heartbeat   {"sensor_id"?, "agent_id"?, "interval_s"?, "counters"?} → {"ok"}.
   /v1/approvals   ?guard_id=... → {"status": "pending"|"approved"|"denied"|
                   "expired"}, or 404 {"status": "not_found"}.
 Errors: 401 {"error":"unauthorized"}, 429 {"error":"rate_limited","limit"},
@@ -72,9 +72,9 @@ def event_to_wire(ev: GuardEvent | dict[str, Any]) -> dict[str, Any]:
 
     Drops empty optionals (None / [] / "") so the result validates against
     guard-event.schema.json, which marks optionals as absent-or-typed, never
-    null. Nested `sensor` and `provenance` entries are cleaned the same way.
-    Dict input passes through untouched apart from the empty-drop, so runtime
-    extension fields (`run_id`, `turn`, `authz`, ...) survive.
+    null (v0.6: every identity field is a flat top-level scalar). Dict input
+    passes through untouched apart from the empty-drop, so runtime extension
+    fields (`run_id`, `turn`, `authz`, ...) survive.
     """
     d = dataclasses.asdict(ev) if dataclasses.is_dataclass(ev) else dict(ev)
     # OGR v0.6: event identity is born at the runtime and returned on the
@@ -83,14 +83,6 @@ def event_to_wire(ev: GuardEvent | dict[str, Any]) -> dict[str, Any]:
     d.pop("event_id", None)
     d.pop("context_refs", None)
     wire = _drop_empties(d)
-    # A key-only caller asserts no identity: an empty subject leaves the wire
-    # entirely and the runtime derives the agent from the API key.
-    if isinstance(wire.get("subject"), dict):
-        wire["subject"] = _drop_empties(wire["subject"])
-        if not wire["subject"]:
-            del wire["subject"]
-    if isinstance(wire.get("sensor"), dict):
-        wire["sensor"] = _drop_empties(wire["sensor"])
     if isinstance(wire.get("provenance"), list):
         wire["provenance"] = [
             _drop_empties(p) if isinstance(p, dict) else p
@@ -322,16 +314,25 @@ class RuntimeClient:
             payload["name"] = name
         return self._request("POST", "/v1/enroll", payload)
 
-    def heartbeat(self, sensor: dict[str, Any] | None = None,
-                  subject: dict[str, Any] | None = None,
+    def heartbeat(self, sensor_id: str | None = None,
+                  agent_id: str | None = None,
+                  sensor_type: str | None = None,
+                  sensor_version: str | None = None,
                   interval_s: float | None = None,
                   counters: dict[str, Any] | None = None) -> dict[str, Any]:
-        """POST /v1/heartbeat (liveness); returns `{"ok": true}`."""
+        """POST /v1/heartbeat (liveness); returns `{"ok": true}`.
+
+        v0.6: flat fields, like every other identity field — at least one of
+        `sensor_id` / `agent_id`."""
         payload: dict[str, Any] = {}
-        if sensor:
-            payload["sensor"] = sensor
-        if subject:
-            payload["subject"] = subject
+        if sensor_id:
+            payload["sensor_id"] = sensor_id
+        if sensor_type:
+            payload["sensor_type"] = sensor_type
+        if sensor_version:
+            payload["sensor_version"] = sensor_version
+        if agent_id:
+            payload["agent_id"] = agent_id
         if interval_s is not None:
             payload["interval_s"] = interval_s
         if counters:

@@ -109,5 +109,5 @@ paths joined to `OGR_RUNTIME_URL`, with automatic fallback to deployments
 that mount the API under `/api/public/ogr`.
 
 OpenClaw is the "one assistant per machine" case: every terminal attaches to
-the same daemon, so events assert `subject.agent_id = openclaw-<hostname>`
+the same daemon, so events assert `agent_id = openclaw-<hostname>`
 and the machine appears as one Agent in the console.

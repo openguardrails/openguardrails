@@ -7,7 +7,7 @@ verify rather than believe. Keywords per RFC 2119.
 
 Two `v0.1` gaps share a root cause:
 
-1. **Unauthenticated events** — `subject.agent_id` is a claim, not an identity.
+1. **Unauthenticated events** — `agent_id` is a claim, not an identity.
    Events can be spoofed by any local process and selectively suppressed by a
    compromised agent.
 2. **Unverifiable approvals** — guard-context flags bit 1 ("approval already
@@ -36,7 +36,7 @@ enrollment a PEP MUST hold:
    Credentials SHOULD be short-lived and renewed automatically;
 2. the runtime's current verification keys;
 3. a recorded **assertion scope**: the workspaces this PEP may write into,
-   the `subject.agent_id` namespaces it may name (exact values or prefix
+   the `agent_id` namespaces it may name (exact values or prefix
    patterns), and the maximum [attestation level](attestation.md) it may
    declare. The scope bounds the blast radius of a compromised PEP.
 
@@ -48,7 +48,7 @@ has expired. PEPs SHOULD refresh verification keys on every reconnect.
 
 1. A PEP MUST send events over a channel authenticated with its enrollment
    credential. mTLS is RECOMMENDED; the contract stays transport-neutral.
-2. A runtime MUST bind the channel identity to the `subject` values that PEP is
+2. A runtime MUST bind the channel identity to the identity fields that PEP is
    allowed to assert (its enrollment assertion scope). For an out-of-scope or
    unverifiable assertion it MUST NOT accept the claimed identity strength:
    it MUST either reject the event or downgrade the assertion to
@@ -69,19 +69,20 @@ channel, with the cadence declared at enrollment:
 
 ```
 heartbeat: {
-  sensor: { id: "openguardrails-higress-connector", class: "proxy" },
+  sensor_id: "openguardrails-higress-connector",
+  sensor_type: "proxy",
   interval_s: 30,
   counters: { events_emitted: 1420, degraded: false }
 }
 ```
 
-A heartbeat identifies its **sender**, and the sender is the PEP: `sensor.id`, the
+A heartbeat identifies its **sender**, and the sender is the PEP: `sensor_id`, the
 same identity its events carry. That is what makes the signal usable for coverage —
 a runtime learns that an integration went dark, which is the bypass this exists to
 catch.
 
 An instrumentation that fronts exactly ONE agent MAY additionally name it
-(`subject.agent_id`), so the agent's liveness rides the same beat. A gateway or
+(`agent_id`), so the agent's liveness rides the same beat. A gateway or
 proxy fronting many agents MUST NOT: its liveness is not any one agent's, and
 attributing it to one would report the other agents as covered by a sensor that
 never spoke for them. Conversely, an agent falling silent behind a live PEP is a

@@ -243,11 +243,11 @@ A prompt that trips the moderation policy comes back as:
 |-----|---------|---------|
 | `OGR_RUNTIME_URL` | `http://localhost:3000` | deployment base URL of the runtime (PDP); the SDK speaks canonical `/v1/*` paths and falls back to the legacy `/api/public/ogr` mount automatically |
 | `OGR_API_KEY` | — | workspace key, `Authorization: Bearer` (required) |
-| `OGR_AGENT_ID` | — | `subject.agent_id` (org-unique); unset lets the runtime derive the agent from the API key |
-| `OGR_AGENT_TYPE` | — | `subject.agent_type` — what kind of agent fronts this proxy |
-| `OGR_AGENT_WORKSPACE` | — | `subject.agent_workspace` — the group of agents this one belongs to; unset lands in the key's workspace |
-| `OGR_AGENT_OWNER` | — | `subject.agent_owner` — the agent's builder / responsible party |
-| `OGR_AGENT_USER` | — | `subject.agent_user` — who uses the agent behind this proxy; only fits a single-user proxy, unset means one user |
+| `OGR_AGENT_ID` | — | `agent_id` (org-unique); unset lets the runtime derive the agent from the API key |
+| `OGR_AGENT_TYPE` | — | `agent_type` — what kind of agent fronts this proxy |
+| `OGR_AGENT_WORKSPACE` | — | `agent_workspace` — the group of agents this one belongs to; unset lands in the key's workspace |
+| `OGR_AGENT_OWNER` | — | `agent_owner` — the agent's builder / responsible party |
+| `OGR_AGENT_USER` | — | `agent_user` — who uses the agent behind this proxy; only fits a single-user proxy, unset means one user |
 | `OGR_INFER_LIFECYCLE` | `true` | infer Session/Run/Turn server-side when no `x-ogr-*` headers are present |
 | `OGR_FAIL_MODE_CLOSED` | `true` | if the runtime is unreachable: block (`true`) or pass through (`false`) |
 | `OGR_CHECK_RESPONSE` | `true` | also moderate the model completion |

@@ -171,13 +171,11 @@ func sendHeartbeat(cfg *Config) {
 	logInfof("[OGR-BEAT] sending: evaluated=%d unchecked=%d ingested=%d mirrored=%d refused=%d unreadable=%d",
 		c["evaluated"], c["unchecked"], c["ingested"], c["mirrored"], c["refused"], c["unreadable"])
 	payload, err := json.Marshal(map[string]any{
-		"sensor": map[string]any{
-			"id":      sensorName,
-			"class":   sensorClass,
-			"version": pluginVersion,
-		},
-		"interval_s": heartbeatPeriodMs / 1000,
-		"counters":   counters(),
+		"sensor_id":      sensorName,
+		"sensor_type":    sensorType,
+		"sensor_version": pluginVersion,
+		"interval_s":     heartbeatPeriodMs / 1000,
+		"counters":       counters(),
 	})
 	if err != nil {
 		return

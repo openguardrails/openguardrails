@@ -22,7 +22,7 @@ def test_exec_event_is_sandbox_altitude():
     assert ev.payload["argv"] == ["bash", "-c", "id"]
     assert ev.payload["process"] == {"pid": 10, "ppid": 9, "comm": "bash"}
     assert ev.payload["sensor"] == {"engine": "ogr-ebpf", "root_pid": 5}
-    assert ev.subject["sandbox_id"] == "sbx-5"
+    assert ev.sandbox_id == "sbx-5"   # flat identity fields (v0.6)
     assert ev.session_id == "run-5"
     # v0.6: no local guard_id without a propagated guard-context — the
     # runtime assigns one and correlates server-side.

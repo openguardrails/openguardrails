@@ -53,7 +53,7 @@ export const OpenGuardrailsPlugin: Plugin = async ({ directory }, options) => {
       const ev: GuardEvent = {
         kind: "tool_call",
         observationPoint: "invocation",
-        subject: { agent_id: "opencode", agent_type: "opencode" },
+        agentId: "opencode", agentType: "opencode",
         payload: { name: input.tool, arguments: output.args },
         eventId: id("evt"),
         guardId: id("ga"),

