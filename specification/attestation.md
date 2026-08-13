@@ -35,7 +35,7 @@ A claim is only as strong as the channel that carried it. A runtime MUST clamp
 event channel itself can prove:
 
 - events from an unenrolled PEP (e.g. authenticated only by a shared
-  workspace API key) have a ceiling of `self_declared`;
+  organization API key) have a ceiling of `self_declared`;
 - events from an enrolled PEP have the ceiling recorded in that PEP's
   enrollment (its channel credential strength and granted assertion scope).
 

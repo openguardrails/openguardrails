@@ -37,35 +37,40 @@ function makeEvent(extra = {}) {
 
 // --- eventToWire / verdictFromWire ------------------------------------------
 
-test("eventToWire emits every schema-required key in snake_case", () => {
+test("eventToWire emits every schema-required key and never event_id", () => {
   const wire = eventToWire(makeEvent())
   for (const key of guardEventSchema.required) {
     assert.ok(key in wire, `missing required wire key: ${key}`)
   }
   assert.equal(wire.ogr_version, OGR_VERSION)
-  assert.equal(wire.ogr_version, "0.5")
-  assert.equal(wire.event_id, "evt-1")
+  assert.equal(wire.ogr_version, "0.6")
+  // OGR v0.6: event identity is born at the runtime — a locally minted
+  // eventId must NEVER reach the wire. guard_id rides only as a hint.
+  assert.ok(!("event_id" in wire))
   assert.equal(wire.guard_id, "ga-1")
   assert.equal(wire.observation_point, "invocation")
 })
 
+test("eventToWire sends the minimal event as exactly {ogr_version, kind, payload}", () => {
+  const wire = eventToWire({ kind: "exec", payload: { argv: ["ls"] }, provenance: [] })
+  assert.deepEqual(Object.keys(wire).sort(), ["kind", "ogr_version", "payload"])
+})
+
 test("eventToWire drops empty optionals and maps provenance", () => {
   const bare = eventToWire(makeEvent())
-  for (const key of ["session_id", "llm_protocol", "context_refs", "provenance", "sensor"]) {
+  for (const key of ["session_id", "llm_protocol", "provenance", "sensor"]) {
     assert.ok(!(key in bare), `empty optional leaked onto the wire: ${key}`)
   }
   const full = eventToWire(
     makeEvent({
       sessionId: "s1",
       llmProtocol: "anthropic.messages",
-      contextRefs: ["evt-0"],
       sensor: { id: "test-sensor", class: "in_process" },
       provenance: [{ source: "web", trust: "untrusted", taintTags: ["injection"] }],
     }),
   )
   assert.equal(full.session_id, "s1")
   assert.equal(full.llm_protocol, "anthropic.messages")
-  assert.deepEqual(full.context_refs, ["evt-0"])
   assert.deepEqual(full.sensor, { id: "test-sensor", class: "in_process" })
   assert.deepEqual(full.provenance, [{ source: "web", trust: "untrusted", taint_tags: ["injection"] }])
 })
@@ -80,7 +85,7 @@ test("eventToWire passes extension fields through verbatim", () => {
 
 test("verdictFromWire maps snake_case and passes extension keys through", () => {
   const verdict = verdictFromWire({
-    ogr_version: "0.5",
+    ogr_version: "0.6",
     event_id: "evt-1",
     guard_id: "ga-1",
     provider: "runtime",
@@ -88,7 +93,6 @@ test("verdictFromWire maps snake_case and passes extension keys through", () => 
     categories: [{ id: "security.exfiltration", domain: "security", score: 0.9 }],
     reasons: ["nope"],
     latency_ms: 12,
-    confidence: 0.8,
     "x.ogr.session_id": "sess-9",
     modifications: { kind: "redact" },
   })
@@ -96,8 +100,7 @@ test("verdictFromWire maps snake_case and passes extension keys through", () => 
   assert.equal(verdict.guardId, "ga-1")
   assert.equal(verdict.decision, "block")
   assert.equal(verdict.latencyMs, 12)
-  assert.equal(verdict.confidence, 0.8)
-  assert.equal(verdict.ogrVersion, "0.5")
+  assert.equal(verdict.ogrVersion, "0.6")
   assert.equal(verdict["x.ogr.session_id"], "sess-9")
   assert.deepEqual(verdict.modifications, { kind: "redact" })
   assert.deepEqual(verdict.categories, [{ id: "security.exfiltration", domain: "security", score: 0.9 }])
@@ -152,7 +155,7 @@ test("evaluate posts one wire event to <prefix>/v1/evaluate and maps the verdict
   handler = () => ({
     status: 200,
     json: {
-      ogr_version: "0.5",
+      ogr_version: "0.6",
       event_id: "evt-1",
       guard_id: "ga-1",
       provider: "runtime",
@@ -168,8 +171,9 @@ test("evaluate posts one wire event to <prefix>/v1/evaluate and maps the verdict
   assert.equal(requests[0].headers.authorization, "Bearer ogr_test")
   assert.equal(requests[0].headers["content-type"], "application/json")
   assert.equal(requests[0].headers["ogr-partial"], undefined)
-  assert.equal(requests[0].body.event_id, "evt-1")
-  assert.equal(requests[0].body.ogr_version, "0.5")
+  // v0.6: no client event id on the wire; the verdict is where the id is learned.
+  assert.equal(requests[0].body.event_id, undefined)
+  assert.equal(requests[0].body.ogr_version, "0.6")
   assert.equal(verdict.decision, "allow")
   assert.equal(verdict.eventId, "evt-1")
   assert.equal(verdict["x.ogr.session_id"], "sess-1")
@@ -227,10 +231,12 @@ test("ingest posts {batch} and parses the always-207 results", async () => {
       ],
     },
   })
-  const results = await client().ingest([makeEvent(), makeEvent({ eventId: "evt-2" })])
+  const results = await client().ingest([makeEvent(), makeEvent({ guardId: "ga-2" })])
   assert.equal(requests[0].url, "/api/public/ogr/v1/ingest")
   assert.equal(requests[0].body.batch.length, 2)
-  assert.equal(requests[0].body.batch[1].event_id, "evt-2")
+  // v0.6: ids come back in the ordered results, never go up in the batch.
+  assert.equal(requests[0].body.batch[1].event_id, undefined)
+  assert.equal(requests[0].body.batch[1].guard_id, "ga-2")
   assert.deepEqual(results, [
     { id: "evt-1", status: 200 },
     { id: "evt-2", status: 400, error: "invalid_event" },
@@ -243,32 +249,25 @@ test("ingest refuses a batch over the maximum", async () => {
   assert.equal(requests.length, 0)
 })
 
-test("enroll posts snake_case and returns {guardId, keyId}", async () => {
-  handler = () => ({ status: 200, json: { guard_id: "ga-77", key_id: "key-9" } })
-  const cred = await client().enroll({ publicKey: "pubkey-b64url", guardId: "my-hook", name: "my hook" })
+test("enroll posts snake_case and returns {pepId, keyId}", async () => {
+  handler = () => ({ status: 200, json: { pep_id: "pep-77", key_id: "key-9" } })
+  const cred = await client().enroll({ publicKey: "pubkey-b64url", pepId: "my-hook", name: "my hook" })
   assert.equal(requests[0].url, "/api/public/ogr/v1/enroll")
-  assert.deepEqual(requests[0].body, { public_key: "pubkey-b64url", guard_id: "my-hook", name: "my hook" })
-  assert.deepEqual(cred, { guardId: "ga-77", keyId: "key-9" })
+  assert.deepEqual(requests[0].body, { public_key: "pubkey-b64url", pep_id: "my-hook", name: "my hook" })
+  assert.deepEqual(cred, { pepId: "pep-77", keyId: "key-9" })
 })
 
-test("heartbeat, getConfig and getApproval hit their endpoints", async () => {
+test("heartbeat and getApproval hit their endpoints", async () => {
   handler = (req) => {
     if (req.url.endsWith("/v1/heartbeat")) return { status: 200, json: { ok: true } }
-    if (req.url.endsWith("/v1/config")) {
-      return { status: 200, json: { on_unreachable: { decision: "allow" }, poll_s: 30 } }
-    }
     return { status: 200, json: { status: "approved" } }
   }
   const c = client()
   assert.deepEqual(await c.heartbeat(), { ok: true })
-  const config = await c.getConfig()
-  assert.deepEqual(config.onUnreachable, { decision: "allow" })
-  assert.equal(config.poll_s, 30)
   const approval = await c.getApproval("ga one/2")
   assert.deepEqual(approval, { status: "approved" })
   assert.equal(requests[1].method, "GET")
-  assert.equal(requests[1].url, "/api/public/ogr/v1/config")
-  assert.equal(requests[2].url, "/api/public/ogr/v1/approvals?guard_id=ga%20one%2F2")
+  assert.equal(requests[1].url, "/api/public/ogr/v1/approvals?guard_id=ga%20one%2F2")
 })
 
 test("a signer adds a verifiable ogr-batch-signature to evaluate and ingest", async () => {

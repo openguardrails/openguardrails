@@ -2,22 +2,21 @@
 
 The OGR layering is API → SDK → Plugin: a runtime exposes the HTTP API
 (`POST /v1/evaluate`, `POST /v1/ingest`, `POST /v1/enroll`, `POST /v1/heartbeat`,
-`GET /v1/config`, `GET /v1/approvals`), this module wraps it, and integrations
+`GET /v1/approvals`), this module wraps it, and integrations
 (plugins) build on the wrapper instead of hand-rolling `urllib` calls.
 
 Stdlib only — the package's zero-dependency promise holds. Ed25519 request
 signing (`Ed25519Signer`) is optional and imports `cryptography` lazily.
 
-Wire contract (protocol 0.5):
+Wire contract (protocol 0.6):
   /v1/evaluate    one GuardEvent in, one Verdict out (extension keys such as
                   `x.ogr.session_id` pass through). Header `ogr-partial: 1`
                   requests an interim judgment on streaming content.
   /v1/ingest      {"batch": [event, ...]} (max 100), always HTTP 207 with
                   {"results": [{"id", "status", "error"?}, ...]}.
-  /v1/enroll      {"public_key": b64url raw 32-byte Ed25519, "guard_id"?,
-                  "name"?} → 200/201 {"guard_id", "key_id"}.
+  /v1/enroll      {"public_key": b64url raw 32-byte Ed25519, "pep_id"?,
+                  "name"?} → 200/201 {"pep_id", "key_id"}.
   /v1/heartbeat   {"sensor"?, "subject"?, "interval_s"?, "counters"?} → {"ok"}.
-  /v1/config      → {"on_unreachable": {...}} (degraded-mode directives).
   /v1/approvals   ?guard_id=... → {"status": "pending"|"approved"|"denied"|
                   "expired"}, or 404 {"status": "not_found"}.
 Errors: 401 {"error":"unauthorized"}, 429 {"error":"rate_limited","limit"},
@@ -78,6 +77,11 @@ def event_to_wire(ev: GuardEvent | dict[str, Any]) -> dict[str, Any]:
     extension fields (`run_id`, `turn`, `authz`, ...) survive.
     """
     d = dataclasses.asdict(ev) if dataclasses.is_dataclass(ev) else dict(ev)
+    # OGR v0.6: event identity is born at the runtime and returned on the
+    # response — a locally minted event_id never goes on the wire, and
+    # context_refs left the protocol.
+    d.pop("event_id", None)
+    d.pop("context_refs", None)
     wire = _drop_empties(d)
     # A key-only caller asserts no identity: an empty subject leaves the wire
     # entirely and the runtime derives the agent from the API key.
@@ -114,8 +118,6 @@ def verdict_from_wire(wire: dict[str, Any]) -> Verdict:
         categories=[Category(c["id"], c["domain"], c.get("score", 1.0))
                     for c in wire.get("categories", [])],
         reasons=list(wire.get("reasons", [])),
-        evidence=list(wire.get("evidence", [])),
-        confidence=wire.get("confidence"),
         latency_ms=wire.get("latency_ms"),
         modifications=wire.get("modifications"),
         ogr_version=wire.get("ogr_version", OGR_VERSION),
@@ -304,9 +306,9 @@ class RuntimeClient:
             results.extend(body.get("results", []))
         return results
 
-    def enroll(self, public_key: str | bytes, guard_id: str | None = None,
+    def enroll(self, public_key: str | bytes, pep_id: str | None = None,
                name: str | None = None) -> dict[str, Any]:
-        """POST /v1/enroll; returns `{"guard_id", "key_id"}`.
+        """POST /v1/enroll; returns `{"pep_id", "key_id"}`.
 
         `public_key` is the raw 32-byte Ed25519 public key (bytes) or its
         base64url encoding (str, e.g. `Ed25519Signer.public_key_b64url()`).
@@ -314,8 +316,8 @@ class RuntimeClient:
         if isinstance(public_key, (bytes, bytearray)):
             public_key = _b64url(bytes(public_key))
         payload: dict[str, Any] = {"public_key": public_key}
-        if guard_id:
-            payload["guard_id"] = guard_id
+        if pep_id:
+            payload["pep_id"] = pep_id
         if name:
             payload["name"] = name
         return self._request("POST", "/v1/enroll", payload)
@@ -335,11 +337,6 @@ class RuntimeClient:
         if counters:
             payload["counters"] = counters
         return self._request("POST", "/v1/heartbeat", payload)
-
-    def get_config(self) -> dict[str, Any]:
-        """GET /v1/config — degraded-mode directives, e.g.
-        `{"on_unreachable": {"security.*": "block", ...}}`."""
-        return self._request("GET", "/v1/config")
 
     def get_approval(self, guard_id: str) -> dict[str, Any]:
         """GET /v1/approvals?guard_id=... — poll a require_approval decision.

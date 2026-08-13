@@ -7,7 +7,7 @@ openapi: 3.1.0
 
 info:
   title: OpenGuardrails Runtime API
-  version: "0.5"
+  version: "0.6"
   summary: The HTTP wire contract between an OGR runtime (PDP) and its interception points (PEPs).
   description: |
     The OpenGuardrails (OGR) Runtime API is the normative HTTP binding of the
@@ -28,7 +28,7 @@ info:
     All requests and responses are JSON, UTF-8,
     `Content-Type: application/json`. Field names on the wire are
     `snake_case`, exactly as in the JSON Schemas. The canonical schema
-    version is `ogr_version: "0.5"`; a runtime SHOULD accept events from
+    version is `ogr_version: "0.6"`; a runtime SHOULD accept events from
     `0.1` through the current version and normalize on read.
 
     Hosted reference documentation: https://openguardrails.com/api/docs/
@@ -94,7 +94,7 @@ paths:
 
         **Failure handling** — if the call fails (timeout, 429, 5xx,
         network), the PEP applies its degraded-mode policy from
-        `GET /v1/config`; it MUST NOT default to allow for gated categories.
+        its locally configured degraded-mode policy; it MUST NOT default to allow for gated categories.
       parameters:
         - name: ogr-partial
           in: header
@@ -124,9 +124,7 @@ paths:
               execBlock:
                 summary: Kernel sensor reporting a curl-pipe-to-bash exec
                 value:
-                  ogr_version: "0.5"
-                  event_id: evt_9f2c
-                  guard_id: g_7a41
+                  ogr_version: "0.6"
                   timestamp: "2026-08-11T09:30:00Z"
                   observation_point: execution
                   sensor: { id: ogr.ebpf.sensor, class: kernel }
@@ -159,9 +157,9 @@ paths:
                 block:
                   summary: Block with session attribution (x.ogr.session_id)
                   value:
-                    ogr_version: "0.5"
-                    event_id: evt_9f2c
-                    guard_id: g_7a41
+                    ogr_version: "0.6"
+                    event_id: evt_01J9ZK7Q2M
+                    guard_id: evt_01J9ZK7Q2M
                     provider: runtime
                     decision: block
                     reasons: [security.exec.remote_script_pipe]
@@ -177,9 +175,9 @@ paths:
                 redact:
                   summary: Redact with a redaction map the PEP must apply
                   value:
-                    ogr_version: "0.5"
-                    event_id: evt_a1b2
-                    guard_id: g_7a41
+                    ogr_version: "0.6"
+                    event_id: evt_01J9ZK8R3N
+                    guard_id: evt_01J9ZK8R3N
                     provider: runtime
                     decision: redact
                     reasons: [privacy.pii.email]
@@ -200,9 +198,9 @@ paths:
                 streamedAllow:
                   summary: Allow on a streamed output, with lane selection and unjudged paths
                   value:
-                    ogr_version: "0.5"
-                    event_id: evt_c3d4
-                    guard_id: g_7a41
+                    ogr_version: "0.6"
+                    event_id: evt_01J9ZK9S4P
+                    guard_id: evt_01J9ZK9S4P
                     provider: runtime
                     decision: allow
                     x.ogr.session_id: sess_01HZX
@@ -228,8 +226,10 @@ paths:
         documented request extension fields (`run_id`, `turn`, `authz`) are
         accepted.
 
-        Ingest MUST be idempotent on (`workspace`, `event_id`): retrying a
-        batch MUST NOT duplicate events. Events arriving through ingest
+        Event ids are assigned by the runtime at ingress and returned in
+        the per-element `results` rows (order preserved — order IS the
+        pairing). There is no request deduplication: retrying a timed-out
+        batch MAY produce duplicate records. Events arriving through ingest
         without a valid `ogr-batch-signature` are capped at the
         `self_declared` attestation ceiling.
       parameters:
@@ -251,9 +251,7 @@ paths:
                   description: 1–100 GuardEvents, each validated independently.
             example:
               batch:
-                - ogr_version: "0.5"
-                  event_id: evt_1
-                  guard_id: g_7a41
+                - ogr_version: "0.6"
                   timestamp: "2026-08-11T09:31:00Z"
                   observation_point: conversation
                   kind: model_output
@@ -300,12 +298,12 @@ paths:
     post:
       operationId: enrollKey
       tags: [fleet]
-      summary: Bind a PEP's Ed25519 public key to the workspace.
+      summary: Bind a PEP's Ed25519 public key to the organization.
       description: |
-        Binds a PEP's Ed25519 key to the workspace so its future requests
+        Binds a PEP's Ed25519 key to the organization so its future requests
         can carry a verifiable identity via the `ogr-batch-signature`
         detached-JWS header, raising the channel's attestation ceiling. The
-        workspace API key is the bootstrap credential. Re-enrolling the same
+        organization API key is the bootstrap credential. Re-enrolling the same
         key is idempotent (returns `200`); a revoked key MUST NOT be
         resurrectable by re-enrolling (returns `403`).
       requestBody:
@@ -316,27 +314,27 @@ paths:
               $ref: "#/components/schemas/EnrollRequest"
             example:
               public_key: 8fT1nJc2sT3v1sJH1sYQe7rW1o0xCbBqvNQm9Yv2ZkQ
-              guard_id: g_7a41
+              pep_id: pep_7a41
               name: build-agent-3 eBPF sensor
       responses:
         "201":
-          description: First enrollment of this public key in the workspace.
+          description: First enrollment of this public key in the organization.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/EnrollCreated"
               example:
-                guard_id: g_7a41
+                pep_id: pep_7a41
                 key_id: key_01J8
                 max_attestation: sensor_attested
         "200":
-          description: Idempotent re-enrollment of a key already bound to this workspace.
+          description: Idempotent re-enrollment of a key already bound to this organization.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/EnrollExisting"
               example:
-                guard_id: g_7a41
+                pep_id: pep_7a41
                 key_id: key_01J8
         "400":
           description: The submitted key is not a valid base64url raw 32-byte Ed25519 public key.
@@ -403,34 +401,6 @@ paths:
                 $ref: "#/components/schemas/Error"
               example:
                 error: invalid_body
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "429":
-          $ref: "#/components/responses/RateLimited"
-
-  /v1/config:
-    get:
-      operationId: getConfig
-      tags: [policy]
-      summary: Fetch the degraded-mode contract.
-      description: |
-        The degraded-mode contract: what a PEP does with a gated action when
-        it **cannot reach the runtime**. Directives are keyed by category
-        prefix; the PEP applies longest-prefix match. Defaults are
-        conservative (`security.*` → `block`). Enforcement is the PEP's; the
-        runtime is only the config source. A PEP SHOULD fetch and cache this
-        at startup and refresh periodically.
-      responses:
-        "200":
-          description: The current degraded-mode directives for this workspace.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ConfigResponse"
-              example:
-                on_unreachable:
-                  "security.*": block
-                  "safety.*": allow
         "401":
           $ref: "#/components/responses/Unauthorized"
         "429":
@@ -547,9 +517,11 @@ components:
       scheme: bearer
       bearerFormat: ogr_...
       description: |
-        Workspace API key: `Authorization: Bearer ogr_<key>`. The key scopes
-        the request to one workspace; every event lands in, and every policy
-        resolves from, that workspace. A missing or invalid key produces
+        Organization API key: `Authorization: Bearer ogr_<key>`. The key
+        proves the ORGANIZATION — the tenant boundary every asserted name is
+        resolved inside. Where an event lands is the agent's business
+        (placement, then `subject.agent_workspace`, then the key's default
+        workspace as last resort). A missing or invalid key produces
         `401 {"error": "unauthorized"}`. The static key authenticates the
         *channel*, not the *sensor*: events arriving with only the workspace
         key are capped at the channel's attestation ceiling. An enrolled PEP
@@ -582,7 +554,7 @@ components:
 
   responses:
     Unauthorized:
-      description: Missing or invalid workspace API key.
+      description: Missing or invalid organization API key.
       content:
         application/json:
           schema:
@@ -756,42 +728,42 @@ components:
         additionally accept the sanctioned runtime request extensions, see
         `GuardEventExt`.
       required:
-        - ogr_version
-        - event_id
-        - guard_id
-        - timestamp
-        - observation_point
         - kind
         - payload
       additionalProperties: false
       properties:
         ogr_version:
           type: string
-          const: "0.5"
-          description: Canonical schema version of this event.
-        event_id:
-          type: string
-          minLength: 1
-          description: >-
-            Client-chosen unique id for this event; ingest is idempotent on
-            (workspace, event_id).
+          const: "0.6"
+          description: Canonical schema version. Absent = the current version.
         guard_id:
           type: string
           minLength: 1
-          description: Stable id of the PEP that observed the event.
+          description: >-
+            Correlation HINT: stable across observation points for one
+            logical action, sent only by deployments that propagate a
+            guard-context. Absent, the runtime assigns one (returned on the
+            verdict) and correlates altitudes server-side. There is no
+            client-supplied event_id at all — event identity is born at the
+            runtime and returned to the caller.
         session_id:
           type: string
           description: Client-side session attribution, if the PEP knows it.
         timestamp:
           type: string
           format: date-time
-          description: When the unit was observed (RFC 3339).
+          description: >-
+            When the unit was OBSERVED (RFC 3339). Absent = the runtime's
+            receive time; only buffered/replayed events need it.
         observation_point:
           type: string
           enum: [conversation, invocation, execution]
           description: >-
             The altitude the event was observed at — what the sensor could
-            see, orthogonal to `sensor.class`.
+            see, orthogonal to `sensor.class`. Absent, the runtime defaults
+            it from `kind` (transcript kinds → conversation;
+            tool_call/tool_result/agent_spawn/config_change → invocation;
+            exec/network/file → execution).
         sensor:
           $ref: "#/components/schemas/Sensor"
         kind:
@@ -858,29 +830,20 @@ components:
         them, so this request shape is open (`additionalProperties: true`)
         even though the canonical GuardEvent schema is closed.
       required:
-        - ogr_version
-        - event_id
-        - guard_id
-        - timestamp
-        - observation_point
         - kind
         - payload
       additionalProperties: true
       properties:
         ogr_version:
           type: string
-          const: "0.5"
-          description: Canonical schema version of this event.
-        event_id:
-          type: string
-          minLength: 1
-          description: >-
-            Client-chosen unique id for this event; ingest is idempotent on
-            (workspace, event_id).
+          const: "0.6"
+          description: Canonical schema version. Absent = the current version.
         guard_id:
           type: string
           minLength: 1
-          description: Stable id of the PEP that observed the event.
+          description: >-
+            Correlation hint (see the canonical GuardEvent schema); absent,
+            the runtime assigns and returns one.
         session_id:
           type: string
           description: Client-side session attribution, if the PEP knows it.
@@ -1076,16 +1039,21 @@ components:
       properties:
         ogr_version:
           type: string
-          const: "0.5"
+          const: "0.6"
           description: Canonical schema version of this verdict.
         event_id:
           type: string
           minLength: 1
-          description: The `event_id` of the GuardEvent this verdict judges.
+          description: >-
+            Runtime-assigned identity of the judged event, returned to the
+            caller here — clients never mint event ids.
         guard_id:
           type: string
           minLength: 1
-          description: The `guard_id` the judged event carried.
+          description: >-
+            The event's guard group: the client's propagated value when one
+            was sent, else runtime-assigned. What `GET /v1/approvals` polls
+            by.
         provider:
           type: string
           minLength: 1
@@ -1098,11 +1066,6 @@ components:
             (`allow`), stop it (`block`), hold for a human
             (`require_approval` — poll `GET /v1/approvals`), or apply
             `modifications` before proceeding (`modify`, `redact`).
-        confidence:
-          type: number
-          minimum: 0
-          maximum: 1
-          description: Overall confidence in the decision.
         latency_ms:
           type: number
           minimum: 0
@@ -1119,11 +1082,6 @@ components:
           description: Taxonomy categories matched, with scores.
         modifications:
           $ref: "#/components/schemas/Modifications"
-        evidence:
-          type: array
-          items:
-            type: object
-          description: Detector-specific supporting evidence objects.
         findings:
           type: array
           items:
@@ -1137,7 +1095,7 @@ components:
       properties:
         id:
           type: ["string", "null"]
-          description: The event's `event_id`, or `null` if it could not be read.
+          description: The runtime-assigned `event_id` of the accepted element, or `null` for a rejected one.
         status:
           type: integer
           description: >-
@@ -1154,19 +1112,21 @@ components:
         public_key:
           type: string
           description: base64url encoding of the raw 32-byte Ed25519 public key.
-        guard_id:
+        pep_id:
           type: string
-          description: Optional stable PEP id to bind the key to.
+          description: >-
+            Optional stable PEP id to bind the key to. Names the ENROLLING
+            SENSOR — unrelated to the per-action `guard_id` on events.
         name:
           type: string
           description: Optional display name for the enrolled PEP.
 
     EnrollCreated:
       type: object
-      description: First enrollment of this key in the workspace.
-      required: [guard_id, key_id, max_attestation]
+      description: First enrollment of this key in the organization.
+      required: [pep_id, key_id, max_attestation]
       properties:
-        guard_id:
+        pep_id:
           type: string
           description: The PEP id the key was bound to (supplied or generated).
         key_id:
@@ -1180,10 +1140,10 @@ components:
 
     EnrollExisting:
       type: object
-      description: Idempotent re-enrollment of a key already bound to this workspace.
-      required: [guard_id, key_id]
+      description: Idempotent re-enrollment of a key already bound to this organization.
+      required: [pep_id, key_id]
       properties:
-        guard_id:
+        pep_id:
           type: string
           description: The PEP id the key is bound to.
         key_id:
@@ -1218,20 +1178,6 @@ components:
           description: >-
             Free-form monotonic counters since PEP start, e.g.
             `events_sent`, `evaluate_errors`.
-
-    ConfigResponse:
-      type: object
-      required: [on_unreachable]
-      properties:
-        on_unreachable:
-          type: object
-          description: >-
-            Degraded-mode directives keyed by category prefix (e.g.
-            `security.*`); the PEP applies longest-prefix match.
-          additionalProperties:
-            type: string
-            enum: [block, allow, require_local_approval]
-            description: What the PEP does with a gated action matching this prefix.
 
     ApprovalStatus:
       type: object

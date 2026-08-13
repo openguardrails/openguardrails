@@ -105,9 +105,11 @@ func TestTheWholeTurnIsONEJudgedEvent(t *testing.T) {
 	if _, ok := p["tools"]; !ok {
 		t.Error("the changed tool set did not ride the turn, so a rug-pull is unrefusable")
 	}
-	// The tool CALL in the re-sent history already ran on the client; the only copy a
-	// gateway could have refused was the one in the response. Itemised, for the record.
-	if got := kinds(dv.Report); got != "tool_call,tool_register" {
+	// v0.6: the tool CALL in the re-sent history is NOT re-itemised here — its
+	// record was born at response time, and with runtime-born event ids a
+	// re-report would be a duplicate row, not a collapse. Only the changed tool
+	// inventory is itemised on the request side.
+	if got := kinds(dv.Report); got != "tool_register" {
 		t.Errorf("report = %q", got)
 	}
 }
@@ -142,9 +144,9 @@ func TestAnExactReplayIsJUDGEDAGAIN(t *testing.T) {
 	 *
 	 * So an exact replay is judged again. That is the safe direction — the cost is a
 	 * redundant judgement, where the opposite (suppressing a turn we think we have seen)
-	 * is how a retried prompt reaches the model unjudged. The double REPORT is absorbed
-	 * downstream instead: history events carry ids derived from the action, so the store
-	 * collapses them (see TestReReportedHistoryCarriesTheSAMEEventID).
+	 * is how a retried prompt reaches the model unjudged. Itemised records do not
+	 * duplicate on replay because they are born once — tool_calls at response time,
+	 * outcomes from the new-input slice (see TestHistoryIsNotReWalked).
 	 */
 	d, st := ctxFor("alice@acme.io")
 	first := allowed(d, st, conv(t, agentContinuation))
@@ -178,62 +180,27 @@ func TestARefusedTurnIsStillJudgedWhenItIsRetried(t *testing.T) {
 	}
 }
 
-func TestReReportedHistoryCarriesTheSAMEEventID(t *testing.T) {
-	// ⚠️ THE PLUGIN NO LONGER REMEMBERS WHAT IT REPORTED — that was cross-request state
-	// in a Redis of its own, and it is gone (docs/proposals/stateless-pep.md). A client
-	// re-sends its whole conversation every turn, so the same executed action IS carried
-	// again; what stops it being counted twice is that its id is derived from the action
-	// rather than from the request. `/ingest` keys its queue job on (workspace,
-	// event_id) and the analytics row is merge-on-write on the same id, so the second
-	// report collapses onto the first.
+func TestHistoryIsNotReWalked(t *testing.T) {
+	// ⚠️ v0.6: EVENT IDS ARE BORN AT THE RUNTIME, so there is no idempotency key
+	// for the store to collapse a re-report onto — an itemised record must be
+	// born exactly once instead. tool_calls are born at response time
+	// (TestResponseItemisesToolCalls); outcomes from the NEW input slice. A
+	// request whose history carries actions older than the new slice must NOT
+	// re-itemise them.
 	second := strings.Replace(agentTurn,
 		`{"role":"user","content":"now check the disk"}`,
 		`{"role":"user","content":"now check the disk"},{"role":"assistant","content":"ok"},{"role":"user","content":"and the logs"}`, 1)
 
-	// Two SEPARATE requests carrying the same past actions — different request ids,
-	// different session state, as two turns of one conversation really are.
-	a, _ := ctxFor("alice@acme.io")
-	b, _ := ctxFor("alice@acme.io")
-	b.reqID = "test-2"
-	first := deriveRequest(a, newSessionState(""), conv(t, second))
-	again := deriveRequest(b, newSessionState(""), conv(t, second))
-
-	ids := func(dv *derived) map[string]string {
-		out := map[string]string{}
-		for _, e := range dv.Report {
-			if e.Kind == "tool_call" || e.Kind == "tool_result" {
-				out[e.Kind+":"+e.EventID] = e.Kind
-			}
+	d, _ := ctxFor("alice@acme.io")
+	dv := deriveRequest(d, newSessionState(""), conv(t, second))
+	for _, e := range dv.Report {
+		if e.Kind == "tool_call" {
+			t.Errorf("a request derivation itemised a tool_call from history: %v — "+
+				"those are born at response time now", e.Payload)
 		}
-		return out
-	}
-	got, want := ids(again), ids(first)
-	if len(want) == 0 {
-		t.Fatal("no history reported to compare")
-	}
-	for k := range want {
-		if _, ok := got[k]; !ok {
-			t.Errorf("history id %q did not repeat across requests — the store cannot "+
-				"collapse the re-report, so one action is counted once per remaining turn", k)
+		if e.Kind == "tool_result" {
+			t.Errorf("an outcome older than the new input slice was re-itemised: %v", e.Payload)
 		}
-	}
-}
-
-func TestTheJudgedTurnKeepsAPerRequestID(t *testing.T) {
-	// ⚠️ The counterpart of the rule above, and the reason it is not applied to
-	// everything: a retry of a REFUSED prompt is a new decision that must be judged and
-	// recorded again. A stable id would let the store read the second attempt as a
-	// duplicate of the first.
-	d, st := ctxFor("alice@acme.io")
-	a := deriveRequest(d, st, conv(t, agentTurn))
-	d2, st2 := ctxFor("alice@acme.io")
-	d2.reqID = "test-retry"
-	b := deriveRequest(d2, st2, conv(t, agentTurn))
-	if a.Judged == nil || b.Judged == nil {
-		t.Fatal("nothing judged")
-	}
-	if a.Judged.EventID == b.Judged.EventID {
-		t.Error("two separate requests produced one judged event id")
 	}
 }
 
@@ -312,8 +279,16 @@ func TestAReplyThatTalksAndActsRefusesBOTH(t *testing.T) {
 	if dv.Judged == nil || dv.Judged.Kind != "model_output" {
 		t.Fatalf("judged = %v", dv.Judged)
 	}
-	if len(dv.Report) != 0 {
-		t.Fatalf("part of one generation was only reported: %q", kinds(dv.Report))
+	// v0.6: the response ALSO births the itemised per-action records (their one
+	// once-only source). The invariant that matters is unchanged: nothing is
+	// ONLY reported — every itemised action is inside the judged generation too.
+	for _, e := range dv.Report {
+		if e.Kind != "tool_call" {
+			t.Fatalf("unexpected report kind %q from a response", e.Kind)
+		}
+	}
+	if len(dv.Report) != 1 {
+		t.Fatalf("expected exactly one itemised tool_call, got %q", kinds(dv.Report))
 	}
 	p := dv.Judged.Payload
 	if p["text"] != "on it" {
@@ -435,7 +410,7 @@ func TestEventsMarshalToTheWireShape(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := gjson.ParseBytes(blob).Get("batch.0")
-	for _, field := range []string{"ogr_version", "event_id", "guard_id", "session_id",
+	for _, field := range []string{"ogr_version", "guard_id", "session_id",
 		"timestamp", "observation_point", "sensor.id", "kind", "llm_protocol", "payload"} {
 		if !got.Get(field).Exists() {
 			t.Errorf("missing %s in %s", field, got.Raw)
@@ -465,14 +440,16 @@ func TestEventsMarshalToTheWireShape(t *testing.T) {
 	if got.Get("subject.attestation").String() != "gateway_api_key" {
 		t.Error("consumer-authenticated identity missing the gateway_api_key stamp")
 	}
-	// Every event id must be distinct or the runtime's per-event verdicts cannot be
-	// paired back to the events they judged.
-	seen := map[string]bool{}
+	// v0.6: no client event_id on the wire at all — identity is born at the
+	// runtime and returned on the verdict / the ordered ingest results.
 	for _, e := range events {
-		if seen[e.EventID] {
-			t.Fatalf("duplicate event_id %q", e.EventID)
+		raw, err := json.Marshal(e)
+		if err != nil {
+			t.Fatal(err)
 		}
-		seen[e.EventID] = true
+		if gjson.ParseBytes(raw).Get("event_id").Exists() {
+			t.Fatalf("a locally minted event_id reached the wire: %s", raw)
+		}
 	}
 }
 
@@ -590,9 +567,12 @@ func TestTheBareCommandHasItsOwnRegisteredPath(t *testing.T) {
 }
 
 func TestAnItemisedToolCallRegistersItsCommandToo(t *testing.T) {
+	// v0.6: itemised tool_calls are born at RESPONSE time, their once-only source.
 	d, st := ctxFor("alice@acme.io")
-	// agentTurn's history carries call_1 with a command.
-	dv := deriveRequest(d, st, conv(t, agentTurn))
+	out := protocol.Output{Actions: []protocol.Action{
+		{ID: "c7", Name: "shell", Arguments: `{"command":"rm -rf /tmp/x"}`},
+	}}
+	dv := deriveResponse(d, st, out, conv(t, agentTurn))
 	var call *GuardEvent
 	for _, e := range dv.Report {
 		if e.Kind == "tool_call" {

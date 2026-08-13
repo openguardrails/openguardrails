@@ -7,6 +7,46 @@ not implementations. Downstream SDKs and adapters pin a protocol version.
 The format follows [Keep a Changelog](https://keepachangelog.com/). The protocol
 version is independent of any implementation's package version.
 
+## [v0.6] — draft revision (in progress)
+
+Protocol minimalism: identifiers are born at the runtime, the MUST set
+shrinks to `kind` + `payload`, and everything nothing consumed is gone.
+
+### Changed (breaking)
+- **`event_id` leaves the request.** The runtime assigns a unique,
+  time-ordered id at ingress and returns it — on the Verdict for
+  `/v1/evaluate`, in the ordered `results` rows for `/v1/ingest`. Client-
+  minted ids existed to make retries deduplicable, a transport concern that
+  never belonged in the data model; **request deduplication is removed**
+  (a retried timeout MAY duplicate a record — observability data tolerates
+  it; exactly-once is future work for an optional idempotency HTTP header).
+- **`guard_id` drops to MAY** — a correlation hint sent only by deployments
+  that actually propagate a guard-context. Absent, the runtime assigns
+  `guard_id = event_id` and SHOULD correlate altitudes **server-side** by
+  (agent, time window, canonical payload projection digest — the same
+  projections approval receipts bind). Rationale: the propagation token
+  rides through the process OGR distrusts; a correlation that only works
+  when the agent cooperates is a courtesy, not a correlation.
+- **The GuardEvent MUST set is `kind` + `payload`.** `timestamp` (absent =
+  receive time), `observation_point` (absent = defaulted from `kind`) and
+  `ogr_version` (absent = current) all become optional. The minimal
+  conformant integration is an API key and two fields.
+- **Verdict loses `evidence` and `confidence`** — the former duplicated
+  `findings` and nothing consumed it; the latter duplicated
+  `categories[].score`. The WHY of a verdict is exactly three layers:
+  `categories` (taxonomy), `findings` (structure), `reasons` (prose).
+- **`GET /v1/config` is removed.** No integration ever called it; every PEP's
+  degraded-mode policy is local configuration, with `x.ogr.on_unreachable`
+  on verdicts available as a push channel.
+- **`context_refs` is removed** — never consumed; `provenance[].ref` already
+  carries the relationship with trust semantics attached.
+- **Enrollment is organization-scoped** and its `guard_id` parameter is
+  renamed **`pep_id`**: it names the enrolling sensor, which v0.5
+  confusingly shared a name with the per-action guard group. The
+  "workspace API key" is now the **organization API key** throughout — the
+  key proves the tenant; WHERE an event lands is the agent's business
+  (placement → asserted `agent_workspace` → the key's default, last).
+
 ## [v0.5] — 2026-08-12
 
 The agent-centric identity remodel. OGR watches AGENTS, so the `subject` now

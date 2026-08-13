@@ -58,7 +58,7 @@ import (
 // every turn of every agent after the first.
 
 const (
-	ogrVersion  = "0.5"
+	ogrVersion  = "0.6"
 	sensorName  = "openguardrails-higress-connector"
 	sensorClass = "proxy"
 	// ⚠️ There is deliberately no `llmProtocol` constant. It was "openai.chat" and it
@@ -147,7 +147,8 @@ type authzEnvelope struct {
 // surface.
 type GuardEvent struct {
 	OGRVersion       string         `json:"ogr_version"`
-	EventID          string         `json:"event_id"`
+	// v0.6: no event_id on the wire — identity is born at the runtime and
+	// returned on the verdict / the ordered ingest results.
 	GuardID          string         `json:"guard_id"`
 	SessionID        string         `json:"session_id,omitempty"`
 	Timestamp        string         `json:"timestamp"`
@@ -389,7 +390,6 @@ type deriveCtx struct {
 	sessionID string
 	guardID   string
 	reqID     string
-	seq       int
 	now       string
 	// The CLIENT's wire protocol, detected per request. Never a constant: it was
 	// `openai.chat` for every event this plugin ever sent, which made 693,197 stored
@@ -398,10 +398,8 @@ type deriveCtx struct {
 }
 
 func (d *deriveCtx) event(kind string, payload map[string]any) *GuardEvent {
-	d.seq++
 	return &GuardEvent{
 		OGRVersion:       ogrVersion,
-		EventID:          "evt-" + d.reqID + "-" + strconv.Itoa(d.seq),
 		GuardID:          d.guardID,
 		SessionID:        d.sessionID,
 		Timestamp:        d.now,
@@ -572,7 +570,6 @@ func deriveRequest(d *deriveCtx, st *sessionState, conv *protocol.Conversation) 
 
 	dv := &derived{}
 	newInput := conv.NewInput()
-	newFrom := len(conv.Turns) - len(newInput)
 
 	// --- the turn ------------------------------------------------------------
 	payload := map[string]any{}
@@ -671,33 +668,28 @@ func deriveRequest(d *deriveCtx, st *sessionState, conv *protocol.Conversation) 
 		dv.Judged = e
 	}
 
-	// --- history -------------------------------------------------------------
+	// --- itemised action records (v0.6: each fact reported ONCE, when first seen) ---
 	//
-	// Everything the client executed since we last saw this conversation: post-hoc by
-	// construction — the enforceable copy of an action was the one in the response — but
-	// it is what a run's evidence is made of. Itemised, because these ARE independent
-	// past facts: nothing composes an action the client ran an hour ago with one it ran
-	// a minute ago.
-	for _, t := range conv.Turns[:newFrom] {
-		switch t.Role {
-		case protocol.RoleAssistant:
-			for _, a := range t.Actions {
-				id := a.ID
-				if id == "" || !dv.claim("c:"+id) {
-					continue
-				}
-				dv.report(attach(toolCallEvent(d, a)))
-			}
-		case protocol.RoleTool:
-			if t.Outcome == nil {
-				continue
-			}
-			id := t.Outcome.CallID
-			if id == "" || !dv.claim("r:"+id) {
-				continue
-			}
-			dv.report(attach(toolResultEvent(d, t.Outcome)))
+	// tool_call rows are born at RESPONSE time (deriveResponse): the reply is the
+	// one place an action is seen exactly once. OUTCOMES are born here, from the
+	// NEW input slice — a continuation feeds each outcome back exactly once, so
+	// the slice is a structural once-only source with no memory and no dedup.
+	//
+	// ⚠️ History older than the new slice is deliberately NOT walked any more.
+	// With runtime-born event ids there is no idempotency key to collapse a
+	// re-report onto, and re-walking the conversation every turn would insert
+	// every past action again on every turn. A conversation resumed through a
+	// fresh gateway therefore starts its itemised record at the resume point —
+	// the judged event still carries and judges the whole turn either way.
+	for _, t := range newInput {
+		if t.Role != protocol.RoleTool || t.Outcome == nil {
+			continue
 		}
+		id := t.Outcome.CallID
+		if id == "" || !dv.claim("r:"+id) {
+			continue
+		}
+		dv.report(attach(toolResultEvent(d, t.Outcome)))
 	}
 
 	// The itemised tool inventory, for the record. The judged turn already carries the
@@ -785,6 +777,22 @@ func deriveResponse(d *deriveCtx, st *sessionState, out protocol.Output,
 		e.Payload["system"] = prompt
 	}
 	dv.Judged = e
+
+	// The itemised tool_call records, born HERE — the reply is the one place an
+	// action is seen exactly once (v0.6: no history re-walk, no dedup ids). The
+	// composed judgement above still carries every call; these are the
+	// per-action rows the console and analytics list.
+	for i, a := range out.Actions {
+		if i >= maxActionsPerTurn {
+			break
+		}
+		item := toolCallEvent(d, a)
+		item.Authz = e.Authz
+		if prompt != "" {
+			item.Payload["system"] = prompt
+		}
+		dv.report(item)
+	}
 	return dv
 }
 
@@ -839,23 +847,6 @@ func toolsPayload(tools []protocol.ToolDef) []map[string]any {
 // The turn's own actions and outcomes ride the judged event instead; these record what
 // the client executed while we were not looking, which are independent past facts.
 
-// stableID gives a HISTORY event an identity derived from the fact it reports, not from
-// the request that happened to carry it.
-//
-// ⚠️ This is what replaced the plugin's cross-request "already reported" set. A client
-// re-sends its whole conversation every turn, so the same executed action is carried by
-// every subsequent request; the plugin used to remember which ids it had reported, in
-// Redis, which is one of the four things that made it stateful. A deterministic id makes
-// the re-report IDEMPOTENT instead: `/ingest` keys its queue job on
-// (workspace, event_id) and the analytics row is merge-on-write on the same id, so the
-// tenth report of one action collapses onto the first.
-//
-// ⚠️ Only for facts that are IMMUTABLE once they happen — an executed call, its outcome,
-// a declared tool. The JUDGED turn keeps a per-request id on purpose: a retry of a
-// refused prompt is a NEW decision and must be judged again, and giving it a stable id
-// would let the store treat the second attempt as a duplicate of the first.
-func stableID(kind, key string) string { return "evt-" + kind + "-" + hashOf(key) }
-
 func toolCallEvent(d *deriveCtx, a protocol.Action) *GuardEvent {
 	p := actionPayload(a)
 	// The itemised kind names the id `call_id`, matching the OGR payload sketch for
@@ -863,7 +854,6 @@ func toolCallEvent(d *deriveCtx, a protocol.Action) *GuardEvent {
 	p["call_id"] = a.ID
 	delete(p, "id")
 	e := d.event("tool_call", p)
-	e.EventID = stableID("tc", a.ID)
 	// Here the action IS the payload, so the composite sits at the empty path and the
 	// bare command at `payload.arguments.command`.
 	registerAction(e, "", a)
@@ -872,7 +862,6 @@ func toolCallEvent(d *deriveCtx, a protocol.Action) *GuardEvent {
 
 func toolResultEvent(d *deriveCtx, o *protocol.Outcome) *GuardEvent {
 	e := d.event("tool_result", outcomePayload(o))
-	e.EventID = stableID("tr", o.CallID)
 	e.withText("payload.result", o.Text)
 	return e
 }

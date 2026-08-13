@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 // ../../../packages/javascript/dist/models.js
-var OGR_VERSION = "0.5";
+var OGR_VERSION = "0.6";
 var DECISIONS = ["block", "require_approval", "redact", "modify", "allow"];
 function severity(decision) {
   return DECISIONS.indexOf(decision);
@@ -19,7 +19,7 @@ var COMPOSED_PROVIDER = "ogr.runtime/composed";
 function merge(ev, decision, verdicts, reasonPrefix) {
   const cats = /* @__PURE__ */ new Map();
   const reasons = [];
-  const evidence = [];
+  const trace = [];
   for (const v of verdicts) {
     for (const c of v.categories) {
       const existing = cats.get(c.id);
@@ -28,7 +28,7 @@ function merge(ev, decision, verdicts, reasonPrefix) {
     }
     for (const r of v.reasons)
       reasons.push(`[${v.provider}] ${r}`);
-    evidence.push({ provider: v.provider, decision: v.decision, latencyMs: v.latencyMs });
+    trace.push({ provider: v.provider, decision: v.decision, latencyMs: v.latencyMs });
   }
   return {
     eventId: ev.eventId,
@@ -37,7 +37,9 @@ function merge(ev, decision, verdicts, reasonPrefix) {
     decision,
     categories: [...cats.values()],
     reasons: [reasonPrefix, ...reasons],
-    evidence,
+    // Per-provider composition trace — an x.ogr extension, not a wire field
+    // (v0.6 removed the unconsumed `evidence`).
+    "x.ogr.composition": trace,
     ogrVersion: OGR_VERSION
   };
 }
@@ -103,39 +105,37 @@ function appliesTo(detector, ev) {
 }
 
 // ../../../packages/javascript/dist/runtime.js
+var idSeq = 0;
+function mintEventId() {
+  idSeq += 1;
+  const rand = globalThis.crypto?.randomUUID?.().slice(0, 12) ?? Math.floor(Math.random() * 1e9).toString(36);
+  return `evt-${Date.now().toString(36)}-${idSeq.toString(36)}-${rand}`;
+}
 var Runtime = class {
   detectors;
   composition;
-  events = /* @__PURE__ */ new Map();
-  // eventId -> event
   byGuard = /* @__PURE__ */ new Map();
   // guardId -> effective verdict so far
   constructor(detectors, policy) {
     this.detectors = detectors;
     this.composition = policy.composition ?? {};
   }
-  /** Inherit provenance from referenced prior events. */
-  enrich(ev) {
-    for (const ref of ev.contextRefs ?? []) {
-      const prior = this.events.get(ref);
-      if (prior)
-        ev.provenance.push(...prior.provenance);
-    }
-    return ev;
-  }
   async evaluate(ev) {
-    this.enrich(ev);
-    this.events.set(ev.eventId, ev);
-    const applicable = this.detectors.filter((d) => appliesTo(d, ev));
-    const verdicts = await Promise.all(applicable.map((d) => Promise.resolve(d.evaluate(ev))));
+    if (!ev.eventId)
+      ev.eventId = mintEventId();
+    if (!ev.guardId)
+      ev.guardId = ev.eventId;
+    const rev = ev;
+    const applicable = this.detectors.filter((d) => appliesTo(d, rev));
+    const verdicts = await Promise.all(applicable.map((d) => Promise.resolve(d.evaluate(rev))));
     const rule = selectRule(verdicts, this.composition);
-    const effective = compose(ev, verdicts, rule);
-    const prior = this.byGuard.get(ev.guardId);
+    const effective = compose(rev, verdicts, rule);
+    const prior = this.byGuard.get(rev.guardId);
     if (prior && severity(prior.decision) < severity(effective.decision)) {
       effective.decision = prior.decision;
       effective.reasons.push(`[correlation] tightened to prior decision '${prior.decision}' from earlier observation point`);
     }
-    this.byGuard.set(ev.guardId, effective);
+    this.byGuard.set(rev.guardId, effective);
     return effective;
   }
 };

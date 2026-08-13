@@ -120,10 +120,10 @@ class PepIdentity {
     try {
       const cred = await client.enroll({
         publicKey: this.publicKeyB64url()!,
-        guardId: `openclaw-hook-${hostname()}`,
+        pepId: `openclaw-hook-${hostname()}`,
         name: `openclaw hook (${hostname()})`,
       })
-      this.guardId = cred.guardId
+      this.guardId = cred.pepId
       this.keyId = cred.keyId
       this.persist()
       console.info(`[openguardrails] enrolled: ${this.guardId} (${this.keyId})`)

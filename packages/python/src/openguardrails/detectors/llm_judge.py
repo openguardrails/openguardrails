@@ -92,7 +92,6 @@ class LLMJudgeDetector(Detector):
         cats = [Category(c["id"], c["domain"], float(c.get("score", 1.0)))
                 for c in out.get("categories", [])]
         v = Verdict(ev.event_id, ev.guard_id, self.provider, out.get("decision", "allow"),
-                    categories=cats, reasons=out.get("reasons", []),
-                    evidence=[{"type": "judge_backend", "name": self.backend.name}])
+                    categories=cats, reasons=out.get("reasons", []))
         v.latency_ms = round((time.perf_counter() - t0) * 1000, 3)
         return v

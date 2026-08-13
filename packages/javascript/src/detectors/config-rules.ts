@@ -6,7 +6,7 @@
  * mechanism alongside an LLM. This is what lets an agent configure guardrails
  * for itself in plain text and regex, no model required.
  */
-import { type Category, type GuardEvent, type Verdict, type Decision, severity, OGR_VERSION } from "../models.js"
+import { type Category, type GuardEvent, type ResolvedGuardEvent, type Verdict, type Decision, severity, OGR_VERSION } from "../models.js"
 import type { Detector } from "./index.js"
 
 export interface CommandRule {
@@ -59,7 +59,7 @@ export class ConfigRulesDetector implements Detector {
     this.patterns = (cfg.command_rules ?? []).map((r) => [new RegExp(r.regex), r])
   }
 
-  evaluate(ev: GuardEvent): Verdict {
+  evaluate(ev: ResolvedGuardEvent): Verdict {
     const t0 = Date.now()
     const cats: Category[] = []
     const reasons: string[] = []

@@ -13,18 +13,22 @@ COMPOSED_PROVIDER = "ogr.runtime/composed"
 def _merge(ev: GuardEvent, decision: str, verdicts: list[Verdict], reason_prefix: str) -> Verdict:
     cats: dict[str, Category] = {}
     reasons: list[str] = []
-    evidence: list[dict] = []
+    trace: list[dict] = []
     for v in verdicts:
         for c in v.categories:
             if c.id not in cats or c.score > cats[c.id].score:
                 cats[c.id] = c
         for r in v.reasons:
             reasons.append(f"[{v.provider}] {r}")
-        evidence.append({"provider": v.provider, "decision": v.decision,
-                         "latency_ms": v.latency_ms})
+        trace.append({"provider": v.provider, "decision": v.decision,
+                      "latency_ms": v.latency_ms})
     out = Verdict(ev.event_id, ev.guard_id, COMPOSED_PROVIDER, decision,
                   categories=list(cats.values()),
-                  reasons=[reason_prefix] + reasons, evidence=evidence)
+                  reasons=[reason_prefix] + reasons)
+    # Per-provider composition trace — an x.ogr extension, not a wire field
+    # (v0.6 removed the unconsumed `evidence`). Same channel verdict_from_wire
+    # uses for extension keys.
+    out.extensions = {"x.ogr.composition": trace}  # type: ignore[attr-defined]
     return out
 
 

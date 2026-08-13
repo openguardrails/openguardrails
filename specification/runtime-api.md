@@ -28,7 +28,7 @@ Plugin   a hook for one surface (agent, gateway, sandbox, eBPF) built on an SDK
 - All requests and responses are JSON, UTF-8, `Content-Type: application/json`.
 - Field names on the wire are `snake_case`, exactly as in the JSON Schemas
   under [`schema/`](../schema/).
-- Canonical schema version: `ogr_version: "0.5"`. A runtime SHOULD accept
+- Canonical schema version: `ogr_version: "0.6"`. A runtime SHOULD accept
   events from `0.1` through the current version and normalize on read.
 - A machine-readable OpenAPI 3.1 description of this binding is maintained at
   [`../schema/runtime-api.openapi.yaml`](../schema/runtime-api.openapi.yaml).
@@ -42,7 +42,6 @@ POST /v1/evaluate
 POST /v1/ingest
 POST /v1/enroll
 POST /v1/heartbeat
-GET  /v1/config
 GET  /v1/approvals
 GET  /v1/health
 ```
@@ -60,14 +59,18 @@ base URL  https://host/api/public/ogr     →  POST https://host/api/public/ogr/
 
 ## Authentication
 
-Every endpoint except `/v1/health` requires a **workspace API key**:
+Every endpoint except `/v1/health` requires an **organization API key**:
 
 ```
 Authorization: Bearer ogr_<key>
 ```
 
-The key scopes the request to one workspace; every event lands in, and every
-policy resolves from, that workspace. A missing or invalid key MUST produce
+The key proves the ORGANIZATION — the tenant boundary every asserted name
+(`agent_id`, `agent_workspace`) is resolved inside. WHERE an event lands is
+the agent's business, not the key's: the workspace the agent was placed in
+wins, then the workspace its `subject.agent_workspace` names, and the key's
+own default workspace is only the last resort for an agent asserting
+nothing. A missing or invalid key MUST produce
 `401 {"error": "unauthorized"}`.
 
 The key is also the **identity floor**. A caller that asserts nothing else —
@@ -79,7 +82,7 @@ key's workspace, and treat every session as the same single user. Each
 [GuardEvent § subject](guard-event.md#subject).
 
 The static key authenticates the *channel*, not the *sensor*. Events arriving
-with only the workspace key are capped at the channel's attestation ceiling
+with only the organization key are capped at the channel's attestation ceiling
 (see [attestation](attestation.md)). A PEP that has [enrolled](#post-v1enroll)
 an Ed25519 key MAY raise that ceiling per request by signing the request body:
 
@@ -155,18 +158,17 @@ notably:
 ingested); clients MUST NOT send the same event to `/v1/ingest` again.
 
 **Failure handling** — if the call fails (timeout, 429, 5xx, network), the
-PEP applies its [degraded-mode](degraded-mode.md) policy from
-[`/v1/config`](#get-v1config); it MUST NOT default to allow for gated
-categories.
+PEP applies its locally configured [degraded-mode](degraded-mode.md) policy;
+it MUST NOT default to allow for gated categories. A runtime MAY push
+directives to enrolled PEPs via the `x.ogr.on_unreachable` extension on any
+verdict; local configuration always exists as the floor.
 
 ```bash
 curl -s https://ogr.example.com/v1/evaluate \
   -H "Authorization: Bearer $OGR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "ogr_version": "0.5",
-    "event_id": "evt_9f2c",
-    "guard_id": "g_7a41",
+    "ogr_version": "0.6",
     "timestamp": "2026-08-11T09:30:00Z",
     "observation_point": "execution",
     "sensor": {"id": "ogr.ebpf.sensor", "class": "kernel"},
@@ -178,9 +180,9 @@ curl -s https://ogr.example.com/v1/evaluate \
 
 ```json
 {
-  "ogr_version": "0.5",
-  "event_id": "evt_9f2c",
-  "guard_id": "g_7a41",
+  "ogr_version": "0.6",
+  "event_id": "evt_01J9ZK7Q2M",
+  "guard_id": "evt_01J9ZK7Q2M",
   "provider": "runtime",
   "decision": "block",
   "reasons": ["security.exec.remote_script_pipe"],
@@ -212,32 +214,41 @@ decision (transcript, telemetry, the whole answer after a streamed judgment).
 ] }
 ```
 
-`results` preserves request order. `id` is the event's `event_id`, or `null`
-if it could not be read. Ingest MUST be idempotent on
-(`workspace`, `event_id`): retrying a batch MUST NOT duplicate events.
+`results` preserves request order — order IS the pairing. `id` is the
+**runtime-assigned** `event_id` of each accepted element
+([GuardEvent § identifiers](guard-event.md#identifiers-are-born-at-the-runtime)),
+or `null` for a rejected one. There is no request deduplication: a client
+retrying a timed-out batch MAY produce duplicate records, which
+observability data tolerates.
 
 Events arriving through ingest without a valid `ogr-batch-signature` are
 capped at the `self_declared` attestation ceiling.
 
 ## POST /v1/enroll
 
-Binds a PEP's Ed25519 key to the workspace so its future requests can carry a
-verifiable identity (see
-[enrollment & approval receipts](enrollment-and-receipts.md)). The workspace
-API key is the bootstrap credential.
+Binds a PEP's Ed25519 key to the **organization** so its future requests can
+carry a verifiable identity (see
+[enrollment & approval receipts](enrollment-and-receipts.md)). The
+organization API key is the bootstrap credential. Org-scoped on purpose: one
+gateway PEP fronts agents that land in many workspaces, so pinning its
+credential to a single workspace was a leftover of the key-equals-workspace
+era.
 
 **Request**
 
 ```json
 {
   "public_key": "<base64url raw 32-byte Ed25519 public key>",
-  "guard_id": "optional stable PEP id",
+  "pep_id": "optional stable PEP id",
   "name": "optional display name"
 }
 ```
 
-**Response** — `201 {"guard_id", "key_id", "max_attestation"}` on first
-enrollment; `200 {"guard_id", "key_id"}` on idempotent re-enrollment of the
+`pep_id` names the ENROLLING SENSOR — it is unrelated to the per-action
+`guard_id` on events, which v0.5 confusingly shared a name with.
+
+**Response** — `201 {"pep_id", "key_id", "max_attestation"}` on first
+enrollment; `200 {"pep_id", "key_id"}` on idempotent re-enrollment of the
 same key; `400 {"error": "invalid_public_key"}`;
 `403 {"error": "key_revoked"}` if the key was revoked — a revoked key MUST
 NOT be resurrectable by re-enrolling.
@@ -263,27 +274,11 @@ GuardEvent and carries no guarded action.
 live-but-idle agent so fleet coverage reflects enrolled PEPs that have not
 yet emitted an event.
 
-## GET /v1/config
-
-The degraded-mode contract: what a PEP does with a gated action when it
-**cannot reach the runtime**.
-
-**Response**
-
-```json
-{ "on_unreachable": { "security.*": "block", "safety.*": "allow" } }
-```
-
-Values: `block` | `allow` | `require_local_approval`, keyed by category
-prefix; the PEP applies longest-prefix match. Defaults are conservative
-(`security.*` → `block`). Enforcement is the PEP's; the runtime is only the
-config source. A PEP SHOULD fetch and cache this at startup and refresh
-periodically. See [degraded mode](degraded-mode.md).
-
 ## GET /v1/approvals?guard_id=...
 
 Polls the human decision behind a `require_approval` verdict, so a blocking
-hook can wait.
+hook can wait. `guard_id` is the value the verdict carried (runtime-assigned
+unless the PEP propagated its own).
 
 **Response** — `200 {"status": "pending" | "approved" | "denied" | "expired",
 "decided_at"?}`; `400` if `guard_id` is missing;
@@ -312,10 +307,12 @@ ride in two sanctioned places:
 
 A **runtime** conforms to this binding if it serves all endpoints above with
 the stated semantics, validates events against the published schemas,
-enforces the authentication and attestation-ceiling rules, records
-evaluate/ingest idempotently, and never silently drops an event it accepted.
+enforces the authentication and attestation-ceiling rules, assigns and
+returns event identifiers at ingress, and never silently drops an event it
+accepted.
 
 A **client/SDK** conforms if it joins configured base URLs with canonical
-paths, sends valid `0.5` events, treats evaluate failure as degraded mode
-(never fail-open on gated categories), reports streamed answers once through
-ingest after partial evaluates, and passes through extension keys unchanged.
+paths, sends valid `0.6` events, reads identifiers from responses instead of
+minting them, treats evaluate failure as degraded mode (never fail-open on
+gated categories), reports streamed answers once through ingest after
+partial evaluates, and passes through extension keys unchanged.

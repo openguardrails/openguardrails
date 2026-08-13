@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 
 from openguardrails import RuntimeClient
 
-OGR_VERSION = "0.5"
+OGR_VERSION = "0.6"
 _seq = itertools.count(1)
 # Per-process tag folded into every generated id. A bare counter reuses
 # evt-/gw-/session-/run- ids after a gateway restart, and the runtime's
@@ -54,8 +54,9 @@ def make_event(kind: str, *, subject: dict, payload: dict, session_id: str,
     passthrough (`event_to_wire`) keeps it, and `run_id`/`turn`, on the wire."""
     event = {
         "ogr_version": OGR_VERSION,
-        "event_id": new_id("evt"),
-        "guard_id": guard_id or new_id("gw"),
+        # v0.6: no client event_id — identity is born at the runtime. guard_id
+        # rides only when the caller correlates (same logical action seen twice).
+        **({"guard_id": guard_id} if guard_id else {}),
         "session_id": session_id,
         "timestamp": _now(),
         "observation_point": "conversation",

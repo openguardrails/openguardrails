@@ -102,8 +102,9 @@ def to_guard_event(rec: SensorRecord, *, subject: dict, session_id: str | None =
         sensor={"id": "openguardrails-ebpf", "class": "kernel"},
         subject=subject,
         payload=payload,
-        event_id=new_id("evt"),
-        guard_id=guard_context.guard_id if guard_context else new_id("ga"),
+        # v0.6: event identity is born at the runtime. guard_id rides only as
+        # the propagated guard-context — the one strong cross-altitude link.
+        guard_id=guard_context.guard_id if guard_context else None,
         timestamp=timestamp or _now(),
         session_id=(guard_context.session_id if guard_context and guard_context.session_id
                     else session_id or f"run-{rec.root_pid}"),

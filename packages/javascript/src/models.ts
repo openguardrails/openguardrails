@@ -5,7 +5,7 @@
  * Python `openguardrails` package implements. Zero dependencies.
  */
 
-export const OGR_VERSION = "0.5"
+export const OGR_VERSION = "0.6"
 
 /** Decision severity order, most severe first (spec: composition.md). */
 export const DECISIONS = ["block", "require_approval", "redact", "modify", "allow"] as const
@@ -73,18 +73,24 @@ export interface Sensor {
 
 export interface GuardEvent {
   kind: string // tool_call | exec | tool_result | model_output | network | ...
-  observationPoint: string // conversation | invocation | execution
+  /** Absent = derived from `kind` by the runtime (transcript → conversation, actions → invocation, exec/network/file → execution). */
+  observationPoint?: string // conversation | invocation | execution
   /** WHICH integration observed it — the mechanism axis, orthogonal to the altitude. */
   sensor?: Sensor
   /** Omitted only by a key-only caller; the runtime then derives the agent from the API key. */
   subject?: Subject
   payload: Record<string, unknown>
-  eventId: string
-  guardId: string
-  timestamp: string
+  /**
+   * OGR v0.6: event identity is born at the runtime — never sent on the wire,
+   * assigned locally by an in-process Runtime, returned on every Verdict.
+   */
+  eventId?: string
+  /** Correlation hint across observation points; absent = the event itself. */
+  guardId?: string
+  /** Absent = the runtime's receive time. */
+  timestamp?: string
   sessionId?: string
   llmProtocol?: string
-  contextRefs?: string[]
   provenance: Provenance[]
   ogrVersion?: string
 }
@@ -96,14 +102,14 @@ export interface Category {
 }
 
 export interface Verdict {
+  /** Runtime-assigned identity of the judged event — how the caller learns it. */
   eventId: string
+  /** The event's guard group: propagated hint when one was sent, else runtime-assigned. */
   guardId: string
   provider: string
   decision: Decision
   categories: Category[]
   reasons: string[]
-  evidence?: Array<Record<string, unknown>>
-  confidence?: number
   latencyMs?: number
   ogrVersion?: string
 }
@@ -118,8 +124,15 @@ export function taintTags(ev: GuardEvent): Set<string> {
   return tags
 }
 
+/**
+ * A GuardEvent after the runtime assigned identity — what detectors and
+ * composition receive. Client code builds plain GuardEvents (ids optional);
+ * the Runtime resolves them before fanout.
+ */
+export type ResolvedGuardEvent = GuardEvent & { eventId: string; guardId: string }
+
 /** Build an `allow` verdict for an event. */
-export function allowVerdict(ev: GuardEvent, provider: string, reason = "no finding"): Verdict {
+export function allowVerdict(ev: ResolvedGuardEvent, provider: string, reason = "no finding"): Verdict {
   return {
     eventId: ev.eventId,
     guardId: ev.guardId,

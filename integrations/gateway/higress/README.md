@@ -315,7 +315,7 @@ the runtime is the side that knows conversations:
 |---|---|
 | token→value map, restoring the reply | `x.ogr.redaction_map` on the verdict |
 | re-masking resent history | the same map — the runtime returns every placeholder whose value appears in THIS request |
-| what was already reported | history events carry ids derived from the ACTION, so a re-report collapses in the store |
+| what was already reported | nothing is re-reported at all (v0.6): itemised tool_calls are born once at RESPONSE time, outcomes once from the structural new-input slice — no memory, no dedup ids |
 | which session this continued | `x.ogr.session_id` — the runtime derives it from `authz.transcript`, which we already send |
 
 And the VM argument goes with them: a request's REQUEST and RESPONSE phases run in the

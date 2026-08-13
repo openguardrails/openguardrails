@@ -10,7 +10,7 @@
  *    opencode integration this backend calls the agent's OWN configured model —
  *    "use my model as the guardrail".
  */
-import { type Category, type GuardEvent, type Verdict, type Decision, isUntrusted, taintTags, OGR_VERSION } from "../models.js"
+import { type Category, type GuardEvent, type ResolvedGuardEvent, type Verdict, type Decision, isUntrusted, taintTags, OGR_VERSION } from "../models.js"
 import type { Detector } from "./index.js"
 
 export const SYSTEM_PROMPT = `You are an OGR security & safety judge. Given an agent action
@@ -62,7 +62,7 @@ export class LLMJudgeDetector implements Detector {
     this.backend = backend ?? new HeuristicBackend()
   }
 
-  async evaluate(ev: GuardEvent): Promise<Verdict> {
+  async evaluate(ev: ResolvedGuardEvent): Promise<Verdict> {
     const t0 = Date.now()
     let cmd: string | undefined
     if (ev.kind === "exec") {
@@ -100,7 +100,6 @@ export class LLMJudgeDetector implements Detector {
       decision: (out.decision as Decision) ?? "allow",
       categories: cats,
       reasons: out.reasons ?? [],
-      evidence: [{ type: "judge_backend", name: this.backend.name }],
       latencyMs: Date.now() - t0,
       ogrVersion: OGR_VERSION,
     }
