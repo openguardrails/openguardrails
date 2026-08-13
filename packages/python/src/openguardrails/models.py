@@ -1,33 +1,15 @@
-"""OGR v0.6 wire types — GuardEvent, Verdict, Subject, Provenance.
+"""OGR v0.6 wire types — GuardEvent, Verdict, Provenance.
 
 Stdlib only. These mirror schema/*.schema.json (protocol 0.6).
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
-from typing import Any, TypedDict
+from typing import Any
 
 OGR_VERSION = "0.6"
 
 
-class Subject(TypedDict, total=False):
-    """Which agent is acting — the five-field agent identity plus actor lineage.
-
-    Every field is optional: an empty subject (or none at all) is the key-only
-    floor, where the runtime derives the agent from the API key (one key, one
-    default agent) and attributes every session to one user. See
-    specification/guard-event.md#subject.
-    """
-
-    agent_id: str          # org-unique agent identity; absent → derived from the API key
-    agent_type: str        # kind of agent ("hermes", "openclaw", "smartwork") — a label, not an identity
-    agent_workspace: str   # named group of agents; absent → the API key's workspace
-    agent_owner: str       # builder / responsible party — an attribute, never a policy boundary
-    agent_user: str        # who is using the agent THIS session; absent → one user
-    sandbox_id: str
-    parent_agent_id: str
-    delegation_chain: list[str]
-    attestation: str       # self_declared|inferred|network|mtls|gateway_api_key|client_key
 
 # Decision severity order (most severe first) — see composition.md.
 DECISIONS = ["block", "require_approval", "redact", "modify", "allow"]
@@ -48,11 +30,27 @@ class Provenance:
 
 @dataclass
 class GuardEvent:
+    # OGR v0.6: every field is FLAT, top-level — identity fields are scalars
+    # and the agent_/sensor_ prefixes are the namespace (no subject/sensor
+    # envelope). kind + payload alone is a complete event; the runtime
+    # derives everything else.
     kind: str                       # see spec: tool_call|exec|tool_result|...
-    observation_point: str          # conversation|invocation|execution
-    # {} is the key-only floor: the runtime derives the agent from the API key.
-    subject: Subject
-    payload: dict[str, Any]
+    payload: dict[str, Any] = field(default_factory=dict)
+    observation_point: str | None = None   # absent = defaulted from kind
+    # -- the agent identity fields (all optional; key-only floor otherwise) --
+    agent_id: str | None = None        # org-unique; absent = derived from the API key
+    agent_type: str | None = None      # a label ("hermes", "smartwork"), not an identity
+    agent_workspace: str | None = None # named group of agents; absent = the key's workspace
+    agent_owner: str | None = None     # builder / responsible party — attribute, not boundary
+    agent_user: str | None = None      # who uses the agent THIS session; absent = one user
+    sandbox_id: str | None = None
+    parent_agent_id: str | None = None
+    delegation_chain: list[str] = field(default_factory=list)
+    attestation: str | None = None     # self_declared|inferred|network|mtls|gateway_api_key|client_key
+    # -- the sensor axis --
+    sensor_id: str | None = None       # which integration observed this
+    sensor_type: str | None = None     # in_process|wrapper|proxy|kernel; absent = bypassable
+    sensor_version: str | None = None
     # OGR v0.6: event identity is born at the runtime — never sent on the
     # wire, assigned locally by an in-process Runtime, returned on verdicts.
     event_id: str | None = None
@@ -61,11 +59,6 @@ class GuardEvent:
     # Absent = the runtime's receive time.
     timestamp: str | None = None
     session_id: str | None = None
-    # WHICH integration observed this: {"id", "class"?, "version"?}. The
-    # mechanism axis — orthogonal to observation_point's altitude, because an
-    # eBPF probe and an in-process wrapper both assert "execution" while
-    # differing completely in whether the agent could have evaded them.
-    sensor: dict[str, Any] | None = None
     llm_protocol: str | None = None
     provenance: list[Provenance] = field(default_factory=list)
     ogr_version: str = OGR_VERSION

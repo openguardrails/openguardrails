@@ -73,13 +73,13 @@ own default workspace is only the last resort for an agent asserting
 nothing. A missing or invalid key MUST produce
 `401 {"error": "unauthorized"}`.
 
-The key is also the **identity floor**. A caller that asserts nothing else —
-no `subject` at all — is still fully attributable: the runtime MUST derive an
+The key is also the **identity floor**. A caller that asserts no identity
+fields at all is still fully attributable: the runtime MUST derive an
 `agent_id` from the key (one key, one default agent), place that agent in the
-key's workspace, and treat every session as the same single user. Each
-`subject` field the caller can assert (`agent_id`, `agent_type`,
+key's workspace, and treat every session as the same single user. Each flat
+identity field the caller can assert (`agent_id`, `agent_type`,
 `agent_workspace`, `agent_owner`, `agent_user`) refines that picture; see
-[GuardEvent § subject](guard-event.md#subject).
+[GuardEvent § the agent identity fields](guard-event.md#the-agent-identity-fields).
 
 The static key authenticates the *channel*, not the *sensor*. Events arriving
 with only the organization key are capped at the channel's attestation ceiling

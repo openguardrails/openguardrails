@@ -131,8 +131,8 @@ class GatewayEngine:
                                          taint_tags=list(taint)))
         verdicts.append(rt.evaluate(GuardEvent(
             kind="model_input", observation_point="conversation",
-            sensor={"id": "openguardrails-gateway", "class": "proxy"},
-            subject=_subject(norm),
+            sensor_id="openguardrails-gateway", sensor_type="proxy",
+            **_subject(norm),
             payload={"messages": msgs, "model": norm.get("model")},
             event_id=_id("evt"), guard_id=guard_id, timestamp=_now(),
             session_id=session_id, llm_protocol=norm.get("protocol"),
@@ -144,8 +144,8 @@ class GatewayEngine:
         for tc in _tool_calls(norm):
             verdicts.append(rt.evaluate(GuardEvent(
                 kind="tool_call", observation_point="conversation",
-                sensor={"id": "openguardrails-gateway", "class": "proxy"},
-                subject=_subject(norm),
+                sensor_id="openguardrails-gateway", sensor_type="proxy",
+                **_subject(norm),
                 payload={"name": tc["name"], "arguments": tc["arguments"]},
                 guard_id=guard_id, timestamp=_now(),
                 session_id=session_id, llm_protocol=norm.get("protocol"),
@@ -163,8 +163,8 @@ class GatewayEngine:
         rt = self._runtime()
         v = rt.evaluate(GuardEvent(
             kind="model_output", observation_point="conversation",
-            sensor={"id": "openguardrails-gateway", "class": "proxy"},
-            subject=_subject(), payload={"text": text},
+            sensor_id="openguardrails-gateway", sensor_type="proxy",
+            **_subject(), payload={"text": text},
             event_id=_id("evt"), guard_id=gid, timestamp=_now(),
             llm_protocol=protocol,
             provenance=[Provenance(source="model", trust="model")],

@@ -117,8 +117,18 @@ const COMPAT_MOUNT = "/api/public/ogr"
 const EVENT_FIELDS = new Set([
   "kind",
   "observationPoint",
-  "sensor",
-  "subject",
+  "agentId",
+  "agentType",
+  "agentWorkspace",
+  "agentOwner",
+  "agentUser",
+  "sandboxId",
+  "parentAgentId",
+  "delegationChain",
+  "attestation",
+  "sensorId",
+  "sensorType",
+  "sensorVersion",
   "payload",
   "eventId",
   "guardId",
@@ -142,14 +152,24 @@ export function eventToWire(ev: GuardEvent): Record<string, unknown> {
   }
   // OGR v0.6: event identity is born at the runtime and returned on the
   // response — a locally minted eventId never goes on the wire. guard_id
-  // does, but only as an explicit correlation hint.
+  // does, but only as an explicit correlation hint. Identity fields are FLAT
+  // scalars (the agent_/sensor_ prefixes are the namespace); a key-only
+  // caller sends none and the runtime derives the agent from the API key.
   if (ev.guardId) wire.guard_id = ev.guardId
   if (ev.timestamp) wire.timestamp = ev.timestamp
   if (ev.observationPoint) wire.observation_point = ev.observationPoint
-  // A key-only caller sends no subject at all; the runtime derives the agent
-  // from the API key (spec: the identity floor).
-  if (ev.subject && Object.keys(ev.subject).length) wire.subject = ev.subject
-  if (ev.sensor) wire.sensor = ev.sensor
+  if (ev.agentId) wire.agent_id = ev.agentId
+  if (ev.agentType) wire.agent_type = ev.agentType
+  if (ev.agentWorkspace) wire.agent_workspace = ev.agentWorkspace
+  if (ev.agentOwner) wire.agent_owner = ev.agentOwner
+  if (ev.agentUser) wire.agent_user = ev.agentUser
+  if (ev.sandboxId) wire.sandbox_id = ev.sandboxId
+  if (ev.parentAgentId) wire.parent_agent_id = ev.parentAgentId
+  if (ev.delegationChain?.length) wire.delegation_chain = ev.delegationChain
+  if (ev.attestation) wire.attestation = ev.attestation
+  if (ev.sensorId) wire.sensor_id = ev.sensorId
+  if (ev.sensorType) wire.sensor_type = ev.sensorType
+  if (ev.sensorVersion) wire.sensor_version = ev.sensorVersion
   if (ev.sessionId) wire.session_id = ev.sessionId
   if (ev.llmProtocol) wire.llm_protocol = ev.llmProtocol
   if (ev.provenance?.length) {

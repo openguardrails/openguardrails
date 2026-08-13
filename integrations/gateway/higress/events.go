@@ -60,7 +60,7 @@ import (
 const (
 	ogrVersion  = "0.6"
 	sensorName  = "openguardrails-higress-connector"
-	sensorClass = "proxy"
+	sensorType  = "proxy"
 	// ⚠️ There is deliberately no `llmProtocol` constant. It was "openai.chat" and it
 	// was stamped on every event this plugin ever sent, so the field could not
 	// distinguish a client that spoke something else from one that did not — 693,197
@@ -80,20 +80,16 @@ const (
 	maxActionsPerTurn    = 64
 )
 
-type sensor struct {
-	ID    string `json:"id"`
-	Class string `json:"class"`
-}
-
-// subject is the OGR v0.5 five-field agent identity. OGR is agent-centric: the
-// consumer the gateway authenticated IS the agent (`agent_id`), the consumer-group
-// is the agent's WORKSPACE — a group of agents plus one policy set, not a human
-// org chart. Owner and user are attributes the platform records on the agent and
-// the session; they never select configuration.
-//
-// The workspace is resolved by the runtime always within the org the API key
-// proves, so a workspace name can never reach another tenant's configuration.
-type subject struct {
+// identity is the flat v0.6 agent five-tuple (+ attestation), embedded into
+// every GuardEvent — the agent_ prefixes are the namespace, no envelope. OGR
+// is agent-centric: the consumer the gateway authenticated IS the agent
+// (`agent_id`), the consumer-group is the agent's WORKSPACE — a group of
+// agents plus one policy set, not a human org chart. Owner and user are
+// attributes the platform records on the agent and the session; they never
+// select configuration. The workspace is resolved by the runtime always
+// within the org the API key proves, so a workspace name can never reach
+// another tenant's configuration.
+type identity struct {
 	AgentID        string `json:"agent_id,omitempty"`
 	AgentType      string `json:"agent_type,omitempty"`
 	AgentWorkspace string `json:"agent_workspace,omitempty"`
@@ -153,10 +149,12 @@ type GuardEvent struct {
 	SessionID        string         `json:"session_id,omitempty"`
 	Timestamp        string         `json:"timestamp"`
 	ObservationPoint string         `json:"observation_point"`
-	Sensor           sensor         `json:"sensor"`
+	SensorID         string         `json:"sensor_id"`
+	SensorType       string         `json:"sensor_type"`
 	Kind             string         `json:"kind"`
 	LLMProtocol      string         `json:"llm_protocol,omitempty"`
-	Subject          *subject       `json:"subject,omitempty"`
+	// Flat v0.6 identity fields, inlined into the top level of the wire object.
+	identity
 	Payload          map[string]any `json:"payload"`
 	Authz            *authzEnvelope `json:"authz,omitempty"`
 
@@ -386,7 +384,7 @@ type deriveCtx struct {
 	// The agent identity every event of this request asserts; nil when the
 	// request carried nothing — the key-only floor, where the runtime derives
 	// the agent from the API key.
-	subj      *subject
+	subj      identity
 	sessionID string
 	guardID   string
 	reqID     string
@@ -404,10 +402,11 @@ func (d *deriveCtx) event(kind string, payload map[string]any) *GuardEvent {
 		SessionID:        d.sessionID,
 		Timestamp:        d.now,
 		ObservationPoint: observationPoint,
-		Sensor:           sensor{ID: sensorName, Class: sensorClass},
+		SensorID:         sensorName,
+		SensorType:       sensorType,
 		Kind:             kind,
 		LLMProtocol:      d.protocol,
-		Subject:          d.subj,
+		identity:         d.subj,
 		Payload:          payload,
 	}
 }
@@ -520,11 +519,8 @@ func unparsedEvent(d *deriveCtx, kind, reason string, bodyBytes int) *GuardEvent
 // which workspace's policy set this traffic belongs under, which is the half that
 // decides what the guardrails do. All-empty returns nil — the key-only floor,
 // where the runtime derives the agent from the API key.
-func subjectOf(agentID, agentType, workspace, owner, user string, viaConsumer bool) *subject {
-	if agentID == "" && agentType == "" && workspace == "" && owner == "" && user == "" {
-		return nil
-	}
-	s := &subject{
+func subjectOf(agentID, agentType, workspace, owner, user string, viaConsumer bool) identity {
+	s := identity{
 		AgentID:        agentID,
 		AgentType:      agentType,
 		AgentWorkspace: workspace,

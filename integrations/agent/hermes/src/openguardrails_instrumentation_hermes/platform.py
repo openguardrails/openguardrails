@@ -112,8 +112,8 @@ def agent_user() -> str:
 
 
 def subject_for(**extra: Any) -> dict[str, Any]:
-    """The explicit per-instance subject every event of this plugin asserts —
-    the OGR v0.5 agent five-tuple.
+    """The per-instance identity kwargs every event of this plugin asserts —
+    the flat v0.6 agent five-tuple, splatted into GuardEvent(**...).
 
     `attestation: client_key` is the honest claim for an in-process hook that
     holds its own enrolled credential; the runtime clamps it to whatever this

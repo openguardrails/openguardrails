@@ -213,15 +213,12 @@ const plugin: ReturnType<typeof definePluginEntry> = definePluginEntry({
         const ev: GuardEvent = {
           kind: "tool_call",
           observationPoint: "invocation",
-          subject: {
-            // One assistant daemon per machine → machine-scoped identity
-            // (identity design §7); client_key is clamped by the runtime to
-            // this key's enrollment scope. Session attribution rides the
-            // event's own sessionId, not the subject.
-            agent_id: c.agentId ?? hostAgentId(),
-            agent_type: "openclaw",
-            attestation: "client_key",
-          },
+          // One assistant daemon per machine → machine-scoped identity
+          // (identity design §7); client_key is clamped by the runtime to
+          // this key's enrollment scope. Flat identity fields (v0.6).
+          agentId: c.agentId ?? hostAgentId(),
+          agentType: "openclaw",
+          attestation: "client_key",
           payload: { name: event.toolName, arguments: event.params, channel: c.channelId },
           eventId: id("evt"),
           guardId: event.toolCallId ?? id("ga"),
@@ -261,11 +258,9 @@ const plugin: ReturnType<typeof definePluginEntry> = definePluginEntry({
       const ev: GuardEvent = {
         kind: "model_output",
         observationPoint: "conversation",
-        subject: {
-          agent_id: c.agentId ?? hostAgentId(),
-          agent_type: "openclaw",
-          attestation: "client_key",
-        },
+        agentId: c.agentId ?? hostAgentId(),
+        agentType: "openclaw",
+        attestation: "client_key",
         payload: { content: e.content ?? "", channel: c.messageProvider },
         eventId: id("evt"),
         guardId: id("ga"),

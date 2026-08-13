@@ -247,7 +247,8 @@ function buildGuardEvent(tool, command) {
   return {
     kind: "exec",
     observationPoint: "invocation",
-    subject: { agent_id: AGENT_ID, agent_type: "codex" },
+    agentId: AGENT_ID,
+    agentType: "codex",
     payload: { argv: [String(command ?? "")], tool, name: tool },
     eventId: id("e"),
     guardId,

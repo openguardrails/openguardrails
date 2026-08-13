@@ -1,10 +1,9 @@
 # Identity attestation
 
 How strongly an identity claim is verified. One ladder serves both faces of
-the same trust root: **who asserted the `subject` identity fields —
-`subject.agent_id` and its companions (`agent_workspace`, `agent_owner`,
-`agent_user`)** (the identity face, carried per event) and **how a channel
-proved itself**
+the same trust root: **who asserted the identity fields — `agent_id` and its
+companions (`agent_workspace`, `agent_owner`, `agent_user`)** (the identity
+face, carried flat on every event) and **how a channel proved itself**
 (the service-auth face, established at [enrollment](enrollment-and-receipts.md)).
 An identity without presentation is a label; presentation without identity is
 an anonymous bearer token — the ladder names where a deployment sits between
@@ -25,13 +24,14 @@ is more trustworthy than an unverified claim.
 | `gateway_api_key` | Asserted by a gateway that authenticated the client with a per-client credential it issued (virtual-key pattern). |
 | `client_key` | Backed by a credential the client itself holds and presented end-to-end. |
 
-## `subject.attestation`
+## `attestation`
 
-A PEP MAY declare how it verified the `subject` identity fields by setting
-`subject.attestation` to a level above ([GuardEvent](guard-event.md#subject)).
+A PEP MAY declare how it verified the identity fields by setting the flat
+`attestation` field to a level above
+([GuardEvent](guard-event.md#the-agent-identity-fields)).
 
 A claim is only as strong as the channel that carried it. A runtime MUST clamp
-`subject.attestation` to the **channel ceiling** — the strongest level the
+`attestation` to the **channel ceiling** — the strongest level the
 event channel itself can prove:
 
 - events from an unenrolled PEP (e.g. authenticated only by a shared
@@ -62,7 +62,7 @@ MAY fall back to its own inference).
 One gateway PEP fronting many agents/users can prove only "this event came
 from gateway G"; who sits behind it is bounded by what the gateway itself can
 authenticate. The contract does not create signals — it standardizes the slot
-(`subject.agent_id` / `subject.agent_user`), labels the strength honestly, and
+(`agent_id` / `agent_user`), labels the strength honestly, and
 lets policy act on it:
 
 | Gateway capability | Level to declare |

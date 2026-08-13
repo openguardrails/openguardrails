@@ -75,7 +75,7 @@ most-restrictive-wins default, and `require_approval` handling.
 
 A runtime (the Policy Decision Point) is **OGR-conformant** if it:
 
-1. binds each enrolled PEP's channel identity to the `subject` values that PEP
+1. binds each enrolled PEP's channel identity to the identity fields that PEP
    may assert, and rejects events where the two disagree;
 2. accepts events from unenrolled PEPs only as **unverified** — usable for
    observability, never as the basis for minting receipts or granting

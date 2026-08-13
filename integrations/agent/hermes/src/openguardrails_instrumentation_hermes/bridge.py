@@ -158,7 +158,8 @@ def _wire(ev: GuardEvent, turn_id: str = "", turn: int | None = None) -> dict[st
     # are Python running INSIDE the agent process, so an agent that stops
     # calling them stops being seen. The execution altitude here is therefore
     # NOT the adversary-proof one — pair it with the eBPF sensor for that.
-    wire.setdefault("sensor", {"id": "openguardrails-hermes", "class": "in_process"})
+    wire.setdefault("sensor_id", "openguardrails-hermes")
+    wire.setdefault("sensor_type", "in_process")
     if turn_id:
         wire["run_id"] = _run_id(turn_id)
     if turn is not None:
@@ -206,7 +207,7 @@ def _report_spawn(child_id: str) -> None:
     try:
         ev = GuardEvent(
             kind="agent_spawn", observation_point="invocation",
-            subject=subject_for(),
+            **subject_for(),
             payload={"child_agent_id": child_id, "child_agent_type": "hermes.subagent"},
             timestamp=_now(),
         )
@@ -579,7 +580,7 @@ def on_pre_api_request(session_id="", task_id="", turn_id="", api_request_id="",
     try:
         _report(GuardEvent(
             kind="user_input", observation_point="conversation",
-            subject=subject_for(**_lineage_for(task_id)),
+            **subject_for(**_lineage_for(task_id)),
             payload=payload,
             timestamp=_now(),
             session_id=session_id,
@@ -625,7 +626,7 @@ def on_post_api_request(session_id="", task_id="", turn_id="", api_request_id=""
     try:
         ev = GuardEvent(
             kind="model_output", observation_point="conversation",
-            subject=subject_for(**_lineage_for(task_id)),
+            **subject_for(**_lineage_for(task_id)),
             payload=payload,
             timestamp=_now(),
             session_id=session_id,
@@ -791,7 +792,7 @@ def on_pre_tool_call(tool_name="", args=None, session_id="", tool_call_id="",
         # attestation claim client_key — the runtime clamps to enrollment scope.
         # Overridden with the subagent's own lineage-linked identity when this
         # task_id isn't the top-level conversation's (see _lineage_for).
-        subject=subject_for(**_lineage_for(task_id)),
+        **subject_for(**_lineage_for(task_id)),
         payload={"name": tool_name, "arguments": args},
         event_id=_id("evt"), guard_id=guard_id, timestamp=_now(),
         session_id=session_id, provenance=provenance,
@@ -844,7 +845,7 @@ def on_post_tool_call(tool_name="", args=None, result=None, session_id="",
     try:
         ev = GuardEvent(
             kind="tool_result", observation_point="invocation",
-            subject=subject_for(**_lineage_for(task_id)),
+            **subject_for(**_lineage_for(task_id)),
             payload=payload,
             timestamp=_now(),
             session_id=session_id,
@@ -916,7 +917,7 @@ def guard_exec(command: str, cwd: str = "/workspace") -> tuple[bool, str]:
     turn = _turn_number(turn_id, api_request_id, offset=1)
     ev = GuardEvent(
         kind="exec", observation_point="execution",
-        subject=subject_for(sandbox_id="sbx", **_lineage_for(task_id)),
+        **subject_for(sandbox_id="sbx", **_lineage_for(task_id)),
         payload={"argv": ["bash", "-c", command], "cwd": cwd, "env_keys": env_keys},
         event_id=_id("evt"), guard_id=guard_id, timestamp=_now(),
         session_id=session_id, provenance=provenance,

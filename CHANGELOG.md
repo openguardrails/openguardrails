@@ -40,6 +40,18 @@ shrinks to `kind` + `payload`, and everything nothing consumed is gone.
   on verdicts available as a push channel.
 - **`context_refs` is removed** — never consumed; `provenance[].ref` already
   carries the relationship with trust semantics attached.
+- **`subject` and `sensor` are flattened into top-level scalar fields** —
+  `agent_id`, `agent_type`, `agent_workspace`, `agent_owner`, `agent_user`,
+  `sandbox_id`, `parent_agent_id`, `delegation_chain`, `attestation`,
+  `sensor_id`, `sensor_type`, `sensor_version`. The `agent_`/`sensor_`
+  prefixes already namespace the fields, so the envelope objects said the
+  same thing twice; identity/attribution fields as flat top-level strings is
+  also the shape the industry ships (OpenAI: `user`, `safety_identifier` —
+  objects only for inherently structured data, which for OGR means
+  `payload`, `provenance`, `redactions`). **`sensor_class` is renamed
+  `sensor_type`** on the way: `*_id` = which one, `*_type` = which kind —
+  one suffix rule with no exceptions to memorize; the closed, ordered
+  vocabulary and its bypassable-when-absent semantics are unchanged.
 - **Enrollment is organization-scoped** and its `guard_id` parameter is
   renamed **`pep_id`**: it names the enrolling sensor, which v0.5
   confusingly shared a name with the per-action guard group. The
