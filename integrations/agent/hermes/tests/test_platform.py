@@ -25,10 +25,15 @@ def test_reporter_disabled_without_env(monkeypatch):
 
 def test_subject_asserts_per_instance_identity(monkeypatch):
     monkeypatch.setenv("OGR_INSTANCE", "researcher")
-    monkeypatch.setenv("OGR_PRINCIPAL", "user:tom")
+    monkeypatch.setenv("OGR_AGENT_OWNER", "user:tom")
+    monkeypatch.setenv("OGR_AGENT_USER", "user:tom")
+    monkeypatch.setenv("OGR_AGENT_WORKSPACE", "research-agents")
     s = subject_for(sandbox_id="sbx")
     assert s["agent_id"] == "hermes-researcher" == agent_id()
     assert s["agent_type"] == "hermes"
+    assert s["agent_owner"] == "user:tom"
+    assert s["agent_user"] == "user:tom"
+    assert s["agent_workspace"] == "research-agents"
     assert s["attestation"] == "client_key"
     assert s["sandbox_id"] == "sbx"
 

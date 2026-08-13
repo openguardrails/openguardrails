@@ -183,7 +183,9 @@ python -m pytest
 
 ## Status
 
-`v0` — draft. See [CHANGELOG.md](CHANGELOG.md) for protocol versions and
+Current protocol version: **v0.5** (see [CHANGELOG.md](CHANGELOG.md) for
+protocol versions). Minor versions before v1 may still break between releases;
+each break is logged. See
 [GOVERNANCE.md](GOVERNANCE.md) for how the spec evolves. Contributions welcome —
 [CONTRIBUTING.md](CONTRIBUTING.md).
 

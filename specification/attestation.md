@@ -1,8 +1,10 @@
 # Identity attestation
 
 How strongly an identity claim is verified. One ladder serves both faces of
-the same trust root: **who asserted `subject.agent_id` / `subject.principal`**
-(the identity face, carried per event) and **how a channel proved itself**
+the same trust root: **who asserted the `subject` identity fields —
+`subject.agent_id` and its companions (`agent_workspace`, `agent_owner`,
+`agent_user`)** (the identity face, carried per event) and **how a channel
+proved itself**
 (the service-auth face, established at [enrollment](enrollment-and-receipts.md)).
 An identity without presentation is a label; presentation without identity is
 an anonymous bearer token — the ladder names where a deployment sits between
@@ -46,7 +48,7 @@ resource X below `gateway_api_key`").
 
 Enrollment records what a PEP is allowed to assert
 ([enrollment](enrollment-and-receipts.md#enrollment)): the workspaces it may
-write into, the `principal` namespaces it may name (exact values or prefix
+write into, the `agent_id` namespaces it may name (exact values or prefix
 patterns such as `acme/*`), and the maximum attestation level it may declare.
 A compromised PEP can then impersonate only within its registered scope.
 
@@ -60,7 +62,7 @@ MAY fall back to its own inference).
 One gateway PEP fronting many agents/users can prove only "this event came
 from gateway G"; who sits behind it is bounded by what the gateway itself can
 authenticate. The contract does not create signals — it standardizes the slot
-(`subject.principal` / `subject.agent_id`), labels the strength honestly, and
+(`subject.agent_id` / `subject.agent_user`), labels the strength honestly, and
 lets policy act on it:
 
 | Gateway capability | Level to declare |

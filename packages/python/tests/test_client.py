@@ -29,7 +29,7 @@ from openguardrails.client import event_to_wire, verdict_from_wire  # noqa: E402
 SCHEMA_DIR = HERE.parents[3] / "schema"
 API_KEY = "ogr_test_key"
 VERDICT_WIRE = {
-    "ogr_version": "0.4", "event_id": "evt-1", "guard_id": "ga-1",
+    "ogr_version": "0.5", "event_id": "evt-1", "guard_id": "ga-1",
     "provider": "ogr.runtime", "decision": "block",
     "categories": [{"id": "security.exfiltration", "domain": "security", "score": 0.9}],
     "reasons": ["curl to unlisted host"],
@@ -188,7 +188,7 @@ def test_evaluate_roundtrip(server, client):
     assert req["path"] == "/api/public/ogr/v1/evaluate"  # prefix + canonical path
     assert req["headers"]["authorization"] == f"Bearer {API_KEY}"
     assert "ogr-partial" not in req["headers"]
-    assert req["body"]["ogr_version"] == "0.4"
+    assert req["body"]["ogr_version"] == "0.5"
     assert "llm_protocol" not in req["body"]  # empty optionals dropped
 
 

@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://openguardrails.com/schema/0.4/guard-event.schema.json",
+  "$id": "https://openguardrails.com/schema/0.5/guard-event.schema.json",
   "title": "GuardEvent",
   "description": "A unit observed at an OGR interception point.",
   "type": "object",
-  "required": ["ogr_version", "event_id", "guard_id", "timestamp", "observation_point", "kind", "subject", "payload"],
+  "required": ["ogr_version", "event_id", "guard_id", "timestamp", "observation_point", "kind", "payload"],
   "additionalProperties": false,
   "properties": {
-    "ogr_version": { "type": "string", "const": "0.4" },
+    "ogr_version": { "type": "string", "const": "0.5" },
     "event_id": { "type": "string", "minLength": 1 },
     "guard_id": { "type": "string", "minLength": 1 },
     "session_id": { "type": "string" },
@@ -30,15 +30,18 @@
     "llm_protocol": { "enum": ["openai.chat", "openai.responses", "anthropic.messages", null] },
     "subject": {
       "type": "object",
-      "required": ["agent_id"],
+      "description": "Which agent is acting — the five-field agent identity plus actor lineage. A key-only caller omits it entirely; the runtime derives the agent from the API key.",
+      "additionalProperties": false,
       "properties": {
-        "agent_id": { "type": "string" },
+        "agent_id": { "type": "string", "minLength": 1 },
         "agent_type": { "type": "string" },
-        "principal": { "type": "string" },
-        "principal_group": { "type": "string" },
+        "agent_workspace": { "type": "string" },
+        "agent_owner": { "type": "string" },
+        "agent_user": { "type": "string" },
         "sandbox_id": { "type": "string" },
         "parent_agent_id": { "type": "string" },
-        "delegation_chain": { "type": "array", "items": { "type": "string" } }
+        "delegation_chain": { "type": "array", "items": { "type": "string" } },
+        "attestation": { "enum": ["self_declared", "inferred", "network", "mtls", "gateway_api_key", "client_key"] }
       }
     },
     "payload": { "type": "object" },

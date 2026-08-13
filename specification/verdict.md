@@ -98,7 +98,7 @@ the restore operation are implementation-internal; the protocol only guarantees
 
 ```json
 {
-  "ogr_version": "0.4",
+  "ogr_version": "0.5",
   "event_id": "evt-9f2",
   "guard_id": "ga-1a2b",
   "provider": "ogr.poc.llm_judge",

@@ -7,6 +7,49 @@ not implementations. Downstream SDKs and adapters pin a protocol version.
 The format follows [Keep a Changelog](https://keepachangelog.com/). The protocol
 version is independent of any implementation's package version.
 
+## [v0.5] — 2026-08-12
+
+The agent-centric identity remodel. OGR watches AGENTS, so the `subject` now
+answers five questions about the actor — WHICH agent, WHAT kind, in WHICH
+workspace, WHO built it, WHO is using it — and the human-identity vocabulary
+(`principal`, `principal_group`) is gone.
+
+### Changed (breaking)
+- **`subject` is the agent five-tuple**: `agent_id` (org-unique identity;
+  behind a gateway the authenticated consumer is the natural value),
+  `agent_type` (harness or product name — a label, not an identity),
+  `agent_workspace` (a named group of AGENTS the operator maintains, e.g. a
+  gateway consumer-group; resolved only inside the tenant the channel
+  credential proves), `agent_owner` (builder / responsible party), and
+  `agent_user` (who is using the agent THIS session). **`principal` and
+  `principal_group` are removed** — the caller-behind-the-gateway is now the
+  agent itself, the caller's org-chart group is nobody's policy boundary, and
+  owner/user are recorded as *attributes* of the agent and the session, never
+  selectors of configuration.
+- **`subject` and `subject.agent_id` drop from MUST to SHOULD** — see the
+  identity floor below. The subject object closes
+  (`additionalProperties: false`) and gains the `attestation` property the
+  spec prose always documented.
+- **Enrollment assertion scopes bound `agent_id`**, not `principal`,
+  namespaces: with the agent as the identity, impersonating an agent is the
+  blast radius a scope must cap. `constraints.principal` on pre-authorization
+  approval receipts becomes `constraints.agent_id`.
+- Wire version `0.4` → `0.5` in schemas (`$id`, `ogr_version`) and examples.
+
+### Added
+- **The API-key identity floor** (`runtime-api.md` § Authentication): the
+  minimum conformant integration sends only the workspace API key and no
+  `subject` at all. The runtime MUST then derive `agent_id` from the key (one
+  key, one default agent), place the agent in the key's workspace, and treat
+  every session as one user. Every asserted field refines that picture; none
+  is a precondition for coverage.
+- **The shadow-agent rule** (`guard-event.md`): events sharing an `agent_id`
+  but disagreeing on `agent_type` — one credential driving hermes, openclaw,
+  and claude-code at once — stay ONE agent (the id is the identity), and a
+  runtime SHOULD surface the disagreement as a shadow-agent signal instead of
+  splitting the inventory. `security.shadow_agent` names the signal in the
+  taxonomy.
+
 ## [v0.4] — draft revision (proposal)
 
 Agent-security observability and degraded-mode operation: keep a PEP safe when
@@ -210,5 +253,5 @@ Initial draft of the contract.
   (`specification/taxonomy.md`).
 - Conformance criteria (`CONFORMANCE.md`) and governance (`GOVERNANCE.md`).
 
-> `v0` is a draft: breaking changes are permitted between drafts and logged here.
-> The first stable line is `v1`.
+> Minor versions before `v1` may introduce breaking changes between releases;
+> every break is logged here. The first stable line is `v1`.

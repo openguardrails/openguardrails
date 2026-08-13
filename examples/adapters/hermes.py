@@ -54,9 +54,9 @@ class _Enforcer:
 class HermesAgentGuard(_Enforcer):
     """Hermes pre-tool hook → OGR (observation_point=invocation)."""
 
-    def __init__(self, runtime: Runtime, agent_id: str = "hermes-1", principal: str = "user:tom"):
+    def __init__(self, runtime: Runtime, agent_id: str = "hermes-1", agent_user: str = "user:tom"):
         super().__init__(runtime)
-        self.agent_id, self.principal = agent_id, principal
+        self.agent_id, self.agent_user = agent_id, agent_user
 
     def guard_tool_call(self, name: str, arguments: dict, session_id: str,
                         provenance: list[Provenance] | None = None,
@@ -65,7 +65,7 @@ class HermesAgentGuard(_Enforcer):
         ev = GuardEvent(
             kind="tool_call", observation_point="invocation",
             subject={"agent_id": self.agent_id, "agent_type": "hermes",
-                     "principal": self.principal},
+                     "agent_user": self.agent_user},
             payload={"name": name, "arguments": arguments},
             event_id=_id("evt"), guard_id=guard_id, timestamp=_now(),
             session_id=session_id, provenance=provenance or [],

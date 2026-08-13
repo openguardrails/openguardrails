@@ -69,7 +69,9 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--api-key", help="bearer token for --runtime-url")
     r.add_argument("--agent-id", default="ogr-ebpf-agent")
     r.add_argument("--agent-type", default="ogr-ebpf.sandbox")
-    r.add_argument("--principal")
+    r.add_argument("--agent-workspace", help="the group of agents this one belongs to")
+    r.add_argument("--agent-owner", help="the agent's builder / responsible party")
+    r.add_argument("--agent-user", help="who the sandboxed agent serves; unset means one user")
     r.add_argument("--session")
     r.add_argument("--guardcontext", help="file the harness writes `ogr-guardcontext` to")
     r.add_argument("--guardcontext-ttl", type=float, default=30.0)
@@ -101,7 +103,9 @@ def _cmd_run(args: argparse.Namespace) -> int:
         pdp = EmbeddedPDP(_load_policy(args.policy))
 
     pep = PEP(pdp, PEPConfig(
-        agent_id=args.agent_id, agent_type=args.agent_type, principal=args.principal,
+        agent_id=args.agent_id, agent_type=args.agent_type,
+        agent_workspace=args.agent_workspace, agent_owner=args.agent_owner,
+        agent_user=args.agent_user,
         session_id=args.session, guardcontext_path=args.guardcontext,
         guardcontext_ttl=args.guardcontext_ttl, enforce=args.enforce,
         fail_closed=args.fail_closed, protect_pids=frozenset({os.getpid()})))

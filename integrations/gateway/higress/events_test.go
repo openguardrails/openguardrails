@@ -9,14 +9,14 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-func ctxFor(principal string) (*deriveCtx, *sessionState) {
+func ctxFor(agentID string) (*deriveCtx, *sessionState) {
 	return &deriveCtx{
-		principal:      principal,
-		principalGroup: "dev-team",
-		sessionID:      "sess-test",
-		guardID:        "gw-test",
-		reqID:          "test",
-		now:            "2026-07-30T00:00:00Z",
+		// The consumer IS the agent (OGR v0.5); the consumer-group is its workspace.
+		subj:      subjectOf(agentID, "smartwork", "dev-agents", "user:tom", "user:lily", true),
+		sessionID: "sess-test",
+		guardID:   "gw-test",
+		reqID:     "test",
+		now:       "2026-07-30T00:00:00Z",
 		// Per REQUEST now, not a package constant. These fixtures are openai.chat
 		// bodies, so that is what they must report.
 		protocol: "openai.chat",
@@ -441,19 +441,29 @@ func TestEventsMarshalToTheWireShape(t *testing.T) {
 			t.Errorf("missing %s in %s", field, got.Raw)
 		}
 	}
-	if got.Get("subject.principal").String() != "alice@acme.io" {
-		t.Error("principal did not reach subject.principal")
+	// The consumer IS the agent: one consumer credential, one agent row.
+	if got.Get("subject.agent_id").String() != "alice@acme.io" {
+		t.Error("consumer did not reach subject.agent_id")
 	}
-	// x-mse-consumer-group. The platform resolves it to a workspace, so losing it on the
-	// wire silently puts every agent under the API key's policy set instead of its own
-	// team's.
-	if got.Get("subject.principal_group").String() != "dev-team" {
-		t.Error("consumer group did not reach subject.principal_group")
+	// x-mse-consumer-group is the agent's WORKSPACE. The platform resolves it to a
+	// workspace, so losing it on the wire silently puts every agent under the API
+	// key's policy set instead of its own workspace's.
+	if got.Get("subject.agent_workspace").String() != "dev-agents" {
+		t.Error("consumer group did not reach subject.agent_workspace")
 	}
-	// agent_id must stay unset: naming the gateway consumer as the agent collapses every
-	// agent behind one API key into a single identity.
-	if got.Get("subject.agent_id").Exists() {
-		t.Error("subject.agent_id was asserted by the gateway")
+	if got.Get("subject.agent_type").String() != "smartwork" {
+		t.Error("agent type did not reach subject.agent_type")
+	}
+	if got.Get("subject.agent_owner").String() != "user:tom" {
+		t.Error("owner did not reach subject.agent_owner")
+	}
+	if got.Get("subject.agent_user").String() != "user:lily" {
+		t.Error("user did not reach subject.agent_user")
+	}
+	// An agent_id from the consumer header is an identity this gateway itself
+	// authenticated — it must say so, or the runtime clamps it to self-declared.
+	if got.Get("subject.attestation").String() != "gateway_api_key" {
+		t.Error("consumer-authenticated identity missing the gateway_api_key stamp")
 	}
 	// Every event id must be distinct or the runtime's per-event verdicts cannot be
 	// paired back to the events they judged.

@@ -198,7 +198,7 @@ const plugin: ReturnType<typeof definePluginEntry> = definePluginEntry({
       "before_tool_call",
       async (event, ctx) => {
         const c = ctx as { agentId?: string; sessionKey?: string; channelId?: string }
-        // The principal is trusted, but if the session has ingested untrusted
+        // The user's own input is trusted, but if the session has ingested untrusted
         // content (inbound message / web / mcp result), this action may be
         // injection-influenced — flag it untrusted so the judge escalates.
         const provenance: Provenance[] = [{ source: "user", trust: "trusted" }]
@@ -216,14 +216,13 @@ const plugin: ReturnType<typeof definePluginEntry> = definePluginEntry({
           subject: {
             // One assistant daemon per machine → machine-scoped identity
             // (identity design §7); client_key is clamped by the runtime to
-            // this key's enrollment scope.
+            // this key's enrollment scope. Session attribution rides the
+            // event's own sessionId, not the subject.
             agent_id: c.agentId ?? hostAgentId(),
             agent_type: "openclaw",
             attestation: "client_key",
-            session_id: c.sessionKey,
-            channel: c.channelId,
           },
-          payload: { name: event.toolName, arguments: event.params },
+          payload: { name: event.toolName, arguments: event.params, channel: c.channelId },
           eventId: id("evt"),
           guardId: event.toolCallId ?? id("ga"),
           timestamp: new Date().toISOString(),
@@ -266,7 +265,6 @@ const plugin: ReturnType<typeof definePluginEntry> = definePluginEntry({
           agent_id: c.agentId ?? hostAgentId(),
           agent_type: "openclaw",
           attestation: "client_key",
-          session_id: c.sessionKey,
         },
         payload: { content: e.content ?? "", channel: c.messageProvider },
         eventId: id("evt"),

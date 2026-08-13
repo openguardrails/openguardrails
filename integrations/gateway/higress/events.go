@@ -58,7 +58,7 @@ import (
 // every turn of every agent after the first.
 
 const (
-	ogrVersion  = "0.4"
+	ogrVersion  = "0.5"
 	sensorName  = "openguardrails-higress-connector"
 	sensorClass = "proxy"
 	// ⚠️ There is deliberately no `llmProtocol` constant. It was "openai.chat" and it
@@ -85,13 +85,24 @@ type sensor struct {
 	Class string `json:"class"`
 }
 
+// subject is the OGR v0.5 five-field agent identity. OGR is agent-centric: the
+// consumer the gateway authenticated IS the agent (`agent_id`), the consumer-group
+// is the agent's WORKSPACE — a group of agents plus one policy set, not a human
+// org chart. Owner and user are attributes the platform records on the agent and
+// the session; they never select configuration.
+//
+// The workspace is resolved by the runtime always within the org the API key
+// proves, so a workspace name can never reach another tenant's configuration.
 type subject struct {
-	Principal string `json:"principal,omitempty"`
-	// The consumer's group. A runtime EXTENSION, not an OGR v0.4 field: the platform
-	// resolves it to a workspace, always within the org the API key proves, so a group
-	// name can never reach another tenant's configuration.
-	PrincipalGroup string `json:"principal_group,omitempty"`
 	AgentID        string `json:"agent_id,omitempty"`
+	AgentType      string `json:"agent_type,omitempty"`
+	AgentWorkspace string `json:"agent_workspace,omitempty"`
+	AgentOwner     string `json:"agent_owner,omitempty"`
+	AgentUser      string `json:"agent_user,omitempty"`
+	// How the identity was verified. `gateway_api_key` when `agent_id` came from
+	// the consumer header (an identity this gateway authenticated); empty for a
+	// statically configured fallback, which the runtime treats as self-declared.
+	Attestation string `json:"attestation,omitempty"`
 }
 
 // transcriptEntry mirrors the runtime's own projection of an event to a transcript
@@ -371,13 +382,15 @@ func instructionOf(conv *protocol.Conversation) string {
 // --- deriving the events ----------------------------------------------------
 
 type deriveCtx struct {
-	principal      string
-	principalGroup string
-	sessionID      string
-	guardID        string
-	reqID          string
-	seq            int
-	now            string
+	// The agent identity every event of this request asserts; nil when the
+	// request carried nothing — the key-only floor, where the runtime derives
+	// the agent from the API key.
+	subj      *subject
+	sessionID string
+	guardID   string
+	reqID     string
+	seq       int
+	now       string
 	// The CLIENT's wire protocol, detected per request. Never a constant: it was
 	// `openai.chat` for every event this plugin ever sent, which made 693,197 stored
 	// events unfalsifiable.
@@ -396,7 +409,7 @@ func (d *deriveCtx) event(kind string, payload map[string]any) *GuardEvent {
 		Sensor:           sensor{ID: sensorName, Class: sensorClass},
 		Kind:             kind,
 		LLMProtocol:      d.protocol,
-		Subject:          subjectOf(d.principal, d.principalGroup),
+		Subject:          d.subj,
 		Payload:          payload,
 	}
 }
@@ -493,17 +506,37 @@ func unparsedEvent(d *deriveCtx, kind, reason string, bodyBytes int) *GuardEvent
 	return e
 }
 
-func subjectOf(principal, group string) *subject {
-	// ⚠️ agent_id is deliberately left unset. The runtime recognises the agent from the
-	// system prompt's self-definition, and naming the gateway consumer as the agent
-	// would collapse every agent behind one API key into one row.
-	if principal == "" && group == "" {
+// subjectOf assembles the per-request agent identity.
+//
+// The consumer IS the agent (OGR v0.5): one consumer credential, one agent row.
+// One credential driving several harnesses at once stays ONE agent — that is a
+// usage error the runtime surfaces as a shadow-agent signal (it sees the same
+// agent_id arrive with differing agent_type values), not a reason to split the
+// inventory here.
+//
+// `viaConsumer` records whether agent_id came from the consumer header — an
+// identity this gateway authenticated — and stamps `gateway_api_key`; a static
+// config fallback stays unstamped and lands at the self-declared floor.
+//
+// ⚠️ The workspace is sent even when the consumer header is absent: it still says
+// which workspace's policy set this traffic belongs under, which is the half that
+// decides what the guardrails do. All-empty returns nil — the key-only floor,
+// where the runtime derives the agent from the API key.
+func subjectOf(agentID, agentType, workspace, owner, user string, viaConsumer bool) *subject {
+	if agentID == "" && agentType == "" && workspace == "" && owner == "" && user == "" {
 		return nil
 	}
-	// ⚠️ The group is sent even when the consumer header is absent: it still says which
-	// workspace's policy set this traffic belongs under, which is the half that decides
-	// what the guardrails do.
-	return &subject{Principal: principal, PrincipalGroup: group}
+	s := &subject{
+		AgentID:        agentID,
+		AgentType:      agentType,
+		AgentWorkspace: workspace,
+		AgentOwner:     owner,
+		AgentUser:      user,
+	}
+	if viaConsumer && agentID != "" {
+		s.Attestation = "gateway_api_key"
+	}
+	return s
 }
 
 // deriveRequest builds the ONE event for what is entering the model this turn, plus

@@ -147,9 +147,11 @@ export function eventToWire(ev: GuardEvent): Record<string, unknown> {
     timestamp: ev.timestamp,
     observation_point: ev.observationPoint,
     kind: ev.kind,
-    subject: ev.subject,
     payload: ev.payload,
   }
+  // A key-only caller sends no subject at all; the runtime derives the agent
+  // from the API key (spec: the identity floor).
+  if (ev.subject && Object.keys(ev.subject).length) wire.subject = ev.subject
   if (ev.sensor) wire.sensor = ev.sensor
   if (ev.sessionId) wire.session_id = ev.sessionId
   if (ev.llmProtocol) wire.llm_protocol = ev.llmProtocol

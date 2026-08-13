@@ -189,5 +189,7 @@ Hermes is the "many instances per machine" case: name each one with
 `OGR_INSTANCE` (default `default`). The instance asserts
 `subject.agent_id = hermes-<instance>` and appears as its own Agent in the
 console. `OGR_KEYFILE` overrides the keypair path
-(`~/.ogr/hermes-<instance>-ed25519.json`), `OGR_PRINCIPAL` the principal
-(default `user:<login>`).
+(`~/.ogr/hermes-<instance>-ed25519.json`). `OGR_AGENT_OWNER` and
+`OGR_AGENT_USER` override the agent's owner and user (both default
+`user:<login>` — a personal agent is owned by, and serves, the person running
+it), and `OGR_AGENT_WORKSPACE` names the group of agents it belongs to.

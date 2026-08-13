@@ -86,9 +86,13 @@ class RemotePDP:
 
 @dataclass
 class PEPConfig:
+    # The OGR v0.5 agent five-tuple, operator-configured: a kernel sensor
+    # watches ONE sandboxed agent, so its identity is deployment configuration.
     agent_id: str = "ogr-ebpf-agent"
     agent_type: str = "ogr-ebpf.sandbox"
-    principal: str | None = None
+    agent_workspace: str | None = None
+    agent_owner: str | None = None
+    agent_user: str | None = None
     session_id: str | None = None
     guardcontext_path: str | None = None
     guardcontext_ttl: float = 30.0
@@ -128,8 +132,12 @@ class PEP:
 
     def _subject(self) -> dict:
         subject = {"agent_id": self.config.agent_id, "agent_type": self.config.agent_type}
-        if self.config.principal:
-            subject["principal"] = self.config.principal
+        if self.config.agent_workspace:
+            subject["agent_workspace"] = self.config.agent_workspace
+        if self.config.agent_owner:
+            subject["agent_owner"] = self.config.agent_owner
+        if self.config.agent_user:
+            subject["agent_user"] = self.config.agent_user
         return subject
 
     # -- one record ---------------------------------------------------------

@@ -30,7 +30,13 @@ Env:
                     the same logical install and collapse to one instance;
                     session_id already tells their conversations apart).
                     Set explicitly to override either signal.
-  OGR_PRINCIPAL     principal override, default "user:<login>"
+  OGR_AGENT_OWNER   agent_owner override — the builder/responsible party,
+                    default "user:<login>" (a personal agent's owner is the
+                    person running it)
+  OGR_AGENT_USER    agent_user override — who this instance serves, default
+                    "user:<login>" (a personal agent serves its owner)
+  OGR_AGENT_WORKSPACE  the group of agents this instance belongs to; unset
+                    lands in the API key's workspace
   OGR_KEYFILE       keypair path, default ~/.ogr/hermes-<instance>-ed25519.json
 """
 from __future__ import annotations
@@ -86,18 +92,28 @@ def agent_id() -> str:
     return f"hermes-{instance_name()}"
 
 
-def principal() -> str:
-    explicit = os.environ.get("OGR_PRINCIPAL", "").strip()
-    if explicit:
-        return explicit
+def _local_user() -> str:
     try:
         return f"user:{getpass.getuser()}"
     except Exception:  # noqa: BLE001
         return "user:unknown"
 
 
+def agent_owner() -> str:
+    """The agent's builder/responsible party. A personal agent's owner is the
+    person running it, so the local login is the default."""
+    return os.environ.get("OGR_AGENT_OWNER", "").strip() or _local_user()
+
+
+def agent_user() -> str:
+    """Who this instance serves. Hermes is a personal agent: every session has
+    the same user, and that user is its owner unless told otherwise."""
+    return os.environ.get("OGR_AGENT_USER", "").strip() or _local_user()
+
+
 def subject_for(**extra: Any) -> dict[str, Any]:
-    """The explicit per-instance subject every event of this plugin asserts.
+    """The explicit per-instance subject every event of this plugin asserts —
+    the OGR v0.5 agent five-tuple.
 
     `attestation: client_key` is the honest claim for an in-process hook that
     holds its own enrolled credential; the runtime clamps it to whatever this
@@ -106,9 +122,13 @@ def subject_for(**extra: Any) -> dict[str, Any]:
     subject: dict[str, Any] = {
         "agent_id": agent_id(),
         "agent_type": "hermes",
-        "principal": principal(),
+        "agent_owner": agent_owner(),
+        "agent_user": agent_user(),
         "attestation": "client_key",
     }
+    workspace = os.environ.get("OGR_AGENT_WORKSPACE", "").strip()
+    if workspace:
+        subject["agent_workspace"] = workspace
     subject.update(extra)
     return subject
 

@@ -52,14 +52,14 @@ export const OpenGuardrailsPlugin: Plugin = async ({ directory }, options) => {
     "tool.execute.before": async (input, output) => {
       const ev: GuardEvent = {
         kind: "tool_call",
-        observationPoint: "agent_hook",
-        subject: { agent_id: "opencode", agent_type: "opencode", session_id: input.sessionID },
+        observationPoint: "invocation",
+        subject: { agent_id: "opencode", agent_type: "opencode" },
         payload: { name: input.tool, arguments: output.args },
         eventId: id("evt"),
         guardId: id("ga"),
         timestamp: new Date().toISOString(),
         sessionId: input.sessionID,
-        // v0.1: principal is trusted. Transcript-based tainting (web/mcp results
+        // v0.1: the user's own input is trusted. Transcript-based tainting (web/mcp results
         // → untrusted provenance) is a follow-up via the opencode session API.
         provenance: [{ source: "user", trust: "trusted" }],
       }

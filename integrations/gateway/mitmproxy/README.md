@@ -58,10 +58,11 @@ restarts with an identical opening prompt is NOT merged into the older inferred
 Session once that Session has grown past it. Transcript-only title/summary
 helper calls are passed upstream but excluded from the primary Agent timeline.
 
-Agent identity is NOT configured on the gateway: events are sent without
-`subject.agent_id` and the runtime recognises the Agent from the system
-prompt's self-definition at ingest (`OGR_AGENT_ID`/`OGR_AGENT_TYPE` remain as
-explicit operator overrides only).
+Agent identity (OGR v0.5 five-tuple) is operator-configured via
+`OGR_AGENT_ID` / `OGR_AGENT_TYPE` / `OGR_AGENT_WORKSPACE` / `OGR_AGENT_OWNER`
+/ `OGR_AGENT_USER`, and every field is optional: unset, the runtime falls
+back to the identity floor — the agent is derived from the API key (one key,
+one default agent) and every session is attributed to one user.
 
 ### Codex (ChatGPT backend, WebSocket)
 
@@ -242,8 +243,11 @@ A prompt that trips the moderation policy comes back as:
 |-----|---------|---------|
 | `OGR_RUNTIME_URL` | `http://localhost:3000` | deployment base URL of the runtime (PDP); the SDK speaks canonical `/v1/*` paths and falls back to the legacy `/api/public/ogr` mount automatically |
 | `OGR_API_KEY` | — | workspace key, `Authorization: Bearer` (required) |
-| `OGR_AGENT_ID` | — | operator override for `subject.agent_id`; unset (recommended) lets the runtime derive the Agent from the system prompt |
-| `OGR_AGENT_TYPE` | — | optional `subject.agent_type` override |
+| `OGR_AGENT_ID` | — | `subject.agent_id` (org-unique); unset lets the runtime derive the agent from the API key |
+| `OGR_AGENT_TYPE` | — | `subject.agent_type` — what kind of agent fronts this proxy |
+| `OGR_AGENT_WORKSPACE` | — | `subject.agent_workspace` — the group of agents this one belongs to; unset lands in the key's workspace |
+| `OGR_AGENT_OWNER` | — | `subject.agent_owner` — the agent's builder / responsible party |
+| `OGR_AGENT_USER` | — | `subject.agent_user` — who uses the agent behind this proxy; only fits a single-user proxy, unset means one user |
 | `OGR_INFER_LIFECYCLE` | `true` | infer Session/Run/Turn server-side when no `x-ogr-*` headers are present |
 | `OGR_FAIL_MODE_CLOSED` | `true` | if the runtime is unreachable: block (`true`) or pass through (`false`) |
 | `OGR_CHECK_RESPONSE` | `true` | also moderate the model completion |
