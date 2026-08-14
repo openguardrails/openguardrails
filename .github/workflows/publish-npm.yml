@@ -58,7 +58,10 @@ jobs:
         run: npm ci
 
       - name: Build package
-        run: npm run build --workspace "${{ steps.package.outputs.directory }}" --if-present
+        # Every workspace, not just the target: an integration package
+        # type-checks against @openguardrails/core's emitted declarations,
+        # which a fresh checkout does not have until the SDK workspace builds.
+        run: npm run build
 
       - name: Test package
         run: npm run test --workspace "${{ steps.package.outputs.directory }}" --if-present
