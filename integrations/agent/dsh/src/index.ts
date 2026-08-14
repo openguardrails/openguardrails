@@ -1,7 +1,7 @@
 /**
  * @openguardrails/dsh-auto-mode
  *
- * Auto mode for DeepSeek Harness (dsh): an `auto` entry in the chat client's
+ * Auto mode for DeepSeek Harness (dsh): an `auto-mode` entry in the chat client's
  * Permissions selector whose approval prompts are answered by OpenGuardrails
  * (OGR) policy instead of a human — built on the full OGR guard engine, as an
  * ordinary Cordis plugin on dsh's documented interception points. No core
@@ -32,7 +32,7 @@
  * `ctx.approval`, the registry enforces.
  *
  * Auto mode inverts one seam of that separation on explicit user request: for
- * sessions whose permission preset is `auto` (a deployment-configured entry in
+ * sessions whose permission preset is `auto-mode` (a deployment-configured entry in
  * dsh's Permissions selector), an `approval/request` answerer resolves asks
  * with the OGR verdict instead of a human — allow grants once, block rejects,
  * and anything the runtime cannot decide falls back to the human gate (or is
@@ -516,7 +516,7 @@ export function apply(ctx: Context, config: Config): void {
   //
   // dsh's permission presets bundle sandbox mode + approval policy, and the
   // chat client renders the preset table as its Permissions selector. A
-  // deployment that adds an `auto` preset (workspace-write + ask — README has
+  // deployment that adds an `auto-mode` preset (workspace-write + ask — README has
   // the cordis.yml snippet) gets its meaning from this answerer: for sessions
   // on that preset, asks that would reach a human — a sandbox-escalation
   // retry, a tool whose policy layer said `ask` — resolve with the OGR

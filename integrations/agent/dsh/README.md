@@ -63,7 +63,7 @@ knobs as workspace-write; the difference is entirely in who answers the asks:
     presets:
       read-only: { sandbox: read-only, approval: ask }
       workspace-write: { sandbox: workspace-write, approval: ask }
-      auto:
+      auto-mode:
         sandbox: workspace-write
         approval: ask
         name: Auto Mode by OGR
@@ -79,7 +79,7 @@ And the plugin (after `@deepseek-ai/dsh-tools`; auto mode is on by default,
   name: '@openguardrails/dsh-auto-mode'
   config:
     auto:
-      preset: auto
+      preset: auto-mode
       unresolved: human   # or `reject` for headless deployments
 ```
 
