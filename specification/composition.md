@@ -1,19 +1,20 @@
 # Composition
 
-When multiple vendors judge one event, the runtime must combine their
-[`Verdict`](verdict.md)s into one **effective verdict**. Composition is the
-deployer's real policy — not "write rules," but "orchestrate vendors." OGR
-standardizes the *mechanism*; the choices stay the deployer's. Keywords per
-RFC 2119.
+When multiple detectors judge one event, the runtime must combine their
+answers into the one **effective verdict** the integration point enforces.
+Composition is the deployer's real policy — not "write rules," but
+"orchestrate detectors." OGR standardizes the *mechanism*; the choices stay
+the deployer's. Keywords per RFC 2119.
 
 ## Policy shape
 
-Composition is configured per risk category (or category prefix). A runtime MUST
-support at least the `deny-wins`, `quorum`, and `first-available` strategies.
+Composition is configured per risk category (or category prefix). A runtime
+MUST support at least the `deny-wins`, `quorum`, and `first-available`
+strategies.
 
 ```yaml
 composition:
-  # security defaults conservative: any vendor blocking blocks the action
+  # security defaults conservative: any detector blocking blocks the action
   "security.*":
     providers: [vendorA, vendorB, ogr.poc.config_rules]
     strategy: deny-wins
@@ -38,44 +39,44 @@ composition:
 
 ## Strategies
 
+With [two decisions](verdict.md#decisions-two) the strategies compose
+decisions, redaction spans, and findings separately:
+
 | Strategy | Effective decision |
 |---|---|
-| `deny-wins` | The most restrictive decision among providers (`block` > `require_approval` > `redact`/`modify` > `allow`). |
-| `quorum` | A non-`allow` decision only if ≥ `count` providers agree (optionally above `min_score`); otherwise `allow`. |
+| `deny-wins` | `block` if any contributing detector blocks, else `allow`. |
+| `quorum` | `block` only if ≥ `count` detectors agree (optionally above `min_score`); otherwise `allow`. |
 | `weighted` | Sum provider weights for each decision; highest wins. Weights set per provider. |
 | `first-available` | First provider to answer (others may be `fallback`). |
 
-## Decision severity order
+## Composing findings and modifications
 
-For `deny-wins` and `conflict_default: most_severe`, severity is:
-
-```
-block  >  require_approval  >  redact  >  modify  >  allow
-```
+- **Findings union.** The effective verdict's `findings` are the union of
+  every contributing detector's findings, each keeping its own `detector`
+  attribution. Whitelisted findings are carried (marked), never dropped.
+- **Spans union.** The effective `modifications.spans` are the union of
+  spans from all contributing verdicts. Overlapping spans on the same `path`
+  merge to the covering range.
+- **Unjudged union.** The effective `unjudged` is the union of every
+  detector's unjudged paths — a path is covered only when every guardrail
+  routed to it answered.
 
 ## Failure & latency
 
 - `timeout_ms` bounds each provider. A provider exceeding it is dropped per
-  `on_timeout` (`degrade` = decide on the rest; `block` = fail closed).
+  `on_timeout` (`degrade` = decide on the rest AND report the dropped
+  provider's paths in `unjudged`; `block` = fail closed).
 - `on_all_failed` sets the decision when every provider errors or times out.
-  Security categories SHOULD fail closed (`block`); low-severity safety MAY fail
-  open (`allow`). This choice is the deployer's and MUST be explicit.
-- `short_circuit: true` lets the runtime stop once a `block` is reached, so an
-  expensive model provider is skipped when a cheap rule already blocked.
-
-## Composing modifications
-
-When the effective decision is `redact`, the effective `modifications.spans`
-MUST be the **union** of spans from all contributing `redact` verdicts.
-Overlapping spans on the same `path` merge to the covering range; the merged
-span keeps the union of the original spans' finding categories. For `modify`
-with whole-payload rewrites (`payload` present), the winning provider per the
-strategy supplies `modifications`; other proposed rewrites are recorded in
-`evidence` (rewrites do not merge).
+  Security categories SHOULD fail closed (`block`); low-severity safety MAY
+  fail open (`allow` with the affected paths in `unjudged`). This choice is
+  the deployer's and MUST be explicit.
+- `short_circuit: true` lets the runtime stop once a `block` is reached, so
+  an expensive model provider is skipped when a cheap rule already blocked.
 
 ## Attribution
 
-The effective verdict MUST record which providers contributed (`provider` on each
-underlying verdict). This is what makes per-vendor metering, billing, and the
+The effective verdict MUST record which providers contributed (`provider` on
+each underlying answer, `detector` on each finding). This is what makes
+per-vendor metering, billing, and the
 [benchmark leaderboard](https://github.com/openguardrails/openguardrails/tree/main/benchmarks)
 possible — the same attribution data, viewed two ways.

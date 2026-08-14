@@ -3,89 +3,49 @@
 This is a monorepo. Run commands from the repository root unless a component
 README explicitly says otherwise.
 
-The repo is layered **API → SDK → Plugin**. The API layer is the normative
-Runtime API binding (`specification/runtime-api.md`: `/v1/evaluate`,
-`/v1/ingest`, enroll, heartbeat, config, approvals) plus the JSON Schemas in
-`schema/` (GuardEvent, Verdict). The SDK layer is `packages/python`
-(`openguardrails`) and `packages/javascript` (`@openguardrails/core`) — each
-combines the in-process runtime with a `RuntimeClient` that wraps the API
-(wire mapping, auth, signing, batching). The plugin layer is everything under
-`integrations/`. Plugins must not hand-roll HTTP clients or wire mapping —
-that belongs in the SDK; new endpoints or wire fields belong in the spec
-first. Python plugins depend on the Python SDK; JavaScript/TypeScript plugins
-depend on the JS SDK. Users normally install a plugin and receive its SDK
-dependency automatically. Self-contained marketplace plugins may bundle the
-SDK and require no separate install.
+**Protocol version: v0.7 — the ledger model** (Session / Turn / Step / Call,
+one observed plane: LLM messages). The design rationale lives in
+`../openguardrails-runtime/docs/v0.7-ledger-redesign.md`; the normative text
+lives here in `specification/` + `schema/`. Read
+`specification/overview.md` first.
 
-OGR supports three integration points: agent hooks, gateway hooks, and sandbox
-hooks. All bindings and runnable integration examples belong under
-`integrations/`; a gateway implementation is not an OGR-operated service.
-`integrations/gateway/openai-anthropic` demonstrates OpenAI/Anthropic gateway-hook integration.
-Standalone Anthropic srt and NVIDIA OpenShell sandbox-hook examples are planned.
-The fourth directory category, `integrations/ebpf`, holds kernel-level
-integrations. `integrations/ebpf/sensor` is the native OGR eBPF reference
-implementation (a CO-RE kernel program under `bpf/` plus a userspace PEP in
-`src/openguardrails_ebpf/`). Such integrations must map their events to an OGR
-observation point (`execution`) rather than inventing a separate wire contract.
+The repo is layered **API → Plugin** — there is deliberately NO SDK layer
+(retired in v0.7, decided 2026-08-14). The API layer is the normative Runtime
+API binding (`specification/runtime-api.md`: `/v1/evaluate`, `/v1/ingest`,
+heartbeat, health) plus the JSON Schemas in `schema/` (GuardEvent, Verdict).
+The plugin layer is everything under `integrations/` — each plugin speaks the
+API directly (two POST calls); new endpoints or wire fields belong in the
+spec first. The two normative integration recipes (agent-direct: declares
+session/turn/step and reports turn ends; gateway: mints step_id, declares
+nothing, runtime derives) are IN the runtime-api spec — a plugin implements
+one of them, and its README says which.
+
+OGR supports two integration points: agent-direct hooks and gateway hooks.
+All bindings and runnable integration examples belong under `integrations/`;
+a gateway implementation is not an OGR-operated service.
+
+## Integration status (2026-08-14)
+
+- `integrations/gateway/higress` — the v0.7 reference gateway integration
+  (Go/WASM), the only CI-covered plugin.
+- Everything else under `integrations/agent/` and the other gateway examples
+  are **v0.6-stale**: they were built on the retired SDKs and await a v0.7
+  rewrite (dsh first — it is the reference agent-direct integration). They
+  are excluded from the npm/uv workspaces and from CI; do not "fix" one by
+  re-adding an SDK.
 
 ## Validation
 
-- JavaScript/TypeScript: `npm ci && npm run build && npm test`
-- Python tests: `python -m pytest` and
-  `python integrations/agent/langgraph/tests/test_smoke.py`
+- Benchmarks: `python -m pip install pytest && python -m pytest`
+- Higress plugin: `cd integrations/gateway/higress && gofmt -l . && go vet ./... && go test ./...`
+  (wasm compile check: `GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o plugin.wasm .`)
 - Release workflows: run `actionlint` against `.github/workflows/*.yml`
 
-## Publishing packages
+## Publishing
 
-Publishing uses GitHub Actions Trusted Publishing with OIDC. Never add an npm
-or PyPI write token to the repository, workflow, or GitHub secrets.
-
-Only protected release tags may trigger publishing. There is intentionally no
-`workflow_dispatch` publishing entry point. Before tagging:
-
-1. Change the version in the selected `package.json` or `pyproject.toml`.
-2. Update the relevant changelog or release notes.
-3. Merge the change into `main` and wait for CI to pass.
-4. Tag that exact commit. The workflow rejects a tag whose version differs
-   from the package metadata.
-
-### npm
-
-Workflow: `.github/workflows/publish-npm.yml`
-GitHub Environment: `npm`
-
-| Tag | npm package |
-|---|---|
-| `js-vX.Y.Z` | `@openguardrails/core` |
-| `openclaw-vX.Y.Z` | `openguardrails-instrumentation-openclaw` |
-| `opencode-vX.Y.Z` | `@openguardrails/opencode-auto-mode` |
-| `dsh-vX.Y.Z` | `@openguardrails/dsh-auto-mode` |
-
-`integrations/agent/claude-code` and `integrations/agent/codex` are private npm workspaces.
-They use npm for builds and tests but are distributed as marketplace plugins;
-do not publish them to npmjs.
-
-### PyPI
-
-Workflow: `.github/workflows/publish-pypi.yml`
-GitHub Environment: `pypi`
-
-| Tag | PyPI project |
-|---|---|
-| `python-vX.Y.Z` | `openguardrails` |
-| `gateway-vX.Y.Z` | `openguardrails-gateway` |
-| `hermes-vX.Y.Z` | `openguardrails-instrumentation-hermes` |
-| `langgraph-vX.Y.Z` | `openguardrails-instrumentation-langgraph` |
-
-Example after version `0.1.3` is merged into `main`:
-
-```bash
-git switch main
-git pull --ff-only
-git tag python-v0.1.3
-git push origin python-v0.1.3
-```
-
-Approve the pending deployment in the matching GitHub Environment, then verify
-the package and provenance on npmjs or PyPI. Never reuse a version that already
-exists on the registry.
+Only protected release tags may trigger publishing; there is intentionally no
+`workflow_dispatch` publishing entry point. The one publishable artifact is
+the Higress plugin (`higress-vX.Y.Z` → `docker.io/openguardrails/higress`,
+OCI artifact; see `RELEASING.md` for why Docker Hub and which secrets).
+Never add an npm or PyPI write token to the repository, workflows, or GitHub
+secrets.

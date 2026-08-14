@@ -4,86 +4,82 @@ This document uses the keywords MUST, SHOULD, MAY as defined in RFC 2119.
 
 ## The model
 
-An **agent** does work by emitting actions: it sends messages to an LLM, it
-registers tools and MCP servers, it loads skills, it calls tools, and — often
-inside a **sandbox** — it executes commands, opens network connections, and
-touches files.
+An **agent** works in a loop: it takes an instruction, calls a model, executes
+the tool calls the model asked for, feeds the results back, and calls the model
+again — until it has nothing left to do. OGR names that loop the way agent
+harnesses themselves do:
 
-OGR inserts a **decision** at each of these moments. An **interception point**
-observes an action, packages it as a [`GuardEvent`](guard-event.md), and asks a
-**runtime** (a Policy Decision Point) for a [`Verdict`](verdict.md). The runtime
-fans the event out to one or more **detectors** (vendor capabilities), then
-**composes** their verdicts into a single decision the interception point
-enforces.
+| Object | Definition |
+|---|---|
+| **Session** | One conversation. Sessions form a tree: a subagent's session names its parent. |
+| **Turn** | One instruction → quiescence: opens when user words arrive, closes when the agent stops. 1-based. Closes with a **reason** (`completed`, `max_tokens`, `blocked`, `aborted`, `error`). |
+| **Step** | One model call inside a turn: everything sent to the model, everything it returned, and every tool call it asked for. 1-based within its turn. |
+| **Call** | One tool call inside a step's response, keyed by the provider's tool-call id. Its result arrives in a LATER step's request and is paired by that id. |
+
+The observed plane is **LLM messages**. Conversation and tool calls are not two
+different vantage points — they travel together in the same provider
+request/response bodies, and one step's two halves are exactly what an
+integration can hold and forward. (A lower plane — observing real process
+execution, network and filesystem behavior underneath the agent — is out of
+scope for this version of the contract.)
+
+OGR inserts a **decision** at the two moments an integration is holding
+something it can still refuse: before the request reaches the model, and after
+the response arrives but before the agent acts on it. The integration packages
+what it holds as a [`GuardEvent`](guard-event.md), and asks a **runtime** (a
+Policy Decision Point) for a [`Verdict`](verdict.md) — `allow` or `block`, with
+findings saying what was found and where, and redaction spans when content must
+be transformed in place.
 
 ```
- action ──▶ interception point ──GuardEvent──▶ runtime ──┬─▶ detector A ─┐
-                    ▲                                     ├─▶ detector B ─┤
-                    │                                     └─▶ detector C ─┘
-                 Verdict ◀──────── composition ◀──────────────────────────┘
+                       step/request                    step/response
+ agent loop ──────────────▶│                                │
+   turn N, step M          │  evaluate ──▶ runtime ──▶ verdict
+                           ▼                                ▼
+                     model call                    execute tool calls
 ```
 
-Verdicts are only enforceable if the channel carrying them — and the approvals
-that satisfy them — can be trusted.
-[Enrollment & approval receipts](enrollment-and-receipts.md) defines how an
-interception point authenticates to a runtime and how a `require_approval`
-grant becomes a verifiable, payload-bound artifact rather than a propagated
-flag. The concrete HTTP surface a runtime exposes — `/v1/evaluate`,
-`/v1/ingest`, enrollment, heartbeat, config and approvals — is normatively
-defined in the [Runtime API binding](runtime-api.md).
-When the runtime is unreachable, [adapter degraded mode](degraded-mode.md)
-keeps the enforcement point safe — degrading to runtime-independent local
-approval rather than failing fully open or fully closed.
+## Two integration points
 
-## Three observation altitudes
+The same contract serves two vantage points. They differ ONLY in who knows the
+coordinates:
 
-The same logical action is often observable at more than one point. OGR treats
-these as **defense in depth** and correlates them with a shared
-[`guard_id`](provenance-and-context.md#guard-context-propagation).
+- **Agent-direct** — a plugin inside a harness, or a developer building a
+  harness who calls the runtime API at the loop's seams. The integration OWNS
+  the loop, so it **declares** `session_id`, `turn` and `step` on every event,
+  and reports each turn's close (`turn/end`) with its reason.
+- **Gateway** — an LLM proxy (reference integration: Higress) that sees one
+  stateless model call at a time. It declares nothing; the runtime **derives**
+  session, turn and step server-side and echoes them on the verdict.
 
-| Altitude | `observation_point` | Sees | Trust property | Typical mechanism |
-|---|---|---|---|---|
-| Conversation | `conversation` | messages, tool/MCP/skill definitions, tool calls & results — normalized across LLM protocols | richest intent + provenance | an AI gateway / LLM proxy, or an in-process hook on the model call |
-| Invocation | `invocation` | lifecycle events (pre/post tool, pre/post model) inside the agent loop | cheap, in-process | a framework-native agent hook |
-| Execution | `execution` | real `execve`, network, filesystem behavior | adversary-proof, agent can't bypass | a sandbox (seccomp/landlock), or a kernel-level (eBPF) sensor |
+Declared always wins; derivation is the fallback for vantage points that cannot
+know. The [`attribution`](verdict.md) field on every verdict says which answer
+the caller got.
 
-The altitude names are deliberately independent of *how* the observation is
-made — `execution`, for example, is asserted identically by a sandboxed
-process wrapper and a kernel-level eBPF sensor, two unrelated mechanisms
-converging on the same layer. Don't read the altitude as "which integration
-reported this"; that's a separate axis, carried by
-[`sensor`](guard-event.md#sensor) — `sensor.class` says whether the observed
-agent could have evaded the observer, which the altitude alone never answers.
-
-A runtime MUST be able to ingest events from any altitude and SHOULD correlate
-events that share a `guard_id` so a single logical action yields a single
-enforced decision.
+There is deliberately **no SDK layer**. The [Runtime API](runtime-api.md) is
+the integration surface — two POST endpoints and two recipes — and every
+integration, including the ones this repository ships, calls it directly.
 
 ## Two domains
 
 OGR carries two risk domains under one contract:
 
-- **safety.\*** — judged on *content*; actions are typically `block`, `redact`,
-  `modify` (regenerate). Classifier-heavy.
-- **security.\*** — judged on *actions and data flow*; actions are typically
-  `block`, `require_approval`, `modify` (constrain). Policy + provenance heavy,
-  and frequently enforceable **statically** by compiling policy into the
-  sandbox (seccomp / landlock / egress allow-lists) in addition to the runtime
-  check.
+- **safety.\*** — judged on *content*; typically blocked or redacted.
+  Classifier-heavy.
+- **security.\*** — judged on *actions and data flow*: what a tool call is
+  about to do, whether an instruction arrived through data rather than from
+  the user. Policy-heavy.
 
-Compiling a security policy into a sandbox and also checking it at runtime is
-not redundant: the static floor is hard, coarse, and zero-latency; the runtime
-ceiling is semantic, fine, and provenance-aware.
+The category vocabulary is the [taxonomy](taxonomy.md).
 
 ## What OGR standardizes vs. leaves competitive
 
 | OGR core (neutral) | Vendor / deployer (competitive) |
 |---|---|
 | event & verdict contract | detection mechanism (config rules **or** model/classifier) |
-| provenance & guard-context | detection quality, coverage, latency, freshness |
-| composition meta-policy *mechanism* | which vendors to subscribe to and how to weight them |
-| enrollment & receipt mechanism | approver authentication method and approval UX |
+| the session/turn/step/call model | detection quality, coverage, latency, freshness |
+| composition meta-policy *mechanism* | which detectors to subscribe to and how to weight them |
 | risk taxonomy (category IDs) | thresholds, what counts as unsafe for a use case |
 
 A `Verdict` carries a `provider` field precisely so a runtime can attribute,
-meter, and benchmark each vendor's contribution.
+meter, and benchmark each detector's contribution.

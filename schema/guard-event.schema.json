@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://openguardrails.com/schema/0.6/guard-event.schema.json",
+  "$id": "https://openguardrails.com/schema/0.7/guard-event.schema.json",
   "title": "GuardEvent",
-  "description": "A unit observed at an OGR interception point. All fields are flat, top-level snake_case; objects are reserved for inherently structured data (payload, provenance, redactions).",
+  "description": "A unit observed at an OGR integration point, on the one observed plane: LLM messages. Three kinds: the two halves of a step (one model call), and a turn-close mark. All fields are flat, top-level snake_case; objects are reserved for inherently structured data (payload).",
   "type": "object",
   "required": [
     "kind",
@@ -12,28 +12,44 @@
   "properties": {
     "ogr_version": {
       "type": "string",
-      "const": "0.6"
+      "const": "0.7"
     },
-    "guard_id": {
-      "type": "string",
-      "minLength": 1,
-      "description": "Correlation hint: stable across observation points for one logical action. Sent only by deployments that propagate a guard-context; absent, the runtime assigns one and correlates altitudes server-side."
+    "kind": {
+      "enum": [
+        "step/request",
+        "step/response",
+        "turn/end"
+      ]
     },
     "session_id": {
-      "type": "string"
+      "type": "string",
+      "minLength": 1,
+      "description": "The producer's session. Declared by integrations that own their loop; absent, the runtime derives the session and echoes it on the Verdict."
+    },
+    "turn": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "1-based turn index within the session (one instruction to quiescence). Declared by loop-owning integrations; absent, derived."
+    },
+    "step": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "1-based step index within the turn (one model call). Declared by loop-owning integrations; absent, derived."
+    },
+    "step_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Producer-minted opaque id binding the step/request and step/response of ONE model call. A gateway mints one per proxied call; a producer stamping turn+step MAY omit it."
+    },
+    "parent_session_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The spawning session, when this session belongs to a subagent. Sessions form a tree; each child reports its own session."
     },
     "timestamp": {
       "type": "string",
       "format": "date-time",
       "description": "When the unit was observed. Absent = the runtime's receive time; only buffered/replayed events need it."
-    },
-    "observation_point": {
-      "enum": [
-        "conversation",
-        "invocation",
-        "execution"
-      ],
-      "description": "The altitude. Absent, the runtime defaults it from kind (llm_request/llm_response/user_input/model_output -> conversation; tool_call/tool_result/agent_spawn -> invocation; exec/network/file -> execution)."
     },
     "agent_id": {
       "type": "string",
@@ -51,58 +67,9 @@
     "agent_user": {
       "type": "string"
     },
-    "sandbox_id": {
-      "type": "string"
-    },
-    "parent_agent_id": {
-      "type": "string"
-    },
-    "delegation_chain": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
-    "attestation": {
-      "enum": [
-        "self_declared",
-        "inferred",
-        "network",
-        "mtls",
-        "gateway_api_key",
-        "client_key"
-      ]
-    },
-    "sensor_id": {
+    "integration": {
       "type": "string",
-      "minLength": 1,
-      "description": "Stable id of the reporting integration, e.g. openguardrails-ebpf."
-    },
-    "sensor_type": {
-      "enum": [
-        "in_process",
-        "wrapper",
-        "proxy",
-        "kernel"
-      ],
-      "description": "How evadable the observer is, weakest first. Absent, consumers MUST treat the sensor as bypassable."
-    },
-    "sensor_version": {
-      "type": "string"
-    },
-    "kind": {
-      "enum": [
-        "llm_request",
-        "llm_response",
-        "user_input",
-        "model_output",
-        "tool_call",
-        "tool_result",
-        "exec",
-        "network",
-        "file",
-        "agent_spawn"
-      ]
+      "description": "The reporting integration and build, e.g. \"ogr-higress/0.4.1\" or \"dsh-plugin/0.1.0\". For heartbeats, fleet coverage, and bad-rollout triage."
     },
     "llm_protocol": {
       "enum": [
@@ -110,97 +77,41 @@
         "openai.responses",
         "anthropic.messages",
         null
-      ]
+      ],
+      "description": "Set when the payload is a raw provider body; a hint — the runtime also detects the protocol from the body shape."
     },
     "payload": {
-      "type": "object"
-    },
-    "content_encoding": {
-      "enum": [
-        "raw",
-        "redacted",
-        "hashed",
-        "metadata_only"
-      ],
-      "default": "raw"
-    },
-    "redactions": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": [
-          "path",
-          "start",
-          "end"
-        ],
-        "additionalProperties": false,
-        "properties": {
-          "path": {
-            "type": "string"
-          },
-          "start": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "end": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "category": {
-            "type": "string",
-            "pattern": "^(safety|security|privacy|x)\\.[a-z0-9_.]+$"
-          },
-          "operator": {
-            "enum": [
-              "replace",
-              "mask",
-              "hash",
-              "encrypt"
-            ]
-          },
-          "ref": {
-            "type": "string"
-          }
-        }
+      "type": "object",
+      "description": "step/request: the raw provider request body, or the canonical shape {messages, tools?}. step/response: the raw provider response body, or the canonical shape {text?, reasoning?, tool_calls?, model?, usage?, timing?}. turn/end: {reason, error?}."
+    }
+  },
+  "if": {
+    "properties": {
+      "kind": {
+        "const": "turn/end"
       }
-    },
-    "provenance": {
-      "type": "array",
-      "items": {
+    }
+  },
+  "then": {
+    "properties": {
+      "payload": {
         "type": "object",
         "required": [
-          "source",
-          "trust"
+          "reason"
         ],
         "additionalProperties": false,
         "properties": {
-          "source": {
+          "reason": {
             "enum": [
-              "system",
-              "user",
-              "model",
-              "tool_result",
-              "web",
-              "mcp",
-              "file",
-              "retrieved"
+              "completed",
+              "max_tokens",
+              "blocked",
+              "aborted",
+              "error"
             ]
           },
-          "trust": {
-            "enum": [
-              "trusted",
-              "untrusted",
-              "unverified"
-            ]
-          },
-          "ref": {
+          "error": {
             "type": "string"
-          },
-          "taint_tags": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
           }
         }
       }

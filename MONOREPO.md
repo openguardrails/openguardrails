@@ -7,10 +7,13 @@ centralized here.
 
 ## Repository mapping
 
+(Paths marked † were retired in protocol v0.7 — the SDK layer and the
+execution plane are gone; see [CHANGELOG.md](CHANGELOG.md).)
+
 | Former repository | Monorepo path |
 |---|---|
-| `openguardrails-python` | `packages/python/` |
-| `openguardrails-js` | `packages/javascript/` |
+| `openguardrails-python` | `packages/python/` † |
+| `openguardrails-js` | `packages/javascript/` † |
 | `openguardrails-instrumentation-claude-code` | `integrations/agent/claude-code/` |
 | `openguardrails-instrumentation-codex` | `integrations/agent/codex/` |
 | `@openguardrails/dsh-auto-mode` | `integrations/agent/dsh/` |

@@ -4,7 +4,7 @@ OGR conformance is intentionally narrow: it is about *speaking the wire*, not
 about detection quality. Quality is measured separately by
 [`openguardrails-bench`](https://github.com/openguardrails/openguardrails/tree/main/benchmarks).
 
-There are five conformance roles. An implementation may play more than one.
+There are three conformance roles. An implementation may play more than one.
 
 ## Detector conformance
 
@@ -18,85 +18,58 @@ A detector is **OGR-conformant** if it:
    [taxonomy](specification/taxonomy.md) namespaces (`safety.*`, `security.*`),
    or a documented vendor extension namespace;
 4. is deterministic with respect to its declared inputs — given the same
-   `GuardEvent` and configuration, the verdict's decision is stable.
+   `GuardEvent` and configuration, the verdict's decision is stable;
+5. reports what it could not judge (`unjudged` paths) rather than answering
+   as if it had looked.
 
 A conformant detector MAY ignore fields it does not understand, but MUST NOT
 reject an event solely for containing unknown optional fields (forward
 compatibility).
 
-## Adapter conformance (agent hook / gateway / sandbox)
+## Integration conformance (agent-direct / gateway)
 
-An adapter is **OGR-conformant** if it:
+An integration is **OGR-conformant** if it implements ONE of the two
+normative recipes in the
+[Runtime API binding](specification/runtime-api.md#the-two-integration-recipes)
+in full:
 
-1. emits `GuardEvent`s that validate against the schema at its interception
-   point, with `provenance` trust labels populated for every piece of context it
-   can attribute (see
-   [provenance](specification/provenance-and-context.md));
-2. propagates `guard-context` so one logical action can be correlated across
-   altitudes by `guard_id`
-   (see [guard-context propagation](specification/provenance-and-context.md#guard-context-propagation));
-3. honors the composed `Verdict` decision — `block` blocks, `allow` allows,
-   `require_approval` gates — at its enforcement point;
-4. when the runtime is unreachable, honors its configured `on_unreachable`
-   policy per category — `block`, `allow`, or `require_local_approval` — rather
-   than a blanket hard block; keeps locally cached hard rules enforced; and
-   signals degraded entry/exit and buffers events for tamper-evident replay on
-   reconnect (see [Adapter degraded mode](specification/degraded-mode.md)).
-   `security.*` defaults to fail-closed, but the deployer MUST be able to choose
-   `require_local_approval`;
-5. enrolls with its runtime before emitting enforcement-relevant events, and
-   emits them only over a channel authenticated with its enrollment credential
-   (see [Enrollment & approval receipts](specification/enrollment-and-receipts.md));
-6. treats an approval as granted **only** after verifying an approval receipt —
-   signature, expiry, scope, and payload-digest binding — and never honors a
-   bare approval flag;
-7. when emitting `content_encoding: redacted` (or `hashed`), populates
-   `redactions` for every span it transformed and retains the original
-   locally for verdict enforcement (see
-   [Local redaction](specification/local-redaction.md)).
-
-## Redactor conformance
-
-A local redaction service is **OGR-conformant** if it implements the span
-contract in [Local redaction](specification/local-redaction.md):
-`POST /analyze` accepting `{text, language, score_threshold}` and returning
-`[{entity_type, start, end, score}]`, plus `GET /health`. Any conformant
-redactor container works with any conformant adapter; the adapter — not the
-redactor — applies operators and holds originals.
-
-## Composer conformance
-
-A composer (the component that merges multiple detectors' verdicts into one
-decision) is **OGR-conformant** if it implements the rules in
-[composition](specification/composition.md) — including precedence, the
-most-restrictive-wins default, and `require_approval` handling.
+1. emits `GuardEvent`s that validate against the schema, one event per step
+   half — never a shattered step;
+2. on the agent-direct recipe, declares `session_id`/`turn`/`step` on every
+   event and reports every turn's close with its reason; on the gateway
+   recipe, mints a `step_id` per proxied call and declares no coordinates;
+3. honors the `Verdict` at its enforcement point — `block` blocks, and
+   `modifications.spans` are applied before content proceeds;
+4. under `fail_mode: closed`, treats a non-empty `unjudged`, an evaluate
+   failure, and a 429 all as "could not look" (see
+   [Degraded mode](specification/degraded-mode.md));
+5. reports streamed answers once, whole, through `/v1/ingest` after
+   `ogr-partial` interim evaluates.
 
 ## Runtime conformance
 
 A runtime (the Policy Decision Point) is **OGR-conformant** if it:
 
-1. binds each enrolled PEP's channel identity to the identity fields that PEP
-   may assert, and rejects events where the two disagree;
-2. accepts events from unenrolled PEPs only as **unverified** — usable for
-   observability, never as the basis for minting receipts or granting
-   enforcement authority;
-3. mints approval receipts only after the approval flow for a
-   `require_approval` decision completes, with bindings and expiry per
-   [Enrollment & approval receipts](specification/enrollment-and-receipts.md);
-4. distributes and rotates its verification keys so PEPs can validate every
-   receipt for its full lifetime (overlapping rotation windows);
-5. when it speaks HTTP, serves the endpoints and semantics of the
+1. serves the endpoints and semantics of the
    [Runtime API binding](specification/runtime-api.md) — canonical `/v1/*`
-   paths, schema validation, attestation ceilings, idempotent ingest, and the
-   documented error shapes.
+   paths, schema validation, runtime-assigned identifiers, and the
+   documented error shapes;
+2. resolves every asserted identity field only within the tenant the API key
+   proves;
+3. honors declared coordinates without re-deriving over them, and marks
+   every verdict's `attribution`;
+4. composes multi-detector answers per
+   [composition](specification/composition.md), including the findings,
+   spans and unjudged unions;
+5. never silently drops an event it accepted.
 
 ## Self-certification
 
-Conformance is currently self-declared. State the version you target and the role
-you implement, e.g.:
+Conformance is currently self-declared. State the version you target and the
+role you implement, e.g.:
 
 ```
-OpenGuardrails v0 — detector + adapter conformant
+OpenGuardrails v0.7 — detector + integration conformant
 ```
 
 Validate against the schemas in `schema/` as part of your test suite. A shared
