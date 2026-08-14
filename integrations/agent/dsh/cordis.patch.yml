@@ -10,7 +10,7 @@
 #     overriding the `openguardrails` row in a later layer (your profile's
 #     cordis.patch.yml) — see cordis.example.yml for every knob.
 #
-#  2. Put "Auto (OpenGuardrails)" in the Permissions selector by overriding
+#  2. Put "Auto Mode" in the Permissions selector by overriding
 #     the base `permission` row. A patch replaces the targeted row's WHOLE
 #     `config`, so the base presets are restated verbatim around the new
 #     entry. A deployment with its own preset table should instead merge the
@@ -33,7 +33,7 @@
       auto:
         sandbox: workspace-write
         approval: ask
-        name: Auto (OpenGuardrails)
+        name: Auto Mode
         description: OpenGuardrails answers approval prompts; only asks it cannot decide reach you.
       danger-full-access:
         sandbox: danger-full-access
