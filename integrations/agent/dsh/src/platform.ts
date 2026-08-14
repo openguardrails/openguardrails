@@ -1,6 +1,13 @@
 /**
- * Optional platform reporter: ship this plugin's GuardEvents to an
+ * The runtime connection: evaluate this plugin's GuardEvents against an
  * OpenGuardrails runtime with an enrolled per-MACHINE identity.
+ *
+ * An agent integration's user is a CONSUMER of the runtime, so there is no
+ * observe/ingest mode here: every event that reaches the runtime goes through
+ * `/v1/evaluate` and its Verdict participates in the decision (it can tighten
+ * the local one, never loosen it). Fire-and-forget ingest is a gateway
+ * posture — enterprise deployments observing traffic they do not control —
+ * and deliberately not this plugin's.
  *
  * dsh is the "one harness process per machine" case of the identity design
  * (runtime docs/agent-identity-and-service-auth.md §7): every session, agent
@@ -12,17 +19,17 @@
  * Transport, signing and wire mapping come from `@openguardrails/core`'s
  * RuntimeClient (canonical `/v1/...` paths; the client's mount-compat fallback
  * discovers deployments that only serve `/api/public/ogr`). What stays here is
- * what is dsh-specific: the key file, the enroll-once cache, the batch queue,
- * and the default sensor.
+ * what is dsh-specific: the key file, the enroll-once cache, and the default
+ * sensor.
  *
- * Local enforcement stays authoritative; reporting is fire-and-forget and is
- * enabled only when OGR_RUNTIME_URL + OGR_API_KEY are set. Any failure —
- * missing key material, failed enrollment, an unreachable runtime — leaves the
- * plugin enforcing exactly as before.
+ * Local enforcement stays authoritative; the connection exists only when
+ * OGR_RUNTIME_URL + OGR_API_KEY are set. Any failure — missing key material,
+ * failed enrollment, an unreachable runtime — leaves the plugin enforcing
+ * exactly as before.
  */
 import { createPrivateKey, generateKeyPairSync, type KeyObject } from "node:crypto"
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { homedir, hostname } from "node:os"
+import { homedir, hostname, userInfo } from "node:os"
 import { dirname, join } from "node:path"
 
 import {
@@ -34,10 +41,6 @@ import {
   type Verdict,
 } from "@openguardrails/core"
 
-const BATCH_MAX = 50
-const FLUSH_MS = 2000
-const QUEUE_MAX = 1000
-
 // The mechanism axis. Every altitude this plugin reports comes from a Cordis
 // listener running inside the dsh process, so a deployment that stops loading
 // the plugin stops being observed — `in_process`, never adversary-proof. The
@@ -48,6 +51,19 @@ const DEFAULT_SENSOR_ID = "openguardrails-dsh"
 /** Machine-scoped asserted identity for the harness process. */
 export function hostAgentId(): string {
   return `dsh-${hostname()}`
+}
+
+/**
+ * The OS account the harness runs as — the best identity a local harness can
+ * assert for both the agent's owner and this session's user (five-tuple
+ * fields; the runtime clamps what the attestation cannot carry).
+ */
+export function osUser(): string | undefined {
+  try {
+    return userInfo().username
+  } catch {
+    return undefined
+  }
 }
 
 function withDefaultSensor(ev: GuardEvent): GuardEvent {
@@ -157,9 +173,8 @@ class PepIdentity {
 }
 
 /**
- * Fire-and-forget batching reporter. Disposable, because a dsh plugin unloads
- * (hot reload, `--patch` swap) and must not leave an interval or an in-flight
- * batch behind.
+ * The evaluate-only runtime connection. Disposable, because a dsh plugin
+ * unloads (hot reload, `--patch` swap) and must not leave anything behind.
  */
 export class PlatformReporter {
   readonly enabled: boolean
@@ -167,8 +182,6 @@ export class PlatformReporter {
   private identity: PepIdentity | null = null
   private signer: Signer | null = null
   private enrolling: Promise<void> | null = null
-  private queue: GuardEvent[] = []
-  private timer: ReturnType<typeof setInterval> | null = null
 
   constructor(private readonly log: ReporterLog = consoleLog) {
     const baseUrl = process.env.OGR_RUNTIME_URL ?? ""
@@ -184,8 +197,6 @@ export class PlatformReporter {
       })
       this.identity = new PepIdentity(log)
       this.enrolling = this.enroll()
-      this.timer = setInterval(() => void this.flush(), FLUSH_MS)
-      this.timer.unref?.()
     }
   }
 
@@ -199,15 +210,13 @@ export class PlatformReporter {
   }
 
   /**
-   * Evaluate ONE GuardEvent synchronously against the runtime and return its
-   * Verdict — the developer path (`llm_request`/`llm_response`), where the
-   * classification is the RUNTIME's job and a local detector chain has nothing
-   * useful to say.
+   * Evaluate ONE GuardEvent against the runtime and return its Verdict.
    *
-   * Returns `null` when reporting is not configured or the call failed, which
-   * the caller reads as "no opinion". Deciding what a missing verdict means is
-   * the caller's job, not this transport's: an observational site ignores it,
-   * an enforcing site consults its own fail-closed setting.
+   * Returns `null` when the runtime is not configured or the call failed,
+   * which the caller reads as "no opinion". Deciding what a missing verdict
+   * means is the caller's job, not this transport's: the tool-call altitude
+   * keeps its local verdict, an enforcing conversation site consults its own
+   * posture.
    */
   async evaluate(ev: GuardEvent): Promise<Verdict | null> {
     if (!this.enabled) return null
@@ -220,30 +229,8 @@ export class PlatformReporter {
     }
   }
 
-  /** Queue one GuardEvent. Never throws, never blocks the enforcement path. */
-  report(ev: GuardEvent): void {
-    if (!this.enabled) return
-    if (this.queue.length >= QUEUE_MAX) this.queue.shift()
-    this.queue.push(withDefaultSensor(ev))
-  }
-
-  async flush(): Promise<void> {
-    if (!this.enabled || this.queue.length === 0) return
-    await this.enrolling
-    const batch = this.queue.splice(0, BATCH_MAX)
-    try {
-      await this.client!.ingest(batch)
-    } catch (err) {
-      this.log.warn(`[openguardrails] ingest failed (${String(err)}) — ${batch.length} events dropped`)
-    }
-  }
-
-  /** Stop the timer and drain what is queued. Safe to call more than once. */
+  /** Nothing queued any more; kept so the plugin's dispose path stays stable. */
   async dispose(): Promise<void> {
-    if (this.timer) {
-      clearInterval(this.timer)
-      this.timer = null
-    }
-    await this.flush()
+    await this.enrolling
   }
 }

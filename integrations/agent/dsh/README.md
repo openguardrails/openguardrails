@@ -132,9 +132,16 @@ in kind:
 |---|---|---|
 | Kinds | `tool_call`, `tool_result` | `llm_request`, `llm_response` |
 | dsh seam | `tools/pre-execute`, `tools/post-execute`, `ctx.tools.guard()` | `llm/stream` |
-| Who judges | a **local** `Runtime` you configure | **the runtime** you point it at |
+| Who judges | a **local** `Runtime`, tightened by **the runtime** when one is configured | **the runtime** you point it at |
 | Needs a server | no | yes |
 | Default | on | off |
+
+There is deliberately **no observe mode** anywhere in this plugin: its user is
+a *consumer* of the runtime, so every event that reaches the runtime goes
+through `/v1/evaluate` and its Verdict participates in the decision — it can
+tighten the local one, never loosen it. Fire-and-forget ingest is a gateway
+posture (enterprise deployments observing traffic they do not control), not
+an agent integration's.
 
 The sensor path declares what the LLM wire cannot show — a pending invocation,
 with its arguments, before dispatch — and a local detector chain judges it. The
@@ -252,7 +259,8 @@ suite asserts both directions against a real dsh tool registry.
 
 ## The developer path — raw model traffic
 
-`llmRequest` and `llmResponse` each take `off` (default) · `observe` · `enforce`.
+`llmRequest` and `llmResponse` each take `off` (default) · `enforce` — no
+observe, like everywhere else in this plugin.
 
 ```yaml
 config:
@@ -265,8 +273,7 @@ config:
 | Emitted | before each model call | when the answer is complete |
 | Payload | the assembled request body — messages, the system slot, the tool inventory | the response body — prose, `tool_calls`, `finish_reason` |
 | `enforce` blocks by | never calling the model | withholding the whole answer |
-| Latency under `enforce` | one runtime round trip per step | one round trip, and the stream is buffered until the verdict lands |
-| Latency under `observe` | none — fire-and-forget | none — streams through untouched |
+| Latency | one runtime round trip per step | one round trip, and the stream is buffered until the verdict lands |
 
 Both need `OGR_RUNTIME_URL` + `OGR_API_KEY`. There is no local fallback and the
 plugin will not pretend otherwise: switched on without a runtime, it logs why
@@ -325,29 +332,39 @@ header/metadata mapping. `reasoning` blocks are dropped because no
   payload — but `guardToolResults` gains you little until you plug one in.
 - **`llmResponse: enforce` buffers the stream.** That is what makes "BEFORE the
   agent acts on it" literally true, and it costs the runtime round trip in
-  first-token latency. Use `observe` when you want the record without the bill.
+  first-token latency.
 - **The projection is not the wire body** — see the caveat above.
 - The OGR `Runtime` retains one entry per `guard_id` for altitude correlation
   and never evicts, so a long-lived harness process grows with the number of
   tool calls. This is SDK behavior, shared with every OGR integration.
 - Taint is in-memory. A session resumed from persistence starts unmarked.
 
-## Platform reporting with an enrolled identity (optional)
+## Connecting a runtime, with an enrolled identity (optional)
 
-Set `OGR_RUNTIME_URL` + `OGR_API_KEY` and the plugin also ships every
-GuardEvent to an OpenGuardrails runtime — fire-and-forget, local enforcement
-stays authoritative. On first use it enrolls a per-machine Ed25519 key
-(`~/.ogr/dsh-ed25519.json`, override with `OGR_KEYFILE`) and signs each batch
-with `OGR-Batch-Signature` (spec: [`specification/attestation.md`](../../../specification/attestation.md)).
+Set `OGR_RUNTIME_URL` + `OGR_API_KEY` (dsh loads `~/.dsh/.env` and the
+invoking directory's `.env` as launch environment) and every tool call, tool
+result and auto-mode approval ask is **evaluated** against the runtime through
+`/v1/evaluate` — its Verdict tightens the local one, never loosens it, and an
+unreachable runtime leaves local enforcement standing. On first use the plugin
+enrolls a per-machine Ed25519 key (`~/.ogr/dsh-ed25519.json`, override with
+`OGR_KEYFILE`) and signs each request (spec:
+[`specification/attestation.md`](../../../specification/attestation.md)).
 Transport is `@openguardrails/core`'s `RuntimeClient`: canonical `/v1/...`
 paths joined to `OGR_RUNTIME_URL`, with automatic fallback to deployments that
-mount the API under `/api/public/ogr`. The reporter is disposed with the
-plugin, so a hot reload leaves no interval or undelivered batch behind.
+mount the API under `/api/public/ogr`.
 
-dsh is the "one harness per machine" case: every session, agent and subagent
-runs inside the same host process, so events assert
-`agent_id = dsh-<hostname>` and the machine appears as one Agent in the
-console. The per-session identity travels as `session_id`.
+Every event carries the **identity five-tuple**, filled automatically:
+
+| Field | Value |
+|---|---|
+| `agent_id` | `dsh-<hostname>` — one harness process per machine, one Agent in the console |
+| `agent_type` | `dsh` |
+| `agent_workspace` | the session's working tree (`session.header.cwd`) |
+| `agent_owner` | the OS account the harness runs as |
+| `agent_user` | the OS account — the best a local single-user harness can assert |
+
+The per-session identity travels as `session_id`; the runtime clamps every
+claim to what the `client_key` attestation supports.
 
 Every event carries `sensor_id = openguardrails-dsh`, `sensor_type =
 in_process` — a deployment that stops loading the plugin stops being observed.
