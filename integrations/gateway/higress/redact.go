@@ -1,147 +1,163 @@
 package main
 
 import (
-	"strconv"
+	"sort"
 	"strings"
 
-	"github.com/openguardrails/higress/protocol"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
-// WHICH values to remove, and what to call them — the plugin's half of the
-// runtime's local-redaction contract.
+// Applying a verdict's modification spans to the body being forwarded.
 //
-// The runtime deliberately does NOT return plaintext: a verdict carries span
-// OFFSETS and no `matched` text, precisely so no verdict store becomes a copy of
-// the data it guards. The process that already holds the plaintext — this
-// plugin, the PEP — slices those offsets out of its own copy, mints the
-// placeholders, and keeps the token->value map for the session (session.go).
+// v0.7 made this generic. The old plugin synthesized the judged texts itself, so it
+// kept a registration table mapping payload paths to its own copies; a raw forwarder
+// has no copies — the payload IS the body — so a span's `path` resolves directly into
+// the JSON that is about to be forwarded, and the splice happens in place.
 //
-// This MUST keep mirroring the runtime's `policy-engine/redact.ts`:
-// longest-prefix category mapping, a 4-character plaintext floor, dedup by
-// value, and value-based (never offset-based) replacement, longest value first.
+// The runtime deliberately does NOT return plaintext: a span carries OFFSETS and a
+// replacement token, so no verdict store becomes a copy of the data it guards. The
+// process that already holds the plaintext — this plugin — slices the span out of its
+// own bytes, which is also how the token→value mapping for restoring the reply is
+// learned (session.go).
 //
-// ⚠️ WHERE those values live in a body is NOT here — it is protocol-specific, and
-// each adapter owns its own write-through paths (protocol/*.go). What survives in
-// this file is the part that is the same whatever the client is speaking.
+// ⚠️ A span that does not resolve — a path that names no string in this body, offsets
+// past the end of the value — is DROPPED and COUNTED, never applied somewhere else.
+// Slicing one span's offsets out of another text masks bytes nobody detected while
+// the real value travels on, and both failures look exactly like a healthy gateway.
 
-// Redaction is one value to remove and the token to put in its place. Aliased from
-// the protocol package, which is where the machinery that applies one lives.
-type Redaction = protocol.Redaction
-
-// MinValueLength is the plaintext floor. Below it, a global value replace
-// mangles ordinary prose ("Ada" appearing inside "Adaptive").
-const MinValueLength = 4
-
-// placeholderTypes maps a taxonomy category to a placeholder type name.
-// Longest prefix wins, mirroring the spec's rollup rule, so a new country
-// variant (`privacy.pii.national_id.cn`) degrades to its bucket instead of
-// falling out of the table.
-//
-// Only secrets and PII appear here: a moderation span is NOT masked. Masking is
-// about the "we do not store secrets or PII" invariant, not about every finding.
-var placeholderTypes = []struct{ prefix, name string }{
-	{"security.secret_leak", "SECRET"},
-	{"privacy.pii.person_name", "NAME"},
-	{"privacy.pii.address", "ADDRESS"},
-	{"privacy.pii.email", "EMAIL"},
-	{"privacy.pii.phone_number", "PHONE"},
-	{"privacy.pii.organization", "ORG"},
-	{"privacy.pii.national_id", "NATIONAL_ID"},
-	{"privacy.pii.tax_id", "TAX_ID"},
-	{"privacy.pii.passport", "PASSPORT"},
-	{"privacy.pii.driver_license", "DRIVER_LICENSE"},
-	{"privacy.pii.bank_card", "BANK_CARD"},
-	{"privacy.pii.bank_account", "BANK_ACCOUNT"},
-	{"privacy.pii", "PII"},
+// Span is one modification from a v0.7 verdict.
+type Span struct {
+	Path        string
+	Start, End  int
+	Replacement string
 }
 
-func placeholderType(category string) string {
-	best, bestLen := "", -1
-	for _, t := range placeholderTypes {
-		if category == t.prefix || strings.HasPrefix(category, t.prefix+".") {
-			if len(t.prefix) > bestLen {
-				best, bestLen = t.name, len(t.prefix)
+// stripPayloadPrefix folds a wire path (`payload.messages.3.content`, bracket form
+// included) to the gjson path inside the body (`messages.3.content`).
+func stripPayloadPrefix(path string) string {
+	p := dottedPath(path)
+	if p == "payload" {
+		return ""
+	}
+	if strings.HasPrefix(p, "payload.") {
+		return p[len("payload."):]
+	}
+	return ""
+}
+
+// dottedPath folds `a[0].b` into `a.0.b`, the form gjson reads.
+func dottedPath(path string) string {
+	if !strings.ContainsRune(path, '[') {
+		return path
+	}
+	out := make([]byte, 0, len(path))
+	for i := 0; i < len(path); i++ {
+		switch path[i] {
+		case '[':
+			if len(out) > 0 && out[len(out)-1] != '.' {
+				out = append(out, '.')
 			}
+		case ']':
+			// A `]` followed by `.` would double the separator.
+			if i+1 < len(path) && path[i+1] == '.' {
+				i++
+			}
+			if i+1 < len(path) {
+				out = append(out, '.')
+			}
+		default:
+			out = append(out, path[i])
 		}
 	}
-	return best
+	return string(out)
 }
 
-// mintToken renders the wire token for one placeholder: `${OGR_EMAIL_1}`.
+// applySpans splices every resolvable span into the body and returns the new body,
+// how many spans were applied, how many were dropped as unresolvable, and the
+// token→value mapping learned from the splices (the token is the runtime's
+// `replacement`; the value is the text it displaced — what `Restore` puts back into
+// the reply).
 //
-// The TYPE stays legible on purpose: redaction hides the value from our own
-// egress detectors too, so a tool_call judge still has to be able to reason
-// "a credential is flowing to an external host" from the token alone.
-//
-// Braces, and single underscores only: a markdown renderer escapes `__` to
-// `\_\_`, so a `__SECRET__1__` style token does not survive a model that formats
-// its output, and `${OGR_EMAIL_1}x` has an unambiguous end where `$OGR_EMAIL_1x`
-// does not.
-func mintToken(typeName string, n int) string {
-	return "${OGR_" + typeName + "_" + strconv.Itoa(n) + "}"
-}
-
-// Span is a detected range recovered from a verdict finding.
-type Span struct {
-	Category string
-	Matched  string
-}
-
-// spansFromVerdict recovers the redactable values from span offsets plus our own copy
-// of the text. This is why the spec keeps offsets on findings and drops `matched`: the
-// values are recoverable from the pair by whoever holds the plaintext, so the verdict
-// itself never carries any.
-//
-// The second return is how many spans named a text this event cannot slice — a path we
-// never registered, or none at all on a turn carrying several texts. Those are DROPPED
-// rather than applied to whatever else was to hand, and the count is what tells a
-// deployment that its runtime and its gateway disagree about path syntax. Silent, that
-// disagreement looks exactly like a workspace with no redaction policy.
-func spansFromVerdict(verdict gjson.Result, e *GuardEvent) ([]Span, int) {
-	var spans []Span
+// Spans on one path are applied HIGHEST OFFSET FIRST, so an earlier splice cannot
+// shift the offsets a later span was computed against.
+func applySpans(body string, spans []Span) (string, int, int, map[string]string) {
+	if len(spans) == 0 {
+		return body, 0, 0, nil
+	}
+	byPath := map[string][]Span{}
 	unresolved := 0
-	for _, f := range verdict.Get("findings").Array() {
-		category := f.Get("category").String()
-		if category == "" {
-			continue
-		}
-		start, end := f.Get("start"), f.Get("end")
-		if !start.Exists() || !end.Exists() {
-			continue
-		}
-		// ⚠️ Against the text THIS finding names. One event carries a whole turn, so
-		// there are several: the user's words at `payload.text`, each tool outcome at
-		// `payload.tool_results.N.result`. Slicing one finding's offsets out of another
-		// text yields a fragment that matches nothing, so the value the verdict asked us
-		// to remove reaches the model while the log says "masked".
-		matched, ok := runeSlice(e.at(f.Get("path").String()), int(start.Int()), int(end.Int()))
-		if !ok {
+	for _, s := range spans {
+		p := stripPayloadPrefix(s.Path)
+		if p == "" || s.Replacement == "" {
 			unresolved++
 			continue
 		}
-		spans = append(spans, Span{Category: category, Matched: matched})
+		byPath[p] = append(byPath[p], s)
 	}
-	return spans, unresolved
+
+	applied := 0
+	learned := map[string]string{}
+	for path, group := range byPath {
+		value := gjson.Get(body, path)
+		if value.Type != gjson.String {
+			unresolved += len(group)
+			continue
+		}
+		text := value.String()
+		sort.Slice(group, func(i, j int) bool { return group[i].Start > group[j].Start })
+		changed := false
+		for _, s := range group {
+			next, matched, ok := spliceRunes(text, s.Start, s.End, s.Replacement)
+			if !ok {
+				unresolved++
+				continue
+			}
+			text = next
+			changed = true
+			applied++
+			learned[s.Replacement] = matched
+		}
+		if !changed {
+			continue
+		}
+		next, err := sjson.Set(body, path, text)
+		if err != nil {
+			// The path resolved for reading, so a write failure is a corrupt body —
+			// count the group as unresolved rather than forwarding a half-edit.
+			unresolved += len(group)
+			applied -= len(group)
+			continue
+		}
+		body = next
+	}
+	if applied < 0 {
+		applied = 0
+	}
+	return body, applied, unresolved, learned
 }
 
-// runeSlice slices text by CHARACTER offsets, not byte offsets.
+// spliceRunes replaces [start,end) — counted in CHARACTERS — with the replacement,
+// returning the new text and the bytes displaced.
 //
-// ⚠️ This is the difference between masking a value and mangling a sentence. A
-// finding's start/end are counted the way the producer counts: the detectors are
-// Python (code points) and the runtime that relays them is JavaScript (UTF-16
-// units), which agree for everything in the BMP. Go indexes BYTES, so on Chinese
-// text — three bytes per character — `text[start:end]` lands a third of the way
-// into the span, returns a fragment that matches nothing, and the value the
-// verdict asked us to remove goes to the model untouched while the log says
-// "masked". Found exactly that way on 2026-07-30, with a Chinese prompt.
-//
-// Astral characters (emoji) are the one case where the producers disagree with
-// each other — two UTF-16 units, one code point — and nothing here can fix that
-// from this side.
-func runeSlice(text string, start, end int) (string, bool) {
+// ⚠️ Characters, not bytes: the producers count code points (Python detectors,
+// JavaScript runtime), and Go indexes bytes. On Chinese text — three bytes per
+// character — a byte splice lands a third of the way into the span, masks a fragment
+// that matches nothing, and the value the verdict asked us to remove goes to the
+// model untouched while the log says "masked". Found exactly that way on 2026-07-30.
+func spliceRunes(text string, start, end int, replacement string) (string, string, bool) {
+	startByte, endByte, ok := runeRange(text, start, end)
+	if !ok {
+		return "", "", false
+	}
+	return text[:startByte] + replacement + text[endByte:], text[startByte:endByte], true
+}
+
+// runeRange converts character offsets to byte offsets, refusing anything out of
+// range.
+func runeRange(text string, start, end int) (int, int, bool) {
 	if start < 0 || end <= start {
-		return "", false
+		return 0, 0, false
 	}
 	startByte, n := -1, 0
 	for byteIdx := range text { // ranging a string yields each rune's byte index
@@ -150,9 +166,9 @@ func runeSlice(text string, start, end int) (string, bool) {
 		}
 		if n == end {
 			if startByte < 0 {
-				return "", false
+				return 0, 0, false
 			}
-			return text[startByte:byteIdx], true
+			return startByte, byteIdx, true
 		}
 		n++
 	}
@@ -160,81 +176,7 @@ func runeSlice(text string, start, end int) (string, bool) {
 		startByte = len(text)
 	}
 	if n == end && startByte >= 0 {
-		return text[startByte:], true
+		return startByte, len(text), true
 	}
-	return "", false // the span runs past the end of our copy of the text
-}
-
-// redactableValues returns (type, value) for each redactable span, deduplicated
-// by value. Equal values collapse onto one entry: restoration has to map a token
-// back to exactly one value, and two tokens for the same value would also
-// overstate what leaked.
-func redactableValues(spans []Span) []Span {
-	seen := map[string]bool{}
-	var out []Span
-	for _, s := range spans {
-		if placeholderType(s.Category) == "" {
-			continue
-		}
-		if len(s.Matched) < MinValueLength || seen[s.Matched] {
-			continue
-		}
-		seen[s.Matched] = true
-		out = append(out, s)
-	}
-	return out
-}
-
-// learnFromVerdict binds the values this verdict asks us to remove to tokens,
-// and returns the session's whole masking instruction set.
-//
-// ⚠️ The token is the RUNTIME'S when it sent one. `evaluate` already mints
-// `${OGR_<TYPE>_<n>}` per span and returns it in
-// `modifications.spans[].replacement`, numbered from a session-scoped counter in
-// the runtime's own Redis. Minting a second, local number for the same value
-// would put two names for one person in the model's context and make the two
-// sides disagree about what a token means. Local minting is the fallback for a
-// verdict that carries no modifications.
-func learnFromVerdict(st *sessionState, v gjson.Result, e *GuardEvent) ([]Redaction, int) {
-	learned := false
-	unresolved := 0
-	for _, s := range v.Get("modifications.spans").Array() {
-		if s.Get("operator").String() != "replace" {
-			continue
-		}
-		token := s.Get("replacement").String()
-		value, ok := runeSlice(e.at(s.Get("path").String()), int(s.Get("start").Int()), int(s.Get("end").Int()))
-		if !ok {
-			unresolved++
-			continue
-		}
-		if token == "" || len(value) < MinValueLength {
-			continue
-		}
-		if _, known := st.ByValue[value]; known {
-			learned = true // already bound, keep the established token
-			continue
-		}
-		st.remember(token, value)
-		learned = true
-	}
-	if !learned {
-		spans, n := spansFromVerdict(v, e)
-		return learnValues(st, spans), unresolved + n
-	}
-	return st.redactions(), unresolved
-}
-
-// learnValues gives each newly seen value a session-scoped token and reuses the
-// established one for a value seen before, returning the full set of masking
-// instructions for the session.
-func learnValues(st *sessionState, spans []Span) []Redaction {
-	for _, s := range redactableValues(spans) {
-		if _, ok := st.ByValue[s.Matched]; ok {
-			continue
-		}
-		typeName := placeholderType(s.Category)
-		st.remember(mintToken(typeName, st.nextNumber(typeName)), s.Matched)
-	}
-	return st.redactions()
+	return 0, 0, false // the span runs past the end of the text
 }

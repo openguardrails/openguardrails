@@ -28,10 +28,10 @@ import (
 //	        caller may already have read it.
 //
 // ⚠️ WHICH LANE IS THE RUNTIME'S DECISION, carried on the input verdict as
-// `x.ogr.output_mode`. A gateway that picked its own lane would be a second place
-// policy lives — and the choice really is policy: an observe-only workspace should
-// not pay buffering latency for an outcome it will not enforce, while a deployment
-// that can accept no exposure wants the buffered lane always.
+// `output_mode`. A gateway that picked its own lane would be a second place policy
+// lives — and the choice really is policy: an observe-only workspace should not pay
+// buffering latency for an outcome it will not enforce, while a deployment that can
+// accept no exposure wants the buffered lane always.
 //
 // ⚠️ BOTH LANES ARE JUDGED. Skipping the final check when the question looked clean
 // saves 58% of the calls and was measured and rejected: 46 of 400 real violating
@@ -108,24 +108,14 @@ func judgeFinal(ctx wrapper.HttpContext, cfg Config, rs *reqState) {
 		return
 	}
 
-	dv := deriveResponse(rs.derive, rs.session, out, rs.conv)
-	ingest(ctx, cfg, dv.Report)
-	if dv.Judged == nil {
-		dv.Commit(rs.session)
-		rs.finish(nil)
-		return
-	}
-	// ⚠️ The WHOLE reply in one judgement: the prose and every action it asks for, as
-	// the one generation they are. This used to judge `events[0]` and send the rest to
-	// /ingest, so a reply that said something AND called a tool had its action reported
-	// rather than refused — and the batch that replaced it made the runtime rank
-	// fragment decisions back into an answer about the turn.
-	mirrorEvents(cfg, judgedOnly(dv))
-	rs.judged, rs.pending = dv.Judged, dv
+	// ⚠️ The WHOLE reply in one event: the prose, the reasoning and every tool call,
+	// as the one generation they are — the canonical shape, because a stream has no
+	// single raw body to forward.
+	e := responseEventCanonical(rs.derive, canonicalOf(rs, out, sp.Timing()))
+	mirrorEvents(cfg, []*GuardEvent{e})
 
-	payload, err := json.Marshal(dv.Judged)
+	payload, err := json.Marshal(e)
 	if err != nil {
-		rs.commit()
 		rs.finish(nil)
 		return
 	}
@@ -158,7 +148,6 @@ func judgeFinal(ctx wrapper.HttpContext, cfg Config, rs *reqState) {
 			}
 			bump(cntEvaluated, 1)
 			if v.Stops() {
-				// Refused: nothing about this reply is recorded as reported.
 				rs.finishBlocked(v.Reason())
 				return
 			}
@@ -166,7 +155,14 @@ func judgeFinal(ctx wrapper.HttpContext, cfg Config, rs *reqState) {
 				rs.finishBlocked(partialMessage)
 				return
 			}
-			rs.commit()
+			// ⚠️ Spans against a CANONICAL payload cannot be spliced into SSE frames —
+			// the canonical text exists nowhere in the stream's bytes. They are counted
+			// as unresolved rather than applied somewhere else; the value still never
+			// reached the caller un-flagged (the finding exists), it is the in-place
+			// masking that a stream cannot deliver.
+			if spans := v.Spans(); len(spans) > 0 {
+				logUnresolvedSpans(len(spans))
+			}
 			rs.finish(nil)
 		}, cfg.timeoutMs)
 	if err != nil {

@@ -1,57 +1,25 @@
 package main
 
 import (
-	"strings"
-
 	"github.com/tidwall/gjson"
 )
 
-// Reading a Verdict.
+// Reading a v0.7 Verdict.
 //
-// ⚠️ Rendering a refusal is NOT here any more. What a refusal looks like is a property
-// of the protocol the caller is speaking, so each adapter renders its own
-// (`Refuse`/`RefuseStream`/`Retract`). This file had one OpenAI-shaped body and used it
-// for every client, which meant a refused `/v1/messages` caller received a `choices[]`
-// document its SDK cannot parse — surfacing to its user as the gateway being broken
-// rather than as a policy decision, and to its retry logic as a malformed reply worth
-// sending again.
-
-// stopsRequest reports whether a decision must not reach the model.
+// Two decisions: `allow` | `block`. Redaction is not a decision — a non-empty
+// `modifications.spans` on an allow says it, and the spans are applied to the body
+// before it is forwarded (redact.go). `unjudged` and `output_mode` are first-class
+// fields now, not `x.ogr.*` extensions; this reader reads ONLY the v0.7 names, by
+// design — the runtime ships in lockstep on the same branch.
 //
-// `require_approval` means "the runtime holds the action and asks a human". A gateway
-// has nobody to ask, so it degrades to a refusal rather than passing — the conservative
-// direction. Nothing in the runtime produces it today (docs/roadmap.md #1), so this is
-// a guard against a future producer, not a live branch.
-func stopsRequest(decision string) bool {
-	return decision == "block" || decision == "require_approval"
-}
-
-// refusalReason is what the end user reads. A verdict's `reasons` are written for an
-// operator, so the first one is used as-is only when it exists; the fallback says what
-// happened without describing what was detected, which would hand an attacker a
-// detector oracle.
-func refusalReason(v gjson.Result) string {
-	for _, r := range v.Get("reasons").Array() {
-		if s := strings.TrimSpace(r.String()); s != "" {
-			return s
-		}
-	}
-	for _, f := range v.Get("findings").Array() {
-		if t := strings.TrimSpace(f.Get("title").String()); t != "" {
-			return t
-		}
-	}
-	return "This request was refused by the organization's AI usage policy."
-}
+// Rendering a refusal is NOT here. What a refusal looks like is a property of the
+// protocol the caller is speaking, so each adapter renders its own
+// (`Refuse`/`RefuseStream`/`Retract`).
 
 // verdict is an answer from `/evaluate`.
 //
-// ⚠️ ONE event in, one Verdict out. There is no batch form and no composed decision,
-// because there is nothing to compose: a gateway phase is one turn, the turn is one
-// event, and one event has one verdict. The batch existed only because the plugin used
-// to shatter a turn into a `model_output` plus one event per tool call, and then the
-// runtime had to rank fragment decisions back into an answer about the turn. Deleting
-// the decomposition deleted the need for the machinery that undid it.
+// ⚠️ ONE event in, one Verdict out. There is no batch form and no composed decision:
+// a step half is one event, and one event has one verdict.
 type verdict struct {
 	root gjson.Result
 }
@@ -60,55 +28,60 @@ func parseVerdict(body []byte) verdict { return verdict{root: gjson.ParseBytes(b
 
 func (v verdict) Decision() string { return v.root.Get("decision").String() }
 
-// Stops reports whether this turn must not go through.
-func (v verdict) Stops() bool { return stopsRequest(v.Decision()) }
+// Stops reports whether this event must not go through. v0.7 has exactly one
+// stopping decision.
+func (v verdict) Stops() bool { return v.Decision() == "block" }
 
-// Reason is what the caller is told.
-func (v verdict) Reason() string { return refusalReason(v.root) }
+// Reason is what the caller is told. The v0.7 verdict deliberately carries no prose
+// `reasons` — findings are structured, and describing what was detected would hand an
+// attacker a detector oracle — so the refusal is a fixed sentence.
+func (v verdict) Reason() string {
+	return "This request was refused by the organization's AI usage policy."
+}
 
-// Redacts reports whether the runtime asked for values to be removed.
-func (v verdict) Redacts() bool { return v.Decision() == "redact" }
-
-// Result is the raw verdict, for the redaction machinery that reads findings and
-// modifications out of it.
-func (v verdict) Result() gjson.Result { return v.root }
+// Spans returns the modification spans the runtime asks this PEP to apply in place:
+// {path, start, end, replacement}, offsets counted in characters against the payload
+// AS TRANSPORTED.
+func (v verdict) Spans() []Span {
+	raw := v.root.Get("modifications.spans")
+	if !raw.IsArray() {
+		return nil
+	}
+	items := raw.Array()
+	out := make([]Span, 0, len(items))
+	for _, s := range items {
+		out = append(out, Span{
+			Path:        s.Get("path").String(),
+			Start:       int(s.Get("start").Int()),
+			End:         int(s.Get("end").Int()),
+			Replacement: s.Get("replacement").String(),
+		})
+	}
+	return out
+}
 
 // Unjudged returns the payload paths that reached a detector and got NO judgement —
-// the runtime answered about part of the turn and is saying which part it skipped.
+// the runtime answered about part of the event and is saying which part it skipped.
 //
 // ⚠️ This is what makes a partial verdict distinguishable from a complete one, and
-// without it `fail_mode: closed` is a promise the gateway cannot keep. One event carries
-// a whole turn, so the runtime fans out per text: a reply with five tool calls is five
-// judge calls. If one times out under the runtime's OWN fail-open, it contributes no
-// findings and the verdict comes back looking complete — four actions judged, one never
-// looked at, `decision: allow`, HTTP 200. Nothing else on the wire separates that from a
-// turn where everything was judged and nothing was found.
+// without it `fail_mode: closed` is a promise the gateway cannot keep. The runtime
+// fans out per text — a reply with five tool calls is five judge calls — and one
+// failing under the runtime's OWN fail-open contributes no findings while the verdict
+// comes back looking complete.
 //
 // ⚠️ ABSENT OR EMPTY MEANS EVERY ROUTED TEXT WAS JUDGED. That is the only assertion
-// fail-closed hangs on, and it is why this reader is safe to ship before the writer: a
-// runtime that does not populate the field behaves exactly as it does today.
+// fail-closed hangs on.
 //
 // ⚠️ COVERAGE, NOT ATTENDANCE. A path appears if ANY guardrail routed to it failed to
-// judge it — not only when every one did. So a `payload.tool_calls.0` read by three tool
-// judges, one of which hit a capability error, DOES appear: two guardrails answering does
-// not make the path covered. That is the guarantee fail-closed is acting on, and the
-// weaker reading — "somebody looked at it" — would be the original defect surviving in a
-// narrower and much harder-to-find form.
+// judge it — two others answering does not make the path covered.
 //
-// Entries are payload paths, exclusively, in the same vocabulary as a finding's `path`
-// (see GuardEvent.at), with `""` for the primary or synthesized text. The runtime tracks
-// unjudged CHECKS internally and maps them to the path of the text they were about; its
-// `"<unnamed>"` placeholder for a detector that threw before its check could be named is
-// internal and never reaches the wire.
-//
-// ⚠️ THE READER IS STILL DELIBERATELY VOCABULARY-AGNOSTIC. Nothing here parses an entry
-// or resolves it against `texts`: the security property rests on NON-EMPTINESS alone, and
-// entries are carried to the log verbatim for a human. Being defensive against a
-// vocabulary that never arrives costs nothing; interpreting one would break the moment
-// the runtime added a kind — and would break by UNDER-reporting, which is the direction
-// that silently passes traffic.
+// ⚠️ THE READER IS DELIBERATELY VOCABULARY-AGNOSTIC. Nothing here parses an entry or
+// resolves it against the payload: the security property rests on NON-EMPTINESS
+// alone, and entries are carried to the log verbatim for a human. Interpreting them
+// would break the moment the runtime added a kind — and would break by
+// UNDER-reporting, which is the direction that silently passes traffic.
 func (v verdict) Unjudged() []string {
-	raw := v.root.Get("x\\.ogr\\.unjudged")
+	raw := v.root.Get("unjudged")
 	if !raw.IsArray() {
 		return nil
 	}
@@ -120,70 +93,34 @@ func (v verdict) Unjudged() []string {
 	return out
 }
 
-// Partial reports whether the runtime answered about only PART of the turn.
+// Partial reports whether the runtime answered about only PART of the event.
 func (v verdict) Partial() bool { return len(v.Unjudged()) > 0 }
 
-// MustRefusePartial is the fail-mode rule for partial coverage, kept here as a pure
-// function so it stays testable without a gateway (see the Makefile note).
+// MustRefusePartial is the fail-mode rule for partial coverage, kept as a pure
+// function so it stays testable without a gateway.
 //
-// Under `closed` an unjudged text refuses the turn, which is the whole content of the
-// promise: if we could not judge it, it does not go through. Under `open` it passes and
-// the caller counts it, exactly as a transport failure does.
+// Under `closed` an unjudged text refuses the event, which is the whole content of
+// the promise: if we could not judge it, it does not go through. Under `open` it
+// passes and the caller counts it, exactly as a transport failure does.
 func (v verdict) MustRefusePartial(failClosed bool) bool { return failClosed && v.Partial() }
 
-// BuffersOutput reads the response lane off an input judgement.
+// BuffersOutput reads the response lane off an input judgement (`output_mode`).
 func (v verdict) BuffersOutput() bool {
-	return v.root.Get("x\\.ogr\\.output_mode").String() == "buffer"
+	return v.root.Get("output_mode").String() == "buffer"
 }
 
-// SessionID is the conversation the RUNTIME assembled this event into.
-//
-// ⚠️ The plugin used to answer this itself, by fingerprinting the conversation prefix
-// and chaining requests through its own Redis (`conversation.go` + `store.go`). That was
-// one of two implementations of one algorithm — the runtime has always had the other
-// (`worker/services/sessionDerivation.ts`) — and the only reason a data-plane filter
-// needed a shared store at all. Since the runtime derives it inline and returns it, this
-// side just reads the answer. Empty against an older runtime, which costs nothing: the
-// id is used for logs, not for behaviour.
-func (v verdict) SessionID() string { return v.root.Get("x\\.ogr\\.session_id").String() }
-
-// RedactionMap is `${OGR_TYPE_N}` -> the plaintext it stands for, for every placeholder
-// whose value appears in the request this verdict answers.
-//
-// ⚠️ **THIS IS WHAT REPLACED THE SESSION STORE**, and it carries more than this turn's
-// findings. A client re-sends the whole conversation in the CLEAR every turn — its own
-// history holds the original values, because we restored our placeholders on the way
-// back — so a number masked in turn 1 arrives unmasked in turn 2 and something has to
-// remember the binding. The runtime remembers it (session-scoped, TTL-bounded) and sends
-// back the subset present in THIS request, which is exactly the set this turn has to
-// re-mask. Nothing has to survive the request here.
-//
-// ⚠️ Empty against an older runtime. The fallback is `learnFromVerdict`, which recovers
-// this turn's OWN values from the span offsets — correct for restoring the reply, but
-// with no memory of earlier turns, so history goes unmasked. Ship the runtime first.
-func (v verdict) RedactionMap() map[string]string {
-	m := v.root.Get("x\\.ogr\\.redaction_map")
-	if !m.Exists() {
-		return nil
-	}
-	out := map[string]string{}
-	m.ForEach(func(k, val gjson.Result) bool {
-		if token, plain := k.String(), val.String(); token != "" && plain != "" {
-			out[token] = plain
-		}
-		return true
-	})
-	return out
-}
+// SessionID is the session the RUNTIME attributed this event to — the gateway
+// declares no coordinates, so this is always the derived answer. Logs only; nothing
+// here keys on it.
+func (v verdict) SessionID() string { return v.root.Get("session_id").String() }
 
 // Usable reports whether this is a VERDICT at all.
 //
-// ⚠️ A 200 is not a verdict. An empty body, an HTML error page from something in front
-// of the runtime, or a JSON document of another shape all parse without error and
-// answer `""` to every question — so every "did it stop?" test says no and the traffic
-// goes through as an ALLOW that nobody made. `fail_mode` does not cover it, because
-// fail_mode is consulted on non-200 and transport failures only.
-//
-// Every caller of `parseVerdict` on a 200 must gate on this and route a false through
-// the same failure path as an unreachable runtime.
+// ⚠️ A 200 is not a verdict. An empty body, an HTML error page from something in
+// front of the runtime, or a JSON document of another shape all parse without error
+// and answer `""` to every question — so every "did it stop?" test says no and the
+// traffic goes through as an ALLOW that nobody made. `fail_mode` does not cover it,
+// because fail_mode is consulted on non-200 and transport failures only. Every caller
+// of `parseVerdict` on a 200 must gate on this and route a false through the same
+// failure path as an unreachable runtime.
 func (v verdict) Usable() bool { return v.Decision() != "" }
