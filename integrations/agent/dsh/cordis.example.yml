@@ -1,73 +1,32 @@
-# OpenGuardrails Auto Mode on DeepSeek Harness — the fully-commented config
-# reference, usable directly as a patch overlay:
+# OpenGuardrails on DeepSeek Harness — the fully-commented config reference,
+# usable directly as a patch overlay:
 #
 #     dsh web --patch integrations/agent/dsh/cordis.example.yml
 #
 # The NORMAL install path needs none of this: `dsh plugin --profile <name>
-# add @openguardrails/dsh-auto-mode` activates the bundle's own minimal
-# cordis.patch.yml (plugin row + the Auto preset) with every default below.
-# Use this file to see and tune the knobs, or as the manual-composition
-# template for a deployment that owns its whole plugin tree (drop the
-# `insert:` wrapper and paste the entry into `cordis.yml` directly).
+# add @openguardrails/dsh` activates the bundle's own minimal cordis.patch.yml
+# (plugin row + the Auto preset) with every default below. Use this file to
+# see and tune the knobs, or as the manual-composition template for a
+# deployment that owns its whole plugin tree (drop the `insert:` wrapper and
+# paste the entry into `cordis.yml` directly).
+#
+# v0.7 (Recipe A): every model step is judged at the loop's own seams —
+# `step/request` before the model, `step/response` before the agent acts,
+# `turn/end` on the loop's close — with the session/turn/step coordinates
+# DECLARED on every event. All decisions come from the runtime; the v0.6
+# local policy engine (bundled regex rules, bring-your-own-model judge,
+# taint tracking) is gone with the SDK layer it rode on.
 
 - insert:
     - id: openguardrails
-      name: '@openguardrails/dsh-auto-mode'
+      name: '@openguardrails/dsh'
       config:
-        # ── Auto mode: answer approval asks with the runtime's verdict for
-        # sessions whose Permissions preset is `auto-mode` (on by default; these
-        # are the defaults, shown for visibility).
-        #
-        # allow → granted once · block → rejected · anything the runtime
-        # cannot decide follows `unresolved`: `human` falls back to the chat
-        # UI's gate, `reject` refuses (headless stance). Sessions on any
-        # other preset are never claimed.
-        auto:
-          enabled: true
-          preset: auto-mode
-          unresolved: human
-
-        # ── The guard engine underneath — every tool call is evaluated
-        # before it runs, on every preset. Also evaluate tool RESULTS. See
-        # the README's "Known limitations" for what the bundled reference
-        # detectors do and do not judge here.
-        guardToolResults: true
-
-        # Per-agent taint from untrusted tool results. A result whose TOOL NAME
-        # matches the pattern is content the agent did not author — the
-        # indirect prompt-injection vector — and marks the agent, so its later
-        # privileged calls escalate (and under auto mode, get rejected).
-        taint:
-          toolResults: true
-          toolResultPattern: 'web|fetch|search|browser|curl|http|^mcp_|_mcp_'
-
-        # ── The OGR v0.6 developer path: forward the raw model traffic and let
-        # the RUNTIME classify it. `off` (default) | `enforce` — no observe
-        # mode anywhere in this plugin: its user is a consumer of the runtime,
-        # so a switched-on kind is evaluated and enforced. Needs
-        # OGR_RUNTIME_URL + OGR_API_KEY — there is no local fallback, because
-        # the bundled detectors judge commands, not conversations.
-        #
-        #   llmRequest:  enforce   # a block verdict means the model is never called
-        #   llmResponse: enforce   # a block verdict withholds the whole answer
-        #
-        # `enforce` on the response buffers the stream until the verdict lands
-        # (that is what makes "before the agent acts on it" true) and costs one
-        # runtime round trip of first-token latency.
-        llmRequest: 'off'
-        llmResponse: 'off'
-
-        # Deny a call that reached the monotonic guard with no OGR verdict —
-        # the signature of a `tools/pre-execute` listener that short-circuited
-        # the waterfall before this plugin ran. Off by default: the failure
-        # mode is a denied call, and that is the deployment's call to make.
-        failClosed: false
-
         # ── The OpenGuardrails runtime connection. Only the API key is
         # required (register at https://openguardrails.com) — most users
         # paste it into the dsh Settings card "openguardrails" instead of
         # configuring anything here. Resolution: Settings > this block >
-        # OGR_* environment variables > defaults.
+        # OGR_* environment variables > defaults. No API key = the
+        # integration is off (and says so, once, in the harness log).
         #
         # runtime:
         #   apiKey: !!js process.env.OGR_API_KEY
@@ -76,26 +35,35 @@
         #   owner: ''      # agent_owner claim; empty = the OS account
         #   user: ''       # agent_user claim; empty = the OS account
 
-        # "Use your own model as the guardrail" — any OpenAI-compatible chat
-        # endpoint. Omit the whole block to judge with the built-in
-        # deterministic heuristic backend instead. BOTH baseURL and model are
-        # required; a half-written block is ignored with a warning.
+        # ── Degraded mode (specification/degraded-mode.md): what happens when
+        # the runtime CANNOT ANSWER — unreachable, timeout, a 429, a verdict
+        # whose `unjudged` names the content being enforced, or a tool call
+        # that reached execution with no step verdict at all.
         #
-        # judge:
-        #   baseURL: https://api.deepseek.com/v1
-        #   model: deepseek-v4-flash
-        #   apiKey: !!js process.env.DEEPSEEK_API_KEY
+        #   open   (default) — proceed, loudly; the runtime's record shows the gap
+        #   closed           — treat "could not look" as block
+        failMode: open
 
-        # The policy itself normally lives in the workspace at
-        # `.dsh/guardrails.json` so the agent can edit its own guardrails.
-        # Point elsewhere with `policyPath`, or inline it with `policy`.
+        # Per-call evaluate budget, milliseconds.
+        timeoutMs: 5000
+
+        # ── Auto mode: answer approval asks from the STEP VERDICT for
+        # sessions whose Permissions preset is `auto-mode` (on by default;
+        # these are the defaults, shown for visibility).
         #
-        # policyPath: guards/openguardrails.json
+        # step-cleared call → granted once · step-refused call → rejected ·
+        # anything the verdict never covered follows `unresolved`: `human`
+        # falls back to the chat UI's gate, `reject` refuses (headless
+        # stance). Sessions on any other preset are never claimed.
+        auto:
+          enabled: true
+          preset: auto-mode
+          unresolved: human
 
 # Put "Auto Mode by OGR" in the Permissions selector. A patch replaces
 # the targeted row's WHOLE `config`, so the base presets are restated
-# verbatim around the new entry — merge `auto-mode` into your own table instead if
-# you have customized it.
+# verbatim around the new entry — merge `auto-mode` into your own table
+# instead if you have customized it.
 - id: permission
   config:
     presets:

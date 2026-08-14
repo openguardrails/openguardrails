@@ -22,7 +22,8 @@ Protocol v0.7 retired the SDK layer; plugins are being rewritten against the
 API one by one:
 
 - **[`gateway/higress`](gateway/higress/)** — the v0.7 reference gateway
-  integration (Go/WASM, CI-covered).
-- **`agent/dsh`** — next: the reference agent-direct integration.
+  integration, Recipe B (Go/WASM, CI-covered).
+- **[`agent/dsh`](agent/dsh/)** — the v0.7 reference agent-direct
+  integration, Recipe A (npm workspace, CI-covered).
 - Everything else is **v0.6-stale** (built on the retired SDKs), excluded
   from the workspaces and CI, and treated as historical until its rewrite.

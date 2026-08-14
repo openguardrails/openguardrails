@@ -27,16 +27,19 @@ a gateway implementation is not an OGR-operated service.
 ## Integration status (2026-08-14)
 
 - `integrations/gateway/higress` — the v0.7 reference gateway integration
-  (Go/WASM), the only CI-covered plugin.
+  (Recipe B, Go/WASM, CI-covered).
+- `integrations/agent/dsh` (`@openguardrails/dsh`) — the v0.7 reference
+  agent-direct integration (Recipe A, npm workspace, CI-covered). Its
+  `src/wire.ts` is the canonical "two hand-rolled POSTs" example.
 - Everything else under `integrations/agent/` and the other gateway examples
-  are **v0.6-stale**: they were built on the retired SDKs and await a v0.7
-  rewrite (dsh first — it is the reference agent-direct integration). They
-  are excluded from the npm/uv workspaces and from CI; do not "fix" one by
+  is **v0.6-stale**: built on the retired SDKs, awaiting a v0.7 rewrite,
+  excluded from the npm/uv workspaces and from CI; do not "fix" one by
   re-adding an SDK.
 
 ## Validation
 
 - Benchmarks: `python -m pip install pytest && python -m pytest`
+- dsh plugin: `npm install && npm run build && npm test` (from the repo root)
 - Higress plugin: `cd integrations/gateway/higress && gofmt -l . && go vet ./... && go test ./...`
   (wasm compile check: `GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o plugin.wasm .`)
 - Release workflows: run `actionlint` against `.github/workflows/*.yml`

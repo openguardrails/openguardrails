@@ -128,8 +128,8 @@ rewritten against the v0.7 contract:
 
 | Category | Target | Status |
 |---|---|---|
-| **Gateway** | Higress (Go/WASM) | [`integrations/gateway/higress`](integrations/gateway/higress/) — **v0.7 reference gateway integration** |
-| **Agent** | DeepSeek Harness (`dsh`) | v0.7 rewrite planned first — the reference agent-direct integration |
+| **Gateway** | Higress (Go/WASM) | [`integrations/gateway/higress`](integrations/gateway/higress/) — **v0.7 reference gateway integration (Recipe B)** |
+| **Agent** | DeepSeek Harness (`dsh`) | [`integrations/agent/dsh`](integrations/agent/dsh/) — **v0.7 reference agent-direct integration (Recipe A)** |
 | | Claude Code · Codex · opencode · OpenClaw · Hermes · LangGraph | v0.6-stale, pending v0.7 rewrite |
 | **Gateway** | OpenAI/Anthropic example · mitmproxy | v0.6-stale, pending v0.7 rewrite |
 
@@ -141,6 +141,9 @@ python -m pip install pytest && python -m pytest
 
 # higress plugin
 cd integrations/gateway/higress && go test ./...
+
+# dsh plugin (npm workspace)
+npm install && npm run build && npm test
 ```
 
 ## Principles

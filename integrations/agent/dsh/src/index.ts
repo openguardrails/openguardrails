@@ -1,89 +1,75 @@
 /**
- * @openguardrails/dsh-auto-mode
+ * @openguardrails/dsh — the OGR v0.7 Recipe A reference integration.
  *
- * Auto mode for DeepSeek Harness (dsh): an `auto-mode` entry in the chat client's
- * Permissions selector whose approval prompts are answered by OpenGuardrails
- * (OGR) policy instead of a human — built on the full OGR guard engine, as an
- * ordinary Cordis plugin on dsh's documented interception points. No core
- * changes, no external hook protocol.
+ * dsh OWNS its loop, and this plugin sits on the loop's documented seams as an
+ * ordinary Cordis plugin (no core changes), speaking the Runtime API directly
+ * (two POSTs, no SDK). Recipe A, from specification/runtime-api.md:
  *
- * It turns harness events into OGR `GuardEvent`s, runs them through a
- * `Runtime` built from the deployment's own guardrails policy (text/regex
- * rules, plus optionally its own model as an LLM judge), and maps the
- * `Verdict` onto the pipeline's typed decisions:
+ *   1. PRE-MODEL     `llm/stream` waterfall → evaluate `step/request`
+ *                    (the assembled request, openai.chat projection).
+ *                    block ⇒ the model is never called; the step yields an
+ *                    error finish and the loop closes the turn.
+ *   2. POST-MODEL    the buffered answer → evaluate `step/response`
+ *                    (canonical {text, reasoning?, tool_calls, model, usage,
+ *                    timing}). block ⇒ refuse the step — or, when every
+ *                    blocking finding names a `payload.tool_calls.N` path,
+ *                    refuse ONLY those calls: the prose still reaches the
+ *                    user and each offending call is denied at the tool
+ *                    registry, which feeds the model an error result.
+ *   3. TOOL RESULTS  are judged in the NEXT step's request (they travel
+ *                    there) — no third call site exists, by design.
+ *   4. TURN CLOSE    `session/event` → ingest `turn/end` with the loop's OWN
+ *                    close reason; a turn this plugin blocked reports
+ *                    `blocked` rather than the error the abort surfaced as.
  *
- *   tools/pre-execute   allow | modify | redact → next()   (delegate)
- *   (invocation)        block                   → { kind: 'deny' }
- *                       require_approval        → { kind: 'ask' }  (human gate
- *                                                  via ctx.approval; a
- *                                                  deployment without an
- *                                                  approval service denies)
+ * Every event DECLARES its coordinates — session_id (the dsh session), turn
+ * and step (the loop's own 1-based numbers, tracked off the `agent/request`
+ * dispatch), parent_session_id for subagent children — so the runtime never
+ * derives; the verdict echoes them back with `attribution: "declared"`.
  *
- *   tools/post-execute  allow | modify | redact → the downstream decision
- *   (invocation)        block | require_approval → { kind: 'block', feedback }
+ * Enforcement at the tool registry is a CONSEQUENCE of the step verdict, not
+ * a separate judgement: `tools/pre-execute` denies the calls the
+ * `step/response` verdict refused, the monotonic `ctx.tools.guard` re-asserts
+ * it against waterfall reordering, and under `failMode: "closed"` a call that
+ * reached execution with NO verdict at all is refused — that is the signature
+ * of a short-circuited waterfall or an unjudged step, and "could not look" is
+ * not "found nothing".
  *
- *   ctx.tools.guard()   monotonic re-assertion of a block, and — under
- *                       `failClosed` — denial of any call that reached the
- *                       guard with no OGR verdict at all.
+ * Auto mode survives unchanged in spirit: for sessions on the `auto-mode`
+ * permission preset, approval asks are answered from the step verdict —
+ * an allowed call grants once, a refused one rejects, and anything the
+ * verdict never covered falls to the human gate (or is rejected, per config).
  *
- * This is a restrict-only guard: it can stop a would-run call or a
- * would-be-returned result, never loosen one. Enforcement and the human gate
- * stay privilege-separated: the plugin decides, the user approves through
- * `ctx.approval`, the registry enforces.
- *
- * Auto mode inverts one seam of that separation on explicit user request: for
- * sessions whose permission preset is `auto-mode` (a deployment-configured entry in
- * dsh's Permissions selector), an `approval/request` answerer resolves asks
- * with the OGR verdict instead of a human — allow grants once, block rejects,
- * and anything the runtime cannot decide falls back to the human gate (or is
- * rejected, per config). Sessions on any other preset are never claimed.
- *
- * @module @openguardrails/dsh-auto-mode
+ * @module @openguardrails/dsh
  */
 import type { Context } from "@deepseek-ai/cordis"
 import z from "@deepseek-ai/schemastery"
 import type { Agent } from "@deepseek-ai/dsh-agent"
-import type { ContentBlock, GenerateOptions, StreamChunk } from "@deepseek-ai/dsh-llm"
+import type { GenerateOptions, StreamChunk } from "@deepseek-ai/dsh-llm"
+import type { Session, SessionEvent } from "@deepseek-ai/dsh-session"
 import type {
-  PostToolDecision,
   PreToolDecision,
   ToolExecution,
   ToolExecutionResult,
 } from "@deepseek-ai/dsh-tools"
-// Type-only: declaration-merges the `approval/request` event (and its
-// ApprovalRequest/ApprovalOutcome vocabulary) onto the Events table. Never a
-// value import — a composition without the approval service simply never
-// dispatches the event, and this plugin must load fine there.
+// Type-only: declaration-merges the `approval/request` event onto the Events
+// table. Never a value import — a composition without the approval service
+// simply never dispatches the event, and this plugin must load fine there.
 import type { ApprovalRequest } from "@deepseek-ai/dsh-user-approval"
-import {
-  Runtime,
-  ConfigRulesDetector,
-  LLMJudgeDetector,
-  HeuristicBackend,
-  severity,
-  type Detector,
-  type GuardEvent,
-  type Provenance,
-  type Verdict,
-} from "@openguardrails/core"
 import { installSettingsSection, settingsNamespace } from "@deepseek-ai/dsh-settings"
 import {
   DEFAULT_AUTO_PRESET,
   DEFAULT_RUNTIME_URL,
-  DEFAULT_TAINT_TOOL_PATTERN,
-  loadGuardrailsConfig,
+  DEFAULT_TIMEOUT_MS,
   type AutoApprovalConfig,
   type AutoUnresolved,
+  type FailMode,
   type GuardrailsOptions,
-  type JudgeConfig,
-  type LlmMode,
-  type ResolvedConfig,
   type RuntimeOptions,
-  type TaintConfig,
 } from "./config.js"
 import { LLM_PROTOCOL, requestBody, ResponseAccumulator } from "./llm-wire.js"
-import { openAICompatibleBackend } from "./own-model.js"
-import { hostAgentId, osUser, PlatformReporter } from "./platform.js"
+import { hostAgentId, osUser } from "./platform.js"
+import { OgrClient, type WireEvent, type WireFinding, type WireVerdict } from "./wire.js"
 
 /** Cordis plugin name; the `id:` in `cordis.yml` is the deployment's own label. */
 export const name = "openguardrails"
@@ -91,53 +77,23 @@ export const name = "openguardrails"
 /** Settings namespace: the "openguardrails" card in the dsh Settings page. */
 export const OGR_SETTINGS_NAMESPACE = settingsNamespace("openguardrails")
 
-/** What kind of agent this integration instruments. */
-const AGENT_TYPE = "DeepSeekHarness"
+/** What kind of agent this integration instruments (`agent_type` claim). */
+const AGENT_TYPE = "dsh"
+
+/** `integration` field on every event: which build observed it. */
+export const INTEGRATION = "ogr-dsh/0.2.0"
 
 /**
  * The tool registry is the enforcement surface: without it this plugin has
  * nothing to guard, so it waits for the service rather than registering
  * listeners that would silently never fire. Everything else — the agent-loop
- * events, `ctx.approval` — is read opportunistically, so a composition without
- * them still gets tool-call enforcement.
+ * events, the session log, `ctx.approval` — is read opportunistically.
  */
 // ⚠️ An ARRAY, and only `tools`. This Cordis's `Inject` object form maps
-// service name → intercept config, NOT `{required, optional}` — writing the
-// latter silently declares dependencies on services literally named "required"
-// and "optional", which never resolve, and the plugin never applies at all.
-// There is no optional-inject syntax; `llm` is read opportunistically with
-// `ctx.get("llm")` instead, the same way the in-tree hook bridges do it.
+// service name → intercept config, NOT `{required, optional}`.
 export const inject = ["tools"]
 
-/** Plugin config: an OGR policy plus the two axes a deployment tunes. */
 export interface Config extends GuardrailsOptions {}
-
-// `baseURL`/`model` are NOT declared required: schemastery resolves a nested
-// object even when the parent key is absent, so a required inner field would
-// make the optional `judge` block impossible to omit. Both are checked
-// together in `loadGuardrailsConfig`, which has to police a judge that came
-// from the policy file too.
-const JudgeSchema: z<JudgeConfig> = z.object({
-  baseURL: z.string().description("OpenAI-compatible base URL, e.g. https://api.deepseek.com/v1"),
-  model: z.string().description("Model id used as the guardrail judge"),
-  apiKey: z.string().role("secret").description("Bearer token for the judge endpoint"),
-  headers: z.dict(z.string()).description("Extra headers sent with every judge request"),
-})
-
-const TaintSchema: z<TaintConfig> = z.object({
-  toolResults: z.boolean().default(true)
-    .description("Mark the calling agent untrusted once it ingests an external tool result"),
-  toolResultPattern: z.string().default(DEFAULT_TAINT_TOOL_PATTERN)
-    .description("Case-insensitive regex over the tool name selecting untrusted-content tools"),
-})
-
-// No observe mode: an agent integration's user is a CONSUMER of the runtime,
-// so a switched-on kind is evaluated and enforced. Fire-and-forget observation
-// is a gateway posture, not this plugin's.
-const LlmModeSchema = z.union([
-  z.const("off").description("do not emit"),
-  z.const("enforce").description("evaluate, wait for the Verdict, act on it"),
-]).default("off")
 
 // `url` deliberately has NO schema default: schemastery materializes defaults
 // into the resolved config, which would shadow an OGR_RUNTIME_URL from the
@@ -165,60 +121,64 @@ const AutoSchema: z<AutoApprovalConfig> = z.object({
     z.const("human").description("delegate to the next answerer — the human gate"),
     z.const("reject").description("refuse the ask (strict headless stance)"),
   ]).default("human")
-    .description("What happens to an ask the runtime cannot decide"),
+    .description("What happens to an ask the step verdict never covered"),
 })
 
 export const Config: z<Config> = z.object({
-  policy: z.any().description("Inline OGR policy; overrides the workspace file and the default"),
-  policyPath: z.string().description("Policy file; relative paths resolve against the session workspace"),
-  judge: JudgeSchema.description("Use your own model as an LLM judge (optional)"),
-  guardToolResults: z.boolean().default(true).description("Also evaluate tool results, not just tool calls"),
-  taint: TaintSchema.description("Per-agent taint propagation from untrusted tool results"),
-  auto: AutoSchema.description("Auto mode: answer approval asks with the runtime's verdict for auto-preset sessions"),
   runtime: RuntimeSchema.description("OpenGuardrails runtime connection and identity claims (also editable in Settings; environment fills gaps)"),
-  failClosed: z.boolean().default(false)
-    .description("Deny any call that reached the monotonic guard without an OGR verdict"),
-  llmRequest: LlmModeSchema.description("Emit llm_request (the assembled provider request body) before each model call"),
-  llmResponse: LlmModeSchema.description("Emit llm_response (the provider response body) after the model answers"),
+  failMode: z.union([
+    z.const("open").description("proceed loudly when the runtime cannot answer"),
+    z.const("closed").description("treat \"could not look\" as block"),
+  ]).default("open")
+    .description("Degraded-mode posture (specification/degraded-mode.md)"),
+  timeoutMs: z.number().default(DEFAULT_TIMEOUT_MS)
+    .description("Per-call evaluate budget in milliseconds"),
+  auto: AutoSchema.description("Auto mode: answer approval asks with the step verdict for auto-preset sessions"),
 })
 
-/**
- * Bound on the pending-verdict table. Every entry is removed on `tools/result`,
- * which the registry fires for every execution including denials, so the cap is
- * a backstop against an unforeseen path, not the normal release mechanism.
- */
-const PENDING_MAX = 4096
+/** Bound on the per-call verdict table; released on `tools/result`, capped as a backstop. */
+const CALLS_MAX = 4096
 
-/**
- * The tighter of the local verdict and the runtime's. A configured runtime
- * participates in every decision — its user is a consumer, not an observer —
- * but restrict-only cuts both ways: remotely it can escalate a decision,
- * never relax one. `null` (not configured, unreachable) leaves the local
- * decision standing.
- */
-function tighter(local: Verdict, remote: Verdict | null): Verdict {
-  if (!remote || severity(remote.decision) >= severity(local.decision)) return local
-  return {
-    ...remote,
-    reasons: [...remote.reasons, "[runtime] the OpenGuardrails runtime tightened the local decision"],
-  }
+/** What the step verdict said about one tool call. */
+type CallVerdict = { allow: true } | { allow: false; reason: string }
+
+/** DSH's turn-end kinds → the v0.7 close-reason vocabulary (1:1, one spelling change). */
+const TURN_END_REASON: Record<string, "completed" | "max_tokens" | "blocked" | "aborted" | "error"> = {
+  "completed": "completed",
+  "max-tokens": "max_tokens",
+  "blocked": "blocked",
+  "aborted": "aborted",
+  "error": "error",
 }
 
-/** One-line human summary of a verdict for a denial reason or corrective feedback. */
-function brief(v: Verdict): string {
-  const cats = v.categories.map((c) => `${c.id}(${c.score})`).join(", ")
-  const why = v.reasons.filter((r) => !r.startsWith("[")).join("; ")
-  return [cats, why].filter(Boolean).join(" — ") || v.decision
+/** One-line human summary of a verdict for a denial reason. */
+function brief(v: WireVerdict): string {
+  const f = (v.findings ?? [])
+    .map((x) => `${x.category}${x.severity ? `(${x.severity})` : ""}`)
+    .join(", ")
+  return f || v.decision
+}
+
+/**
+ * The block-justifying findings that name a specific tool call, by index.
+ * `payload.tool_calls.3.arguments.command` and `payload.tool_calls.3` both
+ * attribute to call 3 — the path grammar is dotted, and the index is the
+ * second segment.
+ */
+function callTargets(findings: readonly WireFinding[]): Map<number, WireFinding> {
+  const out = new Map<number, WireFinding>()
+  for (const f of findings) {
+    const m = /^payload\.tool_calls\.(\d+)(?:\.|$)/.exec(f.path ?? "")
+    if (m) out.set(Number(m[1]), out.get(Number(m[1])) ?? f)
+  }
+  return out
 }
 
 /**
  * The session's effective permission preset: the last `permission/preset`
- * event in the log — the same fold `@deepseek-ai/dsh-permission-presets`
- * ships as `effectivePermissionPreset`, re-folded here over the raw event
- * shape so a deployment without that package costs this plugin neither a
- * dependency nor a load failure. The preset service pins the default preset
- * into every new session as knob events, so a session that never switched
- * still resolves.
+ * event in the log — re-folded over the raw event shape so a deployment
+ * without `dsh-permission-presets` costs neither a dependency nor a load
+ * failure.
  */
 function effectivePreset(events: readonly unknown[]): string | undefined {
   for (let index = events.length - 1; index >= 0; index -= 1) {
@@ -230,93 +190,6 @@ function effectivePreset(events: readonly unknown[]): string | undefined {
   return undefined
 }
 
-/** The model-facing text of a tool result, which is what an injection rides in on. */
-function resultText(content: readonly ContentBlock[]): string {
-  return content
-    .map((block) => (block.type === "text" ? block.text : `[${block.type}]`))
-    .join("\n")
-}
-
-/**
- * Per-agent taint: once an agent ingests untrusted content (a web/fetch/search/
- * browser/MCP tool result), its later tool calls carry `untrusted` provenance
- * so the judge escalates a privileged action that may be injection-influenced.
- *
- * Keyed by the live `Agent` object exactly like dsh's own per-agent guards: the
- * tool registry is context-level and subagents interleave through the same
- * waterfall, so one agent's taint must never leak into another's calls, and
- * object lifetime bounds the entry without a disposal listener.
- */
-interface TaintMark {
-  sources: Set<string>
-  tags: Set<string>
-}
-
-class TaintTracker {
-  private readonly byAgent = new WeakMap<Agent, TaintMark>()
-
-  mark(agent: Agent | undefined, source: string, tag: string): void {
-    if (!agent) return
-    const m = this.byAgent.get(agent) ?? { sources: new Set<string>(), tags: new Set<string>() }
-    m.sources.add(source)
-    m.tags.add(tag)
-    this.byAgent.set(agent, m)
-  }
-
-  get(agent: Agent | undefined): TaintMark | undefined {
-    return agent ? this.byAgent.get(agent) : undefined
-  }
-
-  clear(agent: Agent | undefined): void {
-    if (agent) this.byAgent.delete(agent)
-  }
-}
-
-/**
- * Lazily builds and caches one OGR runtime per session workspace. dsh sessions
- * each carry their own `cwd` and one harness process serves many of them, so a
- * workspace-local `.dsh/guardrails.json` has to resolve per call, not once at
- * load. The `Runtime` is also the correlation store for `guardId`, so agents
- * sharing a workspace deliberately share one.
- */
-class GuardManager {
-  private readonly byWorkspace = new Map<string, { runtime: Runtime; resolved: ResolvedConfig; toolResultRe: RegExp | undefined }>()
-
-  constructor(
-    private readonly options: Config,
-    private readonly warn: (message: string) => void,
-  ) {}
-
-  for(workspaceDir: string | undefined): { runtime: Runtime; resolved: ResolvedConfig; toolResultRe: RegExp | undefined } {
-    const key = workspaceDir ?? ""
-    const hit = this.byWorkspace.get(key)
-    if (hit) return hit
-
-    const resolved = loadGuardrailsConfig(workspaceDir, this.options, this.warn)
-    // ConfigRulesDetector enforces the deterministic regex rules; the judge
-    // weighs provenance, so an untrusted-derived privileged action escalates.
-    // Use the operator's own model when configured, else the deterministic
-    // HeuristicBackend — tainting keeps its teeth with no external model.
-    const judgeBackend = resolved.judge ? openAICompatibleBackend(resolved.judge) : new HeuristicBackend()
-    const detectors: Detector[] = [
-      new ConfigRulesDetector(resolved.policy.config_rules ?? {}),
-      new LLMJudgeDetector(judgeBackend),
-    ]
-    let toolResultRe: RegExp | undefined
-    if (resolved.taint.toolResults && resolved.taint.toolResultPattern) {
-      try {
-        toolResultRe = new RegExp(resolved.taint.toolResultPattern, "i")
-      } catch (error: unknown) {
-        // A bad pattern must not silently disable tainting without a word.
-        this.warn(`invalid taint.toolResultPattern: ${String(error)} — tool-result tainting is off for ${key || "the default workspace"}`)
-      }
-    }
-    const entry = { runtime: new Runtime(detectors, resolved.policy), resolved, toolResultRe }
-    this.byWorkspace.set(key, entry)
-    return entry
-  }
-}
-
 /**
  * Install the guard's listeners.
  * @param ctx - plugin context; every registration is scoped to it and unwinds
@@ -325,16 +198,9 @@ class GuardManager {
  */
 export function apply(ctx: Context, config: Config): void {
   const warn = (message: string): void => ctx.logger.warn(`openguardrails: ${message}`)
-  const guard = new GuardManager(config, warn)
-  const taint = new TaintTracker()
+  const failMode: FailMode = config.failMode ?? "open"
 
   // ---- the runtime connection: Settings → cordis config → env → default ----
-  //
-  // Only the API key is REQUIRED, and it can be pasted into the dsh Settings
-  // card ("openguardrails") at any time — the source is a live thunk, so the
-  // connection comes up without a restart. Everything else has a default:
-  // the URL points at the OpenGuardrails cloud, the workspace claim falls
-  // back to the API key's workspace, owner/user to the OS account.
   const runtimeDefaults: RuntimeOptions = {
     url: config.runtime?.url || process.env.OGR_RUNTIME_URL || DEFAULT_RUNTIME_URL,
     apiKey: config.runtime?.apiKey || process.env.OGR_API_KEY || "",
@@ -347,494 +213,170 @@ export function apply(ctx: Context, config: Config): void {
     setSource: (current: () => RuntimeOptions) => {
       runtimeSettings = current
     },
-    // The reporter re-reads the source on every call; nothing to re-register.
     onChange: () => {},
   })
 
-  const reporter = new PlatformReporter(
+  const client = new OgrClient(
     { info: (m) => ctx.logger.info(m), warn: (m) => ctx.logger.warn(m) },
     () => {
       const s = runtimeSettings()
       return s.apiKey ? { url: s.url || DEFAULT_RUNTIME_URL, apiKey: s.apiKey } : null
     },
+    () => config.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   )
-  ctx.effect(() => () => void reporter.dispose(), "openguardrails: release the runtime connection")
 
-  /**
-   * Verdicts from `tools/pre-execute`, keyed by the registry's per-execution
-   * token, read by the monotonic guard and released on `tools/result`.
-   */
-  const pending = new Map<symbol, Verdict>()
-
-  /**
-   * The payload of each live call, keyed by callId, for the auto-mode
-   * approval answerer: an `ApprovalRequest` carries no arguments, so its
-   * `callId` is how an ask gets its payload back. Same lifetime and backstop
-   * cap as `pending`.
-   */
-  const records = new Map<string, { name: string; arguments: unknown }>()
-
-  function remember(exec: ToolExecution, verdict: Verdict): void {
-    if (pending.size >= PENDING_MAX) {
-      const oldest = pending.keys().next()
-      if (!oldest.done) pending.delete(oldest.value)
-    }
-    pending.set(exec.token, verdict)
-    if (records.size >= PENDING_MAX) {
-      const oldest = records.keys().next()
-      if (!oldest.done) records.delete(oldest.value)
-    }
-    records.set(String(exec.callId), { name: exec.name, arguments: exec.arguments })
-  }
-
-  /** The agent's workspace — the `session/new` cwd, not the host process's launch dir. */
-  function workspaceOf(exec: ToolExecution): string | undefined {
-    return exec.agent?.session.header.cwd
-  }
-
-  // One harness process per machine → machine-scoped identity (identity design
-  // §7); resolved once, because it is a property of the host, not of the call.
+  // One harness process per machine → machine-scoped identity, resolved once.
   const agentId = hostAgentId()
   const accountUser = osUser()
 
-  /**
-   * The claim half of the identity five-tuple, read live so a Settings edit
-   * takes effect immediately. `agent_workspace` is the platform's named
-   * policy/resource group — NOT a directory — and stays absent unless
-   * configured (absent = the API key's workspace); owner and user default to
-   * the OS account, the best a local single-user harness can assert. The
-   * runtime clamps every claim to what the attestation supports.
-   */
-  const claims = (): Pick<GuardEvent, "agentWorkspace" | "agentOwner" | "agentUser"> => {
+  /** The identity claims every event carries, read live so a Settings edit lands immediately. */
+  const claims = (): Pick<WireEvent, "agent_workspace" | "agent_owner" | "agent_user"> => {
     const s = runtimeSettings()
     const owner = s.owner || accountUser
     const user = s.user || accountUser
     return {
-      ...s.workspace ? { agentWorkspace: s.workspace } : {},
-      ...owner ? { agentOwner: owner } : {},
-      ...user ? { agentUser: user } : {},
+      ...s.workspace ? { agent_workspace: s.workspace } : {},
+      ...owner ? { agent_owner: owner } : {},
+      ...user ? { agent_user: user } : {},
     }
   }
 
-  /** The identity five-tuple every event this plugin emits shares (flat fields, OGR v0.6). */
-  function identity(
-    exec: ToolExecution,
-  ): Pick<GuardEvent, "agentId" | "agentType" | "agentWorkspace" | "agentOwner" | "agentUser" | "attestation" | "sessionId"> {
-    return {
-      agentId,
-      agentType: AGENT_TYPE,
-      attestation: "client_key",
-      ...claims(),
-      ...exec.agent ? { sessionId: exec.agent.id } : {},
-    }
-  }
-
-  /**
-   * The call's provenance. The model's own request is unverified content; an
-   * agent that has ingested an external tool result adds an `untrusted` entry
-   * naming the source, which is what makes an injection-influenced privileged
-   * action legible to the judge.
-   */
-  function provenanceFor(agent: Agent | undefined): Provenance[] {
-    const provenance: Provenance[] = [{ source: "model", trust: "unverified" }]
-    const mark = taint.get(agent)
-    if (mark) {
-      provenance.push({
-        source: [...mark.sources][0] ?? "tainted",
-        trust: "untrusted",
-        taintTags: [...mark.tags],
-      })
-    }
-    return provenance
-  }
-
-  // ---- invocation altitude: every tool call, before it runs ----------------
+  // ---- the loop's own coordinates ------------------------------------------
   //
-  // Prepended: `tools/pre-execute` is dsh's reorderable policy layer, and a
-  // permissive listener that returns `allow` without delegating short-circuits
-  // the waterfall. Running first means OGR sees the call; `failClosed` covers
-  // the case where a later-registered prepending listener still preempts it.
-  ctx.on("tools/pre-execute", async (exec, next): Promise<PreToolDecision> => {
-    const { runtime, resolved } = guard.for(workspaceOf(exec))
-    const ev: GuardEvent = {
-      kind: "tool_call",
-      observationPoint: "invocation",
-      ...identity(exec),
-      // Guard-context propagation: the call and its result are one logical
-      // action, so both events carry the call id and the runtime correlates
-      // the two altitudes — a later observation can only tighten the earlier
-      // decision, never loosen it. Event identity itself is born at the
-      // runtime (OGR v0.6), so this plugin never mints an `eventId`.
-      guardId: exec.callId,
-      payload: { name: exec.name, arguments: exec.arguments },
-      timestamp: new Date().toISOString(),
-      provenance: provenanceFor(exec.agent),
-    }
-
-    // The configured runtime is evaluated in PARALLEL with the local chain —
-    // its user is a consumer, not an observer, so the call goes through
-    // /v1/evaluate and the verdict participates: it can tighten the local
-    // decision, never loosen it. Unconfigured or unreachable → local stands.
-    const remote = reporter.evaluate(ev)
-    let verdict: Verdict
-    try {
-      verdict = await runtime.evaluate(ev)
-    } catch (error: unknown) {
-      // A detector failure (an unreachable judge endpoint, a malformed rule)
-      // must not decide policy by accident. `failClosed` is the deployment's
-      // stated posture, so honor it here too.
-      warn(`evaluation of ${exec.name} failed: ${String(error)}`)
-      if (resolved.failClosed) {
-        return { kind: "deny", reason: `[OpenGuardrails] could not evaluate this ${exec.name} call and the deployment is fail-closed` }
-      }
-      return next()
-    }
-    verdict = tighter(verdict, await remote)
-    remember(exec, verdict)
-
-    if (verdict.decision === "block") {
-      return { kind: "deny", reason: `[OpenGuardrails] ${brief(verdict)}` }
-    }
-    if (verdict.decision === "require_approval") {
-      // `ask` resolves through ctx.approval before the monotonic guards; a
-      // composition with no approval service turns it into a denial, which is
-      // the correct direction for a restrict-only guard.
-      return { kind: "ask", reason: `[OpenGuardrails] ${brief(verdict)}` }
-    }
-    // allow | modify | redact → delegate, so a later policy layer still decides.
+  // `agent/request` fires once per step with the loop's {turn, step} — the
+  // very numbers the session log stamps into its own events. Recorded here,
+  // read by the `llm/stream` guard moments later in the same step. A
+  // pass-through waterfall listener: this plugin only watches.
+  interface Coords {
+    turn: number
+    step: number
+    parentSession?: string
+  }
+  const coordsBySession = new Map<string, Coords>()
+  ctx.on("agent/request", (payload, next) => {
+    const parent = payload.agent.session.header.parentSession
+    coordsBySession.set(payload.agent.id, {
+      turn: payload.turn,
+      step: payload.step,
+      ...parent ? { parentSession: String(parent) } : {},
+    })
     return next()
-  }, { prepend: true })
-
-  // ---- monotonic re-assertion ---------------------------------------------
-  //
-  // A registered guard is the one denial that cannot be reordered away. It
-  // repeats an OGR `block` (belt and braces against a pipeline that reached
-  // dispatch anyway) and, under `failClosed`, refuses a call that arrived here
-  // with no verdict at all — the signature of a waterfall that short-circuited
-  // before this plugin ran.
-  ctx.tools.guard((exec): string | undefined => {
-    const verdict = pending.get(exec.token)
-    if (verdict) {
-      return verdict.decision === "block" ? `[OpenGuardrails] ${brief(verdict)}` : undefined
-    }
-    const { resolved } = guard.for(workspaceOf(exec))
-    if (!resolved.failClosed) return undefined
-    return `[OpenGuardrails] this ${exec.name} call was never evaluated (the pre-execute waterfall short-circuited) and the deployment is fail-closed`
   })
 
-  // ---- the untrusted-content boundary, and the result altitude -------------
-  ctx.on("tools/post-execute", async (exec, result, next): Promise<PostToolDecision> => {
-    const { runtime, resolved, toolResultRe } = guard.for(workspaceOf(exec))
-
-    // Taint first, so the mark is set before any downstream listener runs and
-    // before the NEXT call in this agent's turn is evaluated. A failed fetch
-    // produced no content to distrust.
-    if (toolResultRe && !result.isError && toolResultRe.test(exec.name)) {
-      taint.mark(exec.agent, `tool_result:${exec.name}`, "untrusted_tool_result")
-    }
-
-    const downstream = await next()
-    if (!resolved.guardToolResults) return downstream
-    // Already blocked downstream — nothing left for this plugin to restrict.
-    if (downstream.kind === "block") return downstream
-    // This plugin already refused the call at the invocation altitude, so the
-    // tool body never ran and the "result" is the registry's own denial
-    // notice. Re-judging it would only overwrite an accurate denial reason
-    // with a vaguer one — and the guard-context correlation guarantees the
-    // verdict, being for the same `guardId`, comes back blocked regardless.
-    const priorDecision = pending.get(exec.token)?.decision
-    if (priorDecision === "block" || priorDecision === "require_approval") return downstream
-
-    // Guard what actually reaches the model: a downstream listener's
-    // replacement content when it supplied one, else the dispatch result.
-    const content = downstream.content ?? result.content
-    const text = resultText(content)
-    if (text.length === 0) return downstream
-
-    const ev: GuardEvent = {
-      kind: "tool_result",
-      observationPoint: "invocation",
-      ...identity(exec),
-      guardId: exec.callId,
-      // The `{ name, result }` shape the GuardEvent spec gives `tool_result`,
-      // plus the status field the other OGR agent integrations carry so a
-      // failed call reads as an error rather than a generic result.
-      payload: { name: exec.name, result: text, status: result.isError ? "error" : "ok" },
+  /** Base fields shared by every event of one session. */
+  const baseEvent = (sessionId: string | undefined): Omit<WireEvent, "kind" | "payload"> => {
+    const coords = sessionId ? coordsBySession.get(sessionId) : undefined
+    return {
+      ogr_version: "0.7",
       timestamp: new Date().toISOString(),
-      // The result is content this agent did not author. Whether it is
-      // *externally* sourced is the taint pattern's judgement, above; every
-      // result is at best unverified.
-      provenance: [{
-        source: "tool_result",
-        trust: toolResultRe?.test(exec.name) ? "untrusted" : "unverified",
-        ref: exec.name,
-      }],
+      agent_id: agentId,
+      agent_type: AGENT_TYPE,
+      integration: INTEGRATION,
+      ...claims(),
+      ...sessionId ? { session_id: sessionId } : {},
+      ...coords ? { turn: coords.turn, step: coords.step } : {},
+      ...coords?.parentSession ? { parent_session_id: coords.parentSession } : {},
     }
-
-    const remote = reporter.evaluate(ev)
-    let verdict: Verdict
-    try {
-      verdict = await runtime.evaluate(ev)
-    } catch (error: unknown) {
-      warn(`evaluation of the ${exec.name} result failed: ${String(error)}`)
-      return downstream
-    }
-    verdict = tighter(verdict, await remote)
-
-    // There is no human gate after dispatch — the side effect already
-    // happened — so `require_approval` at this altitude blocks the result from
-    // reaching the model and says why.
-    if (verdict.decision === "block" || verdict.decision === "require_approval") {
-      const detail = verdict.decision === "require_approval"
-        ? `${brief(verdict)} (this result needed approval, which cannot be asked for after the tool ran)`
-        : brief(verdict)
-      return {
-        kind: "block",
-        feedback: [{
-          type: "text",
-          text: `[OpenGuardrails] the result of this ${exec.name} call was withheld: ${detail}`,
-        }],
-        ...downstream.additionalContexts ? { additionalContexts: downstream.additionalContexts } : {},
-      }
-    }
-    return downstream
-  })
-
-  // Release the pending verdict on the registry's authoritative final outcome,
-  // which fires for every execution — dispatched, denied, or errored.
-  ctx.on("tools/result", (exec: Readonly<ToolExecution>, _result: Readonly<ToolExecutionResult>) => {
-    pending.delete(exec.token)
-    records.delete(String(exec.callId))
-  })
-
-  // Taint is agent-scoped and in-memory. A cleared session starts a fresh
-  // history, so its taint goes with it; `resume` and `compact` keep the
-  // ingested content in derived history and must keep the mark.
-  ctx.on("agent/session-start", ({ agent, source }) => {
-    if (source === "startup" || source === "clear") taint.clear(agent)
-  })
-
-  // ---- auto mode: the runtime answers the approval seam --------------------
-  //
-  // dsh's permission presets bundle sandbox mode + approval policy, and the
-  // chat client renders the preset table as its Permissions selector. A
-  // deployment that adds an `auto-mode` preset (workspace-write + ask — README has
-  // the cordis.yml snippet) gets its meaning from this answerer: for sessions
-  // on that preset, asks that would reach a human — a sandbox-escalation
-  // retry, a tool whose policy layer said `ask` — resolve with the OGR
-  // verdict instead. Same claim-or-delegate shape as dsh's own ACP bridge,
-  // prepended so it runs before the chat UI's answerer; every other session
-  // delegates untouched, so an unloaded plugin degrades the preset to plain
-  // workspace-write + human asks, which is the fail-safe direction.
-  const auto = config.auto ?? {}
-  if (auto.enabled !== false) {
-    const autoPreset = auto.preset ?? DEFAULT_AUTO_PRESET
-    const unresolved: AutoUnresolved = auto.unresolved ?? "human"
-
-    let onboarded = false
-    ctx.on("approval/request", async (req: ApprovalRequest, next) => {
-      if (effectivePreset(req.agent.session.events) !== autoPreset) return next()
-
-      // The first claimed ask is the "user just switched to Auto Mode"
-      // moment: if no runtime is connected, say once — and only once — how
-      // to connect one. Local policy answers either way.
-      if (!reporter.enabled && !onboarded) {
-        onboarded = true
-        warn(
-          "Auto Mode is answering from LOCAL policy only. Register at https://openguardrails.com for an API key "
-          + "and set OGR_API_KEY in ~/.dsh/.env to connect the runtime.",
-        )
-      }
-
-      // "Cannot decide" is one disposal, three triggers: a require_approval
-      // verdict (including the very verdict whose `ask` raised this request —
-      // asking the runtime again is circular, so it stays undecided), an ask
-      // with no correlated call, and a failed evaluation. `human` delegates
-      // onward to the human gate; `reject` is the restrict-only hard stance.
-      const undecided = () => (unresolved === "reject" ? Promise.resolve("rejected" as const) : next())
-
-      // An ApprovalRequest carries no arguments — `callId` links the ask back
-      // to the call this plugin already evaluated. No record means OGR never
-      // saw what is being approved, and a guard does not grant what it
-      // cannot see.
-      const record = req.callId === undefined ? undefined : records.get(String(req.callId))
-      if (!record) return undecided()
-
-      const { runtime } = guard.for(req.agent.session.header.cwd)
-      // Re-evaluate rather than replay the stored verdict: provenance is
-      // fresh (the agent may have ingested untrusted content since the call
-      // was first judged), the ask's own reason travels in the payload for a
-      // judge to weigh, and guardId correlation guarantees the answer can
-      // only tighten the earlier decision, never loosen it.
-      const ev: GuardEvent = {
-        kind: "tool_call",
-        observationPoint: "invocation",
-        agentId,
-        agentType: AGENT_TYPE,
-        attestation: "client_key",
-        sessionId: req.agent.id,
-        // The same identity five-tuple as every other event this plugin emits.
-        ...claims(),
-        guardId: req.callId,
-        payload: {
-          name: record.name,
-          arguments: record.arguments,
-          approval: { tool: req.toolName, ...req.reason !== undefined ? { reason: req.reason } : {} },
-        },
-        timestamp: new Date().toISOString(),
-        provenance: provenanceFor(req.agent),
-      }
-
-      const remote = reporter.evaluate(ev)
-      let verdict: Verdict
-      try {
-        verdict = await runtime.evaluate(ev)
-      } catch (error: unknown) {
-        warn(`auto mode could not evaluate the ${req.toolName} approval ask: ${String(error)}`)
-        return undecided()
-      }
-      verdict = tighter(verdict, await remote)
-
-      if (verdict.decision === "block") return "rejected"
-      if (verdict.decision === "require_approval") return undecided()
-      return "allowed-once"
-    }, { prepend: true })
   }
 
-  // ---- conversation altitude: the OGR v0.6 developer path -----------------
-  installLlmGuard(ctx, config, { agentId, claims, reporter, warn })
-}
+  // ---- per-call verdicts, and the turns this plugin itself blocked ---------
+  const callVerdicts = new Map<string, CallVerdict>()
+  const ogrBlockedTurns = new Set<string>()
 
-/**
- * The `llm_request` / `llm_response` half: forward the raw model traffic and
- * act on the verdicts.
- *
- * This is the v0.6 developer path, and it is deliberately a different shape
- * from the tool-call half above. There, the plugin decomposes a dsh event into
- * a `tool_call` GuardEvent and a LOCAL `Runtime` judges it. Here it decomposes
- * nothing: the request body and the response body go to the runtime, which
- * derives the new user words, the tool outcomes being fed back, the model's
- * prose, every tool call it asks for, and the declared tool inventory. That
- * classification was every PEP's private burden through v0.5; it is not this
- * plugin's job any more.
- *
- * The consequence is that these two kinds have NO local fallback — the
- * bundled detectors judge commands, not conversations. Both modes therefore
- * require `OGR_RUNTIME_URL` + `OGR_API_KEY`, and both say so loudly when they
- * are switched on without one.
- */
-function installLlmGuard(
-  ctx: Context,
-  config: Config,
-  deps: {
-    agentId: string
-    claims: () => Pick<GuardEvent, "agentWorkspace" | "agentOwner" | "agentUser">
-    reporter: PlatformReporter
-    warn: (message: string) => void
-  },
-): void {
-  const requestMode: LlmMode = config.llmRequest ?? "off"
-  const responseMode: LlmMode = config.llmResponse ?? "off"
-  if (requestMode === "off" && responseMode === "off") return
-
-  const { agentId, claims, reporter, warn } = deps
-  // No install-time runtime check: the API key may arrive later through the
-  // Settings card, and the connection comes up without a restart. A stream
-  // that runs while no runtime is configured passes through, with one warning.
-  let warnedNoRuntime = false
-  // Deliberately NO "is the llm service loaded?" check here. `apply` runs as
-  // soon as `tools` resolves, which in a normal cordis.yml is before the LLM
-  // adapter has finished loading — an eager check reports a missing service
-  // that arrives milliseconds later. Registering the listener unconditionally
-  // is both correct and harmless: without an LLM service nothing dispatches
-  // `llm/stream`, and every real dsh deployment has one (it is the spine).
-
-  /** One conversation-altitude event, fully typed (no `as GuardEvent` escape). */
-  const conversationEvent = (
-    kind: "llm_request" | "llm_response",
-    options: GenerateOptions,
-    payload: Record<string, unknown>,
-    source: string,
-  ): GuardEvent => ({
-    kind,
-    observationPoint: "conversation",
-    agentId,
-    agentType: AGENT_TYPE,
-    attestation: "client_key",
-    ...claims(),
-    llmProtocol: LLM_PROTOCOL,
-    payload,
-    timestamp: new Date().toISOString(),
-    provenance: [{ source, trust: "unverified" }],
-    ...options.sessionId ? { sessionId: String(options.sessionId) } : {},
-  })
+  function rememberCall(callId: string, verdict: CallVerdict): void {
+    if (callVerdicts.size >= CALLS_MAX) {
+      const oldest = callVerdicts.keys().next()
+      if (!oldest.done) callVerdicts.delete(oldest.value)
+    }
+    callVerdicts.set(callId, verdict)
+  }
 
   /**
    * The chunk a blocked step yields instead of the model's answer. `error` is
    * the honest finish kind: the step did not stop because the model stopped,
-   * and the loop's own error handling is what should see it.
+   * and the loop's own error handling is what should see it. The turn is
+   * marked so its `turn/end` reports `blocked` rather than `error`.
    */
-  const blockedChunk = (verdict: Verdict, what: string): StreamChunk => ({
-    type: "finish",
-    reason: {
-      kind: "error",
-      failure: {
-        message: `[OpenGuardrails] ${what} blocked: ${brief(verdict)}`,
-        code: "ogr_blocked",
+  const blockedChunk = (sessionId: string | undefined, detail: string): StreamChunk => {
+    const coords = sessionId ? coordsBySession.get(sessionId) : undefined
+    if (sessionId && coords) ogrBlockedTurns.add(`${sessionId}#${coords.turn}`)
+    return {
+      type: "finish",
+      reason: {
+        kind: "error",
+        failure: { message: `[OpenGuardrails] ${detail}`, code: "ogr_blocked" },
       },
-    },
-  })
+    }
+  }
 
-  ctx.on("llm/stream", (options, next): AsyncIterable<StreamChunk> => {
+  // ---- Recipe A steps 1 + 2: the two halves of every model call ------------
+  let warnedNoRuntime = false
+  let warnedSpans = false
+  ctx.on("llm/stream", (options: GenerateOptions, next): AsyncIterable<StreamChunk> => {
     // An auxiliary call (compaction, session titling) is machinery, not the
-    // agent's conversation with the user; judging it would bill a round trip
-    // for a summary of history the runtime has already seen.
+    // agent's conversation; judging it would bill a round trip for a summary
+    // of history the runtime has already seen.
     if (options.purpose !== undefined) return next()
 
     return (async function* guarded(): AsyncIterable<StreamChunk> {
-      if (!reporter.enabled) {
-        // These kinds carry the raw provider body for the RUNTIME to
-        // classify; without one there is no local fallback, so the stream
-        // passes through untouched — and says so, once.
+      if (!client.enabled) {
+        // No runtime configured = the integration is off, loudly, once. This
+        // is a deployment choice, not degraded mode — failMode governs a
+        // runtime that IS configured and cannot answer.
         if (!warnedNoRuntime) {
           warnedNoRuntime = true
           warn(
-            "llmRequest/llmResponse enforce needs a runtime — set OGR_API_KEY in ~/.dsh/.env. "
-            + "Streaming through untouched until then.",
+            "no runtime configured — set OGR_API_KEY in ~/.dsh/.env (or the Settings card). "
+            + "Streaming through unguarded until then.",
           )
         }
         yield* next()
         return
       }
 
-      if (requestMode === "enforce") {
-        // The assembled request is exactly where trusted and untrusted content
-        // have already been mixed — that is what the runtime reads.
-        const ev = conversationEvent("llm_request", options, requestBody(options), "model_input")
-        const verdict = await reporter.evaluate(ev)
-        // A missing verdict (runtime down, timeout) is NOT an allow, but it
-        // is not a block either: this altitude has no human gate, and
-        // failing a whole turn closed on an unreachable runtime would take
-        // the agent down with it. Say so, and let the tool-call altitude —
-        // which does fail closed — carry the enforcement.
-        if (!verdict) {
-          warn("llm_request got no verdict — proceeding; enforcement falls back to the tool-call altitude")
-        } else if (verdict.decision === "block" || verdict.decision === "require_approval") {
-          // `require_approval` cannot be answered here: `ctx.approval` keys a
-          // question to an agent and a tool, and a model call is neither.
-          // Restrict-only means the safe direction is to stop the call.
-          yield blockedChunk(verdict, "this model call was")
+      const sessionId = options.sessionId ? String(options.sessionId) : undefined
+
+      // -- step/request: judged before the model sees it --
+      const reqVerdict = await client.evaluate({
+        ...baseEvent(sessionId),
+        kind: "step/request",
+        llm_protocol: LLM_PROTOCOL,
+        payload: requestBody(options),
+      })
+      if (!reqVerdict) {
+        if (failMode === "closed") {
+          yield blockedChunk(sessionId, "this model call could not be judged and the deployment is fail-closed")
           return
+        }
+        warn("step/request got no verdict — proceeding (fail-open)")
+      } else {
+        if (reqVerdict.decision === "block") {
+          yield blockedChunk(sessionId, `this model call was blocked: ${brief(reqVerdict)}`)
+          return
+        }
+        if (failMode === "closed" && (reqVerdict.unjudged?.length ?? 0) > 0) {
+          yield blockedChunk(
+            sessionId,
+            `parts of this model call went unjudged (${reqVerdict.unjudged!.join(", ")}) and the deployment is fail-closed`,
+          )
+          return
+        }
+        if ((reqVerdict.modifications?.spans?.length ?? 0) > 0 && !warnedSpans) {
+          // Applying spans would mean splicing dsh's own message objects from
+          // wire paths — not implemented yet. Stated ONCE, in the log and the
+          // README, rather than silently: the runtime's copy is masked either
+          // way; what is not masked is what this process sends the provider.
+          warnedSpans = true
+          warn("the verdict carried redaction spans, which this integration cannot apply yet — content sent unredacted")
         }
       }
 
-      if (responseMode === "off") {
-        yield* next()
-        return
-      }
-
-      // `enforce` buffers: "BEFORE the agent acts on it" is literally true
-      // only if no chunk escapes while the verdict is in flight.
+      // -- the model call, buffered --
+      //
+      // `enforce` semantics require buffering: "before the agent acts on it"
+      // is literally true only if no chunk escapes while the verdict is in
+      // flight. The loop consumes block-ends, so re-yielding the buffered
+      // chunks afterwards reproduces the stream exactly.
       const accumulator = new ResponseAccumulator(options.model)
       const buffered: StreamChunk[] = []
       for await (const chunk of next()) {
@@ -848,32 +390,167 @@ function installLlmGuard(
         return
       }
 
-      const ev = conversationEvent("llm_response", options, accumulator.body(), "model")
-      const verdict = await reporter.evaluate(ev)
-      if (verdict && (verdict.decision === "block" || verdict.decision === "require_approval")) {
-        yield blockedChunk(verdict, "the model's answer was")
+      // -- step/response: judged before the agent acts on it --
+      const resVerdict = await client.evaluate({
+        ...baseEvent(sessionId),
+        kind: "step/response",
+        payload: accumulator.body(),
+      })
+      const calls = accumulator.toolCalls
+
+      if (!resVerdict) {
+        if (failMode === "closed") {
+          yield blockedChunk(sessionId, "the model's answer could not be judged and the deployment is fail-closed")
+          return
+        }
+        warn("step/response got no verdict — releasing the answer (fail-open); its tool calls carry no verdict")
+        yield* buffered
         return
       }
-      if (!verdict) warn("llm_response got no verdict — releasing the answer")
+
+      if (failMode === "closed" && (resVerdict.unjudged?.length ?? 0) > 0) {
+        yield blockedChunk(
+          sessionId,
+          `parts of the model's answer went unjudged (${resVerdict.unjudged!.join(", ")}) and the deployment is fail-closed`,
+        )
+        return
+      }
+
+      if (resVerdict.decision === "block") {
+        const targets = callTargets(resVerdict.findings ?? [])
+        const everyBlockNamesACall = (resVerdict.findings ?? [])
+          .filter((f) => f.action === "block" || f.action === undefined)
+          .every((f) => /^payload\.tool_calls\./.test(f.path ?? ""))
+        if (targets.size > 0 && everyBlockNamesACall) {
+          // Per-call refusal (the spec's sanctioned narrowing): the prose
+          // reaches the user, the offending calls are denied at the registry
+          // and the model reads an error result for each.
+          calls.forEach((call, index) => {
+            const hit = targets.get(index)
+            rememberCall(call.id, hit
+              ? { allow: false, reason: `${hit.category}${hit.severity ? ` (${hit.severity})` : ""}` }
+              : { allow: true })
+          })
+          yield* buffered
+          return
+        }
+        yield blockedChunk(sessionId, `the model's answer was blocked: ${brief(resVerdict)}`)
+        return
+      }
+
+      // allow — every call in this step is cleared by the step verdict.
+      for (const call of calls) rememberCall(call.id, { allow: true })
       yield* buffered
     })()
   })
+
+  // ---- enforcement at the registry: the step verdict's consequences --------
+  //
+  // Prepended: `tools/pre-execute` is dsh's reorderable policy layer, and a
+  // permissive listener that returns `allow` without delegating short-circuits
+  // the waterfall. The monotonic guard below covers reordering regardless.
+  ctx.on("tools/pre-execute", async (exec: ToolExecution, next): Promise<PreToolDecision> => {
+    const verdict = callVerdicts.get(String(exec.callId))
+    if (verdict && !verdict.allow) {
+      return { kind: "deny", reason: `[OpenGuardrails] ${verdict.reason}` }
+    }
+    if (!verdict && client.enabled && failMode === "closed") {
+      return {
+        kind: "deny",
+        reason: `[OpenGuardrails] this ${exec.name} call carries no step verdict and the deployment is fail-closed`,
+      }
+    }
+    return next()
+  }, { prepend: true })
+
+  // The one denial that cannot be reordered away.
+  ctx.tools.guard((exec): string | undefined => {
+    const verdict = callVerdicts.get(String(exec.callId))
+    if (verdict) return verdict.allow ? undefined : `[OpenGuardrails] ${verdict.reason}`
+    if (client.enabled && failMode === "closed") {
+      return `[OpenGuardrails] this ${exec.name} call was never covered by a step verdict and the deployment is fail-closed`
+    }
+    return undefined
+  })
+
+  // Release the call verdict on the registry's authoritative final outcome.
+  ctx.on("tools/result", (exec: Readonly<ToolExecution>, _result: Readonly<ToolExecutionResult>) => {
+    callVerdicts.delete(String(exec.callId))
+  })
+
+  // Tool RESULTS are deliberately not evaluated here: they are judged inside
+  // the NEXT step/request, where they travel (Recipe A step 3). The
+  // post-execute waterfall is left to other policy layers.
+
+  // ---- Recipe A step 4: the turn's close, with its reason ------------------
+  ctx.on("session/event", (session: Session, event: SessionEvent) => {
+    if (event.type !== "turn/end" || !client.enabled) return
+    const data = event.data as { turn?: number; reason?: { kind?: string } }
+    const turn = typeof data.turn === "number" ? data.turn : undefined
+    const kind = data.reason?.kind ?? "completed"
+    const blockedByUs = turn !== undefined && ogrBlockedTurns.delete(`${session.id}#${turn}`)
+    const reason = blockedByUs ? "blocked" : (TURN_END_REASON[kind] ?? "error")
+    const parent = session.header.parentSession
+    void client.ingest([{
+      ogr_version: "0.7",
+      kind: "turn/end",
+      timestamp: new Date().toISOString(),
+      agent_id: agentId,
+      agent_type: AGENT_TYPE,
+      integration: INTEGRATION,
+      ...claims(),
+      session_id: String(session.id),
+      ...turn !== undefined ? { turn } : {},
+      ...parent ? { parent_session_id: String(parent) } : {},
+      payload: { reason },
+    }])
+  })
+
+  // ---- auto mode: the step verdict answers the approval seam ---------------
+  //
+  // For sessions on the auto preset, asks that would reach a human — a
+  // sandbox-escalation retry, a tool whose policy layer said `ask` — resolve
+  // from the verdict the step already earned. Same claim-or-delegate shape as
+  // dsh's own ACP bridge, prepended so it runs before the chat UI's answerer;
+  // every other session delegates untouched.
+  const auto = config.auto ?? {}
+  if (auto.enabled !== false) {
+    const autoPreset = auto.preset ?? DEFAULT_AUTO_PRESET
+    const unresolved: AutoUnresolved = auto.unresolved ?? "human"
+
+    let onboarded = false
+    ctx.on("approval/request", async (req: ApprovalRequest, next) => {
+      if (effectivePreset(req.agent.session.events) !== autoPreset) return next()
+
+      if (!client.enabled && !onboarded) {
+        onboarded = true
+        warn(
+          "Auto Mode has no runtime to answer from. Register at https://openguardrails.com for an API key "
+          + "and set OGR_API_KEY in ~/.dsh/.env to connect one.",
+        )
+      }
+
+      const undecided = () => (unresolved === "reject" ? Promise.resolve("rejected" as const) : next())
+      if (req.callId === undefined) return undecided()
+      const verdict = callVerdicts.get(String(req.callId))
+      if (!verdict) return undecided()
+      return verdict.allow ? "allowed-once" : "rejected"
+    }, { prepend: true })
+  }
 }
 
 export default { name, inject, Config, apply }
 
 export {
   DEFAULT_AUTO_PRESET,
-  DEFAULT_POLICY,
-  DEFAULT_TAINT_TOOL_PATTERN,
-  WORKSPACE_POLICY_PATH,
-  loadGuardrailsConfig,
+  DEFAULT_RUNTIME_URL,
+  DEFAULT_TIMEOUT_MS,
 } from "./config.js"
 export type {
   AutoApprovalConfig,
   AutoUnresolved,
+  FailMode,
   GuardrailsOptions,
-  JudgeConfig,
-  TaintConfig,
-  ResolvedConfig,
+  RuntimeOptions,
 } from "./config.js"
+export type { WireEvent, WireFinding, WireVerdict } from "./wire.js"

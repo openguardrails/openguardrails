@@ -1,16 +1,18 @@
 /**
- * A stand-in for an OGR runtime: enough of `/v1/enroll` and `/v1/evaluate` to
- * exercise the developer path hermetically, plus a record of every event it
- * received so a test can assert on what the plugin actually sent.
+ * A stand-in for an OGR v0.7 runtime: `/v1/evaluate` and `/v1/ingest`, plus a
+ * record of every event received so a test can assert on what the plugin
+ * actually sent. No `/v1/enroll` — enrollment left the protocol in v0.7.
  */
 import { createServer } from "node:http"
 
 /**
- * @param decide - maps a received wire event to a verdict decision; return a
- *   string for the decision alone, or an object to control the whole verdict.
+ * @param decide - maps a received wire event to a verdict; return a string
+ *   for the decision alone, or an object `{decision, findings, unjudged,
+ *   modifications}` to control the whole verdict.
  */
 export async function startMockRuntime(decide = () => "allow") {
   const received = []
+  const ingested = []
   let failNext = 0
 
   const server = createServer((req, res) => {
@@ -23,26 +25,31 @@ export async function startMockRuntime(decide = () => "allow") {
         res.end(JSON.stringify(payload))
       }
 
-      if (req.url.endsWith("/v1/enroll")) {
-        return reply(200, { pep_id: "pep-mock", key_id: "key-mock" })
-      }
       if (req.url.endsWith("/v1/evaluate")) {
         received.push(json)
         if (failNext > 0) { failNext -= 1; return reply(503, { error: "unavailable" }) }
         const outcome = decide(json)
         const v = typeof outcome === "string" ? { decision: outcome } : outcome
         return reply(200, {
+          ogr_version: "0.7",
           event_id: `ev-${received.length}`,
-          guard_id: `ev-${received.length}`,
           provider: "mock-runtime",
           decision: v.decision ?? "allow",
-          categories: v.categories ?? [],
-          reasons: v.reasons ?? [],
+          // Echo the declared coordinates, as a conformant runtime must.
+          ...json.session_id !== undefined ? { session_id: json.session_id } : {},
+          ...json.turn !== undefined ? { turn: json.turn } : {},
+          ...json.step !== undefined ? { step: json.step } : {},
+          attribution: json.turn !== undefined ? "declared" : "derived",
+          findings: v.findings ?? [],
+          ...v.modifications ? { modifications: v.modifications } : {},
+          ...v.unjudged ? { unjudged: v.unjudged } : {},
         })
       }
       if (req.url.endsWith("/v1/ingest")) {
-        for (const e of json.batch ?? []) received.push(e)
-        return reply(207, { results: (json.batch ?? []).map(() => ({ status: "ok" })) })
+        for (const e of json.batch ?? []) { received.push(e); ingested.push(e) }
+        return reply(207, {
+          results: (json.batch ?? []).map((_e, i) => ({ id: `ev-in-${i}`, status: 201 })),
+        })
       }
       reply(404, { error: "not found" })
     })
@@ -54,10 +61,30 @@ export async function startMockRuntime(decide = () => "allow") {
   return {
     url: `http://127.0.0.1:${port}`,
     received,
-    /** Make the next N evaluate calls fail, to exercise the no-verdict paths. */
+    ingested,
+    /** Make the next N evaluate calls fail, to exercise the degraded paths. */
     failNextEvaluate(n) { failNext = n },
     /** Every event of one kind, in arrival order. */
     of(kind) { return received.filter((e) => e.kind === kind) },
     async close() { await new Promise((resolve) => server.close(resolve)) },
+  }
+}
+
+/**
+ * Boot the plugin with a mock runtime wired in through the environment (the
+ * plugin reads OGR_RUNTIME_URL/OGR_API_KEY when `apply` runs), and restore
+ * the environment afterwards.
+ */
+export async function withRuntime(bootFn, config, decide, body) {
+  const runtime = await startMockRuntime(decide)
+  const saved = { ...process.env }
+  process.env.OGR_RUNTIME_URL = runtime.url
+  process.env.OGR_API_KEY = "ogr_mockmockmockmockmockmockmock"
+  try {
+    const booted = await bootFn(config)
+    return await body({ ...booted, runtime })
+  } finally {
+    process.env = saved
+    await runtime.close()
   }
 }

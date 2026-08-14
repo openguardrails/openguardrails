@@ -28,6 +28,21 @@ jobs:
       - name: Test
         run: python -m pytest
 
+  javascript:
+    # The dsh plugin (@openguardrails/dsh) — the v0.7 Recipe A reference
+    # agent-direct integration, tested against a mock v0.7 runtime through
+    # dsh's real tool registry and Cordis waterfalls.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+
   higress:
     # The Higress WASM plugin ("OpenGuardrails Runtime"). Everything worth
     # testing in it — span offsets, SSE chunk boundaries, sealing the session,
