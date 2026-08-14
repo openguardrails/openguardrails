@@ -82,7 +82,7 @@ export type AutoUnresolved = "human" | "reject"
 export interface AutoApprovalConfig {
   /** Register the answerer at all (default true — it is inert until a session actually selects the preset). */
   enabled?: boolean
-  /** The permission-preset name whose sessions this plugin answers for (default `"auto"`). */
+  /** The permission-preset name whose sessions this plugin answers for (default `"auto-mode"`). */
   preset?: string
   /** Disposal of an ask the runtime cannot decide (default `"human"`). */
   unresolved?: AutoUnresolved
@@ -135,7 +135,7 @@ export interface GuardrailsOptions {
 export const DEFAULT_TAINT_TOOL_PATTERN = "web|fetch|search|browser|curl|http|^mcp_|_mcp_"
 
 /** The permission-preset name auto mode answers for unless configured otherwise. */
-export const DEFAULT_AUTO_PRESET = "auto"
+export const DEFAULT_AUTO_PRESET = "auto-mode"
 
 /** Default text/regex guardrails — deterministic, no model required. */
 export const DEFAULT_POLICY: Policy = {

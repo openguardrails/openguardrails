@@ -1,5 +1,5 @@
 /**
- * Auto mode: the `approval/request` answerer that gives an `auto` permission
+ * Auto mode: the `approval/request` answerer that gives an auto-mode permission
  * preset its meaning — asks resolve with the OGR verdict instead of a human.
  *
  * Asks are dispatched through Cordis's real waterfall, the same channel
@@ -68,7 +68,7 @@ async function bootEscalating(config = {}) {
 
 test("an auto session's benign escalation ask is granted by the runtime", async () => {
   const { escalate } = await bootEscalating()
-  assert.equal(await escalate(agentOn("auto"), "ls -la"), "allowed-once")
+  assert.equal(await escalate(agentOn("auto-mode"), "ls -la"), "allowed-once")
 })
 
 test("sessions on any other preset — or never pinned — delegate untouched", async () => {
@@ -81,8 +81,8 @@ test("sessions on any other preset — or never pinned — delegate untouched", 
 
 test("the LAST permission/preset event wins, matching dsh's own fold", async () => {
   const { escalate } = await bootEscalating()
-  assert.equal(await escalate(agentOn("auto", "workspace-write"), "ls -la"), "unavailable")
-  assert.equal(await escalate(agentOn("workspace-write", "auto"), "ls -la"), "allowed-once")
+  assert.equal(await escalate(agentOn("auto-mode", "workspace-write"), "ls -la"), "unavailable")
+  assert.equal(await escalate(agentOn("workspace-write", "auto-mode"), "ls -la"), "allowed-once")
 })
 
 test("a blocked call's ask is rejected, not granted", async () => {
@@ -90,7 +90,7 @@ test("a blocked call's ask is rejected, not granted", async () => {
   // from inside `execute` — raise it from a policy layer ahead of the plugin,
   // where the per-call record is alive (released only on `tools/result`).
   const { ctx, call } = await boot({})
-  const agent = agentOn("auto")
+  const agent = agentOn("auto-mode")
   let outcome
   ctx.on("tools/pre-execute", async (exec, next) => {
     const decision = await next()
@@ -105,7 +105,7 @@ test("a blocked call's ask is rejected, not granted", async () => {
 test("a require_approval verdict stays undecided: back to the human by default, rejected under `reject`", async () => {
   for (const [unresolved, expected] of [["human", "unavailable"], ["reject", "rejected"]]) {
     const { ctx, call } = await boot({ auto: { unresolved } })
-    const agent = agentOn("auto")
+    const agent = agentOn("auto-mode")
     let outcome
     ctx.on("tools/pre-execute", async (exec, next) => {
       const decision = await next()
@@ -121,12 +121,12 @@ test("a require_approval verdict stays undecided: back to the human by default, 
 test("an ask with no correlated call is never granted", async () => {
   const human = await bootEscalating()
   assert.equal(
-    await ask(human.ctx, { agent: agentOn("auto"), toolName: "bash", callId: "never-seen" }),
+    await ask(human.ctx, { agent: agentOn("auto-mode"), toolName: "bash", callId: "never-seen" }),
     "unavailable",
   )
   const strict = await bootEscalating({ auto: { unresolved: "reject" } })
   assert.equal(
-    await ask(strict.ctx, { agent: agentOn("auto"), toolName: "bash", callId: "never-seen" }),
+    await ask(strict.ctx, { agent: agentOn("auto-mode"), toolName: "bash", callId: "never-seen" }),
     "rejected",
   )
 })
@@ -134,10 +134,10 @@ test("an ask with no correlated call is never granted", async () => {
 test("the preset name is configurable", async () => {
   const { escalate } = await bootEscalating({ auto: { preset: "ogr-auto" } })
   assert.equal(await escalate(agentOn("ogr-auto"), "ls -la"), "allowed-once")
-  assert.equal(await escalate(agentOn("auto"), "ls -la"), "unavailable")
+  assert.equal(await escalate(agentOn("auto-mode"), "ls -la"), "unavailable")
 })
 
 test("auto.enabled=false registers no answerer at all", async () => {
   const { escalate } = await bootEscalating({ auto: { enabled: false } })
-  assert.equal(await escalate(agentOn("auto"), "ls -la"), "unavailable")
+  assert.equal(await escalate(agentOn("auto-mode"), "ls -la"), "unavailable")
 })

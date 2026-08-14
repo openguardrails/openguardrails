@@ -15,7 +15,7 @@
       name: '@openguardrails/dsh-auto-mode'
       config:
         # ── Auto mode: answer approval asks with the runtime's verdict for
-        # sessions whose Permissions preset is `auto` (on by default; these
+        # sessions whose Permissions preset is `auto-mode` (on by default; these
         # are the defaults, shown for visibility).
         #
         # allow → granted once · block → rejected · anything the runtime
@@ -24,7 +24,7 @@
         # other preset are never claimed.
         auto:
           enabled: true
-          preset: auto
+          preset: auto-mode
           unresolved: human
 
         # ── The guard engine underneath — every tool call is evaluated
@@ -79,7 +79,7 @@
 
 # Put "Auto Mode by OGR" in the Permissions selector. A patch replaces
 # the targeted row's WHOLE `config`, so the base presets are restated
-# verbatim around the new entry — merge `auto` into your own table instead if
+# verbatim around the new entry — merge `auto-mode` into your own table instead if
 # you have customized it.
 - id: permission
   config:
@@ -90,7 +90,7 @@
       workspace-write:
         sandbox: workspace-write
         approval: ask
-      auto:
+      auto-mode:
         sandbox: workspace-write
         approval: ask
         name: Auto Mode by OGR
