@@ -63,6 +63,19 @@
         # mode is a denied call, and that is the deployment's call to make.
         failClosed: false
 
+        # ── The OpenGuardrails runtime connection. Only the API key is
+        # required (register at https://openguardrails.com) — most users
+        # paste it into the dsh Settings card "openguardrails" instead of
+        # configuring anything here. Resolution: Settings > this block >
+        # OGR_* environment variables > defaults.
+        #
+        # runtime:
+        #   apiKey: !!js process.env.OGR_API_KEY
+        #   url: https://openguardrails.com
+        #   workspace: ''  # agent_workspace claim: the platform policy group (NOT a directory); empty = the key's workspace
+        #   owner: ''      # agent_owner claim; empty = the OS account
+        #   user: ''       # agent_user claim; empty = the OS account
+
         # "Use your own model as the guardrail" — any OpenAI-compatible chat
         # endpoint. Omit the whole block to judge with the built-in
         # deterministic heuristic backend instead. BOTH baseURL and model are

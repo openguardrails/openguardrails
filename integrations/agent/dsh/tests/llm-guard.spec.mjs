@@ -71,7 +71,7 @@ test("llm_request carries the assembled provider body, protocol-named", async ()
     assert.equal(sent.llm_protocol, "openai.chat")
     assert.equal(sent.observation_point, "conversation")
     assert.equal(sent.session_id, "sess-1")
-    assert.equal(sent.agent_type, "dsh")
+    assert.equal(sent.agent_type, "DeepSeekHarness")
     // The runtime classifies FROM this body, so the parts it classifies from
     // have to be present and distinguishable.
     assert.deepEqual(sent.payload.messages[0], { role: "system", content: "You are dsh." })
@@ -128,7 +128,7 @@ test("a configured runtime participates in tool-call decisions: evaluate, and ti
 
     // The identity five-tuple travels on every event.
     const [sent] = runtime.of("tool_call")
-    assert.equal(sent.agent_type, "dsh")
+    assert.equal(sent.agent_type, "DeepSeekHarness")
     assert.ok(sent.agent_id.startsWith("dsh-"))
     assert.ok(sent.agent_owner, "agent_owner asserted (OS account)")
     assert.ok(sent.agent_user, "agent_user asserted (OS account)")
@@ -216,7 +216,9 @@ test("an unreachable runtime does not fail the turn closed, and says so", async 
   })
 })
 
-test("without a runtime the modes refuse to register, loudly", async () => {
+test("without a runtime the modes stream through untouched, and say so once", async () => {
+  // The API key may arrive later through the Settings card, so the listener
+  // registers either way; a keyless stream passes through with one warning.
   const saved = { ...process.env }
   delete process.env.OGR_RUNTIME_URL
   delete process.env.OGR_API_KEY
@@ -224,10 +226,9 @@ test("without a runtime the modes refuse to register, loudly", async () => {
     const { stream, warnings } = await boot({ llmRequest: "enforce" })
     const out = await stream(REQUEST, ANSWER)
     assert.deepEqual(out, ANSWER)
-    assert.ok(
-      warnings.some((w) => /need a runtime/.test(w)),
-      `expected a missing-runtime warning, got: ${warnings.join(" | ")}`,
-    )
+    await stream(REQUEST, ANSWER)
+    const noise = warnings.filter((w) => /needs a runtime/.test(w))
+    assert.equal(noise.length, 1, `expected exactly one missing-runtime warning, got: ${warnings.join(" | ")}`)
   } finally {
     process.env = saved
   }
