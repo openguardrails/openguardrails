@@ -6,5 +6,8 @@
     "skipLibCheck": true, "forceConsistentCasingInFileNames": true, "verbatimModuleSyntax": true,
     "outDir": "./dist", "rootDir": "./src", "types": ["node"]
   },
-  "include": ["src"]
+  // client.ts is the browser half: DOM lib, bundled by scripts/build-client.mjs
+  // into the __ModuleLoader__ handoff shape — not part of the node build.
+  "include": ["src"],
+  "exclude": ["src/client.ts"]
 }

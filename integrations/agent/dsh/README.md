@@ -36,6 +36,17 @@ pick **Auto Mode** — done.
 
 To remove: `dsh plugin --profile web remove @openguardrails/dsh-auto-mode`.
 
+### The icon
+
+The package also ships a browser half (dsh's `dsh.client` plugin capability —
+still zero core changes): a shield-and-spark glyph in the Permission
+selector's exact design-set geometry, decorating the **Auto Mode** row and
+trigger the way the built-in presets carry theirs. It activates by itself in
+`dsh web`; a client without the web module system simply shows the row
+without an icon. The decorator is deliberately conservative — it only touches
+a menu that provably renders the design-set shields, and any structural
+surprise means "no icon", never a broken UI.
+
 ### Manual composition
 
 A deployment that owns its whole plugin tree (or already customizes its
