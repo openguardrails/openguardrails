@@ -342,12 +342,23 @@ header/metadata mapping. `reasoning` blocks are dropped because no
 ## Connecting the runtime — only the API key is yours to fill
 
 Register at [openguardrails.com](https://openguardrails.com), get an API key,
-and paste it into the dsh **Settings → openguardrails** card (the plugin
-registers its own section there). Everything else defaults: the URL points at
-the OpenGuardrails cloud, and the connection comes up **without a restart** —
-the source is read live. The first time an Auto Mode session would ask for
-approval with no key configured, the plugin says exactly this in the log,
-once.
+and put it in `~/.dsh/.env`:
+
+```sh
+OGR_API_KEY=ogr_...
+```
+
+Everything else defaults: the URL points at the OpenGuardrails cloud. The
+first time an Auto Mode session would ask for approval with no key
+configured, the plugin says exactly this in the log, once.
+
+The plugin also registers an **openguardrails Settings section** (API key as
+a secret field, plus the URL and identity claims below) and reads it live —
+a key saved there connects without a restart. dsh's web Settings page does
+not render third-party sections yet (its exposure list is hard-coded
+upstream, documented as deferred work), so until that lands the section is
+reachable only through dsh's settings storage, and `.env` is the practical
+route.
 
 Every setting resolves **Settings → `cordis.yml` config → environment →
 default**:

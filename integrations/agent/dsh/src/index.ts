@@ -642,7 +642,7 @@ export function apply(ctx: Context, config: Config): void {
         onboarded = true
         warn(
           "Auto Mode is answering from LOCAL policy only. Register at https://openguardrails.com for an API key "
-          + "and paste it into Settings → openguardrails (or set OGR_API_KEY) to connect the runtime.",
+          + "and set OGR_API_KEY in ~/.dsh/.env to connect the runtime.",
         )
       }
 
@@ -799,8 +799,8 @@ function installLlmGuard(
         if (!warnedNoRuntime) {
           warnedNoRuntime = true
           warn(
-            "llmRequest/llmResponse enforce needs a runtime — paste an API key into Settings → openguardrails "
-            + "(or set OGR_API_KEY). Streaming through untouched until then.",
+            "llmRequest/llmResponse enforce needs a runtime — set OGR_API_KEY in ~/.dsh/.env. "
+            + "Streaming through untouched until then.",
           )
         }
         yield* next()
