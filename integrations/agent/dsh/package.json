@@ -1,6 +1,6 @@
 {
   "name": "@openguardrails/dsh-auto-mode",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Auto mode for DeepSeek Harness (dsh): an Auto entry in the Permissions selector whose approval prompts are answered by OpenGuardrails policy instead of a human — plus the full OGR guard engine underneath. No core changes.",
   "type": "module",
   "license": "Apache-2.0",
