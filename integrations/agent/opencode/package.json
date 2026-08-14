@@ -48,7 +48,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/openguardrails/openguardrails",
+    "url": "git+https://github.com/openguardrails/openguardrails.git",
     "directory": "integrations/agent/opencode"
   },
   "homepage": "https://openguardrails.com",
