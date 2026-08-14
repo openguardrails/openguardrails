@@ -89,6 +89,33 @@ export interface AutoApprovalConfig {
   unresolved?: AutoUnresolved
 }
 
+/** Where an unset runtime URL points: the OpenGuardrails cloud. */
+export const DEFAULT_RUNTIME_URL = "https://openguardrails.com"
+
+/**
+ * The OpenGuardrails runtime connection, plus the identity claims events
+ * carry. Every field resolves Settings (the dsh web form) → this config →
+ * environment (`OGR_RUNTIME_URL`, `OGR_API_KEY`, `OGR_AGENT_WORKSPACE`,
+ * `OGR_AGENT_OWNER`, `OGR_AGENT_USER`) → default. Only the API key has no
+ * default — get one at https://openguardrails.com.
+ */
+export interface RuntimeOptions {
+  /** Runtime base URL (default {@link DEFAULT_RUNTIME_URL}). */
+  url?: string
+  /** API key; unset disables the runtime connection (local policy only). */
+  apiKey?: string
+  /**
+   * `agent_workspace` claim — the named policy/resource group this agent
+   * belongs to on the platform, NOT a directory. Absent → the API key's
+   * workspace.
+   */
+  workspace?: string
+  /** `agent_owner` claim. Absent → the OS account the harness runs as. */
+  owner?: string
+  /** `agent_user` claim. Absent → the OS account the harness runs as. */
+  user?: string
+}
+
 export interface GuardrailsOptions {
   /** Inline OGR policy; overrides both the workspace file and the default. */
   policy?: Policy
@@ -102,6 +129,8 @@ export interface GuardrailsOptions {
   taint?: TaintConfig
   /** Auto mode: answer approval asks with the runtime's verdict for auto-preset sessions. */
   auto?: AutoApprovalConfig
+  /** The OpenGuardrails runtime connection and identity claims. */
+  runtime?: RuntimeOptions
   /**
    * Emit `llm_request` — the assembled provider request body — before each
    * model call (OGR v0.6 developer path). Under `enforce` a `block` verdict

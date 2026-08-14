@@ -339,32 +339,58 @@ header/metadata mapping. `reasoning` blocks are dropped because no
   tool calls. This is SDK behavior, shared with every OGR integration.
 - Taint is in-memory. A session resumed from persistence starts unmarked.
 
-## Connecting a runtime, with an enrolled identity (optional)
+## Connecting the runtime — only the API key is yours to fill
 
-Set `OGR_RUNTIME_URL` + `OGR_API_KEY` (dsh loads `~/.dsh/.env` and the
-invoking directory's `.env` as launch environment) and every tool call, tool
-result and auto-mode approval ask is **evaluated** against the runtime through
-`/v1/evaluate` — its Verdict tightens the local one, never loosens it, and an
-unreachable runtime leaves local enforcement standing. On first use the plugin
-enrolls a per-machine Ed25519 key (`~/.ogr/dsh-ed25519.json`, override with
-`OGR_KEYFILE`) and signs each request (spec:
-[`specification/attestation.md`](../../../specification/attestation.md)).
-Transport is `@openguardrails/core`'s `RuntimeClient`: canonical `/v1/...`
-paths joined to `OGR_RUNTIME_URL`, with automatic fallback to deployments that
-mount the API under `/api/public/ogr`.
+Register at [openguardrails.com](https://openguardrails.com), get an API key,
+and paste it into the dsh **Settings → openguardrails** card (the plugin
+registers its own section there). Everything else defaults: the URL points at
+the OpenGuardrails cloud, and the connection comes up **without a restart** —
+the source is read live. The first time an Auto Mode session would ask for
+approval with no key configured, the plugin says exactly this in the log,
+once.
+
+Every setting resolves **Settings → `cordis.yml` config → environment →
+default**:
+
+| Setting | Env var | Default |
+|---|---|---|
+| `runtime.url` | `OGR_RUNTIME_URL` | `https://openguardrails.com` |
+| `runtime.apiKey` | `OGR_API_KEY` | — (unset = local policy only) |
+| `runtime.workspace` | `OGR_AGENT_WORKSPACE` | absent → the API key's workspace |
+| `runtime.owner` | `OGR_AGENT_OWNER` | the OS account |
+| `runtime.user` | `OGR_AGENT_USER` | the OS account |
+
+(dsh loads `~/.dsh/.env` and the invoking directory's `.env` as launch
+environment, so the env route needs no shell exports.)
+
+With a key configured, every tool call, tool result and auto-mode approval
+ask is **evaluated** against the runtime through `/v1/evaluate` — its Verdict
+tightens the local one, never loosens it, and an unreachable runtime leaves
+local enforcement standing. Transport is `@openguardrails/core`'s
+`RuntimeClient`: canonical `/v1/...` paths, with automatic fallback to
+deployments that mount the API under `/api/public/ogr`.
 
 Every event carries the **identity five-tuple**, filled automatically:
 
 | Field | Value |
 |---|---|
 | `agent_id` | `dsh-<hostname>` — one harness process per machine, one Agent in the console |
-| `agent_type` | `dsh` |
-| `agent_workspace` | the session's working tree (`session.header.cwd`) |
-| `agent_owner` | the OS account the harness runs as |
-| `agent_user` | the OS account — the best a local single-user harness can assert |
+| `agent_type` | `DeepSeekHarness` |
+| `agent_workspace` | the platform policy/resource group this agent belongs to — **not a directory**; absent = the API key's workspace |
+| `agent_owner` | configurable; defaults to the OS account the harness runs as |
+| `agent_user` | configurable; defaults to the OS account — the best a local single-user harness can assert |
 
 The per-session identity travels as `session_id`; the runtime clamps every
-claim to what the `client_key` attestation supports.
+claim to what the attestation supports.
+
+**Enrollment.** On first use the plugin enrolls a per-machine Ed25519 key
+(`~/.ogr/dsh-ed25519.json`, override with `OGR_KEYFILE`) and signs each
+request (spec: [`specification/attestation.md`](../../../specification/attestation.md)).
+This is what lifts the identity claims from "anyone holding the API key" to
+"the holder of this machine's enrolled key" (`client_key` attestation), and
+what lets the platform revoke one machine without rotating the org key. Any
+enrollment failure degrades silently to unsigned requests at the attestation
+floor.
 
 Every event carries `sensor_id = openguardrails-dsh`, `sensor_type =
 in_process` — a deployment that stops loading the plugin stops being observed.

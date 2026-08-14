@@ -172,36 +172,55 @@ class PepIdentity {
   }
 }
 
+/** One resolved runtime connection: where, and as whom. */
+export interface RuntimeSource {
+  url: string
+  apiKey: string
+}
+
 /**
- * The evaluate-only runtime connection. Disposable, because a dsh plugin
- * unloads (hot reload, `--patch` swap) and must not leave anything behind.
+ * The evaluate-only runtime connection. The source is a THUNK, re-read on
+ * every call, so a connection configured later — an API key pasted into the
+ * dsh Settings form — takes effect without a restart. Disposable, because a
+ * dsh plugin unloads (hot reload, `--patch` swap) and must not leave
+ * anything behind.
  */
 export class PlatformReporter {
-  readonly enabled: boolean
   private client: RuntimeClient | null = null
+  private clientKey = ""
   private identity: PepIdentity | null = null
   private signer: Signer | null = null
   private enrolling: Promise<void> | null = null
 
-  constructor(private readonly log: ReporterLog = consoleLog) {
-    const baseUrl = process.env.OGR_RUNTIME_URL ?? ""
-    const apiKey = process.env.OGR_API_KEY ?? ""
-    this.enabled = Boolean(baseUrl && apiKey)
-    if (this.enabled) {
-      // The delegating signer lets requests go out unsigned until enrollment
-      // lands — the runtime accepts them at the unenrolled attestation floor.
-      this.client = new RuntimeClient({
-        baseUrl,
-        apiKey,
-        signer: { sign: (body) => this.signer?.sign(body) ?? null },
-      })
-      this.identity = new PepIdentity(log)
-      this.enrolling = this.enroll()
-    }
+  constructor(
+    private readonly log: ReporterLog = consoleLog,
+    private readonly source: () => RuntimeSource | null = () => null,
+  ) {}
+
+  /** Whether a runtime is configured RIGHT NOW (the source is live). */
+  get enabled(): boolean {
+    return this.source() !== null
   }
 
-  private async enroll(): Promise<void> {
-    if (!(await this.identity!.enroll(this.client!))) return
+  /** The client for the current source, rebuilt when url/key change. */
+  private ensureClient(src: RuntimeSource): RuntimeClient {
+    const key = `${src.url}\n${src.apiKey}`
+    if (this.client && this.clientKey === key) return this.client
+    this.clientKey = key
+    // The delegating signer lets requests go out unsigned until enrollment
+    // lands — the runtime accepts them at the unenrolled attestation floor.
+    this.client = new RuntimeClient({
+      baseUrl: src.url,
+      apiKey: src.apiKey,
+      signer: { sign: (body) => this.signer?.sign(body) ?? null },
+    })
+    this.identity ??= new PepIdentity(this.log)
+    this.enrolling = this.enroll(this.client)
+    return this.client
+  }
+
+  private async enroll(client: RuntimeClient): Promise<void> {
+    if (!(await this.identity!.enroll(client))) return
     try {
       this.signer = await this.identity!.signer()
     } catch (err) {
@@ -219,10 +238,12 @@ export class PlatformReporter {
    * posture.
    */
   async evaluate(ev: GuardEvent): Promise<Verdict | null> {
-    if (!this.enabled) return null
+    const src = this.source()
+    if (!src) return null
+    const client = this.ensureClient(src)
     await this.enrolling
     try {
-      return await this.client!.evaluate(withDefaultSensor(ev))
+      return await client.evaluate(withDefaultSensor(ev))
     } catch (err) {
       this.log.warn(`[openguardrails] evaluate failed (${String(err)}) — no verdict`)
       return null

@@ -66,8 +66,10 @@ import {
   type Provenance,
   type Verdict,
 } from "@openguardrails/core"
+import { installSettingsSection, settingsNamespace } from "@deepseek-ai/dsh-settings"
 import {
   DEFAULT_AUTO_PRESET,
+  DEFAULT_RUNTIME_URL,
   DEFAULT_TAINT_TOOL_PATTERN,
   loadGuardrailsConfig,
   type AutoApprovalConfig,
@@ -76,6 +78,7 @@ import {
   type JudgeConfig,
   type LlmMode,
   type ResolvedConfig,
+  type RuntimeOptions,
   type TaintConfig,
 } from "./config.js"
 import { LLM_PROTOCOL, requestBody, ResponseAccumulator } from "./llm-wire.js"
@@ -84,6 +87,12 @@ import { hostAgentId, osUser, PlatformReporter } from "./platform.js"
 
 /** Cordis plugin name; the `id:` in `cordis.yml` is the deployment's own label. */
 export const name = "openguardrails"
+
+/** Settings namespace: the "openguardrails" card in the dsh Settings page. */
+export const OGR_SETTINGS_NAMESPACE = settingsNamespace("openguardrails")
+
+/** What kind of agent this integration instruments. */
+const AGENT_TYPE = "DeepSeekHarness"
 
 /**
  * The tool registry is the enforcement surface: without it this plugin has
@@ -130,6 +139,23 @@ const LlmModeSchema = z.union([
   z.const("enforce").description("evaluate, wait for the Verdict, act on it"),
 ]).default("off")
 
+// `url` deliberately has NO schema default: schemastery materializes defaults
+// into the resolved config, which would shadow an OGR_RUNTIME_URL from the
+// environment. The built-in cloud URL is applied at the END of the resolution
+// chain instead (Settings → config → env → DEFAULT_RUNTIME_URL).
+const RuntimeSchema: z<RuntimeOptions> = z.object({
+  url: z.string()
+    .description(`OpenGuardrails runtime base URL (empty = ${DEFAULT_RUNTIME_URL})`),
+  apiKey: z.string().role("secret")
+    .description("API key — get one at https://openguardrails.com"),
+  workspace: z.string()
+    .description("agent_workspace claim: the platform policy/resource group this agent belongs to (NOT a directory); empty = the API key's workspace"),
+  owner: z.string()
+    .description("agent_owner claim; empty = the OS account the harness runs as"),
+  user: z.string()
+    .description("agent_user claim; empty = the OS account the harness runs as"),
+})
+
 const AutoSchema: z<AutoApprovalConfig> = z.object({
   enabled: z.boolean().default(true)
     .description("Register the answerer (inert until a session selects the preset)"),
@@ -149,6 +175,7 @@ export const Config: z<Config> = z.object({
   guardToolResults: z.boolean().default(true).description("Also evaluate tool results, not just tool calls"),
   taint: TaintSchema.description("Per-agent taint propagation from untrusted tool results"),
   auto: AutoSchema.description("Auto mode: answer approval asks with the runtime's verdict for auto-preset sessions"),
+  runtime: RuntimeSchema.description("OpenGuardrails runtime connection and identity claims (also editable in Settings; environment fills gaps)"),
   failClosed: z.boolean().default(false)
     .description("Deny any call that reached the monotonic guard without an OGR verdict"),
   llmRequest: LlmModeSchema.description("Emit llm_request (the assembled provider request body) before each model call"),
@@ -300,8 +327,38 @@ export function apply(ctx: Context, config: Config): void {
   const warn = (message: string): void => ctx.logger.warn(`openguardrails: ${message}`)
   const guard = new GuardManager(config, warn)
   const taint = new TaintTracker()
-  const reporter = new PlatformReporter({ info: (m) => ctx.logger.info(m), warn: (m) => ctx.logger.warn(m) })
-  ctx.effect(() => () => void reporter.dispose(), "openguardrails: drain the platform reporter")
+
+  // ---- the runtime connection: Settings → cordis config → env → default ----
+  //
+  // Only the API key is REQUIRED, and it can be pasted into the dsh Settings
+  // card ("openguardrails") at any time — the source is a live thunk, so the
+  // connection comes up without a restart. Everything else has a default:
+  // the URL points at the OpenGuardrails cloud, the workspace claim falls
+  // back to the API key's workspace, owner/user to the OS account.
+  const runtimeDefaults: RuntimeOptions = {
+    url: config.runtime?.url || process.env.OGR_RUNTIME_URL || DEFAULT_RUNTIME_URL,
+    apiKey: config.runtime?.apiKey || process.env.OGR_API_KEY || "",
+    workspace: config.runtime?.workspace || process.env.OGR_AGENT_WORKSPACE || "",
+    owner: config.runtime?.owner || process.env.OGR_AGENT_OWNER || "",
+    user: config.runtime?.user || process.env.OGR_AGENT_USER || "",
+  }
+  let runtimeSettings: () => RuntimeOptions = () => runtimeDefaults
+  installSettingsSection(ctx, OGR_SETTINGS_NAMESPACE, RuntimeSchema, runtimeDefaults, {
+    setSource: (current: () => RuntimeOptions) => {
+      runtimeSettings = current
+    },
+    // The reporter re-reads the source on every call; nothing to re-register.
+    onChange: () => {},
+  })
+
+  const reporter = new PlatformReporter(
+    { info: (m) => ctx.logger.info(m), warn: (m) => ctx.logger.warn(m) },
+    () => {
+      const s = runtimeSettings()
+      return s.apiKey ? { url: s.url || DEFAULT_RUNTIME_URL, apiKey: s.apiKey } : null
+    },
+  )
+  ctx.effect(() => () => void reporter.dispose(), "openguardrails: release the runtime connection")
 
   /**
    * Verdicts from `tools/pre-execute`, keyed by the registry's per-execution
@@ -341,23 +398,33 @@ export function apply(ctx: Context, config: Config): void {
   const accountUser = osUser()
 
   /**
-   * The identity five-tuple every event this plugin emits shares:
-   * agent_id / agent_type / agent_workspace / agent_owner / agent_user.
-   * Workspace is the session's working tree; owner and user are the OS
-   * account the harness runs as — the best a local single-user harness can
-   * assert, and the runtime clamps every claim to what the attestation
-   * supports. Flat identity fields (OGR v0.6).
+   * The claim half of the identity five-tuple, read live so a Settings edit
+   * takes effect immediately. `agent_workspace` is the platform's named
+   * policy/resource group — NOT a directory — and stays absent unless
+   * configured (absent = the API key's workspace); owner and user default to
+   * the OS account, the best a local single-user harness can assert. The
+   * runtime clamps every claim to what the attestation supports.
    */
+  const claims = (): Pick<GuardEvent, "agentWorkspace" | "agentOwner" | "agentUser"> => {
+    const s = runtimeSettings()
+    const owner = s.owner || accountUser
+    const user = s.user || accountUser
+    return {
+      ...s.workspace ? { agentWorkspace: s.workspace } : {},
+      ...owner ? { agentOwner: owner } : {},
+      ...user ? { agentUser: user } : {},
+    }
+  }
+
+  /** The identity five-tuple every event this plugin emits shares (flat fields, OGR v0.6). */
   function identity(
     exec: ToolExecution,
   ): Pick<GuardEvent, "agentId" | "agentType" | "agentWorkspace" | "agentOwner" | "agentUser" | "attestation" | "sessionId"> {
-    const workspace = workspaceOf(exec)
     return {
       agentId,
-      agentType: "dsh",
+      agentType: AGENT_TYPE,
       attestation: "client_key",
-      ...workspace ? { agentWorkspace: workspace } : {},
-      ...accountUser ? { agentOwner: accountUser, agentUser: accountUser } : {},
+      ...claims(),
       ...exec.agent ? { sessionId: exec.agent.id } : {},
     }
   }
@@ -564,8 +631,20 @@ export function apply(ctx: Context, config: Config): void {
     const autoPreset = auto.preset ?? DEFAULT_AUTO_PRESET
     const unresolved: AutoUnresolved = auto.unresolved ?? "human"
 
+    let onboarded = false
     ctx.on("approval/request", async (req: ApprovalRequest, next) => {
       if (effectivePreset(req.agent.session.events) !== autoPreset) return next()
+
+      // The first claimed ask is the "user just switched to Auto Mode"
+      // moment: if no runtime is connected, say once — and only once — how
+      // to connect one. Local policy answers either way.
+      if (!reporter.enabled && !onboarded) {
+        onboarded = true
+        warn(
+          "Auto Mode is answering from LOCAL policy only. Register at https://openguardrails.com for an API key "
+          + "and paste it into Settings → openguardrails (or set OGR_API_KEY) to connect the runtime.",
+        )
+      }
 
       // "Cannot decide" is one disposal, three triggers: a require_approval
       // verdict (including the very verdict whose `ask` raised this request —
@@ -587,17 +666,15 @@ export function apply(ctx: Context, config: Config): void {
       // was first judged), the ask's own reason travels in the payload for a
       // judge to weigh, and guardId correlation guarantees the answer can
       // only tighten the earlier decision, never loosen it.
-      const workspace = req.agent.session.header.cwd
       const ev: GuardEvent = {
         kind: "tool_call",
         observationPoint: "invocation",
         agentId,
-        agentType: "dsh",
+        agentType: AGENT_TYPE,
         attestation: "client_key",
         sessionId: req.agent.id,
         // The same identity five-tuple as every other event this plugin emits.
-        ...workspace ? { agentWorkspace: workspace } : {},
-        ...accountUser ? { agentOwner: accountUser, agentUser: accountUser } : {},
+        ...claims(),
         guardId: req.callId,
         payload: {
           name: record.name,
@@ -625,7 +702,7 @@ export function apply(ctx: Context, config: Config): void {
   }
 
   // ---- conversation altitude: the OGR v0.6 developer path -----------------
-  installLlmGuard(ctx, config, { agentId, reporter, warn })
+  installLlmGuard(ctx, config, { agentId, claims, reporter, warn })
 }
 
 /**
@@ -649,28 +726,28 @@ export function apply(ctx: Context, config: Config): void {
 function installLlmGuard(
   ctx: Context,
   config: Config,
-  deps: { agentId: string; reporter: PlatformReporter; warn: (message: string) => void },
+  deps: {
+    agentId: string
+    claims: () => Pick<GuardEvent, "agentWorkspace" | "agentOwner" | "agentUser">
+    reporter: PlatformReporter
+    warn: (message: string) => void
+  },
 ): void {
   const requestMode: LlmMode = config.llmRequest ?? "off"
   const responseMode: LlmMode = config.llmResponse ?? "off"
   if (requestMode === "off" && responseMode === "off") return
 
-  const { agentId, reporter, warn } = deps
-  if (!reporter.enabled) {
-    warn(
-      "llmRequest/llmResponse need a runtime (set OGR_RUNTIME_URL and OGR_API_KEY) — "
-      + "these kinds carry the raw provider body for the RUNTIME to classify, and there is no local fallback. Not registering.",
-    )
-    return
-  }
+  const { agentId, claims, reporter, warn } = deps
+  // No install-time runtime check: the API key may arrive later through the
+  // Settings card, and the connection comes up without a restart. A stream
+  // that runs while no runtime is configured passes through, with one warning.
+  let warnedNoRuntime = false
   // Deliberately NO "is the llm service loaded?" check here. `apply` runs as
   // soon as `tools` resolves, which in a normal cordis.yml is before the LLM
   // adapter has finished loading — an eager check reports a missing service
   // that arrives milliseconds later. Registering the listener unconditionally
   // is both correct and harmless: without an LLM service nothing dispatches
   // `llm/stream`, and every real dsh deployment has one (it is the spine).
-
-  const accountUser = osUser()
 
   /** One conversation-altitude event, fully typed (no `as GuardEvent` escape). */
   const conversationEvent = (
@@ -682,11 +759,9 @@ function installLlmGuard(
     kind,
     observationPoint: "conversation",
     agentId,
-    agentType: "dsh",
+    agentType: AGENT_TYPE,
     attestation: "client_key",
-    // The identity five-tuple, minus workspace: a model call belongs to the
-    // harness, not to one working tree.
-    ...accountUser ? { agentOwner: accountUser, agentUser: accountUser } : {},
+    ...claims(),
     llmProtocol: LLM_PROTOCOL,
     payload,
     timestamp: new Date().toISOString(),
@@ -717,6 +792,21 @@ function installLlmGuard(
     if (options.purpose !== undefined) return next()
 
     return (async function* guarded(): AsyncIterable<StreamChunk> {
+      if (!reporter.enabled) {
+        // These kinds carry the raw provider body for the RUNTIME to
+        // classify; without one there is no local fallback, so the stream
+        // passes through untouched — and says so, once.
+        if (!warnedNoRuntime) {
+          warnedNoRuntime = true
+          warn(
+            "llmRequest/llmResponse enforce needs a runtime — paste an API key into Settings → openguardrails "
+            + "(or set OGR_API_KEY). Streaming through untouched until then.",
+          )
+        }
+        yield* next()
+        return
+      }
+
       if (requestMode === "enforce") {
         // The assembled request is exactly where trusted and untrusted content
         // have already been mixed — that is what the runtime reads.
