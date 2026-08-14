@@ -58,9 +58,9 @@ import (
 // every turn of every agent after the first.
 
 const (
-	ogrVersion  = "0.6"
-	sensorName  = "openguardrails-higress-connector"
-	sensorType  = "proxy"
+	ogrVersion = "0.6"
+	sensorName = "openguardrails-higress-connector"
+	sensorType = "proxy"
 	// ⚠️ There is deliberately no `llmProtocol` constant. It was "openai.chat" and it
 	// was stamped on every event this plugin ever sent, so the field could not
 	// distinguish a client that spoke something else from one that did not — 693,197
@@ -142,21 +142,21 @@ type authzEnvelope struct {
 // connector hand-rolled its JSON and every field it interpolated was an injection
 // surface.
 type GuardEvent struct {
-	OGRVersion       string         `json:"ogr_version"`
+	OGRVersion string `json:"ogr_version"`
 	// v0.6: no event_id on the wire — identity is born at the runtime and
 	// returned on the verdict / the ordered ingest results.
-	GuardID          string         `json:"guard_id"`
-	SessionID        string         `json:"session_id,omitempty"`
-	Timestamp        string         `json:"timestamp"`
-	ObservationPoint string         `json:"observation_point"`
-	SensorID         string         `json:"sensor_id"`
-	SensorType       string         `json:"sensor_type"`
-	Kind             string         `json:"kind"`
-	LLMProtocol      string         `json:"llm_protocol,omitempty"`
+	GuardID          string `json:"guard_id"`
+	SessionID        string `json:"session_id,omitempty"`
+	Timestamp        string `json:"timestamp"`
+	ObservationPoint string `json:"observation_point"`
+	SensorID         string `json:"sensor_id"`
+	SensorType       string `json:"sensor_type"`
+	Kind             string `json:"kind"`
+	LLMProtocol      string `json:"llm_protocol,omitempty"`
 	// Flat v0.6 identity fields, inlined into the top level of the wire object.
 	identity
-	Payload          map[string]any `json:"payload"`
-	Authz            *authzEnvelope `json:"authz,omitempty"`
+	Payload map[string]any `json:"payload"`
+	Authz   *authzEnvelope `json:"authz,omitempty"`
 
 	// Not on the wire: the exact text at each payload path a verdict's span offsets can
 	// index. A verdict carries offsets and no matched text by design, so the PEP slices
