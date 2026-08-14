@@ -77,7 +77,7 @@
         #
         # policyPath: guards/openguardrails.json
 
-# Put "Auto Mode" in the Permissions selector. A patch replaces
+# Put "Auto Mode by OGR" in the Permissions selector. A patch replaces
 # the targeted row's WHOLE `config`, so the base presets are restated
 # verbatim around the new entry — merge `auto` into your own table instead if
 # you have customized it.
@@ -93,7 +93,7 @@
       auto:
         sandbox: workspace-write
         approval: ask
-        name: Auto Mode
+        name: Auto Mode by OGR
         description: OpenGuardrails answers approval prompts; only asks it cannot decide reach you.
       danger-full-access:
         sandbox: danger-full-access
