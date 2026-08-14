@@ -107,13 +107,39 @@ test("require_approval on llm_request also stops the call — no gate exists at 
   })
 })
 
-test("observe emits without waiting, and never alters the stream", async () => {
-  await withRuntime({ llmRequest: "observe", llmResponse: "observe" }, () => "block", async ({ stream, ctx }) => {
-    const out = await stream(REQUEST, ANSWER)
-    assert.deepEqual(out, ANSWER, "a block verdict is IGNORED under observe")
-    // Reporting is batched and fire-and-forget; drain it deterministically.
-    await new Promise((r) => setTimeout(r, 50))
-    assert.ok(ctx)
+test("a configured runtime participates in tool-call decisions: evaluate, and tighten only", async () => {
+  const decide = (e) => {
+    if (e.kind !== "tool_call") return "allow"
+    const command = e.payload?.arguments?.command ?? ""
+    return /echo hello/.test(command)
+      ? { decision: "block", reasons: ["org policy: no hellos"] }
+      : "allow"
+  }
+  await withRuntime({}, decide, async ({ call, runtime }) => {
+    // Locally benign, remotely blocked → the remote verdict tightens.
+    const blocked = await call("bash", { command: "echo hello" })
+    assert.equal(blocked.isError, true)
+    assert.match(blocked.error.message, /org policy: no hellos/)
+
+    // Benign both sides → runs; the runtime saw it through /v1/evaluate.
+    const ok = await call("bash", { command: "ls -la" })
+    assert.equal(ok.isError, false)
+    assert.ok(runtime.of("tool_call").length >= 2, "tool calls reached /v1/evaluate")
+
+    // The identity five-tuple travels on every event.
+    const [sent] = runtime.of("tool_call")
+    assert.equal(sent.agent_type, "dsh")
+    assert.ok(sent.agent_id.startsWith("dsh-"))
+    assert.ok(sent.agent_owner, "agent_owner asserted (OS account)")
+    assert.ok(sent.agent_user, "agent_user asserted (OS account)")
+  })
+})
+
+test("a remote allow can never loosen a local block", async () => {
+  await withRuntime({}, () => "allow", async ({ call }) => {
+    const blocked = await call("bash", { command: "rm -rf / " })
+    assert.equal(blocked.isError, true)
+    assert.match(blocked.error.message, /security\.malicious_command/)
   })
 })
 
@@ -208,7 +234,7 @@ test("without a runtime the modes refuse to register, loudly", async () => {
 })
 
 test("the tool-call altitude keeps working alongside the developer path", async () => {
-  await withRuntime({ llmRequest: "observe" }, () => "allow", async ({ call }) => {
+  await withRuntime({ llmRequest: "enforce" }, () => "allow", async ({ call }) => {
     const blocked = await call("bash", { command: "rm -rf / " })
     assert.equal(blocked.isError, true)
     assert.match(blocked.error.message, /security\.malicious_command/)

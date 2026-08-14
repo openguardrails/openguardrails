@@ -47,16 +47,17 @@ export interface TaintConfig {
  * What this plugin does with one of the two v0.6 developer-path kinds.
  *
  * - `off` — do not emit it at all.
- * - `observe` — emit it and act on nothing (fire-and-forget; zero added
- *   latency on the model call).
- * - `enforce` — emit it, wait for the Verdict, and act on it.
+ * - `enforce` — evaluate it against the runtime, wait for the Verdict, and
+ *   act on it.
  *
- * `observe` and `enforce` both require a configured runtime
- * (`OGR_RUNTIME_URL` + `OGR_API_KEY`). These kinds carry the raw provider
- * body precisely so the RUNTIME can classify it; the plugin's local detector
- * chain has nothing to say about one, so there is no local fallback.
+ * There is deliberately no observe mode: an agent integration's user is a
+ * CONSUMER of the runtime, so a switched-on kind is evaluated and enforced;
+ * fire-and-forget observation is a gateway posture. `enforce` requires a
+ * configured runtime (`OGR_RUNTIME_URL` + `OGR_API_KEY`) — these kinds carry
+ * the raw provider body precisely so the RUNTIME can classify it, and the
+ * plugin's local detector chain has nothing to say about one.
  */
-export type LlmMode = "off" | "observe" | "enforce"
+export type LlmMode = "off" | "enforce"
 
 /**
  * What the auto-mode answerer does with an approval ask the runtime cannot

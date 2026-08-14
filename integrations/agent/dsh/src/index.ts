@@ -60,6 +60,7 @@ import {
   ConfigRulesDetector,
   LLMJudgeDetector,
   HeuristicBackend,
+  severity,
   type Detector,
   type GuardEvent,
   type Provenance,
@@ -79,7 +80,7 @@ import {
 } from "./config.js"
 import { LLM_PROTOCOL, requestBody, ResponseAccumulator } from "./llm-wire.js"
 import { openAICompatibleBackend } from "./own-model.js"
-import { hostAgentId, PlatformReporter } from "./platform.js"
+import { hostAgentId, osUser, PlatformReporter } from "./platform.js"
 
 /** Cordis plugin name; the `id:` in `cordis.yml` is the deployment's own label. */
 export const name = "openguardrails"
@@ -121,10 +122,12 @@ const TaintSchema: z<TaintConfig> = z.object({
     .description("Case-insensitive regex over the tool name selecting untrusted-content tools"),
 })
 
+// No observe mode: an agent integration's user is a CONSUMER of the runtime,
+// so a switched-on kind is evaluated and enforced. Fire-and-forget observation
+// is a gateway posture, not this plugin's.
 const LlmModeSchema = z.union([
   z.const("off").description("do not emit"),
-  z.const("observe").description("emit, act on nothing"),
-  z.const("enforce").description("emit, wait for the Verdict, act on it"),
+  z.const("enforce").description("evaluate, wait for the Verdict, act on it"),
 ]).default("off")
 
 const AutoSchema: z<AutoApprovalConfig> = z.object({
@@ -158,6 +161,21 @@ export const Config: z<Config> = z.object({
  * a backstop against an unforeseen path, not the normal release mechanism.
  */
 const PENDING_MAX = 4096
+
+/**
+ * The tighter of the local verdict and the runtime's. A configured runtime
+ * participates in every decision — its user is a consumer, not an observer —
+ * but restrict-only cuts both ways: remotely it can escalate a decision,
+ * never relax one. `null` (not configured, unreachable) leaves the local
+ * decision standing.
+ */
+function tighter(local: Verdict, remote: Verdict | null): Verdict {
+  if (!remote || severity(remote.decision) >= severity(local.decision)) return local
+  return {
+    ...remote,
+    reasons: [...remote.reasons, "[runtime] the OpenGuardrails runtime tightened the local decision"],
+  }
+}
 
 /** One-line human summary of a verdict for a denial reason or corrective feedback. */
 function brief(v: Verdict): string {
@@ -320,15 +338,26 @@ export function apply(ctx: Context, config: Config): void {
   // One harness process per machine → machine-scoped identity (identity design
   // §7); resolved once, because it is a property of the host, not of the call.
   const agentId = hostAgentId()
+  const accountUser = osUser()
 
-  /** The identity fields every event this plugin emits shares. */
-  function identity(exec: ToolExecution): Pick<GuardEvent, "agentId" | "agentType" | "attestation" | "sessionId"> {
+  /**
+   * The identity five-tuple every event this plugin emits shares:
+   * agent_id / agent_type / agent_workspace / agent_owner / agent_user.
+   * Workspace is the session's working tree; owner and user are the OS
+   * account the harness runs as — the best a local single-user harness can
+   * assert, and the runtime clamps every claim to what the attestation
+   * supports. Flat identity fields (OGR v0.6).
+   */
+  function identity(
+    exec: ToolExecution,
+  ): Pick<GuardEvent, "agentId" | "agentType" | "agentWorkspace" | "agentOwner" | "agentUser" | "attestation" | "sessionId"> {
+    const workspace = workspaceOf(exec)
     return {
-      // The runtime clamps the attestation claim to this key's enrollment
-      // scope. Flat identity fields (OGR v0.6).
       agentId,
       agentType: "dsh",
       attestation: "client_key",
+      ...workspace ? { agentWorkspace: workspace } : {},
+      ...accountUser ? { agentOwner: accountUser, agentUser: accountUser } : {},
       ...exec.agent ? { sessionId: exec.agent.id } : {},
     }
   }
@@ -375,6 +404,11 @@ export function apply(ctx: Context, config: Config): void {
       provenance: provenanceFor(exec.agent),
     }
 
+    // The configured runtime is evaluated in PARALLEL with the local chain —
+    // its user is a consumer, not an observer, so the call goes through
+    // /v1/evaluate and the verdict participates: it can tighten the local
+    // decision, never loosen it. Unconfigured or unreachable → local stands.
+    const remote = reporter.evaluate(ev)
     let verdict: Verdict
     try {
       verdict = await runtime.evaluate(ev)
@@ -388,8 +422,8 @@ export function apply(ctx: Context, config: Config): void {
       }
       return next()
     }
+    verdict = tighter(verdict, await remote)
     remember(exec, verdict)
-    reporter.report(ev) // fire-and-forget platform observability
 
     if (verdict.decision === "block") {
       return { kind: "deny", reason: `[OpenGuardrails] ${brief(verdict)}` }
@@ -470,6 +504,7 @@ export function apply(ctx: Context, config: Config): void {
       }],
     }
 
+    const remote = reporter.evaluate(ev)
     let verdict: Verdict
     try {
       verdict = await runtime.evaluate(ev)
@@ -477,7 +512,7 @@ export function apply(ctx: Context, config: Config): void {
       warn(`evaluation of the ${exec.name} result failed: ${String(error)}`)
       return downstream
     }
-    reporter.report(ev)
+    verdict = tighter(verdict, await remote)
 
     // There is no human gate after dispatch — the side effect already
     // happened — so `require_approval` at this altitude blocks the result from
@@ -552,6 +587,7 @@ export function apply(ctx: Context, config: Config): void {
       // was first judged), the ask's own reason travels in the payload for a
       // judge to weigh, and guardId correlation guarantees the answer can
       // only tighten the earlier decision, never loosen it.
+      const workspace = req.agent.session.header.cwd
       const ev: GuardEvent = {
         kind: "tool_call",
         observationPoint: "invocation",
@@ -559,6 +595,9 @@ export function apply(ctx: Context, config: Config): void {
         agentType: "dsh",
         attestation: "client_key",
         sessionId: req.agent.id,
+        // The same identity five-tuple as every other event this plugin emits.
+        ...workspace ? { agentWorkspace: workspace } : {},
+        ...accountUser ? { agentOwner: accountUser, agentUser: accountUser } : {},
         guardId: req.callId,
         payload: {
           name: record.name,
@@ -569,6 +608,7 @@ export function apply(ctx: Context, config: Config): void {
         provenance: provenanceFor(req.agent),
       }
 
+      const remote = reporter.evaluate(ev)
       let verdict: Verdict
       try {
         verdict = await runtime.evaluate(ev)
@@ -576,7 +616,7 @@ export function apply(ctx: Context, config: Config): void {
         warn(`auto mode could not evaluate the ${req.toolName} approval ask: ${String(error)}`)
         return undecided()
       }
-      reporter.report(ev)
+      verdict = tighter(verdict, await remote)
 
       if (verdict.decision === "block") return "rejected"
       if (verdict.decision === "require_approval") return undecided()
@@ -630,6 +670,8 @@ function installLlmGuard(
   // is both correct and harmless: without an LLM service nothing dispatches
   // `llm/stream`, and every real dsh deployment has one (it is the spine).
 
+  const accountUser = osUser()
+
   /** One conversation-altitude event, fully typed (no `as GuardEvent` escape). */
   const conversationEvent = (
     kind: "llm_request" | "llm_response",
@@ -642,6 +684,9 @@ function installLlmGuard(
     agentId,
     agentType: "dsh",
     attestation: "client_key",
+    // The identity five-tuple, minus workspace: a model call belongs to the
+    // harness, not to one working tree.
+    ...accountUser ? { agentOwner: accountUser, agentUser: accountUser } : {},
     llmProtocol: LLM_PROTOCOL,
     payload,
     timestamp: new Date().toISOString(),
@@ -672,29 +717,24 @@ function installLlmGuard(
     if (options.purpose !== undefined) return next()
 
     return (async function* guarded(): AsyncIterable<StreamChunk> {
-      if (requestMode !== "off") {
+      if (requestMode === "enforce") {
         // The assembled request is exactly where trusted and untrusted content
         // have already been mixed — that is what the runtime reads.
         const ev = conversationEvent("llm_request", options, requestBody(options), "model_input")
-
-        if (requestMode === "enforce") {
-          const verdict = await reporter.evaluate(ev)
-          // A missing verdict (runtime down, timeout) is NOT an allow, but it
-          // is not a block either: this altitude has no human gate, and
-          // failing a whole turn closed on an unreachable runtime would take
-          // the agent down with it. Say so, and let the tool-call altitude —
-          // which does fail closed — carry the enforcement.
-          if (!verdict) {
-            warn("llm_request got no verdict — proceeding; enforcement falls back to the tool-call altitude")
-          } else if (verdict.decision === "block" || verdict.decision === "require_approval") {
-            // `require_approval` cannot be answered here: `ctx.approval` keys a
-            // question to an agent and a tool, and a model call is neither.
-            // Restrict-only means the safe direction is to stop the call.
-            yield blockedChunk(verdict, "this model call was")
-            return
-          }
-        } else {
-          reporter.report(ev)
+        const verdict = await reporter.evaluate(ev)
+        // A missing verdict (runtime down, timeout) is NOT an allow, but it
+        // is not a block either: this altitude has no human gate, and
+        // failing a whole turn closed on an unreachable runtime would take
+        // the agent down with it. Say so, and let the tool-call altitude —
+        // which does fail closed — carry the enforcement.
+        if (!verdict) {
+          warn("llm_request got no verdict — proceeding; enforcement falls back to the tool-call altitude")
+        } else if (verdict.decision === "block" || verdict.decision === "require_approval") {
+          // `require_approval` cannot be answered here: `ctx.approval` keys a
+          // question to an agent and a tool, and a model call is neither.
+          // Restrict-only means the safe direction is to stop the call.
+          yield blockedChunk(verdict, "this model call was")
+          return
         }
       }
 
@@ -703,29 +743,22 @@ function installLlmGuard(
         return
       }
 
+      // `enforce` buffers: "BEFORE the agent acts on it" is literally true
+      // only if no chunk escapes while the verdict is in flight.
       const accumulator = new ResponseAccumulator(options.model)
       const buffered: StreamChunk[] = []
       for await (const chunk of next()) {
         accumulator.push(chunk)
-        // `observe` streams through untouched — the whole point of not
-        // enforcing here is that first-token latency stays untouched too.
-        if (responseMode === "observe") yield chunk
-        else buffered.push(chunk)
+        buffered.push(chunk)
       }
 
       // An aborted or empty stream has no complete answer to judge.
       if (!accumulator.complete || accumulator.empty) {
-        if (responseMode === "enforce") yield* buffered
+        yield* buffered
         return
       }
 
       const ev = conversationEvent("llm_response", options, accumulator.body(), "model")
-
-      if (responseMode === "observe") {
-        reporter.report(ev)
-        return
-      }
-
       const verdict = await reporter.evaluate(ev)
       if (verdict && (verdict.decision === "block" || verdict.decision === "require_approval")) {
         yield blockedChunk(verdict, "the model's answer was")
