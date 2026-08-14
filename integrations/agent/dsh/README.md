@@ -1,19 +1,118 @@
-# openguardrails-instrumentation-dsh
+# @openguardrails/dsh-auto-mode
 
-Guard a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
-(`dsh`) agent through the **OpenGuardrails (OGR)** protocol — a vendor-neutral
-enforcement layer for AI agent safety & security.
+**Auto mode for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`).**
+
+dsh's chat client offers three permission modes: *Read Only · Workspace Write ·
+Danger Full Access*. This plugin adds a fourth — **Auto** — where approval
+prompts are answered by [OpenGuardrails (OGR)](https://openguardrails.com)
+policy instead of a human: sandbox-escalation retries, tools that ask, wider
+file access — granted or refused by **your own guardrails** (deterministic
+text/regex rules, optionally your own model as the judge), with only the
+genuinely ambiguous asks falling back to you.
 
 **No dsh core changes.** dsh is an *everything is a plugin* harness, so this is
 an ordinary [Cordis](https://github.com/cordiverse/cordis) plugin on dsh's
-documented interception points — no external hook protocol, no subprocess, no
-patched loop. It is *restrict-only*: it can stop a would-run tool call or
-withhold a would-be-returned tool result, never loosen one.
+documented interception points. Underneath auto mode sits the full OGR guard
+engine — every tool call is evaluated before it runs, whether or not the
+session is on the Auto preset. It is *restrict-only* toward the agent: it can
+stop a would-run tool call or withhold a result, never loosen a verdict.
 
-## Two halves, two altitudes
+## Quick start
 
-The plugin guards at two of OGR's three altitudes, and the two halves are
-deliberately different in kind:
+This package is a dsh **bundle**: install it into a profile with dsh's own
+plugin manager and its configuration layer activates by itself —
+
+```sh
+dsh plugin --profile web add @openguardrails/dsh-auto-mode
+dsh --profile web
+```
+
+(`web` is dsh's default profile — `dsh web` is an alias for `--profile web`;
+any other profile works the same way, and `dsh plugin` initializes a missing
+one). The bundle's [`cordis.patch.yml`](cordis.patch.yml) contributes
+two rows: the plugin itself, and an override of the base `permission` table
+that adds the **Auto** entry to the Permissions selector. Open the selector,
+pick **Auto (OpenGuardrails)** — done.
+
+To remove: `dsh plugin --profile web remove @openguardrails/dsh-auto-mode`.
+
+### Manual composition
+
+A deployment that owns its whole plugin tree (or already customizes its
+preset table) wires the same two halves by hand. The preset entry — same
+knobs as workspace-write; the difference is entirely in who answers the asks:
+
+```yaml
+- id: permission
+  name: '@deepseek-ai/dsh-permission-presets'
+  config:
+    presets:
+      read-only: { sandbox: read-only, approval: ask }
+      workspace-write: { sandbox: workspace-write, approval: ask }
+      auto:
+        sandbox: workspace-write
+        approval: ask
+        name: Auto (OpenGuardrails)
+        description: OpenGuardrails answers approval prompts; only asks it cannot decide reach you.
+      danger-full-access: { sandbox: danger-full-access, approval: never }
+```
+
+And the plugin (after `@deepseek-ai/dsh-tools`; auto mode is on by default,
+`npm install @openguardrails/dsh-auto-mode` puts it on the resolution path):
+
+```yaml
+- id: openguardrails
+  name: '@openguardrails/dsh-auto-mode'
+  config:
+    auto:
+      preset: auto
+      unresolved: human   # or `reject` for headless deployments
+```
+
+A fully-commented config reference lives in
+[`cordis.example.yml`](cordis.example.yml), usable directly as a `--patch`
+overlay: `dsh web --patch cordis.example.yml`.
+
+## How auto mode decides
+
+The answerer is an ordinary `approval/request` waterfall listener in the same
+claim-or-delegate shape as dsh's own ACP bridge: it claims a request only when
+the session's folded `permission/preset` is the configured name, and delegates
+every other session untouched — so a deployment that adds the preset without
+loading this plugin degrades to plain workspace-write with human asks, the
+fail-safe direction.
+
+An `ApprovalRequest` carries no tool arguments, only a `callId` — which is
+this plugin's `guard_id`, so the ask links back to the call already evaluated
+at `tools/pre-execute`. The answerer re-evaluates rather than replaying that
+verdict: provenance is fresh (the agent may have ingested untrusted content
+since), the ask's own `reason` travels in the payload for a judge to weigh,
+and guard-context correlation guarantees the answer can only tighten the
+earlier decision. The mapping:
+
+| Runtime verdict | Outcome |
+| --- | --- |
+| `allow` / `modify` / `redact` | `allowed-once` |
+| `block` | `rejected` |
+| `require_approval` | *undecided* — see below |
+| no correlated call, or evaluation failed | *undecided* — a guard does not grant what it cannot see |
+
+*Undecided* follows `auto.unresolved`: `human` (default) delegates onward so
+the chat UI's gate still sees the genuinely ambiguous asks — including the
+plugin's own `require_approval` escalations, where asking the runtime again
+would be circular; `reject` refuses them, the strict stance for headless
+deployments where no human will ever answer.
+
+Grants are `allowed-once` only, per ask, never a durable rule. Note what auto
+mode is: the user, by selecting the preset, delegates their own approval seat
+to the runtime for that session. The plugin still never loosens an OGR
+verdict — a `block` stays blocked at every altitude.
+
+## The guard engine underneath
+
+Auto mode's verdicts come from the same engine that guards every session, on
+two of OGR's three altitudes — and the two halves are deliberately different
+in kind:
 
 | | **the sensor path** (`invocation`) | **the developer path** (`conversation`) |
 |---|---|---|
@@ -31,9 +130,7 @@ model's prose, every tool call it asks for, and the declared tool inventory.
 Classifying the conversation was every PEP's private burden through v0.5; v0.6
 made it the runtime's job, and this plugin does not do it.
 
-Run either, or both. They are independent switches.
-
-## The sensor path — tool calls
+### The sensor path — tool calls
 
 Each intercepted event becomes an OGR `GuardEvent`, runs through a `Runtime`
 built from **your own policy** (deterministic text/regex rules, plus optionally
@@ -48,52 +145,17 @@ typed decisions:
 | **`ctx.tools.guard()`** | — | monotonic re-assertion | — |
 
 The human-confirm gate and enforcement stay **privilege-separated**: the plugin
-*decides*, the user *approves* through `ctx.approval`, the registry *enforces*.
-A composition with no approval service turns an `ask` into a denial, which is
-the correct direction for a restrict-only guard.
+*decides*, the user *approves* through `ctx.approval` (or, on the Auto preset,
+delegates that seat to the runtime), the registry *enforces*. A composition
+with no approval service turns an `ask` into a denial, which is the correct
+direction for a restrict-only guard.
 
 `tools/pre-execute` is dsh's deliberately *reorderable* policy layer, so this
 plugin registers there with `prepend` — it sees a call before a permissive
 layer can short-circuit the waterfall. See [Fail-closed](#fail-closed) for the
 case that ordering alone cannot cover.
 
-## Install
-
-```sh
-npm install openguardrails-instrumentation-dsh
-```
-
-The package installs [`@openguardrails/core`](../../../packages/javascript/),
-the JavaScript OGR core runtime, as a dependency. dsh itself
-(`@deepseek-ai/dsh-*`, `@deepseek-ai/cordis`) is a peer dependency you already
-have.
-
-## Wire it up
-
-Add an entry to the `cordis.yml` your deployment loads, or apply it as a patch
-over the shipped `dsh web` profile. The plugin must load **after**
-`@deepseek-ai/dsh-tools` — it injects the `tools` service and Cordis waits for
-it, so ordering is a readability concern, not a correctness one.
-
-```yaml
-- id: openguardrails
-  name: 'openguardrails-instrumentation-dsh'
-  config:
-    guardToolResults: true
-    failClosed: false
-```
-
-As a patch overlay onto the Web profile (`dsh web --patch ogr.yml`):
-
-```yaml
-- insert:
-    - id: openguardrails
-      name: 'openguardrails-instrumentation-dsh'
-```
-
-A runnable example lives in [`cordis.example.yml`](cordis.example.yml).
-
-## Configure
+## Configure your guardrails
 
 The agent configures its **own** guardrails. Resolution order (low → high):
 
@@ -110,7 +172,7 @@ workspace and cached.
 
 ```yaml
 - id: openguardrails
-  name: 'openguardrails-instrumentation-dsh'
+  name: '@openguardrails/dsh-auto-mode'
   config:
     # Use your own model as the guardrail — any OpenAI-compatible endpoint.
     judge:
@@ -141,7 +203,8 @@ web/fetch/search/browser/MCP tool, matched by `taint.toolResultPattern` against
 the tool name — its later tool calls carry `untrusted` provenance. The OGR
 judge then escalates a privileged action (`curl … | sh`) from
 `require_approval` to **block** as probable injection, while benign actions
-still pass.
+still pass. This matters doubly under auto mode: an injection-influenced
+escalation ask is *rejected*, not granted.
 
 Taint is keyed by the live `Agent` object, exactly like dsh's own per-agent
 guards: the tool registry is context-level and subagents interleave through the
@@ -203,7 +266,7 @@ a round trip to re-read history the runtime has already seen.
 **An unreachable runtime does not fail the turn closed.** This altitude has no
 human gate, and killing a whole turn because a server blinked would take the
 agent down with it. The plugin says so in the log and proceeds; the tool-call
-altitude — which *does* fail closed, see below — is what carries enforcement
+altitude — which *does* fail closed, see above — is what carries enforcement
 in that window.
 
 **`require_approval` blocks here.** `ctx.approval` keys a question to an agent
@@ -281,14 +344,16 @@ That is the honest reading of an in-process guard, and it is why the
 
 ```sh
 npm install          # from the repository root
-npm run build -w openguardrails-instrumentation-dsh
-npm test  -w openguardrails-instrumentation-dsh
+npm run build -w @openguardrails/dsh-auto-mode
+npm test  -w @openguardrails/dsh-auto-mode
 ```
 
 The tests boot a **real** dsh tool registry (`@deepseek-ai/dsh-tools` plus
 `@deepseek-ai/dsh-system-prompt`) and drive `ctx.tools.execute()` through the
 genuine pipeline, so a change in how dsh orders or short-circuits that pipeline
-surfaces as a test failure rather than as a silently bypassed guard.
+surfaces as a test failure rather than as a silently bypassed guard. The
+auto-mode answerer is exercised through Cordis's real `approval/request`
+waterfall, including the mid-execution escalation window.
 
 ## License
 

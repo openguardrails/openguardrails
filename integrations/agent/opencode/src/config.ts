@@ -24,6 +24,31 @@ export interface JudgeConfig {
   headers?: Record<string, string>
 }
 
+/**
+ * What auto mode does with a permission ask the runtime cannot decide — a
+ * `require_approval` verdict, an ask with no correlated call and no usable
+ * metadata, or a failed evaluation:
+ *
+ * - `human` (default) — leave the ask untouched, so opencode's own prompt
+ *   still reaches the user.
+ * - `reject` — deny it. The strict stance for headless runs where no human
+ *   will ever answer.
+ */
+export type AutoUnresolved = "human" | "reject"
+
+/**
+ * Auto mode: answer opencode's permission prompts (`permission.ask`) with the
+ * OGR runtime's verdict instead of a human. On by default — it is the point
+ * of this package; the prompts it answers are the ones YOUR opencode
+ * `permission` config raises.
+ */
+export interface AutoModeConfig {
+  /** Answer permission asks at all (default true). */
+  enabled?: boolean
+  /** Disposal of an ask the runtime cannot decide (default `"human"`). */
+  unresolved?: AutoUnresolved
+}
+
 export interface GuardrailsOptions {
   /** Inline OGR policy (overrides the file + default). */
   policy?: Policy
@@ -31,6 +56,8 @@ export interface GuardrailsOptions {
   policyPath?: string
   /** Enable the LLM-judge detector backed by your own model. */
   judge?: JudgeConfig
+  /** Auto mode: answer permission prompts with the runtime's verdict. */
+  auto?: AutoModeConfig
 }
 
 /** Default text/regex guardrails — deterministic, no model required. */
@@ -81,6 +108,7 @@ export const DEFAULT_POLICY: Policy = {
 export interface ResolvedConfig {
   policy: Policy
   judge?: JudgeConfig
+  auto: Required<AutoModeConfig>
 }
 
 export function loadGuardrailsConfig(directory: string, options?: GuardrailsOptions): ResolvedConfig {
@@ -97,5 +125,12 @@ export function loadGuardrailsConfig(directory: string, options?: GuardrailsOpti
   if (options?.policy) policy = options.policy
 
   const judge = options?.judge ?? (policy["judge"] as JudgeConfig | undefined)
-  return { policy, judge }
+  // Auto mode may also come from the agent-editable policy file, like `judge`
+  // does — plugin options win.
+  const fromPolicy = policy["auto"] as AutoModeConfig | undefined
+  const auto: Required<AutoModeConfig> = {
+    enabled: options?.auto?.enabled ?? fromPolicy?.enabled ?? true,
+    unresolved: options?.auto?.unresolved ?? fromPolicy?.unresolved ?? "human",
+  }
+  return { policy, judge, auto }
 }

@@ -1,9 +1,11 @@
 /**
- * openguardrails-instrumentation-dsh
+ * @openguardrails/dsh-auto-mode
  *
- * A DeepSeek Harness (dsh) plugin that guards an agent through the
- * OpenGuardrails (OGR) protocol. It is an ordinary Cordis plugin on dsh's
- * documented interception points — no core changes, no external hook protocol.
+ * Auto mode for DeepSeek Harness (dsh): an `auto` entry in the chat client's
+ * Permissions selector whose approval prompts are answered by OpenGuardrails
+ * (OGR) policy instead of a human — built on the full OGR guard engine, as an
+ * ordinary Cordis plugin on dsh's documented interception points. No core
+ * changes, no external hook protocol.
  *
  * It turns harness events into OGR `GuardEvent`s, runs them through a
  * `Runtime` built from the deployment's own guardrails policy (text/regex
@@ -29,7 +31,14 @@
  * stay privilege-separated: the plugin decides, the user approves through
  * `ctx.approval`, the registry enforces.
  *
- * @module openguardrails-instrumentation-dsh
+ * Auto mode inverts one seam of that separation on explicit user request: for
+ * sessions whose permission preset is `auto` (a deployment-configured entry in
+ * dsh's Permissions selector), an `approval/request` answerer resolves asks
+ * with the OGR verdict instead of a human — allow grants once, block rejects,
+ * and anything the runtime cannot decide falls back to the human gate (or is
+ * rejected, per config). Sessions on any other preset are never claimed.
+ *
+ * @module @openguardrails/dsh-auto-mode
  */
 import type { Context } from "@deepseek-ai/cordis"
 import z from "@deepseek-ai/schemastery"
@@ -41,6 +50,11 @@ import type {
   ToolExecution,
   ToolExecutionResult,
 } from "@deepseek-ai/dsh-tools"
+// Type-only: declaration-merges the `approval/request` event (and its
+// ApprovalRequest/ApprovalOutcome vocabulary) onto the Events table. Never a
+// value import — a composition without the approval service simply never
+// dispatches the event, and this plugin must load fine there.
+import type { ApprovalRequest } from "@deepseek-ai/dsh-user-approval"
 import {
   Runtime,
   ConfigRulesDetector,
@@ -52,8 +66,11 @@ import {
   type Verdict,
 } from "@openguardrails/core"
 import {
+  DEFAULT_AUTO_PRESET,
   DEFAULT_TAINT_TOOL_PATTERN,
   loadGuardrailsConfig,
+  type AutoApprovalConfig,
+  type AutoUnresolved,
   type GuardrailsOptions,
   type JudgeConfig,
   type LlmMode,
@@ -110,12 +127,25 @@ const LlmModeSchema = z.union([
   z.const("enforce").description("emit, wait for the Verdict, act on it"),
 ]).default("off")
 
+const AutoSchema: z<AutoApprovalConfig> = z.object({
+  enabled: z.boolean().default(true)
+    .description("Register the answerer (inert until a session selects the preset)"),
+  preset: z.string().default(DEFAULT_AUTO_PRESET)
+    .description("Permission-preset name whose sessions this plugin answers for"),
+  unresolved: z.union([
+    z.const("human").description("delegate to the next answerer — the human gate"),
+    z.const("reject").description("refuse the ask (strict headless stance)"),
+  ]).default("human")
+    .description("What happens to an ask the runtime cannot decide"),
+})
+
 export const Config: z<Config> = z.object({
   policy: z.any().description("Inline OGR policy; overrides the workspace file and the default"),
   policyPath: z.string().description("Policy file; relative paths resolve against the session workspace"),
   judge: JudgeSchema.description("Use your own model as an LLM judge (optional)"),
   guardToolResults: z.boolean().default(true).description("Also evaluate tool results, not just tool calls"),
   taint: TaintSchema.description("Per-agent taint propagation from untrusted tool results"),
+  auto: AutoSchema.description("Auto mode: answer approval asks with the runtime's verdict for auto-preset sessions"),
   failClosed: z.boolean().default(false)
     .description("Deny any call that reached the monotonic guard without an OGR verdict"),
   llmRequest: LlmModeSchema.description("Emit llm_request (the assembled provider request body) before each model call"),
@@ -134,6 +164,25 @@ function brief(v: Verdict): string {
   const cats = v.categories.map((c) => `${c.id}(${c.score})`).join(", ")
   const why = v.reasons.filter((r) => !r.startsWith("[")).join("; ")
   return [cats, why].filter(Boolean).join(" — ") || v.decision
+}
+
+/**
+ * The session's effective permission preset: the last `permission/preset`
+ * event in the log — the same fold `@deepseek-ai/dsh-permission-presets`
+ * ships as `effectivePermissionPreset`, re-folded here over the raw event
+ * shape so a deployment without that package costs this plugin neither a
+ * dependency nor a load failure. The preset service pins the default preset
+ * into every new session as knob events, so a session that never switched
+ * still resolves.
+ */
+function effectivePreset(events: readonly unknown[]): string | undefined {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index] as { type?: string; data?: { preset?: unknown } } | undefined
+    if (event?.type === "permission/preset") {
+      return typeof event.data?.preset === "string" ? event.data.preset : undefined
+    }
+  }
+  return undefined
 }
 
 /** The model-facing text of a tool result, which is what an injection rides in on. */
@@ -242,12 +291,25 @@ export function apply(ctx: Context, config: Config): void {
    */
   const pending = new Map<symbol, Verdict>()
 
+  /**
+   * The payload of each live call, keyed by callId, for the auto-mode
+   * approval answerer: an `ApprovalRequest` carries no arguments, so its
+   * `callId` is how an ask gets its payload back. Same lifetime and backstop
+   * cap as `pending`.
+   */
+  const records = new Map<string, { name: string; arguments: unknown }>()
+
   function remember(exec: ToolExecution, verdict: Verdict): void {
     if (pending.size >= PENDING_MAX) {
       const oldest = pending.keys().next()
       if (!oldest.done) pending.delete(oldest.value)
     }
     pending.set(exec.token, verdict)
+    if (records.size >= PENDING_MAX) {
+      const oldest = records.keys().next()
+      if (!oldest.done) records.delete(oldest.value)
+    }
+    records.set(String(exec.callId), { name: exec.name, arguments: exec.arguments })
   }
 
   /** The agent's workspace — the `session/new` cwd, not the host process's launch dir. */
@@ -277,9 +339,9 @@ export function apply(ctx: Context, config: Config): void {
    * naming the source, which is what makes an injection-influenced privileged
    * action legible to the judge.
    */
-  function provenanceOf(exec: ToolExecution): Provenance[] {
+  function provenanceFor(agent: Agent | undefined): Provenance[] {
     const provenance: Provenance[] = [{ source: "model", trust: "unverified" }]
-    const mark = taint.get(exec.agent)
+    const mark = taint.get(agent)
     if (mark) {
       provenance.push({
         source: [...mark.sources][0] ?? "tainted",
@@ -310,7 +372,7 @@ export function apply(ctx: Context, config: Config): void {
       guardId: exec.callId,
       payload: { name: exec.name, arguments: exec.arguments },
       timestamp: new Date().toISOString(),
-      provenance: provenanceOf(exec),
+      provenance: provenanceFor(exec.agent),
     }
 
     let verdict: Verdict
@@ -440,6 +502,7 @@ export function apply(ctx: Context, config: Config): void {
   // which fires for every execution — dispatched, denied, or errored.
   ctx.on("tools/result", (exec: Readonly<ToolExecution>, _result: Readonly<ToolExecutionResult>) => {
     pending.delete(exec.token)
+    records.delete(String(exec.callId))
   })
 
   // Taint is agent-scoped and in-memory. A cleared session starts a fresh
@@ -448,6 +511,78 @@ export function apply(ctx: Context, config: Config): void {
   ctx.on("agent/session-start", ({ agent, source }) => {
     if (source === "startup" || source === "clear") taint.clear(agent)
   })
+
+  // ---- auto mode: the runtime answers the approval seam --------------------
+  //
+  // dsh's permission presets bundle sandbox mode + approval policy, and the
+  // chat client renders the preset table as its Permissions selector. A
+  // deployment that adds an `auto` preset (workspace-write + ask — README has
+  // the cordis.yml snippet) gets its meaning from this answerer: for sessions
+  // on that preset, asks that would reach a human — a sandbox-escalation
+  // retry, a tool whose policy layer said `ask` — resolve with the OGR
+  // verdict instead. Same claim-or-delegate shape as dsh's own ACP bridge,
+  // prepended so it runs before the chat UI's answerer; every other session
+  // delegates untouched, so an unloaded plugin degrades the preset to plain
+  // workspace-write + human asks, which is the fail-safe direction.
+  const auto = config.auto ?? {}
+  if (auto.enabled !== false) {
+    const autoPreset = auto.preset ?? DEFAULT_AUTO_PRESET
+    const unresolved: AutoUnresolved = auto.unresolved ?? "human"
+
+    ctx.on("approval/request", async (req: ApprovalRequest, next) => {
+      if (effectivePreset(req.agent.session.events) !== autoPreset) return next()
+
+      // "Cannot decide" is one disposal, three triggers: a require_approval
+      // verdict (including the very verdict whose `ask` raised this request —
+      // asking the runtime again is circular, so it stays undecided), an ask
+      // with no correlated call, and a failed evaluation. `human` delegates
+      // onward to the human gate; `reject` is the restrict-only hard stance.
+      const undecided = () => (unresolved === "reject" ? Promise.resolve("rejected" as const) : next())
+
+      // An ApprovalRequest carries no arguments — `callId` links the ask back
+      // to the call this plugin already evaluated. No record means OGR never
+      // saw what is being approved, and a guard does not grant what it
+      // cannot see.
+      const record = req.callId === undefined ? undefined : records.get(String(req.callId))
+      if (!record) return undecided()
+
+      const { runtime } = guard.for(req.agent.session.header.cwd)
+      // Re-evaluate rather than replay the stored verdict: provenance is
+      // fresh (the agent may have ingested untrusted content since the call
+      // was first judged), the ask's own reason travels in the payload for a
+      // judge to weigh, and guardId correlation guarantees the answer can
+      // only tighten the earlier decision, never loosen it.
+      const ev: GuardEvent = {
+        kind: "tool_call",
+        observationPoint: "invocation",
+        agentId,
+        agentType: "dsh",
+        attestation: "client_key",
+        sessionId: req.agent.id,
+        guardId: req.callId,
+        payload: {
+          name: record.name,
+          arguments: record.arguments,
+          approval: { tool: req.toolName, ...req.reason !== undefined ? { reason: req.reason } : {} },
+        },
+        timestamp: new Date().toISOString(),
+        provenance: provenanceFor(req.agent),
+      }
+
+      let verdict: Verdict
+      try {
+        verdict = await runtime.evaluate(ev)
+      } catch (error: unknown) {
+        warn(`auto mode could not evaluate the ${req.toolName} approval ask: ${String(error)}`)
+        return undecided()
+      }
+      reporter.report(ev)
+
+      if (verdict.decision === "block") return "rejected"
+      if (verdict.decision === "require_approval") return undecided()
+      return "allowed-once"
+    }, { prepend: true })
+  }
 
   // ---- conversation altitude: the OGR v0.6 developer path -----------------
   installLlmGuard(ctx, config, { agentId, reporter, warn })
@@ -605,9 +740,17 @@ function installLlmGuard(
 export default { name, inject, Config, apply }
 
 export {
+  DEFAULT_AUTO_PRESET,
   DEFAULT_POLICY,
   DEFAULT_TAINT_TOOL_PATTERN,
   WORKSPACE_POLICY_PATH,
   loadGuardrailsConfig,
 } from "./config.js"
-export type { GuardrailsOptions, JudgeConfig, TaintConfig, ResolvedConfig } from "./config.js"
+export type {
+  AutoApprovalConfig,
+  AutoUnresolved,
+  GuardrailsOptions,
+  JudgeConfig,
+  TaintConfig,
+  ResolvedConfig,
+} from "./config.js"

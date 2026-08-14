@@ -1,7 +1,7 @@
 {
-  "name": "openguardrails-instrumentation-dsh",
+  "name": "@openguardrails/dsh-auto-mode",
   "version": "0.1.0",
-  "description": "DeepSeek Harness (dsh) plugin that guards tool calls and tool results through the OpenGuardrails (OGR) protocol — agent-configurable text/regex guardrails, or use your own model as the judge. No core changes.",
+  "description": "Auto mode for DeepSeek Harness (dsh): an Auto entry in the Permissions selector whose approval prompts are answered by OpenGuardrails policy instead of a human — plus the full OGR guard engine underneath. No core changes.",
   "type": "module",
   "license": "Apache-2.0",
   "author": "OpenGuardrails",
@@ -15,14 +15,23 @@
   "types": "./dist/index.d.ts",
   "files": [
     "dist",
-    "src"
+    "src",
+    "cordis.patch.yml"
   ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
   "scripts": {
     "build": "tsc",
     "test": "node --test tests/*.spec.mjs",
     "clean": "rm -rf dist"
   },
   "keywords": [
+    "auto-mode",
+    "permissions",
+    "approval",
     "dsh",
     "dsh-plugin",
     "deepseek",
@@ -45,7 +54,13 @@
     "@deepseek-ai/dsh-llm": "*",
     "@deepseek-ai/dsh-session": "*",
     "@deepseek-ai/dsh-tools": "*",
+    "@deepseek-ai/dsh-user-approval": "*",
     "@deepseek-ai/schemastery": "*"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-user-approval": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
@@ -54,6 +69,7 @@
     "@deepseek-ai/dsh-session": "0.1.0-rc.6",
     "@deepseek-ai/dsh-system-prompt": "0.1.0-rc.6",
     "@deepseek-ai/dsh-tools": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-user-approval": "^0.1.0-rc.6",
     "@deepseek-ai/schemastery": "^3.18.1",
     "@types/node": "^22",
     "typescript": "^5.7.0"

@@ -45,7 +45,7 @@ Identify, from the task you were given, what the agent will touch:
 ### 2. Install the OGR plugin for the runtime
 Detect the runtime and install. Examples:
 - **Hermes (Python):** `pip install openguardrails-instrumentation-hermes`
-- **opencode (JS/TS):** add `openguardrails-instrumentation-opencode` (plugin)
+- **opencode (JS/TS):** add `@openguardrails/opencode-auto-mode` (plugin)
 - Other runtimes: see `reference/policy-schema.md` and the spec link below.
 
 ### 3. Draft a policy

@@ -3,7 +3,7 @@
  *
  * An OpenClaw plugin that guards an assistant through the OpenGuardrails (OGR)
  * protocol — the multi-channel counterpart of
- * `openguardrails-instrumentation-opencode`.
+ * `@openguardrails/opencode-auto-mode`.
  *
  * It registers in-process plugin hooks, turns each event into an OGR
  * `GuardEvent`, runs it through a `Runtime` built from the assistant's own

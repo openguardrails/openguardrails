@@ -1,7 +1,7 @@
 {
-  "name": "openguardrails-instrumentation-opencode",
-  "version": "0.1.1",
-  "description": "Guard an opencode agent's tool calls through the OpenGuardrails (OGR) protocol \u2014 agent-configurable text/regex guardrails, or use your own model as the judge. No core changes.",
+  "name": "@openguardrails/opencode-auto-mode",
+  "version": "0.2.0",
+  "description": "Auto mode for opencode: permission prompts answered by OpenGuardrails policy instead of a human \u2014 agent-configurable text/regex guardrails, or your own model as the judge. No core changes.",
   "type": "module",
   "license": "Apache-2.0",
   "author": "OpenGuardrails",
@@ -19,9 +19,13 @@
   ],
   "scripts": {
     "build": "tsc",
+    "test": "node --test tests/*.spec.mjs",
     "clean": "rm -rf dist"
   },
   "keywords": [
+    "auto-mode",
+    "permissions",
+    "approval",
     "opencode",
     "plugin",
     "ai",

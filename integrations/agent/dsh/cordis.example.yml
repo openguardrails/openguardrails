@@ -1,24 +1,42 @@
-# OpenGuardrails on DeepSeek Harness — a patch overlay for the `dsh web`
-# profile. Apply it with:
+# OpenGuardrails Auto Mode on DeepSeek Harness — the fully-commented config
+# reference, usable directly as a patch overlay:
 #
 #     dsh web --patch integrations/agent/dsh/cordis.example.yml
 #
-# In a deployment that owns its whole plugin tree, drop the `insert:` wrapper
-# and paste the entry into `cordis.yml` directly.
+# The NORMAL install path needs none of this: `dsh plugin --profile <name>
+# add @openguardrails/dsh-auto-mode` activates the bundle's own minimal
+# cordis.patch.yml (plugin row + the Auto preset) with every default below.
+# Use this file to see and tune the knobs, or as the manual-composition
+# template for a deployment that owns its whole plugin tree (drop the
+# `insert:` wrapper and paste the entry into `cordis.yml` directly).
 
 - insert:
     - id: openguardrails
-      name: 'openguardrails-instrumentation-dsh'
+      name: '@openguardrails/dsh-auto-mode'
       config:
-        # Also evaluate tool RESULTS, not just tool calls. See the README's
-        # "Known limitations" for what the bundled reference detectors do and
-        # do not judge here.
+        # ── Auto mode: answer approval asks with the runtime's verdict for
+        # sessions whose Permissions preset is `auto` (on by default; these
+        # are the defaults, shown for visibility).
+        #
+        # allow → granted once · block → rejected · anything the runtime
+        # cannot decide follows `unresolved`: `human` falls back to the chat
+        # UI's gate, `reject` refuses (headless stance). Sessions on any
+        # other preset are never claimed.
+        auto:
+          enabled: true
+          preset: auto
+          unresolved: human
+
+        # ── The guard engine underneath — every tool call is evaluated
+        # before it runs, on every preset. Also evaluate tool RESULTS. See
+        # the README's "Known limitations" for what the bundled reference
+        # detectors do and do not judge here.
         guardToolResults: true
 
         # Per-agent taint from untrusted tool results. A result whose TOOL NAME
         # matches the pattern is content the agent did not author — the
         # indirect prompt-injection vector — and marks the agent, so its later
-        # privileged calls escalate.
+        # privileged calls escalate (and under auto mode, get rejected).
         taint:
           toolResults: true
           toolResultPattern: 'web|fetch|search|browser|curl|http|^mcp_|_mcp_'
@@ -58,3 +76,25 @@
         # Point elsewhere with `policyPath`, or inline it with `policy`.
         #
         # policyPath: guards/openguardrails.json
+
+# Put "Auto (OpenGuardrails)" in the Permissions selector. A patch replaces
+# the targeted row's WHOLE `config`, so the base presets are restated
+# verbatim around the new entry — merge `auto` into your own table instead if
+# you have customized it.
+- id: permission
+  config:
+    presets:
+      read-only:
+        sandbox: read-only
+        approval: ask
+      workspace-write:
+        sandbox: workspace-write
+        approval: ask
+      auto:
+        sandbox: workspace-write
+        approval: ask
+        name: Auto (OpenGuardrails)
+        description: OpenGuardrails answers approval prompts; only asks it cannot decide reach you.
+      danger-full-access:
+        sandbox: danger-full-access
+        approval: never
