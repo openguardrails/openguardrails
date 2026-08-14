@@ -3,7 +3,7 @@
 Guard an [OpenClaw](https://github.com/openclaw/openclaw) assistant through the
 **OpenGuardrails (OGR)** protocol — a vendor-neutral enforcement layer for AI
 agent safety & security. It's the multi-channel counterpart of
-[`openguardrails-instrumentation-opencode`](../opencode/).
+[`@openguardrails/opencode-auto-mode`](../opencode/).
 
 **No OpenClaw core changes.** This is a pure plugin built on OpenClaw's
 in-process [plugin hooks](https://docs.openclaw.ai/plugins/hooks). It is

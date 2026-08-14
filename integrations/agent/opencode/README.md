@@ -1,44 +1,70 @@
-# openguardrails-instrumentation-opencode
+# @openguardrails/opencode-auto-mode
 
-Guard an [opencode](https://github.com/anomalyco/opencode) agent's tool calls
-through the [OpenGuardrails (OGR)](https://www.npmjs.com/package/@openguardrails/core)
-protocol — the TS counterpart of `openguardrails-instrumentation-hermes`.
+**Auto mode for [opencode](https://github.com/anomalyco/opencode).**
 
-The agent configures **its own guardrails**: plain **text + regex** rules (no
-model required), and optionally **its own model** as an LLM judge. Enforced as a
-pure opencode plugin — **no core changes, no fork**.
+Whatever your opencode `permission` config would ask you — bash commands,
+edits, webfetch — this plugin answers from
+[OpenGuardrails (OGR)](https://www.npmjs.com/package/@openguardrails/core)
+policy instead: **your own guardrails** (plain text + regex rules, no model
+required, optionally your own model as the judge) grant or refuse each
+prompt, and only the asks the runtime cannot decide still reach you.
 
-```bash
-npm install openguardrails-instrumentation-opencode
+Enforced as a pure opencode plugin — **no core changes, no fork**.
+
+Installation is one config edit — opencode installs plugins listed in its
+config by itself on the next start:
+
+```jsonc
+// opencode.json (or the global ~/.config/opencode/opencode.json)
+{
+  "plugin": ["@openguardrails/opencode-auto-mode"],
+  // auto mode answers whatever you tell opencode to ask about:
+  "permission": { "bash": "ask", "edit": "ask", "webfetch": "ask" }
+}
 ```
 
-This installs `@openguardrails/core`, the JavaScript OGR core runtime, as a
-dependency.
+The package brings `@openguardrails/core`, the JavaScript OGR core runtime,
+as a dependency. Auto mode is **on by default** — it is the point of the
+package.
 
 ## How it works
 
-opencode fires `tool.execute.before` for every tool, before it runs. This plugin
-turns the call into an OGR `GuardEvent`, runs it through a `Runtime` built from
-your policy, and enforces the `Verdict`:
+Two hooks, one engine:
+
+**`tool.execute.before`** — every tool call becomes an OGR `GuardEvent` and is
+judged *before it runs*, on every call, whether or not a permission prompt
+would fire:
 
 | OGR decision | opencode behavior |
 | --- | --- |
 | `allow` / `modify` / `redact` | proceed |
 | `block` | throw → the agent sees a tool error and must find a safer path |
-| `require_approval` | throw → asks you to re-run intentionally or relax the policy |
+| `require_approval` | throw → asks the agent to have you re-run intentionally or relax the policy |
 
-It is a **restrict-only** guard: it can stop a would-run tool call, never loosen
-one. (opencode's own `permission` rules still apply first.)
+**`permission.ask`** — opencode's own permission prompt, the human gate. Auto
+mode answers it with the runtime's verdict:
 
-## Enable
+| Runtime verdict | Prompt outcome |
+| --- | --- |
+| `allow` / `modify` / `redact` | `allow` — you are never prompted |
+| `block` | `deny` |
+| `require_approval`, evaluation failed, or nothing to judge | *undecided* — see below |
 
-In your opencode config:
+*Undecided* follows `auto.unresolved`: `human` (default) leaves the prompt
+exactly as opencode raised it, so you still see the genuinely ambiguous asks;
+`reject` denies them — the strict stance for headless runs where no human
+will ever answer.
 
-```jsonc
-{
-  "plugin": ["openguardrails-instrumentation-opencode"]
-}
-```
+The ask links back to the already-evaluated call through its `callID`, which
+both events carry as their OGR `guard_id` — the runtime can only **tighten**
+the earlier decision, never loosen it. An ask with no correlated call falls
+back to the permission's own metadata (opencode's bash asks carry the
+command there); an ask with neither stays undecided — a guard does not grant
+what it cannot see.
+
+This stays a **restrict-only** guard toward the agent: auto mode automates
+*your* seat at the prompt, with your own policy — it never overrides an OGR
+verdict, and a `block` stays blocked everywhere.
 
 ## Configure your guardrails
 
@@ -55,9 +81,17 @@ the package (`curl|bash`, `rm -rf /`, credential-file access, `| sudo`).
         "category": "security.malicious_command", "decision": "require_approval",
         "score": 0.9, "why": "production deploys need explicit human approval" }
     ]
-  }
+  },
+  "auto": { "enabled": true, "unresolved": "human" }
 }
 ```
+
+The policy format is identical across every OGR integration (dsh, openclaw,
+hermes, python), so one `policy.json` works everywhere. `auto` may live in the
+policy file (as above) or in plugin options; options win.
+
+`decision: "require_approval"` is the rule author's "this one is for a human":
+under auto mode it is exactly the class of prompt that still reaches you.
 
 ### Use your own model as the judge
 
@@ -68,13 +102,16 @@ the package (`curl|bash`, `rm -rf /`, credential-file access, `| sudo`).
 }
 ```
 
-Any OpenAI-compatible chat endpoint works — point it at the same model your agent
-uses, or a dedicated guard model. The judge weighs provenance and returns an OGR
-verdict; the deterministic text/regex rules remain the baseline.
+Any OpenAI-compatible chat endpoint works — point it at the same model your
+agent uses, or a dedicated guard model. The judge weighs provenance and the
+ask's own descriptors, and returns an OGR verdict; the deterministic
+text/regex rules remain the baseline.
 
 ## Status
 
-`v0.1`. Pure plugin via `tool.execute.before`. A first-class "ask the human"
-(`require_approval` as an interactive prompt) and transcript-based provenance
-tainting are tracked follow-ups; today `require_approval` is enforced as a
-deny-with-guidance.
+`v0.2`. Auto mode via `permission.ask` + guard engine via
+`tool.execute.before`, correlated by `callID`. Transcript-based provenance
+tainting (web/mcp results → `untrusted`, so injection-influenced asks get
+denied rather than granted) is the tracked follow-up via the opencode session
+API — the dsh integration ([`@openguardrails/dsh-auto-mode`](../dsh/)) already
+does this. Published before `v0.2` as `openguardrails-instrumentation-opencode`.

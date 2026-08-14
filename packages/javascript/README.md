@@ -103,8 +103,8 @@ new LLMJudgeDetector(backend)
 
 This is the SDK. To guard a real agent, use an instrumentation package:
 
-- [`openguardrails-instrumentation-opencode`](https://www.npmjs.com/package/openguardrails-instrumentation-opencode)
-  — guard an opencode agent's tool calls (no core changes).
+- [`@openguardrails/opencode-auto-mode`](https://www.npmjs.com/package/@openguardrails/opencode-auto-mode)
+  — auto mode for opencode: permission prompts answered by OGR policy (no core changes).
 
 ## Status
 

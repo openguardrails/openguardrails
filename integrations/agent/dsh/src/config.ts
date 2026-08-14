@@ -58,6 +58,36 @@ export interface TaintConfig {
  */
 export type LlmMode = "off" | "observe" | "enforce"
 
+/**
+ * What the auto-mode answerer does with an approval ask the runtime cannot
+ * decide — a `require_approval` verdict (including the one that caused the
+ * ask in the first place), an ask with no correlated tool call, or a failed
+ * evaluation:
+ *
+ * - `human` (default) — delegate to the next answerer, so the chat UI's
+ *   human gate still sees the genuinely ambiguous cases.
+ * - `reject` — refuse it. The strict stance for headless deployments where
+ *   no human will ever answer.
+ */
+export type AutoUnresolved = "human" | "reject"
+
+/**
+ * Auto mode: answer dsh approval asks with the OGR runtime's verdict instead
+ * of a human, for sessions whose permission preset is {@link preset}.
+ *
+ * The preset itself is deployment config on `@deepseek-ai/dsh-permission-presets`
+ * (this plugin cannot add table entries); this block configures the ANSWERER
+ * that gives the preset its meaning. See the README's "Auto mode" section.
+ */
+export interface AutoApprovalConfig {
+  /** Register the answerer at all (default true — it is inert until a session actually selects the preset). */
+  enabled?: boolean
+  /** The permission-preset name whose sessions this plugin answers for (default `"auto"`). */
+  preset?: string
+  /** Disposal of an ask the runtime cannot decide (default `"human"`). */
+  unresolved?: AutoUnresolved
+}
+
 export interface GuardrailsOptions {
   /** Inline OGR policy; overrides both the workspace file and the default. */
   policy?: Policy
@@ -69,6 +99,8 @@ export interface GuardrailsOptions {
   guardToolResults?: boolean
   /** Per-agent taint propagation from untrusted tool results. */
   taint?: TaintConfig
+  /** Auto mode: answer approval asks with the runtime's verdict for auto-preset sessions. */
+  auto?: AutoApprovalConfig
   /**
    * Emit `llm_request` — the assembled provider request body — before each
    * model call (OGR v0.6 developer path). Under `enforce` a `block` verdict
@@ -101,6 +133,9 @@ export interface GuardrailsOptions {
  * and a deployment renames its own tools freely.
  */
 export const DEFAULT_TAINT_TOOL_PATTERN = "web|fetch|search|browser|curl|http|^mcp_|_mcp_"
+
+/** The permission-preset name auto mode answers for unless configured otherwise. */
+export const DEFAULT_AUTO_PRESET = "auto"
 
 /** Default text/regex guardrails — deterministic, no model required. */
 export const DEFAULT_POLICY: Policy = {
