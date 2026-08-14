@@ -32,7 +32,7 @@ any other profile works the same way, and `dsh plugin` initializes a missing
 one). The bundle's [`cordis.patch.yml`](cordis.patch.yml) contributes
 two rows: the plugin itself, and an override of the base `permission` table
 that adds the **Auto** entry to the Permissions selector. Open the selector,
-pick **Auto (OpenGuardrails)** — done.
+pick **Auto Mode** — done.
 
 To remove: `dsh plugin --profile web remove @openguardrails/dsh-auto-mode`.
 
@@ -52,7 +52,7 @@ knobs as workspace-write; the difference is entirely in who answers the asks:
       auto:
         sandbox: workspace-write
         approval: ask
-        name: Auto (OpenGuardrails)
+        name: Auto Mode
         description: OpenGuardrails answers approval prompts; only asks it cannot decide reach you.
       danger-full-access: { sandbox: danger-full-access, approval: never }
 ```
