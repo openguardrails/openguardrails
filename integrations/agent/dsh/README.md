@@ -34,7 +34,10 @@ two rows: the plugin itself, and an override of the base `permission` table
 that adds the **Auto** entry to the Permissions selector. Open the selector,
 pick **Auto Mode** — done.
 
-To remove: `dsh plugin --profile web remove @openguardrails/dsh-auto-mode`.
+To upgrade: `dsh plugin --profile web update @openguardrails/dsh-auto-mode`
+(add `--latest` to cross a major version, or `add …@x.y.z` to pin — the
+reliable form right after a release, before registry metadata caches catch
+up). To remove: `dsh plugin --profile web remove @openguardrails/dsh-auto-mode`.
 
 ### The icon
 
