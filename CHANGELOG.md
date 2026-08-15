@@ -7,6 +7,60 @@ not implementations. Downstream SDKs and adapters pin a protocol version.
 The format follows [Keep a Changelog](https://keepachangelog.com/). The protocol
 version is independent of any implementation's package version.
 
+## [v0.7] — the ledger model (in progress)
+
+The protocol adopts the vocabulary agent harnesses themselves use — **Session
+/ Turn / Step / Call** — and collapses to the one plane both real integration
+points observe: LLM messages. One step (one model call) is two events; a turn
+closes with a reason. Full design rationale:
+`openguardrails-runtime/docs/v0.7-ledger-redesign.md`.
+
+### Changed (breaking)
+- **Kinds: 10 → 3.** `step/request`, `step/response`, `turn/end`.
+  `llm_request`/`llm_response`/`user_input`/`model_output` were four names
+  for the two step halves; `tool_call`/`tool_result` ride inside the step
+  bodies (there is no kind left to shatter a step into);
+  `exec`/`network`/`file`/`agent_spawn` go with the execution plane.
+  `turn/start` deliberately does not exist (derivable); `turn/end` carries
+  the close reason (`completed | max_tokens | blocked | aborted | error`).
+- **Coordinates are first-class and 1-based.** `session_id` / `turn` /
+  `step` declared by loop-owning integrations, derived by the runtime
+  otherwise; the verdict echoes them with `attribution: declared | derived`.
+  Declared always wins. `guard_id` → `step_id` (binding the two events of
+  one model call is the only correlation job left). `parent_agent_id` +
+  `delegation_chain` + `agent_spawn` → `parent_session_id` (sessions form a
+  tree; each subagent reports its own session).
+- **Verdict decisions: 5 → 2.** `allow | block`. Redaction is an `allow`
+  with `modifications.spans`; "flag" is an `allow` with findings;
+  `require_approval` is deleted outright (nothing produced it — a real
+  hold-and-ask mechanism re-enters as new design). `reasons[]` and
+  `categories[]` are removed (both restated `findings`); findings gain
+  `severity`, `action`, `fp` (whitelist fingerprint), `whitelisted`, and a
+  masked `subject`; `unjudged` and `output_mode` are promoted from
+  `x.ogr.*` extensions to first-class fields.
+- **Canonical response payloads carry `usage` and `timing`** (tokens,
+  started/first-token/completed) — both vantage points have them for free,
+  and they power per-step cost and latency analytics.
+
+### Removed
+- **The three-altitude model** (`observation_point`, the sensor evadability
+  ladder `sensor_id`/`sensor_type`/`sensor_version` → one `integration`
+  string, `sandbox_id`, cross-altitude correlation). The execution plane
+  returns, if ever, as a future major version.
+- **Attestation and enrollment** (`attestation`, `/v1/enroll`, Ed25519
+  detached-JWS request signing, approval receipts, `/v1/approvals`,
+  `approval-receipt.schema.json`, the attestation and
+  enrollment-and-receipts specifications). The org API key remains the
+  tenant boundary and identity floor.
+- **The wire `provenance` array and local redaction**
+  (`content_encoding`, `redactions[]`, the local-redaction specification).
+  Provenance zones are derived runtime-side from payload structure.
+- **The SDK layer.** `packages/python` (`openguardrails` on PyPI) and
+  `packages/javascript` (`@openguardrails/core` on npm) are retired along
+  with their publish workflows. The API is the integration surface; the two
+  normative integration recipes live in the Runtime API binding.
+- **The eBPF sensor and sandbox integration categories** (execution plane).
+
 ## [v0.6] — draft revision (in progress)
 
 Protocol minimalism: identifiers are born at the runtime, the MUST set

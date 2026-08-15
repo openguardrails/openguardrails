@@ -4,11 +4,6 @@
   "description": "OpenGuardrails protocol, core runtimes, integrations, benchmark, examples, skill, and website.",
   "license": "Apache-2.0",
   "workspaces": [
-    "packages/javascript",
-    "integrations/agent/claude-code",
-    "integrations/agent/codex",
-    "integrations/agent/openclaw",
-    "integrations/agent/opencode",
     "integrations/agent/dsh"
   ],
   "scripts": {

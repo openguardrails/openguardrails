@@ -8,159 +8,132 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// judgedOn builds the minimal judged event these tests need: one text, at the payload
-// path a finding with no `path` of its own is taken to mean.
-func judgedOn(text string) *GuardEvent {
-	return (&GuardEvent{}).withText("payload.text", text)
-}
+// The span applier is the interop surface with the runtime's `modifications.spans`,
+// and it fails SILENTLY in both directions: a span we cannot resolve masks nothing,
+// and a span applied to the wrong bytes masks something nobody detected while the
+// real value travels on. Both look like a healthy gateway — which is why every drop
+// is COUNTED (unresolved), never swallowed.
 
-func TestTokenShape(t *testing.T) {
-	if got := mintToken("EMAIL", 1); got != "${OGR_EMAIL_1}" {
-		t.Fatalf("mintToken = %q", got)
-	}
-	// `__` is bold markup: a model formatting its answer escapes it to `\_\_`,
-	// and a token that depends on it arriving intact never restores.
-	if strings.Contains(mintToken("NATIONAL_ID", 999), "__") {
-		t.Fatal("token carries a double underscore")
-	}
-}
+const spanBody = `{"model":"m","messages":[` +
+	`{"role":"system","content":"You are a helper."},` +
+	`{"role":"user","content":"mail ada@example.com now"}]}`
 
-func TestPlaceholderTypeLongestPrefixWins(t *testing.T) {
-	cases := map[string]string{
-		"privacy.pii.email":            "EMAIL",
-		"privacy.pii.national_id.cn":   "NATIONAL_ID", // a new variant rolls up
-		"privacy.pii.unheard_of":       "PII",
-		"security.secret_leak.aws_key": "SECRET",
-		"safety.violent_crime":         "", // moderation is judged, never masked
-		"security.supply_chain":        "",
+func TestASpanIsSplicedInPlaceAndTheValueLearned(t *testing.T) {
+	spans := []Span{{
+		Path: "payload.messages.1.content", Start: 5, End: 20,
+		Replacement: "${OGR_EMAIL_1}",
+	}}
+	body, applied, unresolved, learned := applySpans(spanBody, spans)
+	if applied != 1 || unresolved != 0 {
+		t.Fatalf("applied=%d unresolved=%d", applied, unresolved)
 	}
-	for category, want := range cases {
-		if got := placeholderType(category); got != want {
-			t.Errorf("placeholderType(%q) = %q, want %q", category, got, want)
-		}
+	if got := gjson.Get(body, "messages.1.content").String(); got != "mail ${OGR_EMAIL_1} now" {
+		t.Fatalf("content = %q", got)
 	}
-}
-
-func TestSpansAreRecoveredFromOffsetsAndOurOwnCopy(t *testing.T) {
-	text := "mail ada@example.com now"
-	v := gjson.Parse(`{"findings":[{"category":"privacy.pii.email","start":5,"end":20}]}`)
-	spans, _ := spansFromVerdict(v, judgedOn(text))
-	if len(spans) != 1 || spans[0].Matched != "ada@example.com" {
-		t.Fatalf("spans = %+v", spans)
+	// What the splice displaced is the restore map: the model may echo the token and
+	// the caller must receive its own data back.
+	if learned["${OGR_EMAIL_1}"] != "ada@example.com" {
+		t.Fatalf("learned = %v", learned)
+	}
+	// The rest of the body is untouched.
+	if gjson.Get(body, "messages.0.content").String() != "You are a helper." {
+		t.Fatal("an unrelated field changed")
 	}
 }
 
 func TestOffsetsAreCharactersNotBytes(t *testing.T) {
-	// The regression this suite exists for: on a Chinese prompt, byte slicing
-	// lands a third of the way into the span, so the value that had to be
-	// removed reaches the model while the logs say "masked".
-	text := "请原样复述这个邮箱：kate@example.com"
-	v := gjson.Parse(`{"findings":[{"category":"privacy.pii.email","start":10,"end":26}]}`)
-	spans, _ := spansFromVerdict(v, judgedOn(text))
-	if len(spans) != 1 || spans[0].Matched != "kate@example.com" {
-		t.Fatalf("spans = %+v, want the email", spans)
+	// The regression this suite exists for: on a Chinese prompt, byte slicing lands a
+	// third of the way into the span, so the value that had to be removed reaches the
+	// model while the logs say "masked". Found live 2026-07-30.
+	body := `{"messages":[{"role":"user","content":"请原样复述这个邮箱：kate@example.com"}]}`
+	spans := []Span{{
+		Path: "payload.messages.0.content", Start: 10, End: 26,
+		Replacement: "${OGR_EMAIL_1}",
+	}}
+	next, applied, _, learned := applySpans(body, spans)
+	if applied != 1 {
+		t.Fatalf("applied = %d", applied)
 	}
-
-	st := newSessionState("sess-cn")
-	red := learnValues(st, spans)
-	masked := protocol.MaskString(text, red)
-	if strings.Contains(masked, "kate@example.com") {
-		t.Fatalf("plaintext survived masking: %q", masked)
+	got := gjson.Get(next, "messages.0.content").String()
+	if strings.Contains(got, "kate@example.com") {
+		t.Fatalf("plaintext survived masking: %q", got)
 	}
-	if !strings.Contains(masked, "请原样复述这个邮箱：") {
-		t.Fatalf("masking mangled the surrounding text: %q", masked)
+	if !strings.Contains(got, "请原样复述这个邮箱：") {
+		t.Fatalf("masking mangled the surrounding text: %q", got)
 	}
-	if protocol.RestoreString(masked, st.Mapping) != text {
-		t.Fatalf("round trip broke: %q", protocol.RestoreString(masked, st.Mapping))
+	if learned["${OGR_EMAIL_1}"] != "kate@example.com" {
+		t.Fatalf("learned = %v", learned)
 	}
 }
 
-func TestRuneSliceBoundaries(t *testing.T) {
-	text := "你好 world"
-	cases := []struct {
-		start, end int
-		want       string
-		ok         bool
-	}{
-		{0, 2, "你好", true},
-		{3, 8, "world", true},
-		{0, 8, text, true},
-		{7, 8, "d", true},
-		{0, 9, "", false}, // past the end of our copy
-		{9, 10, "", false},
-		{2, 2, "", false},
-		{-1, 3, "", false},
+func TestSpansOnOnePathApplyHighestOffsetFirst(t *testing.T) {
+	// Two spans on one string: applying the earlier one first would shift the bytes
+	// the later offsets were computed against.
+	body := `{"messages":[{"role":"user","content":"a@b.io and c@d.io wrote"}]}`
+	spans := []Span{
+		{Path: "payload.messages.0.content", Start: 0, End: 6, Replacement: "${OGR_EMAIL_1}"},
+		{Path: "payload.messages.0.content", Start: 11, End: 17, Replacement: "${OGR_EMAIL_2}"},
 	}
-	for _, c := range cases {
-		got, ok := runeSlice(text, c.start, c.end)
-		if got != c.want || ok != c.ok {
-			t.Errorf("runeSlice(%d,%d) = %q,%v want %q,%v", c.start, c.end, got, ok, c.want, c.ok)
+	next, applied, unresolved, _ := applySpans(body, spans)
+	if applied != 2 || unresolved != 0 {
+		t.Fatalf("applied=%d unresolved=%d", applied, unresolved)
+	}
+	if got := gjson.Get(next, "messages.0.content").String(); got != "${OGR_EMAIL_1} and ${OGR_EMAIL_2} wrote" {
+		t.Fatalf("content = %q", got)
+	}
+}
+
+func TestAnUnresolvableSpanIsDroppedAndCountedNeverAppliedElsewhere(t *testing.T) {
+	cases := [][]Span{
+		{{Path: "payload.nope", Start: 0, End: 4, Replacement: "${X}"}},                  // no such field
+		{{Path: "payload.messages", Start: 0, End: 4, Replacement: "${X}"}},              // not a string
+		{{Path: "payload.messages.1.content", Start: 5, End: 9999, Replacement: "${X}"}}, // past the end
+		{{Path: "payload.messages.1.content", Start: -1, End: 4, Replacement: "${X}"}},   // negative
+		{{Path: "payload.messages.1.content", Start: 7, End: 7, Replacement: "${X}"}},    // empty range
+		{{Path: "payload.messages.1.content", Start: 0, End: 4, Replacement: ""}},        // no token
+		{{Path: "messages.1.content", Start: 0, End: 4, Replacement: "${X}"}},            // no payload. prefix
+		{{Path: "payload", Start: 0, End: 4, Replacement: "${X}"}},                       // the whole payload
+	}
+	for _, spans := range cases {
+		next, applied, unresolved, _ := applySpans(spanBody, spans)
+		if applied != 0 || unresolved != 1 {
+			t.Errorf("%+v → applied=%d unresolved=%d, want 0/1", spans[0], applied, unresolved)
+		}
+		if next != spanBody {
+			t.Errorf("%+v changed the body", spans[0])
 		}
 	}
 }
 
-func TestOutOfRangeOffsetsAreDropped(t *testing.T) {
-	// A verdict computed against a different text must never slice this one.
-	v := gjson.Parse(`{"findings":[
-	  {"category":"privacy.pii.email","start":5,"end":9999},
-	  {"category":"privacy.pii.email","start":-1,"end":4},
-	  {"category":"privacy.pii.email","start":7,"end":7}]}`)
-	if spans, _ := spansFromVerdict(v, judgedOn("short text")); len(spans) != 0 {
-		t.Fatalf("spans = %+v, want none", spans)
+func TestBracketPathsFoldToTheDottedForm(t *testing.T) {
+	spans := []Span{{
+		Path: "payload.messages[1].content", Start: 5, End: 20,
+		Replacement: "${OGR_EMAIL_1}",
+	}}
+	next, applied, _, _ := applySpans(spanBody, spans)
+	if applied != 1 {
+		t.Fatalf("bracket path did not resolve")
+	}
+	if got := gjson.Get(next, "messages.1.content").String(); got != "mail ${OGR_EMAIL_1} now" {
+		t.Fatalf("content = %q", got)
 	}
 }
 
-func TestShortValuesAreNotMasked(t *testing.T) {
-	// A global replace of "Ada" would mangle "Adaptive" everywhere in the prompt.
-	spans := []Span{{Category: "privacy.pii.person_name", Matched: "Ada"}}
-	if got := redactableValues(spans); len(got) != 0 {
-		t.Fatalf("got %+v, want none", got)
-	}
-}
+// --- the restore half ----------------------------------------------------------
+//
+// Masking rewrites the request; the reply may echo the token, and the caller must
+// receive its own data back. The mapping learned from applySpans feeds the same
+// protocol Restore machinery the streaming path uses.
 
-func TestEqualValuesCollapseToOneToken(t *testing.T) {
-	spans := []Span{
-		{Category: "privacy.pii.email", Matched: "ada@example.com"},
-		{Category: "privacy.pii.email", Matched: "ada@example.com"},
-	}
-	if got := redactableValues(spans); len(got) != 1 {
-		t.Fatalf("got %d entries, want 1", len(got))
-	}
-}
+func TestMaskThenRestoreRoundTrip(t *testing.T) {
+	spans := []Span{{
+		Path: "payload.messages.1.content", Start: 5, End: 20,
+		Replacement: "${OGR_EMAIL_1}",
+	}}
+	_, _, _, learned := applySpans(spanBody, spans)
 
-func TestSessionReusesTheTokenForAValueSeenBefore(t *testing.T) {
-	st := newSessionState("sess-x")
-	learnValues(st, []Span{{Category: "privacy.pii.email", Matched: "ada@example.com"}})
-	learnValues(st, []Span{{Category: "privacy.pii.email", Matched: "ada@example.com"}})
-	if len(st.Mapping) != 1 {
-		t.Fatalf("mapping = %v, want one token for one value", st.Mapping)
-	}
-	// A second, different value gets the next number in the SESSION — not a
-	// fresh 1 per request, which would make two values claim one token.
-	learnValues(st, []Span{{Category: "privacy.pii.email", Matched: "grace@example.com"}})
-	if st.Mapping["${OGR_EMAIL_2}"] != "grace@example.com" {
-		t.Fatalf("mapping = %v", st.Mapping)
-	}
-}
-
-func TestLongestValueFirstSoSubstringsCannotCorrupt(t *testing.T) {
-	red := []Redaction{
-		{Token: "${OGR_PII_1}", Value: "1234"},
-		{Token: "${OGR_PII_2}", Value: "1234567890"},
-	}
-	if got := protocol.MaskString("id 1234567890", red); got != "id ${OGR_PII_2}" {
-		t.Fatalf("masked = %q", got)
-	}
-}
-
-func TestRestoreRoundTrip(t *testing.T) {
-	st := newSessionState("sess-x")
-	red := learnValues(st, []Span{{Category: "privacy.pii.email", Matched: "ada@example.com"}})
-	masked := protocol.MaskString("mail ada@example.com now", red)
-	if masked != "mail ${OGR_EMAIL_1} now" {
-		t.Fatalf("masked = %q", masked)
-	}
-	if got := protocol.RestoreString(masked, st.Mapping); got != "mail ada@example.com now" {
+	reply := "your address is ${OGR_EMAIL_1}"
+	if got := protocol.RestoreString(reply, learned); got != "your address is ada@example.com" {
 		t.Fatalf("restored = %q", got)
 	}
 }
@@ -190,11 +163,14 @@ func TestRestoreAbsorbsMarkdownEscaping(t *testing.T) {
 	}
 }
 
-func TestRestoreReadsAnyShapeTheMapNames(t *testing.T) {
-	// The matcher keys off the mapping, so a legacy `__entity_n__` map restores
-	// with no configuration — that is what lets one connector serve both.
-	mapping := map[string]string{"__email_1__": "ada@example.com"}
-	if got := protocol.RestoreString(`mail \_\_email\_1\_\_`, mapping); got != "mail ada@example.com" {
-		t.Fatalf("restored = %q", got)
+func TestSessionAdoptsBoundedly(t *testing.T) {
+	st := newSessionState("")
+	big := map[string]string{}
+	for i := 0; i < maxTokens+50; i++ {
+		big["${OGR_PII_"+string(rune('a'+i%26))+string(rune('a'+(i/26)%26))+string(rune('a'+i/676))+"}"] = "value"
+	}
+	st.adopt(big)
+	if len(st.Mapping) > maxTokens {
+		t.Fatalf("mapping grew to %d, cap is %d", len(st.Mapping), maxTokens)
 	}
 }

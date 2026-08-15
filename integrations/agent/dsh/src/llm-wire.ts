@@ -1,27 +1,25 @@
 /**
- * dsh's model-call shapes → the `openai.chat` bodies OGR v0.6's developer path
- * carries.
+ * dsh's model-call shapes → the two halves of an OGR v0.7 STEP.
  *
- * v0.6 moved conversation classification out of the PEP: `llm_request` and
- * `llm_response` carry "the untouched provider request/response body", and the
- * RUNTIME derives the new user words, the tool outcomes being fed back, the
- * model's prose, every tool call it asks for, and the declared tool inventory.
- * Nothing here classifies anything — this module only re-shapes.
+ * `step/request` carries the request in `openai.chat` form (the runtime
+ * normalizes raw provider bodies; `llm_protocol` names the shape). The
+ * response side sends the CANONICAL shape instead — `{text, reasoning?,
+ * tool_calls, model, usage?, timing}` — because a dsh plugin assembles the
+ * answer from a chunk stream and no single raw provider body ever exists,
+ * which is exactly the case the spec's canonical form is for.
  *
  * ⚠️ One honest caveat, stated here and in the README. A dsh plugin does not
  * see the literal provider body: the `llm/stream` waterfall runs on
  * `GenerateOptions`, dsh's provider-NEUTRAL request, and each adapter
  * (`dsh-llm-deepseek`, `dsh-llm-pi-ai`, …) maps it to the wire afterwards.
- * So this is a faithful PROJECTION into one named protocol, not a byte-exact
- * capture, and `llm_protocol` names the shape actually emitted rather than the
- * shape the adapter will send. Everything the runtime classifies from —
- * messages, tool schemas, tool calls, tool results — survives the projection;
- * what is lost is provider-specific transport (`reasoning_effort` and the
- * adapter's own header/metadata mapping).
+ * So the request is a faithful PROJECTION into one named protocol, not a
+ * byte-exact capture. Everything the runtime classifies from — messages,
+ * tool schemas, tool calls, tool results — survives the projection; what is
+ * lost is provider-specific transport.
  */
-import type { ContentBlock, GenerateOptions, Message, StreamChunk } from "@deepseek-ai/dsh-llm"
+import type { ContentBlock, GenerateOptions, Message, StreamChunk, TokenUsage } from "@deepseek-ai/dsh-llm"
 
-/** The protocol this module projects into; travels on the event as `llmProtocol`. */
+/** The protocol the REQUEST projects into; travels on the event as `llm_protocol`. */
 export const LLM_PROTOCOL = "openai.chat"
 
 /** An `openai.chat` message, as it appears in a request body. */
@@ -46,14 +44,16 @@ function textOf(content: readonly ContentBlock[]): string {
  * A dsh tool RESULT is a user-role message whose single block is a
  * `tool-result`; `openai.chat` spells the same thing as a `tool`-role message
  * keyed by `tool_call_id`. Splitting it out is what lets the runtime see "the
- * tool outcomes being fed back" as such rather than as user words — the
- * distinction the whole developer path rests on.
+ * tool outcomes being fed back" as such rather than as user words — and it is
+ * where those outcomes get JUDGED in v0.7: a result travels in the NEXT
+ * step's request, so this projection is the enforcement surface for indirect
+ * injection riding a tool result.
  *
- * `reasoning` blocks are dropped: they are dsh's separate thinking channel and
- * no `openai.chat` request body carries them. `image` blocks become the
- * protocol's `image_url` part with the attachment's id as the reference — the
- * bytes live in dsh's attachment service and are deliberately not inlined into
- * a guard event.
+ * `reasoning` blocks are dropped from requests: they are dsh's separate
+ * thinking channel and no `openai.chat` request body carries them. `image`
+ * blocks become the protocol's `image_url` part with the attachment's id as
+ * the reference — the bytes live in dsh's attachment service and are
+ * deliberately not inlined into a guard event.
  */
 function projectMessage(message: Message): WireMessage[] {
   const out: WireMessage[] = []
@@ -104,9 +104,10 @@ function projectMessage(message: Message): WireMessage[] {
 }
 
 /**
- * `GenerateOptions` → an `openai.chat` request body — the `llm_request` payload.
- * The `system` slot leads the message list, which is where `openai.chat` puts
- * it and where the runtime looks for the agent's own instructions.
+ * `GenerateOptions` → an `openai.chat` request body — the `step/request`
+ * payload. The `system` slot leads the message list, which is where
+ * `openai.chat` puts it and where the runtime looks for the agent's own
+ * instructions.
  */
 export function requestBody(options: GenerateOptions): Record<string, unknown> {
   const messages: WireMessage[] = []
@@ -117,8 +118,8 @@ export function requestBody(options: GenerateOptions): Record<string, unknown> {
     model: options.model,
     messages,
     // The tool INVENTORY is an attack surface of its own (description
-    // injection, rug-pulls), and v0.6 judges it from the `tools` array where
-    // it already travels — so it is never omitted when present.
+    // injection, rug-pulls), judged from the `tools` array where it already
+    // travels — so it is never omitted when present.
     ...options.tools?.length
       ? {
         tools: options.tools.map((t) => ({
@@ -134,42 +135,58 @@ export function requestBody(options: GenerateOptions): Record<string, unknown> {
   }
 }
 
-/** `openai.chat` finish reasons for the dsh finish kinds that have one. */
-const FINISH_REASON: Record<string, string> = {
-  "stop": "stop",
-  "tool-calls": "tool_calls",
-  "max-tokens": "length",
+/** One assembled tool call, as the canonical payload carries it. */
+export interface AccumulatedCall {
+  id: string
+  name: string
+  arguments: unknown
 }
 
 /**
- * Accumulates a dsh chunk stream into one `openai.chat` response body — the
- * `llm_response` payload.
+ * Accumulates a dsh chunk stream into the CANONICAL `step/response` payload.
  *
  * It folds `block-end` chunks, not the deltas: `block-end` carries the
  * assembled, authoritative block, so the accumulator never has to re-implement
  * partial-JSON stitching for tool arguments (and never disagrees with what the
- * loop itself committed).
+ * loop itself committed). Timing is the plugin's own observation — start of
+ * stream, first content chunk, finish — which is exactly the TTFT/decode split
+ * the Trajectory view renders.
  */
 export class ResponseAccumulator {
   private readonly text: string[] = []
-  private readonly toolCalls: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }> = []
-  private finishReason = "stop"
-  private usage: unknown
+  private readonly reasoning: string[] = []
+  private readonly calls: AccumulatedCall[] = []
+  private usage: TokenUsage | undefined
   private finished = false
+  private finishKind = "stop"
+  private readonly startedAt = new Date()
+  private firstTokenAt: Date | undefined
+  private completedAt: Date | undefined
 
   constructor(private readonly model: string) {}
 
   /** Fold one chunk. Unknown chunk types are ignored, by design (the union widens). */
   push(chunk: StreamChunk): void {
+    if (this.firstTokenAt === undefined
+      && (chunk.type === "text-delta" || chunk.type === "block-start" || chunk.type === "block-end")) {
+      this.firstTokenAt = new Date()
+    }
     if (chunk.type === "block-end") {
       const block = chunk.block
       if (block.type === "text") this.text.push(block.text)
+      else if (block.type === "reasoning") this.reasoning.push(block.text)
       else if (block.type === "tool-call") {
-        this.toolCalls.push({
-          id: String(block.id),
-          type: "function",
-          function: { name: block.name, arguments: block.arguments },
-        })
+        let args: unknown = block.arguments
+        if (typeof args === "string") {
+          // The canonical shape carries the argument OBJECT; a string would
+          // double-encode and hand the judge `"{\"command\":…}"`.
+          try {
+            args = JSON.parse(args)
+          } catch {
+            args = { input: args }
+          }
+        }
+        this.calls.push({ id: String(block.id), name: block.name, arguments: args ?? {} })
       }
       return
     }
@@ -179,7 +196,8 @@ export class ResponseAccumulator {
     }
     if (chunk.type === "finish") {
       this.finished = true
-      this.finishReason = FINISH_REASON[chunk.reason.kind] ?? chunk.reason.kind
+      this.completedAt = new Date()
+      this.finishKind = chunk.reason.kind
     }
   }
 
@@ -190,23 +208,39 @@ export class ResponseAccumulator {
 
   /** Is there any model output at all? An empty response is not worth a round trip. */
   get empty(): boolean {
-    return this.text.length === 0 && this.toolCalls.length === 0
+    return this.text.length === 0 && this.calls.length === 0
   }
 
-  /** The accumulated `openai.chat` response body. */
+  /** The assembled tool calls, in stream order — what per-call enforcement keys on. */
+  get toolCalls(): readonly AccumulatedCall[] {
+    return this.calls
+  }
+
+  /** The canonical `step/response` payload. */
   body(): Record<string, unknown> {
+    const text = this.text.join("")
+    const reasoning = this.reasoning.join("")
     return {
+      text,
+      ...reasoning ? { reasoning } : {},
+      ...this.calls.length > 0 ? { tool_calls: this.calls } : {},
       model: this.model,
-      choices: [{
-        index: 0,
-        message: {
-          role: "assistant",
-          content: this.text.join("") || null,
-          ...this.toolCalls.length > 0 ? { tool_calls: this.toolCalls } : {},
-        },
-        finish_reason: this.finishReason,
-      }],
-      ...this.usage !== undefined ? { usage: this.usage } : {},
+      ...this.usage
+        ? {
+          usage: {
+            input_tokens: this.usage.inputTokens,
+            output_tokens: this.usage.outputTokens,
+            ...this.usage.reasoningTokens !== undefined ? { reasoning_tokens: this.usage.reasoningTokens } : {},
+            ...this.usage.cacheReadTokens !== undefined ? { cache_read_tokens: this.usage.cacheReadTokens } : {},
+            ...this.usage.cacheWriteTokens !== undefined ? { cache_write_tokens: this.usage.cacheWriteTokens } : {},
+          },
+        }
+        : {},
+      timing: {
+        started_at: this.startedAt.toISOString(),
+        ...this.firstTokenAt ? { first_token_at: this.firstTokenAt.toISOString() } : {},
+        ...this.completedAt ? { completed_at: this.completedAt.toISOString() } : {},
+      },
     }
   }
 }

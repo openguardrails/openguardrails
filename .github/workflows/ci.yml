@@ -9,6 +9,10 @@ permissions:
   contents: read
 
 jobs:
+  # The v0.6 SDK packages and the agent/gateway plugins built on them were
+  # retired in v0.7 (the API is the integration surface; plugins call it
+  # directly). Their jobs return here plugin by plugin as each is rewritten
+  # against the v0.7 contract — higress first, below.
   python:
     runs-on: ubuntu-latest
     steps:
@@ -17,21 +21,17 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - name: Install packages and test dependencies
+      - name: Install test dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install pytest
-          python -m pip install -e packages/python
-          python -m pip install -e integrations/gateway/openai-anthropic
-          python -m pip install -e integrations/agent/hermes
-          python -m pip install -e integrations/agent/langgraph
-          python -m pip install -e integrations/ebpf/sensor
       - name: Test
-        run: |
-          python -m pytest
-          python integrations/agent/langgraph/tests/test_smoke.py
+        run: python -m pytest
 
   javascript:
+    # The dsh plugin (@openguardrails/dsh) — the v0.7 Recipe A reference
+    # agent-direct integration, tested against a mock v0.7 runtime through
+    # dsh's real tool registry and Cordis waterfalls.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -42,31 +42,6 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm test
-
-  ebpf:
-    # Compile the OGR eBPF sensor object + loader (CO-RE build check). The
-    # runner kernel exposes BTF at /sys/kernel/btf/vmlinux, so vmlinux.h can be
-    # generated; loading/attaching is not exercised here (needs privileges).
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install BPF toolchain
-        run: |
-          kernel_release=$(uname -r)
-          echo "Runner kernel: $kernel_release"
-          sudo apt-get update
-          # Azure runner kernel-tools packages can omit bpftool even when the
-          # exact linux-tools-$(uname -r) package installs successfully. Use a
-          # generic tools package for a real versioned bpftool binary; bpftool
-          # can dump the running kernel's BTF regardless of its build version.
-          sudo apt-get install -y clang llvm libbpf-dev libelf-dev zlib1g-dev \
-            linux-tools-common linux-tools-generic
-          bpftool_path=$(find /usr/lib -maxdepth 4 -type f -name bpftool -print -quit)
-          test -n "$bpftool_path"
-          "$bpftool_path" version
-          echo "BPFTOOL=$bpftool_path" >> "$GITHUB_ENV"
-      - name: Build sensor
-        run: make -C integrations/ebpf/sensor/bpf
 
   higress:
     # The Higress WASM plugin ("OpenGuardrails Runtime"). Everything worth

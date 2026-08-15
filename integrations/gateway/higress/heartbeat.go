@@ -18,9 +18,9 @@ import (
 // those two, and it is the one signal a PEP must send when it has nothing else to
 // say.
 //
-// ⚠️ It beats as the SENSOR, not as an agent. A gateway fronts many agents, so
-// attributing its liveness to one of them would report the others as covered by a
-// sensor that never spoke for them (specification/enrollment-and-receipts.md).
+// ⚠️ It beats as the INTEGRATION, not as an agent. A gateway fronts many agents, so
+// attributing its liveness to one of them would report the others as covered by an
+// integration that never spoke for them.
 //
 // The counters are the second half. A runtime that only knows "the PEP is up"
 // cannot see selective suppression; comparing what the PEP says it sent against
@@ -170,12 +170,12 @@ func sendHeartbeat(cfg *Config) {
 	c := counters()
 	logInfof("[OGR-BEAT] sending: evaluated=%d unchecked=%d ingested=%d mirrored=%d refused=%d unreadable=%d",
 		c["evaluated"], c["unchecked"], c["ingested"], c["mirrored"], c["refused"], c["unreadable"])
+	// The v0.7 heartbeat shape: one `integration` string names the sender and its
+	// build — the sensor envelope went with the evadability ladder.
 	payload, err := json.Marshal(map[string]any{
-		"sensor_id":      sensorName,
-		"sensor_type":    sensorType,
-		"sensor_version": pluginVersion,
-		"interval_s":     heartbeatPeriodMs / 1000,
-		"counters":       counters(),
+		"integration": integrationID(),
+		"interval_s":  heartbeatPeriodMs / 1000,
+		"counters":    counters(),
 	})
 	if err != nil {
 		return

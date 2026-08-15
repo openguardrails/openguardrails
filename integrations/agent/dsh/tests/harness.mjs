@@ -62,7 +62,7 @@ export async function boot(config = {}, tools = ["bash"]) {
   /** Run one tool call through the pipeline and return its normalized result. */
   const call = (name, args, options = {}) =>
     ctx.tools.execute({
-      callId: `call-${++seq}`,
+      callId: options.callId ?? `call-${++seq}`,
       name,
       arguments: args,
       signal: options.signal ?? new AbortController().signal,

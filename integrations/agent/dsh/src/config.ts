@@ -1,96 +1,58 @@
 /**
- * Guardrails configuration for the DeepSeek Harness (dsh) integration.
+ * Configuration for the OpenGuardrails dsh integration (v0.7, Recipe A).
  *
- * The agent configures its OWN guardrails — text + regex rules (no model
- * needed), and optionally its own model as an LLM judge. Resolution order,
- * lowest precedence first:
- *
- *   1. a sensible default policy (below)
- *   2. `.dsh/guardrails.json` in the agent's session workspace
- *      (agent-editable — this is how an agent gives itself guardrails)
- *   3. the plugin's `cordis.yml` config (highest precedence)
- *
- * The policy IS an OGR policy.json (composition + config_rules), so the same
- * file works unchanged across every OGR integration.
- *
- * Resolution is per-workspace, not per-process: dsh sessions each carry their
- * own `session.header.cwd`, and one dsh process serves many of them.
+ * v0.7 retired the SDK and with it this plugin's LOCAL policy engine — the
+ * bundled regex rules, the bring-your-own-model judge, the taint tracker.
+ * Every decision now comes from the runtime's `/v1/evaluate`; what a
+ * deployment configures here is the CONNECTION, the identity claims, the
+ * degraded-mode posture, and auto mode.
  */
-import { readFileSync, existsSync } from "node:fs"
-import { join } from "node:path"
-import type { Policy } from "@openguardrails/core"
 
-/** "Use your own model as the guardrail" — any OpenAI-compatible chat endpoint. */
-export interface JudgeConfig {
-  baseURL: string
-  model: string
-  apiKey?: string
-  headers?: Record<string, string>
-}
+/** Where an unset runtime URL points: the OpenGuardrails cloud. */
+export const DEFAULT_RUNTIME_URL = "https://openguardrails.com"
+
+/** The permission-preset name auto mode answers for unless configured otherwise. */
+export const DEFAULT_AUTO_PRESET = "auto-mode"
+
+/** Evaluate budget per call; strictly inside a PEP's patience, see the spec's budget note. */
+export const DEFAULT_TIMEOUT_MS = 5000
 
 /**
- * Which tool results carry untrusted external content, and whether the plugin
- * treats them as a taint source at all.
+ * What the plugin does when it CANNOT KNOW — the runtime unreachable, an
+ * evaluate timeout or 429, a verdict whose `unjudged` names the very content
+ * being enforced, or a tool call that reached execution with no verdict
+ * recorded at all (specification/degraded-mode.md):
+ *
+ * - `open` (default) — proceed, loudly. The harness keeps working through an
+ *   outage; the runtime's record shows the gap.
+ * - `closed` — treat "could not look" as block. The stance for deployments
+ *   where an unjudged action is worse than a stopped agent.
  */
-export interface TaintConfig {
-  /** Taint the calling agent from matching tool results (default true). */
-  toolResults?: boolean
-  /**
-   * Case-insensitive regex over the tool NAME. A match means "this tool's
-   * result is content someone else wrote" — the indirect prompt-injection
-   * vector. Defaults to {@link DEFAULT_TAINT_TOOL_PATTERN}.
-   */
-  toolResultPattern?: string
-}
+export type FailMode = "open" | "closed"
 
 /**
- * What this plugin does with one of the two v0.6 developer-path kinds.
+ * What the auto-mode answerer does with an approval ask it cannot resolve —
+ * a call the step verdict never covered, or no runtime configured:
  *
- * - `off` — do not emit it at all.
- * - `enforce` — evaluate it against the runtime, wait for the Verdict, and
- *   act on it.
- *
- * There is deliberately no observe mode: an agent integration's user is a
- * CONSUMER of the runtime, so a switched-on kind is evaluated and enforced;
- * fire-and-forget observation is a gateway posture. `enforce` requires a
- * configured runtime (`OGR_RUNTIME_URL` + `OGR_API_KEY`) — these kinds carry
- * the raw provider body precisely so the RUNTIME can classify it, and the
- * plugin's local detector chain has nothing to say about one.
- */
-export type LlmMode = "off" | "enforce"
-
-/**
- * What the auto-mode answerer does with an approval ask the runtime cannot
- * decide — a `require_approval` verdict (including the one that caused the
- * ask in the first place), an ask with no correlated tool call, or a failed
- * evaluation:
- *
- * - `human` (default) — delegate to the next answerer, so the chat UI's
- *   human gate still sees the genuinely ambiguous cases.
- * - `reject` — refuse it. The strict stance for headless deployments where
- *   no human will ever answer.
+ * - `human` (default) — delegate to the next answerer, the chat UI's human gate.
+ * - `reject` — refuse it. The strict stance for headless deployments.
  */
 export type AutoUnresolved = "human" | "reject"
 
 /**
- * Auto mode: answer dsh approval asks with the OGR runtime's verdict instead
- * of a human, for sessions whose permission preset is {@link preset}.
- *
- * The preset itself is deployment config on `@deepseek-ai/dsh-permission-presets`
- * (this plugin cannot add table entries); this block configures the ANSWERER
- * that gives the preset its meaning. See the README's "Auto mode" section.
+ * Auto mode: answer dsh approval asks with the step verdict instead of a
+ * human, for sessions whose permission preset is {@link preset}. The preset
+ * itself is deployment config on `@deepseek-ai/dsh-permission-presets`; this
+ * block configures the ANSWERER that gives the preset its meaning.
  */
 export interface AutoApprovalConfig {
-  /** Register the answerer at all (default true — it is inert until a session actually selects the preset). */
+  /** Register the answerer at all (default true — inert until a session selects the preset). */
   enabled?: boolean
   /** The permission-preset name whose sessions this plugin answers for (default `"auto-mode"`). */
   preset?: string
-  /** Disposal of an ask the runtime cannot decide (default `"human"`). */
+  /** Disposal of an ask the verdict cannot resolve (default `"human"`). */
   unresolved?: AutoUnresolved
 }
-
-/** Where an unset runtime URL points: the OpenGuardrails cloud. */
-export const DEFAULT_RUNTIME_URL = "https://openguardrails.com"
 
 /**
  * The OpenGuardrails runtime connection, plus the identity claims events
@@ -100,9 +62,9 @@ export const DEFAULT_RUNTIME_URL = "https://openguardrails.com"
  * default — get one at https://openguardrails.com.
  */
 export interface RuntimeOptions {
-  /** Runtime base URL (default {@link DEFAULT_RUNTIME_URL}). */
+  /** Runtime base URL (default {@link DEFAULT_RUNTIME_URL}). A mounted prefix belongs in it. */
   url?: string
-  /** API key; unset disables the runtime connection (local policy only). */
+  /** API key; unset disables the runtime connection (and with it every guard). */
   apiKey?: string
   /**
    * `agent_workspace` claim — the named policy/resource group this agent
@@ -117,173 +79,12 @@ export interface RuntimeOptions {
 }
 
 export interface GuardrailsOptions {
-  /** Inline OGR policy; overrides both the workspace file and the default. */
-  policy?: Policy
-  /** Path to a policy file. Relative paths resolve against the session workspace. */
-  policyPath?: string
-  /** Enable the LLM-judge detector backed by your own model. */
-  judge?: JudgeConfig
-  /** Also evaluate tool RESULTS, not just tool calls (default true). */
-  guardToolResults?: boolean
-  /** Per-agent taint propagation from untrusted tool results. */
-  taint?: TaintConfig
-  /** Auto mode: answer approval asks with the runtime's verdict for auto-preset sessions. */
-  auto?: AutoApprovalConfig
   /** The OpenGuardrails runtime connection and identity claims. */
   runtime?: RuntimeOptions
-  /**
-   * Emit `llm_request` — the assembled provider request body — before each
-   * model call (OGR v0.6 developer path). Under `enforce` a `block` verdict
-   * stops the call: the model is never reached. Default `off`.
-   */
-  llmRequest?: LlmMode
-  /**
-   * Emit `llm_response` — the provider response body — after the model
-   * answers. Under `enforce` the stream is buffered until the Verdict lands,
-   * so that "before the agent acts on it" is literally true; that costs one
-   * runtime round trip of first-token latency per step. Default `off`.
-   */
-  llmResponse?: LlmMode
-  /**
-   * Re-assert an OGR `block` as a monotonic tool-registry guard, and deny any
-   * call that reached the guard without an OGR verdict (default false).
-   *
-   * `tools/pre-execute` is dsh's deliberately reorderable policy layer: a
-   * listener ahead of this plugin that returns `allow` without delegating
-   * short-circuits the waterfall, and OGR never sees the call. With
-   * `failClosed`, the monotonic guard — which cannot be reordered away —
-   * refuses the un-evaluated call instead of letting it dispatch.
-   */
-  failClosed?: boolean
-}
-
-/**
- * Tools whose results are content the agent did not author. Deliberately a
- * name pattern, not a hard-coded list: dsh names MCP tools after their server
- * and a deployment renames its own tools freely.
- */
-export const DEFAULT_TAINT_TOOL_PATTERN = "web|fetch|search|browser|curl|http|^mcp_|_mcp_"
-
-/** The permission-preset name auto mode answers for unless configured otherwise. */
-export const DEFAULT_AUTO_PRESET = "auto-mode"
-
-/** Default text/regex guardrails — deterministic, no model required. */
-export const DEFAULT_POLICY: Policy = {
-  composition: {
-    "security.*": { strategy: "deny-wins", on_all_failed: "block" },
-    default: { strategy: "deny-wins" },
-  },
-  config_rules: {
-    secret_env_markers: ["SECRET", "TOKEN", "KEY", "PASSWORD", "AWS_", "PRIVATE", "CREDENTIAL"],
-    command_rules: [
-      {
-        id: "pipe-to-shell",
-        regex: "(curl|wget)\\b.*\\|\\s*(ba)?sh",
-        category: "security.malicious_command",
-        decision: "require_approval",
-        score: 0.85,
-        why: "remote script fetched and piped directly into a shell",
-      },
-      {
-        id: "rm-rf-root",
-        regex: "rm\\s+-rf\\s+/(\\s|$)",
-        category: "security.malicious_command",
-        decision: "block",
-        score: 1.0,
-        why: "destructive recursive delete of the filesystem root",
-      },
-      {
-        id: "secret-file-access",
-        regex: "(\\.env\\b|/\\.aws/credentials|/\\.ssh/id_|/\\.ssh/|auth\\.json|\\.netrc)",
-        category: "security.secret_leak",
-        decision: "block",
-        score: 0.9,
-        why: "command references a credential file — independent of the reader",
-      },
-      {
-        id: "pipe-to-sudo",
-        regex: "\\|\\s*sudo\\b",
-        category: "security.privilege_escalation",
-        decision: "require_approval",
-        score: 0.7,
-        why: "output piped into sudo",
-      },
-    ],
-  },
-}
-
-export interface ResolvedConfig {
-  policy: Policy
-  judge?: JudgeConfig
-  guardToolResults: boolean
-  taint: Required<TaintConfig>
-  failClosed: boolean
-  llmRequest: LlmMode
-  llmResponse: LlmMode
-}
-
-/** Where the workspace-local, agent-editable policy lives. */
-export const WORKSPACE_POLICY_PATH = join(".dsh", "guardrails.json")
-
-/**
- * Resolve the effective guardrails for one session workspace.
- *
- * @param workspaceDir - the agent's `session.header.cwd`, or undefined for a
- *   session created without one (then only inline config and an absolute
- *   `policyPath` can contribute a file).
- * @param options - the plugin's validated cordis config.
- * @param onWarn - reporter for a policy file that exists but does not parse;
- *   the safe default is kept rather than failing the call open.
- */
-export function loadGuardrailsConfig(
-  workspaceDir: string | undefined,
-  options?: GuardrailsOptions,
-  onWarn?: (message: string) => void,
-): ResolvedConfig {
-  let policy: Policy = DEFAULT_POLICY
-
-  const configured = options?.policyPath
-  // An explicit relative path resolves against the workspace, exactly like the
-  // default location does; without a workspace only an absolute path resolves.
-  const path = configured
-    ? (workspaceDir ? join(workspaceDir, configured) : configured)
-    : (workspaceDir ? join(workspaceDir, WORKSPACE_POLICY_PATH) : undefined)
-
-  if (path && existsSync(path)) {
-    try {
-      policy = JSON.parse(readFileSync(path, "utf8")) as Policy
-    } catch (error: unknown) {
-      // Malformed file → keep the safe default rather than failing open silently.
-      onWarn?.(`could not parse guardrails policy "${path}": ${String(error)} — using the default policy`)
-    }
-  }
-  if (options?.policy) policy = options.policy
-
-  // A judge needs both an endpoint and a model. Config validation cannot
-  // require them (an optional block whose fields are required can never be
-  // omitted), and a policy file may carry a half-written one, so the pair is
-  // checked here: anything short of both is "no judge configured", which
-  // falls back to the deterministic HeuristicBackend rather than to a
-  // guaranteed-failing fetch on every call.
-  const candidate = options?.judge ?? (policy["judge"] as JudgeConfig | undefined)
-  const judge = candidate?.baseURL && candidate.model ? candidate : undefined
-  // Only a HALF-written judge is a misconfiguration. Config validation
-  // materializes an empty `judge` block (its `headers` dict defaults to `{}`),
-  // and that means "no judge", not a mistake worth a warning on every call.
-  if (!judge && (candidate?.baseURL || candidate?.model)) {
-    onWarn?.("`judge` needs both `baseURL` and `model` — ignoring it and judging with the built-in heuristic backend")
-  }
-
-  return {
-    policy,
-    ...judge ? { judge } : {},
-    guardToolResults: options?.guardToolResults ?? true,
-    taint: {
-      toolResults: options?.taint?.toolResults ?? true,
-      toolResultPattern: options?.taint?.toolResultPattern ?? DEFAULT_TAINT_TOOL_PATTERN,
-    },
-    failClosed: options?.failClosed ?? false,
-    llmRequest: options?.llmRequest ?? "off",
-    llmResponse: options?.llmResponse ?? "off",
-  }
+  /** Degraded-mode posture (default `"open"`). */
+  failMode?: FailMode
+  /** Per-call evaluate budget in milliseconds (default {@link DEFAULT_TIMEOUT_MS}). */
+  timeoutMs?: number
+  /** Auto mode: answer approval asks with the step verdict for auto-preset sessions. */
+  auto?: AutoApprovalConfig
 }

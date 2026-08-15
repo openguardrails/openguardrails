@@ -1,8 +1,12 @@
 # `protocol` — one adapter per LLM wire format
 
 This package is where the plugin learns to read a client's traffic. Everything above
-it — event derivation, session chaining, masking policy, the two lanes — reads the
-neutral model defined in `protocol.go` and cannot tell one protocol from another.
+it — the streaming lanes, restoration, refusal rendering — reads the neutral model
+defined in `protocol.go` and cannot tell one protocol from another. (Since the v0.7
+raw-forwarder rewrite the plugin no longer derives events from the parsed
+conversation — the runtime classifies the raw body — but the SSE reassembly, the
+placeholder restorer and the per-protocol refusals all still rest on this package,
+and `ParseRequest`/`Mask` remain as tested library surface.)
 
 | file | protocol | `llm_protocol` |
 |---|---|---|
@@ -32,8 +36,8 @@ appear in `Conversation`.
 
 ## The model
 
-It mirrors the platform's own layering — **agent → session → run → turn → action** — so
-what a gateway sees lines up with what the runtime reassembles.
+It mirrors the platform's own layering — **session → turn → step → call** in OGR
+v0.7 vocabulary — so what a gateway sees lines up with what the runtime reassembles.
 
 ```go
 type Conversation struct {

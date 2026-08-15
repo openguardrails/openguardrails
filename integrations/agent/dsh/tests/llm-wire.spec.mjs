@@ -1,158 +1,83 @@
 /**
- * The v0.6 developer path: dsh model traffic → `openai.chat` bodies.
- *
- * These assert the PROJECTION only. Nothing here classifies the conversation —
- * that is the runtime's job — so what the tests pin is that everything the
- * runtime classifies FROM survives the re-shaping: the system slot, user words,
- * assistant prose, tool calls, tool outcomes fed back, and the tool inventory.
+ * The wire projections in isolation: dsh's `GenerateOptions` → the
+ * `step/request` openai.chat body, and a chunk stream → the CANONICAL
+ * `step/response` payload.
  */
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
 import { LLM_PROTOCOL, requestBody, ResponseAccumulator } from "../dist/llm-wire.js"
 
-const msg = (role, content) => ({ id: `m-${role}`, role, content, source: { kind: "user" } })
-
-test("the protocol name is the shape actually emitted", () => {
+test("the protocol name is the request projection's", () => {
   assert.equal(LLM_PROTOCOL, "openai.chat")
 })
 
-test("the system slot leads the message list", () => {
+test("requestBody: system leads, tool results become tool-role messages", () => {
   const body = requestBody({
-    provider: "p", model: "m", system: "You are dsh.",
-    messages: [msg("user", [{ type: "text", text: "hi" }])],
+    provider: "test", model: "m", system: "sys",
+    messages: [
+      { id: "m1", role: "user", content: [{ type: "text", text: "hi" }], source: { kind: "user" } },
+      {
+        id: "m2", role: "assistant",
+        content: [
+          { type: "text", text: "running it" },
+          { type: "tool-call", id: "c1", name: "bash", arguments: '{"command":"ls"}' },
+        ],
+        source: { kind: "assistant" },
+      },
+      {
+        id: "m3", role: "user",
+        content: [{ type: "tool-result", toolCallId: "c1", content: [{ type: "text", text: "README.md" }] }],
+        source: { kind: "tool" },
+      },
+    ],
+    tools: [{ name: "bash", description: "run", parameters: { type: "object" } }],
   })
-  assert.deepEqual(body.messages[0], { role: "system", content: "You are dsh." })
+  assert.deepEqual(body.messages[0], { role: "system", content: "sys" })
   assert.deepEqual(body.messages[1], { role: "user", content: "hi" })
-  assert.equal(body.model, "m")
+  assert.equal(body.messages[2].role, "assistant")
+  assert.equal(body.messages[2].tool_calls[0].function.name, "bash")
+  // The tool RESULT is a tool-role message keyed by tool_call_id — where the
+  // runtime judges the outcomes being fed back (Recipe A step 3).
+  assert.deepEqual(body.messages[3], { role: "tool", tool_call_id: "c1", content: "README.md" })
+  assert.equal(body.tools[0].function.name, "bash")
 })
 
-test("assistant tool calls project onto openai.chat tool_calls", () => {
-  const body = requestBody({
-    provider: "p", model: "m",
-    messages: [msg("assistant", [
-      { type: "text", text: "Running it." },
-      { type: "tool-call", id: "c1", name: "bash", arguments: '{"command":"ls"}' },
-    ])],
-  })
-  assert.deepEqual(body.messages[0], {
-    role: "assistant",
-    content: "Running it.",
-    tool_calls: [{ id: "c1", type: "function", function: { name: "bash", arguments: '{"command":"ls"}' } }],
-  })
-})
-
-test("a tool result becomes a tool-role message, not user words", () => {
-  // This is the distinction the developer path rests on: the runtime has to be
-  // able to tell "the tool outcomes being fed back" from "the new user words".
-  const body = requestBody({
-    provider: "p", model: "m",
-    messages: [msg("user", [
-      { type: "tool-result", toolCallId: "c1", content: [{ type: "text", text: "total 0" }] },
-    ])],
-  })
-  assert.equal(body.messages.length, 1)
-  assert.deepEqual(body.messages[0], { role: "tool", tool_call_id: "c1", content: "total 0" })
-})
-
-test("a message carrying both a tool result and user text yields both messages", () => {
-  const body = requestBody({
-    provider: "p", model: "m",
-    messages: [msg("user", [
-      { type: "tool-result", toolCallId: "c1", content: [{ type: "text", text: "done" }] },
-      { type: "text", text: "now what?" },
-    ])],
-  })
-  assert.deepEqual(body.messages.map((m) => m.role), ["tool", "user"])
-  assert.equal(body.messages[1].content, "now what?")
-})
-
-test("the tool inventory travels verbatim — it is an attack surface of its own", () => {
-  const body = requestBody({
-    provider: "p", model: "m", messages: [],
-    tools: [{ name: "bash", description: "run a command", parameters: { type: "object", properties: {} } }],
-  })
-  assert.deepEqual(body.tools, [{
-    type: "function",
-    function: { name: "bash", description: "run a command", parameters: { type: "object", properties: {} } },
-  }])
-})
-
-test("reasoning blocks are dropped; no openai.chat request body carries them", () => {
-  const body = requestBody({
-    provider: "p", model: "m",
-    messages: [msg("assistant", [
-      { type: "reasoning", text: "the user probably wants X" },
-      { type: "text", text: "Sure." },
-    ])],
-  })
-  assert.equal(body.messages[0].content, "Sure.")
-  assert.ok(!JSON.stringify(body).includes("probably wants X"))
-})
-
-test("generation parameters ride along when set, and are absent when not", () => {
-  const full = requestBody({ provider: "p", model: "m", messages: [], temperature: 0, maxTokens: 100, stop: ["</x>"] })
-  assert.equal(full.temperature, 0)
-  assert.equal(full.max_tokens, 100)
-  assert.deepEqual(full.stop, ["</x>"])
-
-  const bare = requestBody({ provider: "p", model: "m", messages: [] })
-  assert.ok(!("temperature" in bare))
-  assert.ok(!("max_tokens" in bare))
-  assert.ok(!("stop" in bare))
-  assert.ok(!("tools" in bare))
-})
-
-test("the accumulator folds block-end chunks into an openai.chat response", () => {
+test("the accumulator folds block-ends into the canonical payload, args parsed", () => {
   const acc = new ResponseAccumulator("m")
-  assert.equal(acc.complete, false)
-  assert.equal(acc.empty, true)
-
-  acc.push({ type: "block-start", index: 0, blockType: "text" })
-  acc.push({ type: "text-delta", index: 0, text: "par" })
-  acc.push({ type: "block-end", index: 0, block: { type: "text", text: "partial ignored, block wins" } })
-  acc.push({ type: "block-end", index: 1, block: { type: "tool-call", id: "c1", name: "bash", arguments: '{"command":"ls"}' } })
-  acc.push({ type: "usage", usage: { inputTokens: 10, outputTokens: 5 } })
+  acc.push({ type: "block-end", index: 0, block: { type: "reasoning", text: "thinking…" } })
+  acc.push({ type: "block-end", index: 1, block: { type: "text", text: "on it. " } })
+  acc.push({ type: "block-end", index: 2, block: { type: "text", text: "done." } })
+  acc.push({ type: "block-end", index: 3, block: { type: "tool-call", id: "c1", name: "bash", arguments: '{"command":"df -h"}' } })
+  acc.push({ type: "usage", usage: { inputTokens: 10, outputTokens: 5, reasoningTokens: 2 } })
   acc.push({ type: "finish", reason: { kind: "tool-calls" } })
 
   assert.equal(acc.complete, true)
   assert.equal(acc.empty, false)
   const body = acc.body()
-  const choice = body.choices[0]
-  assert.equal(choice.message.content, "partial ignored, block wins")
-  assert.deepEqual(choice.message.tool_calls, [
-    { id: "c1", type: "function", function: { name: "bash", arguments: '{"command":"ls"}' } },
-  ])
-  assert.equal(choice.finish_reason, "tool_calls")
-  assert.deepEqual(body.usage, { inputTokens: 10, outputTokens: 5 })
+  assert.equal(body.text, "on it. done.")
+  assert.equal(body.reasoning, "thinking…")
+  assert.deepEqual(body.tool_calls, [{ id: "c1", name: "bash", arguments: { command: "df -h" } }])
+  assert.deepEqual(body.usage, { input_tokens: 10, output_tokens: 5, reasoning_tokens: 2 })
+  assert.ok(body.timing.started_at)
+  assert.ok(body.timing.first_token_at)
+  assert.ok(body.timing.completed_at)
 })
 
-test("deltas alone never produce content — only block-end is authoritative", () => {
+test("unparseable tool arguments degrade to {input}, never a double-encoded string", () => {
   const acc = new ResponseAccumulator("m")
-  acc.push({ type: "text-delta", index: 0, text: "streamed" })
-  acc.push({ type: "tool-call-delta", index: 1, id: "c1", name: "bash", argumentsDelta: '{"com' })
+  acc.push({ type: "block-end", index: 0, block: { type: "tool-call", id: "c1", name: "bash", arguments: "not json {" } })
   acc.push({ type: "finish", reason: { kind: "stop" } })
-  assert.equal(acc.empty, true, "no block-end ⇒ nothing complete to judge")
+  assert.deepEqual(acc.body().tool_calls, [{ id: "c1", name: "bash", arguments: { input: "not json {" } }])
 })
 
-test("finish reasons map to openai.chat, and unknown kinds pass through", () => {
-  const of = (kind) => {
-    const acc = new ResponseAccumulator("m")
-    acc.push({ type: "block-end", index: 0, block: { type: "text", text: "x" } })
-    acc.push({ type: "finish", reason: { kind } })
-    return acc.body().choices[0].finish_reason
-  }
-  assert.equal(of("stop"), "stop")
-  assert.equal(of("tool-calls"), "tool_calls")
-  assert.equal(of("max-tokens"), "length")
-  assert.equal(of("some-future-kind"), "some-future-kind")
-})
+test("an aborted stream is incomplete; an empty one not worth a round trip", () => {
+  const aborted = new ResponseAccumulator("m")
+  aborted.push({ type: "block-end", index: 0, block: { type: "text", text: "half" } })
+  assert.equal(aborted.complete, false)
 
-test("a text-only answer reports content and no tool_calls", () => {
-  const acc = new ResponseAccumulator("m")
-  acc.push({ type: "block-end", index: 0, block: { type: "text", text: "hello" } })
-  acc.push({ type: "finish", reason: { kind: "stop" } })
-  const choice = acc.body().choices[0]
-  assert.equal(choice.message.content, "hello")
-  assert.ok(!("tool_calls" in choice.message))
+  const empty = new ResponseAccumulator("m")
+  empty.push({ type: "finish", reason: { kind: "stop" } })
+  assert.equal(empty.complete, true)
+  assert.equal(empty.empty, true)
 })

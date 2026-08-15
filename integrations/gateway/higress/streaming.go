@@ -2,6 +2,7 @@ package main
 
 import (
 	"strings"
+	"time"
 
 	"github.com/openguardrails/higress/protocol"
 	"github.com/tidwall/gjson"
@@ -15,13 +16,14 @@ import (
 // `process_output` is documented as "not called for STREAMING responses"), leaving a
 // 230:21 request-to-response ratio in the event store.
 //
-// ⚠️ And it must be reassembly for THIS protocol. There used to be a
-// `streamReassemblySupported()` that answered true for `openai.chat` and false for the
-// other two, because the reader hard-coded `choices.0.delta.*`: fed an Anthropic or a
-// Responses stream it accumulated nothing, `Result()` came back empty, and the output
-// side of every streamed answer went unreported. That is gone — each protocol brings
-// its own decoder (protocol/sse.go), so there is no longer a protocol whose stream this
-// build can only shrug at.
+// ⚠️ And it must be reassembly for THIS protocol — each protocol brings its own
+// decoder (protocol/sse.go), so there is no protocol whose stream this build can only
+// shrug at.
+//
+// v0.7 addition: the processor OBSERVES TIMING. The canonical `step/response` payload
+// carries `timing {started_at, first_token_at, completed_at}` — facts only the thing
+// in the byte path can measure, and what lets the platform split time-to-first-token
+// from decoding.
 
 // maxRawAccum bounds the copy kept of a non-streamed reply. Past it the reply is still
 // delivered whole and simply reported truncated: a huge answer must not turn into a
@@ -44,10 +46,17 @@ type streamProcessor struct {
 	// "the model said nothing" from "we could not read a single frame of what it sent"
 	// — two states that look identical from an empty Result and mean opposite things.
 	bytes int
+
+	// Wall-clock facts for the canonical payload's `timing`. startedAt is when this
+	// processor first existed (the response phase opening); firstAt is the first
+	// chunk that carried bytes; doneAt is the last chunk.
+	startedAt time.Time
+	firstAt   time.Time
+	doneAt    time.Time
 }
 
 func newStreamProcessor(proto protocol.Protocol, mapping map[string]string, sse bool) *streamProcessor {
-	s := &streamProcessor{proto: proto, sse: sse}
+	s := &streamProcessor{proto: proto, sse: sse, startedAt: time.Now()}
 	if sse {
 		s.scan = protocol.NewScanner(proto.NewDecoder(protocol.NewRestorer(mapping)))
 	}
@@ -57,6 +66,12 @@ func newStreamProcessor(proto protocol.Protocol, mapping map[string]string, sse 
 // ProcessChunk restores placeholders in one raw chunk and accumulates what the model
 // produced.
 func (s *streamProcessor) ProcessChunk(chunk []byte, isLast bool) []byte {
+	if len(chunk) > 0 && s.firstAt.IsZero() {
+		s.firstAt = time.Now()
+	}
+	if isLast {
+		s.doneAt = time.Now()
+	}
 	s.bytes += len(chunk)
 	if !s.sse {
 		if s.raw.Len() < maxRawAccum {
@@ -72,6 +87,20 @@ func (s *streamProcessor) Bytes() int { return s.bytes }
 
 // SawBytes reports whether there was anything to read at all.
 func (s *streamProcessor) SawBytes() bool { return s.bytes > 0 }
+
+// Timing renders what this processor observed, for the canonical payload. Fields the
+// stream never reached stay absent rather than fabricated — an unread stream has no
+// first token, and inventing one would be the timeline lying.
+func (s *streamProcessor) Timing() *canonicalTiming {
+	t := &canonicalTiming{StartedAt: s.startedAt.UTC().Format(time.RFC3339Nano)}
+	if !s.firstAt.IsZero() {
+		t.FirstTokenAt = s.firstAt.UTC().Format(time.RFC3339Nano)
+	}
+	if !s.doneAt.IsZero() {
+		t.CompletedAt = s.doneAt.UTC().Format(time.RFC3339Nano)
+	}
+	return t
+}
 
 // Result is what the model produced.
 //

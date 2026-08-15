@@ -1,13 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://openguardrails.com/schema/0.6/verdict.schema.json",
+  "$id": "https://openguardrails.com/schema/0.7/verdict.schema.json",
   "title": "Verdict",
-  "description": "A detector's decision about a GuardEvent.",
+  "description": "The runtime's decision about a GuardEvent. Two decisions: allow | block. Redaction is not a decision — a non-empty modifications.spans on an allow says it. \"Flag\" is not a decision — allow with findings says it.",
   "type": "object",
   "required": [
     "ogr_version",
     "event_id",
-    "guard_id",
     "provider",
     "decision"
   ],
@@ -15,17 +14,12 @@
   "properties": {
     "ogr_version": {
       "type": "string",
-      "const": "0.6"
+      "const": "0.7"
     },
     "event_id": {
       "type": "string",
       "minLength": 1,
       "description": "Runtime-assigned identity of the judged event, returned to the caller here."
-    },
-    "guard_id": {
-      "type": "string",
-      "minLength": 1,
-      "description": "The event's guard group: the client's propagated value when sent, else runtime-assigned."
     },
     "provider": {
       "type": "string",
@@ -34,103 +28,31 @@
     "decision": {
       "enum": [
         "allow",
-        "block",
-        "require_approval",
-        "modify",
-        "redact"
+        "block"
       ]
+    },
+    "session_id": {
+      "type": "string",
+      "description": "The session the runtime attributed the event to: the declared value echoed, or the derived one."
+    },
+    "turn": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "step": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "attribution": {
+      "enum": [
+        "declared",
+        "derived"
+      ],
+      "description": "Whether session_id/turn/step were the producer's claim or the runtime's reconstruction."
     },
     "latency_ms": {
       "type": "number",
       "minimum": 0
-    },
-    "reasons": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
-    "categories": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": [
-          "id",
-          "domain"
-        ],
-        "additionalProperties": false,
-        "properties": {
-          "id": {
-            "type": "string",
-            "pattern": "^(safety|security|privacy|x)\\.[a-z0-9_.]+$"
-          },
-          "domain": {
-            "enum": [
-              "safety",
-              "security",
-              "privacy"
-            ]
-          },
-          "score": {
-            "type": "number",
-            "minimum": 0,
-            "maximum": 1
-          }
-        }
-      }
-    },
-    "modifications": {
-      "type": "object",
-      "required": [
-        "kind"
-      ],
-      "properties": {
-        "kind": {
-          "enum": [
-            "redact",
-            "rewrite",
-            "constrain"
-          ]
-        },
-        "spans": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": [
-              "path"
-            ],
-            "properties": {
-              "path": {
-                "type": "string"
-              },
-              "start": {
-                "type": "integer"
-              },
-              "end": {
-                "type": "integer"
-              },
-              "replacement": {
-                "type": "string"
-              },
-              "operator": {
-                "enum": [
-                  "replace",
-                  "mask",
-                  "hash",
-                  "encrypt"
-                ],
-                "default": "replace"
-              },
-              "ref": {
-                "type": "string"
-              }
-            }
-          }
-        },
-        "payload": {
-          "type": "object"
-        }
-      }
     },
     "findings": {
       "type": "array",
@@ -145,8 +67,25 @@
             "type": "string",
             "pattern": "^(safety|security|privacy|x)\\.[a-z0-9_.]+$"
           },
+          "severity": {
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ]
+          },
+          "action": {
+            "enum": [
+              "flag",
+              "redact",
+              "block"
+            ],
+            "description": "What this finding contributed to the decision."
+          },
           "path": {
-            "type": "string"
+            "type": "string",
+            "description": "Payload path of the judged text, e.g. payload.tool_calls.1.arguments.command. Registration contract: paths name locations the producer registered when building the event."
           },
           "start": {
             "type": "integer",
@@ -163,9 +102,73 @@
           },
           "detector": {
             "type": "string"
+          },
+          "fp": {
+            "type": "string",
+            "description": "Whitelist fingerprint: a hash of the finding's subject, minted by the engine. Never the value itself."
+          },
+          "whitelisted": {
+            "type": "boolean",
+            "description": "True when an operator whitelisted this exact subject: the finding is recorded but contributes nothing to the decision."
+          },
+          "subject": {
+            "type": "string",
+            "description": "Masked display form of the finding's subject. Never plaintext beyond what the event still carries after modifications."
           }
         }
       }
+    },
+    "modifications": {
+      "type": "object",
+      "required": [
+        "spans"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "spans": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "path",
+              "start",
+              "end",
+              "replacement"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "start": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "end": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "replacement": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "unjudged": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Payload paths this verdict could NOT judge. Absent or empty asserts every routed text was judged; a fail-closed enforcement point MUST treat a non-empty value as \"could not look\", which is not \"found nothing\"."
+    },
+    "output_mode": {
+      "enum": [
+        "buffer",
+        "stream"
+      ],
+      "description": "Which lane the runtime selected for judging a streamed output."
     }
   }
 }

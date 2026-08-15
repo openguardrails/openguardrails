@@ -1,5 +1,11 @@
 # openguardrails-examples
 
+> **⚠️ v0.6-STALE.** This directory predates protocol v0.7 (the ledger model:
+> Session / Turn / Step / Call, kinds `step/request` / `step/response` /
+> `turn/end`, no SDK layer). It will be rewritten against the
+> [v0.7 Runtime API](../specification/runtime-api.md) and its two integration
+> recipes; until then, treat everything below as historical.
+
 The **30-second proof that OGR runs** — plus the index of every place it plugs in.
 
 [OpenGuardrails](https://openguardrails.com) is a vendor-neutral protocol for AI

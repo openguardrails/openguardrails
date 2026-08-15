@@ -25,8 +25,9 @@
 //
 // # The model
 //
-// The types mirror the platform's own layering — agent → session → run → turn →
-// action — so a gateway's view lines up with what the runtime reassembles:
+// The types mirror the platform's own layering — session → turn → step → call in
+// OGR v0.7 vocabulary — so a gateway's view lines up with what the runtime
+// reassembles:
 //
 //	Conversation   what one request carries: a system prompt, turns, tool defs
 //	Turn           one step of the conversation

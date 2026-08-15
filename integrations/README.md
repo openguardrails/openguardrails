@@ -1,21 +1,29 @@
 # Integrations (the plugin layer)
 
-Integrations are the **plugin layer** of OGR's API → SDK → Plugin stack: a
-plugin is a hook for one surface plus an SDK. The hook observes actions and
-enforces decisions; the SDK (`packages/python` / `packages/javascript`)
-handles everything below — building `GuardEvent`s, calling the
-[Runtime API](../specification/runtime-api.md) (`/v1/evaluate`, `/v1/ingest`),
-auth, signing, and wire mapping. A plugin should not hand-roll an HTTP client
-or its own wire serialization.
+Integrations are the **plugin layer** of OGR's API → Plugin stack: a plugin
+is a hook for one surface that observes steps, builds `GuardEvent`s, and
+enforces `Verdict`s — speaking the
+[Runtime API](../specification/runtime-api.md) (`/v1/evaluate`,
+`/v1/ingest`) directly. There is no SDK layer: each plugin implements one of
+the two normative
+[integration recipes](../specification/runtime-api.md#the-two-integration-recipes),
+and its README says which.
 
-Four hook categories:
+Two hook categories:
 
-| Category | Purpose |
-|---|---|
-| [`agent/`](agent/) | Intercept agent tool and framework lifecycle hooks. |
-| [`gateway/`](gateway/) | Intercept LLM protocol requests and responses. |
-| [`sandbox/`](sandbox/) | Enforce policy at process, filesystem, and network boundaries. |
-| [`ebpf/`](ebpf/) | Observe or enforce kernel-level activity with eBPF. |
+| Category | Recipe | Purpose |
+|---|---|---|
+| [`agent/`](agent/) | A (agent-direct) | Inside the harness loop: declares `session_id`/`turn`/`step` on every event and reports each turn's close. |
+| [`gateway/`](gateway/) | B (gateway) | An LLM proxy: one proxied model call = one step; mints a `step_id`, declares no coordinates, forwards raw provider bodies. |
 
-Language-specific plugins depend on the corresponding SDK under `packages/`.
-Marketplace plugins may bundle that SDK into a self-contained artifact.
+## Status (2026-08-14)
+
+Protocol v0.7 retired the SDK layer; plugins are being rewritten against the
+API one by one:
+
+- **[`gateway/higress`](gateway/higress/)** — the v0.7 reference gateway
+  integration, Recipe B (Go/WASM, CI-covered).
+- **[`agent/dsh`](agent/dsh/)** — the v0.7 reference agent-direct
+  integration, Recipe A (npm workspace, CI-covered).
+- Everything else is **v0.6-stale** (built on the retired SDKs), excluded
+  from the workspaces and CI, and treated as historical until its rewrite.

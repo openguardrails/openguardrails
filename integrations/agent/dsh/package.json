@@ -1,7 +1,7 @@
 {
-  "name": "@openguardrails/dsh-auto-mode",
-  "version": "0.1.6",
-  "description": "Auto mode for DeepSeek Harness (dsh): an Auto entry in the Permissions selector whose approval prompts are answered by OpenGuardrails policy instead of a human — plus the full OGR guard engine underneath. No core changes.",
+  "name": "@openguardrails/dsh",
+  "version": "0.2.0",
+  "description": "OpenGuardrails for DeepSeek Harness (dsh): the v0.7 Recipe A reference integration \u2014 every model step judged at the loop's own seams (pre-model, post-model, turn close), coordinates declared, no SDK. Includes Auto Mode: approval prompts answered by the step verdict. No core changes.",
   "type": "module",
   "license": "Apache-2.0",
   "author": "OpenGuardrails",
@@ -52,9 +52,6 @@
     "ogr",
     "openguardrails"
   ],
-  "dependencies": {
-    "@openguardrails/core": "^0.2.0"
-  },
   "peerDependencies": {
     "@deepseek-ai/cordis": "*",
     "@deepseek-ai/dsh-agent": "*",
