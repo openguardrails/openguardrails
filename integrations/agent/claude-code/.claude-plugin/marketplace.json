@@ -5,7 +5,7 @@
     {
       "name": "openguardrails",
       "source": "./",
-      "description": "OGR command-approval gate for Claude Code — a PreToolUse hook that denies risky tool calls (curl|bash, obfuscated exec, non-allowlisted egress, credential reads) before they run, even in bypass mode."
+      "description": "OGR v0.8 enforcement for Claude Code — a PreToolUse hook that evaluates each held tool call against your OGR runtime and denies dangerous calls before they run, even in bypass mode."
     }
   ]
 }
