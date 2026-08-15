@@ -46,6 +46,15 @@ README, and `examples/minimal-agent/`.
   recorded as unjudged; `fail_mode: closed` remains the explicit opt-in for
   deployments gating dangerous categories (degraded-mode spec rewritten
   accordingly).
+- **`findings[].subject` carries the detected value**, as the producer sent
+  it. It was specified as a masked display form, which was theatre: the
+  enforcement point supplied the very text being judged, so withholding it
+  from the answer protected nothing from the only party reading it — while
+  making "which value did this fire on" unanswerable in a console. The
+  prohibition it sat beside is unchanged and now stated on its own: findings
+  MUST NOT echo matched text per span. `subject` is the one bounded
+  exception, at most one per finding, and it is what a false-positive
+  exception keys on.
 
 ### Removed
 - **`/v1/ingest`.** Evaluate records every event it judges; with `turn/end`

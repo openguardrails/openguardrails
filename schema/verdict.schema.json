@@ -89,7 +89,7 @@
           },
           "subject": {
             "type": "string",
-            "description": "Masked display form of the finding's subject. Never plaintext beyond what the event still carries after modifications."
+            "description": "The detected value this finding is about, as the producer sent it — at most one per finding, and what an operator's false-positive exception keys on. NOT a per-span echo of matched text, which findings MUST NOT carry."
           }
         }
       }
