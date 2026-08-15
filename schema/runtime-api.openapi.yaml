@@ -7,32 +7,33 @@ openapi: 3.1.0
 
 info:
   title: OpenGuardrails Runtime API
-  version: "0.7"
+  version: "0.8"
   summary: The HTTP wire contract between an OGR runtime (PDP) and its integration points (PEPs).
   description: |
     The OpenGuardrails (OGR) Runtime API is the normative HTTP binding of the
     OGR contract: the API a runtime (Policy Decision Point) exposes and an
     integration point (Policy Enforcement Point, PEP) calls. There is no SDK
-    layer — this API is the integration surface, and the two integration
-    recipes (agent-direct and gateway) are written against it in the
-    specification.
+    layer — this API is the integration surface: one decision endpoint and
+    one recipe, the same for a developer instrumenting their own agent loop
+    and for a gateway proxying model traffic.
 
-    The observed plane is LLM messages. A session is a ledger of steps: one
-    step is one model call, reported as two events — `step/request` (what is
-    about to be sent) and `step/response` (what came back, before the agent
-    acts on it) — plus an optional `turn/end` mark closing an instruction.
+    The observed plane is LLM messages. One step is one model call, reported
+    as two events — `step/request` (what is about to be sent) and
+    `step/response` (what came back, whole, before the agent acts on it) —
+    bound to each other by a producer-minted `step_id`. Everything above the
+    step (session, turn, numbering) is derived server-side; nothing else is
+    declared on the wire.
 
-    Two data paths exist. `POST /v1/evaluate` is the synchronous decision
-    path: one event in, one verdict out, called while the PEP is holding an
-    action. `POST /v1/ingest` is the asynchronous observation path: batches
-    of events that need no synchronous decision (turn/end marks, the whole
-    answer after a streamed judgment). The remaining endpoints are PEP
-    liveness and health.
+    `POST /v1/evaluate` is the one event path: one event in, one verdict
+    out, called while the PEP is holding an action; every accepted evaluate
+    also records the event. A streamed response is judged exactly once,
+    whole, behind a held-back tail. The remaining endpoints are PEP liveness
+    and runtime health.
 
     All requests and responses are JSON, UTF-8,
     `Content-Type: application/json`. Field names on the wire are
-    `snake_case`, exactly as in the JSON Schemas. The canonical schema
-    version is `ogr_version: "0.7"`.
+    `snake_case`, exactly as in the JSON Schemas. There is no protocol
+    version on the wire; the runtime adapts to the events it receives.
 
     Hosted reference documentation: https://openguardrails.com/api/docs/
     Normative specification:
@@ -67,9 +68,7 @@ security:
 
 tags:
   - name: decisions
-    description: The synchronous decision path.
-  - name: observations
-    description: The asynchronous observation path.
+    description: The decision path — since v0.8 also the only event path.
   - name: liveness
     description: Integration liveness and runtime health.
 
@@ -82,28 +81,18 @@ paths:
       description: |
         One `GuardEvent` in, one `Verdict` out. A PEP calls this while
         holding an action: the step's request before the model call, or the
-        step's response before executing what the model asked for.
+        step's complete response before executing what the model asked for.
+        Every accepted evaluate also RECORDS the event — evaluate is the
+        observation channel; there is no separate ingest path.
 
-        A non-partial evaluate also RECORDS the event (as if ingested);
-        clients MUST NOT send the same event to `/v1/ingest` again.
+        A streamed response is judged exactly once, whole, after stream
+        reassembly, while the integration holds back the stream's tail
+        (see the specification's streaming section).
 
-        On failure (timeout, 429, 5xx, network) the PEP applies its locally
-        configured fail mode per category; it MUST NOT default to allow for
-        gated categories.
-      parameters:
-        - in: header
-          name: ogr-partial
-          required: false
-          schema:
-            type: string
-            enum: ["1"]
-          description: |
-            Marks an interim judgment of a growing streamed answer: decide,
-            answer, record nothing. Judged under the same policies,
-            whitelists and fail modes as a full call — the header suppresses
-            the writes, never changes the decision. The PEP MUST report the
-            final answer once, whole, through `/v1/ingest` when the stream
-            ends.
+        On failure (timeout, 429, 5xx, network) the PEP applies its
+        configured fail mode. The default is open: proceed and record the
+        step as unjudged; deployments gating dangerous categories configure
+        closed.
       requestBody:
         required: true
         content:
@@ -121,57 +110,6 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "429": { $ref: "#/components/responses/RateLimited" }
 
-  /v1/ingest:
-    post:
-      tags: [observations]
-      operationId: ingest
-      summary: Record a batch of events that need no synchronous decision.
-      description: |
-        1–100 events per request; each element validated independently.
-        `results` preserves request order — order IS the pairing. There is no
-        request deduplication: a client retrying a timed-out batch MAY
-        produce duplicate records, which observability data tolerates.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [batch]
-              additionalProperties: false
-              properties:
-                batch:
-                  type: array
-                  minItems: 1
-                  maxItems: 100
-                  items:
-                    $ref: "#/components/schemas/GuardEvent"
-      responses:
-        "207":
-          description: Per-element results, in request order.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [results]
-                properties:
-                  results:
-                    type: array
-                    items:
-                      type: object
-                      required: [id, status]
-                      properties:
-                        id:
-                          type: [string, "null"]
-                          description: Runtime-assigned event_id of the accepted element, null for a rejected one.
-                        status:
-                          type: integer
-                        error:
-                          type: string
-        "400": { $ref: "#/components/responses/InvalidEvent" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "429": { $ref: "#/components/responses/RateLimited" }
-
   /v1/heartbeat:
     post:
       tags: [liveness]
@@ -180,9 +118,11 @@ paths:
       description: |
         Lets the runtime distinguish "agent idle" from "integration went
         dark". Transport-level: a heartbeat is not a GuardEvent and carries
-        no guarded action. A heartbeat MUST register a live-but-idle agent so
-        fleet coverage reflects integrations that have not yet emitted an
-        event.
+        no guarded action. This is also where the integration build id
+        lives (it left the event in v0.8) — fleet coverage and bad-rollout
+        triage read it from here. A heartbeat MUST register a live-but-idle
+        agent so fleet coverage reflects integrations that have not yet
+        emitted an event.
       requestBody:
         required: true
         content:
@@ -194,7 +134,7 @@ paths:
               properties:
                 integration:
                   type: string
-                  description: The reporting integration and build, e.g. "ogr-higress/0.4.1".
+                  description: The reporting integration and build, e.g. "ogr-higress/3.0.0".
                 agent_id:
                   type: string
                 interval_s:
@@ -259,9 +199,9 @@ components:
       description: |
         Organization API key (`Authorization: Bearer ogr_<key>`). The key
         proves the ORGANIZATION — the tenant boundary every asserted name is
-        resolved inside — and is the identity floor: a caller asserting no
-        identity fields is still fully attributable (agent derived from the
-        key, sessions derived, the key's workspace).
+        resolved inside — and is the identity floor: a caller whose identity
+        five-tuple is all empty strings is still fully attributable (agent
+        derived from the key, sessions derived, the key's workspace).
 
   responses:
     InvalidEvent:
@@ -301,7 +241,7 @@ components:
                 type: string
                 const: unauthorized
     RateLimited:
-      description: Rate limit exhausted. Clients back off and treat a 429 on /v1/evaluate like an unreachable runtime (apply the local fail mode, never fail open on gated categories).
+      description: Rate limit exhausted. Clients back off and treat a 429 on /v1/evaluate like an unreachable runtime (apply the configured fail mode; the default is open, and deployments gating dangerous categories configure closed).
       content:
         application/json:
           schema:

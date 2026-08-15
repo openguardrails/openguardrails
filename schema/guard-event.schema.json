@@ -1,120 +1,65 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://openguardrails.com/schema/0.7/guard-event.schema.json",
+  "$id": "https://openguardrails.com/schema/0.8/guard-event.schema.json",
   "title": "GuardEvent",
-  "description": "A unit observed at an OGR integration point, on the one observed plane: LLM messages. Three kinds: the two halves of a step (one model call), and a turn-close mark. All fields are flat, top-level snake_case; objects are reserved for inherently structured data (payload).",
+  "description": "A unit observed at an OGR integration point, on the one observed plane: LLM messages. Two kinds: the two halves of a step (one model call). Every field is required; the empty string on an identity field is the explicit 'no assertion'. All fields are flat, top-level snake_case; objects are reserved for inherently structured data (payload).",
   "type": "object",
   "required": [
     "kind",
+    "step_id",
+    "agent_id",
+    "agent_type",
+    "agent_workspace",
+    "agent_owner",
+    "agent_user",
+    "llm_protocol",
     "payload"
   ],
   "additionalProperties": false,
   "properties": {
-    "ogr_version": {
-      "type": "string",
-      "const": "0.7"
-    },
     "kind": {
       "enum": [
         "step/request",
-        "step/response",
-        "turn/end"
+        "step/response"
       ]
-    },
-    "session_id": {
-      "type": "string",
-      "minLength": 1,
-      "description": "The producer's session. Declared by integrations that own their loop; absent, the runtime derives the session and echoes it on the Verdict."
-    },
-    "turn": {
-      "type": "integer",
-      "minimum": 1,
-      "description": "1-based turn index within the session (one instruction to quiescence). Declared by loop-owning integrations; absent, derived."
-    },
-    "step": {
-      "type": "integer",
-      "minimum": 1,
-      "description": "1-based step index within the turn (one model call). Declared by loop-owning integrations; absent, derived."
     },
     "step_id": {
       "type": "string",
       "minLength": 1,
-      "description": "Producer-minted opaque id binding the step/request and step/response of ONE model call. A gateway mints one per proxied call; a producer stamping turn+step MAY omit it."
-    },
-    "parent_session_id": {
-      "type": "string",
-      "minLength": 1,
-      "description": "The spawning session, when this session belongs to a subagent. Sessions form a tree; each child reports its own session."
-    },
-    "timestamp": {
-      "type": "string",
-      "format": "date-time",
-      "description": "When the unit was observed. Absent = the runtime's receive time; only buffered/replayed events need it."
+      "description": "Producer-minted opaque id binding the step/request and step/response of ONE model call. A fresh random id per call; never reused. The one coordinate on the wire — everything above it (session, turn, step numbering) is derived server-side."
     },
     "agent_id": {
       "type": "string",
-      "minLength": 1
+      "description": "WHICH agent this is, unique within the organization; policy resolution and the inventory key on it. Empty = derived from the API key (identity floor)."
     },
     "agent_type": {
-      "type": "string"
+      "type": "string",
+      "description": "What KIND of agent — the harness or product name. A label, never an identity. Empty = unlabeled."
     },
     "agent_workspace": {
-      "type": "string"
+      "type": "string",
+      "description": "The named GROUP of agents this one belongs to — one workspace, one policy set. Empty = the API key's workspace."
     },
     "agent_owner": {
-      "type": "string"
+      "type": "string",
+      "description": "The agent's builder / responsible party. An accountability attribute, never a policy boundary. Empty = unattributed."
     },
     "agent_user": {
-      "type": "string"
-    },
-    "integration": {
       "type": "string",
-      "description": "The reporting integration and build, e.g. \"ogr-higress/0.4.1\" or \"dsh-plugin/0.1.0\". For heartbeats, fleet coverage, and bad-rollout triage."
+      "description": "Who is USING the agent this session/request. An attribute, never a policy boundary. Empty = every session is one user."
     },
     "llm_protocol": {
       "enum": [
         "openai.chat",
         "openai.responses",
         "anthropic.messages",
-        null
+        "canonical"
       ],
-      "description": "Set when the payload is a raw provider body; a hint — the runtime also detects the protocol from the body shape."
+      "description": "Which shape the payload speaks: a raw provider body's protocol, or 'canonical' for the OGR canonical shape (an integration with no provider body in hand, e.g. after stream reassembly). The producer states it; a runtime may verify against the body shape."
     },
     "payload": {
       "type": "object",
-      "description": "step/request: the raw provider request body, or the canonical shape {messages, tools?}. step/response: the raw provider response body, or the canonical shape {text?, reasoning?, tool_calls?, model?, usage?, timing?}. turn/end: {reason, error?}."
-    }
-  },
-  "if": {
-    "properties": {
-      "kind": {
-        "const": "turn/end"
-      }
-    }
-  },
-  "then": {
-    "properties": {
-      "payload": {
-        "type": "object",
-        "required": [
-          "reason"
-        ],
-        "additionalProperties": false,
-        "properties": {
-          "reason": {
-            "enum": [
-              "completed",
-              "max_tokens",
-              "blocked",
-              "aborted",
-              "error"
-            ]
-          },
-          "error": {
-            "type": "string"
-          }
-        }
-      }
+      "description": "step/request: the untouched provider request body (or canonical {messages, tools?}). step/response: the untouched, complete provider response body — stream-reassembled if streamed — optionally with an integration-inserted top-level 'timing' key (or canonical {text?, reasoning?, tool_calls?, model?, usage?, timing?})."
     }
   }
 }

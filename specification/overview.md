@@ -11,8 +11,8 @@ harnesses themselves do:
 
 | Object | Definition |
 |---|---|
-| **Session** | One conversation. Sessions form a tree: a subagent's session names its parent. |
-| **Turn** | One instruction → quiescence: opens when user words arrive, closes when the agent stops. 1-based. Closes with a **reason** (`completed`, `max_tokens`, `blocked`, `aborted`, `error`). |
+| **Session** | One conversation. |
+| **Turn** | One instruction → quiescence: opens when user words arrive, closes when the agent stops. 1-based. |
 | **Step** | One model call inside a turn: everything sent to the model, everything it returned, and every tool call it asked for. 1-based within its turn. |
 | **Call** | One tool call inside a step's response, keyed by the provider's tool-call id. Its result arrives in a LATER step's request and is paired by that id. |
 
@@ -22,6 +22,15 @@ request/response bodies, and one step's two halves are exactly what an
 integration can hold and forward. (A lower plane — observing real process
 execution, network and filesystem behavior underneath the agent — is out of
 scope for this version of the contract.)
+
+**The ledger is the runtime's job, not the wire's.** In v0.8 an integration
+declares NO coordinates: it names each model call with a `step_id` it minted,
+and the runtime reconstructs everything above that — sessions by
+conversation-prefix chaining (re-attaching across a harness's context
+compaction), turns by instruction boundaries and idle timeout, steps by
+arrival. The one coordinate on the wire is `step_id`, because the one fact a
+runtime cannot derive under concurrency is which request and response were the
+same model call.
 
 OGR inserts a **decision** at the two moments an integration is holding
 something it can still refuse: before the request reaches the model, and after
@@ -34,30 +43,23 @@ be transformed in place.
 ```
                        step/request                    step/response
  agent loop ──────────────▶│                                │
-   turn N, step M          │  evaluate ──▶ runtime ──▶ verdict
-                           ▼                                ▼
+   one model call          │  evaluate ──▶ runtime ──▶ verdict
+   (one step_id)           ▼                                ▼
                      model call                    execute tool calls
 ```
 
-## Two integration points
+## One integration point, two vantage places
 
-The same contract serves two vantage points. They differ ONLY in who knows the
-coordinates:
-
-- **Agent-direct** — a plugin inside a harness, or a developer building a
-  harness who calls the runtime API at the loop's seams. The integration OWNS
-  the loop, so it **declares** `session_id`, `turn` and `step` on every event,
-  and reports each turn's close (`turn/end`) with its reason.
-- **Gateway** — an LLM proxy (reference integration: Higress) that sees one
-  stateless model call at a time. It declares nothing; the runtime **derives**
-  session, turn and step server-side and echoes them on the verdict.
-
-Declared always wins; derivation is the fallback for vantage points that cannot
-know. The [`attribution`](verdict.md) field on every verdict says which answer
-the caller got.
+The same two POSTs serve a developer instrumenting their own agent loop and a
+gateway proxying model traffic it does not understand. They no longer differ
+in protocol — both forward the raw provider body they hold, both mint a
+`step_id` per model call, both declare nothing else. The only difference left
+is operational: who fills the [identity five-tuple](guard-event.md#identity)
+(an agent asserts its own; a gateway asserts its authenticated caller's) and
+where the stream's held-back tail lives.
 
 There is deliberately **no SDK layer**. The [Runtime API](runtime-api.md) is
-the integration surface — two POST endpoints and two recipes — and every
+the integration surface — one decision endpoint and one recipe — and every
 integration, including the ones this repository ships, calls it directly.
 
 ## Two domains
@@ -77,7 +79,7 @@ The category vocabulary is the [taxonomy](taxonomy.md).
 | OGR core (neutral) | Vendor / deployer (competitive) |
 |---|---|
 | event & verdict contract | detection mechanism (config rules **or** model/classifier) |
-| the session/turn/step/call model | detection quality, coverage, latency, freshness |
+| the session/turn/step/call model (derived server-side) | detection quality, coverage, latency, freshness |
 | composition meta-policy *mechanism* | which detectors to subscribe to and how to weight them |
 | risk taxonomy (category IDs) | thresholds, what counts as unsafe for a use case |
 

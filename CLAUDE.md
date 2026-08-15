@@ -3,38 +3,45 @@
 This is a monorepo. Run commands from the repository root unless a component
 README explicitly says otherwise.
 
-**Protocol version: v0.7 — the ledger model** (Session / Turn / Step / Call,
-one observed plane: LLM messages). The design rationale lives in
+**Protocol version: v0.8 — the minimum API** (one endpoint, one recipe;
+everything derivable left the wire, everything producer-known is required).
+The v0.7 design rationale lives in
 `../openguardrails-runtime/docs/v0.7-ledger-redesign.md`; the normative text
 lives here in `specification/` + `schema/`. Read
-`specification/overview.md` first.
+`specification/overview.md` first, then `specification/runtime-api.md` —
+its "minimal integration" section is the canonical example and also ships
+at `examples/minimal-agent/`.
 
 The repo is layered **API → Plugin** — there is deliberately NO SDK layer
 (retired in v0.7, decided 2026-08-14). The API layer is the normative Runtime
-API binding (`specification/runtime-api.md`: `/v1/evaluate`, `/v1/ingest`,
-heartbeat, health) plus the JSON Schemas in `schema/` (GuardEvent, Verdict).
-The plugin layer is everything under `integrations/` — each plugin speaks the
-API directly (two POST calls); new endpoints or wire fields belong in the
-spec first. The two normative integration recipes (agent-direct: declares
-session/turn/step and reports turn ends; gateway: mints step_id, declares
-nothing, runtime derives) are IN the runtime-api spec — a plugin implements
-one of them, and its README says which.
+API binding (`specification/runtime-api.md`: `/v1/evaluate`, heartbeat,
+health — `/v1/ingest` was removed in v0.8) plus the JSON Schemas in
+`schema/` (GuardEvent, Verdict). The plugin layer is everything under
+`integrations/` — each plugin speaks the API directly (two evaluate POSTs
+per model call); new endpoints or wire fields belong in the spec first.
+There is ONE integration recipe (in runtime-api.md) since v0.8: raw provider
+bodies, a minted `step_id` per model call, the required identity five-tuple
+(empty string = no assertion), no other coordinates, fail-open by default,
+tail-hold streaming. A GuardEvent has zero optional fields.
 
-OGR supports two integration points: agent-direct hooks and gateway hooks.
-All bindings and runnable integration examples belong under `integrations/`;
-a gateway implementation is not an OGR-operated service.
+OGR supports two integration points operationally: agent-direct hooks and
+gateway hooks — same protocol, different vantage. All bindings and runnable
+integration examples belong under `integrations/`; a gateway implementation
+is not an OGR-operated service. `examples/minimal-agent/` is the runnable
+form of the spec's minimal integration.
 
-## Integration status (2026-08-14)
+## Integration status (2026-08-15)
 
-- `integrations/gateway/higress` — the v0.7 reference gateway integration
-  (Recipe B, Go/WASM, CI-covered).
-- `integrations/agent/dsh` (`@openguardrails/dsh`) — the v0.7 reference
-  agent-direct integration (Recipe A, npm workspace, CI-covered). Its
-  `src/wire.ts` is the canonical "two hand-rolled POSTs" example.
-- Everything else under `integrations/agent/` and the other gateway examples
-  is **v0.6-stale**: built on the retired SDKs, awaiting a v0.7 rewrite,
-  excluded from the npm/uv workspaces and from CI; do not "fix" one by
-  re-adding an SDK.
+- `integrations/gateway/higress` — the v0.8 reference gateway integration
+  (Go/WASM, CI-covered).
+- `integrations/agent/dsh` (`@openguardrails/dsh`) — the v0.8 reference
+  agent-direct integration (npm workspace, CI-covered). Its `src/wire.ts`
+  is the canonical "hand-rolled evaluate POST" example.
+- `integrations/agent/litellm` — v0.8 litellm callback integration
+  (Python).
+- Anything still marked v0.6-stale in its README is awaiting a v0.8
+  rewrite, excluded from the npm/uv workspaces and from CI; do not "fix"
+  one by re-adding an SDK.
 
 ## Validation
 

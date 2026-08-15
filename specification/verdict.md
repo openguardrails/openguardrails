@@ -32,17 +32,21 @@ verdict tells the truth about partial coverage instead of failing silently.
 
 | Field | Type | Req | Description |
 |---|---|---|---|
-| `ogr_version` | string | MUST | Spec version. |
 | `event_id` | string | MUST | The judged event's identity, **assigned by the runtime at ingress** ([GuardEvent § identifiers](guard-event.md#identifiers-are-born-at-the-runtime)) and returned here — this is how the caller learns it. |
 | `provider` | string | MUST | Detector/runtime identity (for attribution / metering / benchmark). |
 | `decision` | enum | MUST | `allow` \| `block`. |
-| `session_id` / `turn` / `step` | string / int / int | SHOULD | The coordinates the runtime attributed the event to: the declared values echoed, or the derived ones. |
-| `attribution` | enum | SHOULD | `declared` \| `derived` — whose answer the coordinates are. |
 | `findings` | array | SHOULD | What was found, where. See below. |
 | `modifications` | object | MAY | Spans the enforcement point MUST apply in place. |
 | `unjudged` | array<string> | SHOULD | Payload paths this verdict could NOT judge. |
-| `output_mode` | enum | MAY | `buffer` \| `stream` — which lane the runtime selected for judging a streamed output. |
 | `latency_ms` | number | MAY | Runtime-observed decision latency. |
+
+What v0.8 removed: the `session_id`/`turn`/`step` echo and `attribution`
+(there are no declared coordinates left to echo — the ledger lives entirely
+in the runtime, and an integration has no decision to make from them),
+`ogr_version` (the runtime adapts; version negotiation left the wire), and
+`output_mode` (streaming enforcement is the integration's held-back tail —
+[runtime-api § streaming](runtime-api.md#streaming-hold-the-tail-judge-once)
+— so the runtime no longer selects a lane to report).
 
 ## `findings`
 
@@ -108,17 +112,17 @@ impossible.
 - The unit is COVERAGE of a path, not attendance: a path appears if ANY
   guardrail routed to it failed, even when others answered.
 - A fail-closed enforcement point MUST treat a non-empty `unjudged` as
-  "could not look", which is not "found nothing".
+  "could not look", which is not "found nothing". A fail-open enforcement
+  point (the [default](degraded-mode.md)) proceeds, and the record already
+  says what went unjudged.
 
 ## Example — a blocked exfiltration attempt in call 2 of 3
 
 ```json
 {
-  "ogr_version": "0.7",
   "event_id": "evt-9f2",
   "provider": "ogr-runtime",
   "decision": "block",
-  "session_id": "sess-01H9", "turn": 3, "step": 2, "attribution": "declared",
   "findings": [
     { "category": "security.cmd.data_exfiltration", "severity": "critical",
       "action": "block", "path": "payload.tool_calls.1.arguments.command",

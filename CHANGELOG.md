@@ -7,7 +7,60 @@ not implementations. Downstream SDKs and adapters pin a protocol version.
 The format follows [Keep a Changelog](https://keepachangelog.com/). The protocol
 version is independent of any implementation's package version.
 
-## [v0.7] — the ledger model (in progress)
+## [v0.8] — the minimum API (in progress)
+
+Everything a runtime can derive leaves the wire; everything only the
+producer can know becomes required. An integration is an API key, ten
+fields, and one endpoint — the same recipe for a developer's own agent loop
+and for a gateway. The minimal integration example ships in the spec, the
+README, and `examples/minimal-agent/`.
+
+### Changed (breaking)
+- **Zero optional GuardEvent fields.** Required, all of them: `kind`,
+  `step_id`, the identity five-tuple, `llm_protocol`, `payload`. The
+  five-tuple (`agent_id`, `agent_type`, `agent_workspace`, `agent_owner`,
+  `agent_user`) is required *with the empty string as the explicit "no
+  assertion"* — every integrator answers the identity question instead of
+  falling into the API-key floor by omission (the floor itself is
+  unchanged).
+- **All coordinates are derived, always.** `session_id` / `turn` / `step` /
+  `parent_session_id` leave the wire; the runtime chains sessions by
+  conversation prefix (re-attaching across context compaction), closes
+  turns by instruction boundary / `finish_reason` / idle timeout, and
+  numbers steps by arrival. `step_id` is the one coordinate kept: the
+  producer-minted id pairing one model call's two events, which concurrency
+  makes underivable. The Verdict's `attribution` and coordinate echo go
+  with them — there is no declared/derived distinction left.
+- **`llm_protocol` is required and gains `canonical`.** The producer states
+  the payload shape (`openai.chat` | `openai.responses` |
+  `anthropic.messages` | `canonical`); the runtime may verify against the
+  body. Raw-body forwarding is the norm; the canonical shape remains for
+  integrations holding no provider body (own-format harnesses, stream
+  reassembly).
+- **Streaming: hold the tail, judge once.** A streamed response is judged
+  exactly once, whole, after reassembly, while the integration withholds
+  the stream's tail; `allow` releases the tail, `block` cuts the stream.
+  Replaces v0.7's `ogr-partial` interim evaluates (a round-trip per
+  chunk-batch) — and with it, `output_mode` leaves the Verdict.
+- **Fail-open is the default.** An unanswered evaluate proceeds and is
+  recorded as unjudged; `fail_mode: closed` remains the explicit opt-in for
+  deployments gating dangerous categories (degraded-mode spec rewritten
+  accordingly).
+
+### Removed
+- **`/v1/ingest`.** Evaluate records every event it judges; with `turn/end`
+  and partial-stream reporting gone, a second channel had nothing left to
+  carry. Buffered replay goes with it; the heartbeat's counters are how an
+  outage-induced observability gap stays visible.
+- **Kind `turn/end`.** The runtime closes turns itself (next-instruction
+  boundary, `finish_reason`, idle timeout). The accepted cost: "completed"
+  vs "aborted" is invisible from outside.
+- **`ogr_version`** (the runtime adapts to what it receives; producers
+  never version-gate), **`timestamp`** (receive time), and **`integration`**
+  on events (the build id lives on the heartbeat, where fleet coverage and
+  bad-rollout triage read it).
+
+## [v0.7] — the ledger model
 
 The protocol adopts the vocabulary agent harnesses themselves use — **Session
 / Turn / Step / Call** — and collapses to the one plane both real integration
