@@ -93,18 +93,25 @@ type Config struct {
 	timeoutMs  uint32
 	failClosed bool
 
-	// The OGR agent identity: which header carries each field, plus static
+	// The OGR agent identity: which header(s) carry each field, plus static
 	// fallbacks for a route that fronts exactly one agent. agent_user has no
 	// static fallback on purpose — a constant user IS the runtime's default.
-	agentIDHeader        string
-	agentTypeHeader      string
-	agentWorkspaceHeader string
-	agentOwnerHeader     string
-	agentUserHeader      string
-	agentID              string
-	agentType            string
-	agentWorkspace       string
-	agentOwner           string
+	// id and workspace are CHAINS (first non-empty wins): the OGR spelling
+	// first, the MSE compatibility spelling second.
+	agentIDHeaders        []string
+	agentTypeHeader       string
+	agentWorkspaceHeaders []string
+	agentOwnerHeader      string
+	agentUserHeader       string
+	agentID               string
+	agentType             string
+	agentWorkspace        string
+	agentOwner            string
+
+	// The identity FLOOR: when nothing above named the agent, fingerprint the
+	// credential the CLIENT presented. See deriveCallerID.
+	callerFallback   bool
+	callerKeyHeaders []string
 
 	// A second runtime that gets a COPY of every event and decides nothing.
 	mirror           wrapper.HttpClient
@@ -188,19 +195,33 @@ func parseConfig(j gjson.Result, c *Config) error {
 	 * agent and the session; they decide nothing.
 	 *
 	 * Every field's source header is configurable, because not every deployment
-	 * puts these facts in the MSE consumer headers. Static `agent_id` /
-	 * `agent_type` / `agent_workspace` / `agent_owner` config values back the
-	 * headers up for a route that fronts exactly one agent. A deployment that
-	 * configures nothing still works: the runtime derives the agent from the API
-	 * key (one key, one default agent) and attributes every session to one user.
+	 * puts these facts in the same headers. Static `agent_id` / `agent_type` /
+	 * `agent_workspace` / `agent_owner` config values back the headers up for a
+	 * route that fronts exactly one agent. A deployment that configures nothing
+	 * still works: the runtime derives the agent from the API key (one key, one
+	 * default agent) and attributes every session to one user.
+	 *
+	 * The id and workspace defaults are CHAINS — the OGR spelling first, the
+	 * MSE spelling second, first non-empty wins. `x-ogr-agent-id` /
+	 * `x-ogr-agent-workspace` are OUR names for the gateway-asserted fields;
+	 * the `x-mse-*` fallbacks are the spellings existing deployments already
+	 * carry. The two arrive differently and that difference matters:
+	 * `x-mse-consumer` is written by the AUTHENTICATOR (higress key-auth, on
+	 * every authenticated request — and yes, it DOES reach this filter; see
+	 * the identity comment in onRequestHeaders), while `x-mse-consumer-group`
+	 * is an ADMIN-CONFIGURED header — no authenticator writes it; an operator
+	 * decides it (MSE: the console's consumer→group assignment; self-hosted: a
+	 * header-injection rule on the route, running early enough for this filter
+	 * to see it). Configuring `agent_id_header` / `agent_workspace_header`
+	 * replaces the whole chain with that one header.
 	 */
-	c.agentIDHeader = "x-mse-consumer"
+	c.agentIDHeaders = []string{"x-ogr-agent-id", "x-mse-consumer"}
 	if v := j.Get("agent_id_header").String(); v != "" {
-		c.agentIDHeader = v
+		c.agentIDHeaders = []string{v}
 	}
-	c.agentWorkspaceHeader = "x-mse-consumer-group"
+	c.agentWorkspaceHeaders = []string{"x-ogr-agent-workspace", "x-mse-consumer-group"}
 	if v := j.Get("agent_workspace_header").String(); v != "" {
-		c.agentWorkspaceHeader = v
+		c.agentWorkspaceHeaders = []string{v}
 	}
 	c.agentTypeHeader = "x-ogr-agent-type"
 	if v := j.Get("agent_type_header").String(); v != "" {
@@ -220,6 +241,65 @@ func parseConfig(j gjson.Result, c *Config) error {
 	c.agentType = j.Get("agent_type").String()
 	c.agentWorkspace = j.Get("agent_workspace").String()
 	c.agentOwner = j.Get("agent_owner").String()
+
+	/**
+	 * The identity FLOOR (`caller_fallback`, default ON).
+	 *
+	 * ⚠️ What it exists to prevent: with no consumer header and no static
+	 * `agent_id`, the plugin used to send NO agent identity at all, and the
+	 * runtime then fell back to the credential IT could see — the gateway's own
+	 * OGR API key. One key per gateway, so **every consumer behind that gateway
+	 * collapsed into a single agent row**: one inventory line, one policy
+	 * resolution, one blast radius for every "move this agent" click. The
+	 * platform has already paid for this exact mistake once (82.3% of 556k real
+	 * events attributed to a row whose owner did not produce them).
+	 *
+	 * So: fingerprint the credential the CLIENT presented instead. Different
+	 * callers hold different keys, so they become different agents — which is
+	 * the true statement, where the gateway's own key was a false one.
+	 *
+	 * ⚠️ It is a FLOOR, not a substitute for key-auth. A fingerprint says
+	 * "these requests came from one credential"; it cannot say whose it is. The
+	 * real answer is higress key-auth writing an authenticated `x-mse-consumer`,
+	 * and the `caller-` prefix on the id is there so nobody mistakes one for the
+	 * other in the console.
+	 */
+	c.callerFallback = true
+	if v := j.Get("caller_fallback"); v.Exists() && !v.Bool() {
+		c.callerFallback = false
+	}
+	// First non-empty wins, so a deployment putting the key somewhere else names
+	// that header alone rather than reordering ours.
+	c.callerKeyHeaders = []string{"authorization", "x-api-key", "api-key"}
+	if arr := j.Get("caller_key_headers").Array(); len(arr) > 0 {
+		c.callerKeyHeaders = nil
+		for _, h := range arr {
+			if name := strings.TrimSpace(h.String()); name != "" {
+				c.callerKeyHeaders = append(c.callerKeyHeaders, name)
+			}
+		}
+	}
+
+	/**
+	 * ⚠️ There is deliberately NO consumer map in this plugin — no
+	 * credential→name list, no consumer→workspace list. Both existed briefly
+	 * (2.1.0 pre-release, 2026-08-14) on the belief that key-auth's
+	 * `X-Mse-Consumer` "does not reach a WasmPlugin later in the chain". That
+	 * measurement was wrong, and the way it was wrong is worth keeping: the
+	 * lab's header-strip transformer was configured `phase: UNSPECIFIED_PHASE,
+	 * priority: 400` against key-auth's `phase: AUTHN, priority: 310` — and
+	 * Istio orders wasm filters by PHASE first (AUTHN before UNSPECIFIED),
+	 * priority only within a phase. So the stripper ran AFTER key-auth and
+	 * deleted the authenticated header it was supposed to protect. With the
+	 * stripper on `phase: AUTHN, priority: 400` (strip, then authenticate,
+	 * then report), key-auth's header arrives here fine — verified live
+	 * 2026-08-14 with a consumer name that existed nowhere but key-auth's list.
+	 *
+	 * A duplicate credential list here would be two places to revoke a key and
+	 * a second copy of every secret; the gateway's authenticator is the one
+	 * source of the consumer name, and the runtime console owns agent→workspace
+	 * placement for gateways that cannot send a group header.
+	 */
 
 	c.client = wrapper.NewClusterClient(wrapper.TargetCluster{Cluster: c.cluster, Host: c.host})
 
@@ -347,29 +427,86 @@ func onRequestHeaders(ctx wrapper.HttpContext, cfg Config) types.Action {
 	// shape check can refine it.
 	ctx.SetContext(ctxPath, path)
 
-	// The agent identity, header first, static config as fallback. The consumer
-	// header is the one identity this gateway itself authenticated.
-	agentID, _ := proxywasm.GetHttpRequestHeader(cfg.agentIDHeader)
+	/**
+	 * WHO IS THIS, and — the part that matters — WHO GOT TO SAY SO.
+	 *
+	 * The five identity fields split cleanly in two, and the split is the whole
+	 * security model of this filter:
+	 *
+	 *   THE GATEWAY asserts `agent_id`, `agent_workspace`, `agent_owner`. These
+	 *   name a party and select a POLICY SET, so a client that could set them
+	 *   would pick its own identity and its own guardrails. They come from the
+	 *   credential this gateway authenticated, or from operator config.
+	 *
+	 *   THE CLIENT may assert `agent_user` and `agent_type`. Both are
+	 *   ATTRIBUTES the platform records and never resolves configuration
+	 *   through: who is sitting at the keyboard this request, and which harness
+	 *   is running. Only the client can know either, and lying about them costs
+	 *   the liar their own audit trail and nothing else.
+	 *
+	 * ⚠️ Strip the gateway-side headers off client requests at the edge, and
+	 * strip them BEFORE the authenticator runs — in higress terms the
+	 * transformer must sit in `phase: AUTHN` at a higher priority than
+	 * key-auth, because phases order first and priorities only tie-break
+	 * within one. The plugin cannot tell a header the gateway wrote from one
+	 * the client sent — higress key-auth does not overwrite `x-mse-consumer`,
+	 * so a valid credential plus a forged consumer header is attributed to the
+	 * forgery. (And a stripper mis-phased to run AFTER key-auth deletes the
+	 * authenticated header instead — the failure that briefly convinced us
+	 * key-auth's header never propagates at all.)
+	 */
+	getHeader := func(h string) string {
+		v, _ := proxywasm.GetHttpRequestHeader(h)
+		return v
+	}
+
+	// agent_id: the gateway-written header (`x-ogr-agent-id`, falling back to
+	// the `x-mse-consumer` that key-auth/MSE actually write), else the
+	// operator's static value, else the anonymous fingerprint floor. Never the
+	// runtime API key — that names the SENDER and would make every consumer
+	// here one agent.
+	agentID := firstHeader(getHeader, cfg.agentIDHeaders)
 	if agentID == "" {
 		agentID = cfg.agentID
 	}
+	if agentID == "" && cfg.callerFallback {
+		agentID = deriveCallerID(getHeader, cfg.callerKeyHeaders)
+	}
 	ctx.SetContext(ctxAgentID, agentID)
-	agentType, _ := proxywasm.GetHttpRequestHeader(cfg.agentTypeHeader)
+
+	// agent_type: the CLIENT's to declare (which harness is running), with a
+	// static fallback for a route that fronts exactly one.
+	agentType := getHeader(cfg.agentTypeHeader)
 	if agentType == "" {
 		agentType = cfg.agentType
 	}
 	ctx.SetContext(ctxAgentType, agentType)
-	workspace, _ := proxywasm.GetHttpRequestHeader(cfg.agentWorkspaceHeader)
+
+	// agent_workspace — THE POLICY SET, so it is the gateway's to write
+	// (`x-ogr-agent-workspace`, falling back to `x-mse-consumer-group`) and the
+	// one header a client must never be allowed to reach us with. Unlike the
+	// consumer header, no authenticator writes this one: it is ADMIN-CONFIGURED
+	// (MSE assigns consumers to groups in its console; a self-hosted gateway
+	// injects it per route). A deployment that configures no injection sends
+	// nothing here and the runtime console owns placement instead.
+	workspace := firstHeader(getHeader, cfg.agentWorkspaceHeaders)
 	if workspace == "" {
 		workspace = cfg.agentWorkspace
 	}
 	ctx.SetContext(ctxAgentWorkspace, workspace)
-	owner, _ := proxywasm.GetHttpRequestHeader(cfg.agentOwnerHeader)
+
+	// agent_owner: whose agent this IS. Gateway-written (`x-ogr-agent-owner`),
+	// because an owner a client can set is not an owner — the runtime backfills
+	// it once and never overwrites it, so a forged value would be permanent.
+	owner := getHeader(cfg.agentOwnerHeader)
 	if owner == "" {
 		owner = cfg.agentOwner
 	}
 	ctx.SetContext(ctxAgentOwner, owner)
-	user, _ := proxywasm.GetHttpRequestHeader(cfg.agentUserHeader)
+
+	// agent_user: per-request by nature — for an agent serving many people the
+	// value changes with every call, so it can only ever come from the traffic.
+	user := getHeader(cfg.agentUserHeader)
 	ctx.SetContext(ctxAgentUser, user)
 
 	reqID, _ := proxywasm.GetHttpRequestHeader("x-request-id")

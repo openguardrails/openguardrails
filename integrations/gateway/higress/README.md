@@ -100,13 +100,89 @@ back — both times, the shape the caller chose.
 
 ## Identity
 
-The consumer header (`x-mse-consumer` by default) becomes **`agent_id`** — the
-consumer the gateway authenticated IS the agent. The consumer-group header
-(`x-mse-consumer-group`) becomes **`agent_workspace`** — a group of agents plus
-one policy set. Three more renameable headers carry `agent_type`,
-`agent_owner`, `agent_user`. Owner and user are attributes; they never select
-policy. A route that sends none of these still works: the runtime derives the
-agent from the API key.
+The agent-id header becomes **`agent_id`** — the consumer the gateway
+authenticated IS the agent. The workspace header becomes **`agent_workspace`**
+— a group of agents plus one policy set. Both are header CHAINS, first
+non-empty wins: the OGR spelling first (`x-ogr-agent-id` /
+`x-ogr-agent-workspace`), then the MSE compatibility spelling
+(`x-mse-consumer` / `x-mse-consumer-group`). The two MSE headers arrive
+differently: `x-mse-consumer` is written by the AUTHENTICATOR (higress
+`key-auth`, on every authenticated request), while `x-mse-consumer-group` is
+an **admin-configured** header — no authenticator writes it; the operator
+decides it (on MSE, by assigning consumers to groups in the console; on a
+self-hosted gateway, by a header-injection rule on the route). Three more
+renameable headers carry `agent_type`, `agent_owner`, `agent_user`. Owner and
+user are attributes; they never select policy.
+
+### Who gets to say what (2.1.0)
+
+The five identity fields split in two, and the split is the security model:
+
+| field | asserted by | header(s) | why |
+|---|---|---|---|
+| `agent_id` | **the gateway** | `x-ogr-agent-id`, else `x-mse-consumer` | names the party; a client that could set it would pick its own audit trail |
+| `agent_workspace` | **the gateway** | `x-ogr-agent-workspace`, else `x-mse-consumer-group` | selects the POLICY SET — the one field a caller must never choose |
+| `agent_owner` | **the gateway** | `x-ogr-agent-owner` | the runtime backfills it once and never overwrites, so a forgery is permanent |
+| `agent_type` | the client | `x-ogr-agent-type` | which harness is running; only the client knows, and it selects nothing |
+| `agent_user` | the client | `x-ogr-agent-user` | changes per request; only the client knows |
+
+⚠️ **There is deliberately no consumer map in this plugin** — no
+credential→name list, no consumer→workspace list. The gateway's authenticator
+is the one source of the consumer name: higress `key-auth` writes
+`X-Mse-Consumer` on every authenticated request and this filter reads it
+through the chain above, with no plugin configuration at all. A 2.1.0
+pre-release briefly carried a duplicate credential list here, justified by a
+measurement that key-auth's header "does not reach a later WasmPlugin" — the
+measurement was wrong (see the strip warning below for how), and the list was
+two places to revoke a key plus a second copy of every secret. For a gateway
+that cannot write a group header (open-source higress has no consumer groups),
+the runtime console owns agent→workspace placement.
+
+⚠️ **Strip the gateway-side headers at the edge** (`x-ogr-agent-id`,
+`x-ogr-agent-workspace`, `x-ogr-agent-owner`, `x-mse-consumer`,
+`x-mse-consumer-group`) — and strip them **before the authenticator runs**.
+This filter cannot tell a header the gateway wrote from one the client sent,
+and key-auth does NOT overwrite a client-supplied consumer header — a valid
+credential plus a forged `x-mse-consumer` is attributed to the forgery.
+Verified in the lab.
+
+⚠️ **"Before" is a PHASE question, not a priority one.** Istio orders wasm
+filters by phase first (`AUTHN` before `UNSPECIFIED_PHASE`), priority only
+within a phase — so a strip transformer at `phase: UNSPECIFIED_PHASE,
+priority: 400` runs AFTER key-auth at `phase: AUTHN, priority: 310` and
+deletes the authenticated header it exists to protect. That mis-phasing is
+exactly what produced the wrong measurement above: every caller degraded to
+`caller-<hash>` and it read as "the header never propagates". Put the
+stripper at `phase: AUTHN` with a priority above key-auth's: strip, then
+authenticate, then report.
+
+### When nothing names the agent (2.1.0)
+
+A route that sends no consumer header and configures no static `agent_id` still
+reports an agent — the plugin fingerprints the credential the CLIENT presented
+(`Authorization: Bearer …`, `x-api-key` or `api-key`, first non-empty wins) and
+sends `agent_id: "caller-<12 hex of sha256>"`.
+
+⚠️ **This exists because the alternative was one agent per GATEWAY.** With no
+`agent_id` on the event the runtime falls back to the credential it can see —
+the gateway's own OGR API key — and since one gateway has one key, every
+consumer behind it collapses into a single inventory row: one policy
+resolution, one blast radius for every "move this agent" click, one owner for
+traffic that had many. Different callers hold different keys, so fingerprinting
+theirs is the true statement where the gateway's key was a false one.
+
+⚠️ **The credential never leaves the gateway** — only its truncated hash does.
+48 bits, so a collision (which would silently merge two callers) is negligible
+at any real consumer count.
+
+⚠️ **It is a FLOOR, not a substitute for key-auth.** It says "these requests
+came from one credential", never whose. Two honest limits, both removed by
+authenticating properly: a credential shared by a team is one caller here, and
+rotating a credential mints a new agent row. The `caller-` prefix is there so
+nobody reads a fingerprint as an authenticated identity.
+
+Set `caller_fallback: false` to switch it off; the runtime's key-derived
+`key-<…>` agent is then the last resort again.
 
 Every event also carries `integration: "ogr-higress/<version>"` — which build
 observed it, for fleet coverage and bad-rollout triage.
@@ -252,12 +328,14 @@ the traffic pass with `decision=` empty).
 | `mode` | `observe` | `enforce` to act on verdicts |
 | `timeout_ms` | `5000` | the PDP budget, enforce only. A CEILING for the worst case, not a target; the runtime's `OGR_MODEL_TIMEOUT_MS` must fit strictly inside it |
 | `fail_mode` | `open` | `closed` refuses when the PDP is unreachable, answers garbage, or reports unjudged paths |
-| `agent_id_header` | `x-mse-consumer` | which header carries the agent's identity |
-| `agent_workspace_header` | `x-mse-consumer-group` | which header carries the agent's workspace |
+| `agent_id_header` | `x-ogr-agent-id`, else `x-mse-consumer` | which header carries the agent's identity; configuring one replaces the whole chain |
+| `agent_workspace_header` | `x-ogr-agent-workspace`, else `x-mse-consumer-group` | which header carries the agent's workspace; configuring one replaces the whole chain |
 | `agent_type_header` | `x-ogr-agent-type` | which header carries the kind of agent |
 | `agent_owner_header` | `x-ogr-agent-owner` | which header carries the agent's responsible party |
 | `agent_user_header` | `x-ogr-agent-user` | which header carries who is using the agent this session |
 | `agent_id` / `agent_type` / `agent_workspace` / `agent_owner` | *(unset)* | static fallbacks for a route fronting exactly one agent. No static `agent_user` — a constant user is already the runtime's default |
+| `caller_fallback` | `true` | when nothing above names the agent, fingerprint the client's own credential into `caller-<hash>` rather than letting every consumer behind this gateway become one agent (see Identity) |
+| `caller_key_headers` | `authorization`, `x-api-key`, `api-key` | which headers may carry that credential, first non-empty wins |
 | `mirror_cluster` / `mirror_base_url` | *(unset)* | a candidate runtime that gets copies and gates nothing |
 | `mirror_api_key` | `api_key` | the mirror's own credential, when it differs |
 | `mirror_base_path` | `base_path` | the mirror's own mount, when it differs |
