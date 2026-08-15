@@ -8,9 +8,10 @@ import "testing"
 // normalizer can never produce a join with a double or missing slash.
 
 func TestCanonicalPathsAreTheV1Root(t *testing.T) {
-	if pathEvaluate != "/v1/evaluate" || pathIngest != "/v1/ingest" || pathHeartbeat != "/v1/heartbeat" {
-		t.Fatalf("the path constants must be the canonical /v1/* paths, got %q %q %q — a prefix belongs in base_path, not here",
-			pathEvaluate, pathIngest, pathHeartbeat)
+	// Two paths, not three — /v1/ingest left the API in v0.8.
+	if pathEvaluate != "/v1/evaluate" || pathHeartbeat != "/v1/heartbeat" {
+		t.Fatalf("the path constants must be the canonical /v1/* paths, got %q %q — a prefix belongs in base_path, not here",
+			pathEvaluate, pathHeartbeat)
 	}
 }
 

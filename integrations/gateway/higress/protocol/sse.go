@@ -41,6 +41,31 @@ type Decoder interface {
 	Output() Output
 }
 
+// ContentMeter is implemented by a Decoder that can report, cheaply, how much
+// CLIENT-VISIBLE content it has reassembled so far: text, reasoning and tool-call
+// arguments, in UTF-8 bytes, excluding all SSE framing. It exists for the
+// tail-hold enforcement lane, which withholds the stream's last N content bytes
+// and needs a running total on every chunk — cheap enough to ask per chunk, where
+// rebuilding Output() would be O(reply) each time.
+type ContentMeter interface {
+	ContentBytes() int
+}
+
+// ContentBytes is the running client-visible content total, via the decoder's
+// ContentMeter when it has one, else by measuring a freshly built Output (correct,
+// just O(reply) per call — every decoder in this package implements the meter).
+func (s *Scanner) ContentBytes() int {
+	if m, ok := s.dec.(ContentMeter); ok {
+		return m.ContentBytes()
+	}
+	out := s.dec.Output()
+	n := len(out.Text) + len(out.Reasoning)
+	for _, a := range out.Actions {
+		n += len(a.Arguments)
+	}
+	return n
+}
+
 // SSEData returns the payload of a `data:` line.
 func SSEData(line string) (string, bool) {
 	if !strings.HasPrefix(line, "data:") {

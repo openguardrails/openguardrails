@@ -293,6 +293,16 @@ type chatDecoder struct {
 // SuppressUsageFrame arms the swallow — see UsageFrameSuppressor.
 func (d *chatDecoder) SuppressUsageFrame() { d.suppressUsage = true }
 
+// ContentBytes — see protocol.ContentMeter. Builder lengths, so it is O(#calls)
+// per ask, never a rebuild of the reply.
+func (d *chatDecoder) ContentBytes() int {
+	n := d.text.Len() + d.reasoning.Len()
+	for _, c := range d.calls {
+		n += c.Args.Len()
+	}
+	return n
+}
+
 func (d *chatDecoder) Output() Output {
 	out := Output{Text: d.text.String(), Reasoning: d.reasoning.String(), Usage: d.usage}
 	idx := make([]int, 0, len(d.calls))

@@ -164,7 +164,7 @@ func TestRestoreAbsorbsMarkdownEscaping(t *testing.T) {
 }
 
 func TestSessionAdoptsBoundedly(t *testing.T) {
-	st := newSessionState("")
+	st := newSessionState()
 	big := map[string]string{}
 	for i := 0; i < maxTokens+50; i++ {
 		big["${OGR_PII_"+string(rune('a'+i%26))+string(rune('a'+(i/26)%26))+string(rune('a'+i/676))+"}"] = "value"

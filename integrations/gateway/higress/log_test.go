@@ -47,10 +47,13 @@ func TestEverySlotHasAName(t *testing.T) {
 }
 
 // The slots are packed positionally into one shared-data blob, so an insert in the
-// middle silently re-reads every existing counter as its neighbour. Pin the four that
-// have been on the wire since the beginning; appending is safe, reordering is not.
+// middle silently re-reads every existing counter as its neighbour. Pin the original
+// four SLOTS; appending is safe, reordering is not. (Slot 2's WIRE NAME changed with
+// v0.8 — "ingested" became "reported" when /v1/ingest left the API — which is a
+// rename of what the number is called, not a move of where it is stored: the blob
+// stays readable across the upgrade.)
 func TestTheOriginalSlotOrderIsFrozen(t *testing.T) {
-	for i, want := range []string{"evaluated", "unchecked", "ingested", "mirrored"} {
+	for i, want := range []string{"evaluated", "unchecked", "reported", "mirrored"} {
 		if counterNames[i] != want {
 			t.Errorf("slot %d is %q, want %q — reordering re-reads every stored counter as its neighbour",
 				i, counterNames[i], want)

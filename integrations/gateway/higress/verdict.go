@@ -4,13 +4,20 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// Reading a v0.7 Verdict.
+// Reading a v0.8 Verdict: {event_id, provider, decision, findings?,
+// modifications?, unjudged?, latency_ms?}.
 //
 // Two decisions: `allow` | `block`. Redaction is not a decision — a non-empty
 // `modifications.spans` on an allow says it, and the spans are applied to the body
-// before it is forwarded (redact.go). `unjudged` and `output_mode` are first-class
-// fields now, not `x.ogr.*` extensions; this reader reads ONLY the v0.7 names, by
-// design — the runtime ships in lockstep on the same branch.
+// before it is forwarded (redact.go). This reader reads ONLY the v0.8 names, by
+// design — the runtime ships in lockstep on the same branch, and a reader that
+// quietly accepted retired names would hide a half-upgraded deployment forever.
+//
+// What v0.8 removed from the verdict, and why nothing here misses it: the
+// `session_id`/`turn`/`step` echo and `attribution` (the ledger lives entirely in
+// the runtime; this gateway had no decision to make from them), and `output_mode`
+// (streaming enforcement is now the gateway's own held-back tail — tailhold.go —
+// so the runtime no longer selects a lane to report).
 //
 // Rendering a refusal is NOT here. What a refusal looks like is a property of the
 // protocol the caller is speaking, so each adapter renders its own
@@ -28,11 +35,11 @@ func parseVerdict(body []byte) verdict { return verdict{root: gjson.ParseBytes(b
 
 func (v verdict) Decision() string { return v.root.Get("decision").String() }
 
-// Stops reports whether this event must not go through. v0.7 has exactly one
+// Stops reports whether this event must not go through. v0.8 has exactly one
 // stopping decision.
 func (v verdict) Stops() bool { return v.Decision() == "block" }
 
-// Reason is what the caller is told. The v0.7 verdict deliberately carries no prose
+// Reason is what the caller is told. The verdict deliberately carries no prose
 // `reasons` — findings are structured, and describing what was detected would hand an
 // attacker a detector oracle — so the refusal is a fixed sentence.
 func (v verdict) Reason() string {
@@ -103,16 +110,6 @@ func (v verdict) Partial() bool { return len(v.Unjudged()) > 0 }
 // the promise: if we could not judge it, it does not go through. Under `open` it
 // passes and the caller counts it, exactly as a transport failure does.
 func (v verdict) MustRefusePartial(failClosed bool) bool { return failClosed && v.Partial() }
-
-// BuffersOutput reads the response lane off an input judgement (`output_mode`).
-func (v verdict) BuffersOutput() bool {
-	return v.root.Get("output_mode").String() == "buffer"
-}
-
-// SessionID is the session the RUNTIME attributed this event to — the gateway
-// declares no coordinates, so this is always the derived answer. Logs only; nothing
-// here keys on it.
-func (v verdict) SessionID() string { return v.root.Get("session_id").String() }
 
 // Usable reports whether this is a VERDICT at all.
 //

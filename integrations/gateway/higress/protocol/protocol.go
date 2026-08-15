@@ -26,7 +26,7 @@
 // # The model
 //
 // The types mirror the platform's own layering — session → turn → step → call in
-// OGR v0.7 vocabulary — so a gateway's view lines up with what the runtime
+// OGR vocabulary — so a gateway's view lines up with what the runtime
 // reassembles:
 //
 //	Conversation   what one request carries: a system prompt, turns, tool defs
@@ -145,7 +145,7 @@ type Conversation struct {
 }
 
 // Usage is the provider's OWN token accounting for one reply, normalized to the
-// counter names OGR v0.7's canonical payload uses. A gateway holds no tokenizer,
+// counter names the OGR canonical payload uses. A gateway holds no tokenizer,
 // so this is transcription, never estimation: nil means the provider reported
 // nothing, and nil is the honest answer then — an invented count would be read
 // downstream as a measurement.

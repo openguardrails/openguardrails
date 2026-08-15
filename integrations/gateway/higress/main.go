@@ -1,17 +1,21 @@
-// OpenGuardrails Runtime — a Higress WASM plugin that speaks OGR v0.7 to an
+// OpenGuardrails Runtime — a Higress WASM plugin that speaks OGR v0.8 to an
 // OpenGuardrails runtime directly.
 //
-// It implements **Recipe B of the v0.7 Runtime API** (specification/runtime-api.md):
-// the gateway integration. One proxied model call is one STEP — `step/request` on the
-// request flow, `step/response` on the response flow, both carrying the provider body
-// raw — and the runtime classifies, derives session/turn/step, and answers with a
-// Verdict this filter enforces. The gateway declares no coordinates and keeps no
-// state across requests.
+// It implements **the recipe of the v0.8 Runtime API** (specification/runtime-api.md
+// — one recipe now, the same for a gateway and for a developer's own loop). One
+// proxied model call is one STEP: mint a `step_id`, `step/request` on the request
+// flow, `step/response` on the response flow, both to `/v1/evaluate`, both carrying
+// the provider body raw — and the runtime classifies, derives session/turn/step,
+// and answers with a Verdict this filter enforces. The gateway declares no
+// coordinates and keeps no state across requests. `/v1/ingest` and the
+// `ogr-partial` header are gone (v0.8): evaluate IS the observation channel, and a
+// streamed answer is judged exactly once, whole, behind a held tail (tailhold.go).
 //
 // One switch decides how much it does:
 //
 //	mode: observe   report only. Never pauses the request, never touches a body.
-//	                Every event goes to /ingest, which evaluates on arrival, so the
+//	                Every event still goes to /evaluate — fire-and-forget, verdict
+//	                discarded — because evaluate records what it judges, so the
 //	                console fills with findings while the gateway stays a mirror.
 //	mode: enforce   put each step half to /evaluate, wait for the verdict, and
 //	                honour it: refuse, or apply the modification spans and let it
@@ -23,8 +27,8 @@
 // what makes observe a faithful preview of enforce.
 //
 // ⚠️ `/evaluate` takes exactly ONE event. There is no batch form: a step half is one
-// event, and re-shattering it is the decomposition v0.7 removed the vocabulary for.
-// `/ingest` stays a batch endpoint, which is right for what it carries.
+// event, and re-shattering it is the decomposition the spec removed the vocabulary
+// for.
 package main
 
 import (
@@ -32,6 +36,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/higress-group/proxy-wasm-go-sdk/proxywasm"
@@ -65,11 +70,9 @@ const (
 	// join a configured base with `/v1/...` and hard-code no other prefix. The
 	// prefix this build joins them onto is `base_path`, "" by default; the
 	// reference runtime's legacy mount is reached with `base_path: /api/public/ogr`.
+	// Two paths, not three — v0.8 removed /v1/ingest.
 	pathEvaluate  = "/v1/evaluate"
-	pathIngest    = "/v1/ingest"
 	pathHeartbeat = "/v1/heartbeat"
-
-	maxBatch = 100 // the runtime's ingest cap
 )
 
 type Config struct {
@@ -86,12 +89,15 @@ type Config struct {
 	// configuration, not discovery.
 	basePath      string
 	evaluatePath  string
-	ingestPath    string
 	heartbeatPath string
 
 	mode       string
 	timeoutMs  uint32
 	failClosed bool
+
+	// How much client-visible content (UTF-8 bytes) the streaming lane withholds
+	// until the end-of-stream verdict — see tailhold.go.
+	streamTailChars int
 
 	// The OGR agent identity: which header(s) carry each field, plus static
 	// fallbacks for a route that fronts exactly one agent. agent_user has no
@@ -114,10 +120,10 @@ type Config struct {
 	callerKeyHeaders []string
 
 	// A second runtime that gets a COPY of every event and decides nothing.
-	mirror           wrapper.HttpClient
-	mirrorKey        string
-	mirrorIngestPath string
-	hasMirror        bool
+	mirror             wrapper.HttpClient
+	mirrorKey          string
+	mirrorEvaluatePath string
+	hasMirror          bool
 }
 
 // normalizeBasePath cleans a configured mount prefix so joining it with the
@@ -142,7 +148,6 @@ func parseConfig(j gjson.Result, c *Config) error {
 
 	c.basePath = normalizeBasePath(j.Get("base_path").String())
 	c.evaluatePath = c.basePath + pathEvaluate
-	c.ingestPath = c.basePath + pathIngest
 	c.heartbeatPath = c.basePath + pathHeartbeat
 
 	c.mode = modeObserve
@@ -185,7 +190,27 @@ func parseConfig(j gjson.Result, c *Config) error {
 		c.timeoutMs = uint32(v.Uint())
 	}
 
+	// The fail mode. OPEN unless the deployment says `closed`, and that default is
+	// the spec's (degraded-mode.md), not an accident: the minimal integration is an
+	// observability instrument first, and an instrument that can halt the agent it
+	// observes on a network blip would never be adopted. `closed` is the explicit
+	// opt-in for deployments gating dangerous categories, and it covers all three
+	// sizes of "could not look": an unreachable/timed-out/429'd runtime, a 200 whose
+	// body is not a verdict, and a verdict whose `unjudged` names the enforced path.
 	c.failClosed = j.Get("fail_mode").String() == "closed"
+
+	// How much of a streamed answer stays withheld until the end-of-stream verdict
+	// (tailhold.go). 200 is the spec's reference default; 0 still gates stream
+	// completion on the verdict (the final chunk is never released early); a huge
+	// value degenerates to buffering, which the spec names as the limit case.
+	c.streamTailChars = 200
+	if v := j.Get("stream_tail_chars"); v.Exists() {
+		n := int(v.Int())
+		if n < 0 {
+			n = 0
+		}
+		c.streamTailChars = n
+	}
 
 	/**
 	 * The OGR agent identity (agent_id / agent_type / agent_workspace / agent_owner /
@@ -306,7 +331,8 @@ func parseConfig(j gjson.Result, c *Config) error {
 	// Traffic mirroring: a candidate runtime sees the same events and answers nothing.
 	// Fire-and-forget in EVERY mode, including enforce — the mirror must never be able
 	// to slow a request down, let alone stop one, or a shadow deployment becomes an
-	// outage the moment the candidate is unhealthy.
+	// outage the moment the candidate is unhealthy. It rides /evaluate like everything
+	// else (v0.8 has no other event channel); the verdict is simply never read.
 	if cluster := j.Get("mirror_cluster").String(); cluster != "" {
 		host := strings.TrimPrefix(strings.TrimPrefix(j.Get("mirror_base_url").String(), "https://"), "http://")
 		c.mirror = wrapper.NewClusterClient(wrapper.TargetCluster{Cluster: cluster, Host: host})
@@ -321,7 +347,7 @@ func parseConfig(j gjson.Result, c *Config) error {
 		if v := j.Get("mirror_base_path"); v.Exists() {
 			mirrorBase = normalizeBasePath(v.String())
 		}
-		c.mirrorIngestPath = mirrorBase + pathIngest
+		c.mirrorEvaluatePath = mirrorBase + pathEvaluate
 		c.hasMirror = true
 		logInfof("[OGR-CONFIG] mirror: cluster=%s host=%s base_path=%q (copies only, never gates)", cluster, host, mirrorBase)
 	}
@@ -334,9 +360,9 @@ func parseConfig(j gjson.Result, c *Config) error {
 	// not per request. An operator has to be able to confirm what actually loaded —
 	// silence at startup is indistinguishable from a plugin that never loaded at all,
 	// which is the failure this whole integration exists to make visible.
-	proxywasm.LogWarnf("[OGR-CONFIG] v%s mode=%s cluster=%s host=%s base_path=%q timeout=%dms fail=%s beat=%ds log=%s protocols=%s",
-		pluginVersion, c.mode, c.cluster, c.host, c.basePath, c.timeoutMs, failLabel(c.failClosed), heartbeatPeriodMs/1000,
-		logLevelName(logLevel), strings.Join(protocolNames(), ","))
+	proxywasm.LogWarnf("[OGR-CONFIG] v%s mode=%s cluster=%s host=%s base_path=%q timeout=%dms fail=%s tail=%d beat=%ds log=%s protocols=%s",
+		pluginVersion, c.mode, c.cluster, c.host, c.basePath, c.timeoutMs, failLabel(c.failClosed), c.streamTailChars,
+		heartbeatPeriodMs/1000, logLevelName(logLevel), strings.Join(protocolNames(), ","))
 	return nil
 }
 
@@ -365,7 +391,7 @@ const (
 	ctxAgentWorkspace = "ogr_agent_workspace"
 	ctxAgentOwner     = "ogr_agent_owner"
 	ctxAgentUser      = "ogr_agent_user"
-	ctxReqID          = "ogr_req_id"
+	ctxStepID         = "ogr_step_id"
 	ctxSession        = "ogr_session"
 	ctxStreaming      = "ogr_streaming"
 	ctxModel          = "ogr_model"
@@ -407,14 +433,12 @@ type reqState struct {
 	// swallow — a client that never asked must not have to parse it.
 	injectedUsage bool
 
-	// Which lane the RUNTIME put this answer on (`output_mode`), and whether this
-	// filter has taken ownership of the response stream to serve it. See lanes.go.
-	bufferOutput bool
-	laneOwned    bool
-	// The withheld answer, on the buffered lane only. Kept as the model's own bytes so
-	// a released answer is byte-identical — re-rendering from the parsed content would
-	// drop tool_calls, ids and usage.
-	held []byte
+	// Whether this filter has taken ownership of the response stream to enforce
+	// on it, and the withheld-tail buffer once chunks arrive. Held as the model's
+	// own restored bytes so a released tail is byte-identical — re-rendering from
+	// the parsed content would drop tool_calls, ids and usage. See tailhold.go.
+	owned bool
+	hold  *tailHold
 }
 
 // --- request path -----------------------------------------------------------
@@ -520,17 +544,32 @@ func onRequestHeaders(ctx wrapper.HttpContext, cfg Config) types.Action {
 	user := getHeader(cfg.agentUserHeader)
 	ctx.SetContext(ctxAgentUser, user)
 
-	reqID, _ := proxywasm.GetHttpRequestHeader("x-request-id")
-	if reqID == "" {
-		reqID = strconv.FormatInt(time.Now().UnixNano(), 36)
-	}
-	ctx.SetContext(ctxReqID, reqID)
+	// The step's ONE coordinate: a fresh opaque id binding this call's two events.
+	// Minted here, always — earlier builds preferred `x-request-id`, and that header
+	// is client-suppliable: a client retrying with the same id would REUSE a step_id
+	// across model calls, which is the one thing the spec forbids about it.
+	ctx.SetContext(ctxStepID, mintStepID())
 
 	// The body may be rewritten (masking) and the response must not arrive compressed,
 	// or neither restoration nor detection can read it.
 	_ = proxywasm.RemoveHttpRequestHeader("content-length")
 	_ = proxywasm.RemoveHttpRequestHeader("accept-encoding")
 	return types.HeaderStopIteration
+}
+
+// stepSeq disambiguates step ids minted in the same nanosecond. Per-VM (each Envoy
+// worker has its own Wasm VM), which is exactly enough: within a VM the counter
+// separates them, across VMs a same-nanosecond collision would also need equal
+// counters — negligible without spending entropy the wasm host may not have.
+var stepSeq uint32
+
+// mintStepID mints the producer-side coordinate the spec requires: opaque, fresh
+// per model call, never reused. Time plus a sequence rather than crypto/rand,
+// because the id only needs to be UNIQUE, not unguessable — it never leaves the
+// authenticated channel to the runtime.
+func mintStepID() string {
+	return "st-" + strconv.FormatInt(time.Now().UnixNano(), 36) +
+		"-" + strconv.FormatUint(uint64(atomic.AddUint32(&stepSeq, 1)), 36)
 }
 
 // subjectFromCtx assembles the request's agent identity from what the header
@@ -551,31 +590,49 @@ func onRequestBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Actio
 	}
 	parsed := gjson.ParseBytes(body)
 	subj := subjectFromCtx(ctx, cfg)
-	reqID := ctx.GetStringContext(ctxReqID, "")
-	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
 
 	// WHICH PROTOCOL. The path first (the same signal ai-proxy keys on), the body shape
 	// as a fallback.
 	proto := protocol.Detect(ctx.GetStringContext(ctxPath, ""), parsed)
 	if proto == nil {
-		// ⚠️ We saw completion traffic and could not name its protocol. SAY SO — the
-		// alternative is silence, which is indistinguishable from a healthy gateway
-		// with nothing to report. The traffic passes (there is no protocol to render
-		// a refusal in), but it passes COUNTED.
+		/*
+		 * ⚠️ Completion traffic whose protocol this plugin cannot NAME. The v0.8
+		 * policy is: SKIP OGR FOR THIS REQUEST, COUNTED — no event is sent for
+		 * either half.
+		 *
+		 * Why not an event: `llm_protocol` is a required closed enum, and the only
+		 * value we could put there would be an invention (the exact lie that once
+		 * made 693,197 stored events unfalsifiable, now promoted to a schema
+		 * violation); the v0.7 `{"unparsed": true}` diagnostic payload is likewise
+		 * gone — a fabricated payload makes the guardrails judge a fiction.
+		 *
+		 * Why not a refusal, even under fail_mode: closed: there is no protocol to
+		 * render one in — an unparseable refusal body reads as a broken gateway and
+		 * makes agent harnesses retry. And the branch is a defensive backstop more
+		 * than a path: IsCompletionPath and Detect walk the same claim table, so a
+		 * body that got this far has a protocol unless the two ever drift.
+		 *
+		 * The gap stays VISIBLE the way the spec keeps every lost observation
+		 * visible: the heartbeat's `unreadable` counter, plus this line.
+		 */
 		bump(cntUnreadable, 1)
-		logInfof("[OGR-REQ] unrecognised completion body: bytes=%d — reporting an unparsed signal, this request is NOT judged",
+		logInfof("[OGR-REQ] unrecognised completion body: bytes=%d — no llm_protocol to state, this request is NOT judged (counted as unreadable)",
 			len(body))
-		d := &deriveCtx{subj: subj, stepID: "st-" + reqID, now: now}
-		ingest(ctx, cfg, []*GuardEvent{unparsedEvent(d, kindStepRequest, "protocol not recognised by this plugin", len(body))})
+		ctx.SetContext(ctxSkip, true)
 		return types.ActionContinue
 	}
 
+	// step_id is required non-empty; the header phase always minted one, but a
+	// missing context entry must not become an invalid event.
+	stepID := ctx.GetStringContext(ctxStepID, "")
+	if stepID == "" {
+		stepID = mintStepID()
+	}
 	rs := &reqState{
-		session: newSessionState(""),
+		session: newSessionState(),
 		derive: &deriveCtx{
 			subj:     subj,
-			stepID:   "st-" + reqID,
-			now:      now,
+			stepID:   stepID,
 			protocol: proto.Name(),
 		},
 		proto: proto,
@@ -592,8 +649,10 @@ func onRequestBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Actio
 
 	e := requestEvent(rs.derive, body)
 	if cfg.mode == modeObserve {
-		// Nothing is refusable in observe: the request is already gone.
-		ingest(ctx, cfg, []*GuardEvent{e})
+		// Nothing is refusable in observe: the request is already gone. The event
+		// still rides /evaluate — the only channel v0.8 has — fire-and-forget, the
+		// verdict discarded, because evaluate records what it judges.
+		report(cfg, e)
 		rs.sentAt = time.Now()
 		return types.ActionContinue
 	}
@@ -603,9 +662,9 @@ func onRequestBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Actio
 
 // enforceRequest puts the step's request half to the PDP, holding the request.
 func enforceRequest(ctx wrapper.HttpContext, cfg Config, rs *reqState, e *GuardEvent, body string) {
-	// The primary sees the event through /evaluate; the mirror only ever ingests, so
-	// it still needs its own copy or a shadow deployment is comparing against a hole.
-	mirrorEvents(cfg, []*GuardEvent{e})
+	// The primary sees the event through the awaited /evaluate; the mirror gets its
+	// own fire-and-forget copy or a shadow deployment is comparing against a hole.
+	mirrorEvent(cfg, e)
 
 	payload, err := json.Marshal(e)
 	if err != nil {
@@ -659,9 +718,7 @@ func onInputVerdict(ctx wrapper.HttpContext, cfg Config, rs *reqState,
 		return
 	}
 	bump(cntEvaluated, 1)
-	// The runtime's answer for which conversation this was. Diagnostics only.
-	rs.session.ID = v.SessionID()
-	logInfof("[OGR-REQ] decision=%s session=%s", v.Decision(), rs.session.ID)
+	logInfof("[OGR-REQ] decision=%s", v.Decision())
 
 	if v.Stops() {
 		bump(cntRefused, 1)
@@ -673,9 +730,9 @@ func onInputVerdict(ctx wrapper.HttpContext, cfg Config, rs *reqState,
 		return
 	}
 
-	// Decide the response lane before the request goes anywhere: arming the pause has
-	// to happen before the response phase begins.
-	armLanes(ctx, cfg, rs, v)
+	// Take ownership of a streaming response before the request goes anywhere:
+	// arming the pause has to happen before the response phase begins (tailhold.go).
+	armTailHold(ctx, cfg, rs)
 
 	// ⚠️ The verdict's spans name paths INSIDE THE BODY WE SENT (`payload.messages.3.
 	// content`, …) and their offsets index those strings as transported. The runtime
@@ -720,7 +777,7 @@ func onResponseHeaders(ctx wrapper.HttpContext, cfg Config) types.Action {
 	 * upstream failure into a HANG.
 	 *
 	 * Enforce mode takes ownership of the response — `BufferResponseBody` +
-	 * `HeaderStopIteration` here, and `NeedPauseStreamingResponse` from `armLanes`
+	 * `HeaderStopIteration` here, and `NeedPauseStreamingResponse` from `armTailHold`
 	 * during the REQUEST phase, before any status exists to check. That is correct for
 	 * a completion the model produced. It is wrong for everything else Envoy can put on
 	 * this path: a LOCAL REPLY because no route matched, a 503, a 401 from key-auth, a
@@ -772,11 +829,11 @@ func onResponseBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Acti
 	// No first_token_at — buffering is exactly the mode that hides it.
 	e := responseEventTimed(rs.derive, body, bufferedTiming(rs.sentAt))
 	if cfg.mode == modeObserve {
-		ingest(ctx, cfg, []*GuardEvent{e})
+		report(cfg, e)
 		return restoreResponse(rs, body)
 	}
 
-	mirrorEvents(cfg, []*GuardEvent{e})
+	mirrorEvent(cfg, e)
 	payload, err := json.Marshal(e)
 	if err != nil {
 		return restoreResponse(rs, body)
@@ -854,7 +911,7 @@ func onStreamingResponseBody(ctx wrapper.HttpContext, cfg Config, chunk []byte, 
 	}
 	// ⚠️ A refusal is OURS, not the model's. `answer` ends the request with a locally
 	// generated body, and that body still reaches this hook — so without this the
-	// plugin derives a step/response from its own refusal text and ingests it: the
+	// plugin derives a step/response from its own refusal text and reports it: the
 	// audit trail gains a record of something no model ever said, and the refusal is
 	// judged by the guardrails that produced it.
 	if ctx.GetBoolContext(ctxAnswered, false) {
@@ -862,17 +919,17 @@ func onStreamingResponseBody(ctx wrapper.HttpContext, cfg Config, chunk []byte, 
 	}
 	/*
 	 * An error, not a completion (see onResponseHeaders). Let it through untouched —
-	 * but "untouched" is not the same as "return it" once the lanes are armed.
+	 * but "untouched" is not the same as "return it" once the pause is armed.
 	 *
-	 * ⚠️ `armLanes` calls `NeedPauseStreamingResponse` in the REQUEST phase, which is
-	 * the only place early enough to arm it and the one place where no status exists
-	 * yet. Once armed, every chunk stops at this filter and the returned slice is NOT
-	 * written — injection is the only way bytes reach the caller. Returning `chunk`
-	 * here would look like a passthrough and deliver nothing, which is the exact hang
-	 * this whole branch exists to remove.
+	 * ⚠️ `armTailHold` calls `NeedPauseStreamingResponse` in the REQUEST phase, which
+	 * is the only place early enough to arm it and the one place where no status
+	 * exists yet. Once armed, every chunk stops at this filter and the returned slice
+	 * is NOT written — injection is the only way bytes reach the caller. Returning
+	 * `chunk` here would look like a passthrough and deliver nothing, which is the
+	 * exact hang this whole branch exists to remove.
 	 */
 	if ctx.GetBoolContext(ctxNotModel, false) {
-		if rs.laneOwned {
+		if rs.owned {
 			if err := proxywasm.InjectEncodedDataToFilterChain(chunk, isLast); err != nil {
 				proxywasm.LogErrorf("[OGR-RESP] passing an upstream error through failed: %v", err)
 			}
@@ -892,16 +949,16 @@ func onStreamingResponseBody(ctx wrapper.HttpContext, cfg Config, chunk []byte, 
 	// rest of the answer on a hit — and the pipeline measured exactly that
 	// (`docs/STREAMING_GUARDRAIL.md`): false positives 2.3x at 25% visibility, all of
 	// it the reply that agrees on the surface and corrects underneath. Early judgement
-	// is a fit PREFILTER and an unfit BLOCKING CRITERION. The replacement is two lanes
-	// decided by the INPUT verdict (`output_mode`), with the real judgement at end of
-	// stream in both. If mid-stream detection comes back it may only switch lanes
-	// (passthrough -> buffer); it may never cut.
+	// is a fit PREFILTER and an unfit BLOCKING CRITERION. v0.8 codified the
+	// replacement: forward the stream behind a withheld tail and judge the answer
+	// ONCE, whole, at end of stream (tailhold.go). If mid-stream detection ever comes
+	// back it may only grow the hold; it may never cut.
 
-	// Enforcing on a stream: the lanes own the flow from here (lanes.go). Everything
-	// the caller receives goes out by injection, and the whole answer is judged once
-	// at end of stream.
-	if rs.laneOwned {
-		return laneChunk(ctx, cfg, rs, out, isLast)
+	// Enforcing on a stream: the tail-hold owns the flow from here. Everything the
+	// caller receives goes out by injection, and the whole answer is judged once at
+	// end of stream.
+	if rs.owned {
+		return holdChunk(ctx, cfg, rs, sp, out, isLast)
 	}
 
 	if isLast {
@@ -910,12 +967,12 @@ func onStreamingResponseBody(ctx wrapper.HttpContext, cfg Config, chunk []byte, 
 		result := sp.Result()
 		switch {
 		case !result.Empty():
-			ingest(ctx, cfg, []*GuardEvent{responseEventCanonical(rs.derive, canonicalOf(rs, result, sp.Timing()))})
+			report(cfg, responseEventCanonical(rs.derive, canonicalOf(rs, result, sp.Timing())))
 		case sp.SawBytes():
 			// ⚠️ An empty result here means one of two very different things: the model
 			// said nothing, or we could not read a single frame of what it sent. Only
 			// the second is a hole, and it must not look like the first.
-			reportUnreadableStream(ctx, cfg, rs, sp)
+			reportUnreadableStream(rs, sp)
 		}
 	}
 	return out
@@ -959,20 +1016,21 @@ func bufferedTiming(sentAt time.Time) *canonicalTiming {
 	return t
 }
 
-// reportUnreadableStream says, out loud and on the wire, that the model's OUTPUT side
-// of this request was never judged because nothing could be reassembled out of the
-// bytes that arrived. The request side still was.
+// reportUnreadableStream says, out loud, that the model's OUTPUT side of this
+// request was never judged because nothing could be reassembled out of the bytes
+// that arrived. The request side still was.
 //
-// ⚠️ The silence this replaces is the expensive kind: the caller gets its answer, the
-// gateway logs a clean 200, and the only trace of an unjudged reply is an event that
-// was never sent.
-func reportUnreadableStream(ctx wrapper.HttpContext, cfg Config, rs *reqState, sp *streamProcessor) {
+// ⚠️ The silence this replaces is the expensive kind: the caller gets its answer,
+// the gateway logs a clean 200, and nothing anywhere says a reply passed unjudged.
+// v0.7 also sent an `{"unparsed": true}` diagnostic event; v0.8's required
+// `llm_protocol` + honest-payload rules removed the room for it (see events.go),
+// so the counter and this line ARE the record — and under `fail_mode: closed` the
+// enforcing caller refuses the reply outright (tailhold.go), because a reply we
+// could not read is a reply we could not judge.
+func reportUnreadableStream(rs *reqState, sp *streamProcessor) {
 	bump(cntUnreadable, 1)
-	logInfof("[OGR-RESP] %d stream bytes reassembled to nothing on %s — the model's output side of this request is NOT judged",
+	logInfof("[OGR-RESP] %d stream bytes reassembled to nothing on %s — the model's output side of this request is NOT judged (counted as unreadable)",
 		sp.Bytes(), rs.proto.Name())
-	ingest(ctx, cfg, []*GuardEvent{
-		unparsedEvent(rs.derive, kindStepResponse, "stream not reassembled by this build", sp.Bytes()),
-	})
 }
 
 // --- talking to the runtime -------------------------------------------------
@@ -983,6 +1041,12 @@ const failMessage = "The AI guardrail service is unavailable and this deployment
 // it just did not answer about all of this step. Telling an operator "unavailable" would
 // send them looking at connectivity for a service that is up.
 const partialMessage = "Part of this request could not be evaluated and this deployment is configured to fail closed."
+
+// unreadMessage is the third distinct failure: the model answered, and THIS PLUGIN
+// could not reassemble the answer to judge it. Neither an outage nor a partial
+// verdict — an operator debugging it looks at the stream decoding, not at
+// connectivity.
+const unreadMessage = "This response could not be read for evaluation and this deployment is configured to fail closed."
 
 // unorderedBudgetHint is appended to a `status=0`, because that status is exactly as
 // informative as the budget chain is ordered.
@@ -1051,54 +1115,36 @@ func logUnresolvedSpans(n int) {
 		n)
 }
 
-// ingest posts events to the async endpoint and does not wait. The runtime evaluates
-// them there too, so observe mode still produces findings — it just never makes anyone
-// wait for them.
-func ingest(ctx wrapper.HttpContext, cfg Config, events []*GuardEvent) {
-	payload := batchPayload(events)
-	if payload == nil {
+// report posts ONE event to /evaluate and does not wait — observe mode's whole
+// dispatch. Evaluate records everything it judges (it is the observation channel
+// since v0.8 removed /ingest), so observe still produces findings; it just never
+// makes anyone wait for them, and the verdict is deliberately never read — a mode
+// that cannot act on a decision must not be tempted by one.
+func report(cfg Config, e *GuardEvent) {
+	payload, err := json.Marshal(e)
+	if err != nil {
 		return
 	}
-	post(cfg.client, cfg.apiKey, cfg.ingestPath, payload, cfg.timeoutMs, "OGR-INGEST")
-	bump(cntIngested, uint64(len(events)))
-	mirrorAsync(cfg, payload)
+	post(cfg.client, cfg.apiKey, cfg.evaluatePath, payload, cfg.timeoutMs, "OGR-REPORT")
+	bump(cntReported, 1)
+	mirrorEvent(cfg, e)
 }
 
-// mirrorAsync sends a copy to the candidate runtime and forgets about it.
+// mirrorEvent sends a copy of one event to the candidate runtime and forgets it.
 //
 // ⚠️ Dispatched, never awaited, in EVERY mode. A mirror exists to answer "what would
 // the new policy have said" — it is not in the decision, so a slow or dead candidate
 // must cost the caller nothing.
-func mirrorAsync(cfg Config, payload []byte) {
-	if !cfg.hasMirror || payload == nil {
-		return
-	}
-	post(cfg.mirror, cfg.mirrorKey, cfg.mirrorIngestPath, payload, cfg.timeoutMs, "OGR-MIRROR")
-	bump(cntMirrored, 1)
-}
-
-// mirrorEvents is the mirror-only path, for events the primary saw through /evaluate
-// and must not receive twice.
-func mirrorEvents(cfg Config, events []*GuardEvent) {
+func mirrorEvent(cfg Config, e *GuardEvent) {
 	if !cfg.hasMirror {
 		return
 	}
-	mirrorAsync(cfg, batchPayload(events))
-}
-
-func batchPayload(events []*GuardEvent) []byte {
-	if len(events) == 0 {
-		return nil
-	}
-	if len(events) > maxBatch {
-		logInfof("[OGR-INGEST] %d events over the batch cap, sending the newest %d", len(events), maxBatch)
-		events = events[len(events)-maxBatch:]
-	}
-	payload, err := json.Marshal(map[string]any{"batch": events})
+	payload, err := json.Marshal(e)
 	if err != nil {
-		return nil
+		return
 	}
-	return payload
+	post(cfg.mirror, cfg.mirrorKey, cfg.mirrorEvaluatePath, payload, cfg.timeoutMs, "OGR-MIRROR")
+	bump(cntMirrored, 1)
 }
 
 func post(client wrapper.HttpClient, apiKey, path string, payload []byte, timeoutMs uint32, tag string) {
@@ -1108,7 +1154,7 @@ func post(client wrapper.HttpClient, apiKey, path string, payload []byte, timeou
 	}
 	if err := client.Post(path, headers, payload,
 		func(status int, _ http.Header, body []byte) {
-			if status != 200 && status != 207 {
+			if status != 200 {
 				logConditionf(tag+".status", "[%s] status=%d body=%s", tag, status, truncate(string(body), 256))
 			}
 		}, timeoutMs); err != nil {
@@ -1130,8 +1176,12 @@ func applyFail(ctx wrapper.HttpContext, cfg Config, rs *reqState, why string) {
 	// has been unreachable for a week. (No state was written, so an exact retry is
 	// judged again — the plugin keeps nothing across requests by construction.)
 	bump(cntUnchecked, 1)
-	logInfof("[OGR-REQ] request passed UNCHECKED (fail-open): %s, session=%s",
-		why, rs.session.ID)
+	logInfof("[OGR-REQ] request passed UNCHECKED (fail-open): %s", why)
+	// The RESPONSE half is still enforceable — the two step halves are judged
+	// independently, and losing the request's verdict is no reason to stream the
+	// answer back unenforced. Armed here because this callback is still the request
+	// phase, the last moment the pause can be set.
+	armTailHold(ctx, cfg, rs)
 	rs.sentAt = time.Now()
 	proxywasm.ResumeHttpRequest()
 }
