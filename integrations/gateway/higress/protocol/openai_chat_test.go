@@ -125,3 +125,87 @@ func TestAnAnswerEndingMidTokenIsNotTruncated(t *testing.T) {
 		t.Fatalf("the caller received %q, want the whole answer", text.String())
 	}
 }
+
+func TestEnsureStreamUsageOptsInExactlyWhenNeeded(t *testing.T) {
+	// A non-stream request is untouched: buffered replies carry usage anyway.
+	if out, injected := (openAIChat{}).EnsureStreamUsage(`{"model":"m","messages":[]}`); injected || gjson.Get(out, "stream_options").Exists() {
+		t.Fatalf("a non-stream request was rewritten: %s", out)
+	}
+	// A client that opted in already keeps its body byte-identical — and keeps its
+	// usage frame (injected=false means nothing gets swallowed).
+	in := `{"model":"m","stream":true,"stream_options":{"include_usage":true},"messages":[]}`
+	if out, injected := (openAIChat{}).EnsureStreamUsage(in); injected || out != in {
+		t.Fatalf("an already-opted-in request was rewritten: %s", out)
+	}
+	// A stream with no opt-in gets one, and the injection is reported so the
+	// synthetic frame can be withheld from the client.
+	out, injected := openAIChat{}.EnsureStreamUsage(`{"model":"m","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+	if !injected {
+		t.Fatal("a bare stream request was not opted in")
+	}
+	if !gjson.Get(out, "stream_options.include_usage").Bool() {
+		t.Fatalf("include_usage not set: %s", out)
+	}
+	if gjson.Get(out, "messages.0.content").String() != "hi" {
+		t.Fatalf("the conversation was disturbed: %s", out)
+	}
+}
+
+func TestTheInjectedUsageFrameIsSwallowedOnlyWhenArmed(t *testing.T) {
+	usageFrame := `data: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5}}` + "\n\n"
+
+	// Armed: the gateway injected the opt-in, so the client never asked for this
+	// frame — captured for the report, withheld from the wire.
+	dec := openAIChat{}.NewDecoder(NewRestorer(nil))
+	dec.(*chatDecoder).SuppressUsageFrame()
+	scan := NewScanner(dec)
+	out := string(scan.Chunk([]byte(usageFrame+"data: [DONE]\n\n"), true))
+	if strings.Contains(out, "prompt_tokens") {
+		t.Fatalf("the synthetic usage frame reached the client: %q", out)
+	}
+	if !strings.Contains(out, "[DONE]") {
+		t.Fatalf("the stream terminator was lost: %q", out)
+	}
+	u := scan.Output().Usage
+	if u == nil || u.InputTokens != 10 || u.OutputTokens != 5 {
+		t.Fatalf("the swallowed frame was not captured: %+v", u)
+	}
+
+	// Not armed: the client (or the provider, unasked) produced the frame, and it
+	// passes through untouched.
+	plain := NewScanner(openAIChat{}.NewDecoder(NewRestorer(nil)))
+	out = string(plain.Chunk([]byte(usageFrame+"data: [DONE]\n\n"), true))
+	if !strings.Contains(out, "prompt_tokens") {
+		t.Fatalf("a frame the client asked for was swallowed: %q", out)
+	}
+	if u := plain.Output().Usage; u == nil || u.InputTokens != 10 {
+		t.Fatalf("usage not captured on the passthrough: %+v", u)
+	}
+}
+
+func TestAUsageBearingContentChunkIsNeverSwallowed(t *testing.T) {
+	// Some vendors report usage on the LAST CONTENT chunk instead of a dedicated
+	// frame. Swallowing that one would eat part of the answer.
+	dec := openAIChat{}.NewDecoder(NewRestorer(nil))
+	dec.(*chatDecoder).SuppressUsageFrame()
+	scan := NewScanner(dec)
+	frame := `data: {"choices":[{"delta":{"content":"bye"},"finish_reason":"stop"}],"usage":{"prompt_tokens":7,"completion_tokens":3}}` + "\n\n"
+	out := string(scan.Chunk([]byte(frame+"data: [DONE]\n\n"), true))
+	if !strings.Contains(out, "bye") {
+		t.Fatalf("a content chunk was swallowed with its usage: %q", out)
+	}
+	if u := scan.Output().Usage; u == nil || u.InputTokens != 7 {
+		t.Fatalf("usage on a content chunk was not captured: %+v", u)
+	}
+}
+
+func TestChatUsageReadsTheDetailCounters(t *testing.T) {
+	out := openAIChat{}.ParseResponse(gjson.Parse(`{"choices":[{"message":{"content":"ok"}}],
+	  "usage":{"prompt_tokens":100,"completion_tokens":40,
+	    "prompt_tokens_details":{"cached_tokens":25},
+	    "completion_tokens_details":{"reasoning_tokens":12}}}`))
+	u := out.Usage
+	if u == nil || u.CacheReadTokens != 25 || u.ReasoningTokens != 12 {
+		t.Fatalf("detail counters lost: %+v", u)
+	}
+}

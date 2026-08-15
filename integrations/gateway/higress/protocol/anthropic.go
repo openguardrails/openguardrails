@@ -211,7 +211,34 @@ func (anthropicMessages) ParseResponse(body gjson.Result) Output {
 		Text:      anthropicText(c),
 		Reasoning: anthropicReasoning(c),
 		Actions:   anthropicActions(c),
+		Usage:     mergeAnthropicUsage(nil, body.Get("usage")),
 	}
+}
+
+// mergeAnthropicUsage folds one usage object into the accumulator, setting only
+// the fields THIS object carries. Merging is what the stream requires: the
+// Messages API reports input-side counters on `message_start` and the final
+// output count on `message_delta`, and each half must not zero the other.
+func mergeAnthropicUsage(u *Usage, res gjson.Result) *Usage {
+	if !res.IsObject() {
+		return u
+	}
+	if u == nil {
+		u = &Usage{}
+	}
+	if v := res.Get("input_tokens"); v.Exists() {
+		u.InputTokens = v.Int()
+	}
+	if v := res.Get("output_tokens"); v.Exists() {
+		u.OutputTokens = v.Int()
+	}
+	if v := res.Get("cache_read_input_tokens"); v.Exists() {
+		u.CacheReadTokens = v.Int()
+	}
+	if v := res.Get("cache_creation_input_tokens"); v.Exists() {
+		u.CacheWriteTokens = v.Int()
+	}
+	return u
 }
 
 // --- masking and restoration -------------------------------------------------
@@ -356,6 +383,7 @@ type anthropicDecoder struct {
 	r      *Restorer
 	blocks map[int]*anthropicBlock
 	order  []int
+	usage  *Usage
 }
 
 func (d *anthropicDecoder) block(i int) *anthropicBlock {
@@ -380,6 +408,12 @@ func (d *anthropicDecoder) Line(line string, isLast bool) string {
 	idx := int(parsed.Get("index").Int())
 
 	switch parsed.Get("type").String() {
+	case "message_start":
+		// The input-side counters (and the cache split) arrive here, before any
+		// content exists; `message_delta` completes the picture below.
+		d.usage = mergeAnthropicUsage(d.usage, parsed.Get("message.usage"))
+		return line
+
 	case "content_block_start":
 		b := d.block(idx)
 		cb := parsed.Get("content_block")
@@ -419,6 +453,8 @@ func (d *anthropicDecoder) Line(line string, isLast bool) string {
 		return "data: " + next
 
 	case "message_delta", "message_stop":
+		// The final output_tokens count rides message_delta's own `usage`.
+		d.usage = mergeAnthropicUsage(d.usage, parsed.Get("usage"))
 		// ⚠️ The answer is ending, so whatever the restorer holds is text and has to
 		// go out BEFORE the frame that closes it — otherwise an answer ending in the
 		// first characters of a placeholder silently loses them.
@@ -474,5 +510,6 @@ func (d *anthropicDecoder) Output() Output {
 		}
 	}
 	out.Text, out.Reasoning = text.String(), reasoning.String()
+	out.Usage = d.usage
 	return out
 }

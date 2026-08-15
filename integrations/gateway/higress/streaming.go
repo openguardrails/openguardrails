@@ -47,18 +47,36 @@ type streamProcessor struct {
 	// — two states that look identical from an empty Result and mean opposite things.
 	bytes int
 
-	// Wall-clock facts for the canonical payload's `timing`. startedAt is when this
-	// processor first existed (the response phase opening); firstAt is the first
-	// chunk that carried bytes; doneAt is the last chunk.
+	// Wall-clock facts for the canonical payload's `timing`. startedAt is when the
+	// request was RELEASED upstream (threaded in from the request phase — the
+	// response phase opens only when the first chunk is already arriving, so
+	// measuring from here would read TTFT as ~0); firstAt is the first chunk that
+	// carried bytes; doneAt is the last chunk.
 	startedAt time.Time
 	firstAt   time.Time
 	doneAt    time.Time
 }
 
-func newStreamProcessor(proto protocol.Protocol, mapping map[string]string, sse bool) *streamProcessor {
-	s := &streamProcessor{proto: proto, sse: sse, startedAt: time.Now()}
+// newStreamProcessor builds the reader for one reply. startedAt zero means the
+// request phase never stamped a release time (it always should); fall back to
+// now rather than fabricate a past. suppressUsageFrame arms the decoder to
+// withhold the usage-only frame the gateway's OWN opt-in produced — only ever
+// true when this plugin injected `include_usage` itself (see
+// protocol.UsageFrameSuppressor).
+func newStreamProcessor(proto protocol.Protocol, mapping map[string]string, sse bool,
+	startedAt time.Time, suppressUsageFrame bool) *streamProcessor {
+	if startedAt.IsZero() {
+		startedAt = time.Now()
+	}
+	s := &streamProcessor{proto: proto, sse: sse, startedAt: startedAt}
 	if sse {
-		s.scan = protocol.NewScanner(proto.NewDecoder(protocol.NewRestorer(mapping)))
+		dec := proto.NewDecoder(protocol.NewRestorer(mapping))
+		if suppressUsageFrame {
+			if sup, ok := dec.(protocol.UsageFrameSuppressor); ok {
+				sup.SuppressUsageFrame()
+			}
+		}
+		s.scan = protocol.NewScanner(dec)
 	}
 	return s
 }

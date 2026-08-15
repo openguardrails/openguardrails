@@ -3,6 +3,7 @@ package main
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openguardrails/higress/protocol"
 	"github.com/tidwall/gjson"
@@ -27,7 +28,7 @@ func chunk(content string) string {
 }
 
 func TestStreamRestoresAndReassembles(t *testing.T) {
-	sp := newStreamProcessor(chatProto(t), map[string]string{"${OGR_EMAIL_1}": "ada@example.com"}, true)
+	sp := newStreamProcessor(chatProto(t), map[string]string{"${OGR_EMAIL_1}": "ada@example.com"}, true, time.Time{}, false)
 
 	var out strings.Builder
 	for _, c := range []string{chunk("mail "), chunk("${OGR_EMAIL_1}"), chunk(" now")} {
@@ -46,7 +47,7 @@ func TestStreamRestoresAndReassembles(t *testing.T) {
 }
 
 func TestEmptyMappingIsPassthrough(t *testing.T) {
-	sp := newStreamProcessor(chatProto(t), nil, true)
+	sp := newStreamProcessor(chatProto(t), nil, true, time.Time{}, false)
 	in := chunk("hello")
 	if got := string(sp.ProcessChunk([]byte(in), true)); got != in {
 		t.Fatalf("passthrough altered the stream:\n%q\n%q", in, got)
@@ -56,7 +57,7 @@ func TestEmptyMappingIsPassthrough(t *testing.T) {
 func TestANonStreamedReplyIsReportedWithoutBuffering(t *testing.T) {
 	// Observe mode never calls BufferResponseBody, so the whole reply arrives here in
 	// chunks and must still be readable at the end.
-	sp := newStreamProcessor(chatProto(t), nil, false)
+	sp := newStreamProcessor(chatProto(t), nil, false, time.Time{}, false)
 	body := `{"choices":[{"message":{"role":"assistant","content":"the answer",` +
 		`"tool_calls":[{"id":"c1","function":{"name":"shell","arguments":"{}"}}]}}]}`
 	for i := 0; i < len(body); i += 7 {
@@ -79,7 +80,7 @@ func TestANonStreamedReplyIsReportedWithoutBuffering(t *testing.T) {
 }
 
 func TestTheAccumulatedCopyIsBounded(t *testing.T) {
-	sp := newStreamProcessor(chatProto(t), nil, false)
+	sp := newStreamProcessor(chatProto(t), nil, false, time.Time{}, false)
 	huge := strings.Repeat("x", maxRawAccum+4096)
 	sp.ProcessChunk([]byte(huge), true)
 	if sp.raw.Len() > maxRawAccum+len(huge) {
@@ -95,11 +96,11 @@ func TestTheAccumulatedCopyIsBounded(t *testing.T) {
 func TestAnUnreadStreamIsDistinguishableFromASilentOne(t *testing.T) {
 	// An empty Result means one of two opposite things. `SawBytes` is what separates
 	// them, and the difference decides whether the plugin reports a hole.
-	silent := newStreamProcessor(chatProto(t), nil, true)
+	silent := newStreamProcessor(chatProto(t), nil, true, time.Time{}, false)
 	if silent.SawBytes() {
 		t.Error("a processor that received nothing claims it saw bytes")
 	}
-	unread := newStreamProcessor(chatProto(t), nil, true)
+	unread := newStreamProcessor(chatProto(t), nil, true, time.Time{}, false)
 	unread.ProcessChunk([]byte("event: something_else\ndata: {\"type\":\"nope\"}\n\n"), true)
 	if !unread.Result().Empty() {
 		t.Error("an unrecognised frame produced output")
@@ -110,7 +111,7 @@ func TestAnUnreadStreamIsDistinguishableFromASilentOne(t *testing.T) {
 }
 
 func TestStreamedToolCallsAreReassembled(t *testing.T) {
-	sp := newStreamProcessor(chatProto(t), nil, true)
+	sp := newStreamProcessor(chatProto(t), nil, true, time.Time{}, false)
 	for _, c := range []string{
 		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"send","arguments":"{\"to\":"}}]}}]}` + "\n\n",
 		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"a@b.c\"}"}}]}}]}` + "\n\n",
@@ -128,5 +129,41 @@ func TestStreamedToolCallsAreReassembled(t *testing.T) {
 	}
 	if !gjson.Valid(out.Actions[0].Arguments) {
 		t.Fatal("reassembled arguments are not valid JSON")
+	}
+}
+
+func TestTimingStartsAtTheRequestRelease(t *testing.T) {
+	// TTFT is first-chunk minus REQUEST RELEASE. The processor only exists once the
+	// first chunk is already arriving, so measuring from its own construction would
+	// read every TTFT as ~0 — the release time is threaded in from the request phase.
+	release := time.Now().Add(-2 * time.Second)
+	sp := newStreamProcessor(chatProto(t), nil, true, release, false)
+	sp.ProcessChunk([]byte(chunk("hi")), false)
+	sp.ProcessChunk([]byte("data: [DONE]\n\n"), true)
+
+	tm := sp.Timing()
+	if tm.StartedAt != release.UTC().Format("2006-01-02T15:04:05.999999999Z07:00") {
+		t.Fatalf("started_at = %q, want the release time", tm.StartedAt)
+	}
+	started, _ := time.Parse(time.RFC3339Nano, tm.StartedAt)
+	first, err := time.Parse(time.RFC3339Nano, tm.FirstTokenAt)
+	if err != nil || first.Sub(started) < time.Second {
+		t.Fatalf("ttft collapsed: started=%s first=%s", tm.StartedAt, tm.FirstTokenAt)
+	}
+}
+
+func TestSuppressionIsWiredThroughToTheDecoder(t *testing.T) {
+	// The injectedUsage flag must actually reach the decoder, or the client parses
+	// a frame it never asked for while every test on the decoder itself passes.
+	sp := newStreamProcessor(chatProto(t), nil, true, time.Time{}, true)
+	out := string(sp.ProcessChunk([]byte(
+		`data: {"choices":[],"usage":{"prompt_tokens":9,"completion_tokens":4}}`+"\n\n"+
+			"data: [DONE]\n\n"), true))
+	if strings.Contains(out, "prompt_tokens") {
+		t.Fatalf("the synthetic usage frame reached the client: %q", out)
+	}
+	u := sp.Result().Usage
+	if u == nil || u.InputTokens != 9 || u.OutputTokens != 4 {
+		t.Fatalf("usage not captured: %+v", u)
 	}
 }

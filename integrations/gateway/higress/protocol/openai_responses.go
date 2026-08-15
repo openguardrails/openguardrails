@@ -185,7 +185,22 @@ func (openAIResponses) ParseResponse(body gjson.Result) Output {
 	if out.Text == "" {
 		out.Text = body.Get("output_text").String()
 	}
+	out.Usage = responsesUsage(body.Get("usage"))
 	return out
+}
+
+// responsesUsage transcribes the Responses API usage object. Unlike chat, this
+// protocol reports it on every completed response, streamed or not — no opt-in.
+func responsesUsage(u gjson.Result) *Usage {
+	if !u.IsObject() {
+		return nil
+	}
+	return &Usage{
+		InputTokens:     u.Get("input_tokens").Int(),
+		OutputTokens:    u.Get("output_tokens").Int(),
+		ReasoningTokens: u.Get("output_tokens_details.reasoning_tokens").Int(),
+		CacheReadTokens: u.Get("input_tokens_details.cached_tokens").Int(),
+	}
 }
 
 // --- masking and restoration -------------------------------------------------
@@ -355,6 +370,7 @@ type responsesDecoder struct {
 	r     *Restorer
 	items map[int]*responsesItem
 	order []int
+	usage *Usage
 }
 
 func (d *responsesDecoder) item(i int) *responsesItem {
@@ -415,6 +431,10 @@ func (d *responsesDecoder) Line(line string, isLast bool) string {
 		"response.function_call_arguments.done", "response.content_part.done",
 		"response.output_item.done", "response.completed", "response.incomplete",
 		"response.failed":
+		// The terminal events repeat the whole reply object, usage included.
+		if u := responsesUsage(parsed.Get("response.usage")); u != nil {
+			d.usage = u
+		}
 		return d.Flush() + d.restoreWhole(line, data)
 	}
 	return line
@@ -487,5 +507,6 @@ func (d *responsesDecoder) Output() Output {
 		}
 	}
 	out.Text, out.Reasoning = text.String(), reasoning.String()
+	out.Usage = d.usage
 	return out
 }

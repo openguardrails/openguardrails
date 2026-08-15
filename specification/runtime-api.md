@@ -274,6 +274,27 @@ and classifies nothing; that is the runtime's job. Caller identity from the
 gateway's own authentication (e.g. a consumer header) SHOULD be asserted as
 `agent_id`, and the consumer's group as `agent_workspace`.
 
+Two per-step facts only the gateway can supply ride the `step/response`:
+
+- **`timing`** — `{started_at, first_token_at?, completed_at}`, wall-clock
+  facts the byte path observes (`started_at` is the request's release
+  upstream; a buffered reply omits `first_token_at`). On a CANONICAL payload
+  it is the ordinary `timing` field; on a RAW provider body the gateway MAY
+  add it as a top-level `timing` key — inserted into the body's own bytes,
+  never via a re-serialization, so span offsets keep indexing the strings as
+  transported. No provider protocol defines a top-level `timing`; if a body
+  carries one, the gateway MUST leave it alone.
+- **`usage`** — a raw body carries the provider's own accounting and needs
+  nothing added. A canonical (stream-reassembled) payload SHOULD carry the
+  canonical counters `{input_tokens, output_tokens, reasoning_tokens?,
+  cache_read_tokens?, cache_write_tokens?}` transcribed from the stream, and
+  MUST omit the field rather than report zeros when the provider reported
+  nothing — a gateway holds no tokenizer, and absence is the honest value.
+  For protocols where a stream reports usage only on request
+  (`openai.chat`'s `stream_options.include_usage`), an enforcing gateway MAY
+  opt the request in, and then MUST withhold the resulting usage-only frame
+  from a client that never asked for it.
+
 ## Conformance
 
 A **runtime** conforms to this binding if it serves all endpoints above with

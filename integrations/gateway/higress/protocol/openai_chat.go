@@ -135,7 +135,45 @@ func (openAIChat) ParseResponse(body gjson.Result) Output {
 		Text:      msg.Get("content").String(),
 		Reasoning: msg.Get("reasoning_content").String(),
 		Actions:   chatActions(msg),
+		Usage:     chatUsage(body.Get("usage")),
 	}
+}
+
+// chatUsage transcribes the Chat Completions usage object. `usage: null` — what
+// every streamed chunk before the final one carries under include_usage — is not
+// an object and reads as "nothing reported".
+func chatUsage(u gjson.Result) *Usage {
+	if !u.IsObject() {
+		return nil
+	}
+	return &Usage{
+		InputTokens:     u.Get("prompt_tokens").Int(),
+		OutputTokens:    u.Get("completion_tokens").Int(),
+		ReasoningTokens: u.Get("completion_tokens_details.reasoning_tokens").Int(),
+		CacheReadTokens: u.Get("prompt_tokens_details.cached_tokens").Int(),
+	}
+}
+
+// EnsureStreamUsage opts a streaming request into usage reporting
+// (`stream_options.include_usage`), which this protocol otherwise OMITS from
+// streams — the one protocol of the three where a stream's token counts exist
+// only if the request asked. Returns the body unchanged when the request is not
+// a stream or the client already opted in; true means the GATEWAY injected it,
+// and the extra usage-only frame is then the gateway's to swallow, not the
+// client's to parse.
+func (openAIChat) EnsureStreamUsage(body string) (string, bool) {
+	parsed := gjson.Parse(body)
+	if !parsed.Get("stream").Bool() {
+		return body, false
+	}
+	if parsed.Get("stream_options.include_usage").Bool() {
+		return body, false
+	}
+	next, err := sjson.Set(body, "stream_options.include_usage", true)
+	if err != nil {
+		return body, false
+	}
+	return next, true
 }
 
 // --- masking and restoration -------------------------------------------------
@@ -242,13 +280,21 @@ type chatDecoder struct {
 	text      strings.Builder
 	reasoning strings.Builder
 	calls     map[int]*streamCall
+	usage     *Usage
 
 	textBuf      string
 	reasoningBuf string
+
+	// suppressUsage: the GATEWAY injected `include_usage`, so the terminal
+	// usage-only frame is one the client never asked for and must not receive.
+	suppressUsage bool
 }
 
+// SuppressUsageFrame arms the swallow — see UsageFrameSuppressor.
+func (d *chatDecoder) SuppressUsageFrame() { d.suppressUsage = true }
+
 func (d *chatDecoder) Output() Output {
-	out := Output{Text: d.text.String(), Reasoning: d.reasoning.String()}
+	out := Output{Text: d.text.String(), Reasoning: d.reasoning.String(), Usage: d.usage}
 	idx := make([]int, 0, len(d.calls))
 	for i := range d.calls {
 		idx = append(idx, i)
@@ -272,6 +318,19 @@ func (d *chatDecoder) Line(line string, isLast bool) string {
 	parsed := gjson.Parse(data)
 	if !parsed.IsObject() {
 		return line
+	}
+
+	// Token usage, when a chunk carries it (the terminal frame under
+	// include_usage; some vendors put it on the last content chunk instead).
+	// Last non-null wins.
+	if u := chatUsage(parsed.Get("usage")); u != nil {
+		d.usage = u
+		// The usage-only frame the gateway's OWN opt-in produced: captured above,
+		// withheld from a client that never asked for it. A frame that also
+		// carries choices is part of the answer and always passes.
+		if d.suppressUsage && len(parsed.Get("choices").Array()) == 0 {
+			return ""
+		}
 	}
 
 	// ⚠️ The stream is ENDING, so nothing more can complete a half-matched token:

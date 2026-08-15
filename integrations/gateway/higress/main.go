@@ -396,6 +396,17 @@ type reqState struct {
 	model     string
 	streaming bool
 
+	// sentAt is when the request was RELEASED upstream — the moment the model
+	// call actually starts. Stamped at every resume point (observe continue,
+	// enforce resume, fail-open resume) and consumed by the response side as
+	// `timing.started_at`, so TTFT measures the provider, not this filter's
+	// verdict wait.
+	sentAt time.Time
+	// injectedUsage: this plugin opted the stream into usage reporting on the
+	// client's behalf, so the terminal usage-only frame is the plugin's to
+	// swallow — a client that never asked must not have to parse it.
+	injectedUsage bool
+
 	// Which lane the RUNTIME put this answer on (`output_mode`), and whether this
 	// filter has taken ownership of the response stream to serve it. See lanes.go.
 	bufferOutput bool
@@ -583,6 +594,7 @@ func onRequestBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Actio
 	if cfg.mode == modeObserve {
 		// Nothing is refusable in observe: the request is already gone.
 		ingest(ctx, cfg, []*GuardEvent{e})
+		rs.sentAt = time.Now()
 		return types.ActionContinue
 	}
 	enforceRequest(ctx, cfg, rs, e, string(body))
@@ -620,6 +632,7 @@ func finishRequest(ctx wrapper.HttpContext, rs *reqState, outBody string) {
 		}
 		ctx.SetContext(ctxBody, outBody)
 	}
+	rs.sentAt = time.Now()
 	proxywasm.ResumeHttpRequest()
 }
 
@@ -677,6 +690,19 @@ func onInputVerdict(ctx wrapper.HttpContext, cfg Config, rs *reqState,
 			outBody = masked
 			rs.session.adopt(learned)
 			logInfof("[OGR-REQ] applied %d modification spans, %d tokens live", applied, len(rs.session.Mapping))
+		}
+	}
+
+	// Ask the provider to report token usage on a stream that would otherwise
+	// omit it (openai.chat's `include_usage`). ENFORCE ONLY — enforce already
+	// rewrites bodies, observe never touches one — and AFTER the spans, so their
+	// offsets were resolved against the body the runtime counted.
+	if rs.streaming {
+		if inj, ok := rs.proto.(protocol.StreamUsageEnsurer); ok {
+			if next, injected := inj.EnsureStreamUsage(outBody); injected {
+				outBody = next
+				rs.injectedUsage = true
+			}
 		}
 	}
 
@@ -741,7 +767,10 @@ func onResponseBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Acti
 	// (ai-proxy has already translated back below us). Detection happens on these
 	// bytes — they still carry our placeholders, and detecting on the restored text
 	// would find the very values we removed and block our own restoration.
-	e := responseEvent(rs.derive, body)
+	// Timing is the one fact the raw body cannot carry (usage already rides it,
+	// put there by the provider): spliced in as a top-level key, byte-preserving.
+	// No first_token_at — buffering is exactly the mode that hides it.
+	e := responseEventTimed(rs.derive, body, bufferedTiming(rs.sentAt))
 	if cfg.mode == modeObserve {
 		ingest(ctx, cfg, []*GuardEvent{e})
 		return restoreResponse(rs, body)
@@ -853,7 +882,8 @@ func onStreamingResponseBody(ctx wrapper.HttpContext, cfg Config, chunk []byte, 
 	}
 	sp, _ := ctx.GetContext(ctxStream).(*streamProcessor)
 	if sp == nil {
-		sp = newStreamProcessor(rs.proto, rs.session.Mapping, ctx.GetBoolContext(ctxStreaming, true))
+		sp = newStreamProcessor(rs.proto, rs.session.Mapping, ctx.GetBoolContext(ctxStreaming, true),
+			rs.sentAt, rs.injectedUsage)
 		ctx.SetContext(ctxStream, sp)
 	}
 	out := sp.ProcessChunk(chunk, isLast)
@@ -897,13 +927,36 @@ func canonicalOf(rs *reqState, out protocol.Output, timing *canonicalTiming) can
 	for _, a := range out.Actions {
 		calls = append(calls, canonicalToolCall{ID: a.ID, Name: a.Name, Arguments: jsonRaw(a.Arguments)})
 	}
-	return canonicalPayload{
+	p := canonicalPayload{
 		Text:      out.Text,
 		Reasoning: out.Reasoning,
 		ToolCalls: calls,
 		Model:     rs.model,
 		Timing:    timing,
 	}
+	// The provider's own counters, transcribed — nil stays absent, never zeros.
+	if u := out.Usage; u != nil {
+		p.Usage = &canonicalUsage{
+			InputTokens:      u.InputTokens,
+			OutputTokens:     u.OutputTokens,
+			ReasoningTokens:  u.ReasoningTokens,
+			CacheReadTokens:  u.CacheReadTokens,
+			CacheWriteTokens: u.CacheWriteTokens,
+		}
+	}
+	return p
+}
+
+// bufferedTiming is what a buffered reply lets the gateway observe: when the
+// request was released and when the whole body had arrived. A zero sentAt (a
+// path that never stamped it) reports completion alone rather than inventing a
+// start.
+func bufferedTiming(sentAt time.Time) *canonicalTiming {
+	t := &canonicalTiming{CompletedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+	if !sentAt.IsZero() {
+		t.StartedAt = sentAt.UTC().Format(time.RFC3339Nano)
+	}
+	return t
 }
 
 // reportUnreadableStream says, out loud and on the wire, that the model's OUTPUT side
@@ -1079,6 +1132,7 @@ func applyFail(ctx wrapper.HttpContext, cfg Config, rs *reqState, why string) {
 	bump(cntUnchecked, 1)
 	logInfof("[OGR-REQ] request passed UNCHECKED (fail-open): %s, session=%s",
 		why, rs.session.ID)
+	rs.sentAt = time.Now()
 	proxywasm.ResumeHttpRequest()
 }
 

@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+
+	"github.com/tidwall/gjson"
 )
 
 // One proxied model call → OGR v0.7 GuardEvents.
@@ -34,7 +37,7 @@ const (
 	// Reported on every event and in the heartbeat, so it is how a deployment learns
 	// which build is in the VM. Kept honest by TestPluginVersionMatchesTheVERSIONFile —
 	// 1.3.0 and 1.4.0 both shipped while a prior constant still said 1.2.0.
-	pluginVersion = "2.1.0"
+	pluginVersion = "2.2.0"
 
 	kindStepRequest  = "step/request"
 	kindStepResponse = "step/response"
@@ -126,6 +129,51 @@ func responseEvent(d *deriveCtx, rawBody []byte) *GuardEvent {
 	return d.event(kindStepResponse, json.RawMessage(rawBody))
 }
 
+// responseEventTimed is responseEvent plus the step's observed timing, spliced
+// into the raw body as a top-level `timing` key — the one fact a buffered reply
+// has that its own bytes cannot carry (the provider stamps no wall clock), and
+// which only the thing in the byte path can measure.
+//
+// ⚠️ SPLICED BY BYTE INSERTION, never by parse-and-re-marshal. A verdict's span
+// offsets index the string values of the payload AS TRANSPORTED, and Go's JSON
+// encoder re-escapes on the way out (`<` becomes `\u003c`), so a re-marshalled body
+// would put every offset into bytes the runtime never counted. Inserting one
+// sibling key right after the opening `{` leaves every original byte — and every
+// string a span can name — exactly where it was.
+func responseEventTimed(d *deriveCtx, rawBody []byte, timing *canonicalTiming) *GuardEvent {
+	return d.event(kindStepResponse, json.RawMessage(spliceTiming(rawBody, timing)))
+}
+
+func spliceTiming(rawBody []byte, timing *canonicalTiming) []byte {
+	if timing == nil {
+		return rawBody
+	}
+	trimmed := bytes.TrimLeft(rawBody, " \t\r\n")
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return rawBody // not a JSON object: forward untouched, report nothing extra
+	}
+	// No provider protocol has a top-level `timing`; if one ever appears, keep
+	// the body verbatim rather than write a duplicate key.
+	if gjson.ParseBytes(trimmed).Get("timing").Exists() {
+		return rawBody
+	}
+	blob, err := json.Marshal(timing)
+	if err != nil {
+		return rawBody
+	}
+	rest := trimmed[1:]
+	sep := ","
+	if next := bytes.TrimLeft(rest, " \t\r\n"); len(next) > 0 && next[0] == '}' {
+		sep = "" // `{}` — a degenerate but valid body
+	}
+	out := make([]byte, 0, len(trimmed)+len(blob)+16)
+	out = append(out, `{"timing":`...)
+	out = append(out, blob...)
+	out = append(out, sep...)
+	out = append(out, rest...)
+	return out
+}
+
 // canonicalResponse is the step's second half for a STREAMED reply, where no single
 // raw body exists to forward: the canonical shape the spec defines, reassembled from
 // the SSE frames.
@@ -147,11 +195,25 @@ type canonicalTiming struct {
 	CompletedAt  string `json:"completed_at,omitempty"`
 }
 
+// canonicalUsage is the provider's token accounting in the canonical counter
+// names the runtime ingests verbatim (`events.input_tokens` and friends — the
+// same five dsh reports). input/output stay present at 0 when the provider
+// reported a usage object at all; the detail counters are omitted at 0 because
+// most providers never report them.
+type canonicalUsage struct {
+	InputTokens      int64 `json:"input_tokens"`
+	OutputTokens     int64 `json:"output_tokens"`
+	ReasoningTokens  int64 `json:"reasoning_tokens,omitempty"`
+	CacheReadTokens  int64 `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens int64 `json:"cache_write_tokens,omitempty"`
+}
+
 type canonicalPayload struct {
 	Text      string              `json:"text,omitempty"`
 	Reasoning string              `json:"reasoning,omitempty"`
 	ToolCalls []canonicalToolCall `json:"tool_calls,omitempty"`
 	Model     string              `json:"model,omitempty"`
+	Usage     *canonicalUsage     `json:"usage,omitempty"`
 	Timing    *canonicalTiming    `json:"timing,omitempty"`
 }
 

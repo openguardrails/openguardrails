@@ -357,3 +357,101 @@ func TestSessionIDIsReadFromTheV07Field(t *testing.T) {
 		t.Fatalf("SessionID = %q", v.SessionID())
 	}
 }
+
+// ⚠️ The property the timing splice rests on: every byte of the provider body
+// survives, in order — the timing key is INSERTED, the body is never parsed and
+// re-marshalled. A span's offsets index the string values as transported, and a
+// re-encode (which escapes `<` to `\u003c`, among others) would shift them.
+func TestSpliceTimingInsertsWithoutDisturbingTheBodyBytes(t *testing.T) {
+	raw := `{"choices":[{"message":{"role":"assistant","content":"a <b> & \"c\" reply"}}]}`
+	timing := &canonicalTiming{StartedAt: "2026-08-15T00:00:00Z", CompletedAt: "2026-08-15T00:00:02Z"}
+	out := spliceTiming([]byte(raw), timing)
+	if !gjson.ValidBytes(out) {
+		t.Fatalf("splice produced invalid JSON: %s", out)
+	}
+	parsed := gjson.ParseBytes(out)
+	if parsed.Get("timing.started_at").String() != "2026-08-15T00:00:00Z" ||
+		parsed.Get("timing.completed_at").String() != "2026-08-15T00:00:02Z" {
+		t.Fatalf("timing not carried: %s", out)
+	}
+	// Everything after the inserted prefix is the original body's own tail,
+	// byte for byte — the whole point of inserting instead of re-encoding.
+	if !bytes.HasSuffix(out, []byte(raw[1:])) {
+		t.Fatalf("the body's bytes moved:\n%s", out)
+	}
+}
+
+func TestSpliceTimingLeavesWhatItCannotSafelyExtend(t *testing.T) {
+	timing := &canonicalTiming{CompletedAt: "2026-08-15T00:00:02Z"}
+	// Not a JSON object: forwarded untouched rather than guessed at.
+	if got := spliceTiming([]byte(`[1,2]`), timing); string(got) != `[1,2]` {
+		t.Fatalf("a non-object body was rewritten: %s", got)
+	}
+	if got := spliceTiming(nil, timing); got != nil {
+		t.Fatalf("an empty body was rewritten: %s", got)
+	}
+	// A body that already claims a top-level `timing` keeps its own — a duplicate
+	// key would make the document mean different things to different parsers.
+	claimed := `{"timing":{"x":1},"ok":true}`
+	if got := spliceTiming([]byte(claimed), timing); string(got) != claimed {
+		t.Fatalf("an existing timing key was shadowed: %s", got)
+	}
+	if got := spliceTiming([]byte(`{"a":1}`), nil); string(got) != `{"a":1}` {
+		t.Fatalf("nil timing rewrote the body: %s", got)
+	}
+	// The degenerate-but-valid empty object still comes out valid.
+	if got := spliceTiming([]byte(`{}`), timing); !gjson.ValidBytes(got) ||
+		gjson.GetBytes(got, "timing.completed_at").String() == "" {
+		t.Fatalf("empty object: %s", got)
+	}
+}
+
+func TestABufferedResponseEventCarriesItsTiming(t *testing.T) {
+	raw := `{"choices":[{"message":{"role":"assistant","content":"ok"}}]}`
+	e := responseEventTimed(ctxFor("alice@acme.io"), []byte(raw),
+		&canonicalTiming{StartedAt: "2026-08-15T00:00:00Z", CompletedAt: "2026-08-15T00:00:01Z"})
+	if e.Kind != "step/response" {
+		t.Fatalf("kind = %q", e.Kind)
+	}
+	blob, err := json.Marshal(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := gjson.ParseBytes(blob)
+	if got.Get("payload.timing.started_at").String() == "" {
+		t.Fatalf("timing lost on the wire: %s", blob)
+	}
+	if got.Get("payload.choices.0.message.content").String() != "ok" {
+		t.Fatalf("the reply itself was disturbed: %s", blob)
+	}
+}
+
+// The canonical usage keys are the runtime's ingest contract (`events.input_tokens`
+// and friends, the five dsh reports) — pinned by NAME, because a rename here would
+// zero every counter silently.
+func TestCanonicalUsageMarshalsInTheRuntimesCounterNames(t *testing.T) {
+	p := canonicalOf(&reqState{model: "m"}, protocol.Output{
+		Text: "hi",
+		Usage: &protocol.Usage{InputTokens: 1, OutputTokens: 2, ReasoningTokens: 3,
+			CacheReadTokens: 4, CacheWriteTokens: 5},
+	}, nil)
+	blob, err := json.Marshal(responseEventCanonical(ctxFor("a"), p))
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := gjson.ParseBytes(blob).Get("payload.usage")
+	for key, want := range map[string]int64{
+		"input_tokens": 1, "output_tokens": 2, "reasoning_tokens": 3,
+		"cache_read_tokens": 4, "cache_write_tokens": 5,
+	} {
+		if got := u.Get(key).Int(); got != want {
+			t.Errorf("usage.%s = %d, want %d (full: %s)", key, got, want, u.Raw)
+		}
+	}
+	// No usage reported → no usage key: absence is the honest value, zeros are a claim.
+	none := canonicalOf(&reqState{model: "m"}, protocol.Output{Text: "hi"}, nil)
+	blob, _ = json.Marshal(responseEventCanonical(ctxFor("a"), none))
+	if gjson.ParseBytes(blob).Get("payload.usage").Exists() {
+		t.Fatalf("an unreported usage marshalled as zeros: %s", blob)
+	}
+}

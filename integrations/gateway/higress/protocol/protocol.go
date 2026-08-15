@@ -144,15 +144,50 @@ type Conversation struct {
 	Stream bool
 }
 
+// Usage is the provider's OWN token accounting for one reply, normalized to the
+// counter names OGR v0.7's canonical payload uses. A gateway holds no tokenizer,
+// so this is transcription, never estimation: nil means the provider reported
+// nothing, and nil is the honest answer then — an invented count would be read
+// downstream as a measurement.
+type Usage struct {
+	InputTokens      int64
+	OutputTokens     int64
+	ReasoningTokens  int64
+	CacheReadTokens  int64
+	CacheWriteTokens int64
+}
+
 // Output is what the model produced in reply to one request.
 type Output struct {
 	Text      string
 	Reasoning string
 	Actions   []Action
+	// Usage is nil when the provider reported none — on `openai.chat` streams
+	// that is the default unless the request carried
+	// `stream_options.include_usage` (see StreamUsageEnsurer).
+	Usage *Usage
 }
 
-// Empty reports whether the model produced nothing readable.
+// Empty reports whether the model produced nothing readable. Usage alone does
+// not count: a reply that carried counters and no content still said nothing.
 func (o Output) Empty() bool { return o.Text == "" && len(o.Actions) == 0 }
+
+// StreamUsageEnsurer is implemented by a protocol whose provider omits token
+// usage from a stream unless the REQUEST opts in. EnsureStreamUsage rewrites a
+// request body to opt in and reports whether it did — the caller then owes the
+// client a stream without the extra frame it never asked for (see
+// UsageFrameSuppressor).
+type StreamUsageEnsurer interface {
+	EnsureStreamUsage(body string) (string, bool)
+}
+
+// UsageFrameSuppressor is implemented by a Decoder that can withhold the
+// usage-only frame a gateway's own opt-in produced. Only ever armed when the
+// GATEWAY injected the opt-in: a client that asked for usage itself must
+// receive it, and a frame the provider volunteers unasked passes through too.
+type UsageFrameSuppressor interface {
+	SuppressUsageFrame()
+}
 
 // NewInput returns the turns that have NOT yet reached the model: everything
 // after the model's last turn.

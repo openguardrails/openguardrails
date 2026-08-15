@@ -224,9 +224,39 @@ no exposure forces the buffered lane (or `stream: false`) and pays the latency.
 ⚠️ Interim judgments carry **`ogr-partial: 1`** (decide, answer, record
 nothing); the answer is reported once, whole, at end of stream.
 
-The streamed `step/response` also carries **`timing`**
-(`started_at`/`first_token_at`/`completed_at`) — facts only the thing in the
-byte path can measure, feeding the platform's TTFT-vs-decoding split.
+## Token usage and timing (2.2.0)
+
+Every `step/response` now carries the two per-step facts the trajectory view
+reads — **`timing`** and **`usage`** — from whichever side of the four-way
+split (buffered/streamed × observe/enforce) the reply took:
+
+- **`timing`** = `{started_at, first_token_at?, completed_at}`. `started_at`
+  is stamped when the request is RELEASED upstream (after the input verdict,
+  in enforce), so TTFT measures the provider, not this filter's wait. A
+  buffered reply omits `first_token_at` — buffering is exactly the mode that
+  hides it. On the canonical (stream-reassembled) payload it is the ordinary
+  field; on a buffered RAW body it is spliced in as a top-level `timing` key
+  **by byte insertion, never re-serialization** — span offsets index the
+  strings as transported, and Go's encoder would re-escape them.
+- **`usage`** is transcription, never estimation — the gateway holds no
+  tokenizer, and a provider that reported nothing yields NO field, not zeros.
+  A raw buffered body already carries the provider's own `usage` untouched.
+  A reassembled stream reports the canonical five counters (`input_tokens`,
+  `output_tokens`, `reasoning_tokens`, `cache_read_tokens`,
+  `cache_write_tokens`), captured per protocol: `anthropic.messages` splits
+  them across `message_start`/`message_delta` (merged, either half never
+  zeroing the other), `openai.responses` repeats them on the terminal event,
+  and `openai.chat` omits them from streams entirely unless the request opts
+  in — so:
+- ⚠️ **In ENFORCE mode the plugin opts `openai.chat` streams into
+  `stream_options.include_usage` itself** (after span application, so
+  offsets were resolved against the body the runtime counted) **and swallows
+  the resulting usage-only frame** — a client that never asked must not have
+  to parse it; a frame that also carries `choices` is part of the answer and
+  always passes, and a client that opted in itself keeps its frame. OBSERVE
+  mode injects nothing — observe never touches a body — so chat streams
+  under observe report usage only when the client opted in. That coverage
+  gap is the price of the observe contract, stated rather than papered over.
 
 ## Redaction: applying the verdict's spans
 

@@ -123,3 +123,15 @@ func TestARefusalDoesNotClaimTheModelAnswered(t *testing.T) {
 		t.Errorf("incomplete_details.reason = %q", got)
 	}
 }
+
+func TestResponsesUsageReadsTheReasoningAndCacheDetails(t *testing.T) {
+	out := openAIResponses{}.ParseResponse(gjson.Parse(`{"output":[
+	  {"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],
+	  "usage":{"input_tokens":90,"output_tokens":35,
+	    "input_tokens_details":{"cached_tokens":20},
+	    "output_tokens_details":{"reasoning_tokens":8}}}`))
+	u := out.Usage
+	if u == nil || u.InputTokens != 90 || u.OutputTokens != 35 || u.CacheReadTokens != 20 || u.ReasoningTokens != 8 {
+		t.Fatalf("usage = %+v", u)
+	}
+}

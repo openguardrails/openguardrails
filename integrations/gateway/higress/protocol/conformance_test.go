@@ -48,7 +48,8 @@ var conformance = []conformanceCase{
 		    {"role":"tool","tool_call_id":"c1","name":"fetch","content":"the ticket says ada@example.com filed it"},
 		    {"role":"user","content":"thanks, now close it"}]}`,
 		response: `{"choices":[{"index":0,"message":{"role":"assistant","content":"closing it",
-		  "tool_calls":[{"id":"c2","type":"function","function":{"name":"close","arguments":"{\"id\":1}"}}]}}]}`,
+		  "tool_calls":[{"id":"c2","type":"function","function":{"name":"close","arguments":"{\"id\":1}"}}]}}],
+		  "usage":{"prompt_tokens":120,"completion_tokens":45,"prompt_tokens_details":{"cached_tokens":30}}}`,
 		stream: `data: {"choices":[{"delta":{"role":"assistant","content":"clos"}}]}
 
 data: {"choices":[{"delta":{"content":"ing it"}}]}
@@ -58,6 +59,8 @@ data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c2","function":{"name
 data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":":1}"}}]}}]}
 
 data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}
+
+data: {"choices":[],"usage":{"prompt_tokens":120,"completion_tokens":45,"prompt_tokens_details":{"cached_tokens":30}}}
 
 data: [DONE]
 
@@ -80,9 +83,10 @@ data: [DONE]
 		      {"type":"text","text":"thanks, now close it"}]}]}`,
 		response: `{"id":"msg_1","type":"message","role":"assistant","content":[
 		  {"type":"text","text":"closing it"},
-		  {"type":"tool_use","id":"c2","name":"close","input":{"id":1}}],"stop_reason":"tool_use"}`,
+		  {"type":"tool_use","id":"c2","name":"close","input":{"id":1}}],"stop_reason":"tool_use",
+		  "usage":{"input_tokens":120,"output_tokens":45,"cache_read_input_tokens":30}}`,
 		stream: `event: message_start
-data: {"type":"message_start","message":{"id":"msg_1","role":"assistant","content":[]}}
+data: {"type":"message_start","message":{"id":"msg_1","role":"assistant","content":[],"usage":{"input_tokens":120,"output_tokens":2,"cache_read_input_tokens":30}}}
 
 event: content_block_start
 data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
@@ -109,7 +113,7 @@ event: content_block_stop
 data: {"type":"content_block_stop","index":1}
 
 event: message_delta
-data: {"type":"message_delta","delta":{"stop_reason":"tool_use"}}
+data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":45}}
 
 event: message_stop
 data: {"type":"message_stop"}
@@ -131,7 +135,8 @@ data: {"type":"message_stop"}
 		    {"type":"message","role":"user","content":[{"type":"input_text","text":"thanks, now close it"}]}]}`,
 		response: `{"id":"resp_1","object":"response","status":"completed","output":[
 		  {"type":"message","role":"assistant","content":[{"type":"output_text","text":"closing it"}]},
-		  {"type":"function_call","call_id":"c2","name":"close","arguments":"{\"id\":1}"}]}`,
+		  {"type":"function_call","call_id":"c2","name":"close","arguments":"{\"id\":1}"}],
+		  "usage":{"input_tokens":120,"output_tokens":45,"input_tokens_details":{"cached_tokens":30}}}`,
 		stream: `event: response.output_item.added
 data: {"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"m1","role":"assistant"}}
 
@@ -151,7 +156,7 @@ event: response.function_call_arguments.delta
 data: {"type":"response.function_call_arguments.delta","output_index":1,"delta":":1}"}
 
 event: response.completed
-data: {"type":"response.completed","response":{"id":"resp_1","status":"completed"}}
+data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","usage":{"input_tokens":120,"output_tokens":45,"input_tokens_details":{"cached_tokens":30}}}}
 
 `,
 		maskValues: []string{"ada@example.com"},
@@ -288,7 +293,21 @@ func TestABufferedReplyReadsIdenticallyInEveryProtocol(t *testing.T) {
 			if got := gjson.Get(out.Actions[0].Arguments, "id").Int(); got != 1 {
 				t.Errorf("arguments = %q", out.Actions[0].Arguments)
 			}
+			assertSharedUsage(t, out.Usage)
 		})
+	}
+}
+
+// assertSharedUsage pins the token accounting every fixture carries: whatever
+// counter names a protocol uses on its wire, the neutral model must read the
+// same numbers out of all of them.
+func assertSharedUsage(t *testing.T, u *Usage) {
+	t.Helper()
+	if u == nil {
+		t.Fatal("the provider reported usage and the adapter dropped it")
+	}
+	if u.InputTokens != 120 || u.OutputTokens != 45 || u.CacheReadTokens != 30 {
+		t.Errorf("usage = %+v, want input=120 output=45 cache_read=30", u)
 	}
 }
 
@@ -319,6 +338,11 @@ func TestAStreamedReplyReassemblesInEveryProtocol(t *testing.T) {
 			if !gjson.Valid(out.Actions[0].Arguments) {
 				t.Error("reassembled arguments are not valid JSON")
 			}
+			// The stream reports the same accounting as the buffered reply —
+			// anthropic splits it across message_start and message_delta, the
+			// OpenAI family puts it on one terminal frame; the merge must not
+			// let one half zero the other.
+			assertSharedUsage(t, out.Usage)
 		})
 	}
 }

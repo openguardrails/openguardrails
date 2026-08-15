@@ -156,3 +156,15 @@ func TestAnthropicStreamPassesUnknownEventsThrough(t *testing.T) {
 		t.Errorf("unknown event was altered:\n%q\n%q", in, got)
 	}
 }
+
+func TestAnthropicUsageKeepsTheCacheSplit(t *testing.T) {
+	// cache_creation is the WRITE side and cache_read the READ side; folding them
+	// together would make a cache-priming turn look like a cache hit.
+	out := anthropicMessages{}.ParseResponse(gjson.Parse(`{"content":[{"type":"text","text":"ok"}],
+	  "usage":{"input_tokens":50,"output_tokens":9,
+	    "cache_read_input_tokens":30,"cache_creation_input_tokens":15}}`))
+	u := out.Usage
+	if u == nil || u.CacheReadTokens != 30 || u.CacheWriteTokens != 15 {
+		t.Fatalf("usage = %+v", u)
+	}
+}
