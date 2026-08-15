@@ -1,101 +1,124 @@
 ---
 name: openguardrails
 description: >-
-  Install and operate OpenGuardrails (OGR) to guardrail an agent. Use this when
-  the operator asks to add guardrails, run safely/sandboxed, or restrict what an
-  agent may do to files, secrets, network, or outbound side effects (e.g. "handle
-  my email but add guardrails before anything goes out", "run this in a sandbox",
-  "don't let it touch my credentials"). The skill drafts a policy, REQUIRES human
-  approval before enforcing, then enforces it for the session.
+  Connect an agent to OpenGuardrails (OGR) so a runtime judges every model call
+  and tool call while it runs. Use this when the operator asks to add
+  guardrails, run safely, or restrict what an agent may do to files, secrets,
+  network, or outbound side effects (e.g. "handle my email but add guardrails
+  before anything goes out", "don't let it touch my credentials"). The skill
+  proposes a guardrail posture, REQUIRES human approval before enforcing, then
+  connects and verifies enforcement with a canary.
 ---
 
 # OpenGuardrails (OGR)
 
-You are using OGR to guardrail an agent — possibly yourself. OGR is built to be
-operated by an agent: **you draft the policy, your operator approves it, the runtime
-enforces it.** Follow the flow below in order. Do not skip the approval gate.
+You are wiring an agent — possibly yourself — to an OGR runtime. Since
+protocol v0.8 the model is simple: a plugin (or two hand-rolled POSTs) sends
+every model call's request and response to `POST /v1/evaluate`; the runtime
+answers `allow` or `block`; **policy lives in the runtime, selected by the
+agent's workspace** — there is no local policy file and no SDK. Follow the
+flow below in order. Do not skip the approval gate.
 
 ## Your two roles
 
-- **agent-as-tool** — you USE OGR to govern: install, author policy, enforce, verify.
-- **agent-as-subject** — you RUN UNDER OGR: actions are allowed / denied / held for
-  approval. On a block, read the verdict reason. To change the rules, propose a policy
-  edit and route it back through your operator.
+- **agent-as-tool** — you USE OGR to govern: connect an integration, propose
+  the posture, verify enforcement.
+- **agent-as-subject** — you RUN UNDER OGR: actions are judged as you act. On
+  a block, read the verdict's `findings` (category + masked subject) and tell
+  your operator; to change the rules, propose a change and route it through
+  them. You cannot quietly loosen the policy that governs you.
 
 ## The non-negotiable rule
 
-1. **A human approves before a policy goes live.** You may draft and propose. You may
-   NOT enforce a policy your operator has not seen and approved. Editing a live policy
-   re-triggers this gate.
-2. **Enforcement must sit outside your control.** OGR checks run in a layer your task
-   loop cannot mutate (the runtime's sandbox/hook). If your runtime cannot guarantee
-   that, say so to the operator — do not claim the agent is guarded.
+1. **A human approves the posture before it enforces.** You may draft and
+   propose; you may NOT switch an agent to `fail_mode: closed`, change its
+   workspace, or enable auto-approval behavior your operator has not seen.
+2. **Enforcement must sit outside your control.** The verdict comes from the
+   runtime; the block happens in the plugin/hook layer your task loop cannot
+   mutate. If the only integration point available is code you can rewrite
+   mid-task, say so — do not claim the agent is guarded.
 
-If you cannot satisfy both, stop and tell the operator.
+## Flow: survey → connect → propose → confirm → verify → operate
 
-## Flow: install → draft → confirm → enforce
+### 1. Survey the task surface
 
-### 1. Understand the task and its surface
-Identify, from the task you were given, what the agent will touch:
-- which **tools** it needs, which it must never call
-- which **files / paths** are in scope; which secrets must stay unreadable
-- which **network hosts** it legitimately needs (deny everything else)
-- which **outbound side effects** (sending email, posting, deploying) need approval
+From the task you were given, identify what the agent will touch: which
+tools, which files/secrets, which network hosts, which outbound side effects
+(email, posting, deploying). This becomes the posture you propose in step 3.
 
-### 2. Install the OGR plugin for the runtime
-Detect the runtime and install. Examples:
-- **Hermes (Python):** `pip install openguardrails-instrumentation-hermes`
-- **opencode (JS/TS):** add `@openguardrails/opencode-auto-mode` (plugin)
-- Other runtimes: see `reference/policy-schema.md` and the spec link below.
+### 2. Pick and connect the integration
 
-### 3. Draft a policy
-Generate a starting `ogr.policy.json`, then tighten it to the task:
+Every integration needs the same four things: the runtime URL, an org API
+key, the identity five-tuple, and a fail mode. Set them as environment:
+
+```bash
+export OGR_RUNTIME_URL=https://ogr.example.com   # the runtime's base URL
+export OGR_API_KEY=ogr_...                       # org key (ask the operator)
+export OGR_AGENT_ID=invoice-bot                  # WHICH agent (org-unique)
+export OGR_AGENT_TYPE=claude-code                # what kind — a label
+export OGR_AGENT_WORKSPACE=finance-agents        # the policy set it runs under
+export OGR_AGENT_OWNER=payments-team             # who answers for it
+export OGR_AGENT_USER=u-8232                     # who drives it this session
+export OGR_FAIL_MODE=open                        # open (default) | closed
 ```
-python3 scripts/draft_policy.py --task "<one line describing the task>" --out ogr.policy.json
-```
-This emits a resource-based starter (deny-by-default network, secret paths blocked,
-outbound side effects set to `require_approval`). Edit it for the specific task —
-prefer **resource-based** rules (match the path/host) over verb-based ones, so a
-rephrased command can't slip past. Full schema: `reference/policy-schema.md`.
+
+Integrations ship in the spec repo (`integrations/` — install from source,
+each README has the steps): hooks for Claude Code, Codex, opencode, OpenClaw;
+in-loop plugins for Hermes, LangGraph, litellm, dsh; gateways (Higress,
+mitmproxy) when you'd rather guard the traffic path. An agent you are
+building yourself needs no plugin at all — two POSTs per model call; copy
+`examples/minimal-agent/` from the repo.
+
+### 3. Propose the posture
+
+Write the operator a short plan:
+- the five-tuple values you intend to assert (workspace = which policy set);
+- `fail_mode`: `open` (runtime outage → agent keeps working, steps recorded
+  unjudged) or `closed` (outage → gated actions pause) — recommend `closed`
+  only when the task touches secrets, money, or outbound side effects;
+- what the runtime should gate for this task (in taxonomy terms:
+  `security.cmd.*`, `security.secret_leak`, `safety.*`, …) — the operator
+  applies this in the runtime console; you cannot and must not.
 
 ### 4. CONFIRM with the operator — the gate
-Show the operator the **full policy** and a plain-language summary:
-> Here is the policy I will enforce: <what's allowed / denied / needs approval>.
-> Reply "approve" to enforce it, or tell me what to change.
 
-**Wait for explicit approval. Do not proceed without it.** If the operator edits the
-policy, show the updated version and ask again.
+Show the plan and wait for explicit approval. If they edit it, show the
+updated plan and ask again.
 
-### 5. Enforce
-After approval:
+### 5. Verify enforcement with canaries
+
+```bash
+scripts/verify.sh          # health → benign canary (expect allow)
+                           # → exfil canary  (expect block if gated)
 ```
-source scripts/enforce.sh ogr.policy.json    # sets OGR_POLICY, enables the sandbox
-```
-or set directly: `export OGR_POLICY=./ogr.policy.json` and `export OGR_SANDBOX=srt`
-(personal) / your container backend (multi-tenant). Every subsequent action is now
-checked at the agent hook and the sandbox boundary.
+
+The script sends a benign `step/request` (must come back `allow`) and a
+`step/response` whose tool call reads like credential exfiltration (must
+come back `block` **if** the workspace gates it). Report the result
+honestly: "connected, exfil canary blocked" or "connected, but the exfil
+canary was ALLOWED — the workspace does not gate it; ask the operator to
+tighten the runtime policy before relying on this".
 
 ### 6. Operate under the policy
-- On a **block** / **require_approval**, surface the verdict `why` to the operator;
-  do not try to route around it.
-- If the task genuinely needs more than the policy allows, **propose** a specific
-  policy edit and go back to step 4. Never silently widen a live policy.
+
+- On a **block**, surface the verdict's findings to the operator; do not
+  route around it (rephrasing a blocked command is routing around it).
+- If the task genuinely needs more, propose a specific change and go back
+  to step 4. Never silently widen a live posture.
 
 ## The model (for reference)
-- Every action → a **GuardEvent**; a detector returns a **Verdict** (`allow` /
-  `block` / `require_approval`) with a `why`.
-- **Provenance** travels with the action (trusted vs untrusted input) — OGR catches
-  *untrusted input → privileged action*, not just bad strings.
-- Three altitudes correlated by `guard_id`: gateway, agent hook, sandbox.
-- Detectors **compose**: deny-wins or quorum. Same policy model compiles to srt
-  (personal) or OpenShell (multi-tenant) — different policy per threat model.
 
-## Verify coverage (optional)
-Run the neutral benchmark to check what your policy/detectors catch:
-`https://github.com/openguardrails/openguardrails/tree/main/benchmarks` → `python3 benchmarks/harness/run.py`.
+One model call = one step = two events sharing a minted `step_id`:
+`step/request` (the raw provider request body) before the call,
+`step/response` (the raw response, tool calls still unexecuted) after. Nine
+required fields, nothing optional; the five-tuple's empty string means "no
+assertion" and the API key becomes the identity floor. The runtime derives
+sessions and turns; the verdict is `allow`/`block` plus findings, redaction
+spans, and `unjudged` (what it could not look at — which fail-closed treats
+as a block). Full cheat sheet: `reference/wire.md`.
 
 ## Links
-- Policy reference: `reference/policy-schema.md`
-- Agent guide: https://openguardrails.com/agent/
-- Spec: https://github.com/openguardrails/openguardrails
-- Runnable PoC (Hermes + sandbox): https://github.com/openguardrails/openguardrails-poc
+
+- Wire cheat sheet: `reference/wire.md`
+- Spec + integrations + minimal example: https://github.com/openguardrails/openguardrails
+- Docs: https://openguardrails.com/api/docs/ (quickstart is the minimal integration)

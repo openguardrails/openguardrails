@@ -1,22 +1,22 @@
 # OpenGuardrails skill
 
 An [Agent Skill](https://docs.claude.com/en/docs/agents-and-tools/agent-skills) that
-teaches an agent to install and operate [OpenGuardrails (OGR)](https://openguardrails.com):
-draft a policy → **get human approval** → enforce it for the session.
+teaches an agent to connect itself (or another agent) to
+[OpenGuardrails (OGR)](https://openguardrails.com): propose a guardrail
+posture → **get human approval** → connect → verify enforcement with a
+canary.
 
 This is the **installable, executable** companion to the website's
-[`/llms.txt`](https://openguardrails.com/llms.txt) (which is the universal, fetch-by-URL
-discovery manifest any agent can read). Runtimes that support skills install this for
-the full install → draft → confirm → enforce flow.
+[`/llms.txt`](https://openguardrails.com/llms.txt) (the universal,
+fetch-by-URL discovery manifest any agent can read). Runtimes that support
+skills install this for the full survey → propose → confirm → verify flow.
 
 ## Contents
 
 ```
-SKILL.md                     the skill (frontmatter + procedure)
-assets/policy.template.json  resource-based, deny-by-default starter policy
-scripts/draft_policy.py      generate a starter policy tailored to a task
-scripts/enforce.sh           validate + enable enforcement (run after approval)
-reference/policy-schema.md   policy.json schema reference
+SKILL.md              the skill (frontmatter + procedure)
+scripts/verify.sh     health check + benign canary + exfil canary
+reference/wire.md     the v0.8 wire on one page (nine fields, verdict, fail modes)
 ```
 
 ## Install
@@ -27,10 +27,10 @@ cp -r skills/openguardrails ~/.claude/skills/openguardrails
 ```
 **Project-scoped** — place under `.claude/skills/openguardrails/` in the repo.
 
-Then ask your agent to "add guardrails" for a task; it loads the skill and runs the
-flow, pausing for your approval before enforcing.
+Then ask your agent to "add guardrails" for a task; it loads the skill and
+runs the flow, pausing for your approval before anything enforces.
 
 ## The one rule
 
-You draft the cage; your operator approves it; the runtime holds the key. An agent
-that can disable its own guard isn't guarded — see `SKILL.md`.
+You propose the cage; your operator approves it; the runtime holds the key.
+An agent that can disable its own guard isn't guarded — see `SKILL.md`.
