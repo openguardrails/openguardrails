@@ -342,10 +342,10 @@ Silence past `interval_s` is a coverage loss, not an absence of risk.
 | `unchecked` | **traffic that passed with no verdict behind it** |
 | `reported` | events posted fire-and-forget (observe mode), verdict discarded |
 | `mirrored` | events copied to the candidate runtime |
-| `stream_stopped` | streamed answers refused or cut at end of stream |
+| `stream_stopped` | streamed answers refused or cut at end of stream — an overlay on `refused`, not an alternative to it |
 | `unresolved_spans` | **modification spans that named nothing this body holds** |
 | `unreadable` | bodies recognised but not parseable — NOT judged, and NOT reported as events (v0.8 leaves them no honest shape); this counter is the record |
-| `refused` | requests this filter refused (block, fail-closed, partial-closed) |
+| `refused` | **everything this filter refused** — a blocked request, a blocked REPLY (buffered or streamed), fail-closed, partial-closed, an unreadable reply under `closed`. A streamed refusal bumps `stream_stopped` too |
 
 `unchecked` is the one to alert on: it is what a tight `timeout_ms` plus
 `fail_mode: open` produces, and it is invisible in any other signal.

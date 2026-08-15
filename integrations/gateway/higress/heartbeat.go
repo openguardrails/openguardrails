@@ -69,7 +69,13 @@ const (
 	cntUnresolvedSpans // redaction spans whose `path` named no text we hold
 	cntUnreadable      // bodies we recognised and could not parse — NOT judged
 	cntTruncated       // tools or actions dropped by a cap — NOT judged
-	cntRefused         // turns this filter refused (block, fail-closed, partial-closed)
+	// ⚠️ EVERY refusal, wherever it happened: a blocked request, a blocked REPLY
+	// (buffered or streamed), fail-closed, partial-closed, an unreadable reply under
+	// `closed`. A streamed one bumps `stream_stopped` as well — that slot answers a
+	// different question ("did a stream end early"), it does not replace this one.
+	// Three verdict-block sites were missing this until 3.0.1, which made `refused`
+	// silently mean "refusals except the plain ones".
+	cntRefused // turns this filter refused
 	cntLen
 )
 

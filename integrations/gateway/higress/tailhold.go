@@ -193,6 +193,11 @@ func judgeFinal(ctx wrapper.HttpContext, cfg Config, rs *reqState, sp *streamPro
 		if sp.SawBytes() {
 			reportUnreadableStream(rs, sp)
 			if cfg.failClosed {
+				// A reply we could not read is a reply we could not judge, so under
+				// `closed` this is a refusal like any other and belongs in `refused`
+				// as well as `unreadable` — the two answer different questions ("what
+				// did this filter stop" vs "what could it not parse"). 3.0.1.
+				bump(cntRefused, 1)
 				rs.finishBlocked(unreadMessage)
 				return
 			}
@@ -242,6 +247,15 @@ func judgeFinal(ctx wrapper.HttpContext, cfg Config, rs *reqState, sp *streamPro
 			}
 			bump(cntEvaluated, 1)
 			if v.Stops() {
+				// ⚠️ BOTH counters, deliberately. `stream_stopped` (bumped inside
+				// finishBlocked) says a stream ended early; `refused` says this filter
+				// refused something. Every OTHER refusal on this path already counts in
+				// both — evaluateFailed and partiallyJudged bump `refused` and then call
+				// finishBlocked — so a verdict block counting only one of them made the
+				// plain "the runtime said no" case the single refusal shape missing from
+				// `refused`. Fixed in 3.0.1 together with the buffered twin at
+				// main.go's onResponseBody.
+				bump(cntRefused, 1)
 				rs.finishBlocked(v.Reason())
 				return
 			}

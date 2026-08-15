@@ -845,6 +845,14 @@ func onResponseBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Acti
 				v := parseVerdict(respBody)
 				if v.Stops() {
 					// Refused: the reply never reaches the caller.
+					//
+					// ⚠️ COUNT IT. Until 3.0.1 this branch bumped nothing, so a refused
+					// BUFFERED reply was invisible in the heartbeat — `refused` meant
+					// "every refusal except a verdict-blocked reply", which is not a
+					// sentence anyone reading the console would have guessed. Found by
+					// the lab's smoke assertions on 2026-08-15: one refusal, zero
+					// counters.
+					bump(cntRefused, 1)
 					_ = proxywasm.ReplaceHttpResponseBody([]byte(rs.proto.Refuse(rs.model, v.Reason())))
 					proxywasm.ResumeHttpResponse()
 					return
