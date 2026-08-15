@@ -8,17 +8,15 @@ name: Publish Higress plugin
 # plugin's VERSION file — the same rule the npm and PyPI workflows enforce, and
 # for the same reason: the artifact a gateway pulls has to be traceable to a
 # commit, not to whatever happened to be on the runner.
+#
+# A protected release tag is the ONLY way in. There is deliberately no
+# workflow_dispatch entry point: a button that publishes from an arbitrary ref
+# is a release nobody can trace back to a tag.
 
 on:
   push:
     tags:
       - "higress-v*"
-  workflow_dispatch:
-    inputs:
-      dry_run:
-        description: "Build and package without pushing"
-        type: boolean
-        default: true
 
 permissions:
   contents: read
@@ -53,12 +51,10 @@ jobs:
         shell: bash
         run: |
           version="$(tr -d '[:space:]' < "$PLUGIN_DIR/VERSION")"
-          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
-            tag_version="${GITHUB_REF_NAME#higress-v}"
-            if [[ "$tag_version" != "$version" ]]; then
-              echo "::error::Tag version $tag_version does not match $PLUGIN_DIR/VERSION ($version)"
-              exit 1
-            fi
+          tag_version="${GITHUB_REF_NAME#higress-v}"
+          if [[ "$tag_version" != "$version" ]]; then
+            echo "::error::Tag version $tag_version does not match $PLUGIN_DIR/VERSION ($version)"
+            exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Publishing version $version"
@@ -92,7 +88,6 @@ jobs:
   publish:
     name: Publish ${{ needs.build.outputs.version }}
     needs: build
-    if: github.event_name == 'push' || inputs.dry_run == false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v5
