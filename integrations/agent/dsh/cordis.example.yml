@@ -10,12 +10,13 @@
 # deployment that owns its whole plugin tree (drop the `insert:` wrapper and
 # paste the entry into `cordis.yml` directly).
 #
-# v0.7 (Recipe A): every model step is judged at the loop's own seams —
-# `step/request` before the model, `step/response` before the agent acts,
-# `turn/end` on the loop's close — with the session/turn/step coordinates
-# DECLARED on every event. All decisions come from the runtime; the v0.6
-# local policy engine (bundled regex rules, bring-your-own-model judge,
-# taint tracking) is gone with the SDK layer it rode on.
+# v0.8 (the minimum API): every model call is judged at the loop's own
+# seams — `step/request` before the model, `step/response` once, whole, at
+# stream end while the tail is still held back. One endpoint, no declared
+# coordinates (the runtime derives session/turn/step; `step_id` pairs the
+# halves), the identity five-tuple on every event. All decisions come from
+# the runtime; the v0.6 local policy engine is long gone with the SDK layer
+# it rode on.
 
 - insert:
     - id: openguardrails
@@ -40,12 +41,25 @@
         # whose `unjudged` names the content being enforced, or a tool call
         # that reached execution with no step verdict at all.
         #
-        #   open   (default) — proceed, loudly; the runtime's record shows the gap
-        #   closed           — treat "could not look" as block
+        #   open   (the spec's default and this plugin's) — proceed, loudly;
+        #          the heartbeat's evaluate_errors counter shows the gap
+        #   closed — treat "could not look" as block
         failMode: open
 
         # Per-call evaluate budget, milliseconds.
         timeoutMs: 5000
+
+        # Streaming enforcement: the answer streams through live, but its
+        # final N characters are withheld until the step/response verdict —
+        # allow releases them, block cuts the stream. 200 is the spec's
+        # reference default; a deployment that cannot accept content ahead
+        # of the tail being seen sets this huge (degenerates to buffering).
+        streamTailChars: 200
+
+        # Heartbeat cadence, seconds — the build id and the degraded-mode
+        # counters ride /v1/heartbeat so the runtime can tell "agent idle"
+        # from "integration went dark".
+        heartbeatS: 60
 
         # ── Auto mode: answer approval asks from the STEP VERDICT for
         # sessions whose Permissions preset is `auto-mode` (on by default;

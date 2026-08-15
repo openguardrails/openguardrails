@@ -1,38 +1,45 @@
 /**
- * The OGR v0.7 wire, hand-rolled.
+ * The OGR v0.8 wire, hand-rolled.
  *
- * There is no SDK layer in v0.7 — the Runtime API is the integration surface
- * (specification/runtime-api.md), and an integration is two POSTs: `/v1/evaluate`
- * while holding an action, `/v1/ingest` for past facts. This module is those two
+ * There is no SDK layer — the Runtime API is the integration surface
+ * (specification/runtime-api.md), and since v0.8 an integration is ONE
+ * decision endpoint: `/v1/evaluate` while holding an action (evaluate records
+ * what it judges, so it is the observation channel too — `/v1/ingest` is
+ * gone), plus the transport-level `/v1/heartbeat` that carries the
+ * integration build id and the degraded-mode counters. This module is those
  * calls plus the wire types this plugin reads and writes, nothing else: no
- * signing (enrollment left the protocol in v0.7), no batching machinery, no
- * client-side decomposition.
+ * signing, no batching machinery, no client-side decomposition.
  *
  * The base URL is joined with the canonical `/v1/...` paths exactly as the
  * binding requires — a deployment-specific prefix belongs IN the configured
  * base URL (`https://host/api/public/ogr`), never hard-coded here.
  */
 
-/** One v0.7 GuardEvent as this plugin sends it (snake_case, flat). */
+/**
+ * One v0.8 GuardEvent as this plugin sends it (snake_case, flat).
+ *
+ * Every field is REQUIRED — v0.8 removed every knob a producer could choose
+ * to skip. What a runtime can derive is not on the wire at all (session,
+ * turn, step numbering, timestamps, protocol versioning); what only the
+ * producer can know is mandatory, with the empty string as the explicit
+ * "I have nothing to assert" on the identity five-tuple. `step_id` is the
+ * one coordinate kept: concurrency makes pairing a call's two halves
+ * underivable, so the producer mints a fresh random id per model call and
+ * puts the SAME value on both events.
+ */
 export interface WireEvent {
-  ogr_version: "0.7"
-  kind: "step/request" | "step/response" | "turn/end"
-  session_id?: string
-  turn?: number
-  step?: number
-  parent_session_id?: string
-  timestamp: string
-  agent_id?: string
-  agent_type?: string
-  agent_workspace?: string
-  agent_owner?: string
-  agent_user?: string
-  integration: string
-  llm_protocol?: "openai.chat" | "openai.responses" | "anthropic.messages"
+  kind: "step/request" | "step/response"
+  step_id: string
+  agent_id: string
+  agent_type: string
+  agent_workspace: string
+  agent_owner: string
+  agent_user: string
+  llm_protocol: "openai.chat" | "openai.responses" | "anthropic.messages" | "canonical"
   payload: Record<string, unknown>
 }
 
-/** One v0.7 finding — what was found, where, and what it contributed. */
+/** One v0.8 finding — what was found, where, and what it contributed. */
 export interface WireFinding {
   category: string
   severity?: "low" | "medium" | "high" | "critical"
@@ -47,16 +54,11 @@ export interface WireFinding {
   subject?: string
 }
 
-/** The v0.7 Verdict: two decisions, findings, spans, and the coverage truth. */
+/** The v0.8 Verdict: two decisions, findings, spans, and the coverage truth. */
 export interface WireVerdict {
-  ogr_version?: string
   event_id: string
   provider: string
   decision: "allow" | "block"
-  session_id?: string
-  turn?: number
-  step?: number
-  attribution?: "declared" | "derived"
   latency_ms?: number
   findings?: WireFinding[]
   modifications?: { spans?: Array<{ path: string; start: number; end: number; replacement: string }> }
@@ -66,7 +68,21 @@ export interface WireVerdict {
    * "could not look", which is not "found nothing".
    */
   unjudged?: string[]
-  output_mode?: "buffer" | "stream"
+}
+
+/**
+ * One `/v1/heartbeat` body. NOT a GuardEvent — transport-level liveness so
+ * the runtime can tell "agent idle" from "integration went dark". The
+ * integration build id lives here (it left the event in v0.8), and the
+ * counters are how an outage-induced observability gap stays visible: v0.8
+ * has no replay channel, so a raised `evaluate_errors` is the record that
+ * steps went unjudged.
+ */
+export interface WireHeartbeat {
+  integration: string
+  agent_id?: string
+  interval_s?: number
+  counters?: Record<string, number>
 }
 
 /** Log sink; the plugin passes dsh's own logger so wire noise stays in the harness log. */
@@ -82,7 +98,7 @@ export interface RuntimeSource {
 }
 
 /**
- * The two-POST client. The source is a THUNK, re-read on every call, so a
+ * The evaluate client. The source is a THUNK, re-read on every call, so a
  * connection configured later — an API key pasted into the dsh Settings
  * form — takes effect without a restart.
  */
@@ -123,8 +139,8 @@ export class OgrClient {
    * Judge ONE event and return its Verdict, or `null` when no runtime is
    * configured or the call failed (timeout, 429, 5xx, network). Deciding what
    * a missing verdict means is the CALLER's job — that is the deployment's
-   * `fail_mode`, and the degraded-mode spec is explicit that a 429 is an
-   * outage, not an allow.
+   * `fail_mode` (default OPEN, specification/degraded-mode.md), and the spec
+   * is explicit that a 429 is an outage, not an allow.
    */
   async evaluate(event: WireEvent): Promise<WireVerdict | null> {
     try {
@@ -142,18 +158,18 @@ export class OgrClient {
   }
 
   /**
-   * Record past facts (`turn/end` marks), fire-and-forget: a failed ingest is
-   * a lost observation, never a lost enforcement, so it warns and moves on.
+   * Integration liveness, fire-and-forget: a lost heartbeat is a lost signal,
+   * never a lost enforcement, so it warns and moves on. This is where the
+   * build id and the degraded-mode counters travel.
    */
-  async ingest(events: WireEvent[]): Promise<void> {
-    if (events.length === 0) return
+  async heartbeat(body: WireHeartbeat): Promise<void> {
     try {
-      const res = await this.post("/v1/ingest", { batch: events })
+      const res = await this.post("/v1/heartbeat", body)
       if (res && !res.ok) {
-        this.log.warn(`[openguardrails] ingest answered ${res.status}`)
+        this.log.warn(`[openguardrails] heartbeat answered ${res.status}`)
       }
     } catch (err) {
-      this.log.warn(`[openguardrails] ingest failed (${String(err)})`)
+      this.log.warn(`[openguardrails] heartbeat failed (${String(err)})`)
     }
   }
 }

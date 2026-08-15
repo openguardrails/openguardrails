@@ -1,12 +1,13 @@
 /**
- * dsh's model-call shapes → the two halves of an OGR v0.7 STEP.
+ * dsh's model-call shapes → the two halves of an OGR v0.8 STEP.
  *
  * `step/request` carries the request in `openai.chat` form (the runtime
  * normalizes raw provider bodies; `llm_protocol` names the shape). The
- * response side sends the CANONICAL shape instead — `{text, reasoning?,
- * tool_calls, model, usage?, timing}` — because a dsh plugin assembles the
- * answer from a chunk stream and no single raw provider body ever exists,
- * which is exactly the case the spec's canonical form is for.
+ * response side sends the CANONICAL shape instead — `llm_protocol:
+ * "canonical"`, `{text, reasoning?, tool_calls, model, usage?, timing}` —
+ * because a dsh plugin assembles the answer from a chunk stream and no
+ * single raw provider body ever exists, which is exactly the case the
+ * spec's canonical form is for.
  *
  * ⚠️ One honest caveat, stated here and in the README. A dsh plugin does not
  * see the literal provider body: the `llm/stream` waterfall runs on
@@ -21,6 +22,9 @@ import type { ContentBlock, GenerateOptions, Message, StreamChunk, TokenUsage } 
 
 /** The protocol the REQUEST projects into; travels on the event as `llm_protocol`. */
 export const LLM_PROTOCOL = "openai.chat"
+
+/** The RESPONSE side is stream-reassembled — no raw provider body exists, so it says so. */
+export const RESPONSE_PROTOCOL = "canonical"
 
 /** An `openai.chat` message, as it appears in a request body. */
 interface WireMessage {
@@ -45,7 +49,7 @@ function textOf(content: readonly ContentBlock[]): string {
  * `tool-result`; `openai.chat` spells the same thing as a `tool`-role message
  * keyed by `tool_call_id`. Splitting it out is what lets the runtime see "the
  * tool outcomes being fed back" as such rather than as user words — and it is
- * where those outcomes get JUDGED in v0.7: a result travels in the NEXT
+ * where those outcomes get JUDGED: a result travels in the NEXT
  * step's request, so this projection is the enforcement surface for indirect
  * injection riding a tool result.
  *
@@ -242,5 +246,111 @@ export class ResponseAccumulator {
         ...this.completedAt ? { completed_at: this.completedAt.toISOString() } : {},
       },
     }
+  }
+}
+
+/** One queued chunk with the characters it would newly reveal downstream. */
+interface HeldChunk {
+  chunk: StreamChunk
+  /** New characters this chunk reveals; 0 for pure structure. */
+  cost: number
+  /** `finish` — never released before the verdict, whatever the budget. */
+  terminal: boolean
+}
+
+/**
+ * The v0.8 streaming enforcement: hold the TAIL, judge once.
+ *
+ * A streamed answer is judged exactly once, whole, after the stream ends
+ * (never chunk-by-chunk — v0.7's interim evaluates are gone from the
+ * protocol). Enforcement comes from what the user has NOT seen yet: chunks
+ * are forwarded as they arrive, but the final `tail` characters stay held
+ * until the verdict — `allow` flushes them, `block` drops them and the
+ * stream ends in an error finish, so the response never completes. The
+ * accepted cost, stated by the spec, is that content ahead of the tail has
+ * already been seen; a deployment that cannot accept it sets the tail huge,
+ * which degenerates to buffering the whole answer.
+ *
+ * Character accounting, not chunk counting: deltas are split when the budget
+ * lands mid-chunk, and a `block-end` — which repeats its block's WHOLE text —
+ * only releases once that text has already been revealed by its deltas (its
+ * cost is the unrevealed remainder), so a consumer that renders block-ends
+ * cannot be handed the held tail through the back door. The `finish` chunk is
+ * terminal by definition and never released early: nothing downstream may act
+ * on the answer — tool calls included — before the verdict lands. Order is
+ * strictly preserved; nothing is reordered around the hold.
+ */
+export class TailGate {
+  private readonly held: HeldChunk[] = []
+  /** Characters the stream has produced so far (deltas + block-end remainders). */
+  private revealable = 0
+  /** Characters already released downstream. */
+  private released = 0
+  /** Delta characters seen per block index — what a block-end has already revealed. */
+  private readonly deltaSeen = new Map<number, number>()
+
+  constructor(private readonly tail: number) {}
+
+  /** Fold one chunk in; returns the chunks (possibly split) releasable NOW. */
+  feed(chunk: StreamChunk): StreamChunk[] {
+    let cost = 0
+    let terminal = false
+    if (chunk.type === "text-delta" || chunk.type === "reasoning-delta") {
+      cost = chunk.text.length
+      this.deltaSeen.set(chunk.index, (this.deltaSeen.get(chunk.index) ?? 0) + cost)
+    } else if (chunk.type === "tool-call-delta") {
+      cost = chunk.argumentsDelta.length
+      this.deltaSeen.set(chunk.index, (this.deltaSeen.get(chunk.index) ?? 0) + cost)
+    } else if (chunk.type === "block-end") {
+      const block = chunk.block
+      const already = this.deltaSeen.get(chunk.index) ?? 0
+      if (block.type === "text" || block.type === "reasoning") {
+        cost = Math.max(0, block.text.length - already)
+      } else if (block.type === "tool-call") {
+        const args = typeof block.arguments === "string" ? block.arguments : JSON.stringify(block.arguments ?? {})
+        cost = Math.max(0, args.length - already)
+      }
+    } else if (chunk.type === "finish") {
+      terminal = true
+    }
+    this.revealable += cost
+    this.held.push({ chunk, cost, terminal })
+    return this.drain()
+  }
+
+  /** Everything still held, in order — released on `allow` (or an unjudgeable stream). */
+  flush(): StreamChunk[] {
+    const out = this.held.map((h) => h.chunk)
+    this.held.length = 0
+    this.released = this.revealable
+    return out
+  }
+
+  private drain(): StreamChunk[] {
+    const out: StreamChunk[] = []
+    let budget = Math.max(0, this.revealable - this.tail) - this.released
+    while (this.held.length > 0) {
+      const head = this.held[0] as HeldChunk
+      if (head.terminal) break
+      const splittable = head.chunk.type === "text-delta" || head.chunk.type === "reasoning-delta"
+      if (head.cost <= budget) {
+        out.push(head.chunk)
+        this.released += head.cost
+        budget -= head.cost
+        this.held.shift()
+        continue
+      }
+      if (splittable && budget > 0) {
+        // The budget lands mid-delta: release the prefix, keep the remainder
+        // queued as its own (smaller) delta. Concatenation is unchanged.
+        const delta = head.chunk as Extract<StreamChunk, { type: "text-delta" | "reasoning-delta" }>
+        out.push({ ...delta, text: delta.text.slice(0, budget) })
+        head.chunk = { ...delta, text: delta.text.slice(budget) }
+        head.cost -= budget
+        this.released += budget
+      }
+      break
+    }
+    return out
   }
 }

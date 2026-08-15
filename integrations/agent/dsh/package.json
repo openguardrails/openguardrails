@@ -1,7 +1,7 @@
 {
   "name": "@openguardrails/dsh",
-  "version": "0.2.0",
-  "description": "OpenGuardrails for DeepSeek Harness (dsh): the v0.7 Recipe A reference integration \u2014 every model step judged at the loop's own seams (pre-model, post-model, turn close), coordinates declared, no SDK. Includes Auto Mode: approval prompts answered by the step verdict. No core changes.",
+  "version": "0.3.0",
+  "description": "OpenGuardrails for DeepSeek Harness (dsh): the v0.8 reference agent-direct integration \u2014 every model call judged twice at the loop's own seams (pre-model, post-model behind a held stream tail), one endpoint, no SDK. Includes Auto Mode: approval prompts answered by the step verdict. No core changes.",
   "type": "module",
   "license": "Apache-2.0",
   "author": "OpenGuardrails",

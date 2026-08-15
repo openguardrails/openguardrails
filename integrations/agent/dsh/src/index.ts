@@ -1,31 +1,39 @@
 /**
- * @openguardrails/dsh — the OGR v0.7 Recipe A reference integration.
+ * @openguardrails/dsh — the OGR v0.8 reference agent-direct integration.
  *
  * dsh OWNS its loop, and this plugin sits on the loop's documented seams as an
  * ordinary Cordis plugin (no core changes), speaking the Runtime API directly
- * (two POSTs, no SDK). Recipe A, from specification/runtime-api.md:
+ * — one decision endpoint, no SDK. The recipe, from
+ * specification/runtime-api.md:
  *
- *   1. PRE-MODEL     `llm/stream` waterfall → evaluate `step/request`
- *                    (the assembled request, openai.chat projection).
- *                    block ⇒ the model is never called; the step yields an
- *                    error finish and the loop closes the turn.
- *   2. POST-MODEL    the buffered answer → evaluate `step/response`
- *                    (canonical {text, reasoning?, tool_calls, model, usage,
- *                    timing}). block ⇒ refuse the step — or, when every
- *                    blocking finding names a `payload.tool_calls.N` path,
- *                    refuse ONLY those calls: the prose still reaches the
- *                    user and each offending call is denied at the tool
- *                    registry, which feeds the model an error result.
- *   3. TOOL RESULTS  are judged in the NEXT step's request (they travel
- *                    there) — no third call site exists, by design.
- *   4. TURN CLOSE    `session/event` → ingest `turn/end` with the loop's OWN
- *                    close reason; a turn this plugin blocked reports
- *                    `blocked` rather than the error the abort surfaced as.
+ *   1. MINT `step_id`  one fresh random id per model call, the same value on
+ *                      the call's two events — the ONE coordinate v0.8 kept,
+ *                      because concurrent calls make pairing underivable.
+ *   2. PRE-MODEL       `llm/stream` waterfall → evaluate `step/request`
+ *                      (the assembled request, openai.chat projection).
+ *                      block ⇒ the model is never called; the step yields an
+ *                      error finish and the loop closes the turn.
+ *   3. POST-MODEL      the reassembled answer → evaluate `step/response`
+ *                      (canonical {text, reasoning?, tool_calls, model,
+ *                      usage?, timing}), judged EXACTLY ONCE, whole, at
+ *                      stream end while the TAIL is still held back. allow ⇒
+ *                      release the tail; block ⇒ drop it — or, when every
+ *                      blocking finding names a `payload.tool_calls.N` path,
+ *                      refuse ONLY those calls: the prose reaches the user
+ *                      and each offending call is denied at the tool
+ *                      registry, which feeds the model an error result.
+ *   4. TOOL RESULTS    are judged in the NEXT step's request (they travel
+ *                      there) — no third call site exists, by design.
+ *   5. HEARTBEAT       `/v1/heartbeat` carries the build id and the
+ *                      degraded-mode counters, so the runtime can tell
+ *                      "agent idle" from "integration went dark".
  *
- * Every event DECLARES its coordinates — session_id (the dsh session), turn
- * and step (the loop's own 1-based numbers, tracked off the `agent/request`
- * dispatch), parent_session_id for subagent children — so the runtime never
- * derives; the verdict echoes them back with `attribution: "declared"`.
+ * Nothing else is on the wire. v0.8 removed every declared coordinate —
+ * session, turn, step numbering, parent links, timestamps, `turn/end` marks,
+ * `/v1/ingest` — the runtime derives all of it from the stateless, repetitive
+ * requests themselves. What only the producer can know became REQUIRED: the
+ * identity five-tuple rides on every event, with `""` as the explicit "no
+ * assertion" (the API key is the identity floor).
  *
  * Enforcement at the tool registry is a CONSEQUENCE of the step verdict, not
  * a separate judgement: `tools/pre-execute` denies the calls the
@@ -33,7 +41,9 @@
  * it against waterfall reordering, and under `failMode: "closed"` a call that
  * reached execution with NO verdict at all is refused — that is the signature
  * of a short-circuited waterfall or an unjudged step, and "could not look" is
- * not "found nothing".
+ * not "found nothing". The DEFAULT is open, per the degraded-mode spec: an
+ * instrument that can halt the agent it observes would never be adopted, so
+ * blocking on outage is an explicit deployment choice.
  *
  * Auto mode survives unchanged in spirit: for sessions on the `auto-mode`
  * permission preset, approval asks are answered from the step verdict —
@@ -42,11 +52,10 @@
  *
  * @module @openguardrails/dsh
  */
+import { randomUUID } from "node:crypto"
 import type { Context } from "@deepseek-ai/cordis"
 import z from "@deepseek-ai/schemastery"
-import type { Agent } from "@deepseek-ai/dsh-agent"
 import type { GenerateOptions, StreamChunk } from "@deepseek-ai/dsh-llm"
-import type { Session, SessionEvent } from "@deepseek-ai/dsh-session"
 import type {
   PreToolDecision,
   ToolExecution,
@@ -59,7 +68,9 @@ import type { ApprovalRequest } from "@deepseek-ai/dsh-user-approval"
 import { installSettingsSection, settingsNamespace } from "@deepseek-ai/dsh-settings"
 import {
   DEFAULT_AUTO_PRESET,
+  DEFAULT_HEARTBEAT_S,
   DEFAULT_RUNTIME_URL,
+  DEFAULT_STREAM_TAIL_CHARS,
   DEFAULT_TIMEOUT_MS,
   type AutoApprovalConfig,
   type AutoUnresolved,
@@ -67,7 +78,7 @@ import {
   type GuardrailsOptions,
   type RuntimeOptions,
 } from "./config.js"
-import { LLM_PROTOCOL, requestBody, ResponseAccumulator } from "./llm-wire.js"
+import { LLM_PROTOCOL, RESPONSE_PROTOCOL, requestBody, ResponseAccumulator, TailGate } from "./llm-wire.js"
 import { hostAgentId, osUser } from "./platform.js"
 import { OgrClient, type WireEvent, type WireFinding, type WireVerdict } from "./wire.js"
 
@@ -80,8 +91,11 @@ export const OGR_SETTINGS_NAMESPACE = settingsNamespace("openguardrails")
 /** What kind of agent this integration instruments (`agent_type` claim). */
 const AGENT_TYPE = "dsh"
 
-/** `integration` field on every event: which build observed it. */
-export const INTEGRATION = "ogr-dsh/0.2.0"
+/**
+ * The integration build id. v0.8 took it OFF the event — it rides the
+ * heartbeat now, which is where fleet coverage and bad-rollout triage live.
+ */
+export const INTEGRATION = "ogr-dsh/0.3.0"
 
 /**
  * The tool registry is the enforcement surface: without it this plugin has
@@ -127,12 +141,16 @@ const AutoSchema: z<AutoApprovalConfig> = z.object({
 export const Config: z<Config> = z.object({
   runtime: RuntimeSchema.description("OpenGuardrails runtime connection and identity claims (also editable in Settings; environment fills gaps)"),
   failMode: z.union([
-    z.const("open").description("proceed loudly when the runtime cannot answer"),
+    z.const("open").description("proceed loudly when the runtime cannot answer — the spec's default"),
     z.const("closed").description("treat \"could not look\" as block"),
   ]).default("open")
     .description("Degraded-mode posture (specification/degraded-mode.md)"),
   timeoutMs: z.number().default(DEFAULT_TIMEOUT_MS)
     .description("Per-call evaluate budget in milliseconds"),
+  streamTailChars: z.number().default(DEFAULT_STREAM_TAIL_CHARS)
+    .description("Trailing characters of a streamed answer withheld until the step/response verdict"),
+  heartbeatS: z.number().default(DEFAULT_HEARTBEAT_S)
+    .description("Heartbeat cadence in seconds (build id + degraded-mode counters)"),
   auto: AutoSchema.description("Auto mode: answer approval asks with the step verdict for auto-preset sessions"),
 })
 
@@ -141,15 +159,6 @@ const CALLS_MAX = 4096
 
 /** What the step verdict said about one tool call. */
 type CallVerdict = { allow: true } | { allow: false; reason: string }
-
-/** DSH's turn-end kinds → the v0.7 close-reason vocabulary (1:1, one spelling change). */
-const TURN_END_REASON: Record<string, "completed" | "max_tokens" | "blocked" | "aborted" | "error"> = {
-  "completed": "completed",
-  "max-tokens": "max_tokens",
-  "blocked": "blocked",
-  "aborted": "aborted",
-  "error": "error",
-}
 
 /** One-line human summary of a verdict for a denial reason. */
 function brief(v: WireVerdict): string {
@@ -199,6 +208,7 @@ function effectivePreset(events: readonly unknown[]): string | undefined {
 export function apply(ctx: Context, config: Config): void {
   const warn = (message: string): void => ctx.logger.warn(`openguardrails: ${message}`)
   const failMode: FailMode = config.failMode ?? "open"
+  const tailChars = config.streamTailChars ?? DEFAULT_STREAM_TAIL_CHARS
 
   // ---- the runtime connection: Settings → cordis config → env → default ----
   const runtimeDefaults: RuntimeOptions = {
@@ -229,59 +239,46 @@ export function apply(ctx: Context, config: Config): void {
   const agentId = hostAgentId()
   const accountUser = osUser()
 
-  /** The identity claims every event carries, read live so a Settings edit lands immediately. */
-  const claims = (): Pick<WireEvent, "agent_workspace" | "agent_owner" | "agent_user"> => {
+  /**
+   * The identity five-tuple every event carries — ALL five, always, read live
+   * so a Settings edit lands immediately. `""` is the explicit "no
+   * assertion", never an omission: v0.8 makes every integrator answer the
+   * identity question, and the runtime's API-key floor catches what stays
+   * empty. Owner and user default to the OS account because a local
+   * single-user harness genuinely knows it; workspace stays `""` unless the
+   * deployment names one.
+   */
+  const identity = (): Pick<
+    WireEvent,
+    "agent_id" | "agent_type" | "agent_workspace" | "agent_owner" | "agent_user"
+  > => {
     const s = runtimeSettings()
-    const owner = s.owner || accountUser
-    const user = s.user || accountUser
     return {
-      ...s.workspace ? { agent_workspace: s.workspace } : {},
-      ...owner ? { agent_owner: owner } : {},
-      ...user ? { agent_user: user } : {},
-    }
-  }
-
-  // ---- the loop's own coordinates ------------------------------------------
-  //
-  // `agent/request` fires once per step with the loop's {turn, step} — the
-  // very numbers the session log stamps into its own events. Recorded here,
-  // read by the `llm/stream` guard moments later in the same step. A
-  // pass-through waterfall listener: this plugin only watches.
-  interface Coords {
-    turn: number
-    step: number
-    parentSession?: string
-  }
-  const coordsBySession = new Map<string, Coords>()
-  ctx.on("agent/request", (payload, next) => {
-    const parent = payload.agent.session.header.parentSession
-    coordsBySession.set(payload.agent.id, {
-      turn: payload.turn,
-      step: payload.step,
-      ...parent ? { parentSession: String(parent) } : {},
-    })
-    return next()
-  })
-
-  /** Base fields shared by every event of one session. */
-  const baseEvent = (sessionId: string | undefined): Omit<WireEvent, "kind" | "payload"> => {
-    const coords = sessionId ? coordsBySession.get(sessionId) : undefined
-    return {
-      ogr_version: "0.7",
-      timestamp: new Date().toISOString(),
       agent_id: agentId,
       agent_type: AGENT_TYPE,
-      integration: INTEGRATION,
-      ...claims(),
-      ...sessionId ? { session_id: sessionId } : {},
-      ...coords ? { turn: coords.turn, step: coords.step } : {},
-      ...coords?.parentSession ? { parent_session_id: coords.parentSession } : {},
+      agent_workspace: s.workspace || "",
+      agent_owner: s.owner || accountUser || "",
+      agent_user: s.user || accountUser || "",
     }
   }
 
-  // ---- per-call verdicts, and the turns this plugin itself blocked ---------
+  // ---- degraded-mode counters, reported on the heartbeat -------------------
+  //
+  // v0.8 has no replay channel: an event unobserved during an outage is a
+  // lost observation, and these counters are what keep the gap visible
+  // instead of silent (degraded-mode spec, "loud signaling").
+  const counters = { events_sent: 0, evaluate_errors: 0, unresolved_spans: 0 }
+
+  /** One evaluate, counted. A `null` verdict is the caller's fail-mode decision. */
+  const judge = async (event: WireEvent): Promise<WireVerdict | null> => {
+    counters.events_sent += 1
+    const verdict = await client.evaluate(event)
+    if (!verdict) counters.evaluate_errors += 1
+    return verdict
+  }
+
+  // ---- per-call verdicts ---------------------------------------------------
   const callVerdicts = new Map<string, CallVerdict>()
-  const ogrBlockedTurns = new Set<string>()
 
   function rememberCall(callId: string, verdict: CallVerdict): void {
     if (callVerdicts.size >= CALLS_MAX) {
@@ -292,26 +289,37 @@ export function apply(ctx: Context, config: Config): void {
   }
 
   /**
-   * The chunk a blocked step yields instead of the model's answer. `error` is
-   * the honest finish kind: the step did not stop because the model stopped,
-   * and the loop's own error handling is what should see it. The turn is
-   * marked so its `turn/end` reports `blocked` rather than `error`.
+   * The chunk a blocked step yields instead of (the rest of) the model's
+   * answer. `error` is the honest finish kind: the step did not stop because
+   * the model stopped, and the loop's own error handling is what should see
+   * it — the response never completes, so nothing downstream acts on it.
    */
-  const blockedChunk = (sessionId: string | undefined, detail: string): StreamChunk => {
-    const coords = sessionId ? coordsBySession.get(sessionId) : undefined
-    if (sessionId && coords) ogrBlockedTurns.add(`${sessionId}#${coords.turn}`)
-    return {
-      type: "finish",
-      reason: {
-        kind: "error",
-        failure: { message: `[OpenGuardrails] ${detail}`, code: "ogr_blocked" },
-      },
+  const blockedChunk = (detail: string): StreamChunk => ({
+    type: "finish",
+    reason: {
+      kind: "error",
+      failure: { message: `[OpenGuardrails] ${detail}`, code: "ogr_blocked" },
+    },
+  })
+
+  /** Redaction spans this integration cannot apply — warned once, counted always. */
+  let warnedSpans = false
+  const noteSpans = (verdict: WireVerdict): void => {
+    const spans = verdict.modifications?.spans?.length ?? 0
+    if (spans === 0) return
+    counters.unresolved_spans += spans
+    if (!warnedSpans) {
+      // Applying spans would mean splicing dsh's own message objects from
+      // wire paths — not implemented yet. Stated ONCE, in the log and the
+      // README, rather than silently: the runtime's copy is masked either
+      // way; what is not masked is what this process handles locally.
+      warnedSpans = true
+      warn("the verdict carried redaction spans, which this integration cannot apply yet — content passed unredacted")
     }
   }
 
-  // ---- Recipe A steps 1 + 2: the two halves of every model call ------------
+  // ---- recipe steps 1–4: the two halves of every model call ----------------
   let warnedNoRuntime = false
-  let warnedSpans = false
   ctx.on("llm/stream", (options: GenerateOptions, next): AsyncIterable<StreamChunk> => {
     // An auxiliary call (compaction, session titling) is machinery, not the
     // agent's conversation; judging it would bill a round trip for a summary
@@ -334,83 +342,81 @@ export function apply(ctx: Context, config: Config): void {
         return
       }
 
-      const sessionId = options.sessionId ? String(options.sessionId) : undefined
+      // One fresh id binds this call's two events; a local variable IS the
+      // bookkeeping — v0.8 left the producer nothing else to track.
+      const stepId = randomUUID()
 
       // -- step/request: judged before the model sees it --
-      const reqVerdict = await client.evaluate({
-        ...baseEvent(sessionId),
+      const reqVerdict = await judge({
         kind: "step/request",
+        step_id: stepId,
+        ...identity(),
         llm_protocol: LLM_PROTOCOL,
         payload: requestBody(options),
       })
       if (!reqVerdict) {
         if (failMode === "closed") {
-          yield blockedChunk(sessionId, "this model call could not be judged and the deployment is fail-closed")
+          yield blockedChunk("this model call could not be judged and the deployment is fail-closed")
           return
         }
         warn("step/request got no verdict — proceeding (fail-open)")
       } else {
         if (reqVerdict.decision === "block") {
-          yield blockedChunk(sessionId, `this model call was blocked: ${brief(reqVerdict)}`)
+          yield blockedChunk(`this model call was blocked: ${brief(reqVerdict)}`)
           return
         }
         if (failMode === "closed" && (reqVerdict.unjudged?.length ?? 0) > 0) {
           yield blockedChunk(
-            sessionId,
             `parts of this model call went unjudged (${reqVerdict.unjudged!.join(", ")}) and the deployment is fail-closed`,
           )
           return
         }
-        if ((reqVerdict.modifications?.spans?.length ?? 0) > 0 && !warnedSpans) {
-          // Applying spans would mean splicing dsh's own message objects from
-          // wire paths — not implemented yet. Stated ONCE, in the log and the
-          // README, rather than silently: the runtime's copy is masked either
-          // way; what is not masked is what this process sends the provider.
-          warnedSpans = true
-          warn("the verdict carried redaction spans, which this integration cannot apply yet — content sent unredacted")
-        }
+        noteSpans(reqVerdict)
       }
 
-      // -- the model call, buffered --
+      // -- the model call, streamed through the tail gate --
       //
-      // `enforce` semantics require buffering: "before the agent acts on it"
-      // is literally true only if no chunk escapes while the verdict is in
-      // flight. The loop consumes block-ends, so re-yielding the buffered
-      // chunks afterwards reproduces the stream exactly.
+      // Chunks are forwarded as they arrive; the final `tailChars` characters
+      // stay held. That is the v0.8 enforcement point for streams: the
+      // verdict decides the TAIL's fate, tool calls complete only at stream
+      // end, and the `finish` chunk is never released early — so nothing is
+      // acted on before the verdict, while the user still sees the answer
+      // stream in.
       const accumulator = new ResponseAccumulator(options.model)
-      const buffered: StreamChunk[] = []
+      const gate = new TailGate(tailChars)
       for await (const chunk of next()) {
         accumulator.push(chunk)
-        buffered.push(chunk)
+        yield* gate.feed(chunk)
       }
 
       // An aborted or empty stream has no complete answer to judge.
       if (!accumulator.complete || accumulator.empty) {
-        yield* buffered
+        yield* gate.flush()
         return
       }
 
-      // -- step/response: judged before the agent acts on it --
-      const resVerdict = await client.evaluate({
-        ...baseEvent(sessionId),
+      // -- step/response: the whole reassembled answer, judged once --
+      const resVerdict = await judge({
         kind: "step/response",
+        step_id: stepId,
+        ...identity(),
+        llm_protocol: RESPONSE_PROTOCOL,
         payload: accumulator.body(),
       })
       const calls = accumulator.toolCalls
 
       if (!resVerdict) {
         if (failMode === "closed") {
-          yield blockedChunk(sessionId, "the model's answer could not be judged and the deployment is fail-closed")
+          yield blockedChunk("the model's answer could not be judged and the deployment is fail-closed")
           return
         }
         warn("step/response got no verdict — releasing the answer (fail-open); its tool calls carry no verdict")
-        yield* buffered
+        yield* gate.flush()
         return
       }
 
       if (failMode === "closed" && (resVerdict.unjudged?.length ?? 0) > 0) {
         yield blockedChunk(
-          sessionId,
           `parts of the model's answer went unjudged (${resVerdict.unjudged!.join(", ")}) and the deployment is fail-closed`,
         )
         return
@@ -431,16 +437,19 @@ export function apply(ctx: Context, config: Config): void {
               ? { allow: false, reason: `${hit.category}${hit.severity ? ` (${hit.severity})` : ""}` }
               : { allow: true })
           })
-          yield* buffered
+          yield* gate.flush()
           return
         }
-        yield blockedChunk(sessionId, `the model's answer was blocked: ${brief(resVerdict)}`)
+        // The held tail is dropped and the stream ends in an error finish:
+        // the response never completes and no tool call runs.
+        yield blockedChunk(`the model's answer was blocked: ${brief(resVerdict)}`)
         return
       }
 
-      // allow — every call in this step is cleared by the step verdict.
+      // allow — release the tail; every call in this step is cleared.
+      noteSpans(resVerdict)
       for (const call of calls) rememberCall(call.id, { allow: true })
-      yield* buffered
+      yield* gate.flush()
     })()
   })
 
@@ -479,32 +488,32 @@ export function apply(ctx: Context, config: Config): void {
   })
 
   // Tool RESULTS are deliberately not evaluated here: they are judged inside
-  // the NEXT step/request, where they travel (Recipe A step 3). The
+  // the NEXT step/request, where they travel (recipe step 4). The
   // post-execute waterfall is left to other policy layers.
 
-  // ---- Recipe A step 4: the turn's close, with its reason ------------------
-  ctx.on("session/event", (session: Session, event: SessionEvent) => {
-    if (event.type !== "turn/end" || !client.enabled) return
-    const data = event.data as { turn?: number; reason?: { kind?: string } }
-    const turn = typeof data.turn === "number" ? data.turn : undefined
-    const kind = data.reason?.kind ?? "completed"
-    const blockedByUs = turn !== undefined && ogrBlockedTurns.delete(`${session.id}#${turn}`)
-    const reason = blockedByUs ? "blocked" : (TURN_END_REASON[kind] ?? "error")
-    const parent = session.header.parentSession
-    void client.ingest([{
-      ogr_version: "0.7",
-      kind: "turn/end",
-      timestamp: new Date().toISOString(),
-      agent_id: agentId,
-      agent_type: AGENT_TYPE,
-      integration: INTEGRATION,
-      ...claims(),
-      session_id: String(session.id),
-      ...turn !== undefined ? { turn } : {},
-      ...parent ? { parent_session_id: String(parent) } : {},
-      payload: { reason },
-    }])
-  })
+  // ---- recipe step 5: the heartbeat ----------------------------------------
+  //
+  // Liveness over the authenticated channel — one beat on connect (a
+  // heartbeat registers a live-but-idle agent before its first event) and
+  // one per interval after that. The build id and the degraded-mode counters
+  // travel here and nowhere else; the timer is unref'd so it never keeps the
+  // process alive, and disposed with the plugin.
+  const heartbeatS = config.heartbeatS ?? DEFAULT_HEARTBEAT_S
+  ctx.effect(() => {
+    const beat = (): void => {
+      if (!client.enabled) return
+      void client.heartbeat({
+        integration: INTEGRATION,
+        agent_id: agentId,
+        interval_s: heartbeatS,
+        counters: { ...counters },
+      })
+    }
+    beat()
+    const timer = setInterval(beat, heartbeatS * 1000)
+    timer.unref?.()
+    return () => clearInterval(timer)
+  }, "openguardrails: heartbeat")
 
   // ---- auto mode: the step verdict answers the approval seam ---------------
   //
@@ -543,7 +552,9 @@ export default { name, inject, Config, apply }
 
 export {
   DEFAULT_AUTO_PRESET,
+  DEFAULT_HEARTBEAT_S,
   DEFAULT_RUNTIME_URL,
+  DEFAULT_STREAM_TAIL_CHARS,
   DEFAULT_TIMEOUT_MS,
 } from "./config.js"
 export type {
@@ -553,4 +564,4 @@ export type {
   GuardrailsOptions,
   RuntimeOptions,
 } from "./config.js"
-export type { WireEvent, WireFinding, WireVerdict } from "./wire.js"
+export type { WireEvent, WireFinding, WireHeartbeat, WireVerdict } from "./wire.js"

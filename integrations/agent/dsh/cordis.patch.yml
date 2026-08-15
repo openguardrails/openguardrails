@@ -5,11 +5,12 @@
 #
 # Two rows:
 #
-#  1. Insert the plugin. Auto mode is on by default; the v0.7 Recipe A guard
-#     (step/request, step/response, turn/end — all decisions from the
-#     runtime) runs for every session once an API key is configured. Tune it
-#     by overriding the `openguardrails` row in a later layer (your profile's
-#     cordis.patch.yml) — see cordis.example.yml for every knob.
+#  1. Insert the plugin. Auto mode is on by default; the v0.8 guard
+#     (step/request before the model, step/response behind the held stream
+#     tail — all decisions from the runtime) runs for every session once an
+#     API key is configured. Tune it by overriding the `openguardrails` row
+#     in a later layer (your profile's cordis.patch.yml) — see
+#     cordis.example.yml for every knob.
 #
 #  2. Put "Auto Mode by OGR" in the Permissions selector by overriding
 #     the base `permission` row. A patch replaces the targeted row's WHOLE
