@@ -1,15 +1,13 @@
 # @openguardrails/opencode-auto-mode
 
-**Auto mode for [opencode](https://github.com/anomalyco/opencode).**
-
-Whatever your opencode `permission` config would ask you — bash commands,
-edits, webfetch — this plugin answers from
-[OpenGuardrails (OGR)](https://www.npmjs.com/package/@openguardrails/core)
-policy instead: **your own guardrails** (plain text + regex rules, no model
-required, optionally your own model as the judge) grant or refuse each
-prompt, and only the asks the runtime cannot decide still reach you.
-
-Enforced as a pure opencode plugin — **no core changes, no fork**.
+**Auto mode for [opencode](https://github.com/anomalyco/opencode), on OGR
+v0.8.** Whatever your opencode `permission` config would ask you — bash
+commands, edits, webfetch — this plugin answers from an
+[OpenGuardrails](https://openguardrails.com) **runtime verdict** instead of a
+human, and every tool call is judged before it runs. Enforced as a pure
+opencode plugin — no core changes, no fork, and **no SDK**: the plugin speaks
+the Runtime API directly (`specification/runtime-api.md`), one hand-rolled
+`POST /v1/evaluate` per held action plus an optional heartbeat.
 
 Installation is one config edit — opencode installs plugins listed in its
 config by itself on the next start:
@@ -23,95 +21,101 @@ config by itself on the next start:
 }
 ```
 
-The package brings `@openguardrails/core`, the JavaScript OGR core runtime,
-as a dependency. Auto mode is **on by default** — it is the point of the
-package.
+Then connect a runtime: set `OGR_API_KEY` (get one at
+https://openguardrails.com). Without a key the plugin runs unguarded and says
+so once — connecting a runtime is a deployment choice, not a crash.
+
+## The vantage, honestly
+
+The v0.8 recipe pairs two events per **model call**: `step/request` holding
+the raw provider request, `step/response` holding the raw response.
+opencode's plugin surface exposes **tool-call hooks, not the model byte
+path** — this plugin never holds a provider body, so it cannot implement
+that pairing. What it does hold, at the host's two refusable moments, is a
+model-produced tool call about to be acted on. Each one becomes a single
+**canonical `step/response`** carrying exactly the `tool_calls` in hand
+(`llm_protocol: "canonical"`), with a fresh `step_id` per event and no
+request half. Consequences, stated plainly:
+
+- the model's prose and reasoning are never judged, only its tool calls —
+  and only one call per event, as the host surfaces them;
+- the runtime derives session/turn/step from much less context than a
+  loop-owning integration (like [`@openguardrails/dsh`](../dsh/)) provides;
+- no `timing` is sent — this vantage observes no byte path, and fabricating
+  wall-clock facts would be worse than omitting them;
+- redaction spans on a verdict cannot be applied yet (same stance as the dsh
+  reference): the plugin warns once and the content proceeds unredacted —
+  the runtime's own record is masked either way.
 
 ## How it works
 
-Two hooks, one engine:
+**`tool.execute.before`** — the held call is judged before it runs:
 
-**`tool.execute.before`** — every tool call becomes an OGR `GuardEvent` and is
-judged *before it runs*, on every call, whether or not a permission prompt
-would fire:
-
-| OGR decision | opencode behavior |
+| Verdict | opencode behavior |
 | --- | --- |
-| `allow` / `modify` / `redact` | proceed |
+| `allow` | proceed (findings, if any, are recorded runtime-side) |
 | `block` | throw → the agent sees a tool error and must find a safer path |
-| `require_approval` | throw → asks the agent to have you re-run intentionally or relax the policy |
+| no verdict (outage, timeout, 429) | `failMode`: `open` proceeds loudly, `closed` refuses |
 
-**`permission.ask`** — opencode's own permission prompt, the human gate. Auto
-mode answers it with the runtime's verdict:
+**`permission.ask`** — opencode's own permission prompt, the human gate.
+An ask correlated to an already-judged call (same `callID`) is answered from
+that verdict — the same action never earns two answers. An uncorrelated ask
+is judged from the permission's own metadata (opencode's bash asks carry the
+command there). `allow` → `"allow"`, `block` → `"deny"`, nothing to judge →
+*undecided*: `auto.unresolved: "human"` (default) leaves the prompt for you,
+`"reject"` denies it — the strict stance for headless runs.
 
-| Runtime verdict | Prompt outcome |
-| --- | --- |
-| `allow` / `modify` / `redact` | `allow` — you are never prompted |
-| `block` | `deny` |
-| `require_approval`, evaluation failed, or nothing to judge | *undecided* — see below |
+Auto mode stays **restrict-only** toward the agent: it automates *your* seat
+at the prompt, never overrides a verdict, and a `block` stays blocked
+everywhere.
 
-*Undecided* follows `auto.unresolved`: `human` (default) leaves the prompt
-exactly as opencode raised it, so you still see the genuinely ambiguous asks;
-`reject` denies them — the strict stance for headless runs where no human
-will ever answer.
+## Configure
 
-The ask links back to the already-evaluated call through its `callID`, which
-both events carry as their OGR `guard_id` — the runtime can only **tighten**
-the earlier decision, never loosen it. An ask with no correlated call falls
-back to the permission's own metadata (opencode's bash asks carry the
-command there); an ask with neither stays undecided — a guard does not grant
-what it cannot see.
+Plugin options (opencode passes them through), each falling back to the
+environment, then to `""` — the explicit "no assertion", which the runtime
+resolves from the API key:
 
-This stays a **restrict-only** guard toward the agent: auto mode automates
-*your* seat at the prompt, with your own policy — it never overrides an OGR
-verdict, and a `block` stays blocked everywhere.
-
-## Configure your guardrails
-
-Drop an OGR policy at **`.opencode/guardrails.json`** (the agent can write/edit
-this itself), or pass it inline as plugin options. A sensible default ships in
-the package (`curl|bash`, `rm -rf /`, credential-file access, `| sudo`).
-
-```json
+```jsonc
 {
-  "composition": { "security.*": { "strategy": "deny-wins", "on_all_failed": "block" } },
-  "config_rules": {
-    "command_rules": [
-      { "id": "no-prod-deploy", "regex": "deploy\\s+--env\\s+prod",
-        "category": "security.malicious_command", "decision": "require_approval",
-        "score": 0.9, "why": "production deploys need explicit human approval" }
-    ]
+  "runtime": {
+    "url": "https://openguardrails.com",   // or your own runtime; env OGR_RUNTIME_URL
+    "apiKey": "ogr_...",                   // env OGR_API_KEY
+    "agentId": "invoice-bot",              // WHICH agent; env OGR_AGENT_ID
+    "agentType": "opencode",               // what KIND (the default)
+    "workspace": "finance-agents",         // policy group; env OGR_AGENT_WORKSPACE
+    "owner": "payments-team",              // responsible party; env OGR_AGENT_OWNER
+    "user": "u-8232"                       // who is using it; env OGR_AGENT_USER
   },
+  "failMode": "open",                      // "closed" = an outage pauses the agent
+  "timeoutMs": 5000,
   "auto": { "enabled": true, "unresolved": "human" }
 }
 ```
 
-The policy format is identical across every OGR integration (dsh, openclaw,
-hermes, python), so one `policy.json` works everywhere. `auto` may live in the
-policy file (as above) or in plugin options; options win.
+While a runtime is connected, a heartbeat
+(`integration: "ogr-opencode-auto-mode/<version>"`, plus
+`events_sent`/`evaluate_errors` counters) goes out at boot and every 60 s —
+that is how the runtime tells "agent idle" from "integration went dark", and
+where the build id lives in v0.8.
 
-`decision: "require_approval"` is the rule author's "this one is for a human":
-under auto mode it is exactly the class of prompt that still reaches you.
+## Test
 
-### Use your own model as the judge
+Offline, against a strict in-process mock runtime that rejects anything but
+the exact ten-field v0.8 GuardEvent:
 
-```json
-{
-  "config_rules": { "command_rules": [] },
-  "judge": { "baseURL": "https://api.openai.com/v1", "model": "gpt-4o-mini", "apiKey": "sk-..." }
-}
+```bash
+npm install && npm test     # standalone — no workspace, no network in the tests
 ```
-
-Any OpenAI-compatible chat endpoint works — point it at the same model your
-agent uses, or a dedicated guard model. The judge weighs provenance and the
-ask's own descriptors, and returns an OGR verdict; the deterministic
-text/regex rules remain the baseline.
 
 ## Status
 
-`v0.2`. Auto mode via `permission.ask` + guard engine via
-`tool.execute.before`, correlated by `callID`. Transcript-based provenance
-tainting (web/mcp results → `untrusted`, so injection-influenced asks get
-denied rather than granted) is the tracked follow-up via the opencode session
-API — the dsh integration ([`@openguardrails/dsh-auto-mode`](../dsh/)) already
-does this. Published before `v0.2` as `openguardrails-instrumentation-opencode`.
+`v0.3` — the v0.8 rewrite. The v0.2 local policy engine
+(`@openguardrails/core`, regex rules, bring-your-own-model judge,
+`.opencode/guardrails.json`, `require_approval`) is gone with the SDK layer;
+policy now lives in the runtime, where you configure it once for every
+integration. Published before `v0.2` as
+`openguardrails-instrumentation-opencode`.
+
+## License
+
+Apache-2.0

@@ -1,148 +1,103 @@
 /**
- * openguardrails-instrumentation-openclaw
+ * openguardrails-instrumentation-openclaw — OGR v0.8 for OpenClaw.
  *
- * An OpenClaw plugin that guards an assistant through the OpenGuardrails (OGR)
- * protocol — the multi-channel counterpart of
- * `@openguardrails/opencode-auto-mode`.
+ * An OpenClaw plugin that guards an assistant through the OpenGuardrails
+ * Runtime API. v0.8 retired the SDK — and with it this plugin's local policy
+ * engine (regex rules, bring-your-own-model judge, taint tracker) and the
+ * enrolled-key reporter — so every decision now comes from `/v1/evaluate`,
+ * spoken directly: one hand-rolled POST per held action, `Bearer` key, ten
+ * fields.
  *
- * It registers in-process plugin hooks, turns each event into an OGR
- * `GuardEvent`, runs it through a `Runtime` built from the assistant's own
- * guardrails policy (text/regex rules, plus optionally its own model as an LLM
- * judge), and enforces the `Verdict`:
+ * THE VANTAGE, honestly: OpenClaw's plugin hooks expose TOOL CALLS and
+ * CHANNEL MESSAGES, not the model byte path — this plugin never holds a
+ * provider request or response body, so the recipe's paired step/request +
+ * step/response per model call cannot be implemented here (the README
+ * states the limitation). What the plugin DOES hold, at the host's two
+ * refusable moments, is model-produced output the host is about to act on.
+ * Each becomes ONE canonical `step/response` carrying exactly what is in
+ * hand — nothing decomposed, nothing fabricated (no timing: this vantage
+ * observes no byte path). A fresh `step_id` is minted per event; there is
+ * no request half to pair it with, and the runtime derives
+ * session/turn/step itself.
  *
- *   before_tool_call   allow | modify | redact → proceed
- *                      block                   → { block }
- *                      require_approval        → { requireApproval } (human gate)
+ *   before_tool_call   canonical step/response {tool_calls: [the call]},
+ *                      judged BEFORE the tool runs: block → `{ block }`.
  *
- *   message_sending    allow | modify | redact → deliver
- *                      block | require_approval → { cancel } (outbound guard)
+ *   message_sending    canonical step/response {text}, judged BEFORE the
+ *                      outbound channel message leaves: block → `{ cancel }`.
  *
- * No OpenClaw core changes required. This is a "restrict-only" guard: it can
- * stop a would-run tool call or a would-send message, never loosen one. The
- * human-confirm gate (`requireApproval`) and enforcement stay privilege-
- * separated: the plugin decides, the user approves, the host enforces.
+ * An unanswered evaluate follows `failMode` (specification/degraded-mode.md):
+ * open (default) proceeds loudly, closed refuses the action. This is a
+ * restrict-only guard: it can stop a would-run tool call or a would-send
+ * message, never loosen one. No OpenClaw core changes required.
  */
-import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry"
 import {
-  Runtime,
-  ConfigRulesDetector,
-  LLMJudgeDetector,
-  HeuristicBackend,
-  type Detector,
-  type GuardEvent,
-  type Provenance,
-  type Verdict,
-} from "@openguardrails/core"
-import { loadGuardrailsConfig, type GuardrailsOptions, type TaintConfig } from "./config.js"
-import { openAICompatibleBackend } from "./own-model.js"
-import { getReporter, hostAgentId } from "./platform.js"
+  resolveConfig,
+  HEARTBEAT_INTERVAL_S,
+  type GuardrailsOptions,
+  type ResolvedConfig,
+} from "./config.js"
+import { mintStepId, OgrClient, type WireEvent, type WireVerdict } from "./wire.js"
 
-let seq = 0
-function id(prefix: string): string {
-  seq += 1
-  const rand = globalThis.crypto?.randomUUID?.().slice(0, 8) ?? seq.toString(36).padStart(8, "0")
-  return `${prefix}-${seq.toString(36)}-${rand}`
+/** `integration` on the heartbeat: which build is alive (off the event since v0.8). */
+export const INTEGRATION = "ogr-openclaw/0.3.0"
+
+// ---- the slice of OpenClaw's plugin surface this integration touches -------
+//
+// Declared STRUCTURALLY (mirroring the openclaw plugin-sdk hook payloads)
+// so the package builds and tests standalone, with no host SDK installed.
+// OpenClaw duck-types the hook handlers — these shapes, not a nominal
+// import, are the contract. The exported entry is the same plain
+// {id, name, description, register} object `definePluginEntry` used to brand.
+
+export interface BeforeToolCallEvent {
+  toolName: string
+  toolCallId?: string
+  params?: Record<string, unknown>
+}
+export interface MessageSendingEvent {
+  content?: string
+}
+export interface HookCtx {
+  agentId?: string
+  sessionKey?: string
+  channelId?: string
+  messageProvider?: string
+  workspaceDir?: string
+  config?: unknown
+}
+export type BeforeToolCallResult = { block: true; blockReason: string } | undefined
+export type MessageSendingResult =
+  | { cancel: true; cancelReason: string; metadata?: Record<string, unknown> }
+  | undefined
+export interface PluginApi {
+  on(
+    hook: "gateway_start",
+    handler: (event: unknown, ctx: HookCtx) => void,
+  ): void
+  on(
+    hook: "before_tool_call",
+    handler: (event: BeforeToolCallEvent, ctx: HookCtx) => Promise<BeforeToolCallResult>,
+    options?: { priority?: number },
+  ): void
+  on(
+    hook: "message_sending",
+    handler: (event: MessageSendingEvent, ctx: HookCtx) => Promise<MessageSendingResult>,
+  ): void
+}
+export interface PluginEntry {
+  id: string
+  name: string
+  description: string
+  register(api: PluginApi): void
 }
 
-function brief(v: Verdict): string {
-  const cats = v.categories.map((c) => `${c.id}(${c.score})`).join(", ")
-  const why = v.reasons.filter((r) => !r.startsWith("[")).join("; ")
-  return [cats, why].filter(Boolean).join(" — ") || v.decision
-}
-
-/**
- * Per-session taint: once a session ingests untrusted content (an inbound
- * channel message, or a tool result from a web/fetch/search/browser/MCP tool),
- * later tool calls in that session get `untrusted` provenance. Session-scoped;
- * cleared on `session_end`/`before_reset`.
- */
-interface TaintMark {
-  sources: Set<string>
-  tags: Set<string>
-}
-
-class TaintTracker {
-  private readonly bySession = new Map<string, TaintMark>()
-
-  mark(sessionKey: string | undefined, source: string, tag: string): void {
-    if (!sessionKey) return
-    const m = this.bySession.get(sessionKey) ?? { sources: new Set<string>(), tags: new Set<string>() }
-    m.sources.add(source)
-    m.tags.add(tag)
-    this.bySession.set(sessionKey, m)
-  }
-
-  get(sessionKey: string | undefined): TaintMark | undefined {
-    return sessionKey ? this.bySession.get(sessionKey) : undefined
-  }
-
-  clear(sessionKey: string | undefined): void {
-    if (sessionKey) this.bySession.delete(sessionKey)
-  }
-}
-
-/**
- * Lazily builds and caches the OGR runtime. The policy file lives in the
- * workspace, which is only known at `gateway_start`; tool/message hooks build
- * on first use if startup has not populated it yet.
- */
-class GuardManager {
-  private runtime: Runtime | undefined
-  private guardMessages = true
-  private taintCfg: Required<TaintConfig> = {
-    inboundMessages: true,
-    toolResults: true,
-    toolResultPattern: "",
-  }
-  private toolResultRe: RegExp | undefined
-  private workspaceDir: string | undefined
-  private options: GuardrailsOptions | undefined
-
-  configure(workspaceDir: string | undefined, options: GuardrailsOptions | undefined): void {
-    this.workspaceDir = workspaceDir
-    this.options = options
-    this.runtime = undefined // force rebuild with the new workspace/options
-    this.ensure()
-  }
-
-  private ensure(): Runtime {
-    if (this.runtime) return this.runtime
-    const { policy, judge, guardMessages, taint } = loadGuardrailsConfig(this.workspaceDir, this.options)
-    // ConfigRulesDetector enforces deterministic regex rules; the judge weighs
-    // provenance (taint) so an untrusted-derived privileged action escalates.
-    // Use the operator's own model when configured, else the deterministic
-    // HeuristicBackend so tainting has teeth with no external model.
-    const judgeBackend = judge ? openAICompatibleBackend(judge) : new HeuristicBackend()
-    const detectors: Detector[] = [
-      new ConfigRulesDetector(policy.config_rules ?? {}),
-      new LLMJudgeDetector(judgeBackend),
-    ]
-    this.guardMessages = guardMessages
-    this.taintCfg = taint
-    this.toolResultRe = taint.toolResultPattern ? new RegExp(taint.toolResultPattern, "i") : undefined
-    this.runtime = new Runtime(detectors, policy)
-    return this.runtime
-  }
-
-  get messagesEnabled(): boolean {
-    this.ensure()
-    return this.guardMessages
-  }
-
-  get taint(): Required<TaintConfig> {
-    this.ensure()
-    return this.taintCfg
-  }
-
-  /** Is this tool one whose result carries untrusted external content? */
-  isExternalContentTool(toolName: string): boolean {
-    this.ensure()
-    return this.toolResultRe?.test(toolName) ?? false
-  }
-
-  evaluate(ev: GuardEvent): Promise<Verdict> {
-    return this.ensure().evaluate(ev)
-  }
+/** One-line human summary of a verdict for a denial reason. */
+function brief(v: WireVerdict): string {
+  const f = (v.findings ?? [])
+    .map((x) => `${x.category}${x.severity ? `(${x.severity})` : ""}`)
+    .join(", ")
+  return f || v.decision
 }
 
 /** Best-effort read of this plugin's config out of the OpenClaw config tree. */
@@ -151,139 +106,153 @@ function readOptions(config: unknown): GuardrailsOptions | undefined {
   return entries?.["openguardrails"]?.config as GuardrailsOptions | undefined
 }
 
-// Annotate via the importable `definePluginEntry` symbol so the emitted
-// declaration does not inline OpenClaw's non-exported `DefinedPluginEntry`
-// type (TS2742 portability).
-const plugin: ReturnType<typeof definePluginEntry> = definePluginEntry({
+const plugin: PluginEntry = {
   id: "openguardrails",
   name: "OpenGuardrails",
   description:
-    "Enforce the OpenGuardrails (OGR) protocol on tool calls and channel traffic — block, rewrite, or require human approval under a policy you own.",
+    "Judge every tool call and outbound channel message through an OpenGuardrails runtime (OGR v0.8) — block enforced in place, fail-open by default.",
   register(api) {
-    const guard = new GuardManager()
-    const taint = new TaintTracker()
+    const warn = (message: string): void => console.warn(`[openguardrails] ${message}`)
 
-    // Resolve the workspace-scoped policy once the Gateway is up.
+    // The workspace config tree only arrives at `gateway_start`; until then
+    // the environment alone decides. `cfg` is re-resolved there, and the
+    // client reads it through thunks so the late config lands without any
+    // re-registration.
+    let cfg: ResolvedConfig = resolveConfig(undefined)
+    const client = new OgrClient(
+      { info: () => {}, warn: (m) => console.warn(m) },
+      () => (cfg.apiKey ? { url: cfg.url, apiKey: cfg.apiKey } : null),
+      () => cfg.timeoutMs,
+    )
+
+    // Liveness from the moment a runtime is configured: the first beat goes
+    // out immediately (a live-but-idle assistant must register in fleet
+    // coverage) and the interval timer never holds the process open.
+    let heartbeatStarted = false
+    const startHeartbeat = (): void => {
+      if (heartbeatStarted || !client.enabled) return
+      heartbeatStarted = true
+      const beat = (): void => void client.heartbeat(INTEGRATION, cfg.identity.agent_id, HEARTBEAT_INTERVAL_S)
+      beat()
+      const timer = setInterval(beat, HEARTBEAT_INTERVAL_S * 1000)
+      timer.unref?.()
+    }
+
     api.on("gateway_start", (_event, ctx) => {
-      const c = ctx as { workspaceDir?: string; config?: unknown }
-      guard.configure(c.workspaceDir, readOptions(c.config))
+      cfg = resolveConfig(readOptions(ctx.config))
+      startHeartbeat()
+    })
+    startHeartbeat() // env-only deployments never see a gateway_start config
+
+    /**
+     * The five-tuple for one event. Config wins; an unasserted `agent_id`
+     * falls back to the host's own agent id for this hook — a fact the host
+     * supplies, not one this plugin invents — and then to `""`, the explicit
+     * no-assertion the runtime resolves from the API key.
+     */
+    const identity = (ctx: HookCtx): ResolvedConfig["identity"] => ({
+      ...cfg.identity,
+      agent_id: cfg.identity.agent_id || ctx.agentId || "",
     })
 
-    // Channel-inbound tainting: inbound channel messages are untrusted content.
-    api.on("message_received", (event, ctx) => {
-      if (!guard.taint.inboundMessages) return
-      const c = ctx as { sessionKey?: string; messageProvider?: string }
-      const e = event as { messageProvider?: string }
-      const provider = c.messageProvider ?? e.messageProvider ?? "channel"
-      taint.mark(c.sessionKey, `channel:${provider}`, "channel_inbound")
-    })
+    let warnedNoRuntime = false
+    let warnedSpans = false
 
-    // Channel-inbound tainting: results of web/fetch/search/browser/MCP tools
-    // are untrusted external content (the indirect prompt-injection vector).
-    api.on("after_tool_call", (event, ctx) => {
-      if (!guard.taint.toolResults) return
-      const e = event as { toolName: string; error?: string }
-      if (e.error) return // a failed fetch produced no content to trust-taint
-      if (!guard.isExternalContentTool(e.toolName)) return
-      const c = ctx as { sessionKey?: string }
-      taint.mark(c.sessionKey, `tool_result:${e.toolName}`, "untrusted_tool_result")
-    })
+    /** Whether an unguarded pass-through is a deployment choice (no key), said once. */
+    const offline = (): boolean => {
+      if (client.enabled) return false
+      if (!warnedNoRuntime) {
+        warnedNoRuntime = true
+        warn("no runtime configured — set OGR_API_KEY (or plugins.entries.openguardrails.config). Running unguarded until then.")
+      }
+      return true
+    }
 
-    // Taint is session-scoped; drop it when the session ends or resets.
-    api.on("session_end", (_event, ctx) => taint.clear((ctx as { sessionKey?: string }).sessionKey))
-    api.on("before_reset", (_event, ctx) => taint.clear((ctx as { sessionKey?: string }).sessionKey))
+    /**
+     * Judge one held action. Returns a denial reason, or null to proceed —
+     * folding in the degraded-mode posture: no verdict (or a verdict that
+     * could not look at what is being enforced) denies only under
+     * `failMode: "closed"`.
+     */
+    async function judge(event: WireEvent, what: string): Promise<string | null> {
+      const verdict = await client.evaluate(event)
+      if (!verdict) {
+        if (cfg.failMode === "closed") {
+          return `this ${what} could not be judged and the deployment is fail-closed`
+        }
+        warn(`${what} got no verdict — proceeding (fail-open)`)
+        return null
+      }
+      if (verdict.decision === "block") return brief(verdict)
+      if (cfg.failMode === "closed" && (verdict.unjudged?.length ?? 0) > 0) {
+        return `parts of this ${what} went unjudged (${verdict.unjudged!.join(", ")}) and the deployment is fail-closed`
+      }
+      if ((verdict.modifications?.spans?.length ?? 0) > 0 && !warnedSpans) {
+        // Applying spans would mean splicing the host's own params/content
+        // from wire paths — not implemented yet (same stance as the dsh
+        // reference). Stated ONCE rather than silently; the runtime's copy
+        // is masked either way.
+        warnedSpans = true
+        warn("the verdict carried redaction spans, which this integration cannot apply yet — content proceeds unredacted")
+      }
+      return null
+    }
 
-    // Core enforcement: every tool call, before it runs.
+    // Core enforcement: every tool call, held BEFORE it runs — the one copy
+    // of the action anyone can still refuse.
     api.on(
       "before_tool_call",
       async (event, ctx) => {
-        const c = ctx as { agentId?: string; sessionKey?: string; channelId?: string }
-        // The user's own input is trusted, but if the session has ingested untrusted
-        // content (inbound message / web / mcp result), this action may be
-        // injection-influenced — flag it untrusted so the judge escalates.
-        const provenance: Provenance[] = [{ source: "user", trust: "trusted" }]
-        const mark = taint.get(c.sessionKey)
-        if (mark) {
-          provenance.push({
-            source: [...mark.sources][0] ?? "tainted",
-            trust: "untrusted",
-            taintTags: [...mark.tags],
-          })
-        }
-        const ev: GuardEvent = {
-          kind: "tool_call",
-          observationPoint: "invocation",
-          // One assistant daemon per machine → machine-scoped identity
-          // (identity design §7); client_key is clamped by the runtime to
-          // this key's enrollment scope. Flat identity fields (v0.6).
-          agentId: c.agentId ?? hostAgentId(),
-          agentType: "openclaw",
-          attestation: "client_key",
-          payload: { name: event.toolName, arguments: event.params, channel: c.channelId },
-          eventId: id("evt"),
-          guardId: event.toolCallId ?? id("ga"),
-          timestamp: new Date().toISOString(),
-          sessionId: c.sessionKey,
-          provenance,
-        }
-
-        const verdict = await guard.evaluate(ev)
-        getReporter().report(ev) // fire-and-forget platform observability
-
-        if (verdict.decision === "block") {
-          return { block: true, blockReason: `[OpenGuardrails] ${brief(verdict)}` }
-        }
-        if (verdict.decision === "require_approval") {
-          return {
-            requireApproval: {
-              title: `Approve ${event.toolName}?`,
-              description: `[OpenGuardrails] ${brief(verdict)}`,
-              severity: "warning",
-              timeoutBehavior: "deny",
-              pluginId: "openguardrails",
-            },
-          }
-        }
-        // allow | modify | redact → proceed unchanged
-        return
+        if (offline()) return undefined
+        const denial = await judge({
+          kind: "step/response",
+          step_id: mintStepId(),
+          ...identity(ctx),
+          llm_protocol: "canonical",
+          payload: {
+            tool_calls: [{
+              id: event.toolCallId ?? mintStepId(),
+              name: event.toolName,
+              arguments: event.params ?? {},
+            }],
+          },
+        }, `${event.toolName} call`)
+        return denial ? { block: true, blockReason: `[OpenGuardrails] ${denial}` } : undefined
       },
       { priority: 50 },
     )
 
-    // Outbound guard: cancel a reply a deny verdict would forbid.
+    // Outbound guard: the assistant's reply, held BEFORE the channel sends it.
     api.on("message_sending", async (event, ctx) => {
-      if (!guard.messagesEnabled) return
-      const e = event as { content?: string }
-      const c = ctx as { agentId?: string; sessionKey?: string; messageProvider?: string }
-      const ev: GuardEvent = {
-        kind: "model_output",
-        observationPoint: "conversation",
-        agentId: c.agentId ?? hostAgentId(),
-        agentType: "openclaw",
-        attestation: "client_key",
-        payload: { content: e.content ?? "", channel: c.messageProvider },
-        eventId: id("evt"),
-        guardId: id("ga"),
-        timestamp: new Date().toISOString(),
-        sessionId: c.sessionKey,
-        provenance: [{ source: "model", trust: "unverified" }],
-      }
-
-      const verdict = await guard.evaluate(ev)
-      getReporter().report(ev)
-      if (verdict.decision === "block" || verdict.decision === "require_approval") {
-        return {
-          cancel: true,
-          cancelReason: `openguardrails:${verdict.decision}`,
-          metadata: { reason: brief(verdict) },
-        }
-      }
-      return
+      if (!cfg.guardMessages || offline()) return undefined
+      const text = event.content ?? ""
+      if (text === "") return undefined // nothing held, nothing to judge
+      const denial = await judge({
+        kind: "step/response",
+        step_id: mintStepId(),
+        ...identity(ctx),
+        llm_protocol: "canonical",
+        payload: { text },
+      }, "outbound message")
+      return denial
+        ? { cancel: true, cancelReason: "openguardrails:block", metadata: { reason: denial } }
+        : undefined
     })
   },
-})
+}
 
 export default plugin
 
-export { DEFAULT_POLICY, DEFAULT_TAINT_TOOL_PATTERN } from "./config.js"
-export type { GuardrailsOptions, JudgeConfig, TaintConfig } from "./config.js"
+export {
+  DEFAULT_AGENT_TYPE,
+  DEFAULT_RUNTIME_URL,
+  DEFAULT_TIMEOUT_MS,
+  HEARTBEAT_INTERVAL_S,
+  resolveConfig,
+  type FailMode,
+  type FiveTuple,
+  type GuardrailsOptions,
+  type ResolvedConfig,
+  type RuntimeOptions,
+} from "./config.js"
+export type { WireEvent, WireFinding, WireToolCall, WireVerdict } from "./wire.js"
