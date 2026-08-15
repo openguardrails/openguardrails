@@ -39,14 +39,19 @@ form of the spec's minimal integration.
   is the canonical "hand-rolled evaluate POST" example.
 - `integrations/agent/litellm` — v0.8 litellm callback integration
   (Python).
-- Anything still marked v0.6-stale in its README is awaiting a v0.8
-  rewrite, excluded from the npm/uv workspaces and from CI; do not "fix"
-  one by re-adding an SDK.
+- All remaining integrations (hermes, langgraph, claude-code, codex,
+  openclaw, opencode, mitmproxy, openai-anthropic) were rewritten against
+  v0.8 on 2026-08-15 and are CI-covered: the Python ones through the root
+  pytest testpaths (pyproject.toml), the JS hook plugins as standalone
+  `npm test` suites (deliberately NOT npm-workspace members). Never "fix"
+  an integration by re-adding an SDK.
 
 ## Validation
 
-- Benchmarks: `python -m pip install pytest && python -m pytest`
+- Python (benchmarks + hermes/langgraph/litellm/mitmproxy/openai-anthropic):
+  `python -m pip install pytest && python -m pytest`
 - dsh plugin: `npm install && npm run build && npm test` (from the repo root)
+- Hook plugins: `cd integrations/agent/<claude-code|codex|openclaw|opencode> && npm test`
 - Higress plugin: `cd integrations/gateway/higress && gofmt -l . && go vet ./... && go test ./...`
   (wasm compile check: `GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o plugin.wasm .`)
 - Release workflows: run `actionlint` against `.github/workflows/*.yml`

@@ -7,7 +7,7 @@ Keywords per RFC 2119.
 producer could choose to skip: what a runtime can derive is not on the wire at
 all (coordinates, timestamps, protocol versioning), and what only the producer
 can know is mandatory — with the empty string as the explicit "I have nothing
-to assert". An integration is an API key, ten fields, and one endpoint.
+to assert". An integration is an API key, nine fields, and one endpoint.
 
 ## Kinds
 

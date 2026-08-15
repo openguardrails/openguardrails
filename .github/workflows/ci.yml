@@ -9,11 +9,13 @@ permissions:
   contents: read
 
 jobs:
-  # The v0.6 SDK packages and the agent/gateway plugins built on them were
-  # retired in v0.7 (the API is the integration surface; plugins call it
-  # directly). Their jobs return here plugin by plugin as each is rewritten
-  # against the v0.7 contract — higress first, below.
   python:
+    # Root pytest covers the benchmark suite plus every Python integration
+    # (hermes, langgraph, litellm, mitmproxy, openai-anthropic) — the
+    # testpaths list lives in pyproject.toml. All suites are offline: each
+    # spins its own strict mock runtime that 400s any event deviating from
+    # the v0.8 GuardEvent schema, so a passing run is also a wire-conformance
+    # check.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,9 +31,11 @@ jobs:
         run: python -m pytest
 
   javascript:
-    # The dsh plugin (@openguardrails/dsh) — the v0.7 Recipe A reference
-    # agent-direct integration, tested against a mock v0.7 runtime through
-    # dsh's real tool registry and Cordis waterfalls.
+    # The dsh plugin (@openguardrails/dsh) — the v0.8 reference agent-direct
+    # integration — builds and tests through the npm workspace. The hook
+    # plugins (claude-code, codex, openclaw, opencode) are deliberately NOT
+    # workspace members: each is standalone-testable, and their suites run
+    # here directly against their own strict mock runtimes.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -42,12 +46,19 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm test
+      - name: Hook plugins (standalone)
+        run: |
+          for d in claude-code codex openclaw opencode; do
+            echo "== $d"
+            (cd "integrations/agent/$d" && npm test)
+          done
 
   higress:
     # The Higress WASM plugin ("OpenGuardrails Runtime"). Everything worth
-    # testing in it — span offsets, SSE chunk boundaries, sealing the session,
-    # what counts as a NEW event — is ordinary Go and runs on the host; the wasm
-    # build is the compile check for the parts that only exist inside a gateway.
+    # testing in it — span offsets, SSE chunk boundaries, tail-hold release
+    # order, the nine-field wire — is ordinary Go and runs on the host; the
+    # wasm build is the compile check for the parts that only exist inside a
+    # gateway.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
