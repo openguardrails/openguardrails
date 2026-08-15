@@ -80,9 +80,16 @@ test("fail-open: a call with no step verdict dispatches (the deployment's stated
 test("no runtime configured: the registry is unguarded even under failMode closed", async () => {
   // Closed governs a runtime that IS configured and cannot answer;
   // unconfigured is a deployment choice, warned about at the stream.
-  const { call } = await boot({ failMode: "closed" })
-  const result = await call("bash", { command: "ls" })
-  assert.equal(result.isError, false)
+  const saved = { ...process.env }
+  delete process.env.OGR_API_KEY
+  delete process.env.OGR_RUNTIME_URL
+  try {
+    const { call } = await boot({ failMode: "closed" })
+    const result = await call("bash", { command: "ls" })
+    assert.equal(result.isError, false)
+  } finally {
+    process.env = saved
+  }
 })
 
 test("the monotonic guard re-asserts a refusal a reordered waterfall would skip", async () => {

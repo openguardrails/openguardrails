@@ -59,8 +59,8 @@ const (
 const (
 	cntEvaluated = iota // verdicts asked for and received
 	cntUnchecked        // requests that went through with NO verdict
-	cntIngested         // events reported asynchronously
-	cntMirrored         // batches copied to the candidate runtime
+	cntReported         // events posted fire-and-forget (observe mode) — nobody waited
+	cntMirrored         // events copied to the candidate runtime
 	// ⚠️ APPEND ONLY, and never reorder. The slots are packed positionally into one
 	// shared-data blob; an insert in the middle silently re-reads every existing
 	// counter as its neighbour. A length change is safe — `bump` starts from zero
@@ -86,9 +86,12 @@ const (
 // This matters more now than it did, because `log.go` silences those warnings by
 // default and the counter is what carries them instead.
 var counterNames = [cntLen]string{
-	cntEvaluated:       "evaluated",
-	cntUnchecked:       "unchecked",
-	cntIngested:        "ingested",
+	cntEvaluated: "evaluated",
+	cntUnchecked: "unchecked",
+	// Slot 2 was "ingested" until 3.0.0. v0.8 removed /v1/ingest, so the slot now
+	// counts the fire-and-forget evaluates observe mode sends instead — the SLOT is
+	// frozen (positional blob), the wire name follows the semantics.
+	cntReported:        "reported",
 	cntMirrored:        "mirrored",
 	cntStreamStopped:   "stream_stopped",
 	cntUnresolvedSpans: "unresolved_spans",
@@ -168,10 +171,11 @@ func sendHeartbeat(cfg *Config) {
 		return
 	}
 	c := counters()
-	logInfof("[OGR-BEAT] sending: evaluated=%d unchecked=%d ingested=%d mirrored=%d refused=%d unreadable=%d",
-		c["evaluated"], c["unchecked"], c["ingested"], c["mirrored"], c["refused"], c["unreadable"])
-	// The v0.7 heartbeat shape: one `integration` string names the sender and its
-	// build — the sensor envelope went with the evadability ladder.
+	logInfof("[OGR-BEAT] sending: evaluated=%d unchecked=%d reported=%d mirrored=%d refused=%d unreadable=%d",
+		c["evaluated"], c["unchecked"], c["reported"], c["mirrored"], c["refused"], c["unreadable"])
+	// The v0.8 heartbeat shape: one `integration` string names the sender and its
+	// build. This is the build id's ONLY home now — v0.8 took `integration` off the
+	// event, and fleet coverage / bad-rollout triage read it from here.
 	payload, err := json.Marshal(map[string]any{
 		"integration": integrationID(),
 		"interval_s":  heartbeatPeriodMs / 1000,

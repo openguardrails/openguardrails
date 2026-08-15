@@ -1,7 +1,7 @@
 {
   "name": "openguardrails",
-  "description": "OpenGuardrails (OGR) command-approval gate for Claude Code — a PreToolUse hook that turns each risky tool call into a GuardEvent, runs it past a policy (and pluggable security-vendor detectors), and denies/asks before it runs. Fires above the permission system, so it enforces even in bypass mode.",
-  "version": "0.1.0",
+  "description": "OpenGuardrails (OGR) v0.8 enforcement for Claude Code — a PreToolUse hook that sends each held tool call to an OGR runtime as a canonical step/response and denies on a block verdict. Fires above the permission system, so it enforces even in bypass mode.",
+  "version": "1.0.0",
   "author": { "name": "OpenGuardrails", "url": "https://openguardrails.com" },
   "homepage": "https://openguardrails.com/agent/",
   "repository": "https://github.com/openguardrails/openguardrails/tree/main/integrations/agent/claude-code",

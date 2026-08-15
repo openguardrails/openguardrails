@@ -1,25 +1,21 @@
 name: ogr-guard
-version: 0.1.0
-description: "Secure a Hermes agent + its sandbox through the OpenGuardrails (OGR) protocol. One Runtime + one policy.json enforce across three altitudes — gateway (LLM I/O), agent_hook (pre-tool), and sandbox (real exec) — correlated by guard_id and provenance."
+version: 1.0.0
+description: "Guard a Hermes agent through the OpenGuardrails (OGR) v0.8 Runtime API: two evaluates per model call, verdicts enforced on the answer, the tool calls, and the real exec."
 author: "OpenGuardrails"
 hooks:
-  - pre_tool_call
-  - post_tool_call
   - pre_api_request
   - post_api_request
-  # Enforces a blocking content verdict (moderation / off-topic / injection) on the
-  # answer — the only hook Hermes lets a plugin substitute what the user sees.
+  # Enforces the verdict on the answer — the only hook Hermes lets a plugin
+  # substitute what the user sees. Withholds a block, applies redaction spans.
   - transform_llm_output
-  # Redacts or withholds a tool result before it re-enters the model's context.
-  - transform_tool_result
-# Optional: ship every GuardEvent to an OpenGuardrails runtime for console
-# visibility (Explorer, findings). Local enforcement is fully authoritative
-# without these — skip any prompt below (leave blank) to stay local-only.
+  # Enforces the verdict on tool calls: a blocked step/response means the
+  # round's tool calls do not run.
+  - pre_tool_call
 requires_env:
   - name: OGR_RUNTIME_URL
-    description: "OpenGuardrails runtime base URL, e.g. https://your-ogr-instance.example.com (blank = local enforcement only, no console reporting)"
+    description: "OpenGuardrails runtime base URL, e.g. https://your-ogr-instance.example.com (blank = no runtime; the fail mode decides, and the default is open = pass-through)"
   - name: OGR_API_KEY
-    description: "Workspace API key from your OGR console — used as the one-time enrollment bootstrap token"
+    description: "Organization API key from your OGR console (Authorization: Bearer)"
     secret: true
-  - name: OGR_INSTANCE
-    description: "Name for this Hermes instance — becomes agent 'hermes-<instance>' in the console. Blank is fine: defaults to hostname (plus your HERMES_HOME folder name, if you use a non-default one — that's Hermes' own way of running separate instances on one machine). Only set this to override that"
+  - name: OGR_AGENT_ID
+    description: "WHICH agent this Hermes is, unique in your organization (e.g. hermes-laptop-tom). Blank is valid: identity then derives from the API key"

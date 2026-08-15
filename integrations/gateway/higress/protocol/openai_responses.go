@@ -491,6 +491,15 @@ func (d *responsesDecoder) Flush() string {
 	return b.String()
 }
 
+// ContentBytes — see protocol.ContentMeter.
+func (d *responsesDecoder) ContentBytes() int {
+	n := 0
+	for _, it := range d.items {
+		n += it.text.Len() + it.reasoning.Len() + it.args.Len()
+	}
+	return n
+}
+
 func (d *responsesDecoder) Output() Output {
 	var out Output
 	var text, reasoning strings.Builder

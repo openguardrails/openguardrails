@@ -1,7 +1,7 @@
 {
   "name": "@openguardrails/opencode-auto-mode",
-  "version": "0.2.0",
-  "description": "Auto mode for opencode: permission prompts answered by OpenGuardrails policy instead of a human \u2014 agent-configurable text/regex guardrails, or your own model as the judge. No core changes.",
+  "version": "0.3.0",
+  "description": "Auto mode for opencode: permission prompts answered by an OpenGuardrails runtime verdict instead of a human — OGR v0.8, one evaluate call per held tool call, no SDK, no core changes.",
   "type": "module",
   "license": "Apache-2.0",
   "author": "OpenGuardrails",
@@ -19,6 +19,7 @@
   ],
   "scripts": {
     "build": "tsc",
+    "pretest": "npm run build",
     "test": "node --test tests/*.spec.mjs",
     "clean": "rm -rf dist"
   },
@@ -35,14 +36,7 @@
     "ogr",
     "openguardrails"
   ],
-  "dependencies": {
-    "@openguardrails/core": "^0.2.0"
-  },
-  "peerDependencies": {
-    "@opencode-ai/plugin": "*"
-  },
   "devDependencies": {
-    "@opencode-ai/plugin": "latest",
     "@types/node": "^22",
     "typescript": "^5.7.0"
   },

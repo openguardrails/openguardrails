@@ -10,7 +10,7 @@ import (
 
 // Applying a verdict's modification spans to the body being forwarded.
 //
-// v0.7 made this generic. The old plugin synthesized the judged texts itself, so it
+// The applier is generic. The old plugin synthesized the judged texts itself, so it
 // kept a registration table mapping payload paths to its own copies; a raw forwarder
 // has no copies — the payload IS the body — so a span's `path` resolves directly into
 // the JSON that is about to be forwarded, and the splice happens in place.
@@ -26,7 +26,7 @@ import (
 // Slicing one span's offsets out of another text masks bytes nobody detected while
 // the real value travels on, and both failures look exactly like a healthy gateway.
 
-// Span is one modification from a v0.7 verdict.
+// Span is one modification from a verdict.
 type Span struct {
 	Path        string
 	Start, End  int

@@ -1,33 +1,39 @@
 # OpenGuardrails Runtime — the Higress plugin
 
-A Higress WASM plugin that speaks **OGR v0.7 directly to an OpenGuardrails
-runtime**. It implements **Recipe B of the v0.7 Runtime API**
-([`specification/runtime-api.md`](../../../specification/runtime-api.md)): the
-gateway integration.
+A Higress WASM plugin that speaks **OGR v0.8 directly to an OpenGuardrails
+runtime**. It implements **the recipe of the v0.8 Runtime API**
+([`specification/runtime-api.md`](../../../specification/runtime-api.md)) —
+one recipe now, the same two POSTs per model call whether the integration is a
+gateway or a developer's own agent loop.
 
 It is called **OpenGuardrails Runtime** in the Higress console;
 `openguardrails-runtime` is its plugin name.
 
 ```
    client ──▶ Higress ──▶ OpenGuardrails Runtime (WASM) ──▶ runtime
-                              │                    POST {base_path}/v1/{evaluate,ingest}
+                              │                    POST {base_path}/v1/evaluate  (+ heartbeat)
                               ▼                    (base_path defaults to "", the canonical /v1/* root)
                           LLM upstream
 ```
 
-## The v0.7 shape: a raw forwarder
+## The v0.8 shape: a raw forwarder, nine fields
 
-One proxied model call is one **step**, reported as two events:
+One proxied model call is one **step**, reported as two `/v1/evaluate` events:
 
 | flow | event | payload |
 |---|---|---|
 | request | `step/request` | the provider request body, **verbatim** |
-| response | `step/response` | the provider response body verbatim; for a streamed reply, the canonical `{text, reasoning?, tool_calls?, model?, timing?}` shape reassembled from the SSE frames |
+| response | `step/response` | the provider response body verbatim (plus a byte-inserted top-level `timing`); for a streamed reply, the canonical `{text, reasoning?, tool_calls?, model?, usage?, timing?}` shape reassembled from the SSE frames |
 
-Both share a plugin-minted `step_id`. The gateway declares **no coordinates** —
-no `session_id`, no `turn`, no `step` numbers. A proxy sees one stateless call
-at a time; the runtime derives session/turn/step server-side and echoes them on
-the verdict (`attribution: "derived"`).
+Both carry a plugin-minted `step_id` — a fresh opaque id per proxied call,
+never reused, and never taken from `x-request-id` (a client retry could repeat
+that). It is the one coordinate v0.8 kept, because concurrency makes it
+underivable; everything above it is derived server-side, always. The event is
+EXACTLY nine fields, all required: `kind`, `step_id`, the identity five-tuple
+(empty string = explicit "no assertion"), `llm_protocol`, `payload`. No
+`ogr_version` (the runtime adapts), no `timestamp` (receive time), no
+`integration` build id (that fact lives on the heartbeat now), no declared
+coordinates and no coordinate echo on the verdict.
 
 **Nothing is decomposed client-side.** Earlier versions classified the
 conversation into turns, actions and outcomes, itemised history, fingerprinted
@@ -37,9 +43,15 @@ remains here is what only the thing in the byte path can do: hold the bytes,
 enforce the verdict, splice the redactions, reassemble and time the stream, and
 render a refusal in the caller's own protocol.
 
-An unreadable body still produces an event (`{"unparsed": true, "reason",
-"bytes"}` under the matching step kind): silence is indistinguishable from
-health, and traffic that passes unjudged must at least pass *counted*.
+**Unreadable traffic is counted, not fabricated.** A completion body whose
+protocol this plugin cannot name, or a stream no decoder reassembles, produces
+NO event — `llm_protocol` is a required closed enum and inventing a value (or a
+payload) would make the guardrails judge a fiction. The gap stays visible the
+way the spec keeps every lost observation visible: the heartbeat's `unreadable`
+counter plus a log line. (v0.7's `{"unparsed": true}` diagnostic event had no
+schema-legal home left.) In enforce mode with `fail_mode: closed`, an
+unreadable *reply* is refused outright — a reply we could not read is a reply
+we could not judge.
 
 ## One switch
 
@@ -48,13 +60,14 @@ mode: observe   # report only: never pauses a request, never touches a body
 mode: enforce   # evaluate each step half before it proceeds, honour the verdict
 ```
 
-| mode | where events go |
+| mode | dispatch |
 |---|---|
-| `observe` | **everything to `/ingest`.** Nothing waits; nothing is refusable, because the request is already gone. |
-| `enforce` | **each step half to `/evaluate`** — one event, blocking. |
+| `observe` | **fire-and-forget `/evaluate`** — the verdict is discarded unread; nothing waits, nothing is refusable, because the request is already gone. |
+| `enforce` | **awaited `/evaluate`** — one event, blocking, verdict honoured. |
 
-**Observe still detects.** The runtime evaluates on ingest too, so the console
-fills with findings while the gateway stays a mirror. That is what makes the
+**Observe still detects.** Evaluate records and judges everything it receives
+(it is the observation channel — v0.8 removed `/ingest`), so the console fills
+with findings while the gateway stays a mirror. That is what makes the
 migration safe: watch for a week, then flip the switch. Rolling back is
 flipping it back, not redeploying.
 
@@ -75,7 +88,7 @@ mirror_base_path: ""           # falls back to base_path
 
 ⚠️ **Dispatched, never awaited, in every mode — including enforce.** A mirror is
 not in the decision, so a slow or dead candidate must cost the caller nothing.
-It rides `/ingest`: the mirror runtime evaluates on ingest anyway.
+It rides `/evaluate` like everything else; its verdicts are never read.
 
 ## Which protocols it reads
 
@@ -184,8 +197,9 @@ nobody reads a fingerprint as an authenticated identity.
 Set `caller_fallback: false` to switch it off; the runtime's key-derived
 `key-<…>` agent is then the last resort again.
 
-Every event also carries `integration: "ogr-higress/<version>"` — which build
-observed it, for fleet coverage and bad-rollout triage.
+The build id (`ogr-higress/<version>`) rides the **heartbeat**, not the event —
+v0.8 moved it there, and fleet coverage / bad-rollout triage read it from the
+heartbeat row.
 
 ⚠️ **The identity headers are only as trustworthy as the edge that writes
 them.** The plugin reports whatever arrives. A forged `agent_id` misattributes
@@ -194,35 +208,51 @@ the consumer headers from client requests at the edge, before AUTHN, or use
 headers no client can reach — and verify it on your own deployment; ours did
 not.
 
-## Judging a STREAMED answer
+## Judging a STREAMED answer: hold the tail, judge once
 
 **Not while it grows.** The pipeline measured mid-stream judgement directly: at
 25% of the reply visible, false positives on `mt_harm_correct` are 0.353
 against 0.000 on the whole reply — all of it the answer that agrees on the
 surface and corrects underneath ("是的，很多人有这种念头——但这个想法是错的").
-Early detection is a fit prefilter and an unfit blocking criterion.
-
-### Two lanes, decided by the INPUT verdict (`output_mode`)
+Early detection is a fit prefilter and an unfit blocking criterion. v0.8
+codified the alternative (and deleted the `ogr-partial` interim evaluates and
+the `output_mode` lane switch that preceded it):
 
 ```
-question ─┬─► model prefill ──────────────► first token ──► …
-          └─► input check (parallel, off the TTFT path)
-                ├─ buffer → WITHHOLD the answer, judge it whole, release or refuse
-                │           (a true block: the caller never saw it)
-                └─ stream → PASS THROUGH, judge whole at end of stream,
-                            on a hit emit finish_reason: "content_filter"
-                            (a retraction: the caller may already have read it)
+first token ──► … stream flows to the caller … ──► last stream_tail_chars WITHHELD
+                                                        │
+                                    stream ends: reassemble the WHOLE answer,
+                                    ONE step/response evaluate (canonical shape,
+                                    transcribed usage + observed timing)
+                                                        │
+                                        allow ─► release the held tail
+                                        block ─► drop the tail, CUT the stream
 ```
 
-⚠️ **Which lane is the RUNTIME's decision**, carried on the input verdict as
-`output_mode`. A gateway that picked its own lane would be a second place
-policy lives.
-⚠️ **Both lanes get the final check** — 11.5% of real violating replies have a
-question the input side never flags.
-⚠️ **The retraction lane cannot un-deliver bytes.** A deployment that can accept
-no exposure forces the buffered lane (or `stream: false`) and pays the latency.
-⚠️ Interim judgments carry **`ogr-partial: 1`** (decide, answer, record
-nothing); the answer is reported once, whole, at end of stream.
+- The withheld tail is `stream_tail_chars` of client-visible content (default
+  200, counted in UTF-8 bytes of text/reasoning/tool-arguments — never SSE
+  framing; on multi-byte text the same setting withholds fewer *characters*,
+  so set it higher if that matters). Release granularity is the chunk, so the
+  hold is a floor, not an exact figure.
+- **Tool calls never execute before the verdict**, whatever the tail setting: a
+  provider stream only completes tool calls at its end, so argument
+  completions, `finish_reason` and `[DONE]` are always inside the held tail —
+  and the final chunk is never released by arithmetic, only by the verdict.
+- **A block cuts the stream so the answer never completes as sent.** If nothing
+  was released yet (short answer, non-SSE reply, tail larger than the answer)
+  the caller gets a true refusal in its own protocol; otherwise the stream ends
+  with the protocol's retraction frame (`content_filter` / `refusal` stop) —
+  the head has been read and cannot be un-delivered, which is the accepted,
+  spec-stated cost of streaming.
+- **TTFT is unchanged** — the evaluate round-trip delays only the tail. A
+  deployment that can accept no exposure at all sets the tail huge (the spec's
+  `tail = ∞` limit case degenerates to buffering) or `stream: false`.
+- A response the client streams but the provider answers whole (non-SSE) is
+  held whole: partial JSON is useless to a client, so there is nothing to
+  release early.
+- **The final check always runs** — 11.5% of real violating replies have a
+  question the input side never flags — and it runs even when the *request*
+  evaluate failed open: the two step halves are judged independently.
 
 ## Token usage and timing (2.2.0)
 
@@ -265,7 +295,7 @@ The runtime never returns plaintext: a verdict carries
 token, never the matched text. The party that already holds the plaintext does
 the splicing — this plugin, before the body is forwarded.
 
-v0.7 made this **generic**. A span's `path` names a location in the body we
+The applier is **generic**. A span's `path` names a location in the body we
 sent (`payload.messages.3.content`, bracket form accepted), and the runtime —
 which holds the session — returns spans for everything in the body that must
 not reach the model: this turn's findings AND values bound on earlier turns
@@ -310,11 +340,11 @@ Silence past `interval_s` is a coverage loss, not an absence of risk.
 |---|---|
 | `evaluated` | verdicts asked for and received |
 | `unchecked` | **traffic that passed with no verdict behind it** |
-| `ingested` | events reported asynchronously |
-| `mirrored` | batches copied to the candidate runtime |
-| `stream_stopped` | streamed answers refused or retracted at end of stream |
+| `reported` | events posted fire-and-forget (observe mode), verdict discarded |
+| `mirrored` | events copied to the candidate runtime |
+| `stream_stopped` | streamed answers refused or cut at end of stream |
 | `unresolved_spans` | **modification spans that named nothing this body holds** |
-| `unreadable` | bodies recognised but not parseable — NOT judged |
+| `unreadable` | bodies recognised but not parseable — NOT judged, and NOT reported as events (v0.8 leaves them no honest shape); this counter is the record |
 | `refused` | requests this filter refused (block, fail-closed, partial-closed) |
 
 `unchecked` is the one to alert on: it is what a tight `timeout_ms` plus
@@ -331,8 +361,8 @@ and one failing under the runtime's OWN fail-open produces a verdict that
 looks complete: four actions judged, one never looked at, `decision: allow`,
 HTTP 200.
 
-**`unjudged` on the verdict** (first-class in v0.7) is what separates those:
-the payload paths that reached a detector and got no judgement. Absent or
+**`unjudged` on the verdict** is what separates those: the payload paths that
+reached a detector and got no judgement. Absent or
 empty means everything routed was judged — the one assertion fail-closed hangs
 on. Coverage, not attendance: a path appears if ANY guardrail routed to it
 failed. The plugin does not interpret the entries — the security property is
@@ -357,7 +387,8 @@ the traffic pass with `decision=` empty).
 | `api_key` | — | the runtime API key; authenticates the SENDER, resolves the org |
 | `mode` | `observe` | `enforce` to act on verdicts |
 | `timeout_ms` | `5000` | the PDP budget, enforce only. A CEILING for the worst case, not a target; the runtime's `OGR_MODEL_TIMEOUT_MS` must fit strictly inside it |
-| `fail_mode` | `open` | `closed` refuses when the PDP is unreachable, answers garbage, or reports unjudged paths |
+| `fail_mode` | `open` | **open is the spec's default** (an unanswered evaluate proceeds, counted `unchecked`); `closed` refuses when the PDP is unreachable, answers garbage, reports unjudged paths, or the reply itself is unreadable |
+| `stream_tail_chars` | `200` | how much client-visible content a streamed answer withholds until the end-of-stream verdict (UTF-8 bytes; the spec's reference default). `0` still gates stream completion on the verdict; a huge value degenerates to buffering |
 | `agent_id_header` | `x-ogr-agent-id`, else `x-mse-consumer` | which header carries the agent's identity; configuring one replaces the whole chain |
 | `agent_workspace_header` | `x-ogr-agent-workspace`, else `x-mse-consumer-group` | which header carries the agent's workspace; configuring one replaces the whole chain |
 | `agent_type_header` | `x-ogr-agent-type` | which header carries the kind of agent |
@@ -374,8 +405,8 @@ the traffic pass with `decision=` empty).
 ### Which paths it calls
 
 The canonical endpoint paths are rooted at **`/v1/`**: the plugin joins
-`base_path` with `/v1/evaluate`, `/v1/ingest` and `/v1/heartbeat`, and
-hard-codes no other prefix. The mount is **configuration, not discovery** — a
+`base_path` with `/v1/evaluate` and `/v1/heartbeat` (the whole v0.8 surface —
+`/v1/ingest` no longer exists), and hard-codes no other prefix. The mount is **configuration, not discovery** — a
 WASM filter cannot cheaply probe-and-fall-back, and a wrong `base_path` is
 loud (every `/evaluate` comes back non-200, which is `fail_mode` territory,
 not silence). What loaded is printed once, at startup, in the `[OGR-CONFIG]`
@@ -430,7 +461,7 @@ in place does not always take.
 Bump `VERSION`, then push the matching tag:
 
 ```bash
-git tag higress-v2.0.0 && git push origin higress-v2.0.0
+git tag higress-v3.0.0 && git push origin higress-v3.0.0
 ```
 
 `.github/workflows/publish-higress.yml` refuses a tag whose version does not
@@ -438,7 +469,7 @@ match `VERSION`, runs the tests, builds `plugin.wasm`, and `oras push`es the
 gzipped layer under both the version and `latest`:
 
 ```yaml
-url: oci://docker.io/openguardrails/higress:2.0.0
+url: oci://docker.io/openguardrails/higress:3.0.0
 ```
 
 Publishing needs `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (a Docker Hub

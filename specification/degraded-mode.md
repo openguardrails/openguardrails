@@ -2,13 +2,22 @@
 
 [Composition](composition.md) specifies what a runtime does when *detectors*
 fail (`on_timeout`, `on_all_failed`) — the PDP side. This document specifies
-the PEP side: what a conformant integration (agent-direct or gateway) does
-when it cannot reach the runtime at all. Keywords per RFC 2119.
+the PEP side: what a conformant integration does when it cannot reach the
+runtime at all. Keywords per RFC 2119.
 
-A runtime outage — or an attacker-induced network partition between agent
-and runtime — must not silently become "every gated action allowed". The
-integration's behavior while dark is ITS OWN configuration, set before the
-outage, because the runtime is by definition not there to be asked.
+## The default is OPEN
+
+**An integration that configures nothing fails open**: a step whose evaluate
+got no answer (timeout, 429, 5xx, network) proceeds, and the integration
+logs/counts that it went unjudged. This is deliberate — the minimal
+integration is an observability instrument first, and an instrument that can
+halt the agent it observes would never be adopted. Guardrails must earn the
+right to stop production traffic through explicit configuration, not acquire
+it as a side effect of a network blip.
+
+The trade is stated plainly: while the runtime is dark, a fail-open
+integration is unprotected. A deployment that gates dangerous actions makes
+the opposite trade by configuring `closed`.
 
 ## `fail_mode`
 
@@ -16,39 +25,36 @@ Configured per risk category (or category prefix):
 
 ```yaml
 fail_mode:
-  "security.*": closed        # gated actions are denied while the runtime is dark
-  "safety.*":   open          # low-severity safety fails open
-  default:      closed
+  "security.cmd.*": closed    # gated actions are denied while the runtime is dark
+  default:          open      # everything else proceeds, recorded as unjudged
 ```
 
 | Value | Meaning while the runtime is unreachable |
 |---|---|
-| `closed` | Deny the gated action. |
-| `open` | Permit the gated action (and record locally that it went unjudged). |
+| `open` | Permit the action; record locally that it went unjudged. **The default.** |
+| `closed` | Deny the gated action until the runtime answers again. |
 
-A category with no entry uses `default`; an absent `default` MUST be read as
-`closed` for `security.*`. The same `fail_mode` governs the two partial
-failures short of a full outage: an evaluate that times out, and a verdict
-whose [`unjudged`](verdict.md#unjudged-what-this-verdict-could-not-judge)
-names the very path being enforced — "could not look" is the same situation
-at three sizes, and it would be incoherent to fail closed on one and open on
-another.
+A category with no entry uses `default`; an absent `default` is `open`. The
+same `fail_mode` governs the two partial failures short of a full outage: an
+evaluate that times out, and a verdict whose
+[`unjudged`](verdict.md#unjudged-what-this-verdict-could-not-judge) names the
+very path being enforced — "could not look" is the same situation at three
+sizes, and it would be incoherent to fail closed on one and open on another.
 
 ## Normative requirements
 
 1. **The decision is local and pre-configured.** An integration MUST apply
-   its configured `fail_mode` without any runtime round-trip, and MUST NOT
-   default to `open` for `security.*` categories absent explicit
-   configuration.
-2. **Loud signaling and reconciliation.** Entering and leaving degraded mode
-   SHOULD be visible in the integration's own logs/counters, and events
-   observed while degraded SHOULD be buffered and delivered through
-   `/v1/ingest` on reconnect — delayed truth beats no truth. Together with
-   the [heartbeat](runtime-api.md#post-v1heartbeat), reconnect delivery is
-   what gives the runtime the "this integration went dark" signal.
+   its configured `fail_mode` without any runtime round-trip. An integration
+   MUST make its fail mode configurable so a deployment CAN choose `closed`;
+   it MUST NOT hard-code open as the only behavior.
+2. **Loud signaling.** Entering and leaving degraded mode SHOULD be visible
+   in the integration's own logs and counters, and the
+   [heartbeat](runtime-api.md#post-v1heartbeat)'s `evaluate_errors` counter
+   is how the runtime learns an integration went dark. Events observed while
+   degraded are lost observations (v0.8 has no replay channel); the
+   heartbeat counters are what make the gap visible instead of silent.
 3. **429 is an outage.** A rate-limited `/v1/evaluate` MUST be treated
-   exactly like an unreachable runtime — back off and apply `fail_mode`,
-   never fail open because "the runtime is technically up".
+   exactly like an unreachable runtime — back off and apply `fail_mode`.
 
 `fail_mode` (this document, PEP ↔ runtime link) and the runtime's
 `on_all_failed` ([composition](composition.md#failure--latency), runtime ↔

@@ -4,22 +4,15 @@ build-backend = "hatchling.build"
 
 [project]
 name = "openguardrails-instrumentation-langgraph"
-version = "0.1.1"
-description = "Guard a custom LangGraph agent with the OpenGuardrails (OGR) protocol — a drop-in ToolNode at the agent-hook altitude, with native LangGraph interrupt() as the human-confirm gate."
+version = "1.0.0"
+description = "Guard a LangGraph agent with OpenGuardrails (OGR) v0.8 — a chat-model wrapper that judges every step before the model sees it and before the agent acts on it. No SDK, no dependencies: two hand-rolled POSTs to /v1/evaluate."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
-dependencies = [
-  "openguardrails>=0.1.2",
-]
-
-[project.optional-dependencies]
-# The ToolNode/decorator bindings need LangGraph; the decision core (_engine)
-# does not, so it stays testable offline without these installed.
-langgraph = [
-  "langgraph>=0.2",
-  "langchain-core>=0.3",
-]
+# Deliberately empty: there is no SDK layer in v0.8, the wire is stdlib
+# urllib, and the langchain-core message surface is duck-typed — langgraph
+# is the HOST application's dependency, never this package's.
+dependencies = []
 
 [project.urls]
 Homepage = "https://openguardrails.com"

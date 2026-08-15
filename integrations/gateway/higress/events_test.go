@@ -14,7 +14,6 @@ func ctxFor(agentID string) *deriveCtx {
 		// The consumer IS the agent; the consumer-group is its workspace.
 		subj:     subjectOf(agentID, "smartwork", "dev-agents", "user:tom", "user:lily"),
 		stepID:   "st-test",
-		now:      "2026-08-14T00:00:00Z",
 		protocol: "openai.chat",
 	}
 }
@@ -68,22 +67,33 @@ func TestTheResponsePayloadIsTheRawBodyByteForByte(t *testing.T) {
 	}
 }
 
-func TestEventsMarshalToTheV07WireShape(t *testing.T) {
+// The v0.8 wire: EXACTLY nine fields, all required, `additionalProperties: false`.
+// One extra key is a schema violation; one missing key is too — including a
+// five-tuple field whose value is the empty string.
+func TestEventsMarshalToTheV08WireShape(t *testing.T) {
 	e := requestEvent(ctxFor("alice@acme.io"), []byte(rawRequest))
-	blob, err := json.Marshal(map[string]any{"batch": []*GuardEvent{e}})
+	blob, err := json.Marshal(e)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := gjson.ParseBytes(blob).Get("batch.0")
-	for _, field := range []string{"ogr_version", "kind", "step_id", "timestamp",
-		"integration", "llm_protocol", "payload"} {
+	got := gjson.ParseBytes(blob)
+	want := map[string]bool{
+		"kind": true, "step_id": true,
+		"agent_id": true, "agent_type": true, "agent_workspace": true,
+		"agent_owner": true, "agent_user": true,
+		"llm_protocol": true, "payload": true,
+	}
+	for field := range want {
 		if !got.Get(field).Exists() {
-			t.Errorf("missing %s in %s", field, truncate(got.Raw, 300))
+			t.Errorf("missing required field %s in %s", field, truncate(got.Raw, 300))
 		}
 	}
-	if got.Get("ogr_version").String() != "0.7" {
-		t.Errorf("ogr_version = %q", got.Get("ogr_version").String())
-	}
+	got.ForEach(func(key, _ gjson.Result) bool {
+		if !want[key.String()] {
+			t.Errorf("field %q is not in the v0.8 event — the schema is additionalProperties: false", key.String())
+		}
+		return true
+	})
 	// The consumer IS the agent: one consumer credential, one agent row. The
 	// consumer-group is the agent's WORKSPACE — losing it on the wire silently puts
 	// every agent under the API key's policy set instead of its own workspace's.
@@ -102,24 +112,41 @@ func TestEventsMarshalToTheV07WireShape(t *testing.T) {
 	if got.Get("agent_user").String() != "user:lily" {
 		t.Error("user did not reach agent_user")
 	}
-	// v0.7 deletions: the altitude, the sensor axis, the attestation ladder, the
-	// guard group, and any client-minted event id. A field that leaks back onto the
-	// wire is a schema violation (`additionalProperties: false`).
-	for _, gone := range []string{"observation_point", "sensor_id", "sensor_type",
-		"sensor_version", "attestation", "guard_id", "event_id"} {
+	if got.Get("llm_protocol").String() != "openai.chat" {
+		t.Errorf("llm_protocol = %q", got.Get("llm_protocol").String())
+	}
+	// v0.8 deletions, each with a new home: ogr_version (the runtime adapts),
+	// timestamp (receive time), integration (the heartbeat), the coordinates
+	// (derived server-side, always). A field that leaks back onto the wire is a
+	// schema violation.
+	for _, gone := range []string{"ogr_version", "timestamp", "integration",
+		"session_id", "turn", "step", "parent_session_id", "event_id"} {
 		if got.Get(gone).Exists() {
-			t.Errorf("v0.6 field %q reached the v0.7 wire: %s", gone, truncate(got.Raw, 300))
+			t.Errorf("removed field %q reached the v0.8 wire: %s", gone, truncate(got.Raw, 300))
 		}
 	}
-	// The gateway declares NO coordinates — deriving them is the runtime's job, and
-	// a declared value would win over it.
-	for _, coord := range []string{"session_id", "turn", "step", "parent_session_id"} {
-		if got.Get(coord).Exists() {
-			t.Errorf("the gateway declared %q — Recipe B declares no coordinates", coord)
-		}
+}
+
+// ⚠️ The five-tuple is required WITH the empty string as the explicit "no
+// assertion". `omitempty` on any of the five would silently produce an invalid
+// event exactly when nothing named the agent — the key-only floor, the commonest
+// zero-config deployment.
+func TestAnEmptyFiveTupleStillPutsAllFiveFieldsOnTheWire(t *testing.T) {
+	d := &deriveCtx{subj: subjectOf("", "", "", "", ""), stepID: "st-x", protocol: "openai.chat"}
+	blob, err := json.Marshal(requestEvent(d, []byte(`{}`)))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got.Get("integration").String() != "ogr-higress/"+pluginVersion {
-		t.Errorf("integration = %q", got.Get("integration").String())
+	got := gjson.ParseBytes(blob)
+	for _, field := range []string{"agent_id", "agent_type", "agent_workspace",
+		"agent_owner", "agent_user"} {
+		v := got.Get(field)
+		if !v.Exists() {
+			t.Errorf("%s omitted when empty — the v0.8 schema requires it as \"\"", field)
+		}
+		if v.String() != "" {
+			t.Errorf("%s = %q, want the empty assertion", field, v.String())
+		}
 	}
 }
 
@@ -178,31 +205,16 @@ func TestMalformedToolArgumentsDegradeToAStringNotABrokenEvent(t *testing.T) {
 	}
 }
 
-// ⚠️ An unreadable body still produces an event: silence is indistinguishable from
-// health. It carries NO text — inventing a payload would make the guardrails judge a
-// fiction — only the fact of the traffic.
-func TestUnparsedEventCarriesTheFactAndNoText(t *testing.T) {
-	e := unparsedEvent(ctxFor("alice@acme.io"), kindStepRequest, "protocol not recognised by this plugin", 512)
-	blob, _ := json.Marshal(e)
-	p := gjson.ParseBytes(blob).Get("payload")
-	if !p.Get("unparsed").Bool() || p.Get("bytes").Int() != 512 {
-		t.Fatalf("payload = %s", p.Raw)
-	}
-	if p.Get("text").Exists() {
-		t.Error("an unparsed event must not fabricate a text")
-	}
-}
-
 // --- verdict readers -----------------------------------------------------------
 
-func TestV07DecisionsAreAllowAndBlock(t *testing.T) {
+func TestV08DecisionsAreAllowAndBlock(t *testing.T) {
 	if parseVerdict([]byte(`{"decision":"allow"}`)).Stops() {
 		t.Error("allow stopped the request")
 	}
 	if !parseVerdict([]byte(`{"decision":"block"}`)).Stops() {
 		t.Error("block did not stop the request")
 	}
-	// Deleted decisions must not act: v0.7 removed them from the enum, so a runtime
+	// Deleted decisions must not act: the spec removed them from the enum, so a runtime
 	// emitting one is broken — but the safe reading of an unknown non-empty decision
 	// is still "usable, does not stop", which the fail-mode machinery then covers via
 	// findings/spans absence. What matters here is that nothing panics or blocks on a
@@ -230,9 +242,8 @@ func TestSpansAreReadFromModifications(t *testing.T) {
 // ⚠️ `fail_mode: closed` promises an operator: if we could not judge it, it does not
 // go through. The runtime fans out per text — a reply with five tool calls is five
 // judge calls — and one failing under the runtime's OWN fail-open produces a verdict
-// that looks complete. `unjudged` (first-class in v0.7) is the only thing on the wire
-// that separates "everything was judged and nothing found" from "one action was never
-// looked at".
+// that looks complete. `unjudged` is the only thing on the wire that separates
+// "everything was judged and nothing found" from "one action was never looked at".
 
 func TestAVerdictWithoutTheFieldMeansEverythingWasJudged(t *testing.T) {
 	for _, body := range []string{
@@ -299,28 +310,13 @@ func TestThePartialCheckDoesNotInterpretTheEntries(t *testing.T) {
 	}
 }
 
-// ⚠️ The v0.6 extension names must NOT be read: the runtime ships in lockstep on the
-// v0.7 wire, and a reader that quietly accepted both would hide a half-upgraded
+// ⚠️ Retired extension names must NOT be read: the runtime ships in lockstep on the
+// v0.8 wire, and a reader that quietly accepted both would hide a half-upgraded
 // deployment forever.
 func TestTheOldExtensionNamesAreNotRead(t *testing.T) {
-	v := parseVerdict([]byte(`{"decision":"allow","x.ogr.unjudged":["payload.text"],"x.ogr.output_mode":"buffer"}`))
+	v := parseVerdict([]byte(`{"decision":"allow","x.ogr.unjudged":["payload.text"]}`))
 	if v.Partial() {
 		t.Error("the deleted x.ogr.unjudged name was read")
-	}
-	if v.BuffersOutput() {
-		t.Error("the deleted x.ogr.output_mode name was read")
-	}
-}
-
-func TestOutputModeSelectsTheBufferedLane(t *testing.T) {
-	if !parseVerdict([]byte(`{"decision":"allow","output_mode":"buffer"}`)).BuffersOutput() {
-		t.Error("buffer was not read")
-	}
-	if parseVerdict([]byte(`{"decision":"allow","output_mode":"stream"}`)).BuffersOutput() {
-		t.Error("stream buffered")
-	}
-	if parseVerdict([]byte(`{"decision":"allow"}`)).BuffersOutput() {
-		t.Error("absent output_mode buffered — the default lane is passthrough")
 	}
 }
 
@@ -348,13 +344,6 @@ func TestABodyThatIsNotAVerdictIsNotAnAllow(t *testing.T) {
 		if !parseVerdict([]byte(`{"decision":"` + d + `"}`)).Usable() {
 			t.Errorf("decision %q is not usable", d)
 		}
-	}
-}
-
-func TestSessionIDIsReadFromTheV07Field(t *testing.T) {
-	v := parseVerdict([]byte(`{"decision":"allow","session_id":"sess-01H9","turn":3,"step":2,"attribution":"derived"}`))
-	if v.SessionID() != "sess-01H9" {
-		t.Fatalf("SessionID = %q", v.SessionID())
 	}
 }
 

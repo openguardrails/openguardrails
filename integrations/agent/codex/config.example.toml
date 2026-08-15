@@ -3,8 +3,8 @@
 #
 # Prefer the plugin install (`codex plugin marketplace add …` — see README);
 # this file is the manual equivalent for when you'd rather wire the hooks by
-# hand or can't use the plugin system. Run `npm run build` once so the bundled,
-# zero-dependency hooks exist under hooks/.
+# hand or can't use the plugin system. There is no build step — each hook is a
+# single zero-dependency Node ≥ 18 file under hooks/.
 
 # --- Auto mode: remove prompts for calls an OGR runtime judges safe ----------
 # Fires in the approval path, before the user prompt. allow -> runs unattended,
@@ -18,16 +18,17 @@ matcher = "Bash|apply_patch|Read|Edit|Write|WebFetch|mcp__.*"
   timeoutSec = 15
   statusMessage = "OpenGuardrails auto mode"
 
-# Configure auto mode via environment (the hook reads these; export them in your
-# shell profile so Codex's hook process inherits them):
-#   OGR_RUNTIME_URL=https://your-ogr-runtime:8878  # default http://127.0.0.1:8878
-#   OGR_API_KEY=ogr_…                               # required: workspace API key
+# Configure via environment (the hooks read these; export them in your shell
+# profile so Codex's hook process inherits them):
+#   OGR_RUNTIME_URL=https://your-ogr-runtime   # default https://openguardrails.com
+#   OGR_API_KEY=ogr_…                          # required: organization API key
 #   (OGR_SERVER / OGR_ENROLL_TOKEN still work as legacy aliases)
-#   OGR_AGENT_ID=codex-<hostname>               # stable PEP identity
-#   OGR_STATE_DIR=~/.codex/openguardrails       # PEP key material + denial counters
-#   OGR_AUTOMODE_POLICY=/path/to/automode-policy.json   # optional prose policy
+#   OGR_STATE_DIR=~/.codex/openguardrails      # auto mode's per-turn denial counters
+# Identity claims (all default to "" = no assertion; the runtime then derives
+# identity from the API key):
+#   OGR_AGENT_ID=…  OGR_AGENT_WORKSPACE=…  OGR_AGENT_OWNER=…  OGR_AGENT_USER=…
 
-# --- Guardrail: block dangerous calls even under bypassed approvals ----------
+# --- Guardrail: deny blocked calls even under bypassed approvals -------------
 [[hooks.PreToolUse]]
 matcher = "Bash|apply_patch|Read|Edit|Write|WebFetch|mcp__.*"
 
@@ -37,5 +38,7 @@ matcher = "Bash|apply_patch|Read|Edit|Write|WebFetch|mcp__.*"
   timeoutSec = 15
   statusMessage = "OpenGuardrails guardrail"
 
-# Optional: point the guardrail at your own policy instead of the bundled one.
-#   OGR_POLICY=/path/to/policy.json
+# Guardrail degraded mode (specification/degraded-mode.md): what "no verdict"
+# means. The default is open (proceed, recorded as unjudged); deployments
+# gating dangerous actions opt into closed (deny until the runtime answers).
+#   OGR_FAIL_MODE=open|closed

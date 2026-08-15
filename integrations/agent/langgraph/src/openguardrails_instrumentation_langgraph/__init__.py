@@ -1,30 +1,23 @@
-"""OpenGuardrails ↔ LangGraph — guard a custom LangGraph agent at the agent-hook
-altitude.
+"""OpenGuardrails ↔ LangGraph — the v0.8 agent-direct integration.
 
-The decision core (``_engine``: ``GuardEngine`` / ``build_engine`` / ``ToolDecision``)
-imports no ``langgraph`` and is testable offline. The enforcement surfaces
-(``OpenGuardrailsToolNode`` / ``guard`` / ``ogr_guard``) import ``langgraph`` +
-``langchain-core``, so they are exposed lazily — ``import ..._engine`` works
-without the ``[langgraph]`` extra installed.
+A LangGraph agent holds its own model call, so the recipe of
+``specification/runtime-api.md`` fits directly: wrap the chat model with
+:func:`guard` and every step is judged twice — ``step/request`` before the
+provider sees it, ``step/response`` before the agent acts on it — sharing
+one minted ``step_id``. A block raises :class:`GuardrailBlocked`.
+
+No SDK, no langchain import: the wire is stdlib ``urllib``
+(:class:`OgrClient`), and message conversion duck-types the langchain-core
+surface, so this package imports and tests without langgraph installed.
 """
 
-from ._engine import GuardEngine, ToolDecision, build_engine
+from .client import INTEGRATION, OgrClient
+from .guard import GuardedChatModel, GuardrailBlocked, guard
 
 __all__ = [
-    "GuardEngine",
-    "ToolDecision",
-    "build_engine",
-    "OpenGuardrailsToolNode",
+    "INTEGRATION",
+    "OgrClient",
+    "GuardedChatModel",
+    "GuardrailBlocked",
     "guard",
-    "ogr_guard",
 ]
-
-_LANGGRAPH_EXPORTS = {"OpenGuardrailsToolNode", "guard", "ogr_guard"}
-
-
-def __getattr__(name):  # PEP 562 lazy export — keeps langgraph an optional import
-    if name in _LANGGRAPH_EXPORTS:
-        from . import toolnode
-
-        return getattr(toolnode, name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

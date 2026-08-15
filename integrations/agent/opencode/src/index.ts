@@ -1,170 +1,231 @@
 /**
- * @openguardrails/opencode-auto-mode
+ * @openguardrails/opencode-auto-mode — OGR v0.8 for opencode.
  *
- * Auto mode for opencode: permission prompts answered by OpenGuardrails (OGR)
- * policy instead of a human. Whatever your opencode `permission` config would
- * ask you — bash commands, edits, webfetch — the plugin answers from **your
- * own guardrails** (text/regex rules, optionally your own model as the
- * judge); only asks it cannot decide still reach you.
+ * Auto mode for opencode: permission prompts answered by an OpenGuardrails
+ * RUNTIME verdict instead of a human. v0.8 retired the SDK — and with it
+ * this plugin's local policy engine (regex rules, bring-your-own-model
+ * judge, taint) — so every decision now comes from `/v1/evaluate`, spoken
+ * directly: one hand-rolled POST per held action, `Bearer` key, nine fields.
  *
- * Two hooks, one engine:
+ * THE VANTAGE, honestly: opencode's plugin surface exposes TOOL-CALL hooks,
+ * not the model byte path — this plugin never holds a provider request or
+ * response body, so the recipe's paired step/request + step/response per
+ * model call cannot be implemented here (the README states the limitation).
+ * What the plugin DOES hold, at the two refusable moments the host offers,
+ * is a model-produced tool call the host is about to act on. Each becomes
+ * ONE canonical `step/response` carrying exactly the `tool_calls` in hand —
+ * nothing decomposed, nothing fabricated (no timing: this vantage observes
+ * no byte path). A fresh `step_id` is minted per event; there is no request
+ * half to pair it with, and the runtime derives session/turn/step itself.
  *
- *   tool.execute.before   every tool call becomes an OGR `GuardEvent`, judged
- *                          BEFORE it runs: block | require_approval → throw
- *                          (deny-and-continue — the agent sees a tool error
- *                          and must find a safer path). The call's payload is
- *                          recorded under its `callID` for the ask below.
+ *   tool.execute.before   the call, judged BEFORE it runs:
+ *                         block → throw (deny-and-continue — the agent sees
+ *                         a tool error and must find a safer path); the
+ *                         verdict is recorded under the `callID`.
  *
- *   permission.ask         opencode's own permission prompt. Auto mode
- *                          re-evaluates the recorded call (or the ask's own
- *                          metadata) and answers: allow → "allow",
- *                          block → "deny", undecided → the human (default)
- *                          or "deny" under `auto.unresolved: "reject"`.
+ *   permission.ask        opencode's own permission prompt. Answered from
+ *                         the recorded call's verdict when the ask carries a
+ *                         known `callID`, else evaluated from the ask's own
+ *                         metadata (opencode's bash asks put the command
+ *                         there): allow → "allow", block → "deny",
+ *                         nothing to judge → the human (default) or "deny"
+ *                         under `auto.unresolved: "reject"`.
  *
- * Correlation: both events carry the `callID` as their OGR `guard_id`, so the
- * runtime can only tighten the earlier decision, never loosen it. This stays a
- * restrict-only guard toward the agent — auto mode automates the HUMAN's seat
- * (with the human's own policy), it never overrides an OGR verdict.
+ * An unanswered evaluate follows `failMode` (specification/degraded-mode.md):
+ * open (default) proceeds loudly, closed refuses the call. Auto mode stays
+ * restrict-only toward the agent — it automates the HUMAN's seat, never
+ * overrides a verdict, and a block stays blocked everywhere.
  *
  * No opencode core changes required.
  */
-import type { Plugin, Hooks } from "@opencode-ai/plugin"
 import {
-  Runtime,
-  ConfigRulesDetector,
-  LLMJudgeDetector,
-  type Detector,
-  type GuardEvent,
-  type Verdict,
-} from "@openguardrails/core"
-import { loadGuardrailsConfig, type GuardrailsOptions } from "./config.js"
-import { openAICompatibleBackend } from "./own-model.js"
+  resolveConfig,
+  HEARTBEAT_INTERVAL_S,
+  type GuardrailsOptions,
+} from "./config.js"
+import { mintStepId, OgrClient, type WireEvent, type WireVerdict } from "./wire.js"
 
-function brief(v: Verdict): string {
-  const cats = v.categories.map((c) => `${c.id}(${c.score})`).join(", ")
-  const why = v.reasons.filter((r) => !r.startsWith("[")).join("; ")
-  return [cats, why].filter(Boolean).join(" — ") || v.decision
+/** `integration` on the heartbeat: which build is alive (off the event since v0.8). */
+export const INTEGRATION = "ogr-opencode-auto-mode/0.3.0"
+
+// ---- the slice of opencode's plugin surface this integration touches -------
+//
+// Declared STRUCTURALLY (mirroring `@opencode-ai/plugin`) so the package
+// builds and tests standalone, with no host SDK installed. opencode
+// duck-types plugins — these shapes, not a nominal import, are the contract.
+
+export interface ToolExecuteBeforeInput {
+  tool: string
+  sessionID: string
+  callID: string
 }
+export interface ToolExecuteBeforeOutput {
+  args: Record<string, unknown>
+}
+export interface PermissionAskInput {
+  id?: string
+  type: string
+  pattern?: string
+  sessionID?: string
+  title?: string
+  callID?: string
+  metadata?: Record<string, unknown>
+}
+export interface PermissionAskOutput {
+  status: "ask" | "deny" | "allow"
+}
+export interface Hooks {
+  "tool.execute.before"?: (input: ToolExecuteBeforeInput, output: ToolExecuteBeforeOutput) => Promise<void>
+  "tool.execute.after"?: (input: { tool: string; sessionID: string; callID: string }, output: unknown) => Promise<void>
+  "permission.ask"?: (input: PermissionAskInput, output: PermissionAskOutput) => Promise<void>
+}
+export type Plugin = (input: { directory?: string }, options?: unknown) => Promise<Hooks>
 
 /**
- * Bound on the per-call record table. Entries are removed on
+ * Bound on the per-call verdict table. Entries are removed on
  * `tool.execute.after`, which fires for every executed call; the cap is a
  * backstop against calls that never reach it (thrown denials included).
  */
 const RECORDS_MAX = 4096
 
-export const OpenGuardrailsPlugin: Plugin = async ({ directory }, options) => {
-  const { policy, judge, auto } = loadGuardrailsConfig(directory, options as GuardrailsOptions | undefined)
+/** What the verdict said about one held call — the ask answers from this. */
+type CallVerdict = { allow: true } | { allow: false; reason: string }
 
-  const detectors: Detector[] = [new ConfigRulesDetector(policy.config_rules ?? {})]
-  if (judge) detectors.push(new LLMJudgeDetector(openAICompatibleBackend(judge)))
-  const runtime = new Runtime(detectors, policy)
+/** One-line human summary of a verdict for a denial reason. */
+function brief(v: WireVerdict): string {
+  const f = (v.findings ?? [])
+    .map((x) => `${x.category}${x.severity ? `(${x.severity})` : ""}`)
+    .join(", ")
+  return f || v.decision
+}
+
+export const OpenGuardrailsPlugin: Plugin = async (_input, options) => {
+  const cfg = resolveConfig(options as GuardrailsOptions | undefined)
+  const warn = (message: string): void => console.warn(`[openguardrails] ${message}`)
+  const client = new OgrClient(
+    { info: () => {}, warn: (m) => console.warn(m) },
+    () => (cfg.apiKey ? { url: cfg.url, apiKey: cfg.apiKey } : null),
+    () => cfg.timeoutMs,
+  )
+
+  // Liveness from boot: the runtime must be able to tell "agent idle" from
+  // "integration never came up", so the first beat goes out immediately and
+  // the interval timer never holds the process open.
+  if (client.enabled) {
+    void client.heartbeat(INTEGRATION, cfg.identity.agent_id, HEARTBEAT_INTERVAL_S)
+    const timer = setInterval(
+      () => void client.heartbeat(INTEGRATION, cfg.identity.agent_id, HEARTBEAT_INTERVAL_S),
+      HEARTBEAT_INTERVAL_S * 1000,
+    )
+    timer.unref?.()
+  }
+
+  /** The one held action → one canonical step/response, nine fields exactly. */
+  const heldCallEvent = (callId: string, name: string, args: unknown): WireEvent => ({
+    kind: "step/response",
+    step_id: mintStepId(),
+    ...cfg.identity,
+    llm_protocol: "canonical",
+    payload: { tool_calls: [{ id: callId, name, arguments: args }] },
+  })
+
+  const callVerdicts = new Map<string, CallVerdict>()
+  function rememberCall(callId: string, verdict: CallVerdict): void {
+    if (callVerdicts.size >= RECORDS_MAX) {
+      const oldest = callVerdicts.keys().next()
+      if (!oldest.done) callVerdicts.delete(oldest.value)
+    }
+    callVerdicts.set(callId, verdict)
+  }
+
+  let warnedNoRuntime = false
+  let warnedSpans = false
 
   /**
-   * The payload of each live call, keyed by `callID` — a `Permission` carries
-   * only type/pattern/metadata, so the `callID` is how an ask gets the actual
-   * arguments back.
+   * Shared judgement of one held call. Returns the CallVerdict to enforce,
+   * or null when nothing answered and fail-open lets it through undecided.
    */
-  const records = new Map<string, { name: string; arguments: unknown }>()
-
-  /** One invocation-altitude event; `guardId` ties both hooks to one action. */
-  const toolCallEvent = (
-    guardId: string | undefined,
-    sessionId: string,
-    payload: Record<string, unknown>,
-  ): GuardEvent => ({
-    kind: "tool_call",
-    observationPoint: "invocation",
-    agentId: "opencode",
-    agentType: "opencode",
-    payload,
-    timestamp: new Date().toISOString(),
-    sessionId,
-    // v0.2: the model's request is unverified content. Transcript-based
-    // tainting (web/mcp results → untrusted provenance) is a follow-up via
-    // the opencode session API.
-    provenance: [{ source: "model", trust: "unverified" }],
-    ...guardId !== undefined ? { guardId } : {},
-  })
+  async function judge(callId: string, name: string, args: unknown): Promise<CallVerdict | null> {
+    const verdict = await client.evaluate(heldCallEvent(callId, name, args))
+    if (!verdict) {
+      if (cfg.failMode === "closed") {
+        return { allow: false, reason: "this call could not be judged and the deployment is fail-closed" }
+      }
+      warn(`${name} call got no verdict — proceeding (fail-open)`)
+      return null
+    }
+    if (verdict.decision === "block") {
+      return { allow: false, reason: brief(verdict) }
+    }
+    if (cfg.failMode === "closed" && (verdict.unjudged?.length ?? 0) > 0) {
+      return {
+        allow: false,
+        reason: `parts of this call went unjudged (${verdict.unjudged!.join(", ")}) and the deployment is fail-closed`,
+      }
+    }
+    if ((verdict.modifications?.spans?.length ?? 0) > 0 && !warnedSpans) {
+      // Applying spans would mean splicing the host's own argument objects
+      // from wire paths — not implemented yet (same stance as the dsh
+      // reference). Stated ONCE rather than silently; the runtime's copy is
+      // masked either way.
+      warnedSpans = true
+      warn("the verdict carried redaction spans, which this integration cannot apply yet — content proceeds unredacted")
+    }
+    return { allow: true }
+  }
 
   const hooks: Hooks = {
     "tool.execute.before": async (input, output) => {
-      if (records.size >= RECORDS_MAX) {
-        const oldest = records.keys().next()
-        if (!oldest.done) records.delete(oldest.value)
+      if (!client.enabled) {
+        // No runtime configured = the integration is off, loudly, once. This
+        // is a deployment choice, not degraded mode — failMode governs a
+        // runtime that IS configured and cannot answer.
+        if (!warnedNoRuntime) {
+          warnedNoRuntime = true
+          warn("no runtime configured — set OGR_API_KEY (or plugin options). Running unguarded until then.")
+        }
+        return
       }
-      records.set(input.callID, { name: input.tool, arguments: output.args })
-
-      const ev = toolCallEvent(input.callID, input.sessionID, {
-        name: input.tool,
-        arguments: output.args,
-      })
-      const verdict = await runtime.evaluate(ev)
-
-      if (verdict.decision === "block") {
-        throw new Error(`[OpenGuardrails] blocked this ${input.tool} call: ${brief(verdict)}`)
+      const verdict = await judge(input.callID, input.tool, output.args)
+      if (!verdict) return // fail-open, undecided: no record for the ask either
+      rememberCall(input.callID, verdict)
+      if (!verdict.allow) {
+        throw new Error(`[OpenGuardrails] blocked this ${input.tool} call: ${verdict.reason}`)
       }
-      if (verdict.decision === "require_approval") {
-        throw new Error(
-          `[OpenGuardrails] this ${input.tool} call needs your explicit approval: ${brief(verdict)}. ` +
-            `Re-run only if you intend this, or relax .opencode/guardrails.json.`,
-        )
-      }
-      // allow | modify | redact → proceed
     },
 
     "tool.execute.after": async (input) => {
-      records.delete(input.callID)
+      callVerdicts.delete(input.callID)
     },
   }
 
-  if (auto.enabled) {
+  if (cfg.auto.enabled) {
     hooks["permission.ask"] = async (input, output) => {
-      // What is actually being asked about: the recorded call when the ask
-      // carries a callID this plugin has seen, else the permission's own
-      // metadata (opencode's bash asks put the command there). An ask with
-      // neither is undecidable — a guard does not grant what it cannot see.
-      const record = input.callID !== undefined ? records.get(input.callID) : undefined
-      const source = record
-        ?? (Object.keys(input.metadata ?? {}).length > 0
-          ? { name: input.type, arguments: input.metadata }
-          : undefined)
+      // Answer from the already-judged call when the ask correlates to one —
+      // the same action must not earn two different answers.
+      const recorded = input.callID !== undefined ? callVerdicts.get(input.callID) : undefined
+      if (recorded) {
+        output.status = recorded.allow ? "allow" : "deny"
+        return
+      }
 
+      // `human` leaves the ask exactly as opencode raised it; `reject`
+      // refuses it — the headless stance. A guard does not grant what it
+      // cannot see, so an unjudged ask is never answered "allow".
       const undecided = (): void => {
-        // `human` leaves the ask exactly as opencode raised it; `reject`
-        // refuses it — the headless stance.
-        if (auto.unresolved === "reject") output.status = "deny"
+        if (cfg.auto.unresolved === "reject") output.status = "deny"
       }
-      if (!source) return undecided()
+      if (!client.enabled) return undecided()
 
-      // Re-evaluate rather than trusting the before-hook's verdict blindly:
-      // the ask's own descriptors travel in the payload for a judge to weigh,
-      // and guard-context correlation (same guardId) guarantees the answer
-      // can only tighten the earlier decision.
-      const ev = toolCallEvent(input.callID, input.sessionID, {
-        name: source.name,
-        arguments: source.arguments,
-        approval: {
-          type: input.type,
-          title: input.title,
-          ...input.pattern !== undefined ? { pattern: input.pattern } : {},
-        },
-      })
+      const metadata = input.metadata ?? {}
+      if (Object.keys(metadata).length === 0) return undecided()
 
-      let verdict: Verdict
-      try {
-        verdict = await runtime.evaluate(ev)
-      } catch {
-        return undecided()
-      }
-
-      if (verdict.decision === "block") {
-        output.status = "deny"
-      } else if (verdict.decision === "require_approval") {
-        undecided()
-      } else {
-        output.status = "allow"
-      }
+      // An uncorrelated ask still describes a held would-run action —
+      // opencode's bash asks carry the command in `metadata` — so judge it
+      // as the one tool call this plugin actually holds.
+      const verdict = await judge(input.callID ?? input.id ?? mintStepId(), input.type, metadata)
+      if (!verdict) return undecided() // fail-open: the human still decides
+      output.status = verdict.allow ? "allow" : "deny"
     }
   }
 
@@ -173,9 +234,15 @@ export const OpenGuardrailsPlugin: Plugin = async ({ directory }, options) => {
 
 export default OpenGuardrailsPlugin
 export {
-  DEFAULT_POLICY,
+  DEFAULT_AGENT_TYPE,
+  DEFAULT_RUNTIME_URL,
+  DEFAULT_TIMEOUT_MS,
+  HEARTBEAT_INTERVAL_S,
   type AutoModeConfig,
   type AutoUnresolved,
+  type FailMode,
+  type FiveTuple,
   type GuardrailsOptions,
-  type JudgeConfig,
+  type RuntimeOptions,
 } from "./config.js"
+export type { WireEvent, WireFinding, WireToolCall, WireVerdict } from "./wire.js"

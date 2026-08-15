@@ -1,11 +1,11 @@
 /**
- * Configuration for the OpenGuardrails dsh integration (v0.7, Recipe A).
+ * Configuration for the OpenGuardrails dsh integration (v0.8, the minimum API).
  *
- * v0.7 retired the SDK and with it this plugin's LOCAL policy engine — the
- * bundled regex rules, the bring-your-own-model judge, the taint tracker.
- * Every decision now comes from the runtime's `/v1/evaluate`; what a
- * deployment configures here is the CONNECTION, the identity claims, the
- * degraded-mode posture, and auto mode.
+ * v0.7 retired the SDK and this plugin's LOCAL policy engine; v0.8 shrank the
+ * wire itself — every decision comes from the runtime's `/v1/evaluate`, and
+ * the only things a deployment configures here are the CONNECTION, the
+ * identity claims, the degraded-mode posture, the streaming tail hold, the
+ * heartbeat cadence, and auto mode.
  */
 
 /** Where an unset runtime URL points: the OpenGuardrails cloud. */
@@ -18,13 +18,27 @@ export const DEFAULT_AUTO_PRESET = "auto-mode"
 export const DEFAULT_TIMEOUT_MS = 5000
 
 /**
+ * How many trailing characters of a streamed answer are withheld until the
+ * verdict — the spec's reference default. Streaming is judged EXACTLY ONCE,
+ * whole, at stream end; enforcement comes from this held-back tail (`allow`
+ * releases it, `block` cuts the stream). A deployment that cannot accept
+ * content ahead of the tail being seen sets this huge, which degenerates to
+ * buffering the whole answer.
+ */
+export const DEFAULT_STREAM_TAIL_CHARS = 200
+
+/** Heartbeat cadence in seconds — how often the runtime hears "still alive". */
+export const DEFAULT_HEARTBEAT_S = 60
+
+/**
  * What the plugin does when it CANNOT KNOW — the runtime unreachable, an
  * evaluate timeout or 429, a verdict whose `unjudged` names the very content
  * being enforced, or a tool call that reached execution with no verdict
  * recorded at all (specification/degraded-mode.md):
  *
- * - `open` (default) — proceed, loudly. The harness keeps working through an
- *   outage; the runtime's record shows the gap.
+ * - `open` (the spec's default and this plugin's) — proceed, loudly. The
+ *   harness keeps working through an outage; the heartbeat's
+ *   `evaluate_errors` counter is what makes the gap visible to the runtime.
  * - `closed` — treat "could not look" as block. The stance for deployments
  *   where an unjudged action is worse than a stopped agent.
  */
@@ -60,6 +74,11 @@ export interface AutoApprovalConfig {
  * environment (`OGR_RUNTIME_URL`, `OGR_API_KEY`, `OGR_AGENT_WORKSPACE`,
  * `OGR_AGENT_OWNER`, `OGR_AGENT_USER`) → default. Only the API key has no
  * default — get one at https://openguardrails.com.
+ *
+ * v0.8 makes the five-tuple REQUIRED on every event with `""` as the
+ * explicit "no assertion": whatever stays unresolved here is sent as the
+ * empty string, never omitted, and the runtime falls back to the API-key
+ * identity floor.
  */
 export interface RuntimeOptions {
   /** Runtime base URL (default {@link DEFAULT_RUNTIME_URL}). A mounted prefix belongs in it. */
@@ -68,13 +87,13 @@ export interface RuntimeOptions {
   apiKey?: string
   /**
    * `agent_workspace` claim — the named policy/resource group this agent
-   * belongs to on the platform, NOT a directory. Absent → the API key's
-   * workspace.
+   * belongs to on the platform, NOT a directory. Unset → sent as `""`
+   * (the API key's workspace).
    */
   workspace?: string
-  /** `agent_owner` claim. Absent → the OS account the harness runs as. */
+  /** `agent_owner` claim. Unset → the OS account the harness runs as, else `""`. */
   owner?: string
-  /** `agent_user` claim. Absent → the OS account the harness runs as. */
+  /** `agent_user` claim. Unset → the OS account the harness runs as, else `""`. */
   user?: string
 }
 
@@ -85,6 +104,10 @@ export interface GuardrailsOptions {
   failMode?: FailMode
   /** Per-call evaluate budget in milliseconds (default {@link DEFAULT_TIMEOUT_MS}). */
   timeoutMs?: number
+  /** Trailing characters of a streamed answer withheld until the verdict (default {@link DEFAULT_STREAM_TAIL_CHARS}). */
+  streamTailChars?: number
+  /** Heartbeat cadence in seconds (default {@link DEFAULT_HEARTBEAT_S}). */
+  heartbeatS?: number
   /** Auto mode: answer approval asks with the step verdict for auto-preset sessions. */
   auto?: AutoApprovalConfig
 }

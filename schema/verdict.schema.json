@@ -1,21 +1,16 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://openguardrails.com/schema/0.7/verdict.schema.json",
+  "$id": "https://openguardrails.com/schema/0.8/verdict.schema.json",
   "title": "Verdict",
   "description": "The runtime's decision about a GuardEvent. Two decisions: allow | block. Redaction is not a decision — a non-empty modifications.spans on an allow says it. \"Flag\" is not a decision — allow with findings says it.",
   "type": "object",
   "required": [
-    "ogr_version",
     "event_id",
     "provider",
     "decision"
   ],
   "additionalProperties": false,
   "properties": {
-    "ogr_version": {
-      "type": "string",
-      "const": "0.7"
-    },
     "event_id": {
       "type": "string",
       "minLength": 1,
@@ -30,25 +25,6 @@
         "allow",
         "block"
       ]
-    },
-    "session_id": {
-      "type": "string",
-      "description": "The session the runtime attributed the event to: the declared value echoed, or the derived one."
-    },
-    "turn": {
-      "type": "integer",
-      "minimum": 1
-    },
-    "step": {
-      "type": "integer",
-      "minimum": 1
-    },
-    "attribution": {
-      "enum": [
-        "declared",
-        "derived"
-      ],
-      "description": "Whether session_id/turn/step were the producer's claim or the runtime's reconstruction."
     },
     "latency_ms": {
       "type": "number",
@@ -162,13 +138,6 @@
         "type": "string"
       },
       "description": "Payload paths this verdict could NOT judge. Absent or empty asserts every routed text was judged; a fail-closed enforcement point MUST treat a non-empty value as \"could not look\", which is not \"found nothing\"."
-    },
-    "output_mode": {
-      "enum": [
-        "buffer",
-        "stream"
-      ],
-      "description": "Which lane the runtime selected for judging a streamed output."
     }
   }
 }

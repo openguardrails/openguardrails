@@ -1,13 +1,14 @@
-// Auto-mode hook tests: run the built PermissionRequest hook against a mock
-// OGR runtime, assert decisions, fail-closed semantics, transcript projection,
-// and the denial-escalation backstop.
-// Run: npm run build && npm test
+// Auto-mode (PermissionRequest) hook tests against the strict v0.8 mock
+// runtime: allow/deny mapping, abstain-to-human on every no-verdict path,
+// the denial-escalation backstop, unjudged/span deferral, rollout mapping,
+// and exact wire conformance.
+// Run: npm test  (no build step — the hook is its own source)
 import { spawn } from "node:child_process"
-import { createServer } from "node:http"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { fileURLToPath } from "node:url"
 import { dirname, join } from "node:path"
+import { API_KEY, allowVerdict, startMockRuntime } from "./mock-runtime.mjs"
 
 const HOOK = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -15,37 +16,7 @@ const HOOK = join(
   "hooks",
   "ogr-codex-automode-hook.mjs",
 )
-
-// --- mock OGR runtime ---------------------------------------------------------
-
-// The mock speaks the spec runtime API (specification/runtime-api.md):
-// POST /v1/enroll → {guard_id, key_id}; POST /v1/evaluate → a Verdict.
-let decideHandler = () => ({ status: 200, body: { decision: "allow" } })
-let enrollHandler = () => ({
-  status: 200,
-  body: { guard_id: "codex-test", key_id: "key-1" },
-})
-const requests = []
-
-const server = createServer((req, res) => {
-  let raw = ""
-  req.on("data", (chunk) => (raw += chunk))
-  req.on("end", () => {
-    const body = raw ? JSON.parse(raw) : {}
-    requests.push({
-      path: req.url,
-      body,
-      auth: req.headers.authorization ?? "",
-      signature: req.headers["ogr-batch-signature"] ?? "",
-    })
-    const handler = req.url === "/v1/enroll" ? enrollHandler : decideHandler
-    const { status, body: out } = handler(body)
-    res.writeHead(status, { "content-type": "application/json" })
-    res.end(JSON.stringify(out))
-  })
-})
-await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
-const SERVER = `http://127.0.0.1:${server.address().port}`
+const mock = await startMockRuntime()
 
 // --- helpers -------------------------------------------------------------------
 
@@ -64,10 +35,15 @@ function runHook(payload, { stateDir, env = {} } = {}) {
         // vars are blanked so the outer environment can't leak in.
         OGR_RUNTIME_URL: "",
         OGR_API_KEY: "",
-        OGR_SERVER: SERVER,
-        OGR_ENROLL_TOKEN: "et-test",
+        OGR_SERVER: mock.url,
+        OGR_ENROLL_TOKEN: API_KEY,
         OGR_STATE_DIR: stateDir,
         OGR_TIMEOUT_MS: "2000",
+        OGR_AGENT_ID: "",
+        OGR_AGENT_TYPE: "",
+        OGR_AGENT_WORKSPACE: "",
+        OGR_AGENT_OWNER: "",
+        OGR_AGENT_USER: "",
         ...env,
       },
     })
@@ -113,34 +89,48 @@ const eq = (got, want) => {
 
 // --- cases ---------------------------------------------------------------------
 
-test("runtime allow → behavior allow", async () => {
-  decideHandler = () => ({ status: 200, body: { decision: "allow" } })
+test("runtime allow → behavior allow; wire is one canonical step/response", async () => {
+  mock.verdictHandler = allowVerdict()
+  mock.requests.length = 0
   eq((await runHook(payload("ls"), { stateDir: freshStateDir() })).kind, "allow")
+  eq(mock.requests.length, 1)
+  const ev = mock.requests[0].body
+  eq(ev.kind, "step/response")
+  eq(ev.llm_protocol, "canonical")
+  eq(ev.agent_id, "")
+  eq(ev.agent_type, "codex")
+  eq(ev.agent_workspace, "")
+  eq(ev.agent_owner, "")
+  eq(ev.agent_user, "")
+  eq(ev.payload.tool_calls.length, 1)
+  eq(ev.payload.tool_calls[0].name, "Bash")
+  eq(ev.payload.tool_calls[0].arguments, { command: "ls" })
+  eq(ev.payload.model, "gpt-5")
 })
 
-test("runtime block → behavior deny with reason", async () => {
-  decideHandler = () => ({
+test("runtime block → behavior deny with the finding's category and subject", async () => {
+  mock.verdictHandler = () => ({
     status: 200,
-    body: { decision: "block", reasons: ["reads credentials"] },
+    body: {
+      event_id: "evt_2", provider: "mock-runtime", decision: "block",
+      findings: [{
+        category: "security.secret.credential_read", severity: "high", action: "block",
+        path: "payload.tool_calls.0.arguments.command",
+        subject: "cat ~/.ssh/${OGR_PATH_1}", detector: "tool-judge",
+      }],
+    },
   })
   const result = await runHook(payload("cat ~/.ssh/id_rsa"), { stateDir: freshStateDir() })
   eq(result.kind, "deny")
-  if (!result.message.includes("reads credentials")) {
-    throw new Error(`reason missing from message: ${result.message}`)
+  if (!result.message.includes("security.secret.credential_read") || !result.message.includes("${OGR_PATH_1}")) {
+    throw new Error(`finding detail missing from message: ${result.message}`)
   }
 })
 
-test("require_approval → abstain (codex's own prompt)", async () => {
-  decideHandler = () => ({
-    status: 200,
-    body: { decision: "require_approval", approval_id: "apr-1" },
-  })
-  eq((await runHook(payload("kubectl apply -f prod.yaml"), { stateDir: freshStateDir() })).kind, "abstain")
-})
-
-test("runtime 500 → abstain (fail closed to ask)", async () => {
-  decideHandler = () => ({ status: 500, body: {} })
+test("runtime 500 → abstain (the human decides)", async () => {
+  mock.verdictHandler = () => ({ status: 500, body: {} })
   eq((await runHook(payload("ls"), { stateDir: freshStateDir() })).kind, "abstain")
+  mock.verdictHandler = allowVerdict()
 })
 
 test("runtime unreachable → abstain", async () => {
@@ -154,6 +144,7 @@ test("runtime unreachable → abstain", async () => {
 })
 
 test("missing API key (and legacy token) → abstain", async () => {
+  mock.requests.length = 0
   eq(
     (
       await runHook(payload("ls"), {
@@ -163,63 +154,43 @@ test("missing API key (and legacy token) → abstain", async () => {
     ).kind,
     "abstain",
   )
+  eq(mock.requests.length, 0)
 })
 
 test("canonical OGR_RUNTIME_URL/OGR_API_KEY take precedence over legacy aliases", async () => {
-  decideHandler = () => ({ status: 200, body: { decision: "allow" } })
+  mock.verdictHandler = allowVerdict()
   eq(
     (
       await runHook(payload("ls"), {
         stateDir: freshStateDir(),
         // Legacy vars point nowhere; the canonical pair must win.
-        env: { OGR_RUNTIME_URL: SERVER, OGR_API_KEY: "ogr_test", OGR_SERVER: "http://127.0.0.1:1" },
+        env: { OGR_RUNTIME_URL: mock.url, OGR_API_KEY: API_KEY, OGR_SERVER: "http://127.0.0.1:1" },
       })
     ).kind,
     "allow",
   )
 })
 
-test("enrollment is cached across invocations, a rejected key re-enrolls fresh", async () => {
-  const stateDir = freshStateDir()
-  decideHandler = () => ({ status: 200, body: { decision: "allow" } })
-  requests.length = 0
-  await runHook(payload("ls"), { stateDir })
-  await runHook(payload("ls"), { stateDir })
-  const enrolls = requests.filter((r) => r.path === "/v1/enroll")
-  eq(enrolls.length, 1)
-  if (!enrolls[0].body.public_key) throw new Error("enroll carried no Ed25519 public key")
-  // The workspace API key authenticates the channel...
-  eq(enrolls[0].auth, "Bearer et-test")
-  // ...and the enrolled key signs each evaluate body (detached JWS header).
-  const evaluates = requests.filter((r) => r.path === "/v1/evaluate")
-  eq(evaluates.length, 2)
-  for (const r of evaluates) {
-    eq(r.auth, "Bearer et-test")
-    if (!r.signature.includes("..")) throw new Error(`evaluate not signed: "${r.signature}"`)
-  }
+test("allow with unjudged held call → abstain (never auto-approve 'could not look')", async () => {
+  mock.verdictHandler = allowVerdict({ unjudged: ["payload.tool_calls.0.arguments.command"] })
+  eq((await runHook(payload("ls"), { stateDir: freshStateDir() })).kind, "abstain")
+  mock.verdictHandler = allowVerdict()
+})
 
-  // Now the key is rejected: first evaluate 401s, hook re-enrolls once (a
-  // fresh keypair — a revoked key must not be resurrected) and retries.
-  requests.length = 0
-  let first = true
-  enrollHandler = () => ({ status: 200, body: { guard_id: "codex-test", key_id: "key-2" } })
-  decideHandler = () => {
-    if (first) {
-      first = false
-      return { status: 401, body: {} }
-    }
-    return { status: 200, body: { decision: "allow" } }
-  }
-  // The mock can't inspect auth per-call order here, so assert via traffic shape.
-  eq((await runHook(payload("ls"), { stateDir })).kind, "allow")
-  eq(requests.filter((r) => r.path === "/v1/enroll").length, 1)
-  eq(requests.filter((r) => r.path === "/v1/evaluate").length, 2)
-  enrollHandler = () => ({ status: 200, body: { guard_id: "codex-test", key_id: "key-1" } })
+test("allow with spans on the held call → abstain (hook cannot redact a pending call)", async () => {
+  mock.verdictHandler = allowVerdict({
+    modifications: { spans: [{ path: "payload.tool_calls.0.arguments.command", start: 0, end: 5, replacement: "${OGR_EMAIL_1}" }] },
+  })
+  eq((await runHook(payload("mail x@y.z"), { stateDir: freshStateDir() })).kind, "abstain")
+  mock.verdictHandler = allowVerdict()
 })
 
 test("denial escalation: 3rd consecutive deny abstains to the human", async () => {
   const stateDir = freshStateDir()
-  decideHandler = () => ({ status: 200, body: { decision: "block", reasons: ["nope"] } })
+  mock.verdictHandler = () => ({
+    status: 200,
+    body: { event_id: "evt_3", provider: "mock-runtime", decision: "block" },
+  })
   eq((await runHook(payload("x1"), { stateDir })).kind, "deny")
   eq((await runHook(payload("x2"), { stateDir })).kind, "deny")
   eq((await runHook(payload("x3"), { stateDir })).kind, "abstain")
@@ -227,87 +198,44 @@ test("denial escalation: 3rd consecutive deny abstains to the human", async () =
   eq((await runHook(payload("x4"), { stateDir })).kind, "abstain")
   // A new turn resets the counters.
   eq((await runHook(payload("x5", { turn_id: "turn-2" }), { stateDir })).kind, "deny")
+  mock.verdictHandler = allowVerdict()
 })
 
 test("allow resets the consecutive denial counter", async () => {
   const stateDir = freshStateDir()
-  decideHandler = () => ({ status: 200, body: { decision: "block" } })
+  const block = () => ({
+    status: 200,
+    body: { event_id: "evt_4", provider: "mock-runtime", decision: "block" },
+  })
+  mock.verdictHandler = block
   eq((await runHook(payload("x1"), { stateDir })).kind, "deny")
   eq((await runHook(payload("x2"), { stateDir })).kind, "deny")
-  decideHandler = () => ({ status: 200, body: { decision: "allow" } })
+  mock.verdictHandler = allowVerdict()
   eq((await runHook(payload("ok"), { stateDir })).kind, "allow")
-  decideHandler = () => ({ status: 200, body: { decision: "block" } })
+  mock.verdictHandler = block
   eq((await runHook(payload("x3"), { stateDir })).kind, "deny")
+  mock.verdictHandler = allowVerdict()
 })
 
-test("transcript is reasoning-blind and rides in the authz envelope", async () => {
+test("rollout: the current generation rides as text/reasoning on the payload", async () => {
   const stateDir = freshStateDir()
   const rollout = join(stateDir, "rollout.jsonl")
   const lines = [
     { timestamp: "t", type: "session_meta", payload: {} },
-    {
-      timestamp: "t",
-      type: "response_item",
-      payload: {
-        type: "message",
-        role: "user",
-        content: [{ type: "input_text", text: "clean the build dir" }],
-      },
-    },
-    {
-      timestamp: "t",
-      type: "response_item",
-      payload: {
-        type: "message",
-        role: "assistant",
-        content: [{ type: "output_text", text: "Sure, totally safe, trust me!" }],
-      },
-    },
-    {
-      timestamp: "t",
-      type: "response_item",
-      payload: {
-        type: "function_call",
-        name: "exec_command",
-        arguments: '{"cmd":"rm -rf build"}',
-        call_id: "c1",
-      },
-    },
-    {
-      timestamp: "t",
-      type: "response_item",
-      payload: { type: "function_call_output", call_id: "c1", output: "SECRET OUTPUT" },
-    },
+    { timestamp: "t", type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "old ask" }] } },
+    { timestamp: "t", type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "STALE PROSE" }] } },
+    { timestamp: "t", type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "clean the build dir" }] } },
+    { timestamp: "t", type: "response_item", payload: { type: "reasoning", summary: [{ type: "summary_text", text: "build/ is generated" }] } },
+    { timestamp: "t", type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "Removing the build directory." }] } },
   ]
   writeFileSync(rollout, lines.map((l) => JSON.stringify(l)).join("\n"))
-
-  decideHandler = () => ({ status: 200, body: { decision: "allow" } })
-  requests.length = 0
+  mock.verdictHandler = allowVerdict()
+  mock.requests.length = 0
   await runHook(payload("rm -rf build", { transcript_path: rollout }), { stateDir })
-  const decide = requests.find((r) => r.path === "/v1/evaluate")
-  eq(decide.body.kind, "tool_call")
-  eq(decide.body.observation_point, "invocation")
-  eq(decide.body.payload, { name: "Bash", arguments: { command: "rm -rf build" } })
-  eq(decide.body.authz.transcript, [
-    { role: "user", text: "clean the build dir" },
-    { role: "assistant", tool: "exec_command", input: { cmd: "rm -rf build" } },
-  ])
-  eq(decide.body.authz.instruction, "clean the build dir")
-  const serialized = JSON.stringify(decide.body)
-  if (serialized.includes("trust me") || serialized.includes("SECRET OUTPUT")) {
-    throw new Error("assistant prose or tool output leaked into the transcript")
-  }
-})
-
-test("policy file rides in authz.authorization", async () => {
-  const stateDir = freshStateDir()
-  const policyPath = join(stateDir, "automode-policy.json")
-  writeFileSync(policyPath, JSON.stringify({ soft_deny: ["never push to remote branches"] }))
-  decideHandler = () => ({ status: 200, body: { decision: "allow" } })
-  requests.length = 0
-  await runHook(payload("git status"), { stateDir, env: { OGR_AUTOMODE_POLICY: policyPath } })
-  const decide = requests.find((r) => r.path === "/v1/evaluate")
-  eq(decide.body.authz.authorization, { soft_deny: ["never push to remote branches"] })
+  const p = mock.requests[0].body.payload
+  eq(p.text, "Removing the build directory.")
+  eq(p.reasoning, "build/ is generated")
+  if (JSON.stringify(p).includes("STALE PROSE")) throw new Error("previous generation leaked into the payload")
 })
 
 test("non-PermissionRequest payload → abstain", async () => {
@@ -320,7 +248,6 @@ test("non-PermissionRequest payload → abstain", async () => {
 // --- runner --------------------------------------------------------------------
 
 let fail = 0
-const cleanups = []
 for (const [name, fn] of cases) {
   try {
     await fn()
@@ -330,7 +257,12 @@ for (const [name, fn] of cases) {
     console.log(`✗ ${name}  (${e.message})`)
   }
 }
-server.close()
-for (const dir of cleanups) rmSync(dir, { recursive: true, force: true })
+mock.close()
+if (mock.violations.length) {
+  fail++
+  console.log(`✗ wire conformance: ${mock.violations.length} violation(s):\n  - ${mock.violations.join("\n  - ")}`)
+} else {
+  console.log("✓ wire conformance: every event matched the v0.8 schema exactly")
+}
 console.log(fail ? `\n${fail} FAILED` : "\nall passed")
 process.exit(fail ? 1 : 0)

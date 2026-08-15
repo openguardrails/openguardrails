@@ -132,6 +132,32 @@ func TestStreamedToolCallsAreReassembled(t *testing.T) {
 	}
 }
 
+// The tail-hold releases frames by how much CONTENT sits behind them, so the meter
+// must count what the client reads — text — and never the SSE framing around it.
+// Counting framing would over-count and release the true tail early.
+func TestContentBytesCountsContentNotFraming(t *testing.T) {
+	sp := newStreamProcessor(chatProto(t), nil, true, time.Time{}, false)
+	if sp.ContentBytes() != 0 {
+		t.Fatalf("content before any chunk = %d", sp.ContentBytes())
+	}
+	sp.ProcessChunk([]byte(chunk("hello")), false)
+	if got := sp.ContentBytes(); got != len("hello") {
+		t.Fatalf("ContentBytes = %d, want %d (framing must not count)", got, len("hello"))
+	}
+	sp.ProcessChunk([]byte(chunk(" world")), false)
+	if got := sp.ContentBytes(); got != len("hello world") {
+		t.Fatalf("ContentBytes = %d, want %d", got, len("hello world"))
+	}
+	// Tool-call arguments are client-visible content too — they are exactly the
+	// bytes a harness acts on.
+	sp.ProcessChunk([]byte(
+		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"sh","arguments":"{\"a\":1}"}}]}}]}`+"\n\n"),
+		false)
+	if got := sp.ContentBytes(); got != len("hello world")+len(`{"a":1}`) {
+		t.Fatalf("ContentBytes = %d, want arguments counted", got)
+	}
+}
+
 func TestTimingStartsAtTheRequestRelease(t *testing.T) {
 	// TTFT is first-chunk minus REQUEST RELEASE. The processor only exists once the
 	// first chunk is already arriving, so measuring from its own construction would

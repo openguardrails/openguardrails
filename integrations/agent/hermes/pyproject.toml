@@ -4,35 +4,22 @@ build-backend = "hatchling.build"
 
 [project]
 name = "openguardrails-instrumentation-hermes"
-version = "0.2.0"
-description = "Guard a Hermes agent and its sandbox through the OpenGuardrails (OGR) protocol — one policy enforced across the LLM gateway, the agent tool-call hook, and the real sandbox exec."
+version = "1.0.0"
+description = "Guard a Hermes agent through the OpenGuardrails (OGR) v0.8 Runtime API — two evaluates per model call, hand-rolled over stdlib, zero dependencies."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
 authors = [{ name = "OpenGuardrails" }]
-keywords = ["ai", "agent", "security", "guardrails", "hermes", "sandbox", "ogr"]
+keywords = ["ai", "agent", "security", "guardrails", "hermes", "ogr"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
     "Topic :: Security",
 ]
-dependencies = ["openguardrails>=0.2.0"]
-
-# Resolve the sibling workspace member's SOURCE instead of PyPI — required for
-# `uv pip install -e` (from this dir, or targeting an external venv like
-# Hermes' own) to work at all; without it uv errors with "openguardrails is
-# included as a workspace member, but is missing an entry in tool.uv.sources".
-# Editable installs of workspace deps are the point: edit packages/python/src
-# or this package's src and both are live without a release.
-[tool.uv.sources]
-openguardrails = { workspace = true }
-
-[project.optional-dependencies]
-# `srt` (Anthropic Sandbox Runtime) is a Node CLI installed via npm, not pip:
-#   npm install -g @anthropic-ai/sandbox-runtime
-# Listed here only to document the personal-sandbox extra; there is no pip dep.
-srt = []
+# Deliberately empty: there is no SDK layer in v0.8 — the wire is two
+# hand-rolled POSTs (src/.../wire.py) over stdlib urllib.
+dependencies = []
 
 [project.urls]
 Homepage = "https://openguardrails.com"

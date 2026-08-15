@@ -1,42 +1,44 @@
-"""ogr-guard — Hermes plugin securing the agent + its sandbox through OGR.
+"""ogr-guard — Hermes plugin speaking the OGR v0.8 Runtime API directly.
 
-register(ctx) binds six Hermes hooks to the OGR bridge and installs the
-optional sandbox-altitude wrapper. One Runtime + one policy.json enforce
-across all altitudes, correlated by guard_id + provenance.
+register(ctx) binds four Hermes hooks to the bridge and installs the
+optional exec-chokepoint wrapper. There is no SDK and no local policy
+engine: the runtime is the decision point, this plugin is the enforcement
+point, and the whole wire is two POSTs per model call (wire.py).
 """
 from __future__ import annotations
+
+import threading
 
 from . import bridge
 from .sandbox_guard import install_sandbox_guard
 
 
 def register(ctx) -> None:
-    # conversation altitude (LLM I/O). Hermes discards what these two return, so
-    # they observe and DECIDE; the blocking half is transform_llm_output below.
+    # The step's two halves (recipe steps 2 and 4). Hermes discards what
+    # these return, so they evaluate and PARK; enforcement is below.
     ctx.register_hook("pre_api_request", bridge.on_pre_api_request)
     ctx.register_hook("post_api_request", bridge.on_post_api_request)
 
-    # conversation altitude — ENFORCE a blocking content verdict on the answer.
-    # Hermes' only hook that can change what the user sees (agent/turn_finalizer.py
-    # substitutes the first non-empty string a plugin returns). Without it a
-    # moderation / off-topic block was recorded and then ignored.
+    # Enforce on the answer — the only hook Hermes lets a plugin substitute
+    # what the user sees. Withholds a blocked answer, applies redaction spans.
     ctx.register_hook("transform_llm_output", bridge.on_transform_llm_output)
 
-    # agent_hook altitude — DETECT + BLOCK before a tool runs
+    # Enforce on tool calls — "block on response -> do not execute tool
+    # calls". Denies the round's dispatches when its step/response blocked.
     ctx.register_hook("pre_tool_call", bridge.on_pre_tool_call)
 
-    # provenance/taint tracking + the verdict on the tool's result
-    ctx.register_hook("post_tool_call", bridge.on_post_tool_call)
-
-    # invocation altitude — REDACT or withhold a tool result before it becomes
-    # context. post_tool_call is observational in Hermes; this is the seam that can
-    # replace the string (model_tools.py).
-    ctx.register_hook("transform_tool_result", bridge.on_transform_tool_result)
-
-    # sandbox altitude — wrap the real exec chokepoint (optional, fails open)
+    # Exec vantage — wrap the real exec chokepoint (optional, fails open).
     sandbox_ok = install_sandbox_guard()
-    bridge._audit("load", f"ogr-guard registered: hooks=[pre/post_tool_call, "
-                          f"pre/post_api_request, transform_llm_output, "
-                          f"transform_tool_result] "
-                          f"sandbox_wrap={sandbox_ok} "
-                          f"policy={bridge._policy_path()}")
+
+    # One liveness heartbeat at load (recipe step 5), off-thread because a
+    # dark runtime must cost the startup path nothing. Best-effort by design:
+    # the heartbeat is optional and evaluate never depends on it.
+    client = bridge.get_client()
+    if client.enabled:
+        threading.Thread(target=client.heartbeat, daemon=True).start()
+
+    bridge.logger.info(
+        "ogr-guard registered: hooks=[pre/post_api_request, transform_llm_output, "
+        "pre_tool_call] exec_wrap=%s runtime=%s fail_mode=%s",
+        sandbox_ok, client.runtime_url or "(none)", client.fail_mode,
+    )

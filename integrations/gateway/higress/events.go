@@ -7,15 +7,15 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// One proxied model call → OGR v0.7 GuardEvents.
+// One proxied model call → OGR v0.8 GuardEvents.
 //
 // This file used to be a 900-line derivation: it classified the conversation into
-// turns, actions and outcomes, decided what was NEW, itemised history for /ingest,
-// carried a transcript envelope for the judge, and registered every judged text under
-// a payload path so verdict spans could be resolved. All of that was the plugin doing
-// the RUNTIME's job, and v0.7 makes the split explicit (Recipe B of the runtime-api
-// spec): the gateway is a RAW FORWARDER. One proxied model call is one STEP, reported
-// as two events —
+// turns, actions and outcomes, decided what was NEW, itemised history, carried a
+// transcript envelope for the judge, and registered every judged text under a
+// payload path so verdict spans could be resolved. All of that was the plugin doing
+// the RUNTIME's job, and the spec makes the split explicit (the recipe in
+// specification/runtime-api.md): the gateway is a RAW FORWARDER. One proxied model
+// call is one STEP, reported as two events —
 //
 //	step/request    the provider request body, untouched, before the model sees it
 //	step/response   the provider response body (or the canonical shape reassembled
@@ -26,18 +26,27 @@ import (
 // coordinates: a proxy sees one stateless call at a time, and pretending otherwise is
 // how two implementations of one algorithm drift.
 //
+// v0.8 shrank the event to TEN fields, all required (`additionalProperties: false`):
+// kind, step_id, the identity five-tuple, llm_protocol, payload. What a runtime can
+// derive left the wire entirely — no ogr_version (the runtime adapts to what it
+// receives), no timestamp (receive time), no integration build id (that fact lives
+// on the heartbeat now, where fleet coverage and bad-rollout triage read it). The
+// five-tuple is required WITH the empty string as the explicit "no assertion", so an
+// integrator answers the identity question instead of falling into the API-key
+// floor by omission.
+//
 // ⚠️ THE PAYLOAD IS THE BODY'S OWN BYTES (json.RawMessage), never a re-marshalled
 // parse of them. A verdict's span offsets index the payload AS TRANSPORTED; parsing
 // and re-encoding reorders keys and re-escapes strings, so every offset would land in
 // different bytes than the runtime counted.
 
 const (
-	ogrVersion      = "0.7"
 	integrationName = "ogr-higress"
-	// Reported on every event and in the heartbeat, so it is how a deployment learns
-	// which build is in the VM. Kept honest by TestPluginVersionMatchesTheVERSIONFile —
-	// 1.3.0 and 1.4.0 both shipped while a prior constant still said 1.2.0.
-	pluginVersion = "2.2.0"
+	// Reported in the heartbeat (and nowhere else — v0.8 took the build id off the
+	// event), so it is how a deployment learns which build is in the VM. Kept honest
+	// by TestPluginVersionMatchesTheVERSIONFile — 1.3.0 and 1.4.0 both shipped while
+	// a prior constant still said 1.2.0.
+	pluginVersion = "3.0.0"
 
 	kindStepRequest  = "step/request"
 	kindStepResponse = "step/response"
@@ -45,37 +54,36 @@ const (
 
 func integrationID() string { return integrationName + "/" + pluginVersion }
 
-// identity is the flat v0.7 agent five-tuple, embedded into every GuardEvent — the
+// identity is the flat agent five-tuple, embedded into every GuardEvent — the
 // agent_ prefixes are the namespace, no envelope. The consumer the gateway
 // authenticated IS the agent (`agent_id`), the consumer-group is the agent's
 // WORKSPACE. Owner and user are attributes; they never select configuration. Every
 // field is a claim the runtime resolves inside the org the API key proves.
 //
-// v0.7 has no `attestation` field — the ladder went with the enrollment machinery.
+// ⚠️ NO omitempty — v0.8 requires all five on every event, with "" as the explicit
+// "no assertion". An absent field is a schema violation, not a shorter event.
 type identity struct {
-	AgentID        string `json:"agent_id,omitempty"`
-	AgentType      string `json:"agent_type,omitempty"`
-	AgentWorkspace string `json:"agent_workspace,omitempty"`
-	AgentOwner     string `json:"agent_owner,omitempty"`
-	AgentUser      string `json:"agent_user,omitempty"`
+	AgentID        string `json:"agent_id"`
+	AgentType      string `json:"agent_type"`
+	AgentWorkspace string `json:"agent_workspace"`
+	AgentOwner     string `json:"agent_owner"`
+	AgentUser      string `json:"agent_user"`
 }
 
-// GuardEvent is the wire unit. A struct, so encoding/json does the escaping: the old
-// connector hand-rolled its JSON and every field it interpolated was an injection
-// surface.
+// GuardEvent is the wire unit: exactly the ten v0.8 fields, every one required. A
+// struct, so encoding/json does the escaping (the old connector hand-rolled its JSON
+// and every field it interpolated was an injection surface) and so a field cannot
+// leak onto the wire — the schema is `additionalProperties: false`.
 type GuardEvent struct {
-	OGRVersion string `json:"ogr_version"`
-	Kind       string `json:"kind"`
+	Kind string `json:"kind"`
 	// StepID binds the step/request and step/response of ONE proxied model call —
-	// the only correlation a gateway can honestly assert.
-	StepID      string `json:"step_id,omitempty"`
-	Timestamp   string `json:"timestamp"`
-	Integration string `json:"integration"`
-	LLMProtocol string `json:"llm_protocol,omitempty"`
-	// Flat v0.7 identity fields, inlined into the top level of the wire object.
+	// the one coordinate v0.8 kept, because concurrency makes it underivable.
+	StepID string `json:"step_id"`
+	// Flat identity fields, inlined into the top level of the wire object.
 	identity
-	// Payload carries the provider body verbatim (see the file comment), or a
-	// canonical/diagnostic object marshalled by this file.
+	LLMProtocol string `json:"llm_protocol"`
+	// Payload carries the provider body verbatim (see the file comment), or the
+	// canonical object marshalled by this file.
 	Payload json.RawMessage `json:"payload"`
 }
 
@@ -98,20 +106,19 @@ func subjectOf(agentID, agentType, workspace, owner, user string) identity {
 type deriveCtx struct {
 	subj   identity
 	stepID string
-	now    string
 	// The CLIENT's wire protocol, detected per request. Never a constant: it was
 	// `openai.chat` for every event an old build sent, which made 693,197 stored
-	// events unfalsifiable.
+	// events unfalsifiable. v0.8 makes the field REQUIRED, which is why a request
+	// whose protocol cannot be established sends no event at all (see the
+	// unrecognised-body policy in main.go) — inventing an enum value here would be
+	// the same lie at schema strength.
 	protocol string
 }
 
 func (d *deriveCtx) event(kind string, payload json.RawMessage) *GuardEvent {
 	return &GuardEvent{
-		OGRVersion:  ogrVersion,
 		Kind:        kind,
 		StepID:      d.stepID,
-		Timestamp:   d.now,
-		Integration: integrationID(),
 		LLMProtocol: d.protocol,
 		identity:    d.subj,
 		Payload:     payload,
@@ -227,22 +234,16 @@ func responseEventCanonical(d *deriveCtx, p canonicalPayload) *GuardEvent {
 	return d.event(kindStepResponse, blob)
 }
 
-// unparsedEvent is what the plugin sends when it saw completion traffic and could not
-// read it — an unknown protocol, or a stream no decoder reassembled.
-//
-// ⚠️ It exists because the alternative is SILENCE, and silence is indistinguishable
-// from health: HTTP 200 to the client, no warning, no error, no counter, and no row
-// anywhere saying traffic passed unjudged. It carries NO text — we could not read the
-// body, and inventing a payload would make the guardrails judge a fiction. What it
-// carries is the fact of the traffic: why, and how big.
-func unparsedEvent(d *deriveCtx, kind, reason string, bodyBytes int) *GuardEvent {
-	blob, _ := json.Marshal(map[string]any{
-		"unparsed": true,
-		"reason":   reason,
-		"bytes":    bodyBytes,
-	})
-	return d.event(kind, blob)
-}
+// There is no "unparsed" diagnostic event anymore. v0.7 sent one (`{"unparsed":
+// true, "reason", "bytes"}`) for traffic the plugin recognised and could not read,
+// because silence is indistinguishable from health. v0.8 removed the room for it:
+// `llm_protocol` is a required closed enum and the payload must be a provider body
+// or the canonical shape — a fabricated protocol name would make 693k-events-style
+// unfalsifiable data, and a fabricated payload would make the guardrails judge a
+// fiction. The job of making the gap visible moved to where the spec puts every
+// lost observation: the `unreadable` counter on the heartbeat, plus a log line.
+// (See degraded-mode.md — heartbeat counters are what keep an observability gap
+// from being silent.)
 
 // jsonRaw is a pre-serialized JSON fragment that marshals as itself. Degrades to a
 // JSON string when the fragment is not valid JSON, so a truncated argument stream

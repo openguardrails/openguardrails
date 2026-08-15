@@ -1,7 +1,7 @@
 {
   "id": "openguardrails",
   "name": "OpenGuardrails",
-  "description": "Enforce the OpenGuardrails (OGR) protocol on tool calls and channel traffic — block, rewrite, or require human approval under a policy you own.",
+  "description": "Judge every tool call and outbound channel message through an OpenGuardrails runtime (OGR v0.8) — block enforced in place, fail-open by default.",
   "activation": {
     "onStartup": true,
     "onCapabilities": ["hook"]
@@ -10,28 +10,32 @@
     "type": "object",
     "additionalProperties": true,
     "properties": {
-      "policyPath": {
-        "type": "string",
-        "description": "Path to an OGR policy.json. Defaults to <workspace>/openguardrails.json."
-      },
-      "policy": {
+      "runtime": {
         "type": "object",
-        "description": "Inline OGR policy (composition + config_rules). Overrides the file and the default.",
-        "additionalProperties": true
-      },
-      "judge": {
-        "type": "object",
-        "description": "Use your own model as an LLM-judge detector (any OpenAI-compatible chat endpoint).",
-        "additionalProperties": true,
+        "description": "OpenGuardrails runtime connection and identity claims; each field falls back to OGR_* environment variables, then to \"\" (no assertion).",
+        "additionalProperties": false,
         "properties": {
-          "baseURL": { "type": "string" },
-          "model": { "type": "string" },
-          "apiKey": { "type": "string" }
+          "url": { "type": "string", "description": "Runtime base URL (default https://openguardrails.com). A mounted prefix belongs in it." },
+          "apiKey": { "type": "string", "description": "Organization API key; unset disables the runtime connection (and with it every guard)." },
+          "agentId": { "type": "string", "description": "agent_id claim — WHICH agent, unique in the organization." },
+          "agentType": { "type": "string", "description": "agent_type claim — what KIND of agent (default \"openclaw\")." },
+          "workspace": { "type": "string", "description": "agent_workspace claim — the platform policy group, NOT a directory." },
+          "owner": { "type": "string", "description": "agent_owner claim — the responsible party." },
+          "user": { "type": "string", "description": "agent_user claim — who is using the assistant." }
         }
+      },
+      "failMode": {
+        "type": "string",
+        "enum": ["open", "closed"],
+        "description": "Degraded-mode posture when the runtime cannot answer: open (default) proceeds loudly, closed refuses the action."
+      },
+      "timeoutMs": {
+        "type": "number",
+        "description": "Per-call evaluate budget in milliseconds (default 5000)."
       },
       "guardMessages": {
         "type": "boolean",
-        "description": "Also evaluate inbound/outbound channel messages (defaults to true)."
+        "description": "Also judge outbound channel messages, not just tool calls (default true)."
       }
     }
   }

@@ -4,23 +4,23 @@ build-backend = "hatchling.build"
 
 [project]
 name = "openguardrails-gateway-mitmproxy"
-version = "0.2.0"
-description = "OpenGuardrails gateway-hook integration: a mitmproxy addon that enforces the OGR runtime policy on LLM traffic."
+version = "1.0.0"
+description = "OpenGuardrails v0.8 gateway integration: a mitmproxy addon that speaks the Runtime API directly (two POSTs per proxied model call)."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
 authors = [{ name = "OpenGuardrails" }]
 keywords = ["ai", "agent", "security", "guardrails", "llm", "gateway", "proxy", "mitmproxy", "ogr"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Topic :: Security",
 ]
 
-# A PEP binding: the addon talks the OGR protocol to the hosted runtime PDP
-# through the core SDK (`openguardrails.client.RuntimeClient`) — it carries no
-# detection logic and vendors no policy model.
-dependencies = ["mitmproxy>=10.0", "openguardrails>=0.2.0"]
+# v0.8: there is no SDK layer. The addon hand-rolls its two HTTP calls with
+# the stdlib; mitmproxy is the only dependency, and only at proxy runtime —
+# the tests drive the hook logic with fabricated flows and run without it.
+dependencies = ["mitmproxy>=10.0"]
 
 [project.urls]
 Homepage = "https://openguardrails.com"
@@ -28,4 +28,6 @@ Specification = "https://github.com/openguardrails/openguardrails/tree/main/spec
 Source = "https://github.com/openguardrails/openguardrails/tree/main/integrations/gateway/mitmproxy"
 
 [tool.hatch.build.targets.wheel]
-packages = ["ogr_mitmproxy"]
+# The addon is one file, loaded by path (`mitmdump -s addon.py`), not imported
+# as an installed package.
+only-include = ["addon.py"]

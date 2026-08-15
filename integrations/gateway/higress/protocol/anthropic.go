@@ -491,6 +491,16 @@ func (d *anthropicDecoder) Flush() string {
 	return out.String()
 }
 
+// ContentBytes — see protocol.ContentMeter. Every block kind is client-visible
+// content (text, thinking, tool_use partial JSON), so it is the sum of the buffers.
+func (d *anthropicDecoder) ContentBytes() int {
+	n := 0
+	for _, b := range d.blocks {
+		n += b.buf.Len()
+	}
+	return n
+}
+
 func (d *anthropicDecoder) Output() Output {
 	var out Output
 	var text, reasoning strings.Builder

@@ -20,10 +20,10 @@ import (
 // decoder (protocol/sse.go), so there is no protocol whose stream this build can only
 // shrug at.
 //
-// v0.7 addition: the processor OBSERVES TIMING. The canonical `step/response` payload
-// carries `timing {started_at, first_token_at, completed_at}` — facts only the thing
-// in the byte path can measure, and what lets the platform split time-to-first-token
-// from decoding.
+// The processor also OBSERVES TIMING. The canonical `step/response` payload carries
+// `timing {started_at, first_token_at, completed_at}` — facts only the thing in the
+// byte path can measure, and what lets the platform split time-to-first-token from
+// decoding.
 
 // maxRawAccum bounds the copy kept of a non-streamed reply. Past it the reply is still
 // delivered whole and simply reported truncated: a huge answer must not turn into a
@@ -102,6 +102,19 @@ func (s *streamProcessor) ProcessChunk(chunk []byte, isLast bool) []byte {
 
 // Bytes is how much the upstream sent.
 func (s *streamProcessor) Bytes() int { return s.bytes }
+
+// ContentBytes is how much CLIENT-VISIBLE content (text, reasoning, tool-call
+// arguments — no SSE framing) has been reassembled so far, in UTF-8 bytes. The
+// tail-hold lane asks after every chunk, which is why it is a builder-length sum
+// (protocol.ContentMeter) and not a rebuild of the reply. For a non-SSE body there
+// is no per-frame content to meter and the tail-hold buffers the whole reply
+// anyway, so the raw byte count is returned for the log's benefit only.
+func (s *streamProcessor) ContentBytes() int {
+	if !s.sse {
+		return s.raw.Len()
+	}
+	return s.scan.ContentBytes()
+}
 
 // SawBytes reports whether there was anything to read at all.
 func (s *streamProcessor) SawBytes() bool { return s.bytes > 0 }

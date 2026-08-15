@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
-# End-to-end: drive the built auto-mode hook against a LIVE OGR runtime.
+# End-to-end: drive the auto-mode hook against a LIVE OGR runtime (v0.8).
 #
 # Prereqs:
-#   - an OGR runtime reachable at $OGR_RUNTIME_URL with the action-classifier
-#     enabled (legacy alias: $OGR_SERVER)
-#   - a workspace API key in $OGR_API_KEY (legacy alias: $OGR_ENROLL_TOKEN)
-#   - `npm run build` already run
+#   - an OGR runtime reachable at $OGR_RUNTIME_URL (legacy alias: $OGR_SERVER)
+#   - an organization API key in $OGR_API_KEY (legacy alias: $OGR_ENROLL_TOKEN)
+#   (no build step — the hook is its own source)
 #
 # Usage:
 #   OGR_RUNTIME_URL=http://127.0.0.1:8878 OGR_API_KEY=ogr_... test/e2e.sh
@@ -19,8 +18,8 @@ export OGR_API_KEY="${OGR_API_KEY:-${OGR_ENROLL_TOKEN:-}}"
 : "${OGR_API_KEY:?set OGR_API_KEY (or OGR_ENROLL_TOKEN)}"
 export OGR_AGENT_ID="${OGR_AGENT_ID:-codex-e2e}"
 
-# A real reasoning-blind rollout: user text + assistant prose (the prose must
-# never reach the runtime).
+# A realistic rollout: in v0.8 the current generation's prose rides on the
+# canonical payload as `text` — the judge wants it alongside the call.
 ROLLOUT="$(mktemp)"
 cat >"$ROLLOUT" <<'EOF'
 {"timestamp":"t","type":"session_meta","payload":{}}
