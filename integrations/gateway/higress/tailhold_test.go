@@ -100,3 +100,101 @@ func TestDropDiscardsTheTail(t *testing.T) {
 		t.Fatalf("dropped tail still held: %q", got)
 	}
 }
+
+/*
+ * THE SPECULATIVE HEAD (3.1.0). The queue half stays pure, so the arithmetic that
+ * decides how much of an unjudged answer reaches the caller is testable without a
+ * gateway — which matters more here than anywhere else in this file, because the
+ * quantity under test IS the security cost of the feature.
+ */
+func TestPushHeadStopsAtBudget(t *testing.T) {
+	h := newTailHold(0, true) // no tail, so only the head budget bounds anything
+	released := 0
+	var out [][]byte
+	cum := 0
+	for i := 0; i < 10; i++ {
+		chunk := []byte("0123456789") // 10 content bytes per chunk
+		cum += len(chunk)
+		out = append(out, h.pushHead(chunk, cum, 25, &released)...)
+	}
+	total := 0
+	for _, seg := range out {
+		total += len(seg)
+	}
+	// Release granularity is the CHUNK, so the bound is "stops once past the budget",
+	// never "emits exactly the budget" — the same floor/ceiling rule the tail follows.
+	if released < 25 || released > 35 {
+		t.Fatalf("released %d bytes, want the first chunk past a 25-byte budget", released)
+	}
+	if total != released {
+		t.Fatalf("counter %d disagrees with the bytes emitted %d", released, total)
+	}
+}
+
+func TestShortAnswerReleasesNothingSoARefusalStaysClean(t *testing.T) {
+	/*
+	 * ⚠️ THE PROPERTY THE WHOLE DESIGN LEANS ON. An answer shorter than the tail
+	 * releases NOTHING even with a head budget, so `sawRelease()` is false and
+	 * `finishBlocked` renders a CLEAN REFUSAL rather than a retraction. The case that
+	 * matters most — unsafe question, model refuses on its own in one sentence — has
+	 * to land here by arithmetic, with no special case.
+	 */
+	h := newTailHold(200, true)
+	released := 0
+	var out [][]byte
+	cum := 0
+	for _, chunk := range []string{"抱歉，", "我不能", "回答这个问题。"} {
+		cum += len(chunk)
+		out = append(out, h.pushHead([]byte(chunk), cum, headReleaseBytes, &released)...)
+	}
+	if len(out) != 0 || released != 0 {
+		t.Fatalf("released %d bytes of a %d-byte answer; a refusal must stay whole", released, cum)
+	}
+	if h.sawRelease() {
+		t.Fatal("sawRelease() true ⇒ finishBlocked would RETRACT instead of refusing")
+	}
+}
+
+func TestReleaseDrainsOnceTheVerdictLifted(t *testing.T) {
+	h := newTailHold(10, true)
+	released := 0
+	cum := 0
+	for i := 0; i < 5; i++ {
+		cum += 10
+		h.pushHead([]byte("0123456789"), cum, 0, &released) // budget 0 = hold everything
+	}
+	if released != 0 {
+		t.Fatalf("a zero head budget released %d bytes", released)
+	}
+	// The verdict lands: everything except the tail may go.
+	got := 0
+	for _, seg := range h.release(cum) {
+		got += len(seg)
+	}
+	if got != 40 {
+		t.Fatalf("released %d of 50 content bytes, want 40 (10 held as the tail)", got)
+	}
+}
+
+func TestSpeculativeRequiresEnforceStreamingAndFailOpen(t *testing.T) {
+	streaming := &reqState{streaming: true}
+	buffered := &reqState{streaming: false}
+	open := Config{mode: modeEnforce}
+	closed := Config{mode: modeEnforce, failClosed: true}
+	observe := Config{mode: modeObserve}
+
+	if !speculative(open, streaming) {
+		t.Fatal("enforce + streaming + fail-open must speculate")
+	}
+	// ⚠️ fail-CLOSED is the safety one: releasing a head puts unjudged bytes on the
+	// wire on the happy path, which is the literal thing `closed` forbids.
+	if speculative(closed, streaming) {
+		t.Fatal("fail-closed must not release an unjudged head")
+	}
+	if speculative(open, buffered) {
+		t.Fatal("a buffered reply has no head to release early")
+	}
+	if speculative(observe, streaming) {
+		t.Fatal("observe holds nothing; there is no latency here to remove")
+	}
+}
