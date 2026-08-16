@@ -140,11 +140,22 @@ func applySpans(body string, spans []Span) (string, int, int, map[string]string)
 // spliceRunes replaces [start,end) — counted in CHARACTERS — with the replacement,
 // returning the new text and the bytes displaced.
 //
-// ⚠️ Characters, not bytes: the producers count code points (Python detectors,
-// JavaScript runtime), and Go indexes bytes. On Chinese text — three bytes per
-// character — a byte splice lands a third of the way into the span, masks a fragment
-// that matches nothing, and the value the verdict asked us to remove goes to the
-// model untouched while the log says "masked". Found exactly that way on 2026-07-30.
+// ⚠️ Characters, not bytes: the producers count code points and Go indexes bytes. On
+// Chinese text — three bytes per character — a byte splice lands a third of the way
+// into the span, masks a fragment that matches nothing, and the value the verdict
+// asked us to remove goes to the model untouched while the log says "masked". Found
+// exactly that way on 2026-07-30.
+//
+// ⚠️ This comment used to name "the JavaScript runtime" among the producers that
+// count code points, and that was WRONG — JS string indices count UTF-16 CODE UNITS,
+// so every astral character (emoji, CJK Ext-B) before a span shifted the runtime's
+// regex-derived offsets one to the right per character. Python's `str` does index code
+// points, so the model spans were always right and only the runtime's own deterministic
+// detectors drifted; BMP text is identical under both counts, which is why it survived
+// every Chinese and English test. Fixed on the RUNTIME side (`policy-engine/
+// spanOffsets.ts`, 2026-08-16) because that is where the unit is known — a span here
+// carries no marking of which producer made it. Nothing changed in this file; the note
+// is here so the premise is not re-assumed.
 func spliceRunes(text string, start, end int, replacement string) (string, string, bool) {
 	startByte, endByte, ok := runeRange(text, start, end)
 	if !ok {

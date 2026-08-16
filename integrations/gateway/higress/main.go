@@ -439,7 +439,42 @@ type reqState struct {
 	// the parsed content would drop tool_calls, ids and usage. See tailhold.go.
 	owned bool
 	hold  *tailHold
+
+	// --- SPECULATIVE EXECUTION (3.1.0, docs/two-lane-streaming.md) -------------
+	//
+	// The request is forwarded once the FAST lane has masked it, without waiting
+	// for the content judges; the deep verdict lands during the response phase and
+	// decides whether the stream keeps flowing.
+
+	// spec: this step took the two-lane path. False ⇒ every field below is inert
+	// and the response behaves exactly as 3.0.x did.
+	spec bool
+	// input is the deep request-half verdict: pending → allow | clamped.
+	input inputState
+	// released counts client-visible content bytes let out while `input` was still
+	// pending — bounded by headReleaseBytes, which is what keeps the exposure
+	// independent of how slow the judge is.
+	released int
+	// sp is the stream reassembler, kept so a verdict landing AFTER end-of-stream
+	// can still run the final judgement.
+	sp *streamProcessor
+	// ended: the upstream stream is complete and the final judgement is waiting on
+	// `input`. ⚠️ Without this the response half could be put to the PDP while the
+	// request half was still in flight — two evaluates for one step, concurrently,
+	// which is exactly the case a short refusal ("我不能回答", five tokens) produces.
+	ended bool
+	// lastOut is when a byte last reached the caller, for the keepalive below.
+	lastOut time.Time
 }
+
+// inputState is the three-state hold (docs/two-lane-streaming.md §3).
+type inputState int
+
+const (
+	inputPending inputState = iota
+	inputAllow
+	inputClamped
+)
 
 // --- request path -----------------------------------------------------------
 
@@ -656,8 +691,160 @@ func onRequestBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Actio
 		rs.sentAt = time.Now()
 		return types.ActionContinue
 	}
+	if speculative(cfg, rs) {
+		startSpeculative(ctx, cfg, rs, e, string(body))
+		return types.ActionPause
+	}
 	enforceRequest(ctx, cfg, rs, e, string(body))
 	return types.ActionPause
+}
+
+/*
+ * SPECULATIVE EXECUTION — three conditions, and each one is load-bearing.
+ *
+ *   enforce   observe already answers instantly and holds nothing; there is no
+ *             latency here to remove.
+ *   streaming a buffered reply has no head to release early, so the whole thing
+ *             would be held anyway — the spec's own `tail = ∞` limit case — and
+ *             the caller waits for the full generation either way. Serial is
+ *             simpler and costs that caller nothing.
+ *   fail-OPEN ⚠️ THE ONE THAT IS ABOUT SAFETY. Releasing the head puts unjudged
+ *             bytes on the wire on the HAPPY PATH, on every request — which is
+ *             the literal thing `closed` says must not happen. The fast lane
+ *             also reports its deferrals in `x.ogr.unjudged`, so a fail-closed
+ *             deployment would refuse every request anyway. Binding both to
+ *             `fail_mode` is why this feature adds no configuration of its own:
+ *             the setting that already means "may unjudged content proceed"
+ *             answers here too.
+ */
+func speculative(cfg Config, rs *reqState) bool {
+	return cfg.mode == modeEnforce && rs.streaming && !cfg.failClosed
+}
+
+/*
+ * The FAST lane: deterministic detection only (regex + checksums, no model call
+ * in the runtime at all), awaited because MASKING CANNOT BE APPLIED LATE — once
+ * the body is forwarded, `ReplaceHttpRequestBody` is gone and the raw prompt is
+ * in the model's context. Everything else waits beside the model instead.
+ */
+func startSpeculative(ctx wrapper.HttpContext, cfg Config, rs *reqState, e *GuardEvent, body string) {
+	rs.spec = true
+	mirrorEvent(cfg, e)
+
+	payload, err := json.Marshal(e)
+	if err != nil {
+		finishRequest(ctx, rs, body)
+		return
+	}
+	err = cfg.client.Post(cfg.evaluatePath, laneHeaders(cfg, laneFast), payload,
+		func(status int, _ http.Header, respBody []byte) {
+			onFastVerdict(ctx, cfg, rs, payload, body, status, respBody)
+		}, cfg.timeoutMs)
+	if err != nil {
+		logConditionf("req.dispatch", "[OGR-FAST] dispatch failed: %v", err)
+		// Fail-OPEN by construction here (speculative implies it): forward unmasked
+		// and let the deep lane still judge the step. ⚠️ Unmasked is the honest cost
+		// of a PDP we could not reach — say so rather than logging "masked".
+		bump(cntUnchecked, 1)
+		logInfof("[OGR-FAST] request forwarded UNMASKED (fast lane unreachable)")
+		startDeepLane(ctx, cfg, rs, payload)
+		armTailHold(ctx, cfg, rs)
+		finishRequest(ctx, rs, body)
+	}
+}
+
+func onFastVerdict(ctx wrapper.HttpContext, cfg Config, rs *reqState,
+	payload []byte, outBody string, status int, respBody []byte) {
+	v := parseVerdict(respBody)
+	if status != 200 || !v.Usable() {
+		logConditionf("fast.status", "[OGR-FAST] status=%d usable=%v — forwarding UNMASKED",
+			status, v.Usable())
+		bump(cntUnchecked, 1)
+	} else {
+		bump(cntEvaluated, 1)
+		/*
+		 * ⚠️ A fast-lane BLOCK still blocks, and this is the one place speculation
+		 * does not defer. The deterministic detectors answer about VALUES — a secret,
+		 * a national id — and "this must not reach the model" is a decision that has
+		 * to be made before the body is forwarded or it cannot be made at all. The
+		 * content judges are the ones whose refusal a stream can carry out later.
+		 */
+		if v.Stops() {
+			bump(cntRefused, 1)
+			answer(ctx, rs, v.Reason())
+			return
+		}
+		if spans := v.Spans(); len(spans) > 0 {
+			masked, applied, unresolved, learned := applySpans(outBody, spans)
+			logUnresolvedSpans(unresolved)
+			if applied > 0 {
+				outBody = masked
+				rs.session.adopt(learned)
+				logInfof("[OGR-FAST] applied %d spans, %d tokens live", applied, len(rs.session.Mapping))
+			}
+		}
+	}
+
+	// The judges run BESIDE the model from here. Dispatched before the resume so the
+	// two really do start together — a dispatch after `ResumeHttpRequest` is a
+	// dispatch after the host may already have begun the upstream call.
+	startDeepLane(ctx, cfg, rs, payload)
+	armTailHold(ctx, cfg, rs)
+
+	if inj, ok := rs.proto.(protocol.StreamUsageEnsurer); ok {
+		if next, injected := inj.EnsureStreamUsage(outBody); injected {
+			outBody = next
+			rs.injectedUsage = true
+		}
+	}
+	finishRequest(ctx, rs, outBody)
+}
+
+/*
+ * The DEEP lane: a normal, full evaluate of the SAME request event, in flight while
+ * the model prefills. It is the call that RECORDS the step — it re-runs the
+ * deterministic detectors (microseconds) so one verdict holds both families of
+ * finding, which is why the fast lane above records nothing.
+ *
+ * ⚠️ Its callback lands in the RESPONSE phase, and that is supported rather than
+ * lucky: the SDK restores the caller's stream context by `callerContextID` and drops
+ * the callback outright if that context is already destroyed
+ * (proxy-wasm-go-sdk `abi_callback_l7.go`).
+ */
+func startDeepLane(ctx wrapper.HttpContext, cfg Config, rs *reqState, payload []byte) {
+	err := cfg.client.Post(cfg.evaluatePath, ogrHeaders(cfg), payload,
+		func(status int, _ http.Header, respBody []byte) {
+			onDeepVerdict(ctx, cfg, rs, status, respBody)
+		}, cfg.timeoutMs)
+	if err != nil {
+		logConditionf("deep.dispatch", "[OGR-DEEP] dispatch failed: %v", err)
+		bump(cntUnchecked, 1)
+		settleInput(ctx, cfg, rs, inputAllow)
+	}
+}
+
+/*
+ * The deep verdict decides whether the stream KEEPS FLOWING. It never refuses on its
+ * own: the request is already with the model, so what a block buys here is that the
+ * answer stops leaking and is judged WHOLE at end of stream — the spec's measured
+ * position (whole-reply false positives 0.000 against 0.353 at 25% visibility).
+ */
+func onDeepVerdict(ctx wrapper.HttpContext, cfg Config, rs *reqState, status int, respBody []byte) {
+	v := parseVerdict(respBody)
+	if status != 200 || !v.Usable() {
+		evaluateFailed("DEEP", status, cfg.failClosed)
+		// Speculative implies fail-open; keep the stream flowing and let the
+		// end-of-stream judgement be the enforcement point it already is.
+		settleInput(ctx, cfg, rs, inputAllow)
+		return
+	}
+	bump(cntEvaluated, 1)
+	if v.Stops() {
+		logInfof("[OGR-DEEP] request judged block — clamping the stream, judging the whole answer")
+		settleInput(ctx, cfg, rs, inputClamped)
+		return
+	}
+	settleInput(ctx, cfg, rs, inputAllow)
 }
 
 // enforceRequest puts the step's request half to the PDP, holding the request.
@@ -1099,6 +1286,28 @@ func evaluateFailed(phase string, status int, failClosed bool) {
 	}
 	bump(cntUnchecked, 1)
 	logInfof("[OGR-%s] the model's reply reached the caller UNJUDGED (fail-open): %s", phase, why)
+}
+
+/*
+ * THE LANE HEADER. `ogr-lane: fast` asks the runtime for the deterministic half only —
+ * regex and checksums, no model call — and it answers in ~50ms with the spans this
+ * filter must splice before forwarding.
+ *
+ * ⚠️ A HEADER rather than a body field, because the lane is a property of THIS CALL and
+ * not of the event: the two lanes send byte-identical payloads, which is what lets the
+ * fast lane's marshalled bytes be reused for the deep one instead of re-serialising a
+ * 40 KB prompt.
+ *
+ * ⚠️ There is no `deep` value, on purpose. The second call is an ORDINARY evaluate: it
+ * re-runs the deterministic detectors (microseconds) so that one verdict — the recorded
+ * one — carries both families of finding. A runtime that has never heard of lanes
+ * therefore treats the deep call correctly and only mis-handles the fast one, which is
+ * the safe direction for a half-upgraded deployment: it judges MORE than asked, slowly.
+ */
+const laneFast = "fast"
+
+func laneHeaders(cfg Config, lane string) [][2]string {
+	return append(ogrHeaders(cfg), [2]string{"ogr-lane", lane})
 }
 
 func ogrHeaders(cfg Config) [][2]string {

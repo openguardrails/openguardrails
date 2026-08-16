@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/higress-group/proxy-wasm-go-sdk/proxywasm"
 	"github.com/higress-group/wasm-go/pkg/wrapper"
@@ -108,6 +109,42 @@ func (h *tailHold) push(out []byte, cumContent int) [][]byte {
 	return release
 }
 
+/*
+ * pushHead queues a chunk and releases only while fewer than `budget` content bytes
+ * have gone out — the SPECULATIVE head (see headReleaseBytes).
+ *
+ * ⚠️ The tail rule still applies on top, so this can only ever release LESS than the
+ * ordinary arithmetic would. That ordering is what produces the clean-refusal property
+ * for short answers: with `total <= tail` the inner push releases nothing at all,
+ * whatever the head budget says.
+ */
+func (h *tailHold) pushHead(out []byte, cumContent, budget int, released *int) [][]byte {
+	if *released >= budget {
+		h.add(out, cumContent)
+		return nil
+	}
+	segs := h.push(out, cumContent)
+	for _, seg := range segs {
+		*released += len(seg)
+	}
+	return segs
+}
+
+// release drains whatever the tail arithmetic now permits, queueing nothing new. The
+// entry point for a verdict that arrives mid-stream and lifts the head budget.
+func (h *tailHold) release(cumContent int) [][]byte {
+	if h.tail < 0 {
+		return nil
+	}
+	var out [][]byte
+	for len(h.segs) > 0 && cumContent-h.segs[0].cumContent >= h.tail {
+		out = append(out, h.segs[0].bytes)
+		h.segs = h.segs[1:]
+		h.released = true
+	}
+	return out
+}
+
 // add queues a chunk without releasing anything — the isLast entry point.
 func (h *tailHold) add(out []byte, cumContent int) {
 	if len(out) == 0 {
@@ -161,19 +198,143 @@ func holdChunk(ctx wrapper.HttpContext, cfg Config, rs *reqState, sp *streamProc
 	if rs.hold == nil {
 		rs.hold = newTailHold(cfg.streamTailChars, ctx.GetBoolContext(ctxStreaming, true))
 	}
+	rs.sp = sp
 	if !isLast {
-		for _, seg := range rs.hold.push(out, sp.ContentBytes()) {
-			if err := proxywasm.InjectEncodedDataToFilterChain(seg, false); err != nil {
-				proxywasm.LogErrorf("[OGR-TAIL] inject failed: %v", err)
-			}
+		switch {
+		case !rs.spec || rs.input == inputAllow:
+			// 3.0.x behaviour, and the state a speculative step reaches the moment its
+			// deep verdict allows: ordinary tail arithmetic.
+			emit(rs, rs.hold.push(out, sp.ContentBytes()))
+		case rs.input == inputPending:
+			// ⚠️ THE HEAD, and it is bounded by a CONSTANT rather than by how slow the
+			// judge is. With no bound the exposure is `judge latency × token rate` and
+			// drifts with the caller's context size — a coding agent shipping 64 KB of
+			// conversation would leak proportionally more than a chatbot for the same
+			// setting. See headReleaseBytes.
+			emit(rs, rs.hold.pushHead(out, sp.ContentBytes(), headReleaseBytes, &rs.released))
+			keepalive(rs)
+		default: // inputClamped
+			// Nothing more reaches the caller. The answer is still reassembled — it has
+			// to be judged whole at end of stream — it just stops being delivered.
+			rs.hold.add(out, sp.ContentBytes())
+			keepalive(rs)
 		}
 		return nil
 	}
 	// The stream's last chunk is queued and NEVER released by arithmetic: whatever
 	// the configured tail, the frames that complete the answer wait for the verdict.
 	rs.hold.add(out, sp.ContentBytes())
+	rs.ended = true
+	/*
+	 * ⚠️ **THE FINAL JUDGEMENT WAITS FOR THE REQUEST HALF**, and the case that makes
+	 * this necessary is the common one rather than a corner: an unsafe question whose
+	 * model refuses on its own produces a five-token answer, so the stream ends while
+	 * the deep lane is still in flight. Firing here would put two evaluates for ONE
+	 * step to the runtime concurrently — and the runtime's ledger assignment is not
+	 * built for that. `settleInput` runs it instead, when the verdict lands.
+	 */
+	if rs.spec && rs.input == inputPending {
+		return nil
+	}
 	judgeFinal(ctx, cfg, rs, sp)
 	return nil
+}
+
+/*
+ * headReleaseBytes — how much of a streamed answer may reach the caller BEFORE the
+ * request has been judged. Counted in the same unit as the tail: UTF-8 bytes of
+ * client-visible content, never SSE framing.
+ *
+ * ⚠️ **A CONSTANT, deliberately not configuration.** Bounding it is what makes the
+ * exposure independent of judge latency; a per-deployment value would put that drift
+ * straight back. 64 bytes is one or two frames — enough for a client to render "the
+ * stream started", under one sentence of leak.
+ *
+ * ⚠️ **It composes with the tail, and the result is a gift.** Released content is
+ * `max(0, min(head, total − tail))`, so an answer shorter than head+tail releases
+ * NOTHING, `sawRelease()` stays false, and `finishBlocked` takes the CLEAN REFUSAL
+ * branch instead of the retraction one. The case that matters most — unsafe question,
+ * model refuses on its own, one short sentence — lands there by arithmetic, with no
+ * special case anywhere.
+ */
+const headReleaseBytes = 64
+
+// keepaliveAfter is how long a clamped stream may go silent before this filter puts a
+// comment frame on the wire.
+//
+// ⚠️ Not cosmetic. A clamped stream can be silent for the whole of a long generation
+// (a coding agent runs 30s+), and a client reading an already-open SSE stream that goes
+// quiet for that long is cut by its own or an intermediary's idle timeout — which reads
+// as the gateway hanging, the exact failure the non-completion escape hatch exists to
+// prevent elsewhere. An SSE comment resets every read timer and no client parses it.
+//
+// ⚠️ Driven by UPSTREAM CHUNKS, not by a timer: proxy-wasm has no per-stream clock, and
+// it needs none — the ticks we need are exactly the moments the model is producing.
+// An upstream that has itself gone silent is not ours to paper over.
+const keepaliveAfter = 10 * time.Second
+
+func keepalive(rs *reqState) {
+	if rs.hold == nil || !rs.hold.sse {
+		return // a JSON reply has no comment syntax to hide a keepalive in
+	}
+	now := time.Now()
+	if rs.lastOut.IsZero() {
+		rs.lastOut = now
+		return
+	}
+	if now.Sub(rs.lastOut) < keepaliveAfter {
+		return
+	}
+	rs.lastOut = now
+	if err := proxywasm.InjectEncodedDataToFilterChain([]byte(": ogr\n\n"), false); err != nil {
+		proxywasm.LogErrorf("[OGR-TAIL] keepalive inject failed: %v", err)
+	}
+}
+
+// emit writes released segments to the caller and stamps the keepalive clock.
+func emit(rs *reqState, segs [][]byte) {
+	for _, seg := range segs {
+		if err := proxywasm.InjectEncodedDataToFilterChain(seg, false); err != nil {
+			proxywasm.LogErrorf("[OGR-TAIL] inject failed: %v", err)
+		}
+		rs.lastOut = time.Now()
+	}
+}
+
+/*
+ * settleInput records the deep request-half verdict and unblocks whatever was waiting
+ * on it. Called exactly once per speculative step, from the deep lane's callback.
+ *
+ * ⚠️ Everything here has to tolerate arriving BEFORE the response phase began (the
+ * common case on a fast judge), DURING it, or AFTER end of stream. The three are
+ * distinguished by `rs.hold == nil`, `!rs.ended` and `rs.ended`; none of them is an
+ * error, and the last one is what a short refusal produces.
+ */
+func settleInput(ctx wrapper.HttpContext, cfg Config, rs *reqState, state inputState) {
+	if rs.input != inputPending {
+		return // one verdict per step; a second would re-release a dropped tail
+	}
+	rs.input = state
+
+	/*
+	 * ⚠️ Nothing to do if the response never became ours. A non-200 upstream (a 503, a
+	 * key-auth 401, a limiter 429) sets `ctxNotModel` and the stream is passed through
+	 * unheld — injecting into it here would be writing into a chain this filter does
+	 * not own. `answered` is the twin case: this filter already produced the whole
+	 * reply itself.
+	 */
+	if ctx.GetBoolContext(ctxNotModel, false) || ctx.GetBoolContext(ctxAnswered, false) {
+		return
+	}
+	if rs.ended {
+		judgeFinal(ctx, cfg, rs, rs.sp)
+		return
+	}
+	if state == inputAllow && rs.hold != nil && rs.sp != nil {
+		// Release whatever the tail arithmetic now permits — the head budget stopped
+		// applying the moment the request was judged.
+		emit(rs, rs.hold.release(rs.sp.ContentBytes()))
+	}
 }
 
 // judgeFinal puts the COMPLETE answer to the PDP — the step's one and only
