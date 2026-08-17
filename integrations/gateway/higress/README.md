@@ -16,7 +16,7 @@ It is called **OpenGuardrails Runtime** in the Higress console;
                           LLM upstream
 ```
 
-## The v0.8 shape: a raw forwarder, nine fields
+## The v0.8 shape: a raw forwarder, nine fields + the build id
 
 One proxied model call is one **step**, reported as two `/v1/evaluate` events:
 
@@ -29,11 +29,19 @@ Both carry a plugin-minted `step_id` — a fresh opaque id per proxied call,
 never reused, and never taken from `x-request-id` (a client retry could repeat
 that). It is the one coordinate v0.8 kept, because concurrency makes it
 underivable; everything above it is derived server-side, always. The event is
-EXACTLY nine fields, all required: `kind`, `step_id`, the identity five-tuple
-(empty string = explicit "no assertion"), `llm_protocol`, `payload`. No
-`ogr_version` (the runtime adapts), no `timestamp` (receive time), no
-`integration` build id (that fact lives on the heartbeat now), no declared
-coordinates and no coordinate echo on the verdict.
+nine required fields — `kind`, `step_id`, the identity five-tuple (empty string
+= explicit "no assertion"), `llm_protocol`, `payload` — plus `integration`, the
+one optional one. No `ogr_version` (the runtime adapts), no `timestamp` (receive
+time), no declared coordinates and no coordinate echo on the verdict.
+
+`integration` is this plugin's own `name/version` (e.g. `ogr-higress/3.2.0`),
+stamped on every event since **3.2.0**. It was heartbeat-only in 3.0.0–3.1.0,
+which turned out to answer coverage but not triage: a runtime keys its liveness
+row on the integration NAME, so this gateway's replicas and any other
+`ogr-higress` under the same tenant collapse into ONE row whose version is
+whoever beat last — and a beat can go quiet on its own precisely when a bad
+rollout is what you are naming. Per-event, the build travels with the traffic it
+produced and nothing can overwrite it.
 
 **Nothing is decomposed client-side.** Earlier versions classified the
 conversation into turns, actions and outcomes, itemised history, fingerprinted
@@ -127,17 +135,38 @@ self-hosted gateway, by a header-injection rule on the route). Three more
 renameable headers carry `agent_type`, `agent_owner`, `agent_user`. Owner and
 user are attributes; they never select policy.
 
+### The default headers
+
+Nothing has to be configured for identity to work. Each field is read from a
+header (a CHAIN for id and workspace — first non-empty wins), falling back to
+a static config value, and `agent_id` falls back once more to the credential
+fingerprint floor:
+
+| field | default header(s) | static fallback | rename with | asserted by |
+|---|---|---|---|---|
+| `agent_id` | `x-ogr-agent-id` → `x-mse-consumer` | `agent_id`, then `caller-<hash>` | `agent_id_header` | **the gateway** |
+| `agent_type` | `x-ogr-agent-type` | `agent_type` | `agent_type_header` | the client |
+| `agent_workspace` | `x-ogr-agent-workspace` → `x-mse-consumer-group` | `agent_workspace` | `agent_workspace_header` | **the gateway** |
+| `agent_owner` | `x-ogr-agent-owner` | `agent_owner` | `agent_owner_header` | **the gateway** |
+| `agent_user` | `x-ogr-agent-user` | *(none — per-session by nature)* | `agent_user_header` | the client |
+
+⚠️ **Configuring a `*_header` REPLACES the whole chain** with that one header;
+it does not extend it. A field that resolves to nothing is sent as the empty
+string — the spec's explicit "no assertion", never an error — and the runtime
+falls back to what the API key says. The spec's cross-gateway version of this
+table is [Runtime API § at a gateway](../../../specification/runtime-api.md#at-a-gateway-the-five-tuple-arrives-as-headers).
+
 ### Who gets to say what (2.1.0)
 
 The five identity fields split in two, and the split is the security model:
 
-| field | asserted by | header(s) | why |
-|---|---|---|---|
-| `agent_id` | **the gateway** | `x-ogr-agent-id`, else `x-mse-consumer` | names the party; a client that could set it would pick its own audit trail |
-| `agent_workspace` | **the gateway** | `x-ogr-agent-workspace`, else `x-mse-consumer-group` | selects the POLICY SET — the one field a caller must never choose |
-| `agent_owner` | **the gateway** | `x-ogr-agent-owner` | the runtime backfills it once and never overwrites, so a forgery is permanent |
-| `agent_type` | the client | `x-ogr-agent-type` | which harness is running; only the client knows, and it selects nothing |
-| `agent_user` | the client | `x-ogr-agent-user` | changes per request; only the client knows |
+| field | asserted by | why |
+|---|---|---|
+| `agent_id` | **the gateway** | names the party; a client that could set it would pick its own audit trail |
+| `agent_workspace` | **the gateway** | selects the POLICY SET — the one field a caller must never choose |
+| `agent_owner` | **the gateway** | the runtime backfills it once and never overwrites, so a forgery is permanent |
+| `agent_type` | the client | which harness is running; only the client knows, and it selects nothing |
+| `agent_user` | the client | changes per request; only the client knows |
 
 ⚠️ **There is deliberately no consumer map in this plugin** — no
 credential→name list, no consumer→workspace list. The gateway's authenticator

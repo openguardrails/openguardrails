@@ -65,9 +65,32 @@ README, and `examples/minimal-agent/`.
   boundary, `finish_reason`, idle timeout). The accepted cost: "completed"
   vs "aborted" is invisible from outside.
 - **`ogr_version`** (the runtime adapts to what it receives; producers
-  never version-gate), **`timestamp`** (receive time), and **`integration`**
-  on events (the build id lives on the heartbeat, where fleet coverage and
-  bad-rollout triage read it).
+  never version-gate) and **`timestamp`** (receive time).
+
+### Reverted within v0.8
+- **`integration` is back on the event, as the one OPTIONAL field.** v0.8 had
+  moved the build id to the heartbeat alone. That reasoning holds for COVERAGE
+  and fails for TRIAGE, in two ways that are both silent. A runtime keys its
+  liveness record on the integration NAME — it must, so that a rollout updates
+  its row instead of minting a second and reporting the old build as dark —
+  which folds every deployment of one integration under a tenant into a single
+  row whose version is whichever beat landed last: two gateway replicas on
+  `ogr-higress/3.0.2` plus one lab instance on `3.1.0` produced one row reading
+  `3.1.0`, naming the only instance that was sending no traffic at all. And the
+  beat is a separate channel that can go quiet on its own (blocked egress, a
+  misconfigured plugin, a tick that never fires) exactly when a bad rollout is
+  what you are trying to name.
+
+  On the event neither can happen: the build travels with the traffic it
+  produced, no other reporter can overwrite it, and stored events can be split
+  by build to compare behaviour across a rollout. The heartbeat's copy stays the
+  LIVENESS signal; the event's copy is the TRIAGE signal.
+
+  Integrations SHOULD send it; runtimes MUST accept an event that omits it. That
+  asymmetry is what lets the two ends of a deployment roll forward
+  independently — requiring it would reject every build already in the field.
+  It remains a self-declared label: as trustworthy as the credential that
+  carried it, and never an input to authorization or policy selection.
 
 ## [v0.7] — the ledger model
 

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://openguardrails.com/schema/0.8/guard-event.schema.json",
   "title": "GuardEvent",
-  "description": "A unit observed at an OGR integration point, on the one observed plane: LLM messages. Two kinds: the two halves of a step (one model call). Every field is required; the empty string on an identity field is the explicit 'no assertion'. All fields are flat, top-level snake_case; objects are reserved for inherently structured data (payload).",
+  "description": "A unit observed at an OGR integration point, on the one observed plane: LLM messages. Two kinds: the two halves of a step (one model call). Every field is required except 'integration'; the empty string on an identity field is the explicit 'no assertion'. All fields are flat, top-level snake_case; objects are reserved for inherently structured data (payload).",
   "type": "object",
   "required": [
     "kind",
@@ -60,6 +60,11 @@
     "payload": {
       "type": "object",
       "description": "step/request: the untouched provider request body (or canonical {messages, tools?}). step/response: the untouched, complete provider response body — stream-reassembled if streamed — optionally with an integration-inserted top-level 'timing' key (or canonical {text?, reasoning?, tool_calls?, model?, usage?, timing?})."
+    },
+    "integration": {
+      "type": "string",
+      "maxLength": 128,
+      "description": "OPTIONAL, and the only optional field. WHO REPORTED IT — 'name/version', e.g. 'ogr-higress/3.0.2'. The name is the identity (a rollout must not read as a second integration); the version rides along so a bad build can be triaged from the traffic itself. Integrations SHOULD send it. A self-declared label, not proof: exactly as trustworthy as the credential that carried it, and a runtime MUST NOT derive trust from it."
     }
   }
 }
