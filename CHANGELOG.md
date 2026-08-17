@@ -92,6 +92,28 @@ README, and `examples/minimal-agent/`.
   It remains a self-declared label: as trustworthy as the credential that
   carried it, and never an input to authorization or policy selection.
 
+  **Every shipped integration now sends it** — higress, mitmproxy, the
+  openai/anthropic example gateway, claude-code, codex, dsh, hermes, langgraph,
+  litellm, openclaw and opencode. Each stamps it at its single send seam rather
+  than at each construction site: a second construction path is how a build id
+  goes missing on one kind of event only, which reads as "that half of the
+  traffic came from an unknown build" and is worse than sending nothing.
+
+### Added
+- **`instance_id` on the heartbeat**, optional, opaque, minted by the reporter
+  and stable for its process's life but NOT across restarts (a restarted process
+  has fresh counters; reusing the id would splice two series and make a monotonic
+  counter appear to go backwards).
+
+  A runtime MUST key the INTEGRATION record on the NAME — otherwise a rollout
+  mints a second row and reports the old build as dark — which makes `version`
+  and `counters` properties of an INSTANCE that were being stored on the
+  integration. So every replica silently overwrote the others: the record showed
+  whichever beat landed last. Runtimes MUST now record `version` and `counters`
+  per `(integration, instance_id)`, and MUST treat a beat without one as a single
+  unnamed instance, which reproduces the old collapse for older reporters but as
+  a row that says so rather than as a scalar being overwritten.
+
 ## [v0.7] — the ledger model
 
 The protocol adopts the vocabulary agent harnesses themselves use — **Session

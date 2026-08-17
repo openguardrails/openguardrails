@@ -105,10 +105,16 @@ def event_json(kind: str, step_id: str, identity: dict, llm_protocol: str,
 
     The envelope is ours to encode; the payload is the provider's body spliced
     in verbatim, so the event carries the strings exactly as transported. The
-    v0.8 event is EXACTLY these nine fields — no ogr_version, no coordinates,
-    no timestamp, no integration id (guard-event.md § what v0.8 removed)."""
+    v0.8 event is those nine required fields plus `integration` (restored
+    2026-08-17 as the one optional field) — no ogr_version, no coordinates, no
+    timestamp (guard-event.md § what v0.8 removed)."""
     head = json.dumps({"kind": kind, "step_id": step_id, **identity,
-                       "llm_protocol": llm_protocol}, ensure_ascii=False)
+                       "llm_protocol": llm_protocol,
+                       # WHO REPORTED IT — the one OPTIONAL v0.8 field, and the SAME
+                       # constant the heartbeat sends (two literals would drift and
+                       # each would look right alone). Stamped in this ONE builder so
+                       # it cannot go missing on one kind of event only.
+                       "integration": INTEGRATION}, ensure_ascii=False)
     return (head[:-1] + ', "payload": ' + payload_text + "}").encode("utf-8")
 
 

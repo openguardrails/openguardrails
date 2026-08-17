@@ -147,6 +147,15 @@ class OgrClient:
             **self.identity,
             "llm_protocol": llm_protocol,
             "payload": payload,
+            # WHO REPORTED IT — the one OPTIONAL v0.8 field. The SAME constant the
+            # heartbeat sends: two literals would drift and each would look right.
+            #
+            # It rode the heartbeat alone until 2026-08-17, which could not answer
+            # "which build produced this traffic": a runtime keys its liveness record
+            # on the integration NAME (it must, so a rollout updates that row rather
+            # than minting a second and reporting the old build as dark), so every
+            # replica overwrites the others' version.
+            "integration": INTEGRATION,
         }
         try:
             verdict = self._post("/v1/evaluate", event)

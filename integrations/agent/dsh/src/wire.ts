@@ -27,6 +27,12 @@
  * underivable, so the producer mints a fresh random id per model call and
  * puts the SAME value on both events.
  */
+/**
+ * WHO REPORTED IT — `"name/version"`, on every event AND on the heartbeat.
+ * One constant so the two can never name different builds.
+ */
+export const INTEGRATION = "ogr-dsh/0.3.0"
+
 export interface WireEvent {
   kind: "step/request" | "step/response"
   step_id: string
@@ -37,6 +43,19 @@ export interface WireEvent {
   agent_user: string
   llm_protocol: "openai.chat" | "openai.responses" | "anthropic.messages" | "canonical"
   payload: Record<string, unknown>
+  /**
+   * WHO REPORTED IT — `"name/version"`. The one OPTIONAL field on the v0.8
+   * wire, stamped by {@link OgrClient.evaluate} so it cannot be forgotten at a
+   * construction site.
+   *
+   * ⚠️ It rode the heartbeat ALONE until 2026-08-17, and that could not answer
+   * "which build produced this traffic": a runtime keys its liveness record on
+   * the integration NAME (it must, so a rollout updates its row instead of
+   * minting a second and reporting the old build as dark), so every replica
+   * overwrites the others' version. On the event the build travels with the
+   * traffic it produced and nothing can overwrite it.
+   */
+  integration?: string
 }
 
 /** One v0.8 finding — what was found, where, and what it contributed. */
@@ -144,7 +163,9 @@ export class OgrClient {
    */
   async evaluate(event: WireEvent): Promise<WireVerdict | null> {
     try {
-      const res = await this.post("/v1/evaluate", event)
+      // Stamped HERE, not at each construction site: one send path means the
+      // build id cannot go missing on one kind of event only.
+      const res = await this.post("/v1/evaluate", { ...event, integration: INTEGRATION })
       if (!res) return null
       if (!res.ok) {
         this.log.warn(`[openguardrails] evaluate answered ${res.status} — no verdict`)

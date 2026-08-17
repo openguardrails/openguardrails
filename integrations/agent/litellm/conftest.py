@@ -95,20 +95,28 @@ EVENT_FIELDS = {
     "llm_protocol",
     "payload",
 }
+
+#: The one OPTIONAL field (2026-08-17): ``integration``, the reporter's own
+#: ``"name/version"``. An ALLOWLIST, not a relaxation — an unknown key is still a
+#: violation; only a MISSING ``integration`` stopped being one, which is what lets
+#: a runtime and a reporter roll forward independently.
+OPTIONAL_FIELDS = {"integration"}
+
 IDENTITY_FIELDS = (
     "agent_id", "agent_type", "agent_workspace", "agent_owner", "agent_user",
 )
 
 
 def validate_event(body):
-    """STRICT v0.8: exactly the nine fields, correct enums and types."""
+    """STRICT v0.8: the nine required fields (plus the optional
+    `integration`), correct enums and types."""
     errors = []
     if not isinstance(body, dict):
         return ["body is not an object"]
     keys = set(body)
-    if keys != EVENT_FIELDS:
+    if keys < EVENT_FIELDS or keys - EVENT_FIELDS - OPTIONAL_FIELDS:
         errors.append(
-            f"key set mismatch: extra={sorted(keys - EVENT_FIELDS)} "
+            f"key set mismatch: extra={sorted(keys - EVENT_FIELDS - OPTIONAL_FIELDS)} "
             f"missing={sorted(EVENT_FIELDS - keys)}"
         )
         return errors

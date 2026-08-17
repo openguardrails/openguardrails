@@ -153,18 +153,31 @@ reporter is alive" answerable while it is emitting nothing. It is not the
 [GuardEvent](guard-event.md#integration), and that copy is the one to read when
 asking which build produced a given piece of traffic.
 
-⚠️ A runtime keys this record on the integration NAME, so that a rollout updates
-the row it has rather than minting a second and reporting the old build as dark.
-Several deployments of one integration under a tenant therefore SHARE this
-record, and the version it shows is whichever beat arrived last. A reader MUST
-NOT treat it as naming every instance, and MUST NOT conclude from it that no
-other build is sending traffic.
+⚠️ A runtime MUST key the INTEGRATION record on the NAME, so that a rollout
+updates the row it has rather than minting a second and reporting the old build
+as dark. `version` and `counters` are therefore properties of an INSTANCE and
+not of the integration — which is what `instance_id` exists to carry.
+
+**`instance_id`** is an opaque id the reporter mints for itself, stable for the
+life of the reporting process and NOT across restarts (a restarted process has
+fresh counters; reusing the id would splice two series and make a monotonic
+counter appear to go backwards). Reporters SHOULD send it. A runtime MUST record
+`version` and `counters` per `(integration, instance_id)`, and MUST treat a beat
+without one as a single unnamed instance.
+
+⚠️ Without it, every replica of one integration overwrites the others: the
+record's version and counters become whichever beat arrived last. Two gateway
+replicas on `ogr-higress/3.0.2` alongside one instance on `3.1.0` read as a
+single `3.1.0` — naming the only instance that was sending no traffic. A reader
+MUST NOT treat an integration record as naming every instance, and MUST NOT
+conclude from it that no other build is sending traffic.
 
 **Request** — at least one of `integration` / `agent_id`:
 
 ```json
 {
-  "integration": "ogr-higress/3.0.0",
+  "integration": "ogr-higress/3.2.0",
+  "instance_id": "inst-dkrb2q8v1x",
   "agent_id": "invoice-bot",
   "interval_s": 30,
   "counters": {"events_sent": 120, "evaluate_errors": 0, "unresolved_spans": 0}

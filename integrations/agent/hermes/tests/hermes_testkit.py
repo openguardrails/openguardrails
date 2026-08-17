@@ -18,6 +18,13 @@ REQUIRED_FIELDS = {
     "agent_id", "agent_type", "agent_workspace", "agent_owner", "agent_user",
     "llm_protocol", "payload",
 }
+
+#: The one OPTIONAL field (2026-08-17): ``integration``, the reporter's own
+#: ``"name/version"``. An ALLOWLIST, not a relaxation — an unknown key is still a
+#: violation; only a MISSING ``integration`` stopped being one, which is what lets
+#: a runtime and a reporter roll forward independently.
+OPTIONAL_FIELDS = {"integration"}
+
 KINDS = {"step/request", "step/response"}
 PROTOCOLS = {"openai.chat", "openai.responses", "anthropic.messages", "canonical"}
 
@@ -84,8 +91,9 @@ class MockRuntime:
     def _check(self, event: dict) -> list[str]:
         problems = []
         keys = set(event)
-        if keys != REQUIRED_FIELDS:
-            missing, extra = REQUIRED_FIELDS - keys, keys - REQUIRED_FIELDS
+        if keys < REQUIRED_FIELDS or keys - REQUIRED_FIELDS - OPTIONAL_FIELDS:
+            missing = REQUIRED_FIELDS - keys
+            extra = keys - REQUIRED_FIELDS - OPTIONAL_FIELDS
             problems.append(f"fields: missing={sorted(missing)} extra={sorted(extra)}")
         if event.get("kind") not in KINDS:
             problems.append(f"kind: {event.get('kind')!r}")

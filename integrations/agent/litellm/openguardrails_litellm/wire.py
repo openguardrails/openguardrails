@@ -24,8 +24,13 @@ __version__ = "0.1.0"
 
 logger = logging.getLogger("openguardrails")
 
-#: The ten-field v0.8 GuardEvent, exactly as schema/guard-event.schema.json
-#: requires it (additionalProperties: false — nothing else may ride along).
+#: WHO REPORTED IT — ``"name/version"``, on every event AND on the heartbeat.
+#: One constant so the two can never name different builds.
+INTEGRATION = f"openguardrails-litellm/{__version__}"
+
+#: The nine REQUIRED v0.8 GuardEvent fields, exactly as
+#: schema/guard-event.schema.json requires them (additionalProperties: false —
+#: nothing outside these plus :data:`OPTIONAL_EVENT_FIELDS` may ride along).
 EVENT_FIELDS = (
     "kind",
     "step_id",
@@ -37,6 +42,13 @@ EVENT_FIELDS = (
     "llm_protocol",
     "payload",
 )
+
+#: The one OPTIONAL field (2026-08-17). It rode the heartbeat ALONE until then,
+#: which could not answer "which build produced this traffic": a runtime keys its
+#: liveness record on the integration NAME — it must, so a rollout updates that row
+#: instead of minting a second and reporting the old build as dark — so every
+#: replica overwrites the others' version.
+OPTIONAL_EVENT_FIELDS = ("integration",)
 
 
 def _json_default(value):
@@ -85,7 +97,9 @@ class Wire:
     def evaluate(self, event: dict) -> "dict | None":
         """Judge ONE GuardEvent; the whole protocol is this call. A non-2xx
         answer (429 included) is the same as no answer: no verdict."""
-        answered = self._post("/v1/evaluate", event)
+        # Stamped HERE, not at each construction site: one send path means the
+        # build id cannot go missing on one kind of event only.
+        answered = self._post("/v1/evaluate", {**event, "integration": INTEGRATION})
         if answered is None:
             return None
         status, verdict = answered

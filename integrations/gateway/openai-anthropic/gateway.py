@@ -130,10 +130,16 @@ def event_json(kind: str, step_id: str, identity: dict, llm_protocol: str,
                payload_text: str) -> bytes:
     """Serialize a GuardEvent AROUND the payload text: the envelope is ours to
     encode, the payload is the provider's body spliced in verbatim. The v0.8
-    event is EXACTLY these nine fields — no version, no coordinates, no
-    timestamp; everything a runtime can derive left the wire."""
+    event is those nine required fields plus `integration`, the one optional
+    one — no version, no coordinates, no timestamp; everything a runtime can
+    derive left the wire."""
     head = json.dumps({"kind": kind, "step_id": step_id, **identity,
-                       "llm_protocol": llm_protocol}, ensure_ascii=False)
+                       "llm_protocol": llm_protocol,
+                       # WHO REPORTED IT — the one OPTIONAL v0.8 field, and the SAME
+                       # constant the heartbeat sends (two literals would drift and
+                       # each would look right alone). Stamped in this ONE builder so
+                       # it cannot go missing on one kind of event only.
+                       "integration": INTEGRATION}, ensure_ascii=False)
     return (head[:-1] + ', "payload": ' + payload_text + "}").encode("utf-8")
 
 

@@ -1,23 +1,34 @@
 // A STRICT v0.8 mock OGR runtime (node:http, offline), shared by both hook
 // suites. It rejects any GuardEvent deviating from
-// schema/guard-event.schema.json — exactly the nine required fields, nothing
-// extra, no retired v0.6/v0.7 fields — and records every violation so a wire
+// schema/guard-event.schema.json — the nine required fields plus the one
+// optional `integration`, nothing else, no retired v0.6/v0.7 fields — and records every violation so a wire
 // regression fails the run loudly instead of hiding behind fail-open.
 import { createServer } from "node:http"
 
 export const API_KEY = "ogr_test"
 
-// The exact required set from schema/guard-event.schema.json, which also has
-// additionalProperties:false — so the event's key set must EQUAL this list.
+// The required set from schema/guard-event.schema.json. The schema also has
+// additionalProperties:false, so the only keys allowed beyond these are the
+// optional ones below.
 const EVENT_KEYS = [
   "kind", "step_id", "agent_id", "agent_type", "agent_workspace",
   "agent_owner", "agent_user", "llm_protocol", "payload",
 ].sort()
 
+// The one OPTIONAL field (2026-08-17): `integration`, the reporter's own
+// "name/version". An ALLOWLIST, not a relaxation — an unknown key is still a
+// violation; only a MISSING `integration` stopped being one, which is what lets
+// a runtime and a reporter roll forward independently.
+const OPTIONAL_EVENT_KEYS = ["integration"]
+
 function validateEvent(ev) {
   const errs = []
   const keys = Object.keys(ev).sort()
-  if (keys.join(",") !== EVENT_KEYS.join(",")) errs.push(`key set is [${keys}], want [${EVENT_KEYS}]`)
+  const missing = EVENT_KEYS.filter((k) => !keys.includes(k))
+  const extra = keys.filter((k) => !EVENT_KEYS.includes(k) && !OPTIONAL_EVENT_KEYS.includes(k))
+  if (missing.length || extra.length) {
+    errs.push(`key set is [${keys}], missing [${missing}], unexpected [${extra}]`)
+  }
   if (!["step/request", "step/response"].includes(ev.kind)) errs.push(`kind ${ev.kind}`)
   if (typeof ev.step_id !== "string" || !ev.step_id) errs.push("step_id must be a non-empty string")
   for (const f of ["agent_id", "agent_type", "agent_workspace", "agent_owner", "agent_user"]) {
@@ -25,6 +36,11 @@ function validateEvent(ev) {
   }
   if (!["openai.chat", "openai.responses", "anthropic.messages", "canonical"].includes(ev.llm_protocol)) {
     errs.push(`llm_protocol ${ev.llm_protocol}`)
+  }
+  // Presence is optional on the WIRE; for THESE hooks it is mandatory — the mock
+  // tolerating a missing `integration` must not let ours stop sending it.
+  if (!/^ogr-codex(-automode)?\/[0-9]/.test(String(ev.integration))) {
+    errs.push(`integration ${ev.integration}`)
   }
   if (typeof ev.payload !== "object" || ev.payload === null || Array.isArray(ev.payload)) {
     errs.push("payload must be an object")

@@ -188,10 +188,14 @@ def test_allow_roundtrip_two_events_one_step(gw, runtime, upstream):
     assert upstream.requests[0]["headers"].get("Authorization") == "Bearer sk-client"
 
     req_event, resp_event = runtime.events
-    for event in (req_event, resp_event):            # EXACTLY the v0.8 fields
+    # The nine required fields plus `integration`, the ONE optional one (restored
+    # 2026-08-17: the heartbeat's record is keyed on the integration NAME, so it
+    # reports whichever replica beat last and cannot name the build behind traffic).
+    for event in (req_event, resp_event):
         assert set(event) == {"kind", "step_id", "agent_id", "agent_type",
                               "agent_workspace", "agent_owner", "agent_user",
-                              "llm_protocol", "payload"}
+                              "llm_protocol", "payload", "integration"}
+        assert event["integration"] == gateway.INTEGRATION
         assert event["agent_id"] == "edge-gw"
         assert event["agent_user"] == ""              # '' is still an assertion
     assert req_event["kind"] == "step/request"

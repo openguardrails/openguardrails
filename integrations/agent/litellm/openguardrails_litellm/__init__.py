@@ -16,12 +16,14 @@ POSTs to /v1/evaluate in `wire.py` (specification/runtime-api.md).
 """
 
 from .hooks import OpenGuardrails, OpenGuardrailsBlockedError
-from .wire import EVENT_FIELDS, Wire, __version__
+from .wire import EVENT_FIELDS, INTEGRATION, OPTIONAL_EVENT_FIELDS, Wire, __version__
 
 __all__ = [
     "OpenGuardrails",
     "OpenGuardrailsBlockedError",
     "Wire",
     "EVENT_FIELDS",
+    "INTEGRATION",
+    "OPTIONAL_EVENT_FIELDS",
     "__version__",
 ]

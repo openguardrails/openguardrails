@@ -80,7 +80,7 @@ import {
 } from "./config.js"
 import { LLM_PROTOCOL, RESPONSE_PROTOCOL, requestBody, ResponseAccumulator, TailGate } from "./llm-wire.js"
 import { hostAgentId, osUser } from "./platform.js"
-import { OgrClient, type WireEvent, type WireFinding, type WireVerdict } from "./wire.js"
+import { INTEGRATION, OgrClient, type WireEvent, type WireFinding, type WireVerdict } from "./wire.js"
 
 /** Cordis plugin name; the `id:` in `cordis.yml` is the deployment's own label. */
 export const name = "openguardrails"
@@ -90,12 +90,6 @@ export const OGR_SETTINGS_NAMESPACE = settingsNamespace("openguardrails")
 
 /** What kind of agent this integration instruments (`agent_type` claim). */
 const AGENT_TYPE = "dsh"
-
-/**
- * The integration build id. v0.8 took it OFF the event — it rides the
- * heartbeat now, which is where fleet coverage and bad-rollout triage live.
- */
-export const INTEGRATION = "ogr-dsh/0.3.0"
 
 /**
  * The tool registry is the enforcement surface: without it this plugin has

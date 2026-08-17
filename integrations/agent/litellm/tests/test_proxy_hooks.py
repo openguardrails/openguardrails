@@ -9,7 +9,7 @@ import asyncio
 
 import pytest
 
-from openguardrails_litellm import OpenGuardrails, OpenGuardrailsBlockedError
+from openguardrails_litellm import INTEGRATION, OpenGuardrails, OpenGuardrailsBlockedError
 
 run = asyncio.run
 
@@ -83,15 +83,22 @@ def test_allow_flow_sends_both_halves(runtime, make_guard):
     assert "timing" not in response
 
 
-def test_exactly_the_ten_fields_and_empty_five_tuple_defaults(runtime):
+def test_exactly_the_required_fields_plus_integration_and_empty_five_tuple_defaults(runtime):
     guard = OpenGuardrails(runtime_url=runtime.url, api_key="ogr_test_key")
     run(guard.async_pre_call_hook(None, None, request_data(), "acompletion"))
     event = runtime.events[0]
-    # strict shape is asserted by the mock on every request; spot-check here
+    # strict shape is asserted by the mock on every request; spot-check here.
+    # `integration` is the ONE optional field, restored to the event on
+    # 2026-08-17: the heartbeat's record is keyed on the integration NAME, so it
+    # reports whichever replica beat last and cannot say which build produced a
+    # given piece of traffic.
     assert set(event) == {
         "kind", "step_id", "agent_id", "agent_type", "agent_workspace",
         "agent_owner", "agent_user", "llm_protocol", "payload",
+        "integration",
     }
+    # The SAME constant the heartbeat sends — two literals would drift.
+    assert event["integration"] == INTEGRATION
     # nothing configured: "" is the explicit no-assertion, agent_type is the
     # harness label this integration knows it is
     assert event["agent_id"] == ""
