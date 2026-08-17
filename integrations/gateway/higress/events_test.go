@@ -67,9 +67,10 @@ func TestTheResponsePayloadIsTheRawBodyByteForByte(t *testing.T) {
 	}
 }
 
-// The v0.8 wire: EXACTLY nine fields, all required, `additionalProperties: false`.
-// One extra key is a schema violation; one missing key is too — including a
-// five-tuple field whose value is the empty string.
+// The v0.8 wire: the nine required fields plus `integration`, the one optional one
+// (3.2.0), under `additionalProperties: false`. One extra key is a schema violation;
+// one missing required key is too — including a five-tuple field whose value is the
+// empty string.
 func TestEventsMarshalToTheV08WireShape(t *testing.T) {
 	e := requestEvent(ctxFor("alice@acme.io"), []byte(rawRequest))
 	blob, err := json.Marshal(e)
@@ -82,6 +83,7 @@ func TestEventsMarshalToTheV08WireShape(t *testing.T) {
 		"agent_id": true, "agent_type": true, "agent_workspace": true,
 		"agent_owner": true, "agent_user": true,
 		"llm_protocol": true, "payload": true,
+		"integration": true,
 	}
 	for field := range want {
 		if !got.Get(field).Exists() {
@@ -116,14 +118,71 @@ func TestEventsMarshalToTheV08WireShape(t *testing.T) {
 		t.Errorf("llm_protocol = %q", got.Get("llm_protocol").String())
 	}
 	// v0.8 deletions, each with a new home: ogr_version (the runtime adapts),
-	// timestamp (receive time), integration (the heartbeat), the coordinates
-	// (derived server-side, always). A field that leaks back onto the wire is a
-	// schema violation.
-	for _, gone := range []string{"ogr_version", "timestamp", "integration",
+	// timestamp (receive time), the coordinates (derived server-side, always). A
+	// field that leaks back onto the wire is a schema violation.
+	//
+	// ⚠️ `integration` was in this list until 3.2.0 and is deliberately NOT any more —
+	// see TestEveryEventNamesTheBuildThatProducedIt below for why it came back. It is
+	// the one v0.8 removal that was reversed; the rest stay gone.
+	for _, gone := range []string{"ogr_version", "timestamp",
 		"session_id", "turn", "step", "parent_session_id", "event_id"} {
 		if got.Get(gone).Exists() {
 			t.Errorf("removed field %q reached the v0.8 wire: %s", gone, truncate(got.Raw, 300))
 		}
+	}
+}
+
+// EVERY event names the build that produced it, on BOTH halves of a step.
+//
+// ⚠️ This is the whole point of restoring the field, so it is pinned per KIND rather
+// than once: the value is stamped in `deriveCtx.event`, the single constructor, and a
+// second construction path added later would drop it on one kind only — which reads as
+// "that half of the traffic came from an unknown build" and is worse than sending
+// nothing, because it looks like a real answer.
+//
+// The failure this replaces was silent in both directions: a runtime keys its liveness
+// row on the integration NAME, so a lab at one version and two customer replicas at
+// another collapsed into ONE row reporting the version of the instance that was
+// sending no traffic at all.
+func TestEveryEventNamesTheBuildThatProducedIt(t *testing.T) {
+	d := ctxFor("alice@acme.io")
+	for _, tc := range []struct {
+		kind  string
+		event *GuardEvent
+	}{
+		{kindStepRequest, requestEvent(d, []byte(rawRequest))},
+		{kindStepResponse, responseEvent(d, []byte(`{"choices":[]}`))},
+	} {
+		blob, err := json.Marshal(tc.event)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.kind, err)
+		}
+		got := gjson.ParseBytes(blob).Get("integration").String()
+		if got != integrationID() {
+			t.Errorf("%s: integration = %q, want %q", tc.kind, got, integrationID())
+		}
+		// name/version, not a bare name — the version is the half that triages a
+		// bad rollout, and a runtime splits on the last "/".
+		if got != integrationName+"/"+pluginVersion {
+			t.Errorf("%s: integration %q is not name/version", tc.kind, got)
+		}
+	}
+}
+
+// The event's copy and the heartbeat's copy are ONE string from ONE function.
+//
+// ⚠️ Two literals would drift, and the drift is invisible: the beat would name one
+// build while the traffic named another, and each would look internally consistent.
+// That is the same failure mode `TestPluginVersionMatchesTheVERSIONFile` exists for,
+// one level up.
+func TestTheEventAndTheHeartbeatReportTheSameBuild(t *testing.T) {
+	blob, err := json.Marshal(requestEvent(ctxFor("alice@acme.io"), []byte(rawRequest)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	onEvent := gjson.ParseBytes(blob).Get("integration").String()
+	if onEvent != integrationID() {
+		t.Fatalf("event says %q, heartbeat would say %q", onEvent, integrationID())
 	}
 }
 

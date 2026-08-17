@@ -3,11 +3,17 @@
 A `GuardEvent` is the unit an integration point submits to the runtime.
 Keywords per RFC 2119.
 
-**Every field is required; no field is optional.** v0.8 removed every knob a
+**Nine required fields, and exactly one optional.** v0.8 removed every knob a
 producer could choose to skip: what a runtime can derive is not on the wire at
 all (coordinates, timestamps, protocol versioning), and what only the producer
 can know is mandatory — with the empty string as the explicit "I have nothing
 to assert". An integration is an API key, nine fields, and one endpoint.
+
+The single optional field is [`integration`](#integration) — the reporter's own
+`name/version`. Integrations SHOULD send it. It is OPTIONAL rather than required
+so the two ends of a deployment can roll forward independently: making it
+mandatory would reject every build already in the field, turning a diagnostic
+into an outage.
 
 ## Kinds
 
@@ -142,7 +148,9 @@ string is the explicit "no assertion", never an error:
 Behind a gateway that authenticates its callers with per-caller credentials,
 the authenticated caller id is the natural `agent_id`; `agent_workspace` is
 an agent grouping the operator maintains (e.g. a consumer-group header) —
-never a human org chart, never a tenant.
+never a human org chart, never a tenant. Which HTTP headers carry the five
+fields there, and which of them a client must never be allowed to set, is
+[Runtime API § at a gateway](runtime-api.md#at-a-gateway-the-five-tuple-arrives-as-headers).
 
 ### The API key is the identity floor
 
@@ -184,8 +192,47 @@ workspace inside that tenant, never the tenant itself).
 | `session_id` / `turn` / `step` | derived server-side, always |
 | `parent_session_id` | gone with declared coordinates; sessions are flat on the wire |
 | `timestamp` | the runtime's receive time |
-| `integration` (build id) | the [heartbeat](runtime-api.md#post-v1heartbeat), which is where fleet coverage and bad-rollout triage live |
 | kind `turn/end` | runtime-side turn closing (instruction boundary, `finish_reason`, idle timeout) |
+
+`integration` was removed here too and has been **restored as OPTIONAL** — see
+below for what the heartbeat-only version could not answer.
+
+## `integration`
+
+`integration` names the reporter and its build as one string, `name/version`
+(e.g. `ogr-higress/3.0.2`). The NAME is the identity — a rollout MUST NOT read
+as a second integration — and the version rides along for triage.
+
+Integrations SHOULD send it on every event. A runtime MUST accept an event that
+omits it, and MUST NOT infer a reporter for one that does.
+
+⚠️ It is a **self-declared label, not proof.** Nothing bounds what a caller
+names itself, so it is exactly as trustworthy as the credential that carried it
+and no more. A runtime MUST NOT derive trust, authorization or policy selection
+from it.
+
+### Why it is on the event and not only on the heartbeat
+
+v0.8 moved the build id to the [heartbeat](runtime-api.md#post-v1heartbeat)
+alone, on the reasoning that fleet coverage is a property of the REPORTER rather
+than of any one event. That reasoning holds for coverage and fails for triage,
+in two ways that are both silent:
+
+- **A heartbeat is a separate channel with its own failure modes** — blocked
+  egress, a misconfigured plugin, a worker whose timer never fires. It goes quiet
+  exactly when a bad rollout is what you are trying to name, and the traffic
+  itself carries nothing to fall back on.
+- **Beats collapse.** A runtime that keys its liveness record on the integration
+  NAME (which it must, so a rollout updates its row instead of minting a second)
+  folds every deployment of that integration under one tenant into a single row.
+  Two replicas on one build and a third on another produce one row whose version
+  is whichever beat landed last — and the reader has no way to see that it is an
+  aggregate.
+
+On the event neither can happen: the string travels with the traffic it
+describes, no other reporter can overwrite it, and stored events can be split by
+build to compare behaviour across a rollout. The heartbeat's copy stays as the
+liveness signal; the event's copy is the triage signal.
 
 There is **no `event_id` on the request**. Identifiers are the runtime's job:
 

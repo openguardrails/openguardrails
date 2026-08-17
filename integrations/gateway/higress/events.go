@@ -42,11 +42,11 @@ import (
 
 const (
 	integrationName = "ogr-higress"
-	// Reported in the heartbeat (and nowhere else — v0.8 took the build id off the
-	// event), so it is how a deployment learns which build is in the VM. Kept honest
-	// by TestPluginVersionMatchesTheVERSIONFile — 1.3.0 and 1.4.0 both shipped while
-	// a prior constant still said 1.2.0.
-	pluginVersion = "3.1.0"
+	// Reported on EVERY EVENT and in the heartbeat (3.2.0 restored the event's copy;
+	// 3.0.0–3.1.0 had only the beat), so it is how a deployment learns which build is
+	// in the VM. Kept honest by TestPluginVersionMatchesTheVERSIONFile — 1.3.0 and
+	// 1.4.0 both shipped while a prior constant still said 1.2.0.
+	pluginVersion = "3.2.0"
 
 	kindStepRequest  = "step/request"
 	kindStepResponse = "step/response"
@@ -70,10 +70,11 @@ type identity struct {
 	AgentUser      string `json:"agent_user"`
 }
 
-// GuardEvent is the wire unit: exactly the ten v0.8 fields, every one required. A
-// struct, so encoding/json does the escaping (the old connector hand-rolled its JSON
-// and every field it interpolated was an injection surface) and so a field cannot
-// leak onto the wire — the schema is `additionalProperties: false`.
+// GuardEvent is the wire unit: the nine required v0.8 fields plus `integration`,
+// the one optional one. A struct, so encoding/json does the escaping (the old
+// connector hand-rolled its JSON and every field it interpolated was an injection
+// surface) and so a field cannot leak onto the wire — the schema is
+// `additionalProperties: false`.
 type GuardEvent struct {
 	Kind string `json:"kind"`
 	// StepID binds the step/request and step/response of ONE proxied model call —
@@ -85,6 +86,26 @@ type GuardEvent struct {
 	// Payload carries the provider body verbatim (see the file comment), or the
 	// canonical object marshalled by this file.
 	Payload json.RawMessage `json:"payload"`
+	// Integration is WHO REPORTED IT — `integrationID()`, i.e. "name/version".
+	//
+	// ⚠️ Restored to the event 2026-08-17, after the heartbeat-only version failed
+	// the first time anyone needed it. Two silent failures compounded on a customer
+	// deployment: a runtime's liveness row is unique on (org, NAME) — it has to be,
+	// so a rollout updates its row instead of minting a second — so that gateway's
+	// two replicas at 3.0.2 and a lab instance at 3.1.0 all wrote ONE row, and the
+	// row read 3.1.0: the only instance sending no traffic at all. Separately, a beat
+	// is its own channel and can go quiet by itself (blocked egress, a tick that
+	// never fires) exactly when a bad rollout is what you are trying to name.
+	//
+	// On the event neither is possible — the build travels with the traffic it
+	// produced, no other reporter can overwrite it, and stored events split by build.
+	// The heartbeat's copy stays the LIVENESS signal; this one is the TRIAGE signal.
+	//
+	// ⚠️ Deliberately NOT omitempty: `integrationID()` is built from two compile-time
+	// constants and can never be empty, so omitempty could only ever hide a bug. That
+	// is a different rule from the five-tuple's (see `identity`), where "" is itself a
+	// meaningful assertion and omitting it would be a schema violation.
+	Integration string `json:"integration"`
 }
 
 // subjectOf assembles the per-request agent identity. The consumer IS the agent: one
@@ -115,6 +136,9 @@ type deriveCtx struct {
 	protocol string
 }
 
+// event is the ONE constructor every GuardEvent goes through — which is why
+// `Integration` is stamped here rather than at each call site: a second
+// construction path is how a build id goes missing on one kind of event only.
 func (d *deriveCtx) event(kind string, payload json.RawMessage) *GuardEvent {
 	return &GuardEvent{
 		Kind:        kind,
@@ -122,6 +146,7 @@ func (d *deriveCtx) event(kind string, payload json.RawMessage) *GuardEvent {
 		LLMProtocol: d.protocol,
 		identity:    d.subj,
 		Payload:     payload,
+		Integration: integrationID(),
 	}
 }
 

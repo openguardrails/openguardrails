@@ -55,8 +55,9 @@ gateway proxying model traffic it does not understand. They no longer differ
 in protocol — both forward the raw provider body they hold, both mint a
 `step_id` per model call, both declare nothing else. The only difference left
 is operational: who fills the [identity five-tuple](guard-event.md#identity)
-(an agent asserts its own; a gateway asserts its authenticated caller's) and
-where the stream's held-back tail lives.
+(an agent asserts its own; a gateway asserts its authenticated caller's,
+read off [request headers](runtime-api.md#at-a-gateway-the-five-tuple-arrives-as-headers))
+and where the stream's held-back tail lives.
 
 There is deliberately **no SDK layer**. The [Runtime API](runtime-api.md) is
 the integration surface — one decision endpoint and one recipe — and every

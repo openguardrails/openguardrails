@@ -145,9 +145,20 @@ curl -s https://ogr.example.com/v1/evaluate \
 
 Integration liveness over the authenticated channel, so the runtime can
 distinguish "agent idle" from "integration went dark". Transport-level: a
-heartbeat is **not** a GuardEvent and carries no guarded action. This is
-also where the integration build id lives (it left the event in v0.8) —
-fleet coverage and bad-rollout triage read it from here.
+heartbeat is **not** a GuardEvent and carries no guarded action.
+
+The `integration` string here is the **liveness** signal — what makes "this
+reporter is alive" answerable while it is emitting nothing. It is not the
+**triage** signal: the same string rides every
+[GuardEvent](guard-event.md#integration), and that copy is the one to read when
+asking which build produced a given piece of traffic.
+
+⚠️ A runtime keys this record on the integration NAME, so that a rollout updates
+the row it has rather than minting a second and reporting the old build as dark.
+Several deployments of one integration under a tenant therefore SHARE this
+record, and the version it shows is whichever beat arrived last. A reader MUST
+NOT treat it as naming every instance, and MUST NOT conclude from it that no
+other build is sending traffic.
 
 **Request** — at least one of `integration` / `agent_id`:
 
@@ -228,6 +239,56 @@ before the verdict (a provider stream only completes tool calls at its end).
 The accepted cost is that content ahead of the tail has already been seen —
 a deployment that cannot accept it buffers the whole stream instead
 (`tail = ∞` degenerates to buffering).
+
+### At a gateway: the five-tuple arrives as headers
+
+Same recipe, different vantage: a gateway does not know its callers from
+config, it reads them off the request it is proxying. The five-tuple is
+therefore sourced from **request headers**, and a gateway integration SHOULD
+use these names so that two gateways in one deployment agree:
+
+| Field | Header | Compatibility fallback | Asserted by |
+|---|---|---|---|
+| `agent_id` | `x-ogr-agent-id` | `x-mse-consumer` | the **gateway** — the authenticated caller IS the agent |
+| `agent_type` | `x-ogr-agent-type` | — | the client — which harness is running; it selects nothing |
+| `agent_workspace` | `x-ogr-agent-workspace` | `x-mse-consumer-group` | the **gateway** — it selects the POLICY SET |
+| `agent_owner` | `x-ogr-agent-owner` | — | the **gateway** — the runtime backfills it once and never overwrites |
+| `agent_user` | `x-ogr-agent-user` | — | the client — it changes per request |
+
+The `x-mse-*` spellings are the compatibility chain for deployments that
+already carry them (`x-mse-consumer` is written by the gateway's
+authenticator; `x-mse-consumer-group` is operator-configured — no
+authenticator writes it). Where both spellings may appear, the OGR one wins
+and the first non-empty value along the chain is used. A header that is
+absent or empty is the empty string — the explicit "no assertion" — not an
+error: a gateway that reads nothing still reports, and the API key is the
+[identity floor](#authentication).
+
+Every header is a CLAIM the gateway is repeating, so:
+
+- ⚠️ A gateway MUST strip the gateway-asserted headers (`x-ogr-agent-id`,
+  `x-ogr-agent-workspace`, `x-ogr-agent-owner`, and any compatibility
+  spelling it honours) from inbound client requests **before its
+  authenticator runs**. The PEP cannot distinguish a header its own gateway
+  wrote from one a client sent, and authenticators do not generally
+  overwrite a caller-supplied consumer header: a valid credential plus a
+  forged `agent_id` is attributed to the forgery, and a forged
+  `agent_workspace` changes which policy set judges the traffic.
+- A gateway SHOULD let each header name be reconfigured, and MAY accept
+  static `agent_id` / `agent_type` / `agent_workspace` / `agent_owner`
+  values for a route that fronts exactly one agent. There is no static
+  `agent_user` — a constant user is already what the floor gives you.
+- When nothing names the agent, a gateway SHOULD derive `agent_id` from a
+  **fingerprint of the credential the client presented** (a truncated hash,
+  distinctly prefixed) rather than sending nothing: with an empty
+  `agent_id` the runtime falls back to the credential it can see — the
+  gateway's own API key — and every caller behind that gateway collapses
+  into one agent, one policy resolution, one owner for traffic that had
+  many. A fingerprint says "these requests came from one credential"; it is
+  a floor, never a substitute for authenticating the caller.
+
+The reference implementation of all of the above is
+[`integrations/gateway/higress`](../integrations/gateway/higress/README.md).
 
 ---
 
