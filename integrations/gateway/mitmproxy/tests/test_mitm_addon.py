@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 
 import addon
-from addon import OGRGateway
+from addon import INTEGRATION, OGRGateway
 
 
 # ── the mock runtime (PDP) ─────────────────────────────────────────────────
@@ -162,10 +162,14 @@ def test_request_event_is_exactly_v08(gateway, runtime):
     assert req["path"] == "/v1/evaluate"
     assert req["headers"].get("Authorization") == "Bearer ogr_test"
     event = req["event"]
-    # EXACTLY the nine fields — nothing removed in v0.8 may reappear.
+    # The nine required fields plus `integration`, the ONE optional one (restored
+    # 2026-08-17: the heartbeat's record is keyed on the integration NAME, so it
+    # reports whichever replica beat last and cannot say which build produced a
+    # given piece of traffic). Nothing else v0.8 removed may reappear.
     assert set(event) == {"kind", "step_id", "agent_id", "agent_type",
                           "agent_workspace", "agent_owner", "agent_user",
-                          "llm_protocol", "payload"}
+                          "llm_protocol", "payload", "integration"}
+    assert event["integration"] == INTEGRATION
     assert event["kind"] == "step/request"
     assert event["llm_protocol"] == "openai.chat"
     assert event["payload"] == CHAT_BODY    # the raw body, undecomposed

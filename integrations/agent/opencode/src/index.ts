@@ -43,10 +43,8 @@ import {
   HEARTBEAT_INTERVAL_S,
   type GuardrailsOptions,
 } from "./config.js"
-import { mintStepId, OgrClient, type WireEvent, type WireVerdict } from "./wire.js"
+import { INTEGRATION, mintStepId, OgrClient, type WireEvent, type WireVerdict } from "./wire.js"
 
-/** `integration` on the heartbeat: which build is alive (off the event since v0.8). */
-export const INTEGRATION = "ogr-opencode-auto-mode/0.3.0"
 
 // ---- the slice of opencode's plugin surface this integration touches -------
 //

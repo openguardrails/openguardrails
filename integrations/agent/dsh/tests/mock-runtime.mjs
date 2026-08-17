@@ -18,6 +18,14 @@ const EVENT_FIELDS = [
   "llm_protocol", "payload",
 ]
 
+/**
+ * The one OPTIONAL field (2026-08-17): `integration`, the reporter's own
+ * `"name/version"`. An ALLOWLIST, not a relaxation — an unknown key is still a
+ * violation; only a MISSING `integration` stopped being one, which is what lets
+ * a runtime and a reporter roll forward independently.
+ */
+const OPTIONAL_EVENT_FIELDS = ["integration"]
+
 const KINDS = ["step/request", "step/response"]
 const PROTOCOLS = ["openai.chat", "openai.responses", "anthropic.messages", "canonical"]
 
@@ -25,7 +33,9 @@ const PROTOCOLS = ["openai.chat", "openai.responses", "anthropic.messages", "can
 function eventIssues(e) {
   const issues = []
   for (const f of EVENT_FIELDS) if (!(f in e)) issues.push(`missing ${f}`)
-  for (const k of Object.keys(e)) if (!EVENT_FIELDS.includes(k)) issues.push(`unexpected ${k}`)
+  for (const k of Object.keys(e)) {
+    if (!EVENT_FIELDS.includes(k) && !OPTIONAL_EVENT_FIELDS.includes(k)) issues.push(`unexpected ${k}`)
+  }
   if ("kind" in e && !KINDS.includes(e.kind)) issues.push(`bad kind ${JSON.stringify(e.kind)}`)
   if ("step_id" in e && (typeof e.step_id !== "string" || e.step_id.length === 0)) issues.push("step_id must be a non-empty string")
   for (const f of ["agent_id", "agent_type", "agent_workspace", "agent_owner", "agent_user"]) {

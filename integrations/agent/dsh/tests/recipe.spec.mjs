@@ -15,6 +15,7 @@ import { userInfo } from "node:os"
 
 import { boot, tick } from "./harness.mjs"
 import { withRuntime } from "./mock-runtime.mjs"
+import { INTEGRATION } from "../dist/wire.js"
 
 const REQUEST = {
   provider: "test", model: "test-model", system: "You are dsh.",
@@ -50,9 +51,17 @@ test("both step halves are exact v0.8 events: the field set, the protocols, timi
     assert.equal(req.payload.messages[1].content, "list the files")
     assert.equal(req.payload.tools[0].function.name, "bash")
     // Nothing v0.8 removed leaks back onto the wire.
-    for (const gone of ["ogr_version", "session_id", "turn", "step", "parent_session_id", "timestamp", "integration", "event_id"]) {
+    //
+    // ⚠️ `integration` was in this list and deliberately is NOT any more. It came
+    // back as the one OPTIONAL field on 2026-08-17: a runtime keys its liveness
+    // record on the integration NAME, so that record reports whichever replica
+    // beat last and cannot say which build produced a given piece of traffic.
+    for (const gone of ["ogr_version", "session_id", "turn", "step", "parent_session_id", "timestamp", "event_id"]) {
       assert.equal(req[gone], undefined, `${gone} left the wire in v0.8`)
     }
+    // Every event names the build that produced it, with the SAME string the
+    // heartbeat sends — two literals would drift and each would look right alone.
+    assert.equal(req.integration, INTEGRATION, "step/request names the build that produced it")
 
     const [res] = runtime.of("step/response")
     assert.ok(res, "one step/response reached the runtime")

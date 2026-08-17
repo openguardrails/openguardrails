@@ -42,7 +42,7 @@ from collections import OrderedDict
 from datetime import datetime, timezone
 
 from .spans import apply_spans, write_path
-from .wire import Wire, __version__
+from .wire import INTEGRATION, Wire
 
 logger = logging.getLogger("openguardrails")
 
@@ -591,7 +591,7 @@ class OpenGuardrails(CustomLogger):
         want fleet coverage to distinguish idle from dark."""
         if self._off():
             return False
-        body = {"integration": f"openguardrails-litellm/{__version__}"}
+        body = {"integration": INTEGRATION}
         if self.identity["agent_id"]:
             body["agent_id"] = self.identity["agent_id"]
         if interval_s is not None:

@@ -143,6 +143,17 @@ function currentGenerationOf(transcriptPath) {
   return { text, reasoning }
 }
 
+/**
+ * WHO REPORTED IT — `"name/version"`, the one OPTIONAL field on the v0.8 wire.
+ *
+ * ⚠️ Restored to the event on 2026-08-17. It had ridden the heartbeat alone,
+ * which cannot answer "which build produced this traffic": a runtime keys its
+ * liveness record on the integration NAME — it must, so a rollout updates that
+ * row rather than minting a second and reporting the old build as dark — so
+ * every replica overwrites the others' version.
+ */
+const INTEGRATION = "ogr-codex/1.0.0"
+
 // --- GuardEvent → /v1/evaluate → Verdict --------------------------------------
 
 /**
@@ -173,6 +184,7 @@ function buildEvent(input) {
     ...IDENTITY,
     llm_protocol: "canonical",
     payload,
+    integration: INTEGRATION,
   }
 }
 

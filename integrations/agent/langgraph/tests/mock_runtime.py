@@ -1,7 +1,8 @@
 """The strict mock runtime — the v0.8 contract made executable, offline.
 
 It validates every received GuardEvent against the schema's EXACT required
-set (``additionalProperties: false`` — nine fields, nothing optional,
+set (``additionalProperties: false`` — nine required fields plus the one
+optional ``integration``,
 nothing extra) and RECORDS violations instead of merely 400-ing, because a
 fail-open integration would swallow a 400 and a wire regression would
 otherwise pass silently. Tests assert ``runtime.violations == []``.
@@ -27,6 +28,13 @@ REQUIRED_FIELDS = {
     "llm_protocol",
     "payload",
 }
+
+#: The one OPTIONAL field (2026-08-17): ``integration``, the reporter's own
+#: ``"name/version"``. An ALLOWLIST, not a relaxation — an unknown key is still a
+#: violation; only a MISSING ``integration`` stopped being one, which is what lets
+#: a runtime and a reporter roll forward independently.
+OPTIONAL_FIELDS = {"integration"}
+
 KINDS = {"step/request", "step/response"}
 LLM_PROTOCOLS = {"openai.chat", "openai.responses", "anthropic.messages", "canonical"}
 FIVE_TUPLE = ("agent_id", "agent_type", "agent_workspace", "agent_owner", "agent_user")
@@ -88,10 +96,10 @@ class MockRuntime:
 
     def _validate(self, event: dict) -> None:
         keys = set(event)
-        if keys != REQUIRED_FIELDS:
+        if keys < REQUIRED_FIELDS or keys - REQUIRED_FIELDS - OPTIONAL_FIELDS:
             self.violations.append(
                 f"field set mismatch: missing={sorted(REQUIRED_FIELDS - keys)} "
-                f"extra={sorted(keys - REQUIRED_FIELDS)}"
+                f"extra={sorted(keys - REQUIRED_FIELDS - OPTIONAL_FIELDS)}"
             )
             return
         if event["kind"] not in KINDS:

@@ -8,7 +8,7 @@
  */
 import { createServer } from "node:http"
 
-/** The v0.8 GuardEvent field set — all required, none optional, no others. */
+/** The v0.8 GuardEvent required field set — no others beyond OPTIONAL_FIELDS. */
 const REQUIRED_FIELDS = [
   "agent_id",
   "agent_owner",
@@ -21,6 +21,17 @@ const REQUIRED_FIELDS = [
   "step_id",
 ]
 
+/**
+ * The one OPTIONAL field (2026-08-17): `integration`, the reporter's own
+ * `"name/version"`.
+ *
+ * ⚠️ Still `additionalProperties: false` — this list is an ALLOWLIST, not a
+ * relaxation. An unknown key is a violation exactly as before; the change is
+ * that a missing `integration` is not, which is what lets a runtime and a
+ * reporter roll forward independently.
+ */
+const OPTIONAL_FIELDS = ["integration"]
+
 const KINDS = new Set(["step/request", "step/response"])
 const PROTOCOLS = new Set(["openai.chat", "openai.responses", "anthropic.messages", "canonical"])
 
@@ -28,8 +39,14 @@ const PROTOCOLS = new Set(["openai.chat", "openai.responses", "anthropic.message
 export function violationsOf(event) {
   const problems = []
   const keys = Object.keys(event).sort()
-  if (JSON.stringify(keys) !== JSON.stringify(REQUIRED_FIELDS)) {
-    problems.push(`field set is [${keys.join(", ")}], expected exactly [${REQUIRED_FIELDS.join(", ")}]`)
+  const missing = REQUIRED_FIELDS.filter((f) => !keys.includes(f))
+  const extra = keys.filter((k) => !REQUIRED_FIELDS.includes(k) && !OPTIONAL_FIELDS.includes(k))
+  if (missing.length || extra.length) {
+    problems.push(
+      `field set is [${keys.join(", ")}]` +
+        (missing.length ? `, missing [${missing.join(", ")}]` : "") +
+        (extra.length ? `, unexpected [${extra.join(", ")}]` : ""),
+    )
   }
   if (!KINDS.has(event.kind)) problems.push(`kind ${JSON.stringify(event.kind)}`)
   if (typeof event.step_id !== "string" || event.step_id.length === 0) {

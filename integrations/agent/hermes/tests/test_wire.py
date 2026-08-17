@@ -11,12 +11,21 @@ def _client(**kwargs) -> OgrClient:
 
 
 def test_event_is_exactly_the_required_fields(guarded):
-    """v0.8's whole deal: zero optional fields, zero extra fields. The strict
-    mock 400s any drift, so the assertion here is belt on top of braces."""
+    """v0.8's whole deal: the nine required fields, nothing extra beyond the ONE
+    optional one. The strict mock 400s any drift, so this is belt on top of braces.
+
+    The optional field is ``integration``, restored to the event on 2026-08-17
+    because the heartbeat's record is keyed on the integration NAME and therefore
+    reports whichever replica beat last — it cannot say which build produced a
+    given piece of traffic.
+    """
     c = _client()
     verdict = c.evaluate("step/request", "s1", "canonical", {"messages": []})
     assert verdict is not None and verdict["decision"] == "allow"
-    assert set(guarded.events[0]) == REQUIRED_FIELDS
+    assert set(guarded.events[0]) == REQUIRED_FIELDS | {"integration"}
+    # The SAME string the heartbeat sends — two literals would drift and each
+    # would look right on its own.
+    assert guarded.events[0]["integration"] == INTEGRATION
 
 
 def test_five_tuple_defaults_are_empty_except_the_harness_label(guarded):

@@ -37,10 +37,8 @@ import {
   type GuardrailsOptions,
   type ResolvedConfig,
 } from "./config.js"
-import { mintStepId, OgrClient, type WireEvent, type WireVerdict } from "./wire.js"
+import { INTEGRATION, mintStepId, OgrClient, type WireEvent, type WireVerdict } from "./wire.js"
 
-/** `integration` on the heartbeat: which build is alive (off the event since v0.8). */
-export const INTEGRATION = "ogr-openclaw/0.3.0"
 
 // ---- the slice of OpenClaw's plugin surface this integration touches -------
 //
