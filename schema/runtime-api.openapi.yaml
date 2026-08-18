@@ -200,7 +200,7 @@ components:
         Organization API key (`Authorization: Bearer ogr_<key>`). The key
         proves the ORGANIZATION — the tenant boundary every asserted name is
         resolved inside — and is the identity floor: a caller whose identity
-        five-tuple is all empty strings is still fully attributable (agent
+        four-tuple is all empty strings is still fully attributable (agent
         derived from the key, sessions derived, the key's workspace).
 
   responses:

@@ -12,7 +12,7 @@ import (
 func ctxFor(agentID string) *deriveCtx {
 	return &deriveCtx{
 		// The consumer IS the agent; the consumer-group is its workspace.
-		subj:     subjectOf(agentID, "smartwork", "dev-agents", "user:tom", "user:lily"),
+		subj:     subjectOf(agentID, "smartwork", "dev-agents", "user:lily"),
 		stepID:   "st-test",
 		protocol: "openai.chat",
 	}
@@ -67,9 +67,9 @@ func TestTheResponsePayloadIsTheRawBodyByteForByte(t *testing.T) {
 	}
 }
 
-// The v0.8 wire: the nine required fields plus `integration`, the one optional one
+// The v0.8 wire: the eight required fields plus `integration`, the one optional one
 // (3.2.0), under `additionalProperties: false`. One extra key is a schema violation;
-// one missing required key is too — including a five-tuple field whose value is the
+// one missing required key is too — including a four-tuple field whose value is the
 // empty string.
 func TestEventsMarshalToTheV08WireShape(t *testing.T) {
 	e := requestEvent(ctxFor("alice@acme.io"), []byte(rawRequest))
@@ -81,7 +81,7 @@ func TestEventsMarshalToTheV08WireShape(t *testing.T) {
 	want := map[string]bool{
 		"kind": true, "step_id": true,
 		"agent_id": true, "agent_type": true, "agent_workspace": true,
-		"agent_owner": true, "agent_user": true,
+		"agent_user":   true,
 		"llm_protocol": true, "payload": true,
 		"integration": true,
 	}
@@ -107,9 +107,6 @@ func TestEventsMarshalToTheV08WireShape(t *testing.T) {
 	}
 	if got.Get("agent_type").String() != "smartwork" {
 		t.Error("agent type did not reach agent_type")
-	}
-	if got.Get("agent_owner").String() != "user:tom" {
-		t.Error("owner did not reach agent_owner")
 	}
 	if got.Get("agent_user").String() != "user:lily" {
 		t.Error("user did not reach agent_user")
@@ -186,19 +183,19 @@ func TestTheEventAndTheHeartbeatReportTheSameBuild(t *testing.T) {
 	}
 }
 
-// ⚠️ The five-tuple is required WITH the empty string as the explicit "no
-// assertion". `omitempty` on any of the five would silently produce an invalid
+// ⚠️ The four-tuple is required WITH the empty string as the explicit "no
+// assertion". `omitempty` on any of the four would silently produce an invalid
 // event exactly when nothing named the agent — the key-only floor, the commonest
 // zero-config deployment.
-func TestAnEmptyFiveTupleStillPutsAllFiveFieldsOnTheWire(t *testing.T) {
-	d := &deriveCtx{subj: subjectOf("", "", "", "", ""), stepID: "st-x", protocol: "openai.chat"}
+func TestAnEmptyFourTupleStillPutsAllFourFieldsOnTheWire(t *testing.T) {
+	d := &deriveCtx{subj: subjectOf("", "", "", ""), stepID: "st-x", protocol: "openai.chat"}
 	blob, err := json.Marshal(requestEvent(d, []byte(`{}`)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := gjson.ParseBytes(blob)
 	for _, field := range []string{"agent_id", "agent_type", "agent_workspace",
-		"agent_owner", "agent_user"} {
+		"agent_user"} {
 		v := got.Get(field)
 		if !v.Exists() {
 			t.Errorf("%s omitted when empty — the v0.8 schema requires it as \"\"", field)

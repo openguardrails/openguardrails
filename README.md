@@ -40,13 +40,12 @@ import uuid, requests
 OGR = "https://ogr.example.com"           # your runtime's base URL
 KEY = "ogr_xxxxxxxx"                      # your organization API key
 
-# The identity five-tuple. All five always present; "" = nothing to assert
+# The identity four-tuple. All four always present; "" = nothing to assert
 # (the runtime then derives identity from the API key).
 IDENTITY = {
     "agent_id":        "invoice-bot",     # WHICH agent — unique in your org
     "agent_type":      "my-harness",      # what KIND — a label, never policy
     "agent_workspace": "finance-agents",  # agent GROUP — one policy set
-    "agent_owner":     "payments-team",   # WHO is responsible for it
     "agent_user":      "u-8232",          # who is USING it this session
 }
 

@@ -20,7 +20,6 @@
           "agentId": { "type": "string", "description": "agent_id claim — WHICH agent, unique in the organization." },
           "agentType": { "type": "string", "description": "agent_type claim — what KIND of agent (default \"openclaw\")." },
           "workspace": { "type": "string", "description": "agent_workspace claim — the platform policy group, NOT a directory." },
-          "owner": { "type": "string", "description": "agent_owner claim — the responsible party." },
           "user": { "type": "string", "description": "agent_user claim — who is using the assistant." }
         }
       },

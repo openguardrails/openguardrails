@@ -116,14 +116,13 @@ def test_env_fallbacks_fill_the_five_tuple(runtime, monkeypatch):
     monkeypatch.setenv("OGR_AGENT_ID", "invoice-bot")
     monkeypatch.setenv("OGR_AGENT_TYPE", "litellm-proxy")
     monkeypatch.setenv("OGR_AGENT_WORKSPACE", "finance-agents")
-    monkeypatch.setenv("OGR_AGENT_OWNER", "payments-team")
     monkeypatch.setenv("OGR_AGENT_USER", "u-8232")
     monkeypatch.setenv("OGR_FAIL_MODE", "closed")
     monkeypatch.setenv("OGR_TIMEOUT", "2.5")
     guard = OpenGuardrails()
     assert guard.identity == {
         "agent_id": "invoice-bot", "agent_type": "litellm-proxy",
-        "agent_workspace": "finance-agents", "agent_owner": "payments-team",
+        "agent_workspace": "finance-agents",
         "agent_user": "u-8232",
     }
     assert guard.fail_mode == "closed"

@@ -31,7 +31,7 @@ DEFAULT_TIMEOUT_S = 5.0
 class OgrClient:
     """The transport: where the runtime is, and as whom we authenticate.
 
-    Identity (the five-tuple) and enforcement (fail mode) are the guard's
+    Identity (the four-tuple) and enforcement (fail mode) are the guard's
     business, not the transport's — one process may guard several agents
     through one client. Constructor arguments win over the environment
     (``OGR_RUNTIME_URL``, ``OGR_API_KEY``, ``OGR_TIMEOUT_S``).

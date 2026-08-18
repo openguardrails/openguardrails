@@ -273,4 +273,4 @@ def test_hook_events_carry_the_five_tuple_defaults(guarded):
     for ev in guarded.events:
         assert ev["agent_type"] == "hermes"
         assert (ev["agent_id"], ev["agent_workspace"],
-                ev["agent_owner"], ev["agent_user"]) == ("", "", "", "")
+                ev["agent_user"]) == ("", "", "")

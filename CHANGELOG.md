@@ -67,6 +67,32 @@ README, and `examples/minimal-agent/`.
 - **`ogr_version`** (the runtime adapts to what it receives; producers
   never version-gate) and **`timestamp`** (receive time).
 
+### Changed (breaking, within v0.8)
+- **The identity five-tuple is a FOUR-TUPLE: `agent_owner` is removed.** Who is
+  ACCOUNTABLE for an agent is not something a producer can assert, and the field
+  was failing in both directions at once — a per-request self-declared string that
+  a runtime could not safely trust, and therefore one no runtime read.
+
+  Ownership is a console concept with console consequences: it decides who may
+  READ an agent's traffic. A permission cannot rest on a claim the caller makes
+  about itself, and a route's header-injection mistake must not be able to flip
+  it. So it becomes a link from the agent to an ACCOUNT the runtime already knows,
+  assigned by an administrator — nothing about which belongs on this wire.
+
+  The remaining four are exactly the fields only a producer can know AND a runtime
+  uses: `agent_id` (identity, and what policy resolution hangs off),
+  `agent_type` (label), `agent_workspace` (selects the policy set), `agent_user`
+  (who a session serves, changing per request). `agent_owner` was the one that fit
+  neither test.
+
+  ⚠️ A CLEAN CUT, no deprecation window: `additionalProperties: false` means a
+  producer still sending `agent_owner` is rejected outright. That is deliberate
+  while v0.8 is unreleased — a field accepted-and-ignored teaches integrators it
+  still means something. All ten shipped integrations, their strict mock runtimes
+  and the gateway header contract move in this change; higress ships it as 3.4.0.
+  ⚠️ Gateways also stop stripping `x-ogr-agent-owner` at the edge — one fewer
+  forgery surface, and one fewer header a deployment has to get right.
+
 ### Reverted within v0.8
 - **`integration` is back on the event, as the one OPTIONAL field.** v0.8 had
   moved the build id to the heartbeat alone. That reasoning holds for COVERAGE

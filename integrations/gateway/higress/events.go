@@ -27,11 +27,11 @@ import (
 // how two implementations of one algorithm drift.
 //
 // v0.8 shrank the event to TEN fields, all required (`additionalProperties: false`):
-// kind, step_id, the identity five-tuple, llm_protocol, payload. What a runtime can
+// kind, step_id, the identity four-tuple, llm_protocol, payload. What a runtime can
 // derive left the wire entirely — no ogr_version (the runtime adapts to what it
 // receives), no timestamp (receive time), no integration build id (that fact lives
 // on the heartbeat now, where fleet coverage and bad-rollout triage read it). The
-// five-tuple is required WITH the empty string as the explicit "no assertion", so an
+// four-tuple is required WITH the empty string as the explicit "no assertion", so an
 // integrator answers the identity question instead of falling into the API-key
 // floor by omission.
 //
@@ -46,7 +46,7 @@ const (
 	// 3.0.0–3.1.0 had only the beat), so it is how a deployment learns which build is
 	// in the VM. Kept honest by TestPluginVersionMatchesTheVERSIONFile — 1.3.0 and
 	// 1.4.0 both shipped while a prior constant still said 1.2.0.
-	pluginVersion = "3.3.0"
+	pluginVersion = "3.4.0"
 
 	kindStepRequest  = "step/request"
 	kindStepResponse = "step/response"
@@ -54,19 +54,23 @@ const (
 
 func integrationID() string { return integrationName + "/" + pluginVersion }
 
-// identity is the flat agent five-tuple, embedded into every GuardEvent — the
+// identity is the flat agent four-tuple, embedded into every GuardEvent — the
 // agent_ prefixes are the namespace, no envelope. The consumer the gateway
 // authenticated IS the agent (`agent_id`), the consumer-group is the agent's
-// WORKSPACE. Owner and user are attributes; they never select configuration. Every
+// WORKSPACE. `agent_user` is an attribute; it never selects configuration. Every
 // field is a claim the runtime resolves inside the org the API key proves.
 //
-// ⚠️ NO omitempty — v0.8 requires all five on every event, with "" as the explicit
+// ⚠️ NO omitempty — v0.8 requires all four on every event, with "" as the explicit
 // "no assertion". An absent field is a schema violation, not a shorter event.
+//
+// ⚠️ There is no `agent_owner` (removed 2026-08-17). Who is ACCOUNTABLE for an
+// agent is not something this gateway can assert: it was a header a route
+// injected, re-asserted on every request, and a runtime cannot rest a permission
+// on that. Ownership is a link to a console account an admin assigns.
 type identity struct {
 	AgentID        string `json:"agent_id"`
 	AgentType      string `json:"agent_type"`
 	AgentWorkspace string `json:"agent_workspace"`
-	AgentOwner     string `json:"agent_owner"`
 	AgentUser      string `json:"agent_user"`
 }
 
@@ -103,7 +107,7 @@ type GuardEvent struct {
 	//
 	// ⚠️ Deliberately NOT omitempty: `integrationID()` is built from two compile-time
 	// constants and can never be empty, so omitempty could only ever hide a bug. That
-	// is a different rule from the five-tuple's (see `identity`), where "" is itself a
+	// is a different rule from the four-tuple's (see `identity`), where "" is itself a
 	// meaningful assertion and omitting it would be a schema violation.
 	Integration string `json:"integration"`
 }
@@ -113,12 +117,11 @@ type GuardEvent struct {
 // once stays ONE agent — the runtime surfaces that as a shadow-agent signal, not a
 // reason to split the inventory here. All-empty is the key-only floor, where the
 // runtime derives the agent from the API key.
-func subjectOf(agentID, agentType, workspace, owner, user string) identity {
+func subjectOf(agentID, agentType, workspace, user string) identity {
 	return identity{
 		AgentID:        agentID,
 		AgentType:      agentType,
 		AgentWorkspace: workspace,
-		AgentOwner:     owner,
 		AgentUser:      user,
 	}
 }

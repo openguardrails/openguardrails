@@ -26,7 +26,7 @@ matcher = "Bash|apply_patch|Read|Edit|Write|WebFetch|mcp__.*"
 #   OGR_STATE_DIR=~/.codex/openguardrails      # auto mode's per-turn denial counters
 # Identity claims (all default to "" = no assertion; the runtime then derives
 # identity from the API key):
-#   OGR_AGENT_ID=…  OGR_AGENT_WORKSPACE=…  OGR_AGENT_OWNER=…  OGR_AGENT_USER=…
+#   OGR_AGENT_ID=…  OGR_AGENT_WORKSPACE=…  OGR_AGENT_USER=…
 
 # --- Guardrail: deny blocked calls even under bypassed approvals -------------
 [[hooks.PreToolUse]]

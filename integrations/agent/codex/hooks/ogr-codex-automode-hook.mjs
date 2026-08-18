@@ -50,7 +50,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { randomUUID } from "node:crypto"
 
-// --- configuration (env; the five-tuple defaults to "" = no assertion) -------
+// --- configuration (env; the four-tuple defaults to "" = no assertion) -------
 
 // OGR_SERVER / OGR_ENROLL_TOKEN are legacy aliases kept for existing installs.
 const RUNTIME_URL = (
@@ -64,7 +64,7 @@ const MAX_CONSECUTIVE_DENIALS = Number(process.env.OGR_MAX_CONSECUTIVE_DENIALS |
 const MAX_TOTAL_DENIALS = Number(process.env.OGR_MAX_TOTAL_DENIALS || 20)
 
 /**
- * The identity five-tuple, all five always sent: the empty string is the
+ * The identity four-tuple, all four always sent: the empty string is the
  * explicit "no assertion" (the runtime then derives from the API key — the
  * identity floor). Only `agent_type` has a non-empty default: it labels the
  * harness, which we do know.
@@ -73,7 +73,6 @@ const IDENTITY = {
   agent_id: process.env.OGR_AGENT_ID || "",
   agent_type: process.env.OGR_AGENT_TYPE || "codex",
   agent_workspace: process.env.OGR_AGENT_WORKSPACE || "",
-  agent_owner: process.env.OGR_AGENT_OWNER || "",
   agent_user: process.env.OGR_AGENT_USER || "",
 }
 

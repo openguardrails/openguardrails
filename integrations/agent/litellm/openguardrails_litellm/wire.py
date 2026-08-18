@@ -37,7 +37,6 @@ EVENT_FIELDS = (
     "agent_id",
     "agent_type",
     "agent_workspace",
-    "agent_owner",
     "agent_user",
     "llm_protocol",
     "payload",

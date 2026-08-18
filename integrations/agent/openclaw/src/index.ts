@@ -143,7 +143,7 @@ const plugin: PluginEntry = {
     startHeartbeat() // env-only deployments never see a gateway_start config
 
     /**
-     * The five-tuple for one event. Config wins; an unasserted `agent_id`
+     * The four-tuple for one event. Config wins; an unasserted `agent_id`
      * falls back to the host's own agent id for this hook — a fact the host
      * supplies, not one this plugin invents — and then to `""`, the explicit
      * no-assertion the runtime resolves from the API key.

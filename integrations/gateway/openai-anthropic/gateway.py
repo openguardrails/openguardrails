@@ -34,11 +34,11 @@ reply.
 Run:
 
     export OGR_URL=https://ogr.example.com OGR_API_KEY=ogr_...
-    export OGR_AGENT_ID=my-gateway            # the five-tuple, see Config
+    export OGR_AGENT_ID=my-gateway            # the four-tuple, see Config
     python3 gateway.py --port 8800
 
 then point any OpenAI or Anthropic client's base URL at it. This example
-authenticates nobody, so the five-tuple comes from env; a real gateway fills
+authenticates nobody, so the four-tuple comes from env; a real gateway fills
 `agent_id` from its own caller authentication (the authenticated caller IS
 the agent) — that lookup is the only piece intentionally left out.
 """
@@ -88,7 +88,6 @@ class Config:
     agent_id: str = ""          # WHICH agent ('' = derived from the API key)
     agent_type: str = ""        # what KIND — a label, never an identity
     agent_workspace: str = ""   # agent group = policy set ('' = key's workspace)
-    agent_owner: str = ""       # accountability, never a policy boundary
     agent_user: str = ""        # who is using it ('' = every session one user)
     fail_mode: str = "open"     # 'closed' refuses when no verdict arrives
     tail: float = 200           # held-back chars of a streamed reply; inf = buffer
@@ -105,7 +104,6 @@ class Config:
             agent_id=env("OGR_AGENT_ID", ""),
             agent_type=env("OGR_AGENT_TYPE", ""),
             agent_workspace=env("OGR_AGENT_WORKSPACE", ""),
-            agent_owner=env("OGR_AGENT_OWNER", ""),
             agent_user=env("OGR_AGENT_USER", ""),
             fail_mode=env("OGR_FAIL_MODE", "open"),
             tail=float(env("OGR_TAIL_HOLD", "200")),
@@ -116,8 +114,7 @@ class Config:
 
     def identity(self) -> dict:
         return {"agent_id": self.agent_id, "agent_type": self.agent_type,
-                "agent_workspace": self.agent_workspace,
-                "agent_owner": self.agent_owner, "agent_user": self.agent_user}
+                "agent_workspace": self.agent_workspace, "agent_user": self.agent_user}
 
 
 # ── the wire: one endpoint, hand-rolled ─────────────────────────────────────

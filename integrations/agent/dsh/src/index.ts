@@ -32,7 +32,7 @@
  * session, turn, step numbering, parent links, timestamps, `turn/end` marks,
  * `/v1/ingest` — the runtime derives all of it from the stateless, repetitive
  * requests themselves. What only the producer can know became REQUIRED: the
- * identity five-tuple rides on every event, with `""` as the explicit "no
+ * identity four-tuple rides on every event, with `""` as the explicit "no
  * assertion" (the API key is the identity floor).
  *
  * Enforcement at the tool registry is a CONSEQUENCE of the step verdict, not
@@ -114,8 +114,6 @@ const RuntimeSchema: z<RuntimeOptions> = z.object({
     .description("API key — get one at https://openguardrails.com"),
   workspace: z.string()
     .description("agent_workspace claim: the platform policy/resource group this agent belongs to (NOT a directory); empty = the API key's workspace"),
-  owner: z.string()
-    .description("agent_owner claim; empty = the OS account the harness runs as"),
   user: z.string()
     .description("agent_user claim; empty = the OS account the harness runs as"),
 })
@@ -209,7 +207,6 @@ export function apply(ctx: Context, config: Config): void {
     url: config.runtime?.url || process.env.OGR_RUNTIME_URL || DEFAULT_RUNTIME_URL,
     apiKey: config.runtime?.apiKey || process.env.OGR_API_KEY || "",
     workspace: config.runtime?.workspace || process.env.OGR_AGENT_WORKSPACE || "",
-    owner: config.runtime?.owner || process.env.OGR_AGENT_OWNER || "",
     user: config.runtime?.user || process.env.OGR_AGENT_USER || "",
   }
   let runtimeSettings: () => RuntimeOptions = () => runtimeDefaults
@@ -234,24 +231,23 @@ export function apply(ctx: Context, config: Config): void {
   const accountUser = osUser()
 
   /**
-   * The identity five-tuple every event carries — ALL five, always, read live
+   * The identity four-tuple every event carries — ALL four, always, read live
    * so a Settings edit lands immediately. `""` is the explicit "no
    * assertion", never an omission: v0.8 makes every integrator answer the
    * identity question, and the runtime's API-key floor catches what stays
-   * empty. Owner and user default to the OS account because a local
+   * empty. `agent_user` defaults to the OS account because a local
    * single-user harness genuinely knows it; workspace stays `""` unless the
    * deployment names one.
    */
   const identity = (): Pick<
     WireEvent,
-    "agent_id" | "agent_type" | "agent_workspace" | "agent_owner" | "agent_user"
+    "agent_id" | "agent_type" | "agent_workspace" | "agent_user"
   > => {
     const s = runtimeSettings()
     return {
       agent_id: agentId,
       agent_type: AGENT_TYPE,
       agent_workspace: s.workspace || "",
-      agent_owner: s.owner || accountUser || "",
       agent_user: s.user || accountUser || "",
     }
   }

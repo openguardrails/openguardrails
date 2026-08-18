@@ -83,7 +83,6 @@ resolves from the API key:
     "agentId": "invoice-bot",              // WHICH agent; env OGR_AGENT_ID
     "agentType": "opencode",               // what KIND (the default)
     "workspace": "finance-agents",         // policy group; env OGR_AGENT_WORKSPACE
-    "owner": "payments-team",              // responsible party; env OGR_AGENT_OWNER
     "user": "u-8232"                       // who is using it; env OGR_AGENT_USER
   },
   "failMode": "open",                      // "closed" = an outage pauses the agent

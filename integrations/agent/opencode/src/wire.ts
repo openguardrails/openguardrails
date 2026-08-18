@@ -16,7 +16,7 @@
 
 /**
  * One v0.8 GuardEvent exactly as the schema requires: every field present,
- * none optional, no extras (`additionalProperties: false`). The five-tuple
+ * none optional, no extras (`additionalProperties: false`). The four-tuple
  * is required WITH the empty string as the explicit "no assertion" — the
  * integrator answers the identity question; nobody falls into the API-key
  * floor by omission. What v0.6/v0.7 carried and v0.8 removed — versions,
@@ -36,7 +36,12 @@ export interface WireEvent {
   agent_id: string
   agent_type: string
   agent_workspace: string
-  agent_owner: string
+  /**
+   * ⚠️ There is no `agent_owner` (removed 2026-08-17). Who is ACCOUNTABLE for an
+   * agent is not something a producer can assert — it is a link to a console
+   * account an administrator assigns, and a read permission cannot rest on a
+   * claim the caller makes about itself.
+   */
   agent_user: string
   llm_protocol: "openai.chat" | "openai.responses" | "anthropic.messages" | "canonical"
   payload: Record<string, unknown>

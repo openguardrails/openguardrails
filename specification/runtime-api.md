@@ -59,7 +59,7 @@ wins, then the workspace its `agent_workspace` names, and the key's own
 default workspace is only the last resort for an agent asserting nothing.
 A missing or invalid key MUST produce `401 {"error": "unauthorized"}`.
 
-The key is also the **identity floor**: a caller whose five-tuple is all
+The key is also the **identity floor**: a caller whose four-tuple is all
 empty strings is still fully attributable — see
 [GuardEvent § the API key is the identity floor](guard-event.md#the-api-key-is-the-identity-floor).
 
@@ -116,7 +116,6 @@ curl -s https://ogr.example.com/v1/evaluate \
     "agent_id": "invoice-bot",
     "agent_type": "my-harness",
     "agent_workspace": "finance-agents",
-    "agent_owner": "payments-team",
     "agent_user": "u-8232",
     "llm_protocol": "openai.chat",
     "payload": { "id": "chatcmpl-9x", "model": "gpt-5", "choices": [ {
@@ -205,13 +204,13 @@ raw provider bodies at the same two refusable moments.
 ```
 per model call:
   1. mint step_id                (fresh random id; binds this call's two events)
-  2. PRE-MODEL   evaluate(step/request  {step_id, five-tuple, llm_protocol,
+  2. PRE-MODEL   evaluate(step/request  {step_id, four-tuple, llm_protocol,
                                          payload: <raw request body>})
        block                → do not call the model
        modifications.spans  → apply in place BEFORE sending
        no verdict           → apply the configured fail mode (default: open)
   3. call the model
-  4. POST-MODEL  evaluate(step/response {same step_id, five-tuple, llm_protocol,
+  4. POST-MODEL  evaluate(step/response {same step_id, four-tuple, llm_protocol,
                                          payload: <complete raw response body,
                                                    stream-reassembled if streamed,
                                                    + timing>})
@@ -253,10 +252,10 @@ The accepted cost is that content ahead of the tail has already been seen —
 a deployment that cannot accept it buffers the whole stream instead
 (`tail = ∞` degenerates to buffering).
 
-### At a gateway: the five-tuple arrives as headers
+### At a gateway: the four-tuple arrives as headers
 
 Same recipe, different vantage: a gateway does not know its callers from
-config, it reads them off the request it is proxying. The five-tuple is
+config, it reads them off the request it is proxying. The four-tuple is
 therefore sourced from **request headers**, and a gateway integration SHOULD
 use these names so that two gateways in one deployment agree:
 
@@ -265,7 +264,6 @@ use these names so that two gateways in one deployment agree:
 | `agent_id` | `x-ogr-agent-id` | `x-mse-consumer` | the **gateway** — the authenticated caller IS the agent |
 | `agent_type` | `x-ogr-agent-type` | — | the client — which harness is running; it selects nothing |
 | `agent_workspace` | `x-ogr-agent-workspace` | `x-mse-consumer-group` | the **gateway** — it selects the POLICY SET |
-| `agent_owner` | `x-ogr-agent-owner` | — | the **gateway** — the runtime backfills it once and never overwrites |
 | `agent_user` | `x-ogr-agent-user` | — | the client — it changes per request |
 
 The `x-mse-*` spellings are the compatibility chain for deployments that
@@ -280,16 +278,15 @@ error: a gateway that reads nothing still reports, and the API key is the
 Every header is a CLAIM the gateway is repeating, so:
 
 - ⚠️ A gateway MUST strip the gateway-asserted headers (`x-ogr-agent-id`,
-  `x-ogr-agent-workspace`, `x-ogr-agent-owner`, and any compatibility
-  spelling it honours) from inbound client requests **before its
+  `x-ogr-agent-workspace`, and any compatibility spelling it honours) from inbound client requests **before its
   authenticator runs**. The PEP cannot distinguish a header its own gateway
   wrote from one a client sent, and authenticators do not generally
   overwrite a caller-supplied consumer header: a valid credential plus a
   forged `agent_id` is attributed to the forgery, and a forged
   `agent_workspace` changes which policy set judges the traffic.
 - A gateway SHOULD let each header name be reconfigured, and MAY accept
-  static `agent_id` / `agent_type` / `agent_workspace` / `agent_owner`
-  values for a route that fronts exactly one agent. There is no static
+  static `agent_id` / `agent_type` / `agent_workspace` values for a route
+  that fronts exactly one agent. There is no static
   `agent_user` — a constant user is already what the floor gives you.
 - When nothing names the agent, a gateway SHOULD derive `agent_id` from a
   **fingerprint of the credential the client presented** (a truncated hash,
@@ -317,7 +314,7 @@ import uuid, requests
 OGR = "https://ogr.example.com"           # your runtime's base URL
 KEY = "ogr_xxxxxxxx"                      # your organization API key
 
-# The identity five-tuple. All five always present; "" = nothing to assert
+# The identity four-tuple. All four always present; "" = nothing to assert
 # (the runtime then derives identity from the API key).
 IDENTITY = {
     "agent_id":        "invoice-bot",     # WHICH agent — unique in your org;
@@ -326,7 +323,6 @@ IDENTITY = {
                                           #   describes, never selects policy
     "agent_workspace": "finance-agents",  # agent GROUP — one workspace,
                                           #   one policy set
-    "agent_owner":     "payments-team",   # WHO is responsible for this agent
     "agent_user":      "u-8232",          # who is USING it this session
 }
 

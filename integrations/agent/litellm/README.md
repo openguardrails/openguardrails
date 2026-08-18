@@ -78,19 +78,18 @@ default is last.
 | `agent_id` | `OGR_AGENT_ID` | `""` | WHICH agent — e.g. `"invoice-bot"` |
 | `agent_type` | `OGR_AGENT_TYPE` | `"litellm"` | What KIND — the harness label |
 | `agent_workspace` | `OGR_AGENT_WORKSPACE` | `""` | Agent GROUP — one workspace, one policy set, e.g. `"finance-agents"` |
-| `agent_owner` | `OGR_AGENT_OWNER` | `""` | WHO is responsible, e.g. `"payments-team"` |
 | `agent_user` | `OGR_AGENT_USER` | `""` | Who is USING it this session, e.g. `"u-8232"` |
 | `fail_mode` | `OGR_FAIL_MODE` | `"open"` | `open` \| `closed` — see below |
 | `timeout` | `OGR_TIMEOUT` | `5.0` | Per-evaluate timeout, seconds |
 
-### The identity five-tuple
+### The identity four-tuple
 
-All five fields ride on **every** event; the empty string is the explicit
-"no assertion", never an error. An all-empty five-tuple is still fully
+All four fields ride on **every** event; the empty string is the explicit
+"no assertion", never an error. An all-empty four-tuple is still fully
 attributable — the runtime derives the agent from the API key (the
 [identity floor](../../../specification/guard-event.md#the-api-key-is-the-identity-floor)).
 Each field you fill refines the picture: `agent_id` is what policy and the
-inventory key on; `agent_workspace` picks the policy set; `agent_owner` and
+inventory key on; `agent_workspace` picks the policy set; and
 `agent_user` are accountability attributes, never policy boundaries.
 
 ## Degraded mode (`fail_mode`)

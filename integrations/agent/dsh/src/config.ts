@@ -72,10 +72,10 @@ export interface AutoApprovalConfig {
  * The OpenGuardrails runtime connection, plus the identity claims events
  * carry. Every field resolves Settings (the dsh web form) → this config →
  * environment (`OGR_RUNTIME_URL`, `OGR_API_KEY`, `OGR_AGENT_WORKSPACE`,
- * `OGR_AGENT_OWNER`, `OGR_AGENT_USER`) → default. Only the API key has no
+ * `OGR_AGENT_USER`) → default. Only the API key has no
  * default — get one at https://openguardrails.com.
  *
- * v0.8 makes the five-tuple REQUIRED on every event with `""` as the
+ * v0.8 makes the four-tuple REQUIRED on every event with `""` as the
  * explicit "no assertion": whatever stays unresolved here is sent as the
  * empty string, never omitted, and the runtime falls back to the API-key
  * identity floor.
@@ -91,8 +91,6 @@ export interface RuntimeOptions {
    * (the API key's workspace).
    */
   workspace?: string
-  /** `agent_owner` claim. Unset → the OS account the harness runs as, else `""`. */
-  owner?: string
   /** `agent_user` claim. Unset → the OS account the harness runs as, else `""`. */
   user?: string
 }

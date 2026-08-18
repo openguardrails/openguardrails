@@ -3,7 +3,7 @@
  *
  * dsh is the "one harness process per machine" case: every session, agent and
  * subagent runs inside the same host process, so the asserted identity is
- * `dsh-<hostname>` and owner/user default to the OS account — the best a
+ * `dsh-<hostname>` and `agent_user` defaults to the OS account — the best a
  * local single-user harness can assert. The runtime treats every identity
  * field as a CLAIM bounded by the API key's tenant.
  *

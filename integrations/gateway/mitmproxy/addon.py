@@ -422,15 +422,13 @@ _OPTIONS = [
     ("ogr_api_key", str, "OGR_API_KEY", "",
      "organization API key (Authorization: Bearer)"),
     ("ogr_agent_id", str, "OGR_AGENT_ID", "",
-     "five-tuple: WHICH agent fronts this proxy ('' = derived from the API key)"),
+     "four-tuple: WHICH agent fronts this proxy ('' = derived from the API key)"),
     ("ogr_agent_type", str, "OGR_AGENT_TYPE", "",
-     "five-tuple: what KIND of agent ('' = unlabeled)"),
+     "four-tuple: what KIND of agent ('' = unlabeled)"),
     ("ogr_agent_workspace", str, "OGR_AGENT_WORKSPACE", "",
-     "five-tuple: agent group / policy set ('' = the key's workspace)"),
-    ("ogr_agent_owner", str, "OGR_AGENT_OWNER", "",
-     "five-tuple: responsible party ('' = unattributed)"),
+     "four-tuple: agent group / policy set ('' = the key's workspace)"),
     ("ogr_agent_user", str, "OGR_AGENT_USER", "",
-     "five-tuple: who uses the agent behind this proxy ('' = one user)"),
+     "four-tuple: who uses the agent behind this proxy ('' = one user)"),
     ("ogr_fail_mode", str, "OGR_FAIL_MODE", "open",
      "'open' (default): an unanswered evaluate proceeds, counted unchecked; "
      "'closed': it is refused until the runtime answers again"),
@@ -479,7 +477,7 @@ class OGRGateway:
 
     # -- identity ------------------------------------------------------------
     def identity(self) -> dict:
-        """All five fields, always present; '' is the explicit 'no assertion'
+        """All four fields, always present; '' is the explicit 'no assertion'
         (never an omission — every integrator answers the identity question).
         A gateway fills these from its own caller authentication/config; a
         forward proxy has no per-caller credential, so they are operator
@@ -487,7 +485,6 @@ class OGRGateway:
         return {"agent_id": self.ogr_agent_id,
                 "agent_type": self.ogr_agent_type,
                 "agent_workspace": self.ogr_agent_workspace,
-                "agent_owner": self.ogr_agent_owner,
                 "agent_user": self.ogr_agent_user}
 
     # -- the one call ----------------------------------------------------------

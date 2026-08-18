@@ -149,7 +149,7 @@ def gw(runtime, upstream):
     """The real gateway, wired to the two mocks, tail small enough to test."""
     cfg = Config(ogr_url=runtime.url, ogr_api_key="ogr_test",
                  agent_id="edge-gw", agent_type="example",
-                 agent_workspace="gw-tests", agent_owner="qa", agent_user="",
+                 agent_workspace="gw-tests", agent_user="",
                  tail=5, upstream_openai=upstream.url,
                  upstream_anthropic=upstream.url)
     server = make_server(cfg, port=0)
@@ -193,7 +193,7 @@ def test_allow_roundtrip_two_events_one_step(gw, runtime, upstream):
     # reports whichever replica beat last and cannot name the build behind traffic).
     for event in (req_event, resp_event):
         assert set(event) == {"kind", "step_id", "agent_id", "agent_type",
-                              "agent_workspace", "agent_owner", "agent_user",
+                              "agent_workspace", "agent_user",
                               "llm_protocol", "payload", "integration"}
         assert event["integration"] == gateway.INTEGRATION
         assert event["agent_id"] == "edge-gw"

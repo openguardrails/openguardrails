@@ -100,7 +100,6 @@ All via environment variables:
 | `OGR_AGENT_ID` | `""` | `agent_id` claim; empty = derived from the API key (identity floor) |
 | `OGR_AGENT_TYPE` | `claude-code` | `agent_type` claim (harness label) |
 | `OGR_AGENT_WORKSPACE` | `""` | `agent_workspace` claim; empty = the API key's workspace |
-| `OGR_AGENT_OWNER` | `""` | `agent_owner` claim |
 | `OGR_AGENT_USER` | `""` | `agent_user` claim |
 
 ## Honest limits: the fragment vantage

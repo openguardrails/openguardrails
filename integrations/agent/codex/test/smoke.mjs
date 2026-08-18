@@ -29,7 +29,6 @@ function runHook(payload, env = {}) {
         OGR_AGENT_ID: "",
         OGR_AGENT_TYPE: "",
         OGR_AGENT_WORKSPACE: "",
-        OGR_AGENT_OWNER: "",
         OGR_AGENT_USER: "",
         ...env,
       },
@@ -82,11 +81,10 @@ test("allow → silent allow; wire is one canonical step/response with the held 
   const ev = mock.requests[0].body
   eq(ev.kind, "step/response")
   eq(ev.llm_protocol, "canonical")
-  // Five-tuple: agent_type defaults to the harness label, the rest to "".
+  // Four-tuple: agent_type defaults to the harness label, the rest to "".
   eq(ev.agent_id, "")
   eq(ev.agent_type, "codex")
   eq(ev.agent_workspace, "")
-  eq(ev.agent_owner, "")
   eq(ev.agent_user, "")
   const call = ev.payload.tool_calls[0]
   eq(ev.payload.tool_calls.length, 1)
@@ -105,20 +103,18 @@ test("step_id is fresh per invocation", async () => {
   if (!a || a === b) throw new Error(`step_ids not fresh: ${a} / ${b}`)
 })
 
-test("five-tuple env overrides ride on the event", async () => {
+test("four-tuple env overrides ride on the event", async () => {
   mock.verdictHandler = allowVerdict()
   mock.requests.length = 0
   await runHook(payload("ls"), {
     OGR_AGENT_ID: "cx-1",
     OGR_AGENT_WORKSPACE: "eng-agents",
-    OGR_AGENT_OWNER: "platform",
     OGR_AGENT_USER: "u-7",
   })
   const ev = mock.requests[0].body
   eq(ev.agent_id, "cx-1")
   eq(ev.agent_type, "codex")
   eq(ev.agent_workspace, "eng-agents")
-  eq(ev.agent_owner, "platform")
   eq(ev.agent_user, "u-7")
 })
 

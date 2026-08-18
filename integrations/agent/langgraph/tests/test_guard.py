@@ -150,7 +150,7 @@ def test_five_tuple_defaults_empty_except_agent_type(runtime):
     make_guarded(runtime).invoke(CONVO)
     event = runtime.events[0]
     assert event["agent_type"] == "langgraph"  # the one thing this harness knows
-    for field in ("agent_id", "agent_workspace", "agent_owner", "agent_user"):
+    for field in ("agent_id", "agent_workspace", "agent_user"):
         assert event[field] == ""  # explicit "no assertion", present on the wire
     assert runtime.violations == []
 

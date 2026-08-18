@@ -81,7 +81,7 @@ def runtime():
 
 
 FIVE_TUPLE = {"ogr_agent_id": "proxy-agent", "ogr_agent_type": "mitmproxy",
-              "ogr_agent_workspace": "gw-tests", "ogr_agent_owner": "qa",
+              "ogr_agent_workspace": "gw-tests",
               "ogr_agent_user": ""}
 
 
@@ -167,7 +167,7 @@ def test_request_event_is_exactly_v08(gateway, runtime):
     # reports whichever replica beat last and cannot say which build produced a
     # given piece of traffic). Nothing else v0.8 removed may reappear.
     assert set(event) == {"kind", "step_id", "agent_id", "agent_type",
-                          "agent_workspace", "agent_owner", "agent_user",
+                          "agent_workspace", "agent_user",
                           "llm_protocol", "payload", "integration"}
     assert event["integration"] == INTEGRATION
     assert event["kind"] == "step/request"
@@ -439,7 +439,7 @@ def test_upstream_errors_are_not_judged(gateway, runtime):
 
 def test_event_json_round_trips():
     identity = dict.fromkeys(("agent_id", "agent_type", "agent_workspace",
-                              "agent_owner", "agent_user"), "")
+                              "agent_user"), "")
     data = addon.event_json("step/request", "s1", identity, "openai.chat",
                             '{"messages": []}')
     event = json.loads(data)

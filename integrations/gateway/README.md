@@ -2,7 +2,7 @@
 
 Gateway integrations put the OGR decision in the traffic path: one proxied
 model call = one step, raw provider bodies forwarded untouched, the identity
-five-tuple filled from the gateway's own caller authentication. All three
+four-tuple filled from the gateway's own caller authentication. All three
 are thin PEPs speaking the
 [v0.8 Runtime API](../../specification/runtime-api.md) (`POST /v1/evaluate`);
 the policy and its models live in the runtime. OpenGuardrails does not

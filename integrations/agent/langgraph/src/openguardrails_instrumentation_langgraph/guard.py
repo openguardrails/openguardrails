@@ -58,7 +58,7 @@ def _now() -> str:
 
 def _pick(value: str | None, env: str, default: str = "") -> str:
     """Constructor beats environment beats default — and ``""`` stays a
-    legal, explicit value (the five-tuple's "no assertion")."""
+    legal, explicit value (the four-tuple's "no assertion")."""
     if value is not None:
         return value
     return os.environ.get(env, default)
@@ -286,13 +286,12 @@ def guard(
     agent_id: str | None = None,
     agent_type: str | None = None,
     agent_workspace: str | None = None,
-    agent_owner: str | None = None,
     agent_user: str | None = None,
     tools: list | None = None,
 ) -> GuardedChatModel:
     """Wrap a chat model in the OGR v0.8 recipe.
 
-    Everything is constructor-or-environment. The five-tuple is REQUIRED on
+    Everything is constructor-or-environment. The four-tuple is REQUIRED on
     the wire with ``""`` as the explicit "no assertion" — so every field
     defaults to ``""`` (env: ``OGR_AGENT_ID`` etc.) except ``agent_type``,
     which defaults to ``"langgraph"``: the harness kind is the one thing
@@ -306,7 +305,6 @@ def guard(
         "agent_id": _pick(agent_id, "OGR_AGENT_ID"),
         "agent_type": _pick(agent_type, "OGR_AGENT_TYPE", "langgraph"),
         "agent_workspace": _pick(agent_workspace, "OGR_AGENT_WORKSPACE"),
-        "agent_owner": _pick(agent_owner, "OGR_AGENT_OWNER"),
         "agent_user": _pick(agent_user, "OGR_AGENT_USER"),
     }
     resolved_client = client or OgrClient(runtime_url, api_key, timeout)

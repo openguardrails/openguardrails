@@ -29,7 +29,7 @@ Both carry a plugin-minted `step_id` — a fresh opaque id per proxied call,
 never reused, and never taken from `x-request-id` (a client retry could repeat
 that). It is the one coordinate v0.8 kept, because concurrency makes it
 underivable; everything above it is derived server-side, always. The event is
-nine required fields — `kind`, `step_id`, the identity five-tuple (empty string
+nine required fields — `kind`, `step_id`, the identity four-tuple (empty string
 = explicit "no assertion"), `llm_protocol`, `payload` — plus `integration`, the
 one optional one. No `ogr_version` (the runtime adapts), no `timestamp` (receive
 time), no declared coordinates and no coordinate echo on the verdict.
@@ -132,7 +132,7 @@ differently: `x-mse-consumer` is written by the AUTHENTICATOR (higress
 an **admin-configured** header — no authenticator writes it; the operator
 decides it (on MSE, by assigning consumers to groups in the console; on a
 self-hosted gateway, by a header-injection rule on the route). Three more
-renameable headers carry `agent_type`, `agent_owner`, `agent_user`. Owner and
+renameable headers carry `agent_type`, `agent_user`. The user is
 user are attributes; they never select policy.
 
 ### The default headers
@@ -147,14 +147,13 @@ fingerprint floor:
 | `agent_id` | `x-ogr-agent-id` → `x-mse-consumer` | `agent_id`, then `caller-<hash>` | `agent_id_header` | **the gateway** |
 | `agent_type` | `x-ogr-agent-type` | `agent_type` | `agent_type_header` | the client |
 | `agent_workspace` | `x-ogr-agent-workspace` → `x-mse-consumer-group` | `agent_workspace` | `agent_workspace_header` | **the gateway** |
-| `agent_owner` | `x-ogr-agent-owner` | `agent_owner` | `agent_owner_header` | **the gateway** |
 | `agent_user` | `x-ogr-agent-user` | *(none — per-session by nature)* | `agent_user_header` | the client |
 
 ⚠️ **Configuring a `*_header` REPLACES the whole chain** with that one header;
 it does not extend it. A field that resolves to nothing is sent as the empty
 string — the spec's explicit "no assertion", never an error — and the runtime
 falls back to what the API key says. The spec's cross-gateway version of this
-table is [Runtime API § at a gateway](../../../specification/runtime-api.md#at-a-gateway-the-five-tuple-arrives-as-headers).
+table is [Runtime API § at a gateway](../../../specification/runtime-api.md#at-a-gateway-the-four-tuple-arrives-as-headers).
 
 ### Who gets to say what (2.1.0)
 
@@ -164,7 +163,6 @@ The five identity fields split in two, and the split is the security model:
 |---|---|---|
 | `agent_id` | **the gateway** | names the party; a client that could set it would pick its own audit trail |
 | `agent_workspace` | **the gateway** | selects the POLICY SET — the one field a caller must never choose |
-| `agent_owner` | **the gateway** | the runtime backfills it once and never overwrites, so a forgery is permanent |
 | `agent_type` | the client | which harness is running; only the client knows, and it selects nothing |
 | `agent_user` | the client | changes per request; only the client knows |
 
@@ -421,9 +419,8 @@ the traffic pass with `decision=` empty).
 | `agent_id_header` | `x-ogr-agent-id`, else `x-mse-consumer` | which header carries the agent's identity; configuring one replaces the whole chain |
 | `agent_workspace_header` | `x-ogr-agent-workspace`, else `x-mse-consumer-group` | which header carries the agent's workspace; configuring one replaces the whole chain |
 | `agent_type_header` | `x-ogr-agent-type` | which header carries the kind of agent |
-| `agent_owner_header` | `x-ogr-agent-owner` | which header carries the agent's responsible party |
 | `agent_user_header` | `x-ogr-agent-user` | which header carries who is using the agent this session |
-| `agent_id` / `agent_type` / `agent_workspace` / `agent_owner` | *(unset)* | static fallbacks for a route fronting exactly one agent. No static `agent_user` — a constant user is already the runtime's default |
+| `agent_id` / `agent_type` / `agent_workspace` | *(unset)* | static fallbacks for a route fronting exactly one agent. No static `agent_user` — a constant user is already the runtime's default |
 | `caller_fallback` | `true` | when nothing above names the agent, fingerprint the client's own credential into `caller-<hash>` rather than letting every consumer behind this gateway become one agent (see Identity) |
 | `caller_key_headers` | `authorization`, `x-api-key`, `api-key` | which headers may carry that credential, first non-empty wins |
 | `mirror_cluster` / `mirror_base_url` | *(unset)* | a candidate runtime that gets copies and gates nothing |

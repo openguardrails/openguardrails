@@ -38,9 +38,9 @@ embedding):
 | `OGR_REFUSAL_TEXT` | a generic sentence | What the user sees instead of a blocked answer. Says nothing about why by design — categories and rule text are internals (and a map of what to route around); they stay in the runtime's record and this plugin's log. |
 | `OGR_REDACT_MASK` | keep placeholders | Replace redaction spans with this flat string (e.g. `[已隐去]`) instead of the verdict's `${OGR_PHONE_1}`-style placeholders. |
 
-### The identity five-tuple
+### The identity four-tuple
 
-All five ride on **every** event; the empty string is the explicit "no
+All four ride on **every** event; the empty string is the explicit "no
 assertion", never an error. Everything defaults to `""` except `agent_type`
 — the one fact this plugin does know about itself:
 
@@ -49,7 +49,6 @@ assertion", never an error. Everything defaults to `""` except `agent_type`
 | `OGR_AGENT_ID` | `""` (derived from the API key — the identity floor) | `hermes-laptop-tom` | WHICH agent; the inventory and policy resolution key on it |
 | `OGR_AGENT_TYPE` | `hermes` | `hermes` | what KIND — a harness label, never an identity |
 | `OGR_AGENT_WORKSPACE` | `""` (the key's workspace) | `research-agents` | agent GROUP — one workspace, one policy set |
-| `OGR_AGENT_OWNER` | `""` (unattributed) | `ml-team` | WHO is responsible for this agent |
 | `OGR_AGENT_USER` | `""` (every session is one user) | `u-8232` | who is USING it this session |
 
 ## How Hermes' hooks land on the recipe
@@ -139,7 +138,7 @@ than rewritten:
 - **Declared coordinates** (`session_id`/`run_id`/`turn` stamping, the
   subagent lineage reporting, per-instance `OGR_INSTANCE` identity naming) —
   sessions, turns and step numbering are derived server-side, always;
-  identity is the five-tuple.
+  identity is the four-tuple.
 - **The `srt`/OpenShell sandbox backends and policy compilation**
   (`OGR_SANDBOX`) — OS-level isolation is a fine idea, but it was driven by
   the local policy file, which is gone. The exec wrapper's evaluate remains.

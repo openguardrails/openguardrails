@@ -3,7 +3,7 @@
 A `GuardEvent` is the unit an integration point submits to the runtime.
 Keywords per RFC 2119.
 
-**Nine required fields, and exactly one optional.** v0.8 removed every knob a
+**Eight required fields, and exactly one optional.** v0.8 removed every knob a
 producer could choose to skip: what a runtime can derive is not on the wire at
 all (coordinates, timestamps, protocol versioning), and what only the producer
 can know is mandatory — with the empty string as the explicit "I have nothing
@@ -134,7 +134,7 @@ no `attribution` field to report one.
 
 ## Identity
 
-The **five-tuple**. All five fields are required on every event; the empty
+The **four-tuple**. All four fields are required on every event; the empty
 string is the explicit "no assertion", never an error:
 
 | Field | Empty means | Description |
@@ -142,19 +142,18 @@ string is the explicit "no assertion", never an error:
 | `agent_id` | derived from the API key ([identity floor](#the-api-key-is-the-identity-floor)) | WHICH agent this is — unique within the organization; the key the inventory and policy resolution hang off. Example: `"invoice-bot"`. |
 | `agent_type` | unlabeled | What KIND of agent — the harness or product name (`"langgraph"`, `"claude-code"`, `"my-harness"`). A label, not an identity — see [one `agent_id`, one agent](#one-agent_id-one-agent). |
 | `agent_workspace` | the API key's workspace | The named GROUP of agents this one belongs to — one workspace, one policy set. Example: `"finance-agents"`. |
-| `agent_owner` | unattributed | The agent's builder / responsible party — an accountability attribute, never a policy boundary. Example: `"payments-team"`. |
 | `agent_user` | every session is one user | Who is USING the agent this session — changes per session or per request. Example: `"u-8232"`. |
 
 Behind a gateway that authenticates its callers with per-caller credentials,
 the authenticated caller id is the natural `agent_id`; `agent_workspace` is
 an agent grouping the operator maintains (e.g. a consumer-group header) —
-never a human org chart, never a tenant. Which HTTP headers carry the five
+never a human org chart, never a tenant. Which HTTP headers carry the four
 fields there, and which of them a client must never be allowed to set, is
-[Runtime API § at a gateway](runtime-api.md#at-a-gateway-the-five-tuple-arrives-as-headers).
+[Runtime API § at a gateway](runtime-api.md#at-a-gateway-the-four-tuple-arrives-as-headers).
 
 ### The API key is the identity floor
 
-The five-tuple degrades gracefully. An integration sending five empty
+The four-tuple degrades gracefully. An integration sending four empty
 strings is still fully attributable: the runtime MUST derive `agent_id` from
 the API key (one key, one default agent), place the agent in the key's
 workspace, and treat every session as the same single user. Each field an
@@ -172,13 +171,30 @@ the identity) and SHOULD surface the disagreement as a **shadow agent**
 signal: several agents hiding behind one identity is a usage error worth an
 operator's attention, not a reason to split the inventory.
 
-### `agent_owner` and `agent_user` are attributes, not boundaries
+### `agent_user` is an attribute, not a boundary
 
 Identity and placement — `agent_id` and `agent_workspace` — decide where an
-event lands and which policy set judges it. Owner and user *describe*: who
-is accountable for the agent, who a session serves. They belong on the agent
-inventory and the session record, for accountability and per-user analytics;
-a runtime MUST NOT let either select configuration.
+event lands and which policy set judges it. `agent_user` *describes*: who a
+session serves. It belongs on the session record, for per-user analytics; a
+runtime MUST NOT let it select configuration.
+
+### There is no `agent_owner`
+
+Who is ACCOUNTABLE for an agent is not something a producer can assert. It was
+a wire field until 2026-08-17 and is now removed outright, because the only
+honest source for it is the runtime's own account directory:
+
+- On the wire it was a **per-request, self-declared string** — as trustworthy as
+  whichever route happened to inject the header, and re-assertable on every call.
+  A runtime that trusted it could have ownership flipped by a config mistake; one
+  that did not trust it was storing a field nobody read.
+- Ownership is a **console concept with console consequences**: it decides who may
+  read an agent's traffic. A permission cannot rest on a claim the caller makes
+  about itself.
+
+So a runtime SHOULD hold ownership as a link from the agent to an ACCOUNT it
+already knows, assigned by an administrator. Nothing about that belongs on this
+wire, and a producer sending an owner is asserting something it cannot know.
 
 ⚠️ **Every identity field is a CLAIM**, bounded by the channel: resolved only
 within the tenant the channel credential proves (`agent_workspace` names a
@@ -254,7 +270,6 @@ data tolerates.
   "agent_id": "invoice-bot",
   "agent_type": "my-harness",
   "agent_workspace": "finance-agents",
-  "agent_owner": "payments-team",
   "agent_user": "u-8232",
   "llm_protocol": "openai.chat",
   "payload": {
@@ -274,7 +289,7 @@ data tolerates.
 
 The payload is the provider's response body as transported (plus the
 integration-inserted `timing`); the runtime does all decomposition. A
-gateway's event looks identical — it fills the five-tuple from its own
+gateway's event looks identical — it fills the four-tuple from its own
 authenticated caller instead of from config.
 
 The normative JSON Schema is [`schema/guard-event.schema.json`](../schema/guard-event.schema.json).

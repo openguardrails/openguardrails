@@ -153,7 +153,7 @@ test("failMode closed treats a non-empty unjudged as could-not-look", async () =
   }
 })
 
-test("the five-tuple defaults to agent_type=openclaw and empty assertions", async () => {
+test("the four-tuple defaults to agent_type=openclaw and empty assertions", async () => {
   const { handlers, runtime } = await boot(() => "allow")
   try {
     await toolCall(handlers)
@@ -161,7 +161,6 @@ test("the five-tuple defaults to agent_type=openclaw and empty assertions", asyn
     assert.equal(event.agent_type, "openclaw")
     assert.equal(event.agent_id, "")
     assert.equal(event.agent_workspace, "")
-    assert.equal(event.agent_owner, "")
     assert.equal(event.agent_user, "")
   } finally {
     await runtime.close()
@@ -188,7 +187,6 @@ test("configured identity claims ride on every event and beat the host's", async
     assert.equal(event.agent_id, "invoice-bot")
     assert.equal(event.agent_type, "openclaw")
     assert.equal(event.agent_workspace, "finance-agents")
-    assert.equal(event.agent_owner, "payments-team")
     assert.equal(event.agent_user, "u-8232")
     assert.deepEqual(runtime.violations, [])
   } finally {

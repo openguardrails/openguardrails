@@ -151,7 +151,6 @@ class OpenGuardrails(CustomLogger):
         agent_id: "str | None" = None,
         agent_type: "str | None" = None,
         agent_workspace: "str | None" = None,
-        agent_owner: "str | None" = None,
         agent_user: "str | None" = None,
         fail_mode: "str | None" = None,
         timeout: "float | None" = None,
@@ -164,13 +163,12 @@ class OpenGuardrails(CustomLogger):
         def env(value, name, default=""):
             return value if value is not None else os.environ.get(name, default)
 
-        # The identity five-tuple: all five always on the wire, "" = the
+        # The identity four-tuple: all four always on the wire, "" = the
         # explicit "no assertion" (the runtime then derives from the API key).
         self.identity = {
             "agent_id": env(agent_id, "OGR_AGENT_ID"),
             "agent_type": env(agent_type, "OGR_AGENT_TYPE", "litellm"),
             "agent_workspace": env(agent_workspace, "OGR_AGENT_WORKSPACE"),
-            "agent_owner": env(agent_owner, "OGR_AGENT_OWNER"),
             "agent_user": env(agent_user, "OGR_AGENT_USER"),
         }
         self.fail_mode = env(fail_mode, "OGR_FAIL_MODE", "open").lower()

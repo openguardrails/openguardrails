@@ -107,12 +107,10 @@ type Config struct {
 	agentIDHeaders        []string
 	agentTypeHeader       string
 	agentWorkspaceHeaders []string
-	agentOwnerHeader      string
 	agentUserHeader       string
 	agentID               string
 	agentType             string
 	agentWorkspace        string
-	agentOwner            string
 
 	// The identity FLOOR: when nothing above named the agent, fingerprint the
 	// credential the CLIENT presented. See deriveCallerID.
@@ -213,15 +211,20 @@ func parseConfig(j gjson.Result, c *Config) error {
 	}
 
 	/**
-	 * The OGR agent identity (agent_id / agent_type / agent_workspace / agent_owner /
+	 * The OGR agent identity (agent_id / agent_type / agent_workspace /
 	 * agent_user). OGR is agent-centric: the consumer the gateway authenticated IS
 	 * the agent, and the consumer-group is the agent's WORKSPACE — a group of agents
-	 * plus one policy set. Owner and user are attributes the platform records on the
-	 * agent and the session; they decide nothing.
+	 * plus one policy set. `agent_user` is an attribute the platform records on the
+	 * session; it decides nothing.
+	 *
+	 * ⚠️ There is no `agent_owner` (removed 2026-08-17). A gateway cannot assert
+	 * who is ACCOUNTABLE for an agent — it only knows which credential called —
+	 * and a runtime cannot rest a read permission on a header a route injects.
+	 * Ownership is assigned in the console, against an account it already knows.
 	 *
 	 * Every field's source header is configurable, because not every deployment
 	 * puts these facts in the same headers. Static `agent_id` / `agent_type` /
-	 * `agent_workspace` / `agent_owner` config values back the headers up for a
+	 * `agent_workspace` config values back the headers up for a
 	 * route that fronts exactly one agent. A deployment that configures nothing
 	 * still works: the runtime derives the agent from the API key (one key, one
 	 * default agent) and attributes every session to one user.
@@ -252,10 +255,6 @@ func parseConfig(j gjson.Result, c *Config) error {
 	if v := j.Get("agent_type_header").String(); v != "" {
 		c.agentTypeHeader = v
 	}
-	c.agentOwnerHeader = "x-ogr-agent-owner"
-	if v := j.Get("agent_owner_header").String(); v != "" {
-		c.agentOwnerHeader = v
-	}
 	// Per-session by nature: for an agent serving many people the value changes
 	// per request, so it can only ever come from the traffic.
 	c.agentUserHeader = "x-ogr-agent-user"
@@ -265,7 +264,6 @@ func parseConfig(j gjson.Result, c *Config) error {
 	c.agentID = j.Get("agent_id").String()
 	c.agentType = j.Get("agent_type").String()
 	c.agentWorkspace = j.Get("agent_workspace").String()
-	c.agentOwner = j.Get("agent_owner").String()
 
 	/**
 	 * The identity FLOOR (`caller_fallback`, default ON).
@@ -389,7 +387,6 @@ const (
 	ctxAgentID        = "ogr_agent_id"
 	ctxAgentType      = "ogr_agent_type"
 	ctxAgentWorkspace = "ogr_agent_workspace"
-	ctxAgentOwner     = "ogr_agent_owner"
 	ctxAgentUser      = "ogr_agent_user"
 	ctxStepID         = "ogr_step_id"
 	ctxSession        = "ogr_session"
@@ -500,11 +497,11 @@ func onRequestHeaders(ctx wrapper.HttpContext, cfg Config) types.Action {
 	/**
 	 * WHO IS THIS, and — the part that matters — WHO GOT TO SAY SO.
 	 *
-	 * The five identity fields split cleanly in two, and the split is the whole
+	 * The four identity fields split cleanly in two, and the split is the whole
 	 * security model of this filter:
 	 *
-	 *   THE GATEWAY asserts `agent_id`, `agent_workspace`, `agent_owner`. These
-	 *   name a party and select a POLICY SET, so a client that could set them
+	 *   THE GATEWAY asserts `agent_id` and `agent_workspace`. These name a party
+	 *   and select a POLICY SET, so a client that could set them
 	 *   would pick its own identity and its own guardrails. They come from the
 	 *   credential this gateway authenticated, or from operator config.
 	 *
@@ -565,15 +562,6 @@ func onRequestHeaders(ctx wrapper.HttpContext, cfg Config) types.Action {
 	}
 	ctx.SetContext(ctxAgentWorkspace, workspace)
 
-	// agent_owner: whose agent this IS. Gateway-written (`x-ogr-agent-owner`),
-	// because an owner a client can set is not an owner — the runtime backfills
-	// it once and never overwrites it, so a forged value would be permanent.
-	owner := getHeader(cfg.agentOwnerHeader)
-	if owner == "" {
-		owner = cfg.agentOwner
-	}
-	ctx.SetContext(ctxAgentOwner, owner)
-
 	// agent_user: per-request by nature — for an agent serving many people the
 	// value changes with every call, so it can only ever come from the traffic.
 	user := getHeader(cfg.agentUserHeader)
@@ -614,7 +602,6 @@ func subjectFromCtx(ctx wrapper.HttpContext, cfg Config) identity {
 		ctx.GetStringContext(ctxAgentID, ""),
 		ctx.GetStringContext(ctxAgentType, ""),
 		ctx.GetStringContext(ctxAgentWorkspace, ""),
-		ctx.GetStringContext(ctxAgentOwner, ""),
 		ctx.GetStringContext(ctxAgentUser, ""),
 	)
 }

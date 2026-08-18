@@ -44,11 +44,11 @@ class OgrClient:
 
     OGR_RUNTIME_URL       runtime base URL (unset = no runtime; fail mode decides)
     OGR_API_KEY           organization API key (Authorization: Bearer)
-    OGR_AGENT_ID          the five-tuple; all default "" — the explicit
+    OGR_AGENT_ID          the four-tuple; all default "" — the explicit
     OGR_AGENT_TYPE          "no assertion", identity then derives from the
     OGR_AGENT_WORKSPACE     API key (the identity floor). agent_type defaults
-    OGR_AGENT_OWNER         to "hermes": the one field this integration DOES
-    OGR_AGENT_USER          know about itself (a label, never an identity).
+    OGR_AGENT_USER          to "hermes": the one field this integration DOES
+                            know about itself (a label, never an identity).
     OGR_FAIL_MODE         open (default) | closed — what an unanswered
                           evaluate means (specification/degraded-mode.md)
     OGR_TIMEOUT           per-call budget in seconds, default 4.0
@@ -62,7 +62,6 @@ class OgrClient:
         agent_id: str | None = None,
         agent_type: str | None = None,
         agent_workspace: str | None = None,
-        agent_owner: str | None = None,
         agent_user: str | None = None,
         fail_mode: str | None = None,
         timeout: float | None = None,
@@ -70,7 +69,7 @@ class OgrClient:
         self.runtime_url = (runtime_url if runtime_url is not None
                             else _env("OGR_RUNTIME_URL")).rstrip("/")
         self.api_key = api_key if api_key is not None else _env("OGR_API_KEY")
-        # All five always present on every event; "" is a value (the explicit
+        # All four always present on every event; "" is a value (the explicit
         # "no assertion"), never an omission — the schema has zero optional fields.
         self.identity: dict[str, str] = {
             "agent_id": agent_id if agent_id is not None else _env("OGR_AGENT_ID"),
@@ -78,7 +77,6 @@ class OgrClient:
                            else _env("OGR_AGENT_TYPE") or "hermes"),
             "agent_workspace": (agent_workspace if agent_workspace is not None
                                 else _env("OGR_AGENT_WORKSPACE")),
-            "agent_owner": agent_owner if agent_owner is not None else _env("OGR_AGENT_OWNER"),
             "agent_user": agent_user if agent_user is not None else _env("OGR_AGENT_USER"),
         }
         mode = (fail_mode if fail_mode is not None else _env("OGR_FAIL_MODE")).lower() or "open"

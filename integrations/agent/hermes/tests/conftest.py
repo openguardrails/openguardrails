@@ -4,7 +4,7 @@ The mock is deliberately STRICTER than a permissive server: it asserts every
 event carries exactly the schema's required fields — no more (the schema is
 additionalProperties: false; a stray v0.6 field like `timestamp` or
 `session_id` must fail the suite, not slide through), no fewer (the
-five-tuple is required even when empty). A conformance check that only
+four-tuple is required even when empty). A conformance check that only
 looked at what the code meant to send would miss exactly the drift this
 rewrite exists to prevent.
 """
@@ -25,8 +25,7 @@ from hermes_testkit import API_KEY, MockRuntime  # noqa: E402
 
 _OGR_VARS = (
     "OGR_RUNTIME_URL", "OGR_API_KEY",
-    "OGR_AGENT_ID", "OGR_AGENT_TYPE", "OGR_AGENT_WORKSPACE",
-    "OGR_AGENT_OWNER", "OGR_AGENT_USER",
+    "OGR_AGENT_ID", "OGR_AGENT_TYPE", "OGR_AGENT_WORKSPACE", "OGR_AGENT_USER",
     "OGR_FAIL_MODE", "OGR_TIMEOUT", "OGR_REFUSAL_TEXT", "OGR_REDACT_MASK",
 )
 

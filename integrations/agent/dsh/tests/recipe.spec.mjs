@@ -1,7 +1,7 @@
 /**
  * The v0.8 recipe, end to end against a strict mock runtime: two evaluates
  * per model call bound by one producer-minted `step_id`, the required
- * five-tuple with "" as the explicit no-assertion, tail-hold streaming, the
+ * four-tuple with "" as the explicit no-assertion, tail-hold streaming, the
  * degraded-mode postures (default OPEN), and the heartbeat.
  *
  * Streams are dispatched through Cordis's real `llm/stream` waterfall (what
@@ -78,18 +78,17 @@ test("both step halves are exact v0.8 events: the field set, the protocols, timi
   })
 })
 
-test("the five-tuple is always complete; \"\" is the explicit no-assertion", async () => {
+test("the four-tuple is always complete; \"\" is the explicit no-assertion", async () => {
   await withRuntime(boot, {}, () => "allow", async ({ stream, runtime }) => {
     await stream(REQUEST, ANSWER)
     for (const event of runtime.received) {
-      // All five present on every event (the strict mock enforced presence;
+      // All four present on every event (the strict mock enforced presence;
       // this asserts the plugin's own defaults).
       assert.equal(typeof event.agent_workspace, "string")
       assert.equal(event.agent_workspace, "", "unconfigured workspace is the EMPTY STRING, never omitted")
       // A local single-user harness genuinely knows its OS account, so owner
       // and user default to it rather than to "".
       const account = userInfo().username
-      assert.equal(event.agent_owner, account)
       assert.equal(event.agent_user, account)
     }
   })

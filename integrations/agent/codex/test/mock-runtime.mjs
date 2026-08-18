@@ -12,7 +12,7 @@ export const API_KEY = "ogr_test"
 // optional ones below.
 const EVENT_KEYS = [
   "kind", "step_id", "agent_id", "agent_type", "agent_workspace",
-  "agent_owner", "agent_user", "llm_protocol", "payload",
+  "agent_user", "llm_protocol", "payload",
 ].sort()
 
 // The one OPTIONAL field (2026-08-17): `integration`, the reporter's own
@@ -31,7 +31,7 @@ function validateEvent(ev) {
   }
   if (!["step/request", "step/response"].includes(ev.kind)) errs.push(`kind ${ev.kind}`)
   if (typeof ev.step_id !== "string" || !ev.step_id) errs.push("step_id must be a non-empty string")
-  for (const f of ["agent_id", "agent_type", "agent_workspace", "agent_owner", "agent_user"]) {
+  for (const f of ["agent_id", "agent_type", "agent_workspace", "agent_user"]) {
     if (typeof ev[f] !== "string") errs.push(`${f} must be a string`)
   }
   if (!["openai.chat", "openai.responses", "anthropic.messages", "canonical"].includes(ev.llm_protocol)) {
