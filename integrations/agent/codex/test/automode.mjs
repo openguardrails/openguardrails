@@ -42,7 +42,6 @@ function runHook(payload, { stateDir, env = {} } = {}) {
         OGR_AGENT_ID: "",
         OGR_AGENT_TYPE: "",
         OGR_AGENT_WORKSPACE: "",
-        OGR_AGENT_OWNER: "",
         OGR_AGENT_USER: "",
         ...env,
       },
@@ -100,7 +99,6 @@ test("runtime allow → behavior allow; wire is one canonical step/response", as
   eq(ev.agent_id, "")
   eq(ev.agent_type, "codex")
   eq(ev.agent_workspace, "")
-  eq(ev.agent_owner, "")
   eq(ev.agent_user, "")
   eq(ev.payload.tool_calls.length, 1)
   eq(ev.payload.tool_calls[0].name, "Bash")

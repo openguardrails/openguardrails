@@ -99,18 +99,17 @@ Every knob is an environment variable **and** a mitmproxy option
 |---|---|---|---|
 | `ogr_url` | `OGR_URL` | `http://localhost:3000` | runtime base URL; the canonical `/v1/*` paths are joined onto it — a deployment prefix belongs IN the URL |
 | `ogr_api_key` | `OGR_API_KEY` | — | organization API key (`Authorization: Bearer`) |
-| `ogr_agent_id` | `OGR_AGENT_ID` | `""` | five-tuple: WHICH agent fronts this proxy |
-| `ogr_agent_type` | `OGR_AGENT_TYPE` | `""` | five-tuple: what KIND of agent (a label, never an identity) |
-| `ogr_agent_workspace` | `OGR_AGENT_WORKSPACE` | `""` | five-tuple: agent group = policy set |
-| `ogr_agent_owner` | `OGR_AGENT_OWNER` | `""` | five-tuple: responsible party |
-| `ogr_agent_user` | `OGR_AGENT_USER` | `""` | five-tuple: who uses the agent behind this proxy |
+| `ogr_agent_id` | `OGR_AGENT_ID` | `""` | four-tuple: WHICH agent fronts this proxy |
+| `ogr_agent_type` | `OGR_AGENT_TYPE` | `""` | four-tuple: what KIND of agent (a label, never an identity) |
+| `ogr_agent_workspace` | `OGR_AGENT_WORKSPACE` | `""` | four-tuple: agent group = policy set |
+| `ogr_agent_user` | `OGR_AGENT_USER` | `""` | four-tuple: who uses the agent behind this proxy |
 | `ogr_fail_mode` | `OGR_FAIL_MODE` | `open` | what an unanswered evaluate means — see below |
 | `ogr_timeout` | `OGR_TIMEOUT` | `5.0` | evaluate budget (seconds); a ceiling for the worst case, not a target |
 
-**The five-tuple.** All five fields are sent on every event; the empty string
+**The four-tuple.** All four fields are sent on every event; the empty string
 is the explicit "no assertion", never an omission. A gateway normally fills
 `agent_id` from its own caller authentication — the authenticated caller IS
-the agent — but a forward proxy authenticates nobody, so here the five-tuple
+the agent — but a forward proxy authenticates nobody, so here the four-tuple
 is operator config and the API key is the identity floor beneath it: five
 empty strings are still fully attributable to the key. A multi-tenant
 deployment that needs per-caller attribution wants a gateway that

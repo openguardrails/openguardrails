@@ -28,28 +28,25 @@ def test_event_is_exactly_the_required_fields(guarded):
     assert guarded.events[0]["integration"] == INTEGRATION
 
 
-def test_five_tuple_defaults_are_empty_except_the_harness_label(guarded):
+def test_four_tuple_defaults_are_empty_except_the_harness_label(guarded):
     """"" is the explicit no-assertion (identity floor: the API key answers);
     agent_type defaults to "hermes" — the one fact this plugin does know."""
     _client().evaluate("step/request", "s1", "canonical", {"messages": []})
     ev = guarded.events[0]
     assert ev["agent_type"] == "hermes"
-    assert (ev["agent_id"], ev["agent_workspace"], ev["agent_owner"], ev["agent_user"]) \
-        == ("", "", "", "")
+    assert (ev["agent_id"], ev["agent_workspace"], ev["agent_user"]) == ("", "", "")
 
 
-def test_five_tuple_from_env(guarded, clean_env):
+def test_four_tuple_from_env(guarded, clean_env):
     clean_env.setenv("OGR_AGENT_ID", "hermes-lab")
     clean_env.setenv("OGR_AGENT_TYPE", "hermes-fork")
     clean_env.setenv("OGR_AGENT_WORKSPACE", "research-agents")
-    clean_env.setenv("OGR_AGENT_OWNER", "ml-team")
     clean_env.setenv("OGR_AGENT_USER", "u-42")
     _client().evaluate("step/request", "s1", "canonical", {"messages": []})
     ev = guarded.events[0]
     assert ev["agent_id"] == "hermes-lab"
     assert ev["agent_type"] == "hermes-fork"
     assert ev["agent_workspace"] == "research-agents"
-    assert ev["agent_owner"] == "ml-team"
     assert ev["agent_user"] == "u-42"
 
 

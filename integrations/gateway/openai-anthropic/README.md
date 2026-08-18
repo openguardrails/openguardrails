@@ -67,7 +67,7 @@ sets `OGR_TAIL_HOLD=inf`, which degenerates to buffering the whole reply
 ```bash
 export OGR_URL=https://ogr.example.com
 export OGR_API_KEY=ogr_xxx
-export OGR_AGENT_ID=my-gateway          # the five-tuple; see below
+export OGR_AGENT_ID=my-gateway          # the four-tuple; see below
 python3 gateway.py --port 8800
 ```
 
@@ -98,18 +98,17 @@ Anthropic `{"type": "error", ...}`), with `x-ogr-decision` and
 |---|---|---|
 | `OGR_URL` | `http://localhost:3000` | runtime base URL; canonical `/v1/*` paths joined onto it |
 | `OGR_API_KEY` | — | organization API key (`Authorization: Bearer`) |
-| `OGR_AGENT_ID` | `""` | five-tuple: WHICH agent this gateway fronts |
-| `OGR_AGENT_TYPE` | `""` | five-tuple: what KIND (a label, never an identity) |
-| `OGR_AGENT_WORKSPACE` | `""` | five-tuple: agent group = policy set |
-| `OGR_AGENT_OWNER` | `""` | five-tuple: responsible party |
-| `OGR_AGENT_USER` | `""` | five-tuple: who is using it |
+| `OGR_AGENT_ID` | `""` | four-tuple: WHICH agent this gateway fronts |
+| `OGR_AGENT_TYPE` | `""` | four-tuple: what KIND (a label, never an identity) |
+| `OGR_AGENT_WORKSPACE` | `""` | four-tuple: agent group = policy set |
+| `OGR_AGENT_USER` | `""` | four-tuple: who is using it |
 | `OGR_FAIL_MODE` | `open` | `closed` refuses when no verdict arrives — including a verdict whose `unjudged` names paths |
 | `OGR_TAIL_HOLD` | `200` | held-back characters of a streamed reply; `inf` buffers the whole stream |
 | `OGR_TIMEOUT` | `5.0` | evaluate budget (seconds) |
 | `OGR_UPSTREAM_OPENAI` | `https://api.openai.com` | where `/v1/chat/completions` forwards |
 | `OGR_UPSTREAM_ANTHROPIC` | `https://api.anthropic.com` | where `/v1/messages` forwards |
 
-**The five-tuple** is required on every event, with `""` as the explicit "no
+**The four-tuple** is required on every event, with `""` as the explicit "no
 assertion" — every integrator answers the identity question; nobody falls
 into the API-key floor by omission. A real gateway fills `agent_id` from its
 own **caller authentication** (the authenticated caller IS the agent) and

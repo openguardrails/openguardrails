@@ -35,7 +35,7 @@
 import { readFileSync } from "node:fs"
 import { randomUUID } from "node:crypto"
 
-// --- configuration (env; the five-tuple defaults to "" = no assertion) -------
+// --- configuration (env; the four-tuple defaults to "" = no assertion) -------
 
 const RUNTIME_URL = (process.env.OGR_RUNTIME_URL || "https://openguardrails.com").replace(/\/+$/, "")
 const API_KEY = process.env.OGR_API_KEY || ""
@@ -44,7 +44,7 @@ const TIMEOUT_MS = Number(process.env.OGR_TIMEOUT_MS || 5000)
 const FAIL_MODE = process.env.OGR_FAIL_MODE === "closed" ? "closed" : "open"
 
 /**
- * The identity five-tuple, all five always sent: the empty string is the
+ * The identity four-tuple, all four always sent: the empty string is the
  * explicit "no assertion" (the runtime then derives from the API key — the
  * identity floor). Only `agent_type` has a non-empty default: it labels the
  * harness, which we do know.
@@ -53,7 +53,6 @@ const IDENTITY = {
   agent_id: process.env.OGR_AGENT_ID || "",
   agent_type: process.env.OGR_AGENT_TYPE || "claude-code",
   agent_workspace: process.env.OGR_AGENT_WORKSPACE || "",
-  agent_owner: process.env.OGR_AGENT_OWNER || "",
   agent_user: process.env.OGR_AGENT_USER || "",
 }
 

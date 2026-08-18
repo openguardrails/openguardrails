@@ -15,7 +15,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 # fields and nothing else.
 REQUIRED_FIELDS = {
     "kind", "step_id",
-    "agent_id", "agent_type", "agent_workspace", "agent_owner", "agent_user",
+    "agent_id", "agent_type", "agent_workspace", "agent_user",
     "llm_protocol", "payload",
 }
 
@@ -102,7 +102,7 @@ class MockRuntime:
         if not (isinstance(event.get("step_id"), str) and event.get("step_id")):
             problems.append("step_id: empty or not a string")
         for field in ("agent_id", "agent_type", "agent_workspace",
-                      "agent_owner", "agent_user"):
+                      "agent_user"):
             if not isinstance(event.get(field), str):
                 problems.append(f"{field}: not a string")
         if not isinstance(event.get("payload"), dict):

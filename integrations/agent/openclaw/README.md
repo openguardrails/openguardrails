@@ -56,7 +56,7 @@ openclaw plugins install openguardrails-instrumentation-openclaw
 
 In your OpenClaw config under `plugins.entries.openguardrails.config`; every
 field falls back to the environment (`OGR_RUNTIME_URL`, `OGR_API_KEY`,
-`OGR_AGENT_ID`, `OGR_AGENT_WORKSPACE`, `OGR_AGENT_OWNER`, `OGR_AGENT_USER`),
+`OGR_AGENT_ID`, `OGR_AGENT_WORKSPACE`, `OGR_AGENT_USER`),
 then to `""` — the explicit "no assertion", which the runtime resolves from
 the API key. Only the API key is required; without one the plugin runs
 unguarded and says so once.

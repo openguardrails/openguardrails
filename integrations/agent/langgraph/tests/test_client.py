@@ -15,7 +15,6 @@ EVENT = {
     "agent_id": "",
     "agent_type": "langgraph",
     "agent_workspace": "",
-    "agent_owner": "",
     "agent_user": "",
     "llm_protocol": "canonical",
     "payload": {"messages": []},

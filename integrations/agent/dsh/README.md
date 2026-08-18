@@ -17,10 +17,10 @@ be refused:
 | periodically | `/v1/heartbeat` — build id + degraded-mode counters | *(not a guarded action — liveness, so the runtime can tell "agent idle" from "integration went dark")* |
 
 **One endpoint, every field required.** A v0.8 event is `kind`, `step_id`,
-the identity five-tuple, `llm_protocol`, and the `payload` — nothing else on
+the identity four-tuple, `llm_protocol`, and the `payload` — nothing else on
 the wire. The plugin mints one fresh `step_id` per model call (the
 same value on the call's two events — the ONE coordinate the runtime cannot
-derive) and fills the five-tuple on every event, with `""` as the explicit
+derive) and fills the four-tuple on every event, with `""` as the explicit
 "no assertion": `agent_id` is `dsh-<hostname>`, `agent_type` is `dsh`, owner
 and user default to the OS account the harness runs as, and the workspace
 stays empty unless the deployment names one (the API key's workspace is the

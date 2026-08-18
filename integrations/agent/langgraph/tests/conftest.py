@@ -41,7 +41,6 @@ def _clean_ogr_env(monkeypatch):
         "OGR_AGENT_ID",
         "OGR_AGENT_TYPE",
         "OGR_AGENT_WORKSPACE",
-        "OGR_AGENT_OWNER",
         "OGR_AGENT_USER",
     ):
         monkeypatch.delenv(name, raising=False)

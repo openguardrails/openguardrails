@@ -90,7 +90,6 @@ EVENT_FIELDS = {
     "agent_id",
     "agent_type",
     "agent_workspace",
-    "agent_owner",
     "agent_user",
     "llm_protocol",
     "payload",
@@ -103,7 +102,7 @@ EVENT_FIELDS = {
 OPTIONAL_FIELDS = {"integration"}
 
 IDENTITY_FIELDS = (
-    "agent_id", "agent_type", "agent_workspace", "agent_owner", "agent_user",
+    "agent_id", "agent_type", "agent_workspace", "agent_user",
 )
 
 

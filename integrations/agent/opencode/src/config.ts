@@ -59,9 +59,9 @@ export interface AutoModeConfig {
 
 /**
  * The runtime connection plus the identity claims every event carries.
- * Every claim is a five-tuple field on the wire; unset resolves to the
+ * Every claim is a four-tuple field on the wire; unset resolves to the
  * environment (`OGR_RUNTIME_URL`, `OGR_API_KEY`, `OGR_AGENT_ID`,
- * `OGR_AGENT_WORKSPACE`, `OGR_AGENT_OWNER`, `OGR_AGENT_USER`) and then to
+ * `OGR_AGENT_WORKSPACE`, `OGR_AGENT_USER`) and then to
  * `""` — the explicit "no assertion", which the runtime resolves from the
  * API key (the identity floor). Only the API key has no default — get one
  * at https://openguardrails.com.
@@ -77,8 +77,6 @@ export interface RuntimeOptions {
   agentType?: string
   /** `agent_workspace` claim — the platform policy group, NOT a directory. Empty = the key's workspace. */
   workspace?: string
-  /** `agent_owner` claim — the responsible party. Empty = unattributed. */
-  owner?: string
   /** `agent_user` claim — who is using the agent. Empty = every session is one user. */
   user?: string
 }
@@ -99,7 +97,6 @@ export interface FiveTuple {
   agent_id: string
   agent_type: string
   agent_workspace: string
-  agent_owner: string
   agent_user: string
 }
 
@@ -122,7 +119,6 @@ export function resolveConfig(options?: GuardrailsOptions): ResolvedConfig {
       agent_id: r?.agentId || process.env["OGR_AGENT_ID"] || "",
       agent_type: r?.agentType || DEFAULT_AGENT_TYPE,
       agent_workspace: r?.workspace || process.env["OGR_AGENT_WORKSPACE"] || "",
-      agent_owner: r?.owner || process.env["OGR_AGENT_OWNER"] || "",
       agent_user: r?.user || process.env["OGR_AGENT_USER"] || "",
     },
     failMode: options?.failMode ?? "open",

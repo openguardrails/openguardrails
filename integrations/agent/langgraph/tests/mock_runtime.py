@@ -23,7 +23,6 @@ REQUIRED_FIELDS = {
     "agent_id",
     "agent_type",
     "agent_workspace",
-    "agent_owner",
     "agent_user",
     "llm_protocol",
     "payload",
@@ -37,7 +36,7 @@ OPTIONAL_FIELDS = {"integration"}
 
 KINDS = {"step/request", "step/response"}
 LLM_PROTOCOLS = {"openai.chat", "openai.responses", "anthropic.messages", "canonical"}
-FIVE_TUPLE = ("agent_id", "agent_type", "agent_workspace", "agent_owner", "agent_user")
+FIVE_TUPLE = ("agent_id", "agent_type", "agent_workspace", "agent_user")
 
 
 class MockRuntime:

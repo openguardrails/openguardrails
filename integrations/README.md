@@ -12,8 +12,8 @@ Two hook categories — same protocol, different seat:
 
 | Category | Seat | Purpose |
 |---|---|---|
-| [`agent/`](agent/) | inside the harness loop | Holds the model call itself (or, at fragment vantages, the tool call about to execute); fills the five-tuple from its own config. |
-| [`gateway/`](gateway/) | an LLM proxy | One proxied model call = one step; forwards raw provider bodies, fills the five-tuple from its own caller authentication. |
+| [`agent/`](agent/) | inside the harness loop | Holds the model call itself (or, at fragment vantages, the tool call about to execute); fills the four-tuple from its own config. |
+| [`gateway/`](gateway/) | an LLM proxy | One proxied model call = one step; forwards raw provider bodies, fills the four-tuple from its own caller authentication. |
 
 ## Status (2026-08-15)
 

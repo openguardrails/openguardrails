@@ -11,8 +11,7 @@ import { createServer } from "node:http"
 /** The v0.8 GuardEvent required field set — no others beyond OPTIONAL_FIELDS. */
 const REQUIRED_FIELDS = [
   "agent_id",
-  "agent_owner",
-  "agent_type",
+    "agent_type",
   "agent_user",
   "agent_workspace",
   "kind",
@@ -52,7 +51,7 @@ export function violationsOf(event) {
   if (typeof event.step_id !== "string" || event.step_id.length === 0) {
     problems.push(`step_id ${JSON.stringify(event.step_id)}`)
   }
-  for (const f of ["agent_id", "agent_type", "agent_workspace", "agent_owner", "agent_user"]) {
+  for (const f of ["agent_id", "agent_type", "agent_workspace", "agent_user"]) {
     if (typeof event[f] !== "string") problems.push(`${f} is ${typeof event[f]}, not string`)
   }
   if (!PROTOCOLS.has(event.llm_protocol)) problems.push(`llm_protocol ${JSON.stringify(event.llm_protocol)}`)

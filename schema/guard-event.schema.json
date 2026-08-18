@@ -10,7 +10,6 @@
     "agent_id",
     "agent_type",
     "agent_workspace",
-    "agent_owner",
     "agent_user",
     "llm_protocol",
     "payload"
@@ -39,10 +38,6 @@
     "agent_workspace": {
       "type": "string",
       "description": "The named GROUP of agents this one belongs to — one workspace, one policy set. Empty = the API key's workspace."
-    },
-    "agent_owner": {
-      "type": "string",
-      "description": "The agent's builder / responsible party. An accountability attribute, never a policy boundary. Empty = unattributed."
     },
     "agent_user": {
       "type": "string",

@@ -22,7 +22,7 @@
  * to skip. What a runtime can derive is not on the wire at all (session,
  * turn, step numbering, timestamps, protocol versioning); what only the
  * producer can know is mandatory, with the empty string as the explicit
- * "I have nothing to assert" on the identity five-tuple. `step_id` is the
+ * "I have nothing to assert" on the identity four-tuple. `step_id` is the
  * one coordinate kept: concurrency makes pairing a call's two halves
  * underivable, so the producer mints a fresh random id per model call and
  * puts the SAME value on both events.
@@ -39,7 +39,12 @@ export interface WireEvent {
   agent_id: string
   agent_type: string
   agent_workspace: string
-  agent_owner: string
+  /**
+   * ⚠️ There is no `agent_owner` (removed 2026-08-17). Who is ACCOUNTABLE for an
+   * agent is not something a producer can assert — it is a link to a console
+   * account an administrator assigns, and a read permission cannot rest on a
+   * claim the caller makes about itself.
+   */
   agent_user: string
   llm_protocol: "openai.chat" | "openai.responses" | "anthropic.messages" | "canonical"
   payload: Record<string, unknown>

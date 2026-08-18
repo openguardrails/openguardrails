@@ -63,7 +63,6 @@ All via environment variables (the plugin manifest can't declare config;
 | `OGR_AGENT_ID` | `""` | `agent_id` claim; empty = derived from the API key (identity floor) |
 | `OGR_AGENT_TYPE` | `codex` | `agent_type` claim (harness label) |
 | `OGR_AGENT_WORKSPACE` | `""` | `agent_workspace` claim; empty = the API key's workspace |
-| `OGR_AGENT_OWNER` | `""` | `agent_owner` claim |
 | `OGR_AGENT_USER` | `""` | `agent_user` claim |
 | `OGR_MAX_CONSECUTIVE_DENIALS` | `3` | Auto mode: denials in a row before deferring the rest of the turn to you |
 | `OGR_MAX_TOTAL_DENIALS` | `20` | Auto mode: total denials per turn before deferring |
@@ -73,7 +72,7 @@ All via environment variables (the plugin manifest can't declare config;
 
 Each hook holds one pending tool call and sends the runtime one canonical
 `step/response` [`GuardEvent`](../../../specification/guard-event.md) —
-`{kind, step_id, five-tuple, llm_protocol: "canonical", payload}` where the
+`{kind, step_id, four-tuple, llm_protocol: "canonical", payload}` where the
 payload carries the held call as `tool_calls[0]`, plus the current
 generation's prose and reasoning summaries read from the session rollout
 (`transcript_path`) and the host-reported model. `step_id` is fresh per

@@ -32,10 +32,9 @@ model = guard(
     ChatOpenAI(model="gpt-5"),
     runtime_url="https://ogr.example.com",   # or OGR_RUNTIME_URL
     api_key="ogr_xxxxxxxx",                  # or OGR_API_KEY
-    # the identity five-tuple — always on the wire, "" = no assertion
+    # the identity four-tuple — always on the wire, "" = no assertion
     agent_id="invoice-bot",                  # WHICH agent (policy + inventory key)
     agent_workspace="finance-agents",        # agent GROUP — one workspace, one policy set
-    agent_owner="payments-team",             # WHO is responsible
     agent_user="u-8232",                     # who is USING it this session
     # agent_type defaults to "langgraph" — the one thing this harness knows
 )
@@ -85,7 +84,6 @@ defaults to `""` (the explicit "no assertion") except `agent_type`.
 | `agent_id` | `OGR_AGENT_ID` | `""` |
 | `agent_type` | `OGR_AGENT_TYPE` | `"langgraph"` |
 | `agent_workspace` | `OGR_AGENT_WORKSPACE` | `""` |
-| `agent_owner` | `OGR_AGENT_OWNER` | `""` |
 | `agent_user` | `OGR_AGENT_USER` | `""` |
 
 **Fail mode** ([degraded-mode](../../../specification/degraded-mode.md)):

@@ -23,7 +23,7 @@ const API_KEY = "ogr_test"
 // optional ones below.
 const EVENT_KEYS = [
   "kind", "step_id", "agent_id", "agent_type", "agent_workspace",
-  "agent_owner", "agent_user", "llm_protocol", "payload",
+  "agent_user", "llm_protocol", "payload",
 ].sort()
 
 // The one OPTIONAL field (2026-08-17): `integration`, the reporter's own
@@ -42,7 +42,7 @@ function validateEvent(ev) {
   }
   if (!["step/request", "step/response"].includes(ev.kind)) errs.push(`kind ${ev.kind}`)
   if (typeof ev.step_id !== "string" || !ev.step_id) errs.push("step_id must be a non-empty string")
-  for (const f of ["agent_id", "agent_type", "agent_workspace", "agent_owner", "agent_user"]) {
+  for (const f of ["agent_id", "agent_type", "agent_workspace", "agent_user"]) {
     if (typeof ev[f] !== "string") errs.push(`${f} must be a string`)
   }
   if (!["openai.chat", "openai.responses", "anthropic.messages", "canonical"].includes(ev.llm_protocol)) {
@@ -103,7 +103,6 @@ function runHook(payload, env = {}) {
         OGR_AGENT_ID: "",
         OGR_AGENT_TYPE: "",
         OGR_AGENT_WORKSPACE: "",
-        OGR_AGENT_OWNER: "",
         OGR_AGENT_USER: "",
         ...env,
       },
@@ -159,11 +158,10 @@ test("allow → silent allow; wire is one canonical step/response with the held 
   const ev = requests[0].body
   eq(ev.kind, "step/response")
   eq(ev.llm_protocol, "canonical")
-  // Five-tuple: agent_type defaults to the harness label, the rest to "".
+  // Four-tuple: agent_type defaults to the harness label, the rest to "".
   eq(ev.agent_id, "")
   eq(ev.agent_type, "claude-code")
   eq(ev.agent_workspace, "")
-  eq(ev.agent_owner, "")
   eq(ev.agent_user, "")
   const call = ev.payload.tool_calls[0]
   eq(ev.payload.tool_calls.length, 1)
@@ -181,20 +179,18 @@ test("step_id is fresh per invocation", async () => {
   if (!a || a === b) throw new Error(`step_ids not fresh: ${a} / ${b}`)
 })
 
-test("five-tuple env overrides ride on the event", async () => {
+test("four-tuple env overrides ride on the event", async () => {
   verdictHandler = allowVerdict()
   requests.length = 0
   await runHook(payload("ls"), {
     OGR_AGENT_ID: "cc-1",
     OGR_AGENT_WORKSPACE: "eng-agents",
-    OGR_AGENT_OWNER: "platform",
     OGR_AGENT_USER: "u-7",
   })
   const ev = requests[0].body
   eq(ev.agent_id, "cc-1")
   eq(ev.agent_type, "claude-code")
   eq(ev.agent_workspace, "eng-agents")
-  eq(ev.agent_owner, "platform")
   eq(ev.agent_user, "u-7")
 })
 

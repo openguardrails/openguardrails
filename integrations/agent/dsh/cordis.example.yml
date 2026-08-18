@@ -14,7 +14,7 @@
 # seams — `step/request` before the model, `step/response` once, whole, at
 # stream end while the tail is still held back. One endpoint, no declared
 # coordinates (the runtime derives session/turn/step; `step_id` pairs the
-# halves), the identity five-tuple on every event. All decisions come from
+# halves), the identity four-tuple on every event. All decisions come from
 # the runtime; the v0.6 local policy engine is long gone with the SDK layer
 # it rode on.
 
@@ -33,7 +33,6 @@
         #   apiKey: !!js process.env.OGR_API_KEY
         #   url: https://openguardrails.com
         #   workspace: ''  # agent_workspace claim: the platform policy group (NOT a directory); empty = the key's workspace
-        #   owner: ''      # agent_owner claim; empty = the OS account
         #   user: ''       # agent_user claim; empty = the OS account
 
         # ── Degraded mode (specification/degraded-mode.md): what happens when

@@ -94,7 +94,7 @@ def test_exactly_the_required_fields_plus_integration_and_empty_five_tuple_defau
     # given piece of traffic.
     assert set(event) == {
         "kind", "step_id", "agent_id", "agent_type", "agent_workspace",
-        "agent_owner", "agent_user", "llm_protocol", "payload",
+        "agent_user", "llm_protocol", "payload",
         "integration",
     }
     # The SAME constant the heartbeat sends — two literals would drift.
@@ -104,7 +104,6 @@ def test_exactly_the_required_fields_plus_integration_and_empty_five_tuple_defau
     assert event["agent_id"] == ""
     assert event["agent_type"] == "litellm"
     assert event["agent_workspace"] == ""
-    assert event["agent_owner"] == ""
     assert event["agent_user"] == ""
 
 

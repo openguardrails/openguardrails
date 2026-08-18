@@ -14,7 +14,7 @@ import { createServer } from "node:http"
 /** The v0.8 GuardEvent fields — all required, nothing else allowed. */
 const EVENT_FIELDS = [
   "kind", "step_id",
-  "agent_id", "agent_type", "agent_workspace", "agent_owner", "agent_user",
+  "agent_id", "agent_type", "agent_workspace", "agent_user",
   "llm_protocol", "payload",
 ]
 
@@ -38,8 +38,8 @@ function eventIssues(e) {
   }
   if ("kind" in e && !KINDS.includes(e.kind)) issues.push(`bad kind ${JSON.stringify(e.kind)}`)
   if ("step_id" in e && (typeof e.step_id !== "string" || e.step_id.length === 0)) issues.push("step_id must be a non-empty string")
-  for (const f of ["agent_id", "agent_type", "agent_workspace", "agent_owner", "agent_user"]) {
-    // The five-tuple is required WITH "" as the explicit no-assertion — a
+  for (const f of ["agent_id", "agent_type", "agent_workspace", "agent_user"]) {
+    // The four-tuple is required WITH "" as the explicit no-assertion — a
     // missing field and an empty one are different statements.
     if (f in e && typeof e[f] !== "string") issues.push(`${f} must be a string ("" = no assertion)`)
   }
@@ -125,7 +125,7 @@ export async function startMockRuntime(decide = () => "allow") {
  * Boot the plugin with a mock runtime wired in through the environment (the
  * plugin reads OGR_RUNTIME_URL/OGR_API_KEY when `apply` runs), and restore
  * the environment afterwards. The OGR_AGENT_* claim variables are cleared so
- * the five-tuple defaults under test are the plugin's, not the developer's
+ * the four-tuple defaults under test are the plugin's, not the developer's
  * shell's. Any event the mock rejected fails the test — conformance is not
  * optional.
  */
@@ -135,7 +135,6 @@ export async function withRuntime(bootFn, config, decide, body) {
   process.env.OGR_RUNTIME_URL = runtime.url
   process.env.OGR_API_KEY = "ogr_mockmockmockmockmockmockmock"
   delete process.env.OGR_AGENT_WORKSPACE
-  delete process.env.OGR_AGENT_OWNER
   delete process.env.OGR_AGENT_USER
   try {
     const booted = await bootFn(config)
