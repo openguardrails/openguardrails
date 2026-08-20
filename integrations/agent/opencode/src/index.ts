@@ -118,13 +118,19 @@ export const OpenGuardrailsPlugin: Plugin = async (_input, options) => {
     timer.unref?.()
   }
 
-  /** The one held action → one canonical step/response, eight fields exactly. */
-  const heldCallEvent = (callId: string, name: string, args: unknown): WireEvent => ({
+  /**
+   * The one held action → one canonical step/response: the eight required
+   * fields, plus `session_hint` when the host names the session this call
+   * belongs to (opencode's hooks carry `sessionID`, so this vantage holds the
+   * fact the spec says to send) and `integration`, stamped by the client.
+   */
+  const heldCallEvent = (callId: string, name: string, args: unknown, sessionId?: string): WireEvent => ({
     kind: "step/response",
     step_id: mintStepId(),
     ...cfg.identity,
     llm_protocol: "canonical",
     payload: { tool_calls: [{ id: callId, name, arguments: args }] },
+    ...(sessionId ? { session_hint: sessionId } : {}),
   })
 
   const callVerdicts = new Map<string, CallVerdict>()
@@ -143,8 +149,8 @@ export const OpenGuardrailsPlugin: Plugin = async (_input, options) => {
    * Shared judgement of one held call. Returns the CallVerdict to enforce,
    * or null when nothing answered and fail-open lets it through undecided.
    */
-  async function judge(callId: string, name: string, args: unknown): Promise<CallVerdict | null> {
-    const verdict = await client.evaluate(heldCallEvent(callId, name, args))
+  async function judge(callId: string, name: string, args: unknown, sessionId?: string): Promise<CallVerdict | null> {
+    const verdict = await client.evaluate(heldCallEvent(callId, name, args, sessionId))
     if (!verdict) {
       if (cfg.failMode === "closed") {
         return { allow: false, reason: "this call could not be judged and the deployment is fail-closed" }
@@ -184,7 +190,7 @@ export const OpenGuardrailsPlugin: Plugin = async (_input, options) => {
         }
         return
       }
-      const verdict = await judge(input.callID, input.tool, output.args)
+      const verdict = await judge(input.callID, input.tool, output.args, input.sessionID)
       if (!verdict) return // fail-open, undecided: no record for the ask either
       rememberCall(input.callID, verdict)
       if (!verdict.allow) {
@@ -221,7 +227,7 @@ export const OpenGuardrailsPlugin: Plugin = async (_input, options) => {
       // An uncorrelated ask still describes a held would-run action —
       // opencode's bash asks carry the command in `metadata` — so judge it
       // as the one tool call this plugin actually holds.
-      const verdict = await judge(input.callID ?? input.id ?? mintStepId(), input.type, metadata)
+      const verdict = await judge(input.callID ?? input.id ?? mintStepId(), input.type, metadata, input.sessionID)
       if (!verdict) return undecided() // fail-open: the human still decides
       output.status = verdict.allow ? "allow" : "deny"
     }

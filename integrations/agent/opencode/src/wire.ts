@@ -47,9 +47,10 @@ export interface WireEvent {
   llm_protocol: "openai.chat" | "openai.responses" | "anthropic.messages" | "canonical"
   payload: Record<string, unknown>
   /**
-   * WHO REPORTED IT — `"name/version"`. The only one of the v1.0 wire's three
-   * optional fields this plugin sends, stamped by {@link OgrClient.evaluate} so
-   * it cannot be forgotten at a construction site.
+   * WHO REPORTED IT — `"name/version"`. One of the two optional v1.0 fields
+   * this plugin sends (the other is {@link WireEvent.session_hint}), stamped by
+   * {@link OgrClient.evaluate} so it cannot be forgotten at a construction
+   * site.
    *
    * ⚠️ It rode the heartbeat ALONE until 2026-08-17, and that could not answer
    * "which build produced this traffic": a runtime keys its liveness record on
@@ -59,6 +60,15 @@ export interface WireEvent {
    * traffic it produced and nothing can overwrite it.
    */
   integration?: string
+  /**
+   * WHICH CONVERSATION — opencode's own `sessionID` for the session this held
+   * call belongs to. A grouping HINT, not a coordinate: the runtime still
+   * derives turns and steps and MAY decline the grouping (guard-event.md §
+   * session_hint). Sent whenever the host names a session, omitted entirely
+   * when it does not — never the empty string, which would assert a session
+   * named "".
+   */
+  session_hint?: string
 }
 
 /** One tool call as a canonical step/response payload carries it. */

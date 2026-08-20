@@ -54,6 +54,36 @@ test("an allowed call proceeds, and the event is the exact v0.8 wire", async () 
   }
 })
 
+test("session_hint carries opencode's sessionID, on the call hook and the ask", async () => {
+  const { hooks, runtime } = await boot(() => "allow")
+  try {
+    await before(hooks, `call-${++seq}`)
+    // One id per conversation: a second call of the same session names it
+    // identically, which is what makes the hint a grouping signal at all.
+    await before(hooks, `call-${++seq}`)
+    assert.deepEqual(runtime.received.map((e) => e.session_hint), ["sess-1", "sess-1"])
+    // The uncorrelated ask path holds the session too, and must not lose it.
+    assert.equal(await ask(hooks, { callID: `call-${++seq}`, metadata: { command: "ls" } }), "allow")
+    assert.equal(runtime.received.at(-1).session_hint, "sess-1")
+    assert.deepEqual(runtime.violations, [])
+  } finally {
+    await runtime.close()
+  }
+})
+
+test("no sessionID from the host → no session_hint on the wire", async () => {
+  const { hooks, runtime } = await boot(() => "allow")
+  try {
+    // Never "": an empty optional asserts nothing, while the schema would read
+    // it as a session actually named "".
+    await hooks["tool.execute.before"]({ tool: "bash", callID: `call-${++seq}` }, { args: { command: "ls" } })
+    assert.ok(!("session_hint" in runtime.received[0]))
+    assert.deepEqual(runtime.violations, [])
+  } finally {
+    await runtime.close()
+  }
+})
+
 test("step_id is fresh per held call — never reused", async () => {
   const { hooks, runtime } = await boot(() => "allow")
   try {
