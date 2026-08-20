@@ -34,7 +34,7 @@ LLM = os.environ.get("LLM_BASE_URL", "http://127.0.0.1:8472")     # any OpenAI-c
 LLM_KEY = os.environ.get("LLM_API_KEY", "sk-demo")
 MODEL = os.environ.get("LLM_MODEL", "gpt-5")
 
-# The identity five-tuple. All five always present; "" = nothing to assert
+# The identity four-tuple. All four always present; "" = nothing to assert
 # (the runtime then derives identity from the API key).
 IDENTITY = {
     "agent_id":        "invoice-bot",     # WHICH agent — unique in your org;

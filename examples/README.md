@@ -52,9 +52,9 @@ export LLM_MODEL=gpt-5
 python minimal-agent/agent.py "Read notes.txt and total the refunds."
 ```
 
-## The identity five-tuple
+## The identity four-tuple
 
-Every event carries all five fields; the empty string is the explicit "no
+Every event carries all four fields; the empty string is the explicit "no
 assertion", never an error (the runtime then derives identity from the API
 key — the [identity floor](../specification/guard-event.md#the-api-key-is-the-identity-floor)).
 

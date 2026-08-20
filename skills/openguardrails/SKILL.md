@@ -109,13 +109,13 @@ tighten the runtime policy before relying on this".
 
 One model call = one step = two events sharing a minted `step_id`:
 `step/request` (the raw provider request body) before the call,
-`step/response` (the raw response, tool calls still unexecuted) after. Nine
-required fields (plus three optional: integration, connection,
-session_hint); the four-tuple's empty string means "no
-assertion" and the API key becomes the identity floor. The runtime derives
-sessions and turns; the verdict is `allow`/`block` plus findings, redaction
-spans, and `unjudged` (what it could not look at — which fail-closed treats
-as a block). Full cheat sheet: `reference/wire.md`.
+`step/response` (the raw response, tool calls still unexecuted) after. Eight
+required fields (plus three optional: integration, connection, session_hint);
+the four-tuple's empty string means "no assertion" and the API key becomes
+the identity floor. The runtime derives sessions and turns; the verdict is
+`allow`/`block` plus findings, redaction spans, and `unjudged` (what it could
+not look at — which fail-closed treats as a block). Full cheat sheet:
+`reference/wire.md`.
 
 ## Links
 
