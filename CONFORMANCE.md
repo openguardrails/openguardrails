@@ -71,7 +71,7 @@ Conformance is currently self-declared. State the version you target and the
 role you implement, e.g.:
 
 ```
-OpenGuardrails v0.8 — detector + integration conformant
+OpenGuardrails v1.0 — detector + integration conformant
 ```
 
 Validate against the schemas in `schema/` as part of your test suite. The

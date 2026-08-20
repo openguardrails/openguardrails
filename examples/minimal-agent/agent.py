@@ -43,7 +43,6 @@ IDENTITY = {
                                           #   describes, never selects policy
     "agent_workspace": "finance-agents",  # agent GROUP — one workspace,
                                           #   one policy set
-    "agent_owner":     "payments-team",   # WHO is responsible for this agent
     "agent_user":      "u-8232",          # who is USING it this session
 }
 

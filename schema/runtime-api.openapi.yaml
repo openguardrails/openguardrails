@@ -7,7 +7,7 @@ openapi: 3.1.0
 
 info:
   title: OpenGuardrails Runtime API
-  version: "0.8"
+  version: "1.0"
   summary: The HTTP wire contract between an OGR runtime (PDP) and its integration points (PEPs).
   description: |
     The OpenGuardrails (OGR) Runtime API is the normative HTTP binding of the

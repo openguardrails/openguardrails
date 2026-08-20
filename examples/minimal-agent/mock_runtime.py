@@ -22,7 +22,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 MARKER = os.environ.get("OGR_BLOCK_MARKER", "curl -d @~/.ssh/id_rsa")
 
 FIELDS = ("kind", "step_id", "agent_id", "agent_type", "agent_workspace",
-          "agent_owner", "agent_user", "llm_protocol", "payload")
+          "agent_user", "llm_protocol", "payload")
 KINDS = ("step/request", "step/response")
 PROTOCOLS = ("openai.chat", "openai.responses", "anthropic.messages", "canonical")
 

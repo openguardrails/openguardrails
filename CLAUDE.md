@@ -3,11 +3,16 @@
 This is a monorepo. Run commands from the repository root unless a component
 README explicitly says otherwise.
 
-**Protocol version: v0.8 — the minimum API** (one endpoint, one recipe;
-everything derivable left the wire, everything producer-known is required).
-The v0.7 design rationale lives in
-`../openguardrails-runtime/docs/v0.7-ledger-redesign.md`; the normative text
-lives here in `specification/` + `schema/`. Read
+**Protocol version: v1.0 — the first stable release (2026-08-19)**: the v0.8
+"minimum API" wire unchanged (one endpoint, one recipe; everything derivable
+left the wire, everything producer-known is required), plus the **layer
+model** as the normative foundational concept (entity axis: tenant →
+workspace → agent-as-endpoint; traffic stack: L6 session · L5 turn · L4 step ·
+L3 event — the packet, the only layer on the wire — · L2 call · L1 exec).
+Within 1.x changes are additive-optional only. The v0.7 design rationale
+lives in `../openguardrails-runtime/docs/v0.7-ledger-redesign.md`; the layer
+model's full write-up in `../openguardrails-runtime/docs/core-concepts.md`;
+the normative text lives here in `specification/` + `schema/`. Read
 `specification/overview.md` first, then `specification/runtime-api.md` —
 its "minimal integration" section is the canonical example and also ships
 at `examples/minimal-agent/`.
@@ -20,9 +25,11 @@ health — `/v1/ingest` was removed in v0.8) plus the JSON Schemas in
 `integrations/` — each plugin speaks the API directly (two evaluate POSTs
 per model call); new endpoints or wire fields belong in the spec first.
 There is ONE integration recipe (in runtime-api.md) since v0.8: raw provider
-bodies, a minted `step_id` per model call, the required identity five-tuple
+bodies, a minted `step_id` per model call, the required identity FOUR-tuple
 (empty string = no assertion), no other coordinates, fail-open by default,
-tail-hold streaming. A GuardEvent has zero optional fields.
+tail-hold streaming. A GuardEvent has exactly three optional fields —
+`integration`, `connection`, `session_hint` — and adding one is an
+additive-optional spec change, never a required one.
 
 OGR supports two integration points operationally: agent-direct hooks and
 gateway hooks — same protocol, different vantage. All bindings and runnable

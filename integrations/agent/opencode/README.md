@@ -1,7 +1,7 @@
 # @openguardrails/opencode-auto-mode
 
 **Auto mode for [opencode](https://github.com/anomalyco/opencode), on OGR
-v0.8.** Whatever your opencode `permission` config would ask you — bash
+v1.0.** Whatever your opencode `permission` config would ask you — bash
 commands, edits, webfetch — this plugin answers from an
 [OpenGuardrails](https://openguardrails.com) **runtime verdict** instead of a
 human, and every tool call is judged before it runs. Enforced as a pure
@@ -27,7 +27,7 @@ so once — connecting a runtime is a deployment choice, not a crash.
 
 ## The vantage, honestly
 
-The v0.8 recipe pairs two events per **model call**: `step/request` holding
+The v1.0 recipe pairs two events per **model call**: `step/request` holding
 the raw provider request, `step/response` holding the raw response.
 opencode's plugin surface exposes **tool-call hooks, not the model byte
 path** — this plugin never holds a provider body, so it cannot implement
@@ -100,7 +100,7 @@ where the build id lives in v0.8.
 ## Test
 
 Offline, against a strict in-process mock runtime that rejects anything but
-the exact ten-field v0.8 GuardEvent:
+the exact v1.0 GuardEvent field set:
 
 ```bash
 npm install && npm test     # standalone — no workspace, no network in the tests

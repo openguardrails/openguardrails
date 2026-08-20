@@ -1,9 +1,9 @@
 # @openguardrails/dsh
 
-**OpenGuardrails for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) — the v0.8 reference agent-direct integration.**
+**OpenGuardrails for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) — the v1.0 reference agent-direct integration.**
 
 This plugin implements **[the recipe](../../../specification/runtime-api.md#the-recipe)**
-of the v0.8 Runtime API — one decision endpoint, two evaluates per model
+of the v1.0 Runtime API — one decision endpoint, two evaluates per model
 call, no SDK. dsh owns its loop, so the plugin sits on the loop's documented
 seams (an ordinary [Cordis](https://github.com/cordiverse/cordis) plugin, no
 core changes) and judges every model call at the moments something can still
@@ -16,7 +16,7 @@ be refused:
 | tool results | *(no third call site)* | results travel in the NEXT step's request and are judged there |
 | periodically | `/v1/heartbeat` — build id + degraded-mode counters | *(not a guarded action — liveness, so the runtime can tell "agent idle" from "integration went dark")* |
 
-**One endpoint, every field required.** A v0.8 event is `kind`, `step_id`,
+**One endpoint, every field required.** A v1.0 event is `kind`, `step_id`,
 the identity four-tuple, `llm_protocol`, and the `payload` — nothing else on
 the wire. The plugin mints one fresh `step_id` per model call (the
 same value on the call's two events — the ONE coordinate the runtime cannot
@@ -124,10 +124,10 @@ package's browser half — still zero core changes).
 ```sh
 npm install          # from the repo root (npm workspace)
 npm run build        # tsc + the browser half
-npm test             # node --test against a strict mock v0.8 runtime
+npm test             # node --test against a strict mock v1.0 runtime
 ```
 
-The mock runtime validates every event against the exact v0.8 field set —
+The mock runtime validates every event against the exact v1.0 field set —
 every field required, extras rejected — and any rejection fails the test, so the
 suite doubles as a wire-conformance check. The tests drive dsh's REAL tool
 registry and Cordis waterfalls (see [`tests/harness.mjs`](tests/harness.mjs))

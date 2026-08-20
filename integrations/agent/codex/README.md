@@ -1,7 +1,7 @@
 # openguardrails-instrumentation-codex
 
 **Auto mode for [OpenAI Codex](https://github.com/openai/codex), over the
-[OpenGuardrails](https://openguardrails.com) (OGR) v0.8 protocol.**
+[OpenGuardrails](https://openguardrails.com) (OGR) v1.0 protocol.**
 
 Install this as a Codex plugin and Codex stops interrupting you for tool calls
 an OGR runtime judges safe — while everything unclear still stops for a human,
@@ -68,7 +68,7 @@ All via environment variables (the plugin manifest can't declare config;
 | `OGR_MAX_TOTAL_DENIALS` | `20` | Auto mode: total denials per turn before deferring |
 | `OGR_STATE_DIR` | `${PLUGIN_DATA}` | Where auto mode's per-turn denial counters live |
 
-## How the hooks map OGR v0.8 to Codex
+## How the hooks map OGR v1.0 to Codex
 
 Each hook holds one pending tool call and sends the runtime one canonical
 `step/response` [`GuardEvent`](../../../specification/guard-event.md) —
@@ -128,7 +128,7 @@ signal the runtime's judge wants alongside the call.)
 ## Tests
 
 ```bash
-npm test    # offline: strict v0.8 mock runtime (node:http) + behavioral cases
+npm test    # offline: strict v1.0 mock runtime (node:http) + behavioral cases
 ```
 
 `test/smoke.mjs` covers the guardrail (block→deny, fail-open default,

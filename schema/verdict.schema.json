@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://openguardrails.com/schema/0.8/verdict.schema.json",
+  "$id": "https://openguardrails.com/schema/1.0/verdict.schema.json",
   "title": "Verdict",
   "description": "The runtime's decision about a GuardEvent. Two decisions: allow | block. Redaction is not a decision — a non-empty modifications.spans on an allow says it. \"Flag\" is not a decision — allow with findings says it.",
   "type": "object",

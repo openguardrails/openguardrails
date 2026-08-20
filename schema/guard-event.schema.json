@@ -1,6 +1,6 @@
 {
  "$schema": "https://json-schema.org/draft/2020-12/schema",
- "$id": "https://openguardrails.com/schema/0.8/guard-event.schema.json",
+ "$id": "https://openguardrails.com/schema/1.0/guard-event.schema.json",
  "title": "GuardEvent",
  "description": "A unit observed at an OGR integration point, on the one observed plane: LLM messages. Two kinds: the two halves of a step (one model call). Every field is required except 'integration', 'connection' and 'session_hint'; the empty string on an identity field is the explicit 'no assertion'. All fields are flat, top-level snake_case; objects are reserved for inherently structured data (payload).",
  "type": "object",

@@ -3,11 +3,12 @@
 A `GuardEvent` is the unit an integration point submits to the runtime.
 Keywords per RFC 2119.
 
-**Eight required fields, and exactly one optional.** v0.8 removed every knob a
+**Eight required fields, and exactly three optional.** v0.8 removed every knob a
 producer could choose to skip: what a runtime can derive is not on the wire at
 all (coordinates, timestamps, protocol versioning), and what only the producer
 can know is mandatory — with the empty string as the explicit "I have nothing
-to assert". An integration is an API key, nine fields, and one endpoint.
+to assert". An integration is an API key, eight required fields, and one
+endpoint.
 
 The optional fields are [`integration`](#integration) — the reporter's own
 `name/version` — [`connection`](#connection), the reporter's opaque

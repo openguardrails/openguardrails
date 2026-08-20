@@ -22,10 +22,72 @@ leaderboard. Vendors compete on detection quality behind a common plug; users
 get one way to configure and compose safety & security across every agent they
 run.
 
-- We define the **wire** — the session/turn/step/call model, events, verdicts,
-  composition, taxonomy.
+- We define the **wire** — the layer model, events, verdicts, composition,
+  taxonomy.
 - We **referee** the benchmark.
 - We do **not** build detection capability — vendors compete behind the contract.
+
+## The layer model: OGR beside OSI
+
+**This is the protocol's foundational concept.** OGR is to agent traffic what
+the layered network model is to packets — and it is built the way a firewall
+is: an integration sees **one event at a time**, the way a firewall sees one
+IP packet, and the runtime reassembles everything above it and reads
+everything below it out of the payload.
+
+| # | OGR layer | Network analogue | One unit is |
+|---|---|---|---|
+| **L6** | **Session** | — *(this domain's own layer)* | one conversation |
+| **L5** | **Turn** | — *(this domain's own layer)* | one instruction → quiescence |
+| **L4** | **Step** | transport | one model call: request + response, paired by `step_id` |
+| **L3** | **Event** | **network — the packet** | one `GuardEvent`, half a step — **the only layer on the wire** |
+| **L2** | **Call** | link | one tool call the model asked for |
+| **L1** | **Exec** | physical | one real execution on a machine — *named by the model, not carried by the contract* |
+
+Like a packet, an event is a **header** — `kind` (`step/request` \|
+`step/response`), `step_id`, and the identity four-tuple `agent_id ·
+agent_type · agent_workspace · agent_user` (OGR's answer to the firewall's
+5-tuple) — plus a **payload**: the raw provider body. Everything above L3 is
+**derived server-side** (sessions by conversation-prefix chaining, turns by
+instruction boundaries and idle timeout — a firewall does not ask packets
+which connection they belong to); everything below is parsed from the payload
+(calls) or inferred (exec: no sensor observes it, and the gap between what a
+call claims and what an exec does is precisely what agent security is about).
+
+Two honest notes on the analogy. OGR follows the *pragmatic* TCP/IP cut — a
+layer earns its place with its own unit, mechanism, and question — not OSI's
+seven: above transport, networking has only "application", but agent traffic
+*is* a dialogue with stable structure, so Turn and Session are this domain's
+own layers, defined here rather than mapped onto OSI's vestigial
+session/presentation layers. And the **agent is an endpoint, not a layer** —
+it persists with zero traffic, sessions belong to it the way TCP connections
+belong to a host, and it is addressed by the four-tuple every event carries.
+Beside the stack sits the entity axis every firewall has: tenant (the API
+key), **workspace** = security zone (one zone, one policy set), **agent** =
+host, discovered from traffic into an inventory.
+
+Each event gets a **verdict at the moment the integration can still refuse
+it** — the request before the model sees it, the response before the agent
+acts on it:
+
+```
+  your own agent · harness plugins        gateway integrations
+  (two POSTs at the loop's seams)         (an LLM proxy: Higress, …)
+        │                                       │
+        │   raw provider bodies + step_id       │
+        ▼                                       ▼
+   ┌───────────────────────────────────────────────┐
+   │  OGR core contract                            │
+   │  GuardEvent · Verdict ·                       │
+   │  composition · taxonomy                       │
+   └───────────────────────────────────────────────┘
+                       ▲
+                       │
+                detector plugins
+               (config rules OR model/classifier)
+```
+
+Normative text: [Overview § The layer model](specification/overview.md).
 
 ## Integrate your agent in five minutes
 
@@ -80,36 +142,6 @@ while True:
 Runnable version (with streaming): [`examples/minimal-agent/`](examples/minimal-agent/).
 Full contract: [Runtime API](specification/runtime-api.md).
 
-## The model
-
-An agent works in a loop, and OGR names that loop the way agent harnesses do:
-a **session** (one conversation) holds **turns** (one instruction →
-quiescence), a turn holds **steps** (one model call each), and a step's
-response holds **calls** (the tool calls the model asked for). One step is
-reported as two events — `step/request` before the model call,
-`step/response` after it and before the agent acts — and each event gets a
-verdict at the moment the integration can still refuse it. The two events of
-one model call share a producer-minted `step_id`; everything above the step
-(session, turn, numbering) is **derived server-side** — an integration keeps
-no loop state for OGR.
-
-```
-  your own agent · harness plugins        gateway integrations
-  (two POSTs at the loop's seams)         (an LLM proxy: Higress, …)
-        │                                       │
-        │   raw provider bodies + step_id       │
-        ▼                                       ▼
-   ┌───────────────────────────────────────────────┐
-   │  OGR core contract                            │
-   │  GuardEvent · Verdict ·                       │
-   │  composition · taxonomy                       │
-   └───────────────────────────────────────────────┘
-                       ▲
-                       │
-                detector plugins
-               (config rules OR model/classifier)
-```
-
 ## Why a standard
 
 Without OGR, securing an agent is an `N × M × L` integration problem: every
@@ -131,7 +163,7 @@ agent developers integrate by calling it directly:
 
 | Component | What it defines | OTel analogue |
 |---|---|---|
-| [Overview](specification/overview.md) | The session/turn/step/call model and the integration surface | — |
+| [Overview](specification/overview.md) | The layer model and the integration surface | — |
 | [GuardEvent](specification/guard-event.md) | The typed unit observed at an integration point | span / log record |
 | [Verdict](specification/verdict.md) | The runtime's decision about an event | — |
 | [composition](specification/composition.md) | How multiple detectors' answers combine into one decision | — |
@@ -176,16 +208,16 @@ the [overview](specification/overview.md).
 ### Integration status
 
 The v0.6 SDK packages were retired in v0.7 — the API is the integration
-surface. v0.8 merged the two integration recipes into one; integrations
-return plugin by plugin as each is rewritten against it:
+surface. v0.8 merged the two integration recipes into one, and every
+integration below speaks it (v1.0 releases the same wire unchanged):
 
 | Category | Target | Status |
 |---|---|---|
-| **Gateway** | Higress (Go/WASM) | [`integrations/gateway/higress`](integrations/gateway/higress/) — **v0.8 reference gateway integration** |
-| **Agent** | DeepSeek Harness (`dsh`) | [`integrations/agent/dsh`](integrations/agent/dsh/) — **v0.8 reference agent-direct integration** |
-| | litellm | [`integrations/agent/litellm`](integrations/agent/litellm/) — v0.8 |
-| | Claude Code · Codex · opencode · OpenClaw · Hermes · LangGraph | pending v0.8 rewrite |
-| **Gateway** | OpenAI/Anthropic example · mitmproxy | pending v0.8 rewrite |
+| **Gateway** | Higress (Go/WASM) | [`integrations/gateway/higress`](integrations/gateway/higress/) — **the reference gateway integration** |
+| | OpenAI/Anthropic example · mitmproxy | current |
+| **Agent** | DeepSeek Harness (`dsh`) | [`integrations/agent/dsh`](integrations/agent/dsh/) — **the reference agent-direct integration** |
+| | litellm | [`integrations/agent/litellm`](integrations/agent/litellm/) — current |
+| | Claude Code · Codex · opencode · OpenClaw · Hermes · LangGraph | current |
 
 ## Development
 
@@ -215,9 +247,11 @@ npm install && npm run build && npm test
 
 ## Status
 
-Current protocol version: **v0.8** (see [CHANGELOG.md](CHANGELOG.md) for
-protocol versions). Minor versions before v1 may still break between releases;
-each break is logged. See
+Current protocol version: **v1.0** — the first stable release (see
+[CHANGELOG.md](CHANGELOG.md) for protocol versions). The wire is stable:
+changes within 1.x are additive-optional (`additionalProperties: false`
+rejects unknown keys, not absent ones, so both ends roll forward
+independently); anything breaking is a new major version. See
 [GOVERNANCE.md](GOVERNANCE.md) for how the spec evolves. Contributions welcome —
 [CONTRIBUTING.md](CONTRIBUTING.md).
 

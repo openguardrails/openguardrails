@@ -1,7 +1,7 @@
 # openguardrails-instrumentation-openclaw
 
 Guard an [OpenClaw](https://github.com/openclaw/openclaw) assistant through an
-[OpenGuardrails](https://openguardrails.com) runtime, on **OGR v0.8**. It is
+[OpenGuardrails](https://openguardrails.com) runtime, on **OGR v1.0**. It is
 the multi-channel counterpart of
 [`@openguardrails/opencode-auto-mode`](../opencode/).
 
@@ -13,7 +13,7 @@ would-run tool call or a would-send message, never loosen one.
 
 ## The vantage, honestly
 
-The v0.8 recipe pairs two events per **model call**: `step/request` holding
+The v1.0 recipe pairs two events per **model call**: `step/request` holding
 the raw provider request, `step/response` holding the raw response.
 OpenClaw's plugin hooks expose **tool calls and channel messages, not the
 model byte path** — this plugin never holds a provider body, so it cannot
@@ -96,7 +96,7 @@ and where the build id lives in v0.8.
 ## Test
 
 Offline, against a strict in-process mock runtime that rejects anything but
-the exact ten-field v0.8 GuardEvent:
+the exact v1.0 GuardEvent field set:
 
 ```bash
 npm install && npm test     # standalone — no workspace, no network in the tests

@@ -63,7 +63,6 @@ key — the [identity floor](../specification/guard-event.md#the-api-key-is-the-
 | `agent_id` | WHICH agent — unique in your org; policy and inventory key on it | derived from the API key |
 | `agent_type` | what KIND — harness/product label; describes, never selects policy | unlabeled |
 | `agent_workspace` | agent GROUP — one workspace, one policy set | the API key's workspace |
-| `agent_owner` | WHO is responsible for the agent (accountability, not policy) | unattributed |
 | `agent_user` | who is USING it this session | every session is one user |
 
 ## Where to go next

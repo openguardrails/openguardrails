@@ -1,11 +1,11 @@
-# The v0.8 wire, one page
+# The v1.0 wire, one page
 
 One endpoint carries every decision: `POST {base}/v1/evaluate`, header
 `Authorization: Bearer ogr_<key>`. One model call = one step = two events
 sharing a `step_id` you mint. The runtime records what it judges; there is
 no separate ingest.
 
-## GuardEvent — nine fields, all required, nothing else
+## GuardEvent — eight required fields, three optional
 
 ```jsonc
 {
@@ -14,11 +14,14 @@ no separate ingest.
   "agent_id": "invoice-bot",         // WHICH agent (org-unique); "" = derive from key
   "agent_type": "my-harness",        // what kind — a label, never selects policy
   "agent_workspace": "finance-agents", // agent group = ONE policy set
-  "agent_owner": "payments-team",    // responsible party (attribute)
   "agent_user": "u-8232",            // who drives it this session (attribute)
   "llm_protocol": "openai.chat",     // openai.chat | openai.responses |
                                      //   anthropic.messages | canonical
-  "payload": { /* the RAW provider body, untouched */ }
+  "payload": { /* the RAW provider body, untouched */ },
+  // optional — send when you hold the fact:
+  "integration": "my-plugin/1.0.0",  // who reported this, name/version
+  "connection": "i-abc#41",          // your own downstream-flow id (attribution only)
+  "session_hint": "sess_9f2c…"       // your own opaque name for this conversation
 }
 ```
 

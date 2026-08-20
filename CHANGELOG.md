@@ -7,10 +7,38 @@ not implementations. Downstream SDKs and adapters pin a protocol version.
 The format follows [Keep a Changelog](https://keepachangelog.com/). The protocol
 version is independent of any implementation's package version.
 
-## [v0.8] — the minimum API (in progress)
+## [v1.0] — 2026-08-19 — the first stable release
+
+**The wire is v0.8's, unchanged, declared stable**: eight required fields,
+three optional (`integration`, `connection`, `session_hint`), two kinds, one
+endpoint. Within 1.x every change is additive-optional
+(`additionalProperties: false` rejects unknown keys, not absent ones, so both
+ends roll forward independently); anything breaking is a new major version.
+
+### Added
+- **The layer model is the protocol's normative foundational concept**
+  ([overview.md](specification/overview.md) § The layer model, and the README
+  front page). Two axes, the two a firewall has: an **entity axis** — tenant
+  (the API key) → workspace (security zone, one policy set) → agent
+  (host/endpoint, addressed by the identity four-tuple; an entity, never a
+  layer) — and a **six-layer traffic stack**, numbered like the network stack
+  it mirrors: **L6 session · L5 turn · L4 step · L3 event · L2 call ·
+  L1 exec**. The event is the packet — the only layer on the wire; everything
+  above it is derived by the runtime, everything below it is parsed from the
+  payload (calls) or inferred (exec — named by the model, deliberately not
+  carried by the contract). The correspondence follows the pragmatic TCP/IP
+  cut, not OSI's seven: turn and session are this domain's own layers, defined
+  here rather than mapped onto OSI's vestigial session/presentation layers.
+
+### Changed
+- Schema `$id`s move from `…/schema/0.8/…` to `…/schema/1.0/…`, and the
+  OpenAPI document's version reads 1.0. No wire change rides the bump — a
+  validator pinning the 0.8 `$id` validates byte-identical events.
+
+## [v0.8] — the minimum API (unreleased — shipped as v1.0)
 
 Everything a runtime can derive leaves the wire; everything only the
-producer can know becomes required. An integration is an API key, nine
+producer can know becomes required. An integration is an API key, eight required
 fields, and one endpoint — the same recipe for a developer's own agent loop
 and for a gateway. The minimal integration example ships in the spec, the
 README, and `examples/minimal-agent/`.

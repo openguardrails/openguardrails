@@ -1,8 +1,8 @@
-# The example gateway: OGR v0.8 in one file
+# The example gateway: OGR v1.0 in one file
 
 [`gateway.py`](gateway.py) is a runnable LLM gateway — OpenAI Chat
 Completions and Anthropic Messages in, the real provider out — with the
-**complete OGR v0.8 gateway integration** wrapped around both directions.
+**complete OGR v1.0 gateway integration** wrapped around both directions.
 Stdlib only, no SDK (there is none in v0.8), no framework: its value is that
 you can read it top to bottom and see the entire contract, including the part
 every other write-up hand-waves — enforcing on a **streamed** reply.
@@ -21,7 +21,7 @@ is where to read the recipe.
 ## The whole protocol, per proxied call
 
 From [`specification/runtime-api.md`](../../../specification/runtime-api.md),
-"The recipe" — an integration is an API key, nine fields, and one endpoint:
+"The recipe" — an integration is an API key, eight required fields, and one endpoint:
 
 1. **mint `step_id`** — a fresh random id; the one coordinate v0.8 kept,
    because concurrency makes pairing a call's two halves underivable.

@@ -51,7 +51,7 @@ sizes, and it would be incoherent to fail closed on one and open on another.
    in the integration's own logs and counters, and the
    [heartbeat](runtime-api.md#post-v1heartbeat)'s `evaluate_errors` counter
    is how the runtime learns an integration went dark. Events observed while
-   degraded are lost observations (v0.8 has no replay channel); the
+   degraded are lost observations (the protocol has no replay channel); the
    heartbeat counters are what make the gap visible instead of silent.
 3. **429 is an outage.** A rate-limited `/v1/evaluate` MUST be treated
    exactly like an unreachable runtime — back off and apply `fail_mode`.

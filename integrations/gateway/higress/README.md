@@ -1,7 +1,7 @@
 # OpenGuardrails Runtime — the Higress plugin
 
-A Higress WASM plugin that speaks **OGR v0.8 directly to an OpenGuardrails
-runtime**. It implements **the recipe of the v0.8 Runtime API**
+A Higress WASM plugin that speaks **OGR v1.0 directly to an OpenGuardrails
+runtime**. It implements **the recipe of the v1.0 Runtime API**
 ([`specification/runtime-api.md`](../../../specification/runtime-api.md)) —
 one recipe now, the same two POSTs per model call whether the integration is a
 gateway or a developer's own agent loop.
@@ -16,7 +16,7 @@ It is called **OpenGuardrails Runtime** in the Higress console;
                           LLM upstream
 ```
 
-## The v0.8 shape: a raw forwarder, nine fields + the build id
+## The v1.0 shape: a raw forwarder + the build id
 
 One proxied model call is one **step**, reported as two `/v1/evaluate` events:
 
@@ -431,7 +431,7 @@ the traffic pass with `decision=` empty).
 ### Which paths it calls
 
 The canonical endpoint paths are rooted at **`/v1/`**: the plugin joins
-`base_path` with `/v1/evaluate` and `/v1/heartbeat` (the whole v0.8 surface —
+`base_path` with `/v1/evaluate` and `/v1/heartbeat` (the whole v1.0 surface —
 `/v1/ingest` no longer exists), and hard-codes no other prefix. The mount is **configuration, not discovery** — a
 WASM filter cannot cheaply probe-and-fall-back, and a wrong `base_path` is
 loud (every `/evaluate` comes back non-200, which is `fail_mode` territory,

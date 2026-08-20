@@ -2,7 +2,7 @@
 
 Guard a [Hermes](https://github.com/NousResearch/hermes-agent) agent through
 the [OpenGuardrails (OGR)](https://github.com/openguardrails/openguardrails)
-**v0.8 Runtime API** — the agent-direct recipe
+**v1.0 Runtime API** — the agent-direct recipe
 (`specification/runtime-api.md`): two `POST /v1/evaluate` calls per model
 call, verdicts enforced before the answer is shown and before any tool call
 or exec runs. Zero dependencies; the whole wire is hand-rolled over stdlib

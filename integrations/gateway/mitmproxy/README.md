@@ -1,6 +1,6 @@
-# mitmproxy gateway integration (OGR v0.8)
+# mitmproxy gateway integration (OGR v1.0)
 
-A single-file [mitmproxy](https://mitmproxy.org) addon that speaks **OGR v0.8
+A single-file [mitmproxy](https://mitmproxy.org) addon that speaks **OGR v1.0
 directly to an OpenGuardrails runtime**. It implements the gateway side of the
 one normative recipe in
 [`specification/runtime-api.md`](../../../specification/runtime-api.md):
@@ -24,7 +24,7 @@ addon-minted `step_id`:
 The addon is a pure PEP: it holds bytes and enforces verdicts. All policy —
 including session/turn derivation, conversation classification, and judging
 the tool inventory from the `tools` array where it already travels — lives in
-the runtime. The v0.8 event is exactly nine fields; there is no SDK (the two
+the runtime. The v1.0 event is eight required fields plus three optional; there is no SDK (the two
 HTTP calls are hand-rolled stdlib `urllib`), no declared coordinates, no
 `/v1/ingest`, no `turn/end`.
 

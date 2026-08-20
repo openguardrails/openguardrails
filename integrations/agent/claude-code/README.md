@@ -1,6 +1,6 @@
 # openguardrails-instrumentation-claude-code
 
-[OpenGuardrails (OGR)](https://openguardrails.com) **v0.8** enforcement for
+[OpenGuardrails (OGR)](https://openguardrails.com) **v1.0** enforcement for
 **Claude Code**, shipped as a plugin. A `PreToolUse` hook holds each risky tool
 call, sends it to your OGR runtime as one canonical `step/response`
 [`GuardEvent`](../../../specification/guard-event.md), and denies the call when
@@ -135,7 +135,7 @@ set `allowUnsandboxedCommands: false`.
 ## Development
 
 ```
-npm test    # offline: strict v0.8 mock runtime (node:http) + behavioral cases
+npm test    # offline: strict v1.0 mock runtime (node:http) + behavioral cases
 ```
 
 The hook (`hooks/ogr-hook.mjs`) is its own source — no bundling. The test's

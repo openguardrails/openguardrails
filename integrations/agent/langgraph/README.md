@@ -1,7 +1,7 @@
 # openguardrails-instrumentation-langgraph
 
 Guard a [LangGraph](https://github.com/langchain-ai/langgraph) agent with
-**OpenGuardrails (OGR) v0.8** — a chat-model wrapper that runs the
+**OpenGuardrails (OGR) v1.0** — a chat-model wrapper that runs the
 [normative recipe](../../../specification/runtime-api.md#the-recipe) around
 every model call: `step/request` judged **before the provider sees the
 messages**, `step/response` judged **before the agent acts on the tool
@@ -106,7 +106,7 @@ cannot resolve.
 ## Tests
 
 Fully offline — a strict stdlib mock runtime validates every event against
-the exact nine-field v0.8 GuardEvent, and the langchain surface is faked
+the exact v1.0 GuardEvent field set, and the langchain surface is faked
 (the package duck-types it, so the fakes *are* the interface under test):
 
 ```bash

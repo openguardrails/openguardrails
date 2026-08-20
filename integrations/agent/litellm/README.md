@@ -1,9 +1,9 @@
 # openguardrails-litellm
 
-**OpenGuardrails for [litellm](https://github.com/BerriAI/litellm) — a v0.8
+**OpenGuardrails for [litellm](https://github.com/BerriAI/litellm) — a v1.0
 agent-direct integration.**
 
-This package implements **the one normative recipe of the v0.8
+This package implements **the one normative recipe of the v1.0
 [Runtime API](../../../specification/runtime-api.md#the-recipe)** on
 litellm's hook surface: per model call, two POSTs to `/v1/evaluate` —
 `step/request` while litellm is holding what it is about to send,
@@ -111,7 +111,7 @@ call it on a timer if you want fleet coverage to distinguish idle from dark.
 
 A streamed response is judged **exactly once, whole, at stream end** —
 never chunk-by-chunk. litellm's `async_post_call_streaming_iterator_hook`
-wraps the entire stream, so from this seat the v0.8
+wraps the entire stream, so from this seat the v1.0
 [tail-hold](../../../specification/runtime-api.md#streaming-hold-the-tail-judge-once)
 degenerates to **tail = ∞**: every chunk is buffered, the reassembled
 response (litellm's own `stream_chunk_builder` when it can produce a raw
@@ -156,7 +156,7 @@ step, two events, never four.
 ## Tests
 
 Fully offline: a stdlib `http.server` mock runtime that strictly validates
-every event against the ten-field v0.8 GuardEvent shape, and a fake
+every event against the v1.0 GuardEvent shape, and a fake
 `litellm` injected via `sys.modules` (litellm itself is never required).
 
 ```sh

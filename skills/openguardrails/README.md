@@ -16,7 +16,7 @@ skills install this for the full survey → propose → confirm → verify flow.
 ```
 SKILL.md              the skill (frontmatter + procedure)
 scripts/verify.sh     health check + benign canary + exfil canary
-reference/wire.md     the v0.8 wire on one page (nine fields, verdict, fail modes)
+reference/wire.md     the v1.0 wire on one page (the GuardEvent, verdict, fail modes)
 ```
 
 ## Install
