@@ -95,10 +95,12 @@ EVENT_FIELDS = {
     "payload",
 }
 
-#: The one OPTIONAL field (2026-08-17): ``integration``, the reporter's own
-#: ``"name/version"``. An ALLOWLIST, not a relaxation — an unknown key is still a
-#: violation; only a MISSING ``integration`` stopped being one, which is what lets
-#: a runtime and a reporter roll forward independently.
+#: The schema has three optional fields — ``integration``, ``connection``,
+#: ``session_hint``. This integration sends one: ``integration`` (2026-08-17),
+#: the reporter's own ``"name/version"``. An ALLOWLIST, not a relaxation — an
+#: unknown key is still a violation; only a MISSING ``integration`` stopped
+#: being one, which is what lets a runtime and a reporter roll forward
+#: independently.
 OPTIONAL_FIELDS = {"integration"}
 
 IDENTITY_FIELDS = (
@@ -107,8 +109,8 @@ IDENTITY_FIELDS = (
 
 
 def validate_event(body):
-    """STRICT v0.8: the nine required fields (plus the optional
-    `integration`), correct enums and types."""
+    """STRICT v1.0: the eight required fields (plus `integration`, the only
+    optional field this integration sends), correct enums and types."""
     errors = []
     if not isinstance(body, dict):
         return ["body is not an object"]

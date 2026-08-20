@@ -5,7 +5,7 @@
  * RUNTIME verdict instead of a human. v0.8 retired the SDK — and with it
  * this plugin's local policy engine (regex rules, bring-your-own-model
  * judge, taint) — so every decision now comes from `/v1/evaluate`, spoken
- * directly: one hand-rolled POST per held action, `Bearer` key, nine fields.
+ * directly: one hand-rolled POST per held action, `Bearer` key, eight fields.
  *
  * THE VANTAGE, honestly: opencode's plugin surface exposes TOOL-CALL hooks,
  * not the model byte path — this plugin never holds a provider request or
@@ -118,7 +118,7 @@ export const OpenGuardrailsPlugin: Plugin = async (_input, options) => {
     timer.unref?.()
   }
 
-  /** The one held action → one canonical step/response, nine fields exactly. */
+  /** The one held action → one canonical step/response, eight fields exactly. */
   const heldCallEvent = (callId: string, name: string, args: unknown): WireEvent => ({
     kind: "step/response",
     step_id: mintStepId(),

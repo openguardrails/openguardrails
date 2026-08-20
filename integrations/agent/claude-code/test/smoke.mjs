@@ -1,8 +1,8 @@
-// Hook tests: run hooks/ogr-hook.mjs against a STRICT v0.8 mock runtime
+// Hook tests: run hooks/ogr-hook.mjs against a STRICT v1.0 mock runtime
 // (node:http, offline) that rejects any GuardEvent deviating from
-// schema/guard-event.schema.json — the nine required fields plus the one
-// optional `integration`, nothing
-// extra, no retired v0.6/v0.7 fields. Behavioral cases cover block→deny,
+// schema/guard-event.schema.json — the eight required fields plus
+// `integration`, the only one of the schema's three optional fields these
+// hooks send, nothing extra, no retired v0.6/v0.7 fields. Behavioral cases cover block→deny,
 // fail-open default, fail-closed config, unjudged/span handling, and the
 // transcript → canonical payload mapping.
 // Run: npm test  (no build step — the hook is its own source)
@@ -16,7 +16,7 @@ import { dirname, join } from "node:path"
 const HOOK = join(dirname(fileURLToPath(import.meta.url)), "..", "hooks", "ogr-hook.mjs")
 const API_KEY = "ogr_test"
 
-// --- strict v0.8 mock runtime -------------------------------------------------
+// --- strict v1.0 mock runtime -------------------------------------------------
 
 // The required set from schema/guard-event.schema.json. The schema also has
 // additionalProperties:false, so the only keys allowed beyond these are the
@@ -26,8 +26,9 @@ const EVENT_KEYS = [
   "agent_user", "llm_protocol", "payload",
 ].sort()
 
-// The one OPTIONAL field (2026-08-17): `integration`, the reporter's own
-// "name/version". An ALLOWLIST, not a relaxation — an unknown key is still a
+// The schema has three optional fields — `integration`, `connection`,
+// `session_hint`. These hooks send one: `integration` (2026-08-17), the
+// reporter's own "name/version". An ALLOWLIST, not a relaxation — an unknown key is still a
 // violation; only a MISSING `integration` stopped being one, which is what lets
 // a runtime and a reporter roll forward independently.
 const OPTIONAL_EVENT_KEYS = ["integration"]
@@ -303,7 +304,7 @@ if (violations.length) {
   fail++
   console.log(`✗ wire conformance: ${violations.length} violation(s):\n  - ${violations.join("\n  - ")}`)
 } else {
-  console.log("✓ wire conformance: every event matched the v0.8 schema exactly")
+  console.log("✓ wire conformance: every event matched the v1.0 schema exactly")
 }
 console.log(fail ? `\n${fail} FAILED` : "\nall passed")
 process.exit(fail ? 1 : 0)

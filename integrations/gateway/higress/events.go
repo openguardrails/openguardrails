@@ -75,8 +75,8 @@ type identity struct {
 	AgentUser      string `json:"agent_user"`
 }
 
-// GuardEvent is the wire unit: the nine required v0.8 fields plus `integration`,
-// the one optional one. A struct, so encoding/json does the escaping (the old
+// GuardEvent is the wire unit: the eight required v1.0 fields plus the optional
+// `integration` and `connection`. A struct, so encoding/json does the escaping (the old
 // connector hand-rolled its JSON and every field it interpolated was an injection
 // surface) and so a field cannot leak onto the wire — the schema is
 // `additionalProperties: false`.

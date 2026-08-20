@@ -224,7 +224,7 @@ class OpenGuardrails(CustomLogger):
 
     def _event(self, kind: str, step_id: str, payload: dict,
                llm_protocol: str = "openai.chat") -> dict:
-        """One v0.8 GuardEvent: nine fields, all required, nothing else."""
+        """One v1.0 GuardEvent: the eight required fields, nothing else."""
         event = {"kind": kind, "step_id": step_id}
         event.update(self.identity)
         event["llm_protocol"] = llm_protocol

@@ -149,7 +149,8 @@ than rewritten:
 ## Tests
 
 Fully offline — a stdlib mock runtime that asserts every event is exactly
-the nine schema fields, no more, no fewer:
+the eight required schema fields plus the optional ones this integration
+sends (`integration`, `session_hint`), no more, no fewer:
 
 ```bash
 python -m pytest integrations/agent/hermes

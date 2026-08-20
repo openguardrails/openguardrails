@@ -145,7 +145,8 @@ class OgrClient:
             **self.identity,
             "llm_protocol": llm_protocol,
             "payload": payload,
-            # WHO REPORTED IT — the one OPTIONAL v0.8 field. The SAME constant the
+            # WHO REPORTED IT — one of the v1.0 wire's three optional fields, and
+            # the one this integration always sends. The SAME constant the
             # heartbeat sends: two literals would drift and each would look right.
             #
             # It rode the heartbeat alone until 2026-08-17, which could not answer

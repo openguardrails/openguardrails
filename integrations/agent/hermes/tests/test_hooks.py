@@ -268,7 +268,7 @@ def test_hooks_fail_closed_when_configured(dark):
     assert allowed is False
 
 
-def test_hook_events_carry_the_five_tuple_defaults(guarded):
+def test_hook_events_carry_the_four_tuple_defaults(guarded):
     _round(guarded)
     for ev in guarded.events:
         assert ev["agent_type"] == "hermes"

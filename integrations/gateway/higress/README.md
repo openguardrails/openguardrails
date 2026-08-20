@@ -29,9 +29,9 @@ Both carry a plugin-minted `step_id` — a fresh opaque id per proxied call,
 never reused, and never taken from `x-request-id` (a client retry could repeat
 that). It is the one coordinate v0.8 kept, because concurrency makes it
 underivable; everything above it is derived server-side, always. The event is
-nine required fields — `kind`, `step_id`, the identity four-tuple (empty string
-= explicit "no assertion"), `llm_protocol`, `payload` — plus `integration`, the
-one optional one. No `ogr_version` (the runtime adapts), no `timestamp` (receive
+eight required fields — `kind`, `step_id`, the identity four-tuple (empty string
+= explicit "no assertion"), `llm_protocol`, `payload` — plus the optional
+`integration` and `connection`. No `ogr_version` (the runtime adapts), no `timestamp` (receive
 time), no declared coordinates and no coordinate echo on the verdict.
 
 `integration` is this plugin's own `name/version` (e.g. `ogr-higress/3.2.0`),

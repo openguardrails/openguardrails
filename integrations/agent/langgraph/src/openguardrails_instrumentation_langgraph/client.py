@@ -83,7 +83,8 @@ class OgrClient:
         that a 429 is an outage, not an allow.
         """
         try:
-            # WHO REPORTED IT — the one OPTIONAL v0.8 field, stamped HERE rather than
+            # WHO REPORTED IT — the only optional v1.0 field this integration
+            # sends, stamped HERE rather than
             # at each construction site: one send path means the build id cannot go
             # missing on one kind of event only. The SAME constant the heartbeat
             # sends, because two literals would drift and each would look right.

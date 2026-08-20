@@ -1,9 +1,9 @@
 /**
- * The OGR v0.8 wire, hand-rolled.
+ * The OGR v1.0 wire, hand-rolled.
  *
  * There is no SDK layer — the Runtime API is the integration surface
- * (specification/runtime-api.md), and since v0.8 an integration is an API
- * key, nine fields, and ONE decision endpoint. This module is that POST plus
+ * (specification/runtime-api.md), and since v1.0 an integration is an API
+ * key, eight fields, and ONE decision endpoint. This module is that POST plus
  * the optional heartbeat and the wire types this plugin reads and writes,
  * nothing else: no signing, no batching, no client-side decomposition, and
  * no `/v1/ingest` (removed in v0.8 — evaluate records every event it
@@ -15,8 +15,9 @@
  */
 
 /**
- * One v0.8 GuardEvent exactly as the schema requires: every field present,
- * none optional, no extras (`additionalProperties: false`). The four-tuple
+ * One v1.0 GuardEvent exactly as the schema requires: all eight required
+ * fields present, no extras beyond the optional ones the schema names
+ * (`additionalProperties: false`). The four-tuple
  * is required WITH the empty string as the explicit "no assertion" — the
  * integrator answers the identity question; nobody falls into the API-key
  * floor by omission. What v0.6/v0.7 carried and v0.8 removed — versions,
@@ -46,9 +47,9 @@ export interface WireEvent {
   llm_protocol: "openai.chat" | "openai.responses" | "anthropic.messages" | "canonical"
   payload: Record<string, unknown>
   /**
-   * WHO REPORTED IT — `"name/version"`. The one OPTIONAL field on the v0.8
-   * wire, stamped by {@link OgrClient.evaluate} so it cannot be forgotten at a
-   * construction site.
+   * WHO REPORTED IT — `"name/version"`. The only one of the v1.0 wire's three
+   * optional fields this plugin sends, stamped by {@link OgrClient.evaluate} so
+   * it cannot be forgotten at a construction site.
    *
    * ⚠️ It rode the heartbeat ALONE until 2026-08-17, and that could not answer
    * "which build produced this traffic": a runtime keys its liveness record on

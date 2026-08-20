@@ -1,8 +1,10 @@
-// A STRICT v0.8 mock OGR runtime (node:http, offline), shared by both hook
+// A STRICT v1.0 mock OGR runtime (node:http, offline), shared by both hook
 // suites. It rejects any GuardEvent deviating from
-// schema/guard-event.schema.json — the nine required fields plus the one
-// optional `integration`, nothing else, no retired v0.6/v0.7 fields — and records every violation so a wire
-// regression fails the run loudly instead of hiding behind fail-open.
+// schema/guard-event.schema.json — the eight required fields plus
+// `integration`, the only one of the schema's three optional fields these
+// hooks send, nothing else, no retired v0.6/v0.7 fields — and records every
+// violation so a wire regression fails the run loudly instead of hiding
+// behind fail-open.
 import { createServer } from "node:http"
 
 export const API_KEY = "ogr_test"
@@ -15,8 +17,9 @@ const EVENT_KEYS = [
   "agent_user", "llm_protocol", "payload",
 ].sort()
 
-// The one OPTIONAL field (2026-08-17): `integration`, the reporter's own
-// "name/version". An ALLOWLIST, not a relaxation — an unknown key is still a
+// The schema has three optional fields — `integration`, `connection`,
+// `session_hint`. These hooks send one: `integration` (2026-08-17), the
+// reporter's own "name/version". An ALLOWLIST, not a relaxation — an unknown key is still a
 // violation; only a MISSING `integration` stopped being one, which is what lets
 // a runtime and a reporter roll forward independently.
 const OPTIONAL_EVENT_KEYS = ["integration"]

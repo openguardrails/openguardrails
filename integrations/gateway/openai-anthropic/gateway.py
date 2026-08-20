@@ -6,7 +6,7 @@
 
 This is the normative gateway recipe (specification/runtime-api.md, "The
 recipe") written for reading: stdlib only, no SDK — the Runtime API *is* the
-integration surface, and an integration is an API key, nine fields, and one
+integration surface, and an integration is an API key, eight fields, and one
 endpoint. Per proxied model call:
 
     1. mint step_id                       (one line, no bookkeeping)
@@ -127,12 +127,14 @@ def event_json(kind: str, step_id: str, identity: dict, llm_protocol: str,
                payload_text: str) -> bytes:
     """Serialize a GuardEvent AROUND the payload text: the envelope is ours to
     encode, the payload is the provider's body spliced in verbatim. The v0.8
-    event is those nine required fields plus `integration`, the one optional
-    one — no version, no coordinates, no timestamp; everything a runtime can
-    derive left the wire."""
+    event is those eight required fields plus `integration`, the only one of
+    the schema's three optional fields this gateway sends — no version, no
+    coordinates, no timestamp; everything a runtime can derive left the
+    wire."""
     head = json.dumps({"kind": kind, "step_id": step_id, **identity,
                        "llm_protocol": llm_protocol,
-                       # WHO REPORTED IT — the one OPTIONAL v0.8 field, and the SAME
+                       # WHO REPORTED IT — the only optional field this gateway
+                       # sends, and the SAME
                        # constant the heartbeat sends (two literals would drift and
                        # each would look right alone). Stamped in this ONE builder so
                        # it cannot go missing on one kind of event only.

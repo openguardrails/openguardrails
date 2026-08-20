@@ -1,6 +1,6 @@
 /**
- * A stand-in for an OGR v0.8 runtime: `/v1/evaluate` and `/v1/heartbeat`,
- * STRICT about the wire. Every evaluate body is checked against the v0.8
+ * A stand-in for an OGR v1.0 runtime: `/v1/evaluate` and `/v1/heartbeat`,
+ * STRICT about the wire. Every evaluate body is checked against the v1.0
  * GuardEvent contract — exactly the required fields, no extras
  * (`additionalProperties: false`), no v0.6/v0.7 leftovers — and a violation
  * both answers 400 (as a conformant runtime must) and lands in
@@ -8,7 +8,7 @@
  */
 import { createServer } from "node:http"
 
-/** The v0.8 GuardEvent required field set — no others beyond OPTIONAL_FIELDS. */
+/** The v1.0 GuardEvent required field set — no others beyond OPTIONAL_FIELDS. */
 const REQUIRED_FIELDS = [
   "agent_id",
     "agent_type",
@@ -21,8 +21,9 @@ const REQUIRED_FIELDS = [
 ]
 
 /**
- * The one OPTIONAL field (2026-08-17): `integration`, the reporter's own
- * `"name/version"`.
+ * The schema has three optional fields — `integration`, `connection`,
+ * `session_hint`. This plugin sends one: `integration` (2026-08-17), the
+ * reporter's own `"name/version"`.
  *
  * ⚠️ Still `additionalProperties: false` — this list is an ALLOWLIST, not a
  * relaxation. An unknown key is a violation exactly as before; the change is
@@ -34,7 +35,7 @@ const OPTIONAL_FIELDS = ["integration"]
 const KINDS = new Set(["step/request", "step/response"])
 const PROTOCOLS = new Set(["openai.chat", "openai.responses", "anthropic.messages", "canonical"])
 
-/** Every way one event body can violate the v0.8 schema, as strings. */
+/** Every way one event body can violate the v1.0 schema, as strings. */
 export function violationsOf(event) {
   const problems = []
   const keys = Object.keys(event).sort()

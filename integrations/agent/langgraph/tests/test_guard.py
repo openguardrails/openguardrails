@@ -146,7 +146,7 @@ def test_fail_mode_is_validated(runtime):
 # ── identity ───────────────────────────────────────────────────────────────
 
 
-def test_five_tuple_defaults_empty_except_agent_type(runtime):
+def test_four_tuple_defaults_empty_except_agent_type(runtime):
     make_guarded(runtime).invoke(CONVO)
     event = runtime.events[0]
     assert event["agent_type"] == "langgraph"  # the one thing this harness knows
@@ -155,7 +155,7 @@ def test_five_tuple_defaults_empty_except_agent_type(runtime):
     assert runtime.violations == []
 
 
-def test_five_tuple_env_fills_and_constructor_wins(runtime, monkeypatch):
+def test_four_tuple_env_fills_and_constructor_wins(runtime, monkeypatch):
     monkeypatch.setenv("OGR_AGENT_ID", "env-bot")
     monkeypatch.setenv("OGR_AGENT_USER", "u-env")
     make_guarded(runtime, agent_id="invoice-bot", agent_workspace="finance-agents").invoke(CONVO)

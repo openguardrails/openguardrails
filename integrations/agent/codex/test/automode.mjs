@@ -260,7 +260,7 @@ if (mock.violations.length) {
   fail++
   console.log(`✗ wire conformance: ${mock.violations.length} violation(s):\n  - ${mock.violations.join("\n  - ")}`)
 } else {
-  console.log("✓ wire conformance: every event matched the v0.8 schema exactly")
+  console.log("✓ wire conformance: every event matched the v1.0 schema exactly")
 }
 console.log(fail ? `\n${fail} FAILED` : "\nall passed")
 process.exit(fail ? 1 : 0)

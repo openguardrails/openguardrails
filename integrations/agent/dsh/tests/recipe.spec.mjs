@@ -53,7 +53,7 @@ test("both step halves are exact v0.8 events: the field set, the protocols, timi
     // Nothing v0.8 removed leaks back onto the wire.
     //
     // ⚠️ `integration` was in this list and deliberately is NOT any more. It came
-    // back as the one OPTIONAL field on 2026-08-17: a runtime keys its liveness
+    // back as an optional field on 2026-08-17: a runtime keys its liveness
     // record on the integration NAME, so that record reports whichever replica
     // beat last and cannot say which build produced a given piece of traffic.
     for (const gone of ["ogr_version", "session_id", "turn", "step", "parent_session_id", "timestamp", "event_id"]) {

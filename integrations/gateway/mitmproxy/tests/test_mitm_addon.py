@@ -80,7 +80,7 @@ def runtime():
     rt.close()
 
 
-FIVE_TUPLE = {"ogr_agent_id": "proxy-agent", "ogr_agent_type": "mitmproxy",
+FOUR_TUPLE = {"ogr_agent_id": "proxy-agent", "ogr_agent_type": "mitmproxy",
               "ogr_agent_workspace": "gw-tests",
               "ogr_agent_user": ""}
 
@@ -88,7 +88,7 @@ FIVE_TUPLE = {"ogr_agent_id": "proxy-agent", "ogr_agent_type": "mitmproxy",
 @pytest.fixture()
 def gateway(runtime):
     return OGRGateway(ogr_url=runtime.url, ogr_api_key="ogr_test",
-                      ogr_timeout=5.0, **FIVE_TUPLE)
+                      ogr_timeout=5.0, **FOUR_TUPLE)
 
 
 # ── fabricated flow objects (duck-typed to what the addon reads) ───────────
@@ -162,7 +162,8 @@ def test_request_event_is_exactly_v08(gateway, runtime):
     assert req["path"] == "/v1/evaluate"
     assert req["headers"].get("Authorization") == "Bearer ogr_test"
     event = req["event"]
-    # The nine required fields plus `integration`, the ONE optional one (restored
+    # The eight required fields plus `integration`, the only optional one this
+    # addon sends (restored
     # 2026-08-17: the heartbeat's record is keyed on the integration NAME, so it
     # reports whichever replica beat last and cannot say which build produced a
     # given piece of traffic). Nothing else v0.8 removed may reappear.
@@ -263,7 +264,7 @@ def test_own_refusal_is_never_rejudged(gateway, runtime):
 
 def test_fail_open_is_the_default_and_counts_unchecked():
     gw = OGRGateway(ogr_url="http://127.0.0.1:1", ogr_api_key="k",
-                    ogr_timeout=0.2, **FIVE_TUPLE)
+                    ogr_timeout=0.2, **FOUR_TUPLE)
     assert gw.ogr_fail_mode == "open"
     flow = FakeFlow("/v1/chat/completions", CHAT_BODY)
     run(gw.request(flow))
@@ -273,7 +274,7 @@ def test_fail_open_is_the_default_and_counts_unchecked():
 
 def test_fail_closed_refuses_without_a_verdict():
     gw = OGRGateway(ogr_url="http://127.0.0.1:1", ogr_api_key="k",
-                    ogr_timeout=0.2, ogr_fail_mode="closed", **FIVE_TUPLE)
+                    ogr_timeout=0.2, ogr_fail_mode="closed", **FOUR_TUPLE)
     flow = FakeFlow("/v1/chat/completions", CHAT_BODY)
     run(gw.request(flow))
     assert flow.response.status_code == 503
@@ -458,7 +459,7 @@ def test_with_real_mitmproxy_flow(runtime):
     pytest.importorskip("mitmproxy")
     from mitmproxy.test import tflow, tutils
 
-    gw = OGRGateway(ogr_url=runtime.url, ogr_api_key="ogr_test", **FIVE_TUPLE)
+    gw = OGRGateway(ogr_url=runtime.url, ogr_api_key="ogr_test", **FOUR_TUPLE)
     runtime.verdicts.append({"event_id": "e", "provider": "mock", "decision": "block"})
     flow = tflow.tflow(req=tutils.treq(
         method=b"POST", path=b"/v1/chat/completions",

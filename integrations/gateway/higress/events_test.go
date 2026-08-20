@@ -68,11 +68,11 @@ func TestTheResponsePayloadIsTheRawBodyByteForByte(t *testing.T) {
 	}
 }
 
-// The v0.8 wire: the eight required fields plus `integration`, the one optional one
-// (3.2.0), under `additionalProperties: false`. One extra key is a schema violation;
+// The v1.0 wire: the eight required fields plus `integration` (3.2.0) and
+// `connection` (3.5.0), under `additionalProperties: false`. One extra key is a schema violation;
 // one missing required key is too — including a four-tuple field whose value is the
 // empty string.
-func TestEventsMarshalToTheV08WireShape(t *testing.T) {
+func TestEventsMarshalToTheV10WireShape(t *testing.T) {
 	e := requestEvent(ctxFor("alice@acme.io"), []byte(rawRequest))
 	blob, err := json.Marshal(e)
 	if err != nil {
@@ -203,7 +203,7 @@ func TestAnEmptyFourTupleStillPutsAllFourFieldsOnTheWire(t *testing.T) {
 		"agent_user"} {
 		v := got.Get(field)
 		if !v.Exists() {
-			t.Errorf("%s omitted when empty — the v0.8 schema requires it as \"\"", field)
+			t.Errorf("%s omitted when empty — the v1.0 schema requires it as \"\"", field)
 		}
 		if v.String() != "" {
 			t.Errorf("%s = %q, want the empty assertion", field, v.String())

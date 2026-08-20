@@ -28,7 +28,7 @@ logger = logging.getLogger("openguardrails")
 #: One constant so the two can never name different builds.
 INTEGRATION = f"openguardrails-litellm/{__version__}"
 
-#: The nine REQUIRED v0.8 GuardEvent fields, exactly as
+#: The eight REQUIRED v1.0 GuardEvent fields, exactly as
 #: schema/guard-event.schema.json requires them (additionalProperties: false —
 #: nothing outside these plus :data:`OPTIONAL_EVENT_FIELDS` may ride along).
 EVENT_FIELDS = (
@@ -42,7 +42,9 @@ EVENT_FIELDS = (
     "payload",
 )
 
-#: The one OPTIONAL field (2026-08-17). It rode the heartbeat ALONE until then,
+#: The one optional field this integration sends, of the schema's three
+#: (``integration``, ``connection``, ``session_hint``): ``integration``
+#: (2026-08-17). It rode the heartbeat ALONE until then,
 #: which could not answer "which build produced this traffic": a runtime keys its
 #: liveness record on the integration NAME — it must, so a rollout updates that row
 #: instead of minting a second and reporting the old build as dark — so every

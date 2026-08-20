@@ -144,7 +144,8 @@ function assistantTurnOf(transcriptPath, toolUseId, toolName, toolInput) {
 }
 
 /**
- * WHO REPORTED IT — `"name/version"`, the one OPTIONAL field on the v0.8 wire.
+ * WHO REPORTED IT — `"name/version"`, the only one of the v1.0 wire's three
+ * optional fields these hooks send.
  *
  * ⚠️ Restored to the event on 2026-08-17. It had ridden the heartbeat alone,
  * which cannot answer "which build produced this traffic": a runtime keys its

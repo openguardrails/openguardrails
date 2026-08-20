@@ -1,9 +1,9 @@
-"""The strict mock runtime — the v0.8 contract made executable, offline.
+"""The strict mock runtime — the v1.0 contract made executable, offline.
 
 It validates every received GuardEvent against the schema's EXACT required
-set (``additionalProperties: false`` — nine required fields plus the one
-optional ``integration``,
-nothing extra) and RECORDS violations instead of merely 400-ing, because a
+set (``additionalProperties: false`` — eight required fields plus
+``integration``, the only one of the schema's three optional fields this
+integration sends, nothing extra) and RECORDS violations instead of merely 400-ing, because a
 fail-open integration would swallow a 400 and a wire regression would
 otherwise pass silently. Tests assert ``runtime.violations == []``.
 """
@@ -16,7 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 API_KEY = "ogr_test_key"
 
-# The v0.8 GuardEvent: schema/guard-event.schema.json `required`, verbatim.
+# The v1.0 GuardEvent: schema/guard-event.schema.json `required`, verbatim.
 REQUIRED_FIELDS = {
     "kind",
     "step_id",
@@ -28,15 +28,17 @@ REQUIRED_FIELDS = {
     "payload",
 }
 
-#: The one OPTIONAL field (2026-08-17): ``integration``, the reporter's own
-#: ``"name/version"``. An ALLOWLIST, not a relaxation — an unknown key is still a
-#: violation; only a MISSING ``integration`` stopped being one, which is what lets
-#: a runtime and a reporter roll forward independently.
+#: The schema has three optional fields — ``integration``, ``connection``,
+#: ``session_hint``. This integration sends one: ``integration`` (2026-08-17),
+#: the reporter's own ``"name/version"``. An ALLOWLIST, not a relaxation — an
+#: unknown key is still a violation; only a MISSING ``integration`` stopped
+#: being one, which is what lets a runtime and a reporter roll forward
+#: independently.
 OPTIONAL_FIELDS = {"integration"}
 
 KINDS = {"step/request", "step/response"}
 LLM_PROTOCOLS = {"openai.chat", "openai.responses", "anthropic.messages", "canonical"}
-FIVE_TUPLE = ("agent_id", "agent_type", "agent_workspace", "agent_user")
+FOUR_TUPLE = ("agent_id", "agent_type", "agent_workspace", "agent_user")
 
 
 class MockRuntime:
@@ -105,7 +107,7 @@ class MockRuntime:
             self.violations.append(f"bad kind: {event['kind']!r}")
         if not isinstance(event["step_id"], str) or not event["step_id"]:
             self.violations.append(f"bad step_id: {event['step_id']!r}")
-        for field in FIVE_TUPLE:
+        for field in FOUR_TUPLE:
             if not isinstance(event[field], str):
                 self.violations.append(f"{field} is not a string: {event[field]!r}")
         if event["llm_protocol"] not in LLM_PROTOCOLS:

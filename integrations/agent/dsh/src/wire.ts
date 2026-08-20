@@ -16,9 +16,9 @@
  */
 
 /**
- * One v0.8 GuardEvent as this plugin sends it (snake_case, flat).
+ * One v1.0 GuardEvent as this plugin sends it (snake_case, flat).
  *
- * Every field is REQUIRED — v0.8 removed every knob a producer could choose
+ * Every field below is REQUIRED — v0.8 removed every knob a producer could choose
  * to skip. What a runtime can derive is not on the wire at all (session,
  * turn, step numbering, timestamps, protocol versioning); what only the
  * producer can know is mandatory, with the empty string as the explicit
@@ -49,9 +49,9 @@ export interface WireEvent {
   llm_protocol: "openai.chat" | "openai.responses" | "anthropic.messages" | "canonical"
   payload: Record<string, unknown>
   /**
-   * WHO REPORTED IT — `"name/version"`. The one OPTIONAL field on the v0.8
-   * wire, stamped by {@link OgrClient.evaluate} so it cannot be forgotten at a
-   * construction site.
+   * WHO REPORTED IT — `"name/version"`. The only one of the v1.0 wire's three
+   * optional fields this plugin sends, stamped by {@link OgrClient.evaluate} so
+   * it cannot be forgotten at a construction site.
    *
    * ⚠️ It rode the heartbeat ALONE until 2026-08-17, and that could not answer
    * "which build produced this traffic": a runtime keys its liveness record on

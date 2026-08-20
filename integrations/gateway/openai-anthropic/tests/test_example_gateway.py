@@ -188,7 +188,8 @@ def test_allow_roundtrip_two_events_one_step(gw, runtime, upstream):
     assert upstream.requests[0]["headers"].get("Authorization") == "Bearer sk-client"
 
     req_event, resp_event = runtime.events
-    # The nine required fields plus `integration`, the ONE optional one (restored
+    # The eight required fields plus `integration`, the only optional one this
+    # gateway sends (restored
     # 2026-08-17: the heartbeat's record is keyed on the integration NAME, so it
     # reports whichever replica beat last and cannot name the build behind traffic).
     for event in (req_event, resp_event):

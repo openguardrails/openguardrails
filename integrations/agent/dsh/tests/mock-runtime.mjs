@@ -1,5 +1,5 @@
 /**
- * A stand-in for an OGR v0.8 runtime: `/v1/evaluate` and `/v1/heartbeat`,
+ * A stand-in for an OGR v1.0 runtime: `/v1/evaluate` and `/v1/heartbeat`,
  * plus a record of everything received so a test can assert on what the
  * plugin actually sent. No `/v1/ingest` — evaluate is the observation
  * channel since v0.8, and a second event path no longer exists.
@@ -11,7 +11,8 @@
  */
 import { createServer } from "node:http"
 
-/** The v0.8 GuardEvent fields — all required, nothing else allowed. */
+/** The v1.0 GuardEvent required fields — eight, nothing else beyond the
+ * optional ones below. */
 const EVENT_FIELDS = [
   "kind", "step_id",
   "agent_id", "agent_type", "agent_workspace", "agent_user",
@@ -19,8 +20,9 @@ const EVENT_FIELDS = [
 ]
 
 /**
- * The one OPTIONAL field (2026-08-17): `integration`, the reporter's own
- * `"name/version"`. An ALLOWLIST, not a relaxation — an unknown key is still a
+ * The schema has three optional fields — `integration`, `connection`,
+ * `session_hint`. This plugin sends one: `integration` (2026-08-17), the
+ * reporter's own `"name/version"`. An ALLOWLIST, not a relaxation — an unknown key is still a
  * violation; only a MISSING `integration` stopped being one, which is what lets
  * a runtime and a reporter roll forward independently.
  */

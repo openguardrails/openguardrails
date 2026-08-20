@@ -110,7 +110,7 @@ def test_proxy_claimed_steps_are_not_double_sent_by_sdk_logs(runtime,
 # ── configuration ──────────────────────────────────────────────────────────
 
 
-def test_env_fallbacks_fill_the_five_tuple(runtime, monkeypatch):
+def test_env_fallbacks_fill_the_four_tuple(runtime, monkeypatch):
     monkeypatch.setenv("OGR_RUNTIME_URL", runtime.url)
     monkeypatch.setenv("OGR_API_KEY", "ogr_env_key")
     monkeypatch.setenv("OGR_AGENT_ID", "invoice-bot")

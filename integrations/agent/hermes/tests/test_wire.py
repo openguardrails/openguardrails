@@ -11,13 +11,15 @@ def _client(**kwargs) -> OgrClient:
 
 
 def test_event_is_exactly_the_required_fields(guarded):
-    """v0.8's whole deal: the nine required fields, nothing extra beyond the ONE
-    optional one. The strict mock 400s any drift, so this is belt on top of braces.
+    """v1.0's whole deal: the eight required fields, nothing extra beyond the
+    optional ones this integration sends. The strict mock 400s any drift, so
+    this is belt on top of braces.
 
-    The optional field is ``integration``, restored to the event on 2026-08-17
+    Here that is ``integration`` alone — restored to the event on 2026-08-17
     because the heartbeat's record is keyed on the integration NAME and therefore
     reports whichever replica beat last — it cannot say which build produced a
-    given piece of traffic.
+    given piece of traffic. ``session_hint`` rides along only when the vantage
+    holds a session; this client holds none.
     """
     c = _client()
     verdict = c.evaluate("step/request", "s1", "canonical", {"messages": []})
