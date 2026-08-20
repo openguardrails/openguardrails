@@ -144,8 +144,8 @@ function assistantTurnOf(transcriptPath, toolUseId, toolName, toolInput) {
 }
 
 /**
- * WHO REPORTED IT — `"name/version"`, the only one of the v1.0 wire's three
- * optional fields these hooks send.
+ * WHO REPORTED IT — `"name/version"`, one of the two optional v1.0 fields
+ * this hook sends (the other is `session_hint`).
  *
  * ⚠️ Restored to the event on 2026-08-17. It had ridden the heartbeat alone,
  * which cannot answer "which build produced this traffic": a runtime keys its
@@ -186,6 +186,13 @@ function buildEvent(input) {
     llm_protocol: "canonical",
     payload,
     integration: INTEGRATION,
+    // The conversation this step belongs to, when the host names one. Claude
+    // Code hands every hook invocation its `session_id`, so this vantage holds
+    // the fact the spec says to send: sessions become DECLARED instead of
+    // inferred from message prefixes, which is what survives /compact and a
+    // trimmed history. A grouping hint only — never authorization, ordering or
+    // policy selection (guard-event.md § session_hint).
+    ...(input.session_id ? { session_hint: String(input.session_id) } : {}),
   }
 }
 

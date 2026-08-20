@@ -1,8 +1,8 @@
 // Hook tests: run hooks/ogr-hook.mjs against a STRICT v1.0 mock runtime
 // (node:http, offline) that rejects any GuardEvent deviating from
-// schema/guard-event.schema.json — the eight required fields plus
-// `integration`, the only one of the schema's three optional fields these
-// hooks send, nothing extra, no retired v0.6/v0.7 fields. Behavioral cases cover block→deny,
+// schema/guard-event.schema.json — the eight required fields plus the two
+// optional ones this hook sends (`integration`, `session_hint`), nothing
+// extra, no retired v0.6/v0.7 fields. Behavioral cases cover block→deny,
 // fail-open default, fail-closed config, unjudged/span handling, and the
 // transcript → canonical payload mapping.
 // Run: npm test  (no build step — the hook is its own source)
@@ -27,11 +27,12 @@ const EVENT_KEYS = [
 ].sort()
 
 // The schema has three optional fields — `integration`, `connection`,
-// `session_hint`. These hooks send one: `integration` (2026-08-17), the
-// reporter's own "name/version". An ALLOWLIST, not a relaxation — an unknown key is still a
-// violation; only a MISSING `integration` stopped being one, which is what lets
-// a runtime and a reporter roll forward independently.
-const OPTIONAL_EVENT_KEYS = ["integration"]
+// `session_hint`. This hook sends two: `integration` (2026-08-17), the
+// reporter's own "name/version", and `session_hint`, the host's `session_id`
+// for the conversation. `connection` is a GATEWAY's field and deliberately
+// stays out of the allowlist, so a stray copy here would fail loudly. An
+// ALLOWLIST, not a relaxation — an unknown key is still a violation.
+const OPTIONAL_EVENT_KEYS = ["integration", "session_hint"]
 
 function validateEvent(ev) {
   const errs = []
@@ -169,6 +170,23 @@ test("allow → silent allow; wire is one canonical step/response with the held 
   eq(call.name, "Bash")
   eq(call.arguments, { command: "ls -la" })
   if (!call.id) throw new Error("held call has no id")
+})
+
+test("session_hint carries the host's session_id, and is absent without one", async () => {
+  verdictHandler = allowVerdict()
+  requests.length = 0
+  await runHook(payload("ls"))
+  eq(requests[0].body.session_hint, "sess-1")
+  // Two invocations of the same session name it identically — that is the
+  // whole point of a hint: one id per conversation, stable across steps.
+  await runHook(payload("pwd"))
+  eq(requests[1].body.session_hint, "sess-1")
+  // A host that names no session gets no hint (never "" — an empty optional
+  // field asserts nothing and the schema would take it as a real value).
+  const anon = payload("ls")
+  delete anon.session_id
+  await runHook(anon)
+  if ("session_hint" in requests[2].body) throw new Error("session_hint sent without a session_id")
 })
 
 test("step_id is fresh per invocation", async () => {
