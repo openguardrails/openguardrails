@@ -15,10 +15,10 @@ BASE="${OGR_RUNTIME_URL%/}"
 AUTH="Authorization: Bearer ${OGR_API_KEY}"
 
 identity() {
-  # The five-tuple, always present; empty string = no assertion.
-  printf '"agent_id":"%s","agent_type":"%s","agent_workspace":"%s","agent_owner":"%s","agent_user":"%s"' \
+  # The identity four-tuple, always present; empty string = no assertion.
+  printf '"agent_id":"%s","agent_type":"%s","agent_workspace":"%s","agent_user":"%s"' \
     "${OGR_AGENT_ID:-}" "${OGR_AGENT_TYPE:-}" "${OGR_AGENT_WORKSPACE:-}" \
-    "${OGR_AGENT_OWNER:-}" "${OGR_AGENT_USER:-}"
+    "${OGR_AGENT_USER:-}"
 }
 
 step_id() { printf 'canary-%s-%s' "$(date +%s)" "$RANDOM"; }

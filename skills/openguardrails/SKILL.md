@@ -13,7 +13,7 @@ description: >-
 # OpenGuardrails (OGR)
 
 You are wiring an agent — possibly yourself — to an OGR runtime. Since
-protocol v0.8 the model is simple: a plugin (or two hand-rolled POSTs) sends
+protocol v1.0 the model is simple: a plugin (or two hand-rolled POSTs) sends
 every model call's request and response to `POST /v1/evaluate`; the runtime
 answers `allow` or `block`; **policy lives in the runtime, selected by the
 agent's workspace** — there is no local policy file and no SDK. Follow the
@@ -49,7 +49,7 @@ tools, which files/secrets, which network hosts, which outbound side effects
 ### 2. Pick and connect the integration
 
 Every integration needs the same four things: the runtime URL, an org API
-key, the identity five-tuple, and a fail mode. Set them as environment:
+key, the identity four-tuple, and a fail mode. Set them as environment:
 
 ```bash
 export OGR_RUNTIME_URL=https://ogr.example.com   # the runtime's base URL
@@ -57,7 +57,6 @@ export OGR_API_KEY=ogr_...                       # org key (ask the operator)
 export OGR_AGENT_ID=invoice-bot                  # WHICH agent (org-unique)
 export OGR_AGENT_TYPE=claude-code                # what kind — a label
 export OGR_AGENT_WORKSPACE=finance-agents        # the policy set it runs under
-export OGR_AGENT_OWNER=payments-team             # who answers for it
 export OGR_AGENT_USER=u-8232                     # who drives it this session
 export OGR_FAIL_MODE=open                        # open (default) | closed
 ```
@@ -72,7 +71,7 @@ building yourself needs no plugin at all — two POSTs per model call; copy
 ### 3. Propose the posture
 
 Write the operator a short plan:
-- the five-tuple values you intend to assert (workspace = which policy set);
+- the four-tuple values you intend to assert (workspace = which policy set);
 - `fail_mode`: `open` (runtime outage → agent keeps working, steps recorded
   unjudged) or `closed` (outage → gated actions pause) — recommend `closed`
   only when the task touches secrets, money, or outbound side effects;
@@ -111,7 +110,8 @@ tighten the runtime policy before relying on this".
 One model call = one step = two events sharing a minted `step_id`:
 `step/request` (the raw provider request body) before the call,
 `step/response` (the raw response, tool calls still unexecuted) after. Nine
-required fields, nothing optional; the five-tuple's empty string means "no
+required fields (plus three optional: integration, connection,
+session_hint); the four-tuple's empty string means "no
 assertion" and the API key becomes the identity floor. The runtime derives
 sessions and turns; the verdict is `allow`/`block` plus findings, redaction
 spans, and `unjudged` (what it could not look at — which fail-closed treats
