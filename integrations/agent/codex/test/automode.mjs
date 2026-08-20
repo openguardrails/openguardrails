@@ -106,6 +106,20 @@ test("runtime allow → behavior allow; wire is one canonical step/response", as
   eq(ev.payload.model, "gpt-5")
 })
 
+test("session_hint carries the host's session_id, and is absent without one", async () => {
+  mock.verdictHandler = allowVerdict()
+  mock.requests.length = 0
+  const stateDir = freshStateDir()
+  await runHook(payload("ls"), { stateDir })
+  eq(mock.requests[0].body.session_hint, "sess-1")
+  // No session named → no field. Never "": an empty optional asserts nothing,
+  // while the schema would read it as a real value.
+  const anon = payload("ls")
+  delete anon.session_id
+  await runHook(anon, { stateDir })
+  if ("session_hint" in mock.requests[1].body) throw new Error("session_hint sent without a session_id")
+})
+
 test("runtime block → behavior deny with the finding's category and subject", async () => {
   mock.verdictHandler = () => ({
     status: 200,

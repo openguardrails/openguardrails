@@ -1,10 +1,9 @@
 // A STRICT v1.0 mock OGR runtime (node:http, offline), shared by both hook
 // suites. It rejects any GuardEvent deviating from
-// schema/guard-event.schema.json — the eight required fields plus
-// `integration`, the only one of the schema's three optional fields these
-// hooks send, nothing else, no retired v0.6/v0.7 fields — and records every
-// violation so a wire regression fails the run loudly instead of hiding
-// behind fail-open.
+// schema/guard-event.schema.json — the eight required fields plus the two
+// optional ones these hooks send (`integration`, `session_hint`), nothing
+// else, no retired v0.6/v0.7 fields — and records every violation so a wire
+// regression fails the run loudly instead of hiding behind fail-open.
 import { createServer } from "node:http"
 
 export const API_KEY = "ogr_test"
@@ -18,11 +17,12 @@ const EVENT_KEYS = [
 ].sort()
 
 // The schema has three optional fields — `integration`, `connection`,
-// `session_hint`. These hooks send one: `integration` (2026-08-17), the
-// reporter's own "name/version". An ALLOWLIST, not a relaxation — an unknown key is still a
-// violation; only a MISSING `integration` stopped being one, which is what lets
-// a runtime and a reporter roll forward independently.
-const OPTIONAL_EVENT_KEYS = ["integration"]
+// `session_hint`. These hooks send two: `integration` (2026-08-17), the
+// reporter's own "name/version", and `session_hint`, the host's `session_id`
+// for the conversation. `connection` is a GATEWAY's field and deliberately
+// stays out of the allowlist, so a stray copy here would fail loudly. An
+// ALLOWLIST, not a relaxation — an unknown key is still a violation.
+const OPTIONAL_EVENT_KEYS = ["integration", "session_hint"]
 
 function validateEvent(ev) {
   const errs = []

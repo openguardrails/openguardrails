@@ -172,8 +172,8 @@ function loadDenials(sessionId, turnId) {
 }
 
 /**
- * WHO REPORTED IT — `"name/version"`, the only one of the v1.0 wire's three
- * optional fields these hooks send.
+ * WHO REPORTED IT — `"name/version"`, one of the two optional v1.0 fields
+ * these hooks send (the other is `session_hint`).
  *
  * ⚠️ Restored to the event on 2026-08-17. It had ridden the heartbeat alone,
  * which cannot answer "which build produced this traffic": a runtime keys its
@@ -214,6 +214,13 @@ function buildEvent(input) {
     llm_protocol: "canonical",
     payload,
     integration: INTEGRATION,
+    // The conversation this step belongs to, when the host names one. Codex
+    // hands each hook invocation its `session_id` (the same id that names the
+    // rollout this hook already reads), so this vantage holds the fact
+    // guard-event.md § session_hint says to send: sessions declared instead of
+    // inferred from message prefixes, which survives a compacted or trimmed
+    // history. A grouping hint only — never authorization, ordering or policy.
+    ...(input.session_id ? { session_hint: String(input.session_id) } : {}),
   }
 }
 

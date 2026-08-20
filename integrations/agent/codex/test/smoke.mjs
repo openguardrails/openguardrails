@@ -94,6 +94,23 @@ test("allow → silent allow; wire is one canonical step/response with the held 
   eq(ev.payload.model, "gpt-5")
 })
 
+test("session_hint carries the host's session_id, and is absent without one", async () => {
+  mock.verdictHandler = allowVerdict()
+  mock.requests.length = 0
+  await runHook(payload("ls"))
+  eq(mock.requests[0].body.session_hint, "sess-1")
+  // One id per conversation: a second invocation of the same session names it
+  // identically, which is what makes the hint a grouping signal at all.
+  await runHook(payload("pwd"))
+  eq(mock.requests[1].body.session_hint, "sess-1")
+  // No session named → no field. Never "": an empty optional asserts nothing,
+  // while the schema would read it as a real value.
+  const anon = payload("ls")
+  delete anon.session_id
+  await runHook(anon)
+  if ("session_hint" in mock.requests[2].body) throw new Error("session_hint sent without a session_id")
+})
+
 test("step_id is fresh per invocation", async () => {
   mock.verdictHandler = allowVerdict()
   mock.requests.length = 0
