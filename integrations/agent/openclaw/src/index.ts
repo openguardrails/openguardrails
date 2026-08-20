@@ -153,6 +153,17 @@ const plugin: PluginEntry = {
       agent_id: cfg.identity.agent_id || ctx.agentId || "",
     })
 
+    /**
+     * WHICH CONVERSATION this held action belongs to. OpenClaw hands every
+     * hook its `sessionKey`, so this vantage holds the fact guard-event.md §
+     * session_hint says to send: one opaque id per conversation, declared
+     * rather than inferred from message prefixes. A host that names no
+     * session sends no field — never `""`, which would assert a session
+     * actually named "".
+     */
+    const sessionHint = (ctx: HookCtx): { session_hint?: string } =>
+      ctx.sessionKey ? { session_hint: ctx.sessionKey } : {}
+
     let warnedNoRuntime = false
     let warnedSpans = false
 
@@ -207,6 +218,7 @@ const plugin: PluginEntry = {
           step_id: mintStepId(),
           ...identity(ctx),
           llm_protocol: "canonical",
+          ...sessionHint(ctx),
           payload: {
             tool_calls: [{
               id: event.toolCallId ?? mintStepId(),
@@ -230,6 +242,7 @@ const plugin: PluginEntry = {
         step_id: mintStepId(),
         ...identity(ctx),
         llm_protocol: "canonical",
+        ...sessionHint(ctx),
         payload: { text },
       }, "outbound message")
       return denial

@@ -22,15 +22,17 @@ const REQUIRED_FIELDS = [
 
 /**
  * The schema has three optional fields — `integration`, `connection`,
- * `session_hint`. This plugin sends one: `integration` (2026-08-17), the
- * reporter's own `"name/version"`.
+ * `session_hint`. This plugin sends two: `integration` (2026-08-17), the
+ * reporter's own `"name/version"`, and `session_hint`, OpenClaw's
+ * `sessionKey`. `connection` is a GATEWAY's field and deliberately stays out,
+ * so a stray copy here would fail loudly.
  *
  * ⚠️ Still `additionalProperties: false` — this list is an ALLOWLIST, not a
  * relaxation. An unknown key is a violation exactly as before; the change is
  * that a missing `integration` is not, which is what lets a runtime and a
  * reporter roll forward independently.
  */
-const OPTIONAL_FIELDS = ["integration"]
+const OPTIONAL_FIELDS = ["integration", "session_hint"]
 
 const KINDS = new Set(["step/request", "step/response"])
 const PROTOCOLS = new Set(["openai.chat", "openai.responses", "anthropic.messages", "canonical"])

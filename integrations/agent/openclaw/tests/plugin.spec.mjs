@@ -62,6 +62,37 @@ test("an allowed tool call proceeds, and the event is the exact v0.8 wire", asyn
   }
 })
 
+test("session_hint carries the host's sessionKey, on tool calls and outbound messages", async () => {
+  const { handlers, runtime } = await boot(() => "allow")
+  try {
+    await toolCall(handlers)
+    // One id per conversation: a second action in the same session names it
+    // identically, which is what makes the hint a grouping signal at all.
+    await toolCall(handlers)
+    await handlers.get("message_sending")({ content: "hi" }, { sessionKey: "sess-1" })
+    assert.deepEqual(runtime.received.map((e) => e.session_hint), ["sess-1", "sess-1", "sess-1"])
+    assert.deepEqual(runtime.violations, [])
+  } finally {
+    await runtime.close()
+  }
+})
+
+test("no sessionKey from the host → no session_hint on the wire", async () => {
+  const { handlers, runtime } = await boot(() => "allow")
+  try {
+    // Never "": an empty optional asserts nothing, while the schema would read
+    // it as a session actually named "".
+    await handlers.get("before_tool_call")(
+      { toolName: "bash", toolCallId: `call-${++seq}`, params: { command: "ls" } },
+      {},
+    )
+    assert.ok(!("session_hint" in runtime.received[0]))
+    assert.deepEqual(runtime.violations, [])
+  } finally {
+    await runtime.close()
+  }
+})
+
 test("step_id is fresh per held action — never reused", async () => {
   const { handlers, runtime } = await boot(() => "allow")
   try {
