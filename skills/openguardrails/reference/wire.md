@@ -42,8 +42,8 @@ no separate ingest.
   "event_id": "evt_…",       // runtime-minted; how you reference the event
   "provider": "ogr-runtime",
   "decision": "allow",        // or "block"
-  "findings": [{ "category": "security.cmd.data_exfiltration",
-                 "severity": "critical", "action": "block",
+  "findings": [{ "category": "security.data_exfiltration",
+                 "severity": "critical",
                  "path": "payload.tool_calls.0.arguments.command",
                  "start": 0, "end": 41, "subject": "curl … ${OGR_URL_1}" }],
   "modifications": { "spans": [ /* apply in place BEFORE content proceeds */ ] },

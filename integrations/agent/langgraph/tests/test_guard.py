@@ -91,13 +91,13 @@ def test_tool_results_travel_in_the_next_request(runtime):
 
 def test_block_on_request_never_calls_the_model(runtime):
     runtime.verdicts = [{"decision": "block", "findings": [
-        {"category": "security.cmd.data_exfiltration", "action": "block"}
+        {"category": "security.data_exfiltration"}
     ]}]
     model = FakeChatModel()
     with pytest.raises(GuardrailBlocked) as exc:
         make_guarded(runtime, model).invoke(CONVO)
     assert exc.value.kind == "step/request"
-    assert "security.cmd.data_exfiltration" in str(exc.value)
+    assert "security.data_exfiltration" in str(exc.value)
     assert model.calls == []  # the model was never called
     assert len(runtime.events) == 1  # and there was no response half to send
 

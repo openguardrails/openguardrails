@@ -25,8 +25,10 @@ Configured per risk category (or category prefix):
 
 ```yaml
 fail_mode:
-  "security.cmd.*": closed    # gated actions are denied while the runtime is dark
-  default:          open      # everything else proceeds, recorded as unjudged
+  security.malicious_command: closed  # dangerous actions are denied while the
+  security.data_exfiltration: closed  #   runtime is dark
+  "security.secret_leak.*":   closed  # a trailing .* covers a whole subtree
+  default:                    open    # everything else proceeds, unjudged
 ```
 
 | Value | Meaning while the runtime is unreachable |

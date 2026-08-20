@@ -215,8 +215,7 @@ def test_provider_timing_key_is_left_alone(gateway, runtime):
 def test_block_on_request_never_forwards(gateway, runtime):
     runtime.verdicts.append({"event_id": "evt-9", "provider": "mock",
                              "decision": "block",
-                             "findings": [{"category": "security.prompt_injection",
-                                           "action": "block"}]})
+                             "findings": [{"category": "security.prompt_injection"}]})
     flow = FakeFlow("/v1/chat/completions", CHAT_BODY)
     run(gateway.request(flow))
     assert flow.response is not None        # refused in place of forwarding

@@ -144,7 +144,14 @@ while True:
 ```
 
 Runnable version (with streaming): [`examples/minimal-agent/`](examples/minimal-agent/).
-Full contract: [Runtime API](specification/runtime-api.md).
+Full contract: [Runtime API](specification/runtime-api.md) — including
+[a complete exchange](specification/runtime-api.md#a-complete-exchange): both
+halves of one model call written out whole, with the verdict each returns.
+
+**The questions the wire raises first** — which `llm_protocol` to declare, what
+to send when your protocol is not one we list, why a different model does not
+mean a different integration — are answered in the
+[protocols FAQ](https://openguardrails.com/api/docs/faq/).
 
 ## Why a standard
 

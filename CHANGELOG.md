@@ -7,6 +7,47 @@ not implementations. Downstream SDKs and adapters pin a protocol version.
 The format follows [Keep a Changelog](https://keepachangelog.com/). The protocol
 version is independent of any implementation's package version.
 
+## [Unreleased]
+
+### Removed
+- **`findings[].action`** — the per-finding `flag` | `redact` | `block`
+  contribution. No runtime ever emitted it, so every consumer branching on
+  it matched nothing and silently fell back (the reference LangGraph
+  integration built its block message from `action == "block"` and always got
+  an empty set). What it claimed to add is already carried, twice over: an
+  `allow` with findings IS "flagged", and `modifications.spans` names every
+  text that must be rewritten, by path. A field that only ever reads as
+  absent is worse than no field — it invites logic that cannot work.
+  ⚠️ `findings[]` has `additionalProperties: false`, so a runtime that DID
+  emit `action` now fails validation and must stop sending it. This is the
+  one deliberate exception to 1.x's additive-only rule, taken while the
+  release is days old and no such runtime is known to exist.
+
+### Added
+- **[Runtime API § a complete exchange](specification/runtime-api.md#a-complete-exchange)** —
+  both halves of one model call written out whole: every field a producer may
+  send (the eight required plus all three optional), the raw provider bodies,
+  and the verdict each half returns — an `allow` carrying redaction spans,
+  then a `block` on the tool call. It also states the offsets rule an
+  integrator hits first: a finding carries `start`/`end` only where the judged
+  text is a verbatim string leaf of the transported body, which is why an
+  OpenAI tool call's JSON-encoded `arguments` yields a path and no offsets.
+- The [protocols FAQ](https://openguardrails.com/api/docs/faq/) — what
+  `llm_protocol` accepts, what "different models mean different payloads"
+  costs an integrator (nothing: forward the raw body), and what to send when
+  the protocol is your own. Linked from the README.
+
+### Fixed
+- Examples across the specification, the skill and the reference integrations
+  cited `security.cmd.data_exfiltration`, which is not a taxonomy id. The
+  category is `security.data_exfiltration`.
+- `runtime-api.openapi.yaml` typed `invalid_event`'s `details` entries as
+  strings; they are objects naming the field that failed.
+- The `fail_mode` examples keyed on `security.cmd.*`, which is not a taxonomy
+  prefix either — nothing would ever have matched it. They name real ids now
+  (`security.malicious_command`, `security.data_exfiltration`) and demonstrate
+  the trailing `.*` on a subtree that exists (`security.secret_leak.*`).
+
 ## [v1.0] — 2026-08-19 — the first stable release
 
 **The wire is v0.8's, unchanged, declared stable**: eight required fields,

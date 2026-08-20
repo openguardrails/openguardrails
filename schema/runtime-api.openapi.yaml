@@ -217,8 +217,12 @@ components:
                 const: invalid_event
               details:
                 type: array
+                description: |
+                  Per-field validation issues. Each entry names the offending
+                  field and why it failed — an unknown key, a missing
+                  required field, a value outside an enum.
                 items:
-                  type: string
+                  type: object
     InvalidBody:
       description: Malformed request.
       content:

@@ -76,7 +76,7 @@ Write the operator a short plan:
   unjudged) or `closed` (outage → gated actions pause) — recommend `closed`
   only when the task touches secrets, money, or outbound side effects;
 - what the runtime should gate for this task (in taxonomy terms:
-  `security.cmd.*`, `security.secret_leak`, `safety.*`, …) — the operator
+  `security.malicious_command`, `security.secret_leak.*`, `safety.*`, …) — the operator
   applies this in the runtime console; you cannot and must not.
 
 ### 4. CONFIRM with the operator — the gate

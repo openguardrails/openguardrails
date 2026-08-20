@@ -51,14 +51,6 @@
               "critical"
             ]
           },
-          "action": {
-            "enum": [
-              "flag",
-              "redact",
-              "block"
-            ],
-            "description": "What this finding contributed to the decision."
-          },
           "path": {
             "type": "string",
             "description": "Payload path of the judged text, e.g. payload.tool_calls.1.arguments.command. Registration contract: paths name locations the producer registered when building the event."

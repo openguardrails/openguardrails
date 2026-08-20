@@ -65,9 +65,10 @@ def _pick(value: str | None, env: str, default: str = "") -> str:
 
 
 def _block_reason(verdict: dict) -> str:
-    categories = sorted(
-        {f.get("category", "?") for f in verdict.get("findings") or [] if f.get("action") == "block"}
-    )
+    # Every category the verdict reported. A finding carries no per-finding
+    # action — the decision does (Verdict § findings), so on a block there is
+    # nothing finer to filter by.
+    categories = sorted({f.get("category", "?") for f in verdict.get("findings") or []})
     return ", ".join(categories) if categories else "blocked by policy"
 
 

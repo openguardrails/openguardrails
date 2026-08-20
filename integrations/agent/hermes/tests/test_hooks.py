@@ -30,8 +30,8 @@ def _block_on(kind):
     def decide(event):
         if event["kind"] == kind:
             return {"event_id": "e", "provider": "mock", "decision": "block",
-                    "findings": [{"category": "security.cmd.data_exfiltration",
-                                  "action": "block", "score": 0.97}]}
+                    "findings": [{"category": "security.data_exfiltration",
+                                  "score": 0.97}]}
         return {"event_id": "e", "provider": "mock", "decision": "allow"}
     return decide
 
@@ -120,7 +120,7 @@ def test_response_block_withholds_the_answer(guarded):
     assert isinstance(out, str) and out
     assert "去哪都好玩" not in out
     # The refusal reaches an end user: no taxonomy ids, no finding internals.
-    assert "security.cmd" not in out and "OGR" not in out
+    assert "security." not in out and "OGR" not in out
 
 
 def test_tenant_owns_the_refusal_copy(guarded, clean_env):

@@ -174,8 +174,8 @@ class MockRuntime:
                     "provider": "mock-runtime",
                     "decision": "block",
                     "findings": findings or [
-                        {"category": "security.cmd.data_exfiltration",
-                         "severity": "critical", "action": "block"}
+                        {"category": "security.data_exfiltration",
+                         "severity": "critical"}
                     ],
                 }
             return allow_verdict(event)

@@ -35,7 +35,7 @@ echo "    decision: $(printf '%s' "$BENIGN" | grep -o '"decision"[[:space:]]*:[[
 printf '%s' "$BENIGN" | grep -Eq '"decision"[[:space:]]*:[[:space:]]*"allow"' \
   || { echo "    UNEXPECTED: benign canary not allowed — investigate before proceeding"; exit 1; }
 
-echo "3/3 exfil canary (expect block if the workspace gates security.cmd.*)…"
+echo "3/3 exfil canary (expect block if the workspace gates security.data_exfiltration)…"
 EXFIL=$(curl -fsS -X POST "${BASE}/v1/evaluate" -H "$AUTH" -H 'Content-Type: application/json' -d "{
   \"kind\":\"step/response\",\"step_id\":\"$(step_id)\",$(identity),
   \"llm_protocol\":\"openai.chat\",
