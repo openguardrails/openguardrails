@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"time"
 
 	"github.com/tidwall/gjson"
 )
@@ -46,7 +47,7 @@ const (
 	// 3.0.0–3.1.0 had only the beat), so it is how a deployment learns which build is
 	// in the VM. Kept honest by TestPluginVersionMatchesTheVERSIONFile — 1.3.0 and
 	// 1.4.0 both shipped while a prior constant still said 1.2.0.
-	pluginVersion = "3.4.0"
+	pluginVersion = "3.5.0"
 
 	kindStepRequest  = "step/request"
 	kindStepResponse = "step/response"
@@ -110,6 +111,23 @@ type GuardEvent struct {
 	// is a different rule from the four-tuple's (see `identity`), where "" is itself a
 	// meaningful assertion and omitting it would be a schema violation.
 	Integration string `json:"integration"`
+	// Connection is WHICH DOWNSTREAM FLOW carried this request —
+	// `<instance>#<envoy connection ordinal>` (`connectionID()` in main.go),
+	// opaque to the runtime, stable for the life of one client connection.
+	//
+	// The one session signal a CLIENT cannot strip: the runtime reassembles
+	// sessions from the conversation each request carries, and both content
+	// signals were measured failing at once (2026-08-19) — a harness that
+	// tail-trims its history rewrites every prefix the chain fingerprints, and
+	// a bridge that strips `metadata` removes every id the client asserted —
+	// while the keep-alive connection under them never changed. The runtime
+	// uses it as a corroborated LAST-RESORT grouping signal only (a connection
+	// names a process, which may hold several concurrent conversations).
+	//
+	// ⚠️ omitempty, unlike Integration: a wasm host that will not answer the
+	// connection property has nothing to assert, and the field is OPTIONAL on
+	// the wire exactly so absence stays valid.
+	Connection string `json:"connection,omitempty"`
 }
 
 // subjectOf assembles the per-request agent identity. The consumer IS the agent: one
@@ -130,6 +148,11 @@ func subjectOf(agentID, agentType, workspace, user string) identity {
 type deriveCtx struct {
 	subj   identity
 	stepID string
+	// The downstream flow this request arrived on — see GuardEvent.Connection.
+	// Resolved ONCE per request (the property read costs a host call) and
+	// stamped by the one constructor below, so the two halves of a step and
+	// every speculative/tail-hold path carry the same value.
+	connection string
 	// The CLIENT's wire protocol, detected per request. Never a constant: it was
 	// `openai.chat` for every event an old build sent, which made 693,197 stored
 	// events unfalsifiable. v0.8 makes the field REQUIRED, which is why a request
@@ -150,12 +173,28 @@ func (d *deriveCtx) event(kind string, payload json.RawMessage) *GuardEvent {
 		identity:    d.subj,
 		Payload:     payload,
 		Integration: integrationID(),
+		Connection:  d.connection,
 	}
 }
 
 // requestEvent is the step's first half: the provider request body, verbatim.
 func requestEvent(d *deriveCtx, rawBody []byte) *GuardEvent {
 	return d.event(kindStepRequest, json.RawMessage(rawBody))
+}
+
+// requestEventTimed is requestEvent plus the one wall-clock fact the request half
+// can carry: when this gateway saw it (`timing.received_at`). Spliced by the same
+// byte insertion the response half uses — see spliceTiming for why a re-marshal
+// would move every span offset.
+//
+// ⚠️ This is NOT the event's timestamp, and the wire deliberately has no such
+// field (v0.8). It is one END of a duration whose other end — the PREVIOUS step's
+// `timing.completed_at` — this same process stamped, so the pair measures the
+// agent's tool-execution gap with the clock skew cancelled out. A runtime that
+// ordered events by it would be ordering by a clock it cannot audit.
+func requestEventTimed(d *deriveCtx, rawBody []byte, receivedAt time.Time) *GuardEvent {
+	t := &canonicalTiming{ReceivedAt: receivedAt.UTC().Format(time.RFC3339Nano)}
+	return d.event(kindStepRequest, json.RawMessage(spliceTiming(rawBody, t)))
 }
 
 // responseEvent is the step's second half for a buffered reply: the provider
@@ -225,6 +264,15 @@ type canonicalToolCall struct {
 }
 
 type canonicalTiming struct {
+	// ReceivedAt is the REQUEST half's only endpoint: when this gateway saw the
+	// request. It exists so a runtime can measure the gap between one step's reply
+	// and the next step's request — the agent's own tool-execution time — WITHOUT
+	// subtracting one clock from another. Both endpoints are then stamped here, by
+	// one process, so a skew against the runtime's clock cancels instead of
+	// accumulating. ⚠️ It is a DURATION ENDPOINT, never an ordering key: a runtime
+	// orders events by its own derived coordinates (`step_id` and what it derives
+	// from it), because nothing bounds how wrong a producer's clock can be.
+	ReceivedAt   string `json:"received_at,omitempty"`
 	StartedAt    string `json:"started_at,omitempty"`
 	FirstTokenAt string `json:"first_token_at,omitempty"`
 	CompletedAt  string `json:"completed_at,omitempty"`

@@ -131,7 +131,7 @@ class OgrClient:
     # the protocol
     # ------------------------------------------------------------------ #
     def evaluate(self, kind: str, step_id: str, llm_protocol: str,
-                 payload: dict[str, Any]) -> dict[str, Any] | None:
+                 payload: dict[str, Any], session_hint: str = "") -> dict[str, Any] | None:
         """Judge ONE event; the Verdict dict, or None when the runtime could
         not answer (unconfigured, timeout, 401/429/5xx, network, bad JSON).
         Deciding what None means is `blocked()`'s job — that is the
@@ -155,6 +155,13 @@ class OgrClient:
             # replica overwrites the others' version.
             "integration": INTEGRATION,
         }
+        # The producer's own name for the conversation (v0.8 optional
+        # `session_hint`) — a GROUPING hint, absent when this vantage holds no
+        # session (the exec chokepoint). The runtime derives turns/steps
+        # regardless; this only spares it guessing WHICH conversation, which
+        # content-derivation provably cannot always answer.
+        if session_hint:
+            event["session_hint"] = session_hint
         try:
             verdict = self._post("/v1/evaluate", event)
         except Exception as exc:  # noqa: BLE001 — every failure is one outcome: no verdict

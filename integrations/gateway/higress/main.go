@@ -580,6 +580,43 @@ func onRequestHeaders(ctx wrapper.HttpContext, cfg Config) types.Action {
 	return types.HeaderStopIteration
 }
 
+/**
+ * connectionID names the DOWNSTREAM FLOW this request arrived on:
+ * `<instance>#<envoy connection ordinal>` — the wire's optional `connection`
+ * field (spec § connection). The instance half keeps two replicas' ordinals
+ * apart; the ordinal is Envoy's own per-process connection counter, so the
+ * pair is stable for the life of one client connection and never reused by
+ * another process.
+ *
+ * WHY: the runtime reassembles sessions from the conversation each request
+ * carries, and both content-level signals fail at once in real traffic — a
+ * harness that tail-trims its history rewrites every prefix, and a bridge
+ * strips the session id the client asserted — while the keep-alive connection
+ * under them never changed (measured 2026-08-19). This is the firewall's own
+ * four-tuple, handed over.
+ *
+ * ⚠️ Returns "" when the host will not answer or the instance is unnamed —
+ * the field is OPTIONAL on the wire precisely so absence stays valid. An
+ * ordinal without the instance half would COLLIDE across replicas (every
+ * Envoy counts from zero), which is worse than absence, so "" it is.
+ */
+func connectionID() string {
+	raw, err := proxywasm.GetProperty([]string{"connection", "id"})
+	if err != nil || len(raw) == 0 {
+		return ""
+	}
+	inst := instanceID()
+	if inst == "" {
+		return ""
+	}
+	// The property is a little-endian uint64.
+	var ordinal uint64
+	for i := 0; i < len(raw) && i < 8; i++ {
+		ordinal |= uint64(raw[i]) << (8 * uint(i))
+	}
+	return inst + "#" + strconv.FormatUint(ordinal, 36)
+}
+
 // stepSeq disambiguates step ids minted in the same nanosecond. Per-VM (each Envoy
 // worker has its own Wasm VM), which is exactly enough: within a VM the counter
 // separates them, across VMs a same-nanosecond collision would also need equal
@@ -653,9 +690,10 @@ func onRequestBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Actio
 	rs := &reqState{
 		session: newSessionState(),
 		derive: &deriveCtx{
-			subj:     subj,
-			stepID:   stepID,
-			protocol: proto.Name(),
+			subj:       subj,
+			stepID:     stepID,
+			protocol:   proto.Name(),
+			connection: connectionID(),
 		},
 		proto: proto,
 		// Read directly rather than through a full conversation parse: a raw
@@ -669,7 +707,11 @@ func onRequestBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Actio
 	ctx.SetContext(ctxModel, rs.model)
 	ctx.SetContext(ctxBody, string(body))
 
-	e := requestEvent(rs.derive, body)
+	// The gateway's own sighting of this request — one end of the tool-execution
+	// gap whose other end is the PREVIOUS step's `timing.completed_at`, stamped by
+	// this same process. See requestEventTimed: a duration endpoint, not a
+	// timestamp, and never an ordering key.
+	e := requestEventTimed(rs.derive, body, time.Now())
 	if cfg.mode == modeObserve {
 		// Nothing is refusable in observe: the request is already gone. The event
 		// still rides /evaluate — the only channel v0.8 has — fire-and-forget, the
@@ -961,6 +1003,12 @@ func onResponseHeaders(ctx wrapper.HttpContext, cfg Config) types.Action {
 	 * error body is not a model output, and a status we cannot read is not one either.
 	 */
 	if status, err := proxywasm.GetHttpResponseHeader(":status"); err != nil || status != "200" {
+		// COUNTED, because this is the one branch that loses a step's response
+		// half with no trace anywhere: the request was reported, the reply is
+		// not a model output, and the runtime's record shows a half-empty step
+		// indistinguishable from a reporter that measured nothing.
+		bump(cntUpstreamNon200, 1)
+		logInfof("[OGR-RESP] completion response is %q, not 200 — the step's response half is NOT reported (counted as upstream_non200)", status)
 		ctx.SetContext(ctxNotModel, true)
 		return types.ActionContinue
 	}

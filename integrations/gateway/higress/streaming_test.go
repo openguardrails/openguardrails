@@ -193,3 +193,53 @@ func TestSuppressionIsWiredThroughToTheDecoder(t *testing.T) {
 		t.Fatalf("usage not captured: %+v", u)
 	}
 }
+
+// ── The framing sniff ────────────────────────────────────────────────────────
+//
+// Content-type is whatever the last proxy in front of the upstream decided to
+// say. An SSE stream served as `application/octet-stream` used to feed the
+// raw-JSON path, parse to nothing, and report the model's whole output side
+// unreadable — 100% response loss for every consumer routed to that upstream
+// (the per-upstream loss pattern measured on the customer mirror, 2026-08-19).
+// The bytes cannot lie about their own framing; the header can.
+
+func TestAnSSEStreamMislabelledAsPlainIsStillReassembled(t *testing.T) {
+	// Header said "not SSE" (sse=false); the bytes are an event stream.
+	sp := newStreamProcessor(chatProto(t), nil, false, time.Time{}, false)
+	var out strings.Builder
+	for _, c := range []string{chunk("count "), chunk("to "), chunk("three")} {
+		out.Write(sp.ProcessChunk([]byte(c), false))
+	}
+	out.Write(sp.ProcessChunk([]byte("data: [DONE]\n\n"), true))
+	if got := sp.Result().Text; got != "count to three" {
+		t.Fatalf("mislabelled SSE reassembled to %q — the unreadable path again", got)
+	}
+	// Delivery must be untouched: the sniff redirects READING only.
+	if !strings.Contains(out.String(), `"content":"count "`) {
+		t.Fatalf("forwarded bytes were altered:\n%s", out.String())
+	}
+}
+
+func TestAPlainReplyMislabelledAsSSEIsStillParsed(t *testing.T) {
+	// Header said "event stream" (sse=true); the body is one JSON object.
+	sp := newStreamProcessor(chatProto(t), nil, true, time.Time{}, false)
+	body := `{"choices":[{"message":{"content":"whole reply"}}]}`
+	sp.ProcessChunk([]byte(body[:20]), false)
+	sp.ProcessChunk([]byte(body[20:]), true)
+	if got := sp.Result().Text; got != "whole reply" {
+		t.Fatalf("mislabelled JSON reassembled to %q", got)
+	}
+}
+
+func TestAnHonestClaimIsNotSecondGuessed(t *testing.T) {
+	// A correct SSE claim keeps the scanner from frame one — restoration included.
+	sp := newStreamProcessor(chatProto(t), map[string]string{"${OGR_EMAIL_1}": "ada@example.com"}, true, time.Time{}, false)
+	out := string(sp.ProcessChunk([]byte(chunk("${OGR_EMAIL_1}")), false))
+	out += string(sp.ProcessChunk([]byte("data: [DONE]\n\n"), true))
+	if !strings.Contains(out, "ada@example.com") {
+		t.Fatalf("restoration missed the FIRST frame — the sniff must not delay the scanner:\n%s", out)
+	}
+	if got := sp.Result().Text; got != "${OGR_EMAIL_1}" {
+		t.Fatalf("reassembled = %q", got)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/openguardrails/higress/protocol"
 	"github.com/tidwall/gjson"
@@ -78,20 +79,24 @@ func TestEventsMarshalToTheV08WireShape(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := gjson.ParseBytes(blob)
-	want := map[string]bool{
+	required := map[string]bool{
 		"kind": true, "step_id": true,
 		"agent_id": true, "agent_type": true, "agent_workspace": true,
 		"agent_user":   true,
 		"llm_protocol": true, "payload": true,
 		"integration": true,
 	}
-	for field := range want {
+	// `connection` (3.5.0) is OPTIONAL: allowed on the wire, never required —
+	// this fixture stamps none, so it must be absent (see the dedicated tests).
+	allowed := map[string]bool{"connection": true}
+	for field := range required {
+		allowed[field] = true
 		if !got.Get(field).Exists() {
 			t.Errorf("missing required field %s in %s", field, truncate(got.Raw, 300))
 		}
 	}
 	got.ForEach(func(key, _ gjson.Result) bool {
-		if !want[key.String()] {
+		if !allowed[key.String()] {
 			t.Errorf("field %q is not in the v0.8 event — the schema is additionalProperties: false", key.String())
 		}
 		return true
@@ -471,6 +476,37 @@ func TestABufferedResponseEventCarriesItsTiming(t *testing.T) {
 	}
 }
 
+// The REQUEST half carries one wall-clock fact: when this gateway saw it. It is
+// the far end of the tool-execution gap whose near end is the PREVIOUS step's
+// `timing.completed_at` — both stamped by this process, so the runtime measures
+// that gap without subtracting our clock from its own.
+func TestARequestEventCarriesWhenTheGatewaySawIt(t *testing.T) {
+	raw := `{"model":"m","messages":[{"role":"user","content":"a <b> & \"c\""}]}`
+	at := time.Date(2026, 8, 19, 10, 5, 22, 464000000, time.UTC)
+	e := requestEventTimed(ctxFor("alice@acme.io"), []byte(raw), at)
+	if e.Kind != "step/request" {
+		t.Fatalf("kind = %q", e.Kind)
+	}
+	blob, err := json.Marshal(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := gjson.ParseBytes(blob)
+	if got.Get("payload.timing.received_at").String() != "2026-08-19T10:05:22.464Z" {
+		t.Fatalf("received_at not carried: %s", blob)
+	}
+	// ⚠️ ONLY that one endpoint. `started_at` on a request half would read as the
+	// generation's start, which this event knows nothing about.
+	if got.Get("payload.timing.started_at").Exists() ||
+		got.Get("payload.timing.completed_at").Exists() {
+		t.Fatalf("a request half claimed generation timing: %s", blob)
+	}
+	// The conversation itself is untouched — same insertion rule as the reply.
+	if got.Get("payload.messages.0.content").String() != `a <b> & "c"` {
+		t.Fatalf("the request body was disturbed: %s", blob)
+	}
+}
+
 // The canonical usage keys are the runtime's ingest contract (`events.input_tokens`
 // and friends, the five dsh reports) — pinned by NAME, because a rename here would
 // zero every counter silently.
@@ -498,5 +534,33 @@ func TestCanonicalUsageMarshalsInTheRuntimesCounterNames(t *testing.T) {
 	blob, _ = json.Marshal(responseEventCanonical(ctxFor("a"), none))
 	if gjson.ParseBytes(blob).Get("payload.usage").Exists() {
 		t.Fatalf("an unreported usage marshalled as zeros: %s", blob)
+	}
+}
+
+// The wire's second optional field (3.5.0): the downstream flow id. Stamped by the
+// ONE constructor from deriveCtx — so both halves of a step carry the same value —
+// and omitted entirely when the host would not answer, because `additionalProperties:
+// false` makes an empty-but-present key a statement while an absent one is not.
+func TestConnectionRidesEveryEventOfTheRequestThatCarriedIt(t *testing.T) {
+	d := ctxFor("alice@acme.io")
+	d.connection = "inst-k9#2f"
+	req := requestEvent(d, []byte(rawRequest))
+	resp := responseEvent(d, []byte(`{"choices":[{"message":{"content":"hi"}}]}`))
+	for _, e := range []*GuardEvent{req, resp} {
+		blob, err := json.Marshal(e)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := gjson.ParseBytes(blob).Get("connection").String(); got != "inst-k9#2f" {
+			t.Errorf("connection = %q, want inst-k9#2f in %s", got, truncate(string(blob), 200))
+		}
+	}
+}
+
+func TestAnUnknownConnectionIsAbsentNotEmpty(t *testing.T) {
+	e := requestEvent(ctxFor("alice@acme.io"), []byte(rawRequest))
+	blob, _ := json.Marshal(e)
+	if gjson.ParseBytes(blob).Get("connection").Exists() {
+		t.Error("an unstamped connection must be ABSENT on the wire, not \"\"")
 	}
 }

@@ -274,3 +274,77 @@ def test_hook_events_carry_the_five_tuple_defaults(guarded):
         assert ev["agent_type"] == "hermes"
         assert (ev["agent_id"], ev["agent_workspace"],
                 ev["agent_user"]) == ("", "", "")
+
+
+# ── The session tag (llm_request middleware, 1.1.0) ─────────────────────────
+
+
+def test_session_tag_fills_the_openai_user_field():
+    from openguardrails_instrumentation_hermes import bridge
+
+    r = bridge.on_llm_request_middleware(
+        request={"model": "m", "messages": []},
+        session_id="brave-otter",
+        api_mode="openai_chat",
+    )
+    user = r["request"]["user"]
+    assert user.startswith("hermes_session_")
+    # The `_session_<hex>` tail is the shape an OGR runtime recognises as
+    # SESSION-scoped; a bare user id must never group sessions.
+    import re
+
+    assert re.search(r"_session_[0-9a-f]{32}$", user)
+    # Deterministic: the same session tags identically on every call.
+    again = bridge.on_llm_request_middleware(
+        request={"model": "m"}, session_id="brave-otter", api_mode="openai_chat"
+    )
+    assert again["request"]["user"] == user
+
+
+def test_session_tag_uses_metadata_on_the_anthropic_mode():
+    from openguardrails_instrumentation_hermes import bridge
+
+    r = bridge.on_llm_request_middleware(
+        request={"model": "m"}, session_id="s1", api_mode="anthropic_messages"
+    )
+    assert r["request"]["metadata"]["user_id"].startswith("hermes_session_")
+
+
+def test_session_tag_never_overwrites_a_deployment_value():
+    from openguardrails_instrumentation_hermes import bridge
+
+    assert (
+        bridge.on_llm_request_middleware(
+            request={"user": "ops-set-this"}, session_id="s1", api_mode="openai_chat"
+        )
+        is None
+    )
+    assert (
+        bridge.on_llm_request_middleware(
+            request={"metadata": {"user_id": "theirs"}},
+            session_id="s1",
+            api_mode="anthropic_messages",
+        )
+        is None
+    )
+
+
+def test_session_tag_stays_silent_without_a_session(monkeypatch):
+    from openguardrails_instrumentation_hermes import bridge
+
+    assert bridge.on_llm_request_middleware(request={"model": "m"}, session_id="") is None
+
+
+def test_both_wire_halves_carry_the_session_hint(guarded):
+    """The v0.8 optional `session_hint`: the producer names its conversation on
+    the ENVELOPE (agent-direct path), same digest form as the body tag — so the
+    runtime groups this session's events, side calls included, without guessing
+    from conversation prefixes."""
+    import re
+
+    _round(guarded)
+    assert len(guarded.events) == 2
+    hints = {e.get("session_hint") for e in guarded.events}
+    assert len(hints) == 1
+    hint = hints.pop()
+    assert re.fullmatch(r"hermes_session_[0-9a-f]{32}", hint)

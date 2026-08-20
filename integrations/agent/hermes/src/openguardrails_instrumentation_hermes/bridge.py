@@ -188,7 +188,8 @@ def on_pre_api_request(session_id="", task_id="", turn_id="", api_request_id="",
         _pending_steps[key] = (step_id, started_at)
     messages = [_plain_message(m) for m in (request_messages or conversation_history or [])]
     verdict = client.evaluate("step/request", step_id, "canonical",
-                              {"messages": messages})
+                              {"messages": messages},
+                              session_hint=_session_tag(session_id) if session_id else "")
     if client.blocked(verdict):
         logger.warning("ogr-guard: step/request blocked %s", _brief(verdict))
         with _lock:
@@ -233,7 +234,8 @@ def on_post_api_request(session_id="", task_id="", turn_id="", api_request_id=""
         payload["reasoning"] = reasoning
     if started_at:
         payload["timing"] = {"started_at": started_at, "completed_at": _now()}
-    verdict = client.evaluate("step/response", step_id, "canonical", payload)
+    verdict = client.evaluate("step/response", step_id, "canonical", payload,
+                              session_hint=_session_tag(session_id) if session_id else "")
     if client.blocked(verdict):
         logger.warning("ogr-guard: step/response blocked %s", _brief(verdict))
         with _lock:
@@ -412,3 +414,72 @@ def guard_exec(command: str, cwd: str = "/workspace") -> tuple[bool, str]:
     if not allowed:
         logger.warning("ogr-guard: exec blocked %s :: %s", _brief(verdict), command)
     return allowed, _brief(verdict)
+
+
+# --------------------------------------------------------------------------
+# The session tag: name the session ON THE OUTBOUND MODEL REQUEST
+# --------------------------------------------------------------------------
+#
+# This plugin already reports to a runtime directly. But most fleets ALSO (or
+# only) observe at a gateway in front of the model — and a gateway sees one
+# stateless request at a time. Measured on a production mirror (2026-08-19):
+# 18,142 hermes-bridge requests in three hours carried NO session field of any
+# kind, so the gateway-side runtime had to reassemble sessions from
+# conversation prefixes alone — which a compacted or tail-trimmed history
+# defeats wholesale (a 168-turn conversation re-sent as 5 turns was measured
+# the same day).
+#
+# Hermes' llm_request MIDDLEWARE is the seam that fixes it at the source: it
+# may rewrite the outgoing provider kwargs, and its context carries the
+# session_id. We stamp an OPAQUE session tag into the one field each protocol
+# family reliably accepts:
+#
+#     openai modes    -> `user`             (an OpenAI-standard field)
+#     anthropic mode  -> `metadata.user_id` (Anthropic's standard slot —
+#                        exactly where Claude Code puts its own session id)
+#
+# The value is `hermes_session_<sha256(session_id)[:32]>` — the `_session_<hex>`
+# tail is the shape an OGR runtime recognises as SESSION-scoped (a bare user
+# id must never group sessions), and the digest keeps the human-readable
+# session name out of provider logs.
+#
+# ⚠️ Nothing is overwritten: a deployment that already sets `user` or
+# `metadata.user_id` keeps its own value — this tag fills silence, it does not
+# compete. ⚠️ Off switch: OGR_SESSION_TAG=off. ⚠️ Attribution only, like every
+# self-declared field on the OGR wire: the gateway uses it to group this
+# caller's own traffic and for nothing else.
+
+_SESSION_TAG_ENABLED = os.environ.get("OGR_SESSION_TAG", "on").lower() != "off"
+
+
+def _session_tag(session_id: str) -> str:
+    import hashlib
+
+    digest = hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:32]
+    return f"hermes_session_{digest}"
+
+
+def on_llm_request_middleware(request=None, session_id="", api_mode="", **_):
+    """llm_request middleware: return {"request": ...} with the session tag."""
+    if not _SESSION_TAG_ENABLED or not session_id or not isinstance(request, dict):
+        return None
+    tag = _session_tag(session_id)
+    changed = False
+    if "anthropic" in (api_mode or ""):
+        metadata = request.get("metadata")
+        if not isinstance(metadata, dict):
+            metadata = {}
+        if not metadata.get("user_id"):
+            metadata = dict(metadata)
+            metadata["user_id"] = tag
+            request = dict(request)
+            request["metadata"] = metadata
+            changed = True
+    else:
+        if not request.get("user"):
+            request = dict(request)
+            request["user"] = tag
+            changed = True
+    if not changed:
+        return None
+    return {"request": request, "plugin": "ogr-guard", "reason": "session tag"}

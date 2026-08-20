@@ -1,65 +1,75 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://openguardrails.com/schema/0.8/guard-event.schema.json",
-  "title": "GuardEvent",
-  "description": "A unit observed at an OGR integration point, on the one observed plane: LLM messages. Two kinds: the two halves of a step (one model call). Every field is required except 'integration'; the empty string on an identity field is the explicit 'no assertion'. All fields are flat, top-level snake_case; objects are reserved for inherently structured data (payload).",
-  "type": "object",
-  "required": [
-    "kind",
-    "step_id",
-    "agent_id",
-    "agent_type",
-    "agent_workspace",
-    "agent_user",
-    "llm_protocol",
-    "payload"
-  ],
-  "additionalProperties": false,
-  "properties": {
-    "kind": {
-      "enum": [
-        "step/request",
-        "step/response"
-      ]
-    },
-    "step_id": {
-      "type": "string",
-      "minLength": 1,
-      "description": "Producer-minted opaque id binding the step/request and step/response of ONE model call. A fresh random id per call; never reused. The one coordinate on the wire — everything above it (session, turn, step numbering) is derived server-side."
-    },
-    "agent_id": {
-      "type": "string",
-      "description": "WHICH agent this is, unique within the organization; policy resolution and the inventory key on it. Empty = derived from the API key (identity floor)."
-    },
-    "agent_type": {
-      "type": "string",
-      "description": "What KIND of agent — the harness or product name. A label, never an identity. Empty = unlabeled."
-    },
-    "agent_workspace": {
-      "type": "string",
-      "description": "The named GROUP of agents this one belongs to — one workspace, one policy set. Empty = the API key's workspace."
-    },
-    "agent_user": {
-      "type": "string",
-      "description": "Who is USING the agent this session/request. An attribute, never a policy boundary. Empty = every session is one user."
-    },
-    "llm_protocol": {
-      "enum": [
-        "openai.chat",
-        "openai.responses",
-        "anthropic.messages",
-        "canonical"
-      ],
-      "description": "Which shape the payload speaks: a raw provider body's protocol, or 'canonical' for the OGR canonical shape (an integration with no provider body in hand, e.g. after stream reassembly). The producer states it; a runtime may verify against the body shape."
-    },
-    "payload": {
-      "type": "object",
-      "description": "step/request: the untouched provider request body (or canonical {messages, tools?}). step/response: the untouched, complete provider response body — stream-reassembled if streamed — optionally with an integration-inserted top-level 'timing' key (or canonical {text?, reasoning?, tool_calls?, model?, usage?, timing?})."
-    },
-    "integration": {
-      "type": "string",
-      "maxLength": 128,
-      "description": "OPTIONAL, and the only optional field. WHO REPORTED IT — 'name/version', e.g. 'ogr-higress/3.0.2'. The name is the identity (a rollout must not read as a second integration); the version rides along so a bad build can be triaged from the traffic itself. Integrations SHOULD send it. A self-declared label, not proof: exactly as trustworthy as the credential that carried it, and a runtime MUST NOT derive trust from it."
-    }
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "https://openguardrails.com/schema/0.8/guard-event.schema.json",
+ "title": "GuardEvent",
+ "description": "A unit observed at an OGR integration point, on the one observed plane: LLM messages. Two kinds: the two halves of a step (one model call). Every field is required except 'integration', 'connection' and 'session_hint'; the empty string on an identity field is the explicit 'no assertion'. All fields are flat, top-level snake_case; objects are reserved for inherently structured data (payload).",
+ "type": "object",
+ "required": [
+  "kind",
+  "step_id",
+  "agent_id",
+  "agent_type",
+  "agent_workspace",
+  "agent_user",
+  "llm_protocol",
+  "payload"
+ ],
+ "additionalProperties": false,
+ "properties": {
+  "kind": {
+   "enum": [
+    "step/request",
+    "step/response"
+   ]
+  },
+  "step_id": {
+   "type": "string",
+   "minLength": 1,
+   "description": "Producer-minted opaque id binding the step/request and step/response of ONE model call. A fresh random id per call; never reused. The one coordinate on the wire — everything above it (session, turn, step numbering) is derived server-side."
+  },
+  "agent_id": {
+   "type": "string",
+   "description": "WHICH agent this is, unique within the organization; policy resolution and the inventory key on it. Empty = derived from the API key (identity floor)."
+  },
+  "agent_type": {
+   "type": "string",
+   "description": "What KIND of agent — the harness or product name. A label, never an identity. Empty = unlabeled."
+  },
+  "agent_workspace": {
+   "type": "string",
+   "description": "The named GROUP of agents this one belongs to — one workspace, one policy set. Empty = the API key's workspace."
+  },
+  "agent_user": {
+   "type": "string",
+   "description": "Who is USING the agent this session/request. An attribute, never a policy boundary. Empty = every session is one user."
+  },
+  "llm_protocol": {
+   "enum": [
+    "openai.chat",
+    "openai.responses",
+    "anthropic.messages",
+    "canonical"
+   ],
+   "description": "Which shape the payload speaks: a raw provider body's protocol, or 'canonical' for the OGR canonical shape (an integration with no provider body in hand, e.g. after stream reassembly). The producer states it; a runtime may verify against the body shape."
+  },
+  "payload": {
+   "type": "object",
+   "description": "step/request: the untouched provider request body (or canonical {messages, tools?}), optionally with an integration-inserted top-level 'timing' key carrying 'received_at' — when the integration saw the request. step/response: the untouched, complete provider response body — stream-reassembled if streamed — optionally with an integration-inserted top-level 'timing' key (or canonical {text?, reasoning?, tool_calls?, model?, usage?, timing?})."
+  },
+  "integration": {
+   "type": "string",
+   "maxLength": 128,
+   "description": "OPTIONAL. WHO REPORTED IT — 'name/version', e.g. 'ogr-higress/3.0.2'. The name is the identity (a rollout must not read as a second integration); the version rides along so a bad build can be triaged from the traffic itself. Integrations SHOULD send it. A self-declared label, not proof: exactly as trustworthy as the credential that carried it, and a runtime MUST NOT derive trust from it."
+  },
+  "connection": {
+   "type": "string",
+   "maxLength": 128,
+   "description": "OPTIONAL. WHICH DOWNSTREAM CONNECTION carried this request — the integration's own opaque flow id (e.g. '<instance>#<connection ordinal>'), stable for the life of one client connection and never reused across processes. The one session signal a client cannot strip: consecutive requests of one client process ride one keep-alive connection even when the body carries no session field at all. Attribution only — a connection names a PROCESS, which may hold several concurrent conversations, so a runtime MAY use it only as a corroborated last-resort grouping signal and MUST NOT derive trust or policy from it."
+  },
+  "session_hint": {
+   "type": "string",
+   "maxLength": 128,
+   "description": "OPTIONAL. The producer's own name for the CONVERSATION this step belongs to — opaque, stable for the life of one conversation, distinct across concurrent conversations. Integrations that hold a natural session id SHOULD send it on every event of the session, side calls and subagents included. A GROUPING HINT, not v0.7's declared coordinates: the runtime still derives turns/steps and may decline the grouping where its own evidence contradicts it. A runtime MUST NOT derive authorization, policy selection, ordering, or trust from it."
   }
+ }
 }

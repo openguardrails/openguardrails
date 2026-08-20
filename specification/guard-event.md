@@ -9,9 +9,12 @@ all (coordinates, timestamps, protocol versioning), and what only the producer
 can know is mandatory — with the empty string as the explicit "I have nothing
 to assert". An integration is an API key, nine fields, and one endpoint.
 
-The single optional field is [`integration`](#integration) — the reporter's own
-`name/version`. Integrations SHOULD send it. It is OPTIONAL rather than required
-so the two ends of a deployment can roll forward independently: making it
+The optional fields are [`integration`](#integration) — the reporter's own
+`name/version` — [`connection`](#connection), the reporter's opaque
+downstream-flow id, and [`session_hint`](#session_hint), the producer's own
+name for the conversation this step belongs to. Integrations SHOULD send all
+three when they hold the fact. They are OPTIONAL rather than required so the
+two ends of a deployment can roll forward independently: making any of them
 mandatory would reject every build already in the field, turning a diagnostic
 into an outage.
 
@@ -74,7 +77,8 @@ judged after reassembly where no single raw body ever existed. The shape:
 ```jsonc
 // step/request
 { "messages": [ /* the full conversation being sent */ ],
-  "tools":    [ /* declared tool schemas — include when changed or first seen */ ] }
+  "tools":    [ /* declared tool schemas — include when changed or first seen */ ],
+  "timing":   { "received_at": "..." } }
 
 // step/response
 { "text": "...", "reasoning": "...",
@@ -85,19 +89,35 @@ judged after reassembly where no single raw body ever existed. The shape:
   "timing": { "started_at": "...", "first_token_at": "...", "completed_at": "..." } }
 ```
 
-### `usage` and `timing` on `step/response`
+### `usage` and `timing`
 
 Two per-step facts only the integration can supply, powering per-step cost
 and latency analytics downstream:
 
-- **`timing`** — `{started_at, first_token_at?, completed_at}`, wall-clock
-  facts the byte path observes (`started_at` is the request's release
-  upstream; a buffered reply omits `first_token_at`). On a CANONICAL payload
-  it is the ordinary `timing` field; on a RAW provider body the integration
-  MAY add it as a top-level `timing` key — inserted into the body's own
-  bytes, never via a re-serialization, so span offsets keep indexing the
-  strings as transported. No provider protocol defines a top-level `timing`;
-  if a body carries one, the integration MUST leave it alone.
+- **`timing`** — wall-clock facts the byte path observes. On `step/response`,
+  `{started_at, first_token_at?, completed_at}` (`started_at` is the
+  request's release upstream; a buffered reply omits `first_token_at`). On
+  `step/request`, one endpoint and one only: `{received_at}`, when the
+  integration saw the request. On a CANONICAL payload it is the ordinary
+  `timing` field; on a RAW provider body the integration MAY add it as a
+  top-level `timing` key — inserted into the body's own bytes, never via a
+  re-serialization, so span offsets keep indexing the strings as
+  transported. No provider protocol defines a top-level `timing`; if a body
+  carries one, the integration MUST leave it alone.
+
+  **`timing` is a set of DURATION ENDPOINTS, not the event's timestamp — and
+  a runtime MUST NOT order events by it.** The wire carries no event
+  timestamp (v0.8): coordinates and ordering are the runtime's, derived from
+  `step_id`, because nothing bounds how wrong a producer's clock can be and
+  the receiving end cannot audit it. What these fields are FOR is arithmetic
+  between two instants **the same process stamped** — `completed_at −
+  started_at` is the generation, and the next step's `received_at −` this
+  step's `completed_at` is the agent's own tool-execution gap. Within one
+  clock a skew cancels; across two it accumulates, so a runtime measuring
+  either span against its OWN receive time is measuring the delivery path as
+  well. This is why `received_at` is worth sending and an event-level
+  `timestamp` is not: one is half of a difference, the other is a claim
+  about when something happened that the runtime would have to trust.
 - **`usage`** — a raw body carries the provider's own accounting and needs
   nothing added. A canonical (stream-reassembled) payload SHOULD carry the
   canonical counters transcribed from the stream, and MUST omit the field
@@ -249,6 +269,56 @@ On the event neither can happen: the string travels with the traffic it
 describes, no other reporter can overwrite it, and stored events can be split by
 build to compare behaviour across a rollout. The heartbeat's copy stays as the
 liveness signal; the event's copy is the triage signal.
+
+## `connection`
+
+`connection` names the DOWNSTREAM FLOW a request arrived on, as one opaque
+string the integration mints — e.g. `<instance>#<connection ordinal>` for a
+gateway, where the instance half keeps two replicas' ordinals apart. It MUST be
+stable for the life of one client connection and MUST NOT be reused by another
+process.
+
+Why it exists: a gateway reassembles sessions from stateless requests, and the
+body-level evidence can vanish wholesale — a harness that compacts or
+tail-trims its history rewrites every prefix, and a bridge may strip every
+session field the client asserted (both measured in production, 2026-08-19).
+What survives all of that is transport: consecutive requests of one client
+process ride one keep-alive connection. This field is the integration handing
+that fact to the runtime — the same move a firewall makes when it reassembles a
+stream from the four-tuple.
+
+⚠️ **A connection names a PROCESS, not a conversation.** One desktop app can
+run several conversations down one connection, and an L4 balancer in front of
+the integration can pool many clients into one. A runtime MAY therefore use it
+only as a corroborated, last-resort grouping signal — behind every
+content-derived answer, refused outright when the flow maps to more than one
+live candidate — and MUST NOT derive trust, authorization or policy selection
+from it. Like `integration`, it is a self-declared label bounded only by the
+credential that carried it.
+
+## `session_hint`
+
+`session_hint` is the producer's own name for the CONVERSATION this step
+belongs to — an opaque string, stable for the life of one conversation,
+different across two conversations the same producer runs at once. A harness
+or SDK that holds a natural session id (nearly all do) SHOULD send it on
+every event of that session, side calls and subagent calls included.
+
+⚠️ **This is not v0.7's `session_id` coming back, and the name is different
+on purpose.** Declared COORDINATES (session/turn/step) stay off the wire:
+they were authority, they short-circuited derivation, and nothing bounds how
+wrong a producer's bookkeeping is. A HINT is a grouping signal: the runtime
+still owns the ledger — it derives turns and steps, orders by its own
+assignment, and MAY decline the hint's grouping where its own evidence
+contradicts it. What the hint answers is the one question content-derivation
+provably cannot always answer (measured 2026-08-19): which conversation a
+request belongs to after the harness has compacted or tail-trimmed its
+history, and which conversation a side call (a safety check, a title
+generation, a subagent) was made on behalf of.
+
+A runtime MUST NOT treat it as authorization, policy selection, ordering, or
+trust of any kind — the `integration` rule. It is scoped to the credential
+that carried it: two tenants' identical hints never meet.
 
 There is **no `event_id` on the request**. Identifiers are the runtime's job:
 

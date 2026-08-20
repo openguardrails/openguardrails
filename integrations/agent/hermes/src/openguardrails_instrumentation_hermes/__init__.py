@@ -27,6 +27,13 @@ def register(ctx) -> None:
     # calls". Denies the round's dispatches when its step/response blocked.
     ctx.register_hook("pre_tool_call", bridge.on_pre_tool_call)
 
+    # Name the session ON THE OUTBOUND MODEL REQUEST (llm_request middleware),
+    # so a gateway-side OGR in front of the model can reassemble sessions
+    # without guessing from conversation prefixes. Older Hermes builds have no
+    # register_middleware — degrade to hooks-only rather than fail the load.
+    if hasattr(ctx, "register_middleware"):
+        ctx.register_middleware("llm_request", bridge.on_llm_request_middleware)
+
     # Exec vantage — wrap the real exec chokepoint (optional, fails open).
     sandbox_ok = install_sandbox_guard()
 
@@ -39,6 +46,6 @@ def register(ctx) -> None:
 
     bridge.logger.info(
         "ogr-guard registered: hooks=[pre/post_api_request, transform_llm_output, "
-        "pre_tool_call] exec_wrap=%s runtime=%s fail_mode=%s",
+        "pre_tool_call] middleware=[llm_request session tag] exec_wrap=%s runtime=%s fail_mode=%s",
         sandbox_ok, client.runtime_url or "(none)", client.fail_mode,
     )

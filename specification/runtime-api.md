@@ -205,7 +205,8 @@ raw provider bodies at the same two refusable moments.
 per model call:
   1. mint step_id                (fresh random id; binds this call's two events)
   2. PRE-MODEL   evaluate(step/request  {step_id, four-tuple, llm_protocol,
-                                         payload: <raw request body>})
+                                         payload: <raw request body
+                                                   + timing.received_at>})
        block                → do not call the model
        modifications.spans  → apply in place BEFORE sending
        no verdict           → apply the configured fail mode (default: open)
@@ -226,8 +227,9 @@ periodically:
 
 Step 4 is the enforcement moment that matters most: the model's tool calls,
 held BEFORE execution, are the only copy of an action anyone can still
-refuse. `usage`/`timing` on the response event are specified in
-[GuardEvent § usage and timing](guard-event.md#usage-and-timing-on-stepresponse).
+refuse. `usage`/`timing` are specified in
+[GuardEvent § usage and timing](guard-event.md#usage-and-timing) — including
+why `timing` is a set of duration endpoints a runtime must not order by.
 
 ### Streaming: hold the tail, judge once
 
@@ -326,6 +328,11 @@ IDENTITY = {
     "agent_user":      "u-8232",          # who is USING it this session
 }
 
+SESSION = uuid.uuid4().hex                # one conversation, one hint —
+                                          #   the runtime groups every event
+                                          #   of it (side calls included)
+                                          #   without guessing from prefixes
+
 def evaluate(kind: str, step_id: str, payload: dict) -> dict | None:
     """The whole protocol is this one call. Returns the Verdict, or None
     when the runtime could not answer — and this integration FAILS OPEN:
@@ -335,6 +342,7 @@ def evaluate(kind: str, step_id: str, payload: dict) -> dict | None:
                           headers={"Authorization": f"Bearer {KEY}"},
                           json={"kind": kind, "step_id": step_id,
                                 "llm_protocol": "openai.chat",
+                                "session_hint": SESSION,
                                 **IDENTITY, "payload": payload},
                           timeout=5)
         return r.json() if r.ok else None

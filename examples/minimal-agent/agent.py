@@ -48,6 +48,11 @@ IDENTITY = {
 }
 
 
+SESSION = uuid.uuid4().hex                # one conversation, one hint —
+                                          #   the runtime groups every event
+                                          #   of it (side calls included)
+                                          #   without guessing from prefixes
+
 def evaluate(kind: str, step_id: str, payload: dict) -> dict | None:
     """The whole protocol is this one call. Returns the Verdict, or None
     when the runtime could not answer — and this integration FAILS OPEN:
@@ -57,6 +62,7 @@ def evaluate(kind: str, step_id: str, payload: dict) -> dict | None:
                           headers={"Authorization": f"Bearer {KEY}"},
                           json={"kind": kind, "step_id": step_id,
                                 "llm_protocol": "openai.chat",
+                                "session_hint": SESSION,
                                 **IDENTITY, "payload": payload},
                           timeout=5)
         return r.json() if r.ok else None

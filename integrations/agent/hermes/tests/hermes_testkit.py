@@ -19,11 +19,14 @@ REQUIRED_FIELDS = {
     "llm_protocol", "payload",
 }
 
-#: The one OPTIONAL field (2026-08-17): ``integration``, the reporter's own
-#: ``"name/version"``. An ALLOWLIST, not a relaxation — an unknown key is still a
-#: violation; only a MISSING ``integration`` stopped being one, which is what lets
-#: a runtime and a reporter roll forward independently.
-OPTIONAL_FIELDS = {"integration"}
+#: The OPTIONAL fields. ``integration`` (2026-08-17) is the reporter's own
+#: build id; ``session_hint`` (2026-08-19) is the producer's opaque name for
+#: the conversation — a grouping hint, sent whenever the vantage holds a
+#: session and absent at the exec chokepoint, which holds none. ``connection``
+#: is in the schema too but is a GATEWAY's field; this integration never sends
+#: it, and the testkit deliberately keeps it out of the allowed set so a stray
+#: copy here would fail loudly.
+OPTIONAL_FIELDS = {"integration", "session_hint"}
 
 KINDS = {"step/request", "step/response"}
 PROTOCOLS = {"openai.chat", "openai.responses", "anthropic.messages", "canonical"}

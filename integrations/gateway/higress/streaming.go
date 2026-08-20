@@ -39,9 +39,23 @@ type streamProcessor struct {
 	// reply can be REPORTED at the end. Buffering the whole body to read it — the
 	// enforce path's `BufferResponseBody` — is a latency and memory cost an observer
 	// has no business imposing.
+	//
+	// ⚠️ The header's claim, VERIFIED against the first bytes (see the sniff in
+	// ProcessChunk). Content-type is whatever the last proxy in front of the
+	// upstream decided to say: an SSE stream served as `application/octet-stream`
+	// fed the raw-JSON path, parsed to nothing, and the model's whole output side
+	// was reported unreadable — 100% response loss for every consumer routed to
+	// that upstream, invisible except as the `unreadable` counter. The bytes
+	// cannot lie about their own framing; the header can.
 	sse  bool
 	scan *protocol.Scanner
 	raw  strings.Builder
+	// Sniff state: the mode settles on the first non-empty chunk. The
+	// constructor inputs are kept so the scanner can be built on a raw→SSE
+	// flip.
+	decided  bool
+	mapping  map[string]string
+	suppress bool
 	// bytes is how much the upstream actually sent. It is the evidence that separates
 	// "the model said nothing" from "we could not read a single frame of what it sent"
 	// — two states that look identical from an empty Result and mean opposite things.
@@ -68,17 +82,53 @@ func newStreamProcessor(proto protocol.Protocol, mapping map[string]string, sse 
 	if startedAt.IsZero() {
 		startedAt = time.Now()
 	}
-	s := &streamProcessor{proto: proto, sse: sse, startedAt: startedAt}
+	s := &streamProcessor{
+		proto: proto, sse: sse, startedAt: startedAt,
+		mapping: mapping, suppress: suppressUsageFrame,
+	}
 	if sse {
-		dec := proto.NewDecoder(protocol.NewRestorer(mapping))
-		if suppressUsageFrame {
-			if sup, ok := dec.(protocol.UsageFrameSuppressor); ok {
-				sup.SuppressUsageFrame()
-			}
-		}
-		s.scan = protocol.NewScanner(dec)
+		s.buildScanner()
 	}
 	return s
+}
+
+func (s *streamProcessor) buildScanner() {
+	dec := s.proto.NewDecoder(protocol.NewRestorer(s.mapping))
+	if s.suppress {
+		if sup, ok := dec.(protocol.UsageFrameSuppressor); ok {
+			sup.SuppressUsageFrame()
+		}
+	}
+	s.scan = protocol.NewScanner(dec)
+}
+
+/**
+ * settleMode verifies the header's framing claim against the FIRST non-empty
+ * chunk and flips the reassembly path when the bytes contradict it.
+ *
+ * The rule is deliberately narrow, and decided ONCE, on positive evidence
+ * only: an SSE opener (`data:`, `event:`, a `:` comment) on a body the header
+ * called plain flips to the scanner; a JSON brace on a body the header called
+ * an event stream flips to raw. Anything ambiguous — including the rare first
+ * chunk shorter than the openers — keeps the header's claim, so an honest
+ * deployment is byte-for-byte unaffected. No buffering and no replay: the
+ * decision lands before the first byte is read by either path, which is what
+ * keeps the scanner's placeholder restoration intact from frame one.
+ */
+func (s *streamProcessor) settleMode(chunk []byte) {
+	head := strings.TrimLeft(string(chunk), " \t\r\n")
+	looksSSE := strings.HasPrefix(head, "data:") || strings.HasPrefix(head, "event:") ||
+		strings.HasPrefix(head, ":")
+	looksJSON := strings.HasPrefix(head, "{") || strings.HasPrefix(head, "[")
+	if !s.sse && looksSSE {
+		s.sse = true
+		s.buildScanner()
+		logInfof("[OGR-RESP] content-type claimed a plain body but the bytes are an event stream — reassembling as SSE")
+	} else if s.sse && looksJSON {
+		s.sse = false
+		s.scan = nil
+		logInfof("[OGR-RESP] content-type claimed an event stream but the bytes are a plain body — reassembling as JSON")
+	}
 }
 
 // ProcessChunk restores placeholders in one raw chunk and accumulates what the model
@@ -91,6 +141,10 @@ func (s *streamProcessor) ProcessChunk(chunk []byte, isLast bool) []byte {
 		s.doneAt = time.Now()
 	}
 	s.bytes += len(chunk)
+	if !s.decided && len(chunk) > 0 {
+		s.decided = true
+		s.settleMode(chunk)
+	}
 	if !s.sse {
 		if s.raw.Len() < maxRawAccum {
 			s.raw.Write(chunk)

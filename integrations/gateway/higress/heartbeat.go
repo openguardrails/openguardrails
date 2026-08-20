@@ -81,6 +81,12 @@ const (
 	// Three verdict-block sites were missing this until 3.0.1, which made `refused`
 	// silently mean "refusals except the plain ones".
 	cntRefused // turns this filter refused
+	// A completion request whose RESPONSE came back non-200: nothing to judge and
+	// nothing to hold, so the step's second half is never reported — which used to
+	// be SILENT, and silence here is exactly the shape of the measured per-upstream
+	// response loss (2026-08-19: one consumer lost ~180 responses/hour while
+	// `unreadable` moved by 9 — the skip was upstream of every existing counter).
+	cntUpstreamNon200
 	cntLen
 )
 
@@ -109,6 +115,7 @@ var counterNames = [cntLen]string{
 	cntUnreadable:      "unreadable",
 	cntTruncated:       "truncated",
 	cntRefused:         "refused",
+	cntUpstreamNon200:  "upstream_non200",
 }
 
 // bump adds to one counter. A lost increment under contention is acceptable —

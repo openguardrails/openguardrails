@@ -10,19 +10,28 @@ version is independent of any implementation's package version.
 ## [v0.8] — the minimum API (in progress)
 
 Everything a runtime can derive leaves the wire; everything only the
-producer can know becomes required. An integration is an API key, ten
+producer can know becomes required. An integration is an API key, nine
 fields, and one endpoint — the same recipe for a developer's own agent loop
 and for a gateway. The minimal integration example ships in the spec, the
 README, and `examples/minimal-agent/`.
 
 ### Changed (breaking)
-- **Zero optional GuardEvent fields.** Required, all of them: `kind`,
-  `step_id`, the identity five-tuple, `llm_protocol`, `payload`. The
-  five-tuple (`agent_id`, `agent_type`, `agent_workspace`, `agent_owner`,
-  `agent_user`) is required *with the empty string as the explicit "no
-  assertion"* — every integrator answers the identity question instead of
-  falling into the API-key floor by omission (the floor itself is
-  unchanged).
+- **The GuardEvent is eight required fields plus two optional.** Required:
+  `kind`, `step_id`, the identity four-tuple (`agent_id`, `agent_type`,
+  `agent_workspace`, `agent_user`), `llm_protocol`, `payload` — and the
+  four identity fields are required *with the empty string as the explicit
+  "no assertion"*, so every integrator answers the identity question instead
+  of falling into the API-key floor by omission (the floor itself is
+  unchanged). Optional: `integration`, `connection`, `session_hint`.
+
+  ⚠️ Both of those numbers MOVED INSIDE v0.8, before release, and each has
+  its own entry below — this bullet states where they landed, not where they
+  started. The tuple opened as a FIVE-tuple (`agent_owner` removed); the
+  event opened with ZERO optional fields (`integration` restored first,
+  `connection` and `session_hint` added 2026-08-19). A producer built
+  against an early v0.8 draft must read those entries, because
+  `additionalProperties: false` rejects the extra key outright rather than
+  ignoring it.
 - **All coordinates are derived, always.** `session_id` / `turn` / `step` /
   `parent_session_id` leave the wire; the runtime chains sessions by
   conversation prefix (re-attaching across context compaction), closes
@@ -139,6 +148,47 @@ README, and `examples/minimal-agent/`.
   per `(integration, instance_id)`, and MUST treat a beat without one as a single
   unnamed instance, which reproduces the old collapse for older reporters but as
   a row that says so rather than as a scalar being overwritten.
+
+- **`connection` on the GuardEvent** — optional, opaque: the reporter's own
+  downstream-flow id (e.g. `<instance>#<connection ordinal>` for a gateway),
+  stable for the life of one client connection, never reused across processes.
+  It exists because both content-level session signals were measured failing at
+  once in production (2026-08-19): a harness that tail-trims its history
+  rewrites every conversation prefix a runtime could chain on, and a bridge in
+  front of the model strips every session field the client asserted — while the
+  keep-alive connection under them never changed. A runtime MAY use it only as
+  a corroborated last-resort grouping signal (a connection names a PROCESS —
+  possibly several concurrent conversations, possibly an L4 balancer's pool)
+  and MUST NOT derive trust, authorization or policy selection from it. Same
+  additive-optional discipline as `integration`: `additionalProperties: false`
+  rejects unknown keys, not absent ones, so both ends roll forward
+  independently. Shipped by higress 3.5.0.
+
+- **`session_hint` on the GuardEvent** — optional, opaque: the producer's own
+  name for the conversation this step belongs to, sent on every event of the
+  session including side calls and subagents. NOT v0.7's declared coordinates
+  returning: a hint is a grouping signal the runtime may decline, never
+  authority — turns, steps and ordering stay derived, and trust/authorization
+  never rest on it. It exists because content-derivation measurably fails on
+  real harness behaviour (compacted and tail-trimmed histories rewrite every
+  prefix a runtime can chain on, 2026-08-19) while the producer holds the fact
+  the whole time — the agent-direct integrations literally had the session id
+  in hand and no field to say it in. Same additive-optional discipline as
+  `integration`/`connection`.
+
+- **`timing.received_at` on `step/request`** — when the integration SAW the
+  request, alongside the `timing` a `step/response` already carries. It is
+  the far end of a duration whose near end is the previous step's
+  `completed_at`, so a runtime can measure the agent's own tool-execution gap
+  from two instants **one process stamped** instead of subtracting a producer's
+  clock from its own.
+  This is not `timestamp` coming back, and the spec now says so where the
+  fields are defined: `timing` is a set of DURATION ENDPOINTS and a runtime
+  MUST NOT order events by it. Ordering stays derived from `step_id`, because
+  nothing bounds how wrong a producer's clock is and the receiving end cannot
+  audit it. Optional and additive — a `.strict()` validator rejects unknown
+  keys, not absent ones, so producers and runtimes roll forward
+  independently. higress ships it as **3.5.0**.
 
 ## [v0.7] — the ledger model
 

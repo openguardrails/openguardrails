@@ -36,6 +36,7 @@ embedding):
 | `OGR_FAIL_MODE` | `open` | What an unanswered evaluate means (timeout, 429, 5xx, network, unconfigured): `open` proceeds and counts the gap; `closed` denies until the runtime answers. An unrecognized value degrades to `closed` — a deployment that touched the knob wanted more than the default. |
 | `OGR_TIMEOUT` | `4.0` | Per-evaluate budget, seconds. Deliberately short: every call sits between the agent and its next action. |
 | `OGR_REFUSAL_TEXT` | a generic sentence | What the user sees instead of a blocked answer. Says nothing about why by design — categories and rule text are internals (and a map of what to route around); they stay in the runtime's record and this plugin's log. |
+| `OGR_SESSION_TAG` | `on` | 1.1.0: stamp an opaque session tag (`user` = `hermes_session_<sha256[:32]>` on OpenAI modes, `metadata.user_id` on the Anthropic mode) onto every OUTBOUND model request, via Hermes' `llm_request` middleware. This is for the GATEWAY in front of the model: an OGR runtime observing there reads the tag and reassembles the session exactly instead of inferring it from conversation prefixes — which survives context compaction and history trimming. Never overwrites a value the deployment already set; `off` disables. Attribution only, like every self-declared OGR field. |
 | `OGR_REDACT_MASK` | keep placeholders | Replace redaction spans with this flat string (e.g. `[已隐去]`) instead of the verdict's `${OGR_PHONE_1}`-style placeholders. |
 
 ### The identity four-tuple
