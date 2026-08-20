@@ -111,6 +111,9 @@ IDENTITY = {
     "agent_user":      "u-8232",          # who is USING it this session
 }
 
+SESSION = uuid.uuid4().hex   # optional session_hint: one id per conversation —
+                             # sessions become declared instead of inferred
+
 def evaluate(kind, step_id, payload):
     """The whole protocol is this one call. Fail-open: no verdict → proceed."""
     try:
@@ -118,6 +121,7 @@ def evaluate(kind, step_id, payload):
                           headers={"Authorization": f"Bearer {KEY}"},
                           json={"kind": kind, "step_id": step_id,
                                 "llm_protocol": "openai.chat",
+                                "session_hint": SESSION,
                                 **IDENTITY, "payload": payload},
                           timeout=5)
         return r.json() if r.ok else None
