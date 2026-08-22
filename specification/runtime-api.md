@@ -150,7 +150,7 @@ curl -s https://ogr.example.com/v1/evaluate \
 ```json
 {
   "event_id": "0198f2b1-4a3c-7b21-9f0e-8c2d5a71e3d0",
-  "provider": "openguardrails-runtime",
+  "provider": "openguardrails-airs",
   "decision": "allow",
   "latency_ms": 143,
   "findings": [
@@ -209,7 +209,7 @@ curl -s https://ogr.example.com/v1/evaluate \
 ```json
 {
   "event_id": "0198f2b1-51e0-7c04-b6a7-2f9d13c4aa87",
-  "provider": "openguardrails-runtime",
+  "provider": "openguardrails-airs",
   "decision": "block",
   "latency_ms": 388,
   "findings": [

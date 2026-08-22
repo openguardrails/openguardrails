@@ -10,8 +10,8 @@ model** as the normative foundational concept (entity axis: tenant →
 workspace → agent-as-endpoint; traffic stack: L6 session · L5 turn · L4 step ·
 L3 event — the packet, the only layer on the wire — · L2 call · L1 exec).
 Within 1.x changes are additive-optional only. The v0.7 design rationale
-lives in `../openguardrails-runtime/docs/v0.7-ledger-redesign.md`; the layer
-model's full write-up in `../openguardrails-runtime/docs/core-concepts.md`;
+lives in `../openguardrails-airs/docs/v0.7-ledger-redesign.md`; the layer
+model's full write-up in `../openguardrails-airs/docs/core-concepts.md`;
 the normative text lives here in `specification/` + `schema/`. Read
 `specification/overview.md` first, then `specification/runtime-api.md` —
 its "minimal integration" section is the canonical example and also ships

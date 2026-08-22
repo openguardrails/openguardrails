@@ -137,7 +137,7 @@ impossible.
 ```json
 {
   "event_id": "evt-9f2",
-  "provider": "ogr-runtime",
+  "provider": "openguardrails-airs",
   "decision": "block",
   "findings": [
     { "category": "security.data_exfiltration", "severity": "critical",
