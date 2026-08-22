@@ -1,4 +1,4 @@
-# OpenGuardrails Runtime — the Higress plugin
+# OpenGuardrails AIRS — the Higress plugin
 
 A Higress WASM plugin that speaks **OGR v1.0 directly to an OpenGuardrails
 runtime**. It implements **the recipe of the v1.0 Runtime API**
@@ -6,11 +6,14 @@ runtime**. It implements **the recipe of the v1.0 Runtime API**
 one recipe now, the same two POSTs per model call whether the integration is a
 gateway or a developer's own agent loop.
 
-It is called **OpenGuardrails Runtime** in the Higress console;
-`openguardrails-runtime` is its plugin name.
+It is called **OpenGuardrails AIRS** in the Higress console;
+`openguardrails-airs` is its plugin name (both renamed from "OpenGuardrails
+Runtime" / `openguardrails-runtime` at 3.6.0, with the product — an existing
+WasmPlugin CR under the old name keeps working and adopts the new name on its
+next upgrade).
 
 ```
-   client ──▶ Higress ──▶ OpenGuardrails Runtime (WASM) ──▶ runtime
+   client ──▶ Higress ──▶ OpenGuardrails AIRS (WASM) ──▶ runtime
                               │                    POST {base_path}/v1/evaluate  (+ heartbeat)
                               ▼                    (base_path defaults to "", the canonical /v1/* root)
                           LLM upstream
@@ -408,7 +411,7 @@ the traffic pass with `decision=` empty).
 
 | Key | Default | Notes |
 |---|---|---|
-| `runtime_cluster` | — | Envoy cluster, e.g. `outbound\|80\|\|openguardrails-runtime.static` |
+| `runtime_cluster` | — | Envoy cluster, e.g. `outbound\|80\|\|openguardrails-airs.static` |
 | `runtime_base_url` | — | used for the Host header |
 | `base_path` | `""` | the mount prefix the canonical `/v1/*` endpoint paths are joined onto |
 | `api_key` | — | the runtime API key; authenticates the SENDER, resolves the org |
@@ -472,8 +475,8 @@ Sideload rather than an OCI pull (the docker bridge on the dev box has no
 egress):
 
 ```bash
-cp plugin.wasm references/higress_root/openguardrails-runtime.wasm
-# WasmPlugin CR with url: file:///data/openguardrails-runtime.wasm, priority 200
+cp plugin.wasm references/higress_root/openguardrails-airs.wasm
+# WasmPlugin CR with url: file:///data/openguardrails-airs.wasm, priority 200
 ```
 
 ⚠️ Priority must stay BELOW `key-auth` (310): the consumer headers this plugin

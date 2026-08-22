@@ -15,7 +15,7 @@ operate a gateway service.
 | OpenAI + Anthropic protocols, a readable single-file proxy | [`openai-anthropic/`](openai-anthropic/) |
 
 `higress` is the one that runs INSIDE the gateway: a WASM plugin, called
-**OpenGuardrails Runtime** in the Higress console. Being in the data path is
+**OpenGuardrails AIRS** in the Higress console. Being in the data path is
 what lets it do the two things an out-of-band integration cannot — carry out
 redaction spans in full (the runtime returns span offsets and never
 plaintext) and refuse a request before the model sees it, streaming

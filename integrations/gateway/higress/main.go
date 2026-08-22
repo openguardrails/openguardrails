@@ -1,5 +1,6 @@
-// OpenGuardrails Runtime — a Higress WASM plugin that speaks OGR v0.8 to an
-// OpenGuardrails runtime directly.
+// OpenGuardrails AIRS — a Higress WASM plugin that speaks OGR v0.8 to an
+// OpenGuardrails AIRS runtime directly. (Renamed from "openguardrails-runtime"
+// with the product, 3.6.0.)
 //
 // It implements **the recipe of the v0.8 Runtime API** (specification/runtime-api.md
 // — one recipe now, the same for a gateway and for a developer's own loop). One
@@ -50,7 +51,7 @@ func main() {}
 
 func init() {
 	wrapper.SetCtx(
-		"openguardrails-runtime",
+		"openguardrails-airs",
 		wrapper.ParseConfig(parseConfig),
 		wrapper.ProcessRequestHeaders(onRequestHeaders),
 		wrapper.ProcessRequestBody(onRequestBody),

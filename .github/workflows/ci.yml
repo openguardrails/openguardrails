@@ -54,7 +54,7 @@ jobs:
           done
 
   higress:
-    # The Higress WASM plugin ("OpenGuardrails Runtime"). Everything worth
+    # The Higress WASM plugin ("OpenGuardrails AIRS"). Everything worth
     # testing in it — span offsets, SSE chunk boundaries, tail-hold release
     # order, the nine-field wire — is ordinary Go and runs on the host; the
     # wasm build is the compile check for the parts that only exist inside a

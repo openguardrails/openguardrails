@@ -1,6 +1,6 @@
 name: Publish Higress plugin
 
-# The Higress WASM plugin ("OpenGuardrails Runtime") ships as an OCI artifact,
+# The Higress WASM plugin ("OpenGuardrails AIRS") ships as an OCI artifact,
 # not a container image: Higress pulls `oci://<repo>:<tag>` and expects a single
 # gzipped tar layer containing `plugin.wasm`. `oras push` produces exactly that.
 #
@@ -120,7 +120,7 @@ jobs:
           # Two tags in one push: the immutable version a deployment should pin,
           # and `latest` for a lab that just wants the newest.
           oras push "$IMAGE:$VERSION,latest" \
-            --annotation "org.opencontainers.image.title=OpenGuardrails Runtime" \
+            --annotation "org.opencontainers.image.title=OpenGuardrails AIRS" \
             --annotation "org.opencontainers.image.description=Guardrails from an OpenGuardrails runtime, as a Higress WASM plugin" \
             --annotation "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
             --annotation "org.opencontainers.image.revision=${{ github.sha }}" \
