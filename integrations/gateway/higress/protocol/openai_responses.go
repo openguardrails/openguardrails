@@ -371,7 +371,13 @@ type responsesDecoder struct {
 	items map[int]*responsesItem
 	order []int
 	usage *Usage
+	// frames counts data payloads in this protocol's own event namespace
+	// (`response.*`) — see protocol.FrameCounter.
+	frames int
 }
+
+// RecognizedFrames — see protocol.FrameCounter.
+func (d *responsesDecoder) RecognizedFrames() int { return d.frames }
 
 func (d *responsesDecoder) item(i int) *responsesItem {
 	it := d.items[i]
@@ -393,6 +399,13 @@ func (d *responsesDecoder) Line(line string, isLast bool) string {
 		return line
 	}
 	idx := int(parsed.Get("output_index").Int())
+
+	// The protocol's own event namespace: every event this API emits is
+	// `response.*`, so the namespace is what marks a frame as recognised —
+	// including event types newer than the cases below.
+	if strings.HasPrefix(parsed.Get("type").String(), "response.") {
+		d.frames++
+	}
 
 	switch parsed.Get("type").String() {
 	case "response.output_item.added":

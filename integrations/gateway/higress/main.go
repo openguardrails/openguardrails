@@ -1199,10 +1199,18 @@ func onStreamingResponseBody(ctx wrapper.HttpContext, cfg Config, chunk []byte, 
 		switch {
 		case !result.Empty():
 			report(cfg, responseEventCanonical(rs.derive, canonicalOf(rs, result, sp.Timing())))
+		case sp.SawBytes() && sp.RecognizedFrames() > 0:
+			// A WELL-FORMED stream whose answer is genuinely EMPTY. That is a reply,
+			// not a hole: report it, so the step keeps its response half (usage and
+			// timing included) instead of reading forever as "request with no
+			// answer" — the shape that renders every later tool result as a stray.
+			report(cfg, responseEventCanonical(rs.derive, canonicalOf(rs, result, sp.Timing())))
+			bump(cntEmptyReply, 1)
 		case sp.SawBytes():
 			// ⚠️ An empty result here means one of two very different things: the model
 			// said nothing, or we could not read a single frame of what it sent. Only
-			// the second is a hole, and it must not look like the first.
+			// the second is a hole, and it must not look like the first — which is
+			// what the RecognizedFrames split above decides.
 			reportUnreadableStream(rs, sp)
 		}
 	}

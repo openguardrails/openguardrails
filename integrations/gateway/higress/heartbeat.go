@@ -87,6 +87,12 @@ const (
 	// response loss (2026-08-19: one consumer lost ~180 responses/hour while
 	// `unreadable` moved by 9 — the skip was upstream of every existing counter).
 	cntUpstreamNon200
+	// A WELL-FORMED stream whose reassembled answer was genuinely EMPTY — the
+	// model produced nothing (no text, no reasoning, no tool calls). Reported as
+	// an empty response event since 3.6.1, so the step keeps its response half;
+	// counted here because a rising rate is a model/harness symptom worth seeing
+	// (the "[no visible output]" nudge loops), never an error of this filter.
+	cntEmptyReply
 	cntLen
 )
 
@@ -116,6 +122,7 @@ var counterNames = [cntLen]string{
 	cntTruncated:       "truncated",
 	cntRefused:         "refused",
 	cntUpstreamNon200:  "upstream_non200",
+	cntEmptyReply:      "empty_reply",
 }
 
 // bump adds to one counter. A lost increment under contention is acceptable —

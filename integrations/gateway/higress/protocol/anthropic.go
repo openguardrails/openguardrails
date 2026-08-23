@@ -384,7 +384,13 @@ type anthropicDecoder struct {
 	blocks map[int]*anthropicBlock
 	order  []int
 	usage  *Usage
+	// frames counts data payloads whose `type` this decoder handles — see
+	// protocol.FrameCounter.
+	frames int
 }
+
+// RecognizedFrames — see protocol.FrameCounter.
+func (d *anthropicDecoder) RecognizedFrames() int { return d.frames }
 
 func (d *anthropicDecoder) block(i int) *anthropicBlock {
 	b := d.blocks[i]
@@ -407,14 +413,20 @@ func (d *anthropicDecoder) Line(line string, isLast bool) string {
 	}
 	idx := int(parsed.Get("index").Int())
 
-	switch parsed.Get("type").String() {
+	switch t := parsed.Get("type").String(); t {
+	case "ping", "content_block_stop":
+		// Known frames with nothing to reassemble — recognised, passed through.
+		d.frames++
+		return line
 	case "message_start":
+		d.frames++
 		// The input-side counters (and the cache split) arrive here, before any
 		// content exists; `message_delta` completes the picture below.
 		d.usage = mergeAnthropicUsage(d.usage, parsed.Get("message.usage"))
 		return line
 
 	case "content_block_start":
+		d.frames++
 		b := d.block(idx)
 		cb := parsed.Get("content_block")
 		b.kind = cb.Get("type").String()
@@ -427,6 +439,7 @@ func (d *anthropicDecoder) Line(line string, isLast bool) string {
 		return line
 
 	case "content_block_delta":
+		d.frames++
 		b := d.block(idx)
 		delta := parsed.Get("delta")
 		var path, original string
@@ -453,6 +466,7 @@ func (d *anthropicDecoder) Line(line string, isLast bool) string {
 		return "data: " + next
 
 	case "message_delta", "message_stop":
+		d.frames++
 		// The final output_tokens count rides message_delta's own `usage`.
 		d.usage = mergeAnthropicUsage(d.usage, parsed.Get("usage"))
 		// ⚠️ The answer is ending, so whatever the restorer holds is text and has to

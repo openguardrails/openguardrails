@@ -170,7 +170,20 @@ type Output struct {
 
 // Empty reports whether the model produced nothing readable. Usage alone does
 // not count: a reply that carried counters and no content still said nothing.
-func (o Output) Empty() bool { return o.Text == "" && len(o.Actions) == 0 }
+//
+// ⚠️ REASONING COUNTS, and it did not until 3.6.1 — which silently lost the
+// response half of every PURE-REASONING reply. The deepseek family emits
+// `reasoning_content` heavily and some harnesses parse their tool calls out of
+// it (DSML markup), so a reply that was all reasoning was a real answer the
+// client acted on — while this predicate read it as nothing, the observe path
+// counted it `unreadable` instead of reporting it, and the enforce path under
+// `fail_mode: closed` REFUSED it outright. Measured on the shihongchen mirror
+// (2026-08-23): 9.5% of steps lost their response half, ~75% of it the
+// `unreadable` counter, on a model family whose reported outputs carry
+// reasoning in the thousands per hour.
+func (o Output) Empty() bool {
+	return o.Text == "" && o.Reasoning == "" && len(o.Actions) == 0
+}
 
 // StreamUsageEnsurer is implemented by a protocol whose provider omits token
 // usage from a stream unless the REQUEST opts in. EnsureStreamUsage rewrites a

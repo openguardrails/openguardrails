@@ -285,10 +285,19 @@ type chatDecoder struct {
 	textBuf      string
 	reasoningBuf string
 
+	// frames counts data payloads recognised as THIS protocol's — a chunk
+	// carrying a `choices` array or a `usage` object, or the `[DONE]`
+	// terminator, which no other protocol of the three emits. See
+	// protocol.FrameCounter for what the count separates.
+	frames int
+
 	// suppressUsage: the GATEWAY injected `include_usage`, so the terminal
 	// usage-only frame is one the client never asked for and must not receive.
 	suppressUsage bool
 }
+
+// RecognizedFrames — see protocol.FrameCounter.
+func (d *chatDecoder) RecognizedFrames() int { return d.frames }
 
 // SuppressUsageFrame arms the swallow — see UsageFrameSuppressor.
 func (d *chatDecoder) SuppressUsageFrame() { d.suppressUsage = true }
@@ -323,11 +332,15 @@ func (d *chatDecoder) Line(line string, isLast bool) string {
 		return line
 	}
 	if data == "[DONE]" {
+		d.frames++
 		return d.Flush() + line
 	}
 	parsed := gjson.Parse(data)
 	if !parsed.IsObject() {
 		return line
+	}
+	if parsed.Get("choices").IsArray() || parsed.Get("usage").IsObject() {
+		d.frames++
 	}
 
 	// Token usage, when a chunk carries it (the terminal frame under

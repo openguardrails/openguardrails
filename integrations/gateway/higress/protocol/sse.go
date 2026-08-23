@@ -41,6 +41,27 @@ type Decoder interface {
 	Output() Output
 }
 
+// FrameCounter is implemented by a Decoder that counts the data frames it
+// RECOGNISED as its own protocol's — a chat chunk with a `choices` array, an
+// anthropic event of a known type, a `response.*` event. It exists to split an
+// empty reassembly's two very different causes: a WELL-FORMED stream whose
+// answer was genuinely empty (frames recognised — the model said nothing, which
+// is a reportable reply), and bytes this decoder could not read at all (zero —
+// a wrong dialect, a compressed body, garbage), which is the real `unreadable`.
+type FrameCounter interface {
+	RecognizedFrames() int
+}
+
+// RecognizedFrames is the count of protocol-recognised data frames, or 0 for a
+// decoder that does not count (which conservatively reads as "unreadable" when
+// the reassembly is empty — never as a fabricated empty reply).
+func (s *Scanner) RecognizedFrames() int {
+	if c, ok := s.dec.(FrameCounter); ok {
+		return c.RecognizedFrames()
+	}
+	return 0
+}
+
 // ContentMeter is implemented by a Decoder that can report, cheaply, how much
 // CLIENT-VISIBLE content it has reassembled so far: text, reasoning and tool-call
 // arguments, in UTF-8 bytes, excluding all SSE framing. It exists for the

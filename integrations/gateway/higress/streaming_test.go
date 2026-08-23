@@ -108,6 +108,59 @@ func TestAnUnreadStreamIsDistinguishableFromASilentOne(t *testing.T) {
 	if !unread.SawBytes() {
 		t.Error("bytes arrived and were not counted, so the hole would be reported as silence")
 	}
+	if unread.RecognizedFrames() != 0 {
+		t.Error("an alien dialect counted as recognised frames — it would be reported as an empty reply instead of unreadable")
+	}
+}
+
+func TestAPureReasoningReplyIsNotEmpty(t *testing.T) {
+	// ⚠️ THE MEASURED LOSS (2026-08-23, shihongchen mirror): the deepseek family
+	// streams replies that are ALL `reasoning_content` — some harnesses parse
+	// their tool calls out of it as DSML markup — and Output.Empty() ignored
+	// reasoning, so the observe path counted every such reply `unreadable` (9.5%
+	// of steps lost their response half) and the enforce path under fail-closed
+	// REFUSED it. A reply the client acted on is not nothing.
+	sp := newStreamProcessor(chatProto(t), nil, true, time.Time{}, false)
+	sp.ProcessChunk([]byte(`data: {"choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"Let me check the ledger first."}}]}`+"\n\n"), false)
+	sp.ProcessChunk([]byte(`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`+"\n\n"+"data: [DONE]\n\n"), true)
+	if sp.Result().Empty() {
+		t.Fatal("a pure-reasoning reply reads as empty — its response half is lost as 'unreadable'")
+	}
+	if got := sp.Result().Reasoning; got != "Let me check the ledger first." {
+		t.Fatalf("reasoning not reassembled: %q", got)
+	}
+}
+
+func TestAWellFormedEmptyStreamRecognisesFrames(t *testing.T) {
+	// The model genuinely producing NOTHING (the "[no visible output]" nudge
+	// loops) is a well-formed stream with empty deltas. It must be separable
+	// from unreadable bytes: frames recognised + empty result ⇒ report an empty
+	// reply (the step keeps its response half), never count `unreadable`.
+	sp := newStreamProcessor(chatProto(t), nil, true, time.Time{}, false)
+	sp.ProcessChunk([]byte(`data: {"choices":[{"index":0,"delta":{"role":"assistant"}}]}`+"\n\n"), false)
+	sp.ProcessChunk([]byte(`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`+"\n\n"+"data: [DONE]\n\n"), true)
+	if !sp.Result().Empty() {
+		t.Fatal("an empty generation produced output from nowhere")
+	}
+	if sp.RecognizedFrames() == 0 {
+		t.Fatal("a well-formed empty stream recognised no frames — it would be counted unreadable")
+	}
+}
+
+func TestCompressedBytesRecogniseNoFrames(t *testing.T) {
+	// A gzip body (an upstream that compresses without being asked — the request
+	// phase strips accept-encoding) defeats both reassembly paths. It must stay
+	// in the UNREADABLE class: zero recognised frames, empty result, bytes seen.
+	// The settleMode magic-number log is what names it in the gateway's own log.
+	gzipHead := []byte{0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03}
+	sp := newStreamProcessor(chatProto(t), nil, true, time.Time{}, false)
+	sp.ProcessChunk(append(gzipHead, []byte("\x63\x60\x60\x60\x00\x00")...), true)
+	if !sp.Result().Empty() || !sp.SawBytes() {
+		t.Fatal("compressed bytes should reassemble to nothing while counting as seen")
+	}
+	if sp.RecognizedFrames() != 0 {
+		t.Fatal("compressed bytes counted as recognised frames")
+	}
 }
 
 func TestStreamedToolCallsAreReassembled(t *testing.T) {

@@ -116,6 +116,16 @@ func (s *streamProcessor) buildScanner() {
  * keeps the scanner's placeholder restoration intact from frame one.
  */
 func (s *streamProcessor) settleMode(chunk []byte) {
+	// A COMPRESSED body defeats both paths — neither `data:` nor a JSON brace
+	// will ever match — and it looks exactly like an unreadable dialect unless
+	// named here. The request phase strips `accept-encoding` (main.go), so a
+	// compressed response means the upstream compressed WITHOUT being asked;
+	// this log is what turns a mute `unreadable` count into a diagnosis.
+	if len(chunk) >= 2 && chunk[0] == 0x1f && chunk[1] == 0x8b {
+		logInfof("[OGR-RESP] response body is GZIP-compressed — the upstream ignored the stripped accept-encoding; this reply cannot be read and will count as unreadable")
+	} else if len(chunk) >= 4 && chunk[0] == 0x28 && chunk[1] == 0xb5 && chunk[2] == 0x2f && chunk[3] == 0xfd {
+		logInfof("[OGR-RESP] response body is ZSTD-compressed — the upstream ignored the stripped accept-encoding; this reply cannot be read and will count as unreadable")
+	}
 	head := strings.TrimLeft(string(chunk), " \t\r\n")
 	looksSSE := strings.HasPrefix(head, "data:") || strings.HasPrefix(head, "event:") ||
 		strings.HasPrefix(head, ":")
@@ -172,6 +182,19 @@ func (s *streamProcessor) ContentBytes() int {
 
 // SawBytes reports whether there was anything to read at all.
 func (s *streamProcessor) SawBytes() bool { return s.bytes > 0 }
+
+// RecognizedFrames is how many data frames the decoder recognised as its own
+// protocol's — what separates a WELL-FORMED stream whose answer was genuinely
+// empty (a reportable reply) from bytes nothing could read (`unreadable`). A
+// non-SSE body reports 0: the raw path has no frames, so an empty parse there
+// stays conservatively unreadable rather than becoming a fabricated empty
+// reply. See protocol.FrameCounter.
+func (s *streamProcessor) RecognizedFrames() int {
+	if !s.sse || s.scan == nil {
+		return 0
+	}
+	return s.scan.RecognizedFrames()
+}
 
 // Timing renders what this processor observed, for the canonical payload. Fields the
 // stream never reached stay absent rather than fabricated — an unread stream has no

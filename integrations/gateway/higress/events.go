@@ -47,7 +47,7 @@ const (
 	// 3.0.0–3.1.0 had only the beat), so it is how a deployment learns which build is
 	// in the VM. Kept honest by TestPluginVersionMatchesTheVERSIONFile — 1.3.0 and
 	// 1.4.0 both shipped while a prior constant still said 1.2.0.
-	pluginVersion = "3.6.0"
+	pluginVersion = "3.6.1"
 
 	kindStepRequest  = "step/request"
 	kindStepResponse = "step/response"

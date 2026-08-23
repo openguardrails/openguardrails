@@ -346,12 +346,21 @@ func judgeFinal(ctx wrapper.HttpContext, cfg Config, rs *reqState, sp *streamPro
 	}
 	out := sp.Result()
 	if out.Empty() {
-		// ⚠️ Nothing said, or nothing READABLE — SawBytes is what separates them, and
-		// only the second is a hole. An unreadable reply is a reply this plugin
-		// cannot judge, which under fail-closed must not go through: "could not
-		// look" is not "found nothing" (degraded-mode.md says it is the same
-		// situation as an outage, at a different size).
+		// ⚠️ Nothing said, or nothing READABLE — and since 3.6.1 the frame count is
+		// what separates them, not SawBytes alone. A WELL-FORMED stream that carried
+		// no content is the model genuinely saying nothing: a judgeable (vacuous)
+		// reply with nothing to refuse, recorded fire-and-forget so the step keeps
+		// its response half. Only bytes the decoder recognised NOTHING of are the
+		// hole — a reply this plugin cannot judge, which under fail-closed must not
+		// go through: "could not look" is not "found nothing" (degraded-mode.md says
+		// it is the same situation as an outage, at a different size).
 		if sp.SawBytes() {
+			if sp.RecognizedFrames() > 0 {
+				report(cfg, responseEventCanonical(rs.derive, canonicalOf(rs, out, sp.Timing())))
+				bump(cntEmptyReply, 1)
+				rs.finishAllow()
+				return
+			}
 			reportUnreadableStream(rs, sp)
 			if cfg.failClosed {
 				// A reply we could not read is a reply we could not judge, so under
