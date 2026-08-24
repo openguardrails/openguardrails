@@ -12,6 +12,12 @@ this document defines. Keywords per RFC 2119.
 | `allow` | Proceed. Findings may still be present (observed, recorded, not enforced) and `modifications.spans` may still require redaction in place. |
 | `block` | Deny the action. |
 
+⚠️ A verdict MAY also carry **[obligations](obligations.md)** — things the
+enforcement point must DO before the action proceeds — beside a decision that is
+still `allow`. An obligation is not a decision: it takes no part in
+[composition](composition.md), and a runtime MUST NOT rest a control on one being
+fulfilled, because a conformant 1.0/1.1 PEP ignores the key entirely.
+
 What v0.6's other three decisions became:
 
 - **`redact` / `modify`** — not decisions. A verdict that requires content

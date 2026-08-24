@@ -177,6 +177,8 @@ agent developers integrate by calling it directly:
 | [Overview](specification/overview.md) | The layer model and the integration surface | — |
 | [GuardEvent](specification/guard-event.md) | The typed unit observed at an integration point | span / log record |
 | [Verdict](specification/verdict.md) | The runtime's decision about an event | — |
+| [obligations](specification/obligations.md) | What the enforcement point must DO before an action proceeds — carried beside an `allow` | XACML obligations |
+| [artifact scan](specification/artifact-scan.md) | The sibling contract a scanner implements — hash-first, range-negotiated, pluggable | ICAP |
 | [composition](specification/composition.md) | How multiple detectors' answers combine into one decision | — |
 | [degraded mode](specification/degraded-mode.md) | What an integration does when the runtime is unreachable (default: fail open) | — |
 | [Runtime API](specification/runtime-api.md) | The HTTP binding a runtime exposes, the recipe, and the minimal integration | OTLP/HTTP |

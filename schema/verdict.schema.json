@@ -130,6 +130,84 @@
         "type": "string"
       },
       "description": "Payload paths this verdict could NOT judge. Absent or empty asserts every routed text was judged; a fail-closed enforcement point MUST treat a non-empty value as \"could not look\", which is not \"found nothing\"."
+    },
+    "obligations": {
+      "type": "array",
+      "description": "OPTIONAL (OGR 1.2). What the PEP MUST do before the action proceeds, alongside a decision that is still `allow`. An obligation is not a decision and does not take part in composition. A PEP that does not understand this key ignores it and behaves as before; a runtime therefore MUST NOT rest a control on one being fulfilled. See specification/obligations.md.",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "type",
+          "call_id",
+          "artifact",
+          "on_unfulfilled"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 256,
+            "description": "Stable and deterministic for a given event, so a re-delivery re-mints it and a duplicate fulfilment is idempotent."
+          },
+          "type": {
+            "enum": [
+              "scan_artifact"
+            ]
+          },
+          "call_id": {
+            "type": "string",
+            "maxLength": 256,
+            "description": "The provider tool-call id this is about."
+          },
+          "artifact": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "locator"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "file",
+                  "package",
+                  "url",
+                  "text"
+                ]
+              },
+              "locator": {
+                "type": "string",
+                "maxLength": 512,
+                "description": "The AGENT's own string — a path as written, `npm:left-pad@9.9.9`, or a URL. A runtime MUST NOT resolve or normalise it: only the PEP knows the working directory it means."
+              },
+              "declared_type": {
+                "type": "string",
+                "maxLength": 128,
+                "description": "What the NAME claims, from its extension. A CLAIM: the disagreement between this and the bytes' own signature is itself a finding."
+              }
+            }
+          },
+          "provider_hint": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "A non-secret provider NAME. Advisory. MUST NOT be an address and MUST NOT carry a credential — the decision channel is not a credential-distribution channel; whoever makes the scan call holds the scan credential."
+          },
+          "on_unfulfilled": {
+            "enum": [
+              "flag",
+              "block"
+            ],
+            "description": "What the runtime does if no result is reported for this obligation."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this stops being answerable. Deep analysis is asynchronous, so an obligation outlives the step that issued it."
+          }
+        }
+      }
     }
   }
 }

@@ -24,6 +24,107 @@ version is independent of any implementation's package version.
   release is days old and no such runtime is known to exist.
 
 ### Added
+- **The Artifact Scan API ([artifact-scan.md](specification/artifact-scan.md))** —
+  the SIBLING contract a scanner implements, so an obligation can name a
+  scanner without naming a vendor. `POST /v1/analyze` with
+  `kind: file|package|url|text`, a three-state `clean|suspicious|malicious`
+  verdict, and a **hash-first, range-negotiated** upload: the client sends
+  sha256 + size + declared type + the first 4 KiB, a known hash answers with no
+  upload at all, and otherwise the SERVER names the byte ranges it wants.
+  ⚠️ **A runtime MUST NOT proxy artifact bytes** — whoever holds them calls the
+  scanner, and the credential lives with that caller. A verdict never carries an
+  address or a credential.
+  ⚠️ **The verdict is a DETECTION, not an outcome**: `suspicious` is an answer,
+  and whether it stops the action is the calling policy's decision.
+  ⚠️ **A client MUST NOT manufacture a pass.** An unpolled `202`, a non-2xx, an
+  unparseable body and an unknown verdict are all failures — converting any of
+  them to `clean` is the one error here that cannot be detected afterwards.
+  ⚠️ **`kind: package` MUST be ecosystem-qualified** (`npm:`, `pypi:`, …):
+  `left-pad` names different things on npm and PyPI.
+  ⚠️ Range negotiation is OPTIONAL for a SERVER — an adapter in front of a
+  signature scanner answers "send everything" — because making it mandatory
+  would exclude exactly the on-premise scanners this pluggability admits.
+
+- **Obligations — `verdict.obligations[]` and `GuardEvent.obligation_results[]`
+  ([Obligations](specification/obligations.md))** — something the enforcement
+  point MUST DO before the action proceeds, carried BESIDE a decision that is
+  still `allow`. The first and only type is `scan_artifact`: a tool call names
+  a file, package or URL it is about to open, the bytes are on the agent's host
+  where no decision point in the model path can reach them, and the runtime
+  requires an answer it cannot produce itself. Additive-optional, so every 1.0
+  and 1.1 implementation is unaffected.
+  ⚠️ **An obligation is not a decision** — `decision` stays `allow`/`block` and
+  obligations take no part in composition.
+  ⚠️ **A runtime MUST NOT rest a control on one being fulfilled.** The key is
+  optional and a conformant PEP may ignore it; what an ignored obligation buys
+  is MEASUREMENT (the fraction that go unfulfilled is how real this control is
+  in a deployment), never assurance.
+  ⚠️ **No endpoint and no credential in the verdict.** `provider_hint` is a
+  non-secret NAME; a PEP MUST NOT treat it as an address. Whoever makes the
+  scan call holds the scan credential — a verdict frequently crosses into a
+  different trust zone from the console that set the policy.
+  ⚠️ **A locator is the AGENT's string** — `./report.xlsm` means whatever its
+  working directory makes it mean. A runtime MUST NOT resolve or normalise it.
+  ⚠️ **`declared_type` is a CLAIM**, taken from the name alone. Its value is
+  that the bytes can contradict it: a 300 MB executable wearing an `.mp4` name
+  is exactly that disagreement.
+  ⚠️ **A fulfilment report is SELF-DECLARED** — a PEP that called no scanner and
+  reported `clean` is byte-identical to one that called and was told `clean`.
+  A runtime MUST NOT treat it as verified nor make it an input to
+  authorization. Same rule as `integration`.
+  Results ride the NEXT `step/request`, beside the `tool_results` for the same
+  calls — no extra round trip and no second endpoint on the hot path.
+
+- **`GET /v1/limits`, and the same object on the heartbeat response
+  ([Runtime API § GET /v1/limits](specification/runtime-api.md#get-v1limits))** —
+  what a caller may send: `max_request_bytes`, a per-KIND cap on inline
+  attachments (`media.image`, `.audio`, `.video`, `.document`, `.file`) and
+  `media_parts_max`. A runtime MAY bound these per organization; this is how a
+  producer learns the numbers at configuration time instead of discovering them
+  as `413`s in production. Additive-optional in both directions.
+  ⚠️ **An unaccepted attachment MUST NOT fail the request.** `media[kind] = 0`
+  means the kind is not accepted, and the runtime records what arrived and
+  reports the part's path in the verdict's `unjudged` list. A decision point
+  that refused a whole turn because it will not store a screenshot would force
+  every gateway in front of it to choose between breaking the turn and failing
+  open — and failing open leaves no record at all.
+  ⚠️ **Advisory to a producer, authoritative at the runtime.** A producer MUST
+  remain correct having never fetched them, and one that also holds a local cap
+  MUST use `min(local, advertised)`: learning a larger cap does not license
+  exceeding an operator's own bandwidth decision.
+  ⚠️ **Absent is not zero.** No `limits` on the response means UNKNOWN — a
+  producer falls back to its configured behaviour rather than treating every
+  kind as refused. This is what keeps a 3.x reporter working against a runtime
+  that serves no limits at all.
+  ⚠️ Over `max_request_bytes` is the one HARD refusal:
+  `413 {"error": "payload_too_large", "limit_bytes", "received_bytes"}`, and the
+  runtime SHOULD refuse before reading the body — the cost is holding the bytes,
+  not answering.
+  Implemented in the higress plugin as of **3.8.0**, which folds the advertised
+  caps into its own `media_max_bytes` per kind. ⚠️ The two `0`s are opposite
+  there: `media_max_bytes: 0` means *send everything*, an advertised `0` means
+  *refused*.
+
+- **Media parts, and `payload._ogr_media`
+  ([GuardEvent § Media parts](specification/guard-event.md#media-parts-ogr-11))** —
+  a payload's images, audio, video and documents are named as what they are:
+  UNJUDGED content, in the provider's own shapes, that no guardrail in this
+  specification reads. Additive-optional, so every 1.0 producer stays
+  conformant.
+  An integration MAY elide an oversized inline part rather than send it — a
+  short video is tens of megabytes, and in an enforcing deployment the caller
+  waits while all of them cross the wire to be not-read — and when it does it
+  replaces the value IN PLACE with `ogr-media:elided` and describes it in a
+  top-level `_ogr_media` array (`path` · `kind` · `media_type` · `bytes`).
+  ⚠️ In place, never removed: dropping the element shifts every later array
+  index, and a verdict span behind it still resolves — onto the wrong string.
+  ⚠️ Base64 only, never text: the payload IS the judged input, so a producer
+  that shortened a prompt would blind the detectors on the largest requests.
+  ⚠️ Every field is a producer CLAIM about what it saw; a runtime must not
+  accept a storage locator from it.
+  The forwarded body is untouched — eliding is a property of the report.
+  Implemented in the higress plugin as `media_max_bytes` (3.7.0, default
+  4 MiB).
 - **[Runtime API § a complete exchange](specification/runtime-api.md#a-complete-exchange)** —
   both halves of one model call written out whole: every field a producer may
   send (the eight required plus all three optional), the raw provider bodies,
@@ -36,6 +137,24 @@ version is independent of any implementation's package version.
   `llm_protocol` accepts, what "different models mean different payloads"
   costs an integrator (nothing: forward the raw body), and what to send when
   the protocol is your own. Linked from the README.
+- **The layer model in span vocabulary** ([overview.md](specification/overview.md)
+  § The layer model in span vocabulary, mirrored at
+  [the layer model](https://openguardrails.com/api/docs/concepts/layer-model/#if-you-already-think-in-spans)
+  and in the FAQ) — the correspondence between OGR's six layers and the
+  tracing spans harness developers are already instrumented in (OpenTelemetry's
+  GenAI semantic conventions, and OpenInference's span kinds). **Informative,
+  not normative**: no part of the wire contract depends on it. The anchor is
+  L4 — the inference span (`chat {model}`) is a step, exactly 1:1 — so a
+  harness SHOULD mint `step_id` from that span's `span_id`, which covers both
+  halves of the step and makes every guard row joinable to its trace;
+  `gen_ai.conversation.id` is `session_hint`, `invoke_agent` is a turn,
+  `execute_tool` is a call.
+  ⚠️ **A span is an interval, a GuardEvent is a half**, and telemetry is
+  sampled where enforcement is not — spans are written when an operation ends
+  and cannot refuse anything, which is why exporting spans to a collector is
+  not an integration.
+  ⚠️ Two unrelated meanings of one word: a tracing span is not a verdict's
+  `modifications.spans` (character offsets in a text).
 
 ### Fixed
 - Examples across the specification, the skill and the reference integrations

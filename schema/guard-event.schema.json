@@ -54,7 +54,7 @@
   },
   "payload": {
    "type": "object",
-   "description": "step/request: the untouched provider request body (or canonical {messages, tools?}), optionally with an integration-inserted top-level 'timing' key carrying 'received_at' — when the integration saw the request. step/response: the untouched, complete provider response body — stream-reassembled if streamed — optionally with an integration-inserted top-level 'timing' key (or canonical {text?, reasoning?, tool_calls?, model?, usage?, timing?})."
+   "description": "step/request: the untouched provider request body (or canonical {messages, tools?}), optionally with an integration-inserted top-level 'timing' key carrying 'received_at' — when the integration saw the request. step/response: the untouched, complete provider response body — stream-reassembled if streamed — optionally with an integration-inserted top-level 'timing' key (or canonical {text?, reasoning?, tool_calls?, model?, usage?, timing?}). A payload MAY carry media parts (images, audio, video, documents) in the protocol's own shapes; a runtime MUST treat them as UNJUDGED content. A producer that elides an oversized inline part replaces that value IN PLACE with 'ogr-media:elided' and describes it in a top-level '_ogr_media' array — see specification/guard-event.md § Media parts."
   },
   "integration": {
    "type": "string",
@@ -70,6 +70,61 @@
    "type": "string",
    "maxLength": 128,
    "description": "OPTIONAL. The producer's own name for the CONVERSATION this step belongs to — opaque, stable for the life of one conversation, distinct across concurrent conversations. Integrations that hold a natural session id SHOULD send it on every event of the session, side calls and subagents included. A GROUPING HINT, not v0.7's declared coordinates: the runtime still derives turns/steps and may decline the grouping where its own evidence contradicts it. A runtime MUST NOT derive authorization, policy selection, ordering, or trust from it."
+  },
+  "obligation_results": {
+   "type": "array",
+   "description": "OPTIONAL (OGR 1.2). What the PEP did about the obligations a previous verdict gave it. Rides the NEXT step/request, beside the tool_results for the same calls. SELF-DECLARED: a PEP that called no scanner and reports `clean` is indistinguishable from one that called and was told `clean`, so a runtime MUST NOT treat this as verified, and MUST NOT make it an input to authorization. Absent is the ordinary case and means nothing was reported.",
+   "maxItems": 64,
+   "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+     "id",
+     "state"
+    ],
+    "properties": {
+     "id": {
+      "type": "string",
+      "maxLength": 256,
+      "description": "The obligation's id, echoed verbatim."
+     },
+     "state": {
+      "enum": [
+       "fulfilled",
+       "failed",
+       "skipped"
+      ]
+     },
+     "verdict": {
+      "enum": [
+       "clean",
+       "suspicious",
+       "malicious"
+      ],
+      "description": "Present on `fulfilled`. The scanner is a DETECTOR: how a `suspicious` answer is treated is the runtime policy's decision, not the scanner's."
+     },
+     "provider": {
+      "type": "string",
+      "maxLength": 64,
+      "description": "Which scanner answered. Self-declared, like `integration`."
+     },
+     "analysis_id": {
+      "type": "string",
+      "maxLength": 128,
+      "description": "The scanner's own id for the analysis — what an attestation is matched against."
+     },
+     "detected_type": {
+      "type": "string",
+      "maxLength": 128,
+      "description": "What the BYTES were, against the name's claim. The cheapest durable signal in this axis: it needs the first few KiB and survives a refused upload, an exhausted quota and an unreachable provider."
+     },
+     "reason": {
+      "type": "string",
+      "maxLength": 512,
+      "description": "Why, on `failed`/`skipped`."
+     }
+    }
+   }
   }
  }
 }

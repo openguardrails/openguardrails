@@ -129,6 +129,51 @@ and latency analytics downstream:
   request in, and then MUST withhold the resulting usage-only frame from a
   client that never asked for it.
 
+### Media parts (OGR 1.1)
+
+A provider body carries images, audio, video and documents in the protocol's
+own shapes — a `data:` URI under `image_url.url`, Anthropic's
+`source.{media_type,data}`, `input_audio.data`, `file.file_data`, or a
+reference (an https URL, a provider `file_id`). **A runtime MUST treat all of
+it as UNJUDGED content**: it is not text, no guardrail defined in this
+specification reads it, and a verdict says nothing about it. What a runtime
+does with the bytes — store them, expire them on their own clock, show them to
+an operator — is its own business.
+
+An integration MAY **elide** an inline part rather than send it, and a large
+one SHOULD be elided: a short video is tens of megabytes, and in an enforcing
+deployment the caller waits while every one of those bytes crosses the wire to
+be not-read. When an integration elides a part it MUST:
+
+1. replace the value **in place, at its own path**, with the string
+   `ogr-media:elided` — never remove the element, which would shift every
+   later array index and silently re-target every span behind it;
+2. describe what was there in a top-level **`_ogr_media`** array on the
+   payload, one entry per elided part:
+
+```jsonc
+"_ogr_media": [
+  { "path": "payload.messages.3.content.1.image_url.url",
+    "kind": "image",              // image | audio | video | document | file
+    "media_type": "image/png",    // omitted when the body named none
+    "bytes": 41288304 }           // DECODED size of what was elided
+]
+```
+
+3. elide **inline base64 only, never text.** The payload is what the runtime
+   judges, so a producer that shortened a prompt would be blinding the
+   detectors on exactly the largest requests. What makes eliding a blob safe
+   is that nothing reads it.
+
+`_ogr_media` is inserted the same way `timing` is — into the body's own bytes,
+never by re-serializing it — and only when at least one part was elided. Every
+field in it is a producer CLAIM: it describes what the integration saw and
+asserts nothing about the runtime's own storage. A runtime MUST NOT accept a
+storage locator from it.
+
+The body the integration FORWARDS to the model is never affected by any of
+this: eliding is a property of the report, not of the traffic.
+
 The wire is deliberately STATELESS and repetitive — every `step/request`
 carries the full conversation, exactly as the provider protocol does. A
 runtime is expected to deduplicate at ingress (each message stored once, per
@@ -364,3 +409,16 @@ gateway's event looks identical — it fills the four-tuple from its own
 authenticated caller instead of from config.
 
 The normative JSON Schema is [`schema/guard-event.schema.json`](../schema/guard-event.schema.json).
+
+## Obligation results (OGR 1.2)
+
+A `step/request` MAY carry `obligation_results[]` — what the enforcement point did
+about the [obligations](obligations.md) a previous verdict gave it, beside the
+`tool_results` for the same calls.
+
+⚠️ **SELF-DECLARED.** A PEP that called no scanner and reported `clean` is
+byte-identical to one that called and was told `clean`. A runtime MUST NOT treat a
+reported result as verified and MUST NOT make it an input to authorization — the
+same rule [`integration`](#integration) carries. Absent is the ordinary case and
+means nothing was reported, which is a fact worth counting rather than an error
+worth refusing.

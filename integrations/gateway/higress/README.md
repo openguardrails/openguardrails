@@ -421,6 +421,7 @@ the traffic pass with `decision=` empty).
 | `mode` | `observe` | `enforce` to act on verdicts |
 | `timeout_ms` | `5000` | the PDP budget, enforce only. A CEILING for the worst case, not a target; the runtime's `OGR_MODEL_TIMEOUT_MS` must fit strictly inside it |
 | `fail_mode` | `open` | **open is the spec's default** (an unanswered evaluate proceeds, counted `unchecked`); `closed` refuses when the PDP is unreachable, answers garbage, reports unjudged paths, or the reply itself is unreadable |
+| `media_max_bytes` | `4194304` (4 MiB) | above this, an inline media part (a base64 image, audio clip, video or document) is DESCRIBED in the event instead of sent — `payload._ogr_media` carries kind/type/size and the value becomes `ogr-media:elided`. `0` sends every body verbatim. ⚠️ The body FORWARDED to the model is never touched, and only base64-shaped values are ever elided: the event payload is what the runtime judges, so prose must reach it whole. ⚠️ Since 3.8.0 the EFFECTIVE cap is `min(this, what the runtime advertises)`, per media KIND — see *What the runtime accepts* below |
 | `stream_tail_chars` | `200` | how much client-visible content a streamed answer withholds until the end-of-stream verdict (UTF-8 bytes; the spec's reference default). `0` still gates stream completion on the verdict; a huge value degenerates to buffering |
 | `agent_id_header` | `x-ogr-agent-id`, else `x-mse-consumer` | which header carries the agent's identity; configuring one replaces the whole chain |
 | `agent_workspace_header` | `x-ogr-agent-workspace`, else `x-mse-consumer-group` | which header carries the agent's workspace; configuring one replaces the whole chain |
@@ -514,3 +515,31 @@ gateway cannot pull anonymously is not a release.)
 ## Support
 
 thomas@openguardrails.com
+
+## What the runtime accepts (3.8.0)
+
+The runtime bounds what one organization may send — a whole-body cap it answers
+`413` to, and a per-KIND cap deciding whether an inline attachment's bytes are kept
+at all. It advertises those numbers in the **heartbeat response** (and at
+`GET /v1/limits`), so this plugin learns them on the channel it already runs and
+elides locally instead of collecting refusals.
+
+What changes: an organization whose runtime accepts no images stops having base64
+screenshots shipped across the wire — in enforce mode, in front of a waiting caller —
+only to be recorded as declined at the far end.
+
+- **`min(configured, advertised)`, never `max`.** An operator who lowered
+  `media_max_bytes` made a bandwidth decision about their own link; learning a larger
+  cap does not overrule it.
+- **Advisory, never authority.** The runtime enforces its limits regardless. With no
+  successful beat — or against a runtime too old to advertise — this plugin behaves
+  exactly as 3.7.0 did.
+- ⚠️⚠️ **`0` MEANS THE OPPOSITE THING ON EACH SIDE.** In THIS config,
+  `media_max_bytes: 0` means *send everything verbatim*; in the advertised limits, `0`
+  means *this kind is refused*. The plugin keeps the advertised value in its own
+  tri-state (never advertised / refused / a number) and never assigns it into the
+  configured field. If you are reading `limits.go`, that is what the whole file is
+  about.
+- ⚠️ **Absent is not zero.** A runtime that sends no `limits` leaves every kind
+  UNKNOWN, which resolves to the configured behaviour. Reading silence as "refuse
+  everything" would stop a working deployment reporting attachments at all.

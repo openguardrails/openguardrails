@@ -155,9 +155,40 @@ paths:
                 properties:
                   ok:
                     type: boolean
+                  limits:
+                    allOf: [{ $ref: "#/components/schemas/Limits" }]
+                    description: |
+                      Optional. The same object GET /v1/limits returns, so a
+                      reporter that already beats learns its caps without a
+                      second call. Absent means UNKNOWN, never "zero".
         "400": { $ref: "#/components/responses/InvalidBody" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/limits:
+    get:
+      tags: [liveness]
+      operationId: limits
+      summary: What this caller may send.
+      description: |
+        A runtime MAY bound request size and attachment size per organization.
+        This is how a producer learns those numbers at configuration time
+        rather than discovering them as 413s in production.
+
+        The numbers are ADVISORY to a producer and AUTHORITATIVE at the
+        runtime: a producer MUST remain correct having never fetched them, and
+        one that also holds a local cap MUST use min(local, advertised).
+      responses:
+        "200":
+          description: The caller's resolved limits.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [limits]
+                properties:
+                  limits: { $ref: "#/components/schemas/Limits" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
 
   /v1/health:
     get:
@@ -259,6 +290,33 @@ components:
                 type: integer
 
   schemas:
+    Limits:
+      type: object
+      required: [max_request_bytes, media, media_parts_max]
+      properties:
+        max_request_bytes:
+          type: integer
+          minimum: 0
+          description: |
+            The whole /v1/evaluate body. A larger request MUST be refused with
+            413, and the runtime SHOULD refuse it before reading the body.
+        media:
+          type: object
+          description: |
+            Largest single inline attachment of each kind whose BYTES the
+            runtime will retain. 0 means the kind is NOT ACCEPTED — an
+            unaccepted attachment is recorded and reported in the verdict's
+            `unjudged` list, never answered with a 4xx.
+          properties:
+            image: { type: integer, minimum: 0 }
+            audio: { type: integer, minimum: 0 }
+            video: { type: integer, minimum: 0 }
+            document: { type: integer, minimum: 0 }
+            file: { type: integer, minimum: 0 }
+        media_parts_max:
+          type: integer
+          minimum: 0
+          description: Inline attachments per event.
     GuardEvent:
       $ref: "./guard-event.schema.json"
     Verdict:

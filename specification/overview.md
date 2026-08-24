@@ -78,6 +78,83 @@ be transformed in place.
                      model call                    execute tool calls
 ```
 
+## The layer model in span vocabulary (non-normative)
+
+Most agent harnesses are already instrumented with **tracing spans** —
+OpenTelemetry's GenAI semantic conventions, or a framework dialect of them
+(OpenInference, and the trace/observation models the hosted tracing vendors
+build on it). That vocabulary and this one describe the same traffic, so the
+correspondence is worth stating exactly. This section is **informative**: no
+part of the wire contract depends on it, and an integration is never required
+to emit or consume spans.
+
+⚠️ Two unrelated meanings of one word: a **tracing span** is a timed operation
+in a trace; a Verdict's [`modifications.spans`](verdict.md#modifications) are
+character offset ranges in a text. This section means the first.
+
+| # | OGR layer | OTel GenAI span | Correspondence |
+|---|---|---|---|
+| **L6** | **Session** | *no span* — the `gen_ai.conversation.id` attribute that groups traces | Same unit. A harness records the id only when it already holds one; OGR **derives** the session and takes the harness's id, when it has one, as `session_hint` — a grouping signal, not authority. |
+| **L5** | **Turn** | the `invoke_agent` span — usually a trace root | Same unit when the harness starts one invocation per user instruction. Nothing in the span model *requires* that, so the boundary is the harness's; OGR's is derived from the traffic. |
+| **L4** | **Step** | the inference span — `chat {model}`, `gen_ai.operation.name = chat` | **Exactly 1:1.** One model call, request through full response, retries included. The cleanest anchor between the two models. |
+| **L3** | **Event** | *no span* — a span EDGE | `step/request` is the inference span's start, `step/response` its end; the two payloads are what `gen_ai.input.messages` / `gen_ai.output.messages` carry (opt-in there, mandatory here — it IS the event). |
+| **L2** | **Call** | the `execute_tool` span | Same unit, different placement: OGR attaches the call to the step that ISSUED it and pairs the result back from the next step's request; a tracer gives it its own span under the agent invocation, alongside the inference spans. |
+| **L1** | **Exec** | *no span in the GenAI conventions* | What the tool process actually did. Ordinary (non-GenAI) spans may cover part of it; neither model claims to see it from the model plane. |
+
+The entity axis, same reading:
+
+| OGR | Span vocabulary |
+|---|---|
+| Tenant | not modeled — backend tenancy of the trace store (OGR: the API key, never the payload) |
+| Workspace | not modeled — nearest neighbor is the resource attribute `deployment.environment.name` |
+| Agent | `gen_ai.agent.id` / `gen_ai.agent.name` → `agent_id` / `agent_type` |
+| (the human) | `user.id` → `agent_user` |
+
+**Three differences that are not vocabulary.** They are why OGR does not simply
+consume spans:
+
+1. **A span is an interval; a GuardEvent is a half.** A span is written when its
+   operation *ends* — after the model has answered, after the tool has run.
+   OGR's two moments are the ones where something is still held and can still
+   be refused: before the request reaches the model, and after the response
+   arrives but before the agent acts on it. A span cannot block, so a step is
+   two events rather than one record.
+2. **A span declares its coordinates; a GuardEvent declares one.** `trace_id`,
+   `span_id` and `parent_span_id` are producer-authored — and a producer that
+   can declare a flow can get the flow wrong. The wire keeps `step_id` only,
+   because pairing the two halves of one model call under concurrency is the
+   one fact a runtime cannot derive; sessions, turns and step numbers are
+   derived server-side.
+3. **Telemetry is best-effort and sampled; enforcement is neither.** Dropping
+   spans is normal operation; a dropped guard event is an unjudged model call.
+   The same asymmetry governs content: message capture is opt-in for a tracer
+   and unconditional here.
+
+A fourth difference is shape. A trace is an open-ended tree — any framework may
+nest whatever spans it likes — while this stack is six fixed layers, so the same
+traffic from two different harnesses lands on the same coordinates.
+
+**If your harness already emits spans**, three of the mappings are directly
+useful when you write the integration:
+
+- Mint `step_id` from the inference span's `span_id`. One span covers both
+  halves of the step, which is exactly the pairing rule, and it makes every
+  guard row joinable to the trace it came from.
+- Send `gen_ai.conversation.id` as [`session_hint`](guard-event.md#session_hint).
+- Send `gen_ai.agent.id` / `gen_ai.agent.name` / `user.id` as the identity
+  four-tuple's `agent_id` / `agent_type` / `agent_user`, and name your
+  instrumentation in [`integration`](guard-event.md#integration) the way an
+  OTel instrumentation scope names itself.
+
+What does NOT carry over: exporting spans to a collector is not an integration.
+The evaluate call is synchronous and in the byte path — see
+[the minimal integration](runtime-api.md#the-minimal-integration-your-own-agent).
+
+Other dialects map through the same anchors — in OpenInference, span kind
+`AGENT` ≈ turn, `LLM` ≈ step, `TOOL` ≈ call, `session.id` ≈ session,
+`user.id` ≈ `agent_user`; its `GUARDRAIL` kind is where an OGR `evaluate` call
+itself would appear if you traced it.
+
 ## One integration point, two vantage places
 
 The same two POSTs serve a developer instrumenting their own agent loop and a
