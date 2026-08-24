@@ -137,22 +137,38 @@ version is independent of any implementation's package version.
   `llm_protocol` accepts, what "different models mean different payloads"
   costs an integrator (nothing: forward the raw body), and what to send when
   the protocol is your own. Linked from the README.
-- **The layer model in span vocabulary** ([overview.md](specification/overview.md)
-  § The layer model in span vocabulary, mirrored at
-  [the layer model](https://openguardrails.com/api/docs/concepts/layer-model/#if-you-already-think-in-spans)
-  and in the FAQ) — the correspondence between OGR's six layers and the
-  tracing spans harness developers are already instrumented in (OpenTelemetry's
-  GenAI semantic conventions, and OpenInference's span kinds). **Informative,
-  not normative**: no part of the wire contract depends on it. The anchor is
-  L4 — the inference span (`chat {model}`) is a step, exactly 1:1 — so a
-  harness SHOULD mint `step_id` from that span's `span_id`, which covers both
-  halves of the step and makes every guard row joinable to its trace;
-  `gen_ai.conversation.id` is `session_hint`, `invoke_agent` is a turn,
-  `execute_tool` is a call.
+- **The layer model in harness vocabularies** ([overview.md](specification/overview.md)
+  § The layer model in harness vocabularies, with the comparison table also in
+  the [README](README.md#the-same-six-layers-in-five-other-vocabularies) and
+  mirrored at
+  [the layer model](https://openguardrails.com/api/docs/concepts/layer-model/#your-harness-already-has-words-for-this)
+  and in the FAQ) — one table putting the six layers beside the
+  OSI/TCP-IP stack and the four vocabularies a harness already has for the
+  same traffic: OpenTelemetry's GenAI semantic conventions (and OpenInference's
+  span kinds), the **OpenAI Agents SDK**, the **Claude Agent SDK**, and
+  **LangGraph**, each with the wiring notes that follow from it. **Informative, not normative**: no
+  part of the wire contract depends on it. The anchor is L4 — the inference
+  span (`chat {model}`, `generation_span`, one loop round trip, one model-node
+  execution) is a step, exactly 1:1 — so a harness SHOULD mint `step_id` from
+  that span's id, which covers both halves of the step and makes every guard
+  row joinable to its trace. Session comes from `gen_ai.conversation.id` /
+  `SQLiteSession` id / `session_id` / `thread_id`, all of them `session_hint`;
+  turn is one `Runner.run()` / `query()` prompt / graph `invoke()`; call is
+  `execute_tool` / `function_span` / a `tool_use` block / a `ToolNode` call.
+  ⚠️ **"Turn" means this stack's STEP in both the OpenAI Agents SDK and the
+  Claude Agent SDK** — there a turn is one iteration of the agent loop and is
+  what `max_turns` counts, while an OGR turn is the user-instruction episode
+  containing those iterations. Same word, one layer apart; an integrator
+  reading either SDK's docs will hit this first.
+  The OSI column is exact through L4 — exec/call/event/step on
+  physical/link/network/transport, the packet at L3 in both — and deliberately
+  empty above it: turn and session are this domain's own L5 and L6, not OSI's
+  session and presentation layers.
   ⚠️ **A span is an interval, a GuardEvent is a half**, and telemetry is
   sampled where enforcement is not — spans are written when an operation ends
   and cannot refuse anything, which is why exporting spans to a collector is
-  not an integration.
+  not an integration. An SDK HOOK (`PreToolUse`, `wrap_tool_call`) is the
+  opposite: it can refuse, which is where the agent-direct plugins sit.
   ⚠️ Two unrelated meanings of one word: a tracing span is not a verdict's
   `modifications.spans` (character offsets in a text).
 
