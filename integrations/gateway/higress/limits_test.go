@@ -28,11 +28,11 @@ func withAdvertised(configured int, image, audio, video, document, file int64) m
 func TestMediaLimitFoldsConfiguredAndAdvertised(t *testing.T) {
 	u := int64(capUnknown)
 	cases := []struct {
-		name       string
-		lim        mediaLimits
-		kind       string
-		wantLimit  int
-		wantElide  bool
+		name      string
+		lim       mediaLimits
+		kind      string
+		wantLimit int
+		wantElide bool
 	}{
 		// ⚠️ THE WHOLE POINT OF THIS TABLE: `0` means "no eliding configured" on one
 		// side and "this kind is refused" on the other. Both appear here.

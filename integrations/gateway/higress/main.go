@@ -705,10 +705,10 @@ func onRequestBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Actio
 	rs := &reqState{
 		session: newSessionState(),
 		derive: &deriveCtx{
-			subj:          subj,
-			stepID:        stepID,
-			protocol:      proto.Name(),
-			connection:    connectionID(),
+			subj:        subj,
+			stepID:      stepID,
+			protocol:    proto.Name(),
+			connection:  connectionID(),
 			mediaLimits: resolveMediaLimits(cfg.mediaMaxBytes),
 		},
 		proto: proto,
