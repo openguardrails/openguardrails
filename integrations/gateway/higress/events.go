@@ -47,7 +47,7 @@ const (
 	// 3.0.0–3.1.0 had only the beat), so it is how a deployment learns which build is
 	// in the VM. Kept honest by TestPluginVersionMatchesTheVERSIONFile — 1.3.0 and
 	// 1.4.0 both shipped while a prior constant still said 1.2.0.
-	pluginVersion = "3.6.1"
+	pluginVersion = "3.8.0"
 
 	kindStepRequest  = "step/request"
 	kindStepResponse = "step/response"
@@ -148,6 +148,11 @@ func subjectOf(agentID, agentType, workspace, user string) identity {
 type deriveCtx struct {
 	subj   identity
 	stepID string
+	// Above this many bytes an inline media part is described instead of sent
+	// (media.go, `media_max_bytes`). Carried here rather than passed to each
+	// constructor so the two halves of a step cannot disagree about the cap.
+	// 0 = send every body verbatim.
+	mediaLimits mediaLimits
 	// The downstream flow this request arrived on — see GuardEvent.Connection.
 	// Resolved ONCE per request (the property read costs a host call) and
 	// stamped by the one constructor below, so the two halves of a step and
@@ -177,9 +182,12 @@ func (d *deriveCtx) event(kind string, payload json.RawMessage) *GuardEvent {
 	}
 }
 
-// requestEvent is the step's first half: the provider request body, verbatim.
+// requestEvent is the step's first half: the provider request body, verbatim —
+// except for an oversized inline media part, which is described rather than sent
+// (media.go). The body FORWARDED to the model is untouched either way.
 func requestEvent(d *deriveCtx, rawBody []byte) *GuardEvent {
-	return d.event(kindStepRequest, json.RawMessage(rawBody))
+	reported, _ := elideMedia(rawBody, d.mediaLimits)
+	return d.event(kindStepRequest, json.RawMessage(reported))
 }
 
 // requestEventTimed is requestEvent plus the one wall-clock fact the request half
@@ -194,13 +202,15 @@ func requestEvent(d *deriveCtx, rawBody []byte) *GuardEvent {
 // ordered events by it would be ordering by a clock it cannot audit.
 func requestEventTimed(d *deriveCtx, rawBody []byte, receivedAt time.Time) *GuardEvent {
 	t := &canonicalTiming{ReceivedAt: receivedAt.UTC().Format(time.RFC3339Nano)}
-	return d.event(kindStepRequest, json.RawMessage(spliceTiming(rawBody, t)))
+	reported, _ := elideMedia(rawBody, d.mediaLimits)
+	return d.event(kindStepRequest, json.RawMessage(spliceTiming(reported, t)))
 }
 
 // responseEvent is the step's second half for a buffered reply: the provider
 // response body, verbatim.
 func responseEvent(d *deriveCtx, rawBody []byte) *GuardEvent {
-	return d.event(kindStepResponse, json.RawMessage(rawBody))
+	reported, _ := elideMedia(rawBody, d.mediaLimits)
+	return d.event(kindStepResponse, json.RawMessage(reported))
 }
 
 // responseEventTimed is responseEvent plus the step's observed timing, spliced
@@ -215,7 +225,8 @@ func responseEvent(d *deriveCtx, rawBody []byte) *GuardEvent {
 // sibling key right after the opening `{` leaves every original byte — and every
 // string a span can name — exactly where it was.
 func responseEventTimed(d *deriveCtx, rawBody []byte, timing *canonicalTiming) *GuardEvent {
-	return d.event(kindStepResponse, json.RawMessage(spliceTiming(rawBody, timing)))
+	reported, _ := elideMedia(rawBody, d.mediaLimits)
+	return d.event(kindStepResponse, json.RawMessage(spliceTiming(reported, timing)))
 }
 
 func spliceTiming(rawBody []byte, timing *canonicalTiming) []byte {

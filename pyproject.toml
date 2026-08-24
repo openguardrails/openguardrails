@@ -1,6 +1,7 @@
 [tool.pytest.ini_options]
 testpaths = [
   "benchmarks/tests",
+  "packages/artifact-scan/tests",
   "integrations/agent/hermes",
   "integrations/agent/langgraph",
   "integrations/agent/litellm",

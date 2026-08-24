@@ -35,6 +35,7 @@ Canonical endpoint paths are rooted at **`/v1/`**:
 ```
 POST /v1/evaluate
 POST /v1/heartbeat
+GET  /v1/limits
 GET  /v1/health
 ```
 
@@ -297,6 +298,58 @@ conclude from it that no other build is sending traffic.
 **Response** — `200 {"ok": true}`. A heartbeat MUST register a
 live-but-idle agent so fleet coverage reflects integrations that have not
 yet emitted an event.
+
+A runtime that bounds what a caller may send SHOULD include the same `limits`
+object [`GET /v1/limits`](#get-v1limits) returns:
+
+```json
+{"ok": true, "limits": {"max_request_bytes": 8388608,
+                        "media": {"image": 8388608, "audio": 0, "video": 0,
+                                  "document": 0, "file": 0},
+                        "media_parts_max": 16}}
+```
+
+⚠️ Additive and OPTIONAL, in both directions: a reporter that does not read it
+behaves exactly as before, and a runtime that does not send it MUST NOT be read
+as advertising zero — absent means UNKNOWN, never refused.
+
+## GET /v1/limits
+
+What this caller may send. A runtime MAY bound request size and attachment
+size per organization; this is how a producer learns those numbers at
+configuration time instead of discovering them as `413`s in production.
+
+**Response** — `200`:
+
+```json
+{"limits": {"max_request_bytes": 8388608,
+            "media": {"image": 8388608, "audio": 16777216, "video": 0,
+                      "document": 16777216, "file": 8388608},
+            "media_parts_max": 16}}
+```
+
+- **`max_request_bytes`** — the whole `/v1/evaluate` body. A larger request
+  MUST be refused with `413`, and the runtime SHOULD refuse it BEFORE reading
+  the body. The refusal SHOULD name the limit:
+  `413 {"error": "payload_too_large", "limit_bytes": N, "received_bytes": M}`.
+- **`media[kind]`** — the largest single inline attachment of that kind whose
+  BYTES the runtime will retain. **`0` means the kind is not accepted.**
+- **`media_parts_max`** — inline attachments per event.
+
+⚠️ **An unaccepted attachment MUST NOT fail the request.** The runtime records
+what arrived and reports the part's path in the verdict's `unjudged` list; it
+does not answer 4xx. A decision point that refuses a whole turn because it will
+not store a screenshot forces every gateway in front of it to choose between
+breaking the turn and failing open — and failing open leaves no record at all.
+
+⚠️ **These numbers are ADVISORY to a producer and AUTHORITATIVE at the runtime.**
+A producer MUST remain correct having never fetched them. A producer that both
+holds a local cap and has fetched these MUST use `min(local, advertised)`:
+learning a larger cap does not license exceeding an operator's own.
+
+⚠️ **Absent is not zero.** A runtime that serves no limits, or a fetch that
+failed, means UNKNOWN — a producer MUST fall back to its configured behaviour
+rather than treating every kind as refused.
 
 ## GET /v1/health
 

@@ -87,6 +87,43 @@ acts on it:
                (config rules OR model/classifier)
 ```
 
+### The same six layers, in five other vocabularies
+
+Agent harnesses already have words for this traffic. They line up:
+
+| # | OGR | Network (OSI / TCP-IP) | OTel GenAI | OpenAI Agents SDK | Claude Agent SDK | LangGraph |
+|---|---|---|---|---|---|---|
+| **L6** | **Session** — one conversation | *no OSI layer* — the firewall's session table, idle aging | `gen_ai.conversation.id` *(no span)* | `Session` / `SQLiteSession` id; a trace's `group_id` | the session — `session_id`, `resume`, `fork` | the **thread** — `thread_id` + checkpointer |
+| **L5** | **Turn** — one instruction → quiescence | *no OSI layer* — a flow's FIN / RST / timeout | `invoke_agent` span | one `Runner.run()` — one trace | one `query()` prompt, up to its `ResultMessage` | one `invoke()` / `stream()` on the graph |
+| **L4** | **Step** — one model call | **transport** (OSI L4) | the inference span, `chat {model}` | `generation_span` / `response_span` — *their* "turn" | one loop round trip — *their* "turn" (`max_turns`) | one model-node execution (`before_model` → `after_model`) |
+| **L3** | **Event** — half a step, **the wire unit** | **network** (OSI L3) — the packet | that span's start / end | that span's start / end | `AssistantMessage` out; tool results ride the **next** `UserMessage` | the two moments around the chat model's `invoke()` |
+| **L2** | **Call** — one tool call | **data link** (OSI L2) | `execute_tool` span | `function_span` | a `tool_use` block; `PreToolUse` is its gate | a `ToolNode` call; `wrap_tool_call` is its gate |
+| **L1** | **Exec** — one real execution | **physical** (OSI L1) | — | — | what `Bash` / `Edit` actually did on the host | what the tool function actually did |
+| — | **Agent** *(entity, off the stack)* | host / endpoint | `gen_ai.agent.id` / `.name` | the `Agent` object (`agent_span`); a handoff switches it | the agent, and each subagent | the compiled graph |
+| — | **Workspace** · **Tenant** | security zone · administrative boundary | *(`deployment.environment.name`)* | — | — | — |
+
+**The numbers line up through L4 on purpose.** Exec/call/event/step sit on
+physical/link/network/transport, and the packet is L3 in both columns. Above
+transport the columns part: networking has only "application", because network
+applications share no structure — agent traffic *is* a dialogue with stable
+structure, so **turn and session are this domain's own L5 and L6**, not OSI's
+session and presentation layers (the two practice discarded).
+
+⚠️ **"Turn" means this stack's STEP in two of the three SDKs.** In both the
+OpenAI Agents SDK and the Claude Agent SDK a *turn* is one iteration of the
+agent loop — one model call plus the tool runs it triggers — and that is what
+`max_turns` counts. An OGR **turn** is the user-instruction episode that
+*contains* those iterations: one `Runner.run()`, one `query()` prompt, one
+graph `invoke()`. Same word, one layer apart. (The OpenAI Agents SDK
+documentation uses both senses: `max_turns` counts loop iterations, while "a
+single logical turn in a chat conversation" is one `Runner.run()` — an OGR
+turn.)
+
+The full mapping — including what to send as `session_hint`, why an SDK *hook*
+(`PreToolUse`, `wrap_tool_call`) is an enforcement point where a tracing span
+is not, and how a handoff moves the entity axis rather than the stack — is in
+[Overview § The layer model in harness vocabularies](specification/overview.md#the-layer-model-in-harness-vocabularies-non-normative).
+
 Normative text: [Overview § The layer model](specification/overview.md).
 
 ## Integrate your agent in five minutes
@@ -177,6 +214,8 @@ agent developers integrate by calling it directly:
 | [Overview](specification/overview.md) | The layer model and the integration surface | — |
 | [GuardEvent](specification/guard-event.md) | The typed unit observed at an integration point | span / log record |
 | [Verdict](specification/verdict.md) | The runtime's decision about an event | — |
+| [obligations](specification/obligations.md) | What the enforcement point must DO before an action proceeds — carried beside an `allow` | XACML obligations |
+| [artifact scan](specification/artifact-scan.md) | The sibling contract a scanner implements — hash-first, range-negotiated, pluggable | ICAP |
 | [composition](specification/composition.md) | How multiple detectors' answers combine into one decision | — |
 | [degraded mode](specification/degraded-mode.md) | What an integration does when the runtime is unreachable (default: fail open) | — |
 | [Runtime API](specification/runtime-api.md) | The HTTP binding a runtime exposes, the recipe, and the minimal integration | OTLP/HTTP |

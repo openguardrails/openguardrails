@@ -13,6 +13,7 @@ execution plane are gone; see [CHANGELOG.md](CHANGELOG.md).)
 | Former repository | Monorepo path |
 |---|---|
 | `openguardrails-python` | `packages/python/` † |
+| (new 2026-08-24) | `packages/artifact-scan/` — ⚠️ **NOT the retired SDK layer.** `/v1/evaluate` still has none and needs none (two hand-rolled POSTs). This is the ARTIFACT recipe — sniffing, streaming hashes, server-driven range negotiation and four scanner dialects — which is too intricate to expect each integrator to redo, and which fails in the direction nobody can catch afterwards. See [specification/artifact-scan.md](specification/artifact-scan.md). |
 | `openguardrails-js` | `packages/javascript/` † |
 | `openguardrails-instrumentation-claude-code` | `integrations/agent/claude-code/` |
 | `openguardrails-instrumentation-codex` | `integrations/agent/codex/` |

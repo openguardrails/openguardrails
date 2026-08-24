@@ -113,6 +113,11 @@ type Config struct {
 	agentType             string
 	agentWorkspace        string
 
+	// Above this many bytes an inline media part (a base64 image, audio clip,
+	// video or document) is DESCRIBED in the event instead of being sent — see
+	// media.go. 0 = send every body verbatim.
+	mediaMaxBytes int
+
 	// The identity FLOOR: when nothing above named the agent, fingerprint the
 	// credential the CLIENT presented. See deriveCallerID.
 	callerFallback   bool
@@ -187,6 +192,15 @@ func parseConfig(j gjson.Result, c *Config) error {
 	c.timeoutMs = 5000
 	if v := j.Get("timeout_ms"); v.Exists() {
 		c.timeoutMs = uint32(v.Uint())
+	}
+
+	// How large an inline media part may be before it is described rather than
+	// sent (media.go). ⚠️ Explicit 0 means "never elide", so `Exists()` decides —
+	// a plain `Uint()` would read an unset key as 0 and disable the cap on every
+	// deployment that has not heard of it.
+	c.mediaMaxBytes = defaultMediaMaxBytes
+	if v := j.Get("media_max_bytes"); v.Exists() {
+		c.mediaMaxBytes = int(v.Uint())
 	}
 
 	// The fail mode. OPEN unless the deployment says `closed`, and that default is
@@ -691,10 +705,11 @@ func onRequestBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Actio
 	rs := &reqState{
 		session: newSessionState(),
 		derive: &deriveCtx{
-			subj:       subj,
-			stepID:     stepID,
-			protocol:   proto.Name(),
-			connection: connectionID(),
+			subj:        subj,
+			stepID:      stepID,
+			protocol:    proto.Name(),
+			connection:  connectionID(),
+			mediaLimits: resolveMediaLimits(cfg.mediaMaxBytes),
 		},
 		proto: proto,
 		// Read directly rather than through a full conversation parse: a raw

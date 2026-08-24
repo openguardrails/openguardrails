@@ -250,6 +250,12 @@ func sendHeartbeat(cfg *Config) {
 	// briefly busy, i.e. exactly when liveness matters most.
 	if err := cfg.client.Post(cfg.heartbeatPath, ogrHeaders(*cfg), payload,
 		func(status int, _ http.Header, body []byte) {
+			// WHAT THE RUNTIME WILL ACCEPT, learned from the beat it just answered
+			// (3.8.0, limits.go). No extra call: the response is already here, and
+			// this is the one channel every deployment already runs on a timer.
+			// ⚠️ Before the status check — a 200 is what carries it, and a non-200
+			// simply has no limits to parse, so `rememberLimits` no-ops.
+			rememberLimits(body)
 			// ⚠️ An ERROR, not a warning, and so never silenced by `log_level`. A beat
 			// that does not arrive makes the platform mark this sensor dark, which is
 			// indistinguishable from the plugin having been uninstalled — the exact
