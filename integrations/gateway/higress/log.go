@@ -14,6 +14,13 @@ import (
 // deployment that is the largest thing in the access log, it buries the lines that
 // mean something, and the container's json-file driver fills the disk with it.
 //
+// ⚠️ This file governs what the PLUGIN says, and for a while that was not the same
+// thing as what the plugin PRINTED. Every evaluate went through
+// `wrapper.HttpClient`, which logged the whole request body and the whole response
+// at info from inside the SDK — under this file's floor, so `log_level: quiet` was
+// no defence, and what it printed was the user's prompt. That is why dispatch.go
+// exists and why nothing here posts through the wrapper any more.
+//
 // The rule, and it is one sentence:
 //
 //	quiet prints only what says the DEPLOYMENT IS BROKEN. Everything that describes a
