@@ -34,7 +34,6 @@ package main
 
 import (
 	"encoding/json"
-	"net/http"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -77,7 +76,7 @@ const (
 )
 
 type Config struct {
-	client wrapper.HttpClient
+	client ogrClient
 
 	cluster string
 	host    string
@@ -124,7 +123,7 @@ type Config struct {
 	callerKeyHeaders []string
 
 	// A second runtime that gets a COPY of every event and decides nothing.
-	mirror             wrapper.HttpClient
+	mirror             ogrClient
 	mirrorKey          string
 	mirrorEvaluatePath string
 	hasMirror          bool
@@ -339,7 +338,7 @@ func parseConfig(j gjson.Result, c *Config) error {
 	 * placement for gateways that cannot send a group header.
 	 */
 
-	c.client = wrapper.NewClusterClient(wrapper.TargetCluster{Cluster: c.cluster, Host: c.host})
+	c.client = ogrClient{cluster: c.cluster, host: c.host}
 
 	// Traffic mirroring: a candidate runtime sees the same events and answers nothing.
 	// Fire-and-forget in EVERY mode, including enforce — the mirror must never be able
@@ -348,7 +347,7 @@ func parseConfig(j gjson.Result, c *Config) error {
 	// else (v0.8 has no other event channel); the verdict is simply never read.
 	if cluster := j.Get("mirror_cluster").String(); cluster != "" {
 		host := strings.TrimPrefix(strings.TrimPrefix(j.Get("mirror_base_url").String(), "https://"), "http://")
-		c.mirror = wrapper.NewClusterClient(wrapper.TargetCluster{Cluster: cluster, Host: host})
+		c.mirror = ogrClient{cluster: cluster, host: host}
 		c.mirrorKey = j.Get("mirror_api_key").String()
 		if c.mirrorKey == "" {
 			c.mirrorKey = c.apiKey
@@ -781,10 +780,10 @@ func startSpeculative(ctx wrapper.HttpContext, cfg Config, rs *reqState, e *Guar
 		finishRequest(ctx, rs, body)
 		return
 	}
-	err = cfg.client.Post(cfg.evaluatePath, laneHeaders(cfg, laneFast), payload,
-		func(status int, _ http.Header, respBody []byte) {
+	err = cfg.client.post(cfg.evaluatePath, laneHeaders(cfg, laneFast), payload, cfg.timeoutMs,
+		func(status int, respBody []byte) {
 			onFastVerdict(ctx, cfg, rs, payload, body, status, respBody)
-		}, cfg.timeoutMs)
+		})
 	if err != nil {
 		logConditionf("req.dispatch", "[OGR-FAST] dispatch failed: %v", err)
 		// Fail-OPEN by construction here (speculative implies it): forward unmasked
@@ -857,10 +856,10 @@ func onFastVerdict(ctx wrapper.HttpContext, cfg Config, rs *reqState,
  * (proxy-wasm-go-sdk `abi_callback_l7.go`).
  */
 func startDeepLane(ctx wrapper.HttpContext, cfg Config, rs *reqState, payload []byte) {
-	err := cfg.client.Post(cfg.evaluatePath, ogrHeaders(cfg), payload,
-		func(status int, _ http.Header, respBody []byte) {
+	err := cfg.client.post(cfg.evaluatePath, ogrHeaders(cfg), payload, cfg.timeoutMs,
+		func(status int, respBody []byte) {
 			onDeepVerdict(ctx, cfg, rs, status, respBody)
-		}, cfg.timeoutMs)
+		})
 	if err != nil {
 		logConditionf("deep.dispatch", "[OGR-DEEP] dispatch failed: %v", err)
 		bump(cntUnchecked, 1)
@@ -903,10 +902,10 @@ func enforceRequest(ctx wrapper.HttpContext, cfg Config, rs *reqState, e *GuardE
 		finishRequest(ctx, rs, body)
 		return
 	}
-	err = cfg.client.Post(cfg.evaluatePath, ogrHeaders(cfg), payload,
-		func(status int, _ http.Header, respBody []byte) {
+	err = cfg.client.post(cfg.evaluatePath, ogrHeaders(cfg), payload, cfg.timeoutMs,
+		func(status int, respBody []byte) {
 			onInputVerdict(ctx, cfg, rs, body, status, respBody)
-		}, cfg.timeoutMs)
+		})
 	if err != nil {
 		logConditionf("req.dispatch", "[OGR-REQ] evaluate dispatch failed: %v", err)
 		applyFail(ctx, cfg, rs, "evaluate dispatch failed")
@@ -1076,8 +1075,8 @@ func onResponseBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Acti
 	if err != nil {
 		return restoreResponse(rs, body)
 	}
-	err = cfg.client.Post(cfg.evaluatePath, ogrHeaders(cfg), payload,
-		func(status int, _ http.Header, respBody []byte) {
+	err = cfg.client.post(cfg.evaluatePath, ogrHeaders(cfg), payload, cfg.timeoutMs,
+		func(status int, respBody []byte) {
 			if status == 200 && parseVerdict(respBody).Usable() {
 				bump(cntEvaluated, 1)
 				v := parseVerdict(respBody)
@@ -1136,7 +1135,7 @@ func onResponseBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Acti
 				_ = proxywasm.ReplaceHttpResponseBody([]byte(next))
 			}
 			proxywasm.ResumeHttpResponse()
-		}, cfg.timeoutMs)
+		})
 	if err != nil {
 		return restoreResponse(rs, body)
 	}
@@ -1423,17 +1422,17 @@ func mirrorEvent(cfg Config, e *GuardEvent) {
 	bump(cntMirrored, 1)
 }
 
-func post(client wrapper.HttpClient, apiKey, path string, payload []byte, timeoutMs uint32, tag string) {
+func post(client ogrClient, apiKey, path string, payload []byte, timeoutMs uint32, tag string) {
 	headers := [][2]string{
 		{"Content-Type", "application/json"},
 		{"Authorization", "Bearer " + apiKey},
 	}
-	if err := client.Post(path, headers, payload,
-		func(status int, _ http.Header, body []byte) {
+	if err := client.post(path, headers, payload, timeoutMs,
+		func(status int, body []byte) {
 			if status != 200 {
 				logConditionf(tag+".status", "[%s] status=%d body=%s", tag, status, truncate(string(body), 256))
 			}
-		}, timeoutMs); err != nil {
+		}); err != nil {
 		logConditionf(tag+".dispatch", "[%s] dispatch failed: %v", tag, err)
 	}
 }

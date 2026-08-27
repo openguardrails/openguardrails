@@ -435,6 +435,31 @@ the traffic pass with `decision=` empty).
 | `mirror_base_path` | `base_path` | the mirror's own mount, when it differs |
 | `log_level` | `quiet` | `quiet` \| `info` \| `debug`. Quiet prints only what says the deployment is broken. Anything unrecognised is quiet — the failure mode of this setting is disk. |
 
+### What ends up in the gateway's log
+
+`log_level` governs everything this plugin prints, and at the default `quiet`
+that is one line per plugin LOAD plus whatever says the deployment is broken.
+
+**No request or response body is ever printed at any level, including `debug`.**
+Up to and including 3.8.0 that was not true, and not because of anything in this
+plugin: events were posted through `wrapper.HttpClient` from higress-group/wasm-go,
+which logs `http call start … body: … timeout: …` and `http call end … body: …` at
+**info**, from inside the SDK. Envoy's default log level *is* info, so a gateway
+running 3.8.0 printed every GuardEvent — the user's prompt, the tool schema, the
+model's reply, all raw — and the runtime's whole answer back. At least twice per
+model call, since a step has a request half and a response half, and twice that many
+lines because the SDK logs a start AND an end; a speculative fast lane or a mirror
+adds more. All of it to stdout, and from there into the container log.
+`log_level: quiet` could not suppress it; only Envoy's own `wasm` logger could,
+which silences this plugin's real errors too.
+
+Since **3.8.1** the plugin dispatches its own calls (`dispatch.go`) and the wrapper
+is gone from the event path, so the default install prints nothing about the traffic
+it judges. If you are on 3.8.0 or earlier and cannot upgrade yet, the stopgap is to
+turn the gateway's wasm logger down — on the gateway pod,
+`curl -XPOST 'localhost:15000/logging?wasm=warn'` (immediate, lost on restart), or
+`--component-log-level wasm:warn` on the proxy for something that survives one.
+
 ### Which paths it calls
 
 The canonical endpoint paths are rooted at **`/v1/`**: the plugin joins

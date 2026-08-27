@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"net/http"
 	"time"
 
 	"github.com/higress-group/proxy-wasm-go-sdk/proxywasm"
@@ -388,8 +387,8 @@ func judgeFinal(ctx wrapper.HttpContext, cfg Config, rs *reqState, sp *streamPro
 		rs.finishAllow()
 		return
 	}
-	err = cfg.client.Post(cfg.evaluatePath, ogrHeaders(cfg), payload,
-		func(status int, _ http.Header, respBody []byte) {
+	err = cfg.client.post(cfg.evaluatePath, ogrHeaders(cfg), payload, cfg.timeoutMs,
+		func(status int, respBody []byte) {
 			if status != 200 {
 				// Fail mode decides, exactly as it does on the request side. Note the
 				// asymmetry the medium forces: failing CLOSED after bytes have gone out
@@ -442,7 +441,7 @@ func judgeFinal(ctx wrapper.HttpContext, cfg Config, rs *reqState, sp *streamPro
 				logUnresolvedSpans(len(spans))
 			}
 			rs.finishAllow()
-		}, cfg.timeoutMs)
+		})
 	if err != nil {
 		logConditionf("tail.dispatch", "[OGR-TAIL] final evaluate dispatch failed: %v", err)
 		evaluateFailed("TAIL", 0, cfg.failClosed)

@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/binary"
 	"encoding/json"
-	"net/http"
 	"strconv"
 	"time"
 
@@ -222,7 +221,11 @@ func startHeartbeat(cfg *Config) {
 }
 
 func sendHeartbeat(cfg *Config) {
-	if cfg == nil || cfg.client == nil {
+	// ⚠️ An empty cluster is "parseConfig never named a runtime", which is what the
+	// nil check on `wrapper.HttpClient` used to mean before 3.8.1 made the client a
+	// value (dispatch.go). Beating at an unconfigured upstream would be one
+	// guaranteed dispatch failure every 30s, forever.
+	if cfg == nil || cfg.client.cluster == "" {
 		return
 	}
 	c := counters()
@@ -248,8 +251,8 @@ func sendHeartbeat(cfg *Config) {
 	// on a verdict — 5s by default — and a beat is nobody's latency: sharing that
 	// budget just turned healthy heartbeats into 504s whenever the runtime was
 	// briefly busy, i.e. exactly when liveness matters most.
-	if err := cfg.client.Post(cfg.heartbeatPath, ogrHeaders(*cfg), payload,
-		func(status int, _ http.Header, body []byte) {
+	if err := cfg.client.post(cfg.heartbeatPath, ogrHeaders(*cfg), payload, heartbeatTimeoutMs,
+		func(status int, body []byte) {
 			// WHAT THE RUNTIME WILL ACCEPT, learned from the beat it just answered
 			// (3.8.0, limits.go). No extra call: the response is already here, and
 			// this is the one channel every deployment already runs on a timer.
@@ -264,7 +267,7 @@ func sendHeartbeat(cfg *Config) {
 			if status != 200 {
 				logConditionf("beat.status", "[OGR-BEAT] status=%d body=%s", status, truncate(string(body), 160))
 			}
-		}, heartbeatTimeoutMs); err != nil {
+		}); err != nil {
 		logConditionf("beat.dispatch", "[OGR-BEAT] dispatch failed: %v", err)
 	}
 }
