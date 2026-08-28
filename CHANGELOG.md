@@ -24,6 +24,46 @@ version is independent of any implementation's package version.
   release is days old and no such runtime is known to exist.
 
 ### Added
+- **Mandate — the authorization envelope ([mandate.md](specification/mandate.md),
+  [schema/mandate.schema.json](schema/mandate.schema.json))** — the operator's
+  declaration of what one workspace's agents may do, judged against the tool
+  calls they actually make. It closes the one gap every other control leaves
+  open: an action that is not dangerous in itself and not dangerous for every
+  agent — `place_order(NVDA, 5000)`, `nmap 203.0.113.5` — where the only thing
+  that makes it a violation is *what this agent was authorized to do*. This is
+  the failure mode operators call **drift**, and it is invisible to content
+  judgment by construction. Additive-optional and CONFIGURATION-ONLY: the wire
+  is unchanged and a violation arrives as an ordinary `finding`.
+  ⚠️ **A mandate is NEVER on the wire.** It is resolved by `agent_workspace` from
+  the runtime's own config; a runtime MUST NOT accept one from a producer, because
+  the process that would exceed an envelope is the last one that should supply it.
+  ⚠️ **A missing mandate is no envelope, not an empty one** — a runtime MUST NOT
+  refuse the actions of an unconfigured agent.
+  ⚠️ **It judges CALLS (L2), not EXECS (L1).** A mandate is not a pre-trade risk
+  control and not a firewall; it cannot recall an order or a packet a process
+  holding the credential already sent. Where a regime requires controls at the
+  point of access (SEC Rule 15c3-5, MiFID II RTS 6) they belong at the broker/OMS,
+  and a mandate complements them by seeing the reasoning and instruction flow.
+  ⚠️ **It reports what it cannot read.** An unbound tool, an absent field, or any
+  dimension needing state outside the payload is `unjudged`, never assumed clean.
+
+- **Action-integrity taxonomy ids ([taxonomy.md](specification/taxonomy.md))** —
+  the neutral `security.*` ids the two action-first verticals need, none of them a
+  vertical sibling: `security.mandate_violation` (+ `.scope` / `.capability` /
+  `.limit` / `.window` / `.irreversible`), `security.market_manipulation`
+  (+ pattern subcategories), `security.restricted_information` (MNPI and the like),
+  and `security.persistence`. With two informative mapping sections mirroring the
+  healthcare one — **agentic-trading** and **security-operations** — that map each
+  vertical's failure modes onto the shared ids (and, for security work, onto MITRE
+  ATT&CK tactics), plus executable category-expectation corpora
+  (`benchmarks/suites/security/mandate_violation_{trading,secops}.jsonl`) and a
+  runnable mandate at [`examples/mandate-agent/`](examples/mandate-agent/).
+  ⚠️ **There is no `offensive.*` domain and there will not be one.** An id meaning
+  "this was an attack" would have to be decided from intent, which no detector
+  observes; a defender's agent and an attacker's agent raise every one of these
+  questions identically, and the only thing that separates them is the envelope the
+  operator declared in advance.
+
 - **The Artifact Scan API ([artifact-scan.md](specification/artifact-scan.md))** —
   the SIBLING contract a scanner implements, so an obligation can name a
   scanner without naming a vendor. `POST /v1/analyze` with

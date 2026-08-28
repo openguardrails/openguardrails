@@ -272,9 +272,16 @@ OGR carries two risk domains under one contract:
   Classifier-heavy.
 - **security.\*** — judged on *actions and data flow*: what a tool call is
   about to do, whether an instruction arrived through data rather than from
-  the user. Policy-heavy.
+  the user, and whether the action stayed inside the authority the operator
+  granted the agent. Policy-heavy.
 
 The category vocabulary is the [taxonomy](taxonomy.md).
+
+Some security failures are not visible in any single action, because the same
+call is legitimate for one agent and a violation for the next — an order outside
+a trading desk's mandate, a scan outside a security engagement's scope. That
+envelope is declared by the operator and held by the runtime, never on the wire;
+see [Mandate](mandate.md).
 
 ## What OGR standardizes vs. leaves competitive
 

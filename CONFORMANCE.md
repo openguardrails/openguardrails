@@ -65,6 +65,18 @@ A runtime (the Policy Decision Point) is **OGR-conformant** if it:
    spans and unjudged unions;
 5. never silently drops an event it accepted.
 
+## Mandate support (conditional)
+
+Mandate evaluation ([Mandate](specification/mandate.md)) is **not** a requirement
+of any role above — a conformant runtime may implement none of it. A runtime that
+*advertises* mandate support additionally: resolves mandates by workspace and
+never from an event; evaluates an unbound tool against `capabilities` only and
+reports the unread dimensions in `unjudged`; emits `security.mandate_violation.*`
+findings naming the mandate in `detector`; and counts cumulative limits from
+observed traffic without presenting the count as complete. Enforcement points need
+no changes: a mandate finding is an ordinary finding and a mandate block is an
+ordinary `block`.
+
 ## Self-certification
 
 Conformance is currently self-declared. State the version you target and the

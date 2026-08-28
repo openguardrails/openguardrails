@@ -51,6 +51,12 @@ suites/security/
   secret_leak.jsonl
 suites/safety/
   unsafe_advice_healthcare.jsonl # synthetic category-expectation fixtures
+suites/security/                 # mandate corpora + the configs that judge them:
+  mandate_violation_trading.jsonl  # trading-agent drift -> security.mandate_violation.*
+  mandate_violation_secops.jsonl   # security-ops drift  -> same neutral ids
+  mandate_{trading,secops}.mandate.json  # the envelope each corpus is scored against
+harness/
+  mandate.py             # the mandate evaluator (runtime-side check, not a detector)
 harness/
   ogrlib.py              # minimal OGR types (mirrors openguardrails)
   detectors.py           # reference detectors + baselines (NOT third-party vendors)
@@ -77,9 +83,36 @@ Implement the OGR contract — `evaluate(GuardEvent) → Verdict` — wrap it as
 is the prerequisite to being listed; the benchmark is the ranking. Corpora
 governance will be foundation-neutral.
 
+## Mandate scoring (the authorization envelope)
+
+`run.py` also scores a **mandate** — the operator's declared authorization
+envelope ([`specification/mandate.md`](../specification/mandate.md)) — over the two
+`mandate_violation_*` corpora. This is deliberately kept OUT of the vendor
+leaderboard: a mandate is runtime *configuration*, not a submitted detector, so it
+does not compete with the guard models. It is scored on its own:
+
+- **precision / recall / F1** over the cases a mandate OWNS
+  (`security.mandate_violation.*`) against the compliant control cases;
+- **dimension** — of the violations it caught, how often it named the right
+  envelope dimension (scope / capability / limit / window / irreversible);
+- **lane** — how often it correctly ABSTAINED on the cases another detector owns
+  (prompt injection, secret leak, market manipulation, MNPI, a raw `exec` shell
+  string). A mandate reads structured tool calls; firing outside that lane is a
+  false positive on someone else's turf.
+
+The reference mandate scores 1.000 on its own seed — the point is a **regression
+guard**: a change that breaks a dimension mapping or the lane boundary drops the
+number, and `benchmarks/tests/test_mandate_scoring.py` also proves the metric is
+not vacuous (an empty mandate scores recall 0). Third-party or stricter mandates
+are scored the same way.
+
 ## Roadmap
 
 - Obfuscated / paraphrased / novel-domain cases (break the keyword baseline).
 - `safety.*` suites (toxicity, self-harm, PII).
 - `tool_poisoning` suite (malicious MCP/tool **definitions**).
+- A mandate evaluator scoring the `mandate_violation_*` corpora against a
+  declared envelope (they carry `expected_categories` today; a mandate is
+  runtime configuration, not a submitted detector — see
+  [`specification/mandate.md`](../specification/mandate.md)).
 - Adapters for real guard models so vendors appear with real numbers.

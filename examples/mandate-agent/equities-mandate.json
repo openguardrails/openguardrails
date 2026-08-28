@@ -1,0 +1,107 @@
+{
+  "mandate": "desk-a-equities",
+  "version": "2026-08-01",
+  "workspace": "quant-agents",
+  "on_violation": "block",
+  "bindings": [
+    {
+      "tool": "place_order",
+      "capability": "order.place",
+      "fields": {
+        "asset_class": "asset_class",
+        "instrument": "symbol",
+        "quantity": "quantity",
+        "side": "side",
+        "venue": "venue"
+      },
+      "capability_map": {
+        "side": {
+          "sell_short": "order.short",
+          "buy_to_cover": "order.short"
+        }
+      }
+    },
+    {
+      "tool": "cancel_order",
+      "capability": "order.cancel",
+      "fields": {
+        "instrument": "symbol"
+      }
+    },
+    {
+      "tool": "get_quote",
+      "capability": "data.read"
+    }
+  ],
+  "scope": {
+    "allow": [
+      "equity:us:*"
+    ],
+    "deny": [
+      "equity:us:GME",
+      "crypto:*"
+    ]
+  },
+  "capabilities": {
+    "allow": [
+      "order.place",
+      "order.cancel",
+      "data.read"
+    ],
+    "deny": [
+      "order.short",
+      "funds.withdraw"
+    ]
+  },
+  "limits": [
+    {
+      "id": "per-order-qty",
+      "metric": "quantity",
+      "window": "per_call",
+      "max": 500,
+      "unit": "shares"
+    },
+    {
+      "id": "daily-orders",
+      "metric": "count",
+      "window": "per_day",
+      "max": 200
+    },
+    {
+      "id": "order-rate",
+      "metric": "count",
+      "window": "per_minute",
+      "max": 10
+    }
+  ],
+  "windows": [
+    {
+      "id": "rth",
+      "timezone": "America/New_York",
+      "days": [
+        "mon",
+        "tue",
+        "wed",
+        "thu",
+        "fri"
+      ],
+      "from": "09:30",
+      "to": "16:00",
+      "applies_to": {
+        "capabilities": [
+          "order.place",
+          "order.cancel"
+        ]
+      }
+    }
+  ],
+  "irreversible": [
+    {
+      "id": "unwind",
+      "capability": "order.place",
+      "when": {
+        "side": "sell_all"
+      }
+    }
+  ]
+}

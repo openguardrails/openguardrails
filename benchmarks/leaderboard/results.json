@@ -37,7 +37,7 @@
           "fp": 0,
           "fn": 2,
           "tn": 14,
-          "p95ms": 0.0116
+          "p95ms": 0.002
         },
         "malicious_command": {
           "precision": 1.0,
@@ -47,7 +47,7 @@
           "fp": 0,
           "fn": 4,
           "tn": 14,
-          "p95ms": 0.0112
+          "p95ms": 0.0022
         },
         "data_exfiltration": {
           "precision": 1.0,
@@ -57,7 +57,7 @@
           "fp": 0,
           "fn": 7,
           "tn": 14,
-          "p95ms": 0.0133
+          "p95ms": 0.0028
         },
         "secret_leak": {
           "precision": 1.0,
@@ -67,11 +67,11 @@
           "fp": 0,
           "fn": 6,
           "tn": 14,
-          "p95ms": 0.0112
+          "p95ms": 0.0021
         }
       },
       "macroF1": 0.641,
-      "p95ms": 0.0133
+      "p95ms": 0.0028
     },
     {
       "name": "keyword-baseline",
@@ -85,7 +85,7 @@
           "fp": 4,
           "fn": 7,
           "tn": 10,
-          "p95ms": 0.0154
+          "p95ms": 0.0037
         },
         "malicious_command": {
           "precision": 0.714,
@@ -95,7 +95,7 @@
           "fp": 4,
           "fn": 2,
           "tn": 10,
-          "p95ms": 0.0089
+          "p95ms": 0.0019
         },
         "data_exfiltration": {
           "precision": 0.636,
@@ -105,7 +105,7 @@
           "fp": 4,
           "fn": 3,
           "tn": 10,
-          "p95ms": 0.0087
+          "p95ms": 0.0018
         },
         "secret_leak": {
           "precision": 0.556,
@@ -115,11 +115,11 @@
           "fp": 4,
           "fn": 3,
           "tn": 10,
-          "p95ms": 0.0088
+          "p95ms": 0.0016
         }
       },
       "macroF1": 0.611,
-      "p95ms": 0.0154
+      "p95ms": 0.0037
     },
     {
       "name": "block-all",
@@ -133,7 +133,7 @@
           "fp": 14,
           "fn": 0,
           "tn": 0,
-          "p95ms": 0.0004
+          "p95ms": 0.0001
         },
         "malicious_command": {
           "precision": 0.462,
@@ -143,7 +143,7 @@
           "fp": 14,
           "fn": 0,
           "tn": 0,
-          "p95ms": 0.0004
+          "p95ms": 0.0001
         },
         "data_exfiltration": {
           "precision": 0.417,
@@ -153,7 +153,7 @@
           "fp": 14,
           "fn": 0,
           "tn": 0,
-          "p95ms": 0.0004
+          "p95ms": 0.0001
         },
         "secret_leak": {
           "precision": 0.364,
@@ -163,11 +163,11 @@
           "fp": 14,
           "fn": 0,
           "tn": 0,
-          "p95ms": 0.0004
+          "p95ms": 0.0
         }
       },
       "macroF1": 0.591,
-      "p95ms": 0.0004
+      "p95ms": 0.0001
     },
     {
       "name": "config-rules",
@@ -181,7 +181,7 @@
           "fp": 0,
           "fn": 8,
           "tn": 14,
-          "p95ms": 0.0092
+          "p95ms": 0.002
         },
         "malicious_command": {
           "precision": 1.0,
@@ -191,7 +191,7 @@
           "fp": 0,
           "fn": 4,
           "tn": 14,
-          "p95ms": 0.0078
+          "p95ms": 0.0016
         },
         "data_exfiltration": {
           "precision": 1.0,
@@ -201,7 +201,7 @@
           "fp": 0,
           "fn": 8,
           "tn": 14,
-          "p95ms": 0.0098
+          "p95ms": 0.0022
         },
         "secret_leak": {
           "precision": 1.0,
@@ -211,11 +211,11 @@
           "fp": 0,
           "fn": 6,
           "tn": 14,
-          "p95ms": 0.0078
+          "p95ms": 0.0017
         }
       },
       "macroF1": 0.491,
-      "p95ms": 0.0098
+      "p95ms": 0.0022
     },
     {
       "name": "llm-judge",
@@ -229,7 +229,7 @@
           "fp": 0,
           "fn": 2,
           "tn": 14,
-          "p95ms": 0.0058
+          "p95ms": 0.0019
         },
         "malicious_command": {
           "precision": 1.0,
@@ -239,7 +239,7 @@
           "fp": 0,
           "fn": 10,
           "tn": 14,
-          "p95ms": 0.0034
+          "p95ms": 0.0007
         },
         "data_exfiltration": {
           "precision": 1.0,
@@ -249,7 +249,7 @@
           "fp": 0,
           "fn": 8,
           "tn": 14,
-          "p95ms": 0.0036
+          "p95ms": 0.0008
         },
         "secret_leak": {
           "precision": 0.0,
@@ -259,11 +259,11 @@
           "fp": 0,
           "fn": 8,
           "tn": 14,
-          "p95ms": 0.0031
+          "p95ms": 0.0006
         }
       },
       "macroF1": 0.38,
-      "p95ms": 0.0058
+      "p95ms": 0.0019
     },
     {
       "name": "allow-all",
@@ -277,7 +277,7 @@
           "fp": 0,
           "fn": 11,
           "tn": 14,
-          "p95ms": 0.0007
+          "p95ms": 0.0003
         },
         "malicious_command": {
           "precision": 0.0,
@@ -287,7 +287,7 @@
           "fp": 0,
           "fn": 12,
           "tn": 14,
-          "p95ms": 0.0004
+          "p95ms": 0.0
         },
         "data_exfiltration": {
           "precision": 0.0,
@@ -297,7 +297,7 @@
           "fp": 0,
           "fn": 10,
           "tn": 14,
-          "p95ms": 0.0004
+          "p95ms": 0.0001
         },
         "secret_leak": {
           "precision": 0.0,
@@ -307,11 +307,46 @@
           "fp": 0,
           "fn": 8,
           "tn": 14,
-          "p95ms": 0.0004
+          "p95ms": 0.0
         }
       },
       "macroF1": 0.0,
-      "p95ms": 0.0007
+      "p95ms": 0.0003
     }
-  ]
+  ],
+  "mandate": {
+    "suites": [
+      {
+        "suite": "mandate_violation_trading",
+        "mandate": "mandate_trading.mandate.json",
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "tp": 6,
+        "fp": 0,
+        "fn": 0,
+        "tn": 2,
+        "dimensionAccuracy": 1.0,
+        "laneDiscipline": 1.0,
+        "laneCases": 4,
+        "p95ms": 0.0389
+      },
+      {
+        "suite": "mandate_violation_secops",
+        "mandate": "mandate_secops.mandate.json",
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "tp": 5,
+        "fp": 0,
+        "fn": 0,
+        "tn": 2,
+        "dimensionAccuracy": 1.0,
+        "laneDiscipline": 1.0,
+        "laneCases": 5,
+        "p95ms": 0.014
+      }
+    ],
+    "macroF1": 1.0
+  }
 }

@@ -65,6 +65,16 @@ key — the [identity floor](../specification/guard-event.md#the-api-key-is-the-
 | `agent_workspace` | agent GROUP — one workspace, one policy set | the API key's workspace |
 | `agent_user` | who is USING it this session | every session is one user |
 
+## A second example: the authorization envelope
+
+[`mandate-agent/`](mandate-agent/) is the runnable form of
+[`specification/mandate.md`](../specification/mandate.md) — the runtime-side check
+for **drift**, the failure content judgment cannot see: an agent doing its own job
+outside the bounds its operator gave it. Two schema-conforming mandates (a trading
+desk, a security engagement) and a ~200-line reference evaluator show why the same
+tool call is compliant for one agent and a violation for the next. Offline, zero
+dependencies: `cd mandate-agent && ./demo.sh`.
+
 ## Where to go next
 
 - [`specification/runtime-api.md`](../specification/runtime-api.md) — the
