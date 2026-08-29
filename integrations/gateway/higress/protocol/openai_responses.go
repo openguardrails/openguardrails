@@ -333,6 +333,151 @@ func (r openAIResponses) RefuseStream(model, reason string) string {
 	return b.String()
 }
 
+// --- continuations -----------------------------------------------------------
+
+// SoftRefuse: the notice as a COMPLETED response. `status: "completed"` where Refuse
+// says `incomplete` + `content_filter` — the same trade soft.go describes, in this
+// protocol's own vocabulary.
+func (openAIResponses) SoftRefuse(model, notice string) string {
+	out, err := json.Marshal(map[string]any{
+		"id": "resp_ogr_refusal", "object": "response", "model": model,
+		"status":      "completed",
+		"output":      []map[string]any{responsesMessage(notice)},
+		"output_text": notice,
+		"x_ogr":       xOGR("answer"),
+	})
+	if err != nil {
+		return `{"error":{"message":"refused"}}`
+	}
+	return string(out)
+}
+
+func (openAIResponses) SoftRefuseStream(model, notice string) string {
+	shell := map[string]any{
+		"id": "resp_ogr", "object": "response", "model": model, "status": "completed",
+		"output": []map[string]any{responsesMessage(notice)}, "output_text": notice,
+		// The marker rides the frames a client assembles the reply from.
+		"x_ogr": xOGR("answer"),
+	}
+	part := map[string]any{"type": "output_text", "text": "", "annotations": []any{}}
+	var b strings.Builder
+	write := func(name string, payload map[string]any) {
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			return
+		}
+		b.WriteString("event: " + name + "\n" + SSEFrame(string(raw)))
+	}
+	write("response.created", map[string]any{
+		"type": "response.created",
+		"response": map[string]any{
+			"id": "resp_ogr", "object": "response", "model": model,
+			"status": "in_progress", "output": []any{}, "x_ogr": xOGR("answer"),
+		},
+	})
+	write("response.output_item.added", map[string]any{
+		"type": "response.output_item.added", "output_index": 0, "item": responsesMessage(""),
+	})
+	write("response.content_part.added", map[string]any{
+		"type": "response.content_part.added", "item_id": "msg_ogr_refusal",
+		"output_index": 0, "content_index": 0, "part": part,
+	})
+	write("response.output_text.delta", map[string]any{
+		"type": "response.output_text.delta", "item_id": "msg_ogr_refusal",
+		"output_index": 0, "content_index": 0, "delta": notice,
+	})
+	write("response.output_text.done", map[string]any{
+		"type": "response.output_text.done", "item_id": "msg_ogr_refusal",
+		"output_index": 0, "content_index": 0, "text": notice,
+	})
+	write("response.output_item.done", map[string]any{
+		"type": "response.output_item.done", "output_index": 0, "item": responsesMessage(notice),
+	})
+	// ⚠️ `response.completed`, where RefuseStream ends on `response.incomplete` +
+	// `content_filter`. That pair is this protocol's terminal marker.
+	write("response.completed", map[string]any{"type": "response.completed", "response": shell})
+	return b.String()
+}
+
+// RetractSoft delivers the notice as one more text delta on the item already
+// streaming, then completes the response.
+func (openAIResponses) RetractSoft(model, notice string) string {
+	var b strings.Builder
+	write := func(name string, payload map[string]any) {
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			return
+		}
+		b.WriteString("event: " + name + "\n" + SSEFrame(string(raw)))
+	}
+	write("response.output_text.delta", map[string]any{
+		"type": "response.output_text.delta", "item_id": "msg_ogr_refusal",
+		"output_index": 0, "content_index": 0, "delta": "\n\n" + notice,
+	})
+	write("response.completed", map[string]any{
+		"type": "response.completed",
+		"response": map[string]any{
+			"id": "resp_ogr", "object": "response", "model": model,
+			"status": "completed", "x_ogr": xOGR("drop_calls"),
+		},
+	})
+	return b.String()
+}
+
+/*
+ * DropCallsStream: not expressible here, so the caller falls back to RetractSoft —
+ * the loop still survives, but the surviving calls do not.
+ *
+ * ⚠️ An item is addressed by `output_index`, which this seam does not track, so
+ * re-emitting a surviving function_call would collide with or skip a live item.
+ */
+func (openAIResponses) DropCallsStream(model string, survivors []Action, notice string) (string, bool) {
+	return "", false
+}
+
+// DropCalls removes `function_call` items from the `output` array and appends the
+// notice as a message item.
+//
+// ⚠️ In practice this rarely fires: the runtime derives no `payload.tool_calls.N`
+// container mapping for this protocol, so no directive naming one reaches here and the
+// caller falls back to a hard refusal. Implemented honestly anyway — a half-written
+// adapter method is how a protocol becomes silently second class.
+func (openAIResponses) DropCalls(body string, paths []string, notice string) (string, bool) {
+	ordered := dropGroups(paths)
+	if ordered == nil || !allResolve(body, ordered) {
+		return body, false
+	}
+	out := body
+	for _, p := range ordered {
+		next, err := sjson.Delete(out, p)
+		if err != nil {
+			return body, false
+		}
+		out = next
+	}
+	raw, err := json.Marshal(responsesMessage(notice))
+	if err != nil {
+		return body, false
+	}
+	next, err := sjson.SetRaw(out, "output.-1", string(raw))
+	if err != nil {
+		return body, false
+	}
+	out = next
+	// Whatever survived, the response itself COMPLETED — the caller has a usable
+	// answer and the items it may still act on.
+	if next, err := sjson.Set(out, "status", "completed"); err == nil {
+		out = next
+	}
+	if next, err := sjson.Delete(out, "incomplete_details"); err == nil {
+		out = next
+	}
+	if next, err := sjson.SetRaw(out, "x_ogr", `{"decision":"block","continuation":"drop_calls"}`); err == nil {
+		out = next
+	}
+	return out, true
+}
+
 func (openAIResponses) Retract(model string) string {
 	raw, err := json.Marshal(map[string]any{
 		"type": "response.incomplete",
@@ -374,6 +519,16 @@ type responsesDecoder struct {
 	// frames counts data payloads in this protocol's own event namespace
 	// (`response.*`) — see protocol.FrameCounter.
 	frames int
+}
+
+// SawCalls — see protocol.CallWatcher.
+func (d *responsesDecoder) SawCalls() bool {
+	for _, it := range d.items {
+		if it != nil && it.kind == "function_call" {
+			return true
+		}
+	}
+	return false
 }
 
 // RecognizedFrames — see protocol.FrameCounter.

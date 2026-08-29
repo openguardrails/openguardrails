@@ -36,6 +36,7 @@ Canonical endpoint paths are rooted at **`/v1/`**:
 POST /v1/evaluate
 POST /v1/heartbeat
 GET  /v1/limits
+GET  /v1/rules
 GET  /v1/health
 ```
 
@@ -97,7 +98,7 @@ which is the decomposition this contract exists to prevent.
 
 **Side effect** — every accepted evaluate also RECORDS the event; evaluate is
 the observation channel. (`/v1/ingest` and the `ogr-partial` interim-judgment
-header were removed in v0.8: with [tail-hold streaming](#streaming-hold-the-tail-judge-once)
+header were removed in v0.8: with [bounded-head streaming](#streaming-release-a-bounded-head-judge-once)
 each step is judged exactly once, whole, so a second channel and a
 don't-record flag had nothing left to carry.)
 
@@ -291,9 +292,17 @@ conclude from it that no other build is sending traffic.
   "instance_id": "inst-dkrb2q8v1x",
   "agent_id": "invoice-bot",
   "interval_s": 30,
+  "ruleset": "rs_9f2c1e0a7b3d4c5e8f1a2b3c4d5e6f70",
   "counters": {"events_sent": 120, "evaluate_errors": 0, "unresolved_spans": 0}
 }
 ```
+
+**`ruleset`** (OPTIONAL, 1.4, at most 64 characters) is the id of the
+[local-redaction](local-redaction.md) ruleset this instance is masking with,
+exactly as [`GET /v1/rules`](#get-v1rules) served it — so the per-instance
+record can say which ruleset each reporting process is on, and a process
+still on a superseded set is visible as such. An integration not doing local
+redaction omits it.
 
 **Response** — `200 {"ok": true}`. A heartbeat MUST register a
 live-but-idle agent so fleet coverage reflects integrations that have not
@@ -312,6 +321,20 @@ object [`GET /v1/limits`](#get-v1limits) returns:
 ⚠️ Additive and OPTIONAL, in both directions: a reporter that does not read it
 behaves exactly as before, and a runtime that does not send it MUST NOT be read
 as advertising zero — absent means UNKNOWN, never refused.
+
+A runtime that serves [`GET /v1/rules`](#get-v1rules) SHOULD likewise include
+the current ruleset's id beside `limits`, so a reporter that already beats
+learns of a change within one interval without polling the feed:
+
+```json
+{"ok": true, "limits": {"…": "…"},
+ "rules": {"id": "rs_9f2c1e0a7b3d4c5e8f1a2b3c4d5e6f70"}}
+```
+
+⚠️ The same warning: additive and OPTIONAL in both directions. A reporter that
+does not read it behaves exactly as before; an absent `rules` means the runtime
+serves no feed or did not say — never that the ruleset is empty — and a
+reporter holding a cached ruleset keeps masking with it.
 
 ## GET /v1/limits
 
@@ -351,6 +374,95 @@ learning a larger cap does not license exceeding an operator's own.
 failed, means UNKNOWN — a producer MUST fall back to its configured behaviour
 rather than treating every kind as refused.
 
+## GET /v1/rules
+
+The [local-redaction](local-redaction.md) rule feed (OGR 1.4): the secret
+patterns this caller's organization masks with, served by the runtime so that
+an open-source integration ships none of its own. The shape is
+[`schema/ruleset.schema.json`](../schema/ruleset.schema.json) and its dialect
+is [`ogr-re-1`](local-redaction.md#dialect-ogr-re-1).
+
+**Request** — `GET`, authenticated. An integration holding a cached ruleset
+sends its id as `If-None-Match`:
+
+```
+GET /v1/rules
+Authorization: Bearer ogr_…
+If-None-Match: "rs_9f2c1e0a7b3d4c5e8f1a2b3c4d5e6f70"
+```
+
+**Response** — `304 Not Modified` when the id matches; otherwise `200` with
+`ETag: "<id>"` and the ruleset. Two of the reference runtime's rules, shown
+whole:
+
+```json
+{"ruleset": {
+  "id": "rs_9f2c1e0a7b3d4c5e8f1a2b3c4d5e6f70",
+  "generated_at": "2026-08-28T09:00:00.000Z",
+  "family": "secrets",
+  "dialect": "ogr-re-1",
+  "rules": [
+    {"id": "entity_api_key",
+     "category": "security.secret_leak.api_key",
+     "severity": "critical",
+     "tier": "strong",
+     "flags": "",
+     "patterns": [
+       {"id": "openai",
+        "source": "(?<![A-Za-z0-9])sk-(?:proj-)?[A-Za-z0-9_\\-]{20,}(?![A-Za-z0-9])"},
+       {"id": "gitlab",
+        "source": "(?<![A-Za-z0-9])gl(?:pat|oas|dt|rtr|rt|cbt|ptt|ft|imt|agent|soat|ffct|wt)-[A-Za-z0-9_.\\-]{20,}(?![A-Za-z0-9_.\\-])"}
+     ],
+     "examples": {
+       "match": ["sk-proj-abcdefghijklmnopqrstuvwxyz0123456789"],
+       "nomatch": ["sk-${OPENAI_API_KEY}", "sk-...3ab", "ghp_short"]}},
+    {"id": "entity_bearer_token",
+     "category": "security.secret_leak.api_key",
+     "severity": "critical",
+     "tier": "strong",
+     "flags": "i",
+     "patterns": [
+       {"id": "authorization_header",
+        "source": "(?<![A-Za-z0-9\\-])(?:proxy-)?authorization\\s*:\\s*(?:bearer|basic|token|apikey)\\s{1,4}(?!(?:\\*{3,}|x{3,}|\\$\\{|<|>|%[sd]|\\.{3,}|…|changeme|placeholder|redacted|your[_\\-]?password|your[_\\-]|example|token(?![A-Za-z0-9_])|secret(?![A-Za-z0-9_])|\\$))(?![A-Za-z0-9._~+/\\-]*(?:\\.{3,}|…))([A-Za-z0-9._~+/\\-]{12,}={0,2})"}
+     ],
+     "group": 1,
+     "examples": {
+       "match": ["curl -H \"Authorization: Bearer pk_cc7f7b3f73664638b8f30fe8ca598848\"",
+                 "Proxy-Authorization: Basic dXNlcjpwYXNzd29yZDEyMw=="],
+       "nomatch": ["Authorization: Bearer <YOUR_TOKEN>",
+                   "Authorization: Bearer ${API_TOKEN}",
+                   "Authorization: Bearer pk_cc7...8848"]}}
+  ]}}
+```
+
+- **`id`** — `rs_` + 32 hex, a hash of the rules in order and nothing else
+  (`generated_at` is display). An integration reports this id back — on every
+  event's [`redaction.ruleset`](guard-event.md#redaction) and on the
+  heartbeat — and MUST NOT recompute it.
+- **`rules[]` in served order**, and the order is content: it is the overlap
+  tie-break at the integration and part of what the id hashes.
+- **`group`** — the 1-based capturing group that IS the span, so
+  `entity_bearer_token` masks the credential and leaves
+  `Authorization: Bearer ${OGR_SECRET_1}` — the shape a tool can still send.
+- **`examples`** — on every rule, and an integration MUST run them at load,
+  disabling by id any rule that fails in its own engine.
+
+⚠️ **ADVISORY to a producer and AUTHORITATIVE at the runtime**, as `limits` is.
+The runtime runs the identical ruleset on every event it receives, so a rule
+the integration disabled or a build that never fetched is still judged — as a
+finding, after the value has left. An integration MUST remain correct having
+never fetched: with no ruleset it masks nothing and reports `ruleset: ""`.
+
+⚠️ **Absent is not empty.** A fetch that failed means UNKNOWN — the
+integration MUST fall back to its cached ruleset, and with none to its
+configured [fail mode](degraded-mode.md). A runtime that serves no feed
+answers `404`, which an integration MUST treat the same way; it MUST NOT be
+read as *the organization has no rules*.
+
+⚠️ The feed is read with the ordinary organization key and bounded by the same
+tenant. A ruleset is not traffic: a key that may send events may fetch the
+rules those events are masked with, whatever else it may claim.
+
 ## GET /v1/health
 
 Unauthenticated liveness: `200 {"status": "ok", "version": "..."}` when the
@@ -379,7 +491,7 @@ per model call:
                                          payload: <complete raw response body,
                                                    stream-reassembled if streamed,
                                                    + timing>})
-       block                → do not execute tool calls / do not release the held tail
+       block                → do not execute tool calls / do not release the withheld remainder
        modifications.spans  → apply before the content is shown or acted on
        no verdict           → apply the configured fail mode
      (tool RESULTS need no call of their own — they travel in the next
@@ -395,28 +507,45 @@ refuse. `usage`/`timing` are specified in
 [GuardEvent § usage and timing](guard-event.md#usage-and-timing) — including
 why `timing` is a set of duration endpoints a runtime must not order by.
 
-### Streaming: hold the tail, judge once
+### Streaming: release a bounded head, judge once
 
 A streamed response is judged EXACTLY ONCE, whole, after the stream ends —
 never chunk-by-chunk (v0.7's interim `ogr-partial` evaluates added a
-round-trip per chunk-batch and are gone). Enforcement comes from holding
-back the stream's TAIL:
+round-trip per chunk-batch and are gone). Enforcement comes from bounding
+how much of the answer may be on the wire before that judgement:
 
-1. Forward (or render) the stream as it arrives, but withhold the final
-   `tail` characters (integration-configured; reference default 200) from
-   the client/user.
+1. Forward (or render) at most `head` bytes of client-visible content
+   (integration-configured; reference default 32) and withhold everything
+   after it.
 2. When the stream ends, reassemble the complete response and submit it as
    the step's one `step/response` evaluate — canonical shape with
    transcribed `usage` if no single raw body exists.
-3. `allow` → release the held tail, then act on tool calls. `block` → drop
-   the tail and abort the stream; the response never completes and no tool
+3. `allow` → release everything held, then act on tool calls. `block` →
+   drop it and abort the stream; the response never completes and no tool
    call runs.
 
-The evaluate round-trip delays only the tail, and tool calls never execute
-before the verdict (a provider stream only completes tool calls at its end).
-The accepted cost is that content ahead of the tail has already been seen —
-a deployment that cannot accept it buffers the whole stream instead
-(`tail = ∞` degenerates to buffering).
+Tool calls never execute before the verdict, whatever `head` is: a provider
+stream only completes tool calls at its end, so argument completions and the
+terminal frames are always inside the held remainder.
+
+The bound is measured from the HEAD of the answer, and that is normative.
+A rule of the form "withhold the last N" guarantees only that N bytes are
+withheld; what reaches the client is `total − N`, which grows without limit
+in the length of the answer — so a long violating reply is delivered
+essentially whole and can only be RETRACTED. Bounding the head instead makes
+the exposure a constant, independent of both the answer's length and the
+judge's latency.
+
+`head` is counted in UTF-8 bytes of client-visible content — text, reasoning
+and tool-call arguments, never transport framing — so frames carrying no
+content may be released regardless, and a stream still reads as live from its
+first frame. It is a CEILING: a chunk that would carry the client past the
+bound is withheld whole rather than truncated. `head = 0` is valid and
+releases nothing.
+
+The accepted cost is that content inside the head has already been seen, so a
+block after it is a retraction rather than a refusal; `head = 0` removes even
+that, at the price of showing the user nothing until the answer is judged.
 
 ### At a gateway: the four-tuple arrives as headers
 
@@ -547,14 +676,16 @@ while True:
     # the next step/request, which carries the full conversation
 ```
 
-Streaming needs one change: hold the last ~200 characters back, evaluate
-the reassembled whole response once at stream end, then release the tail on
-`allow` or cut the stream on `block` — see
-[streaming](#streaming-hold-the-tail-judge-once).
+Streaming needs one change: release at most the first ~32 bytes of content
+and withhold the rest, evaluate the reassembled whole response once at stream
+end, then release the remainder on `allow` or cut the stream on `block` — see
+[streaming](#streaming-release-a-bounded-head-judge-once).
 
 ## Conformance
 
-A **runtime** conforms to this binding if it serves all endpoints above with
+A **runtime** conforms to this binding if it serves all endpoints above
+(`GET /v1/rules` is OPTIONAL — a runtime that serves no rule feed answers
+`404`, and conforms) with
 the stated semantics, validates events against the published schemas,
 enforces the authentication rules, assigns and returns event identifiers at
 ingress, derives sessions, turns and steps server-side (re-attaching across
@@ -568,4 +699,4 @@ reads identifiers from responses instead of minting them, applies its
 configured fail mode on evaluate failure (default open, configurable
 closed), applies modification spans before content proceeds, honors
 `unjudged` when fail-closed, and judges streamed answers once, whole, behind
-a held tail.
+a bounded head.

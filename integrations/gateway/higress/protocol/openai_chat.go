@@ -248,6 +248,138 @@ func (openAIChat) Retract(model string) string {
 	return SSEFrame(string(last)) + "data: [DONE]\n\n"
 }
 
+// --- continuations -----------------------------------------------------------
+
+// SoftRefuse: the notice as an ordinary assistant message, `finish_reason: "stop"`.
+func (openAIChat) SoftRefuse(model, notice string) string {
+	out, err := json.Marshal(map[string]any{
+		"id": "chatcmpl-ogr-refusal", "object": "chat.completion", "model": model,
+		"choices": []map[string]any{{
+			"index":         0,
+			"message":       map[string]any{"role": "assistant", "content": notice},
+			"finish_reason": "stop",
+		}},
+		"x_ogr": xOGR("answer"),
+	})
+	if err != nil {
+		return `{"error":{"message":"refused"}}`
+	}
+	return string(out)
+}
+
+// ⚠️ Deliberately does NOT set `message.refusal`. Some harnesses promote a populated
+// `refusal` to a terminal content_filter, which is the exact branch this rendering
+// exists to avoid — and the ones that do not would render the notice twice.
+func (c openAIChat) SoftRefuseStream(model, notice string) string {
+	head := chatChunk(model, map[string]any{"role": "assistant", "content": notice}, "")
+	// The marker rides the FIRST frame: a client that logs refusals must be able to
+	// see one on a stream too, now that the finish reason no longer says it.
+	head["x_ogr"] = xOGR("answer")
+	first, _ := json.Marshal(head)
+	last, _ := json.Marshal(chatChunk(model, map[string]any{}, "stop"))
+	return SSEFrame(string(first)) + SSEFrame(string(last)) + "data: [DONE]\n\n"
+}
+
+/*
+ * DropCallsStream re-emits the calls that survived as ordinary tool-call deltas.
+ *
+ * ⚠️ Each survivor is sent COMPLETE in one delta — id, name and the whole argument
+ * string — rather than split the way a provider streams it. A client concatenates
+ * argument deltas by index, so one complete delta assembles to the same call, and
+ * splitting it would only add ways to be cut short.
+ *
+ * ⚠️ Indexes are RENUMBERED from zero over the survivors. They must be: index is the
+ * client's accumulator key, so keeping the original index of call 2 after call 0 was
+ * refused leaves a hole that some clients render as an empty call.
+ */
+func (openAIChat) DropCallsStream(model string, survivors []Action, notice string) (string, bool) {
+	var b strings.Builder
+	for i, a := range survivors {
+		args := a.Arguments
+		if args == "" {
+			args = "{}"
+		}
+		chunk := chatChunk(model, map[string]any{"tool_calls": []map[string]any{{
+			"index": i, "id": a.ID, "type": "function",
+			"function": map[string]any{"name": a.Name, "arguments": args},
+		}}}, "")
+		raw, err := json.Marshal(chunk)
+		if err != nil {
+			return "", false
+		}
+		b.WriteString(SSEFrame(string(raw)))
+	}
+	notes, err := json.Marshal(chatChunk(model, map[string]any{"content": "\n\n" + notice}, ""))
+	if err != nil {
+		return "", false
+	}
+	b.WriteString(SSEFrame(string(notes)))
+	finish := "tool_calls"
+	if len(survivors) == 0 {
+		finish = "stop"
+	}
+	last, err := json.Marshal(chatChunk(model, map[string]any{}, finish))
+	if err != nil {
+		return "", false
+	}
+	b.WriteString(SSEFrame(string(last)))
+	b.WriteString("data: [DONE]\n\n")
+	return b.String(), true
+}
+
+// RetractSoft: one more content delta carrying the notice, then a normal stop.
+// Mid-stream this is exactly what a client expects — chunks are additive.
+func (openAIChat) RetractSoft(model, notice string) string {
+	first, _ := json.Marshal(chatChunk(model, map[string]any{"content": "\n\n" + notice}, ""))
+	last, _ := json.Marshal(chatChunk(model, map[string]any{}, "stop"))
+	return SSEFrame(string(first)) + SSEFrame(string(last)) + "data: [DONE]\n\n"
+}
+
+func (openAIChat) DropCalls(body string, paths []string, notice string) (string, bool) {
+	ordered := dropGroups(paths)
+	if ordered == nil || !allResolve(body, ordered) {
+		return body, false
+	}
+	out := body
+	for _, p := range ordered {
+		next, err := sjson.Delete(out, p)
+		if err != nil {
+			return body, false
+		}
+		out = next
+	}
+	const msg = "choices.0.message"
+	/*
+	 * ⚠️ What SURVIVED decides the finish reason, and getting it wrong breaks the loop
+	 * in whichever direction it is wrong: `tool_calls` with an empty array leaves a
+	 * harness waiting for calls that will never arrive, and `stop` while calls remain
+	 * makes it discard work the policy allowed.
+	 */
+	remaining := len(gjson.Get(out, msg+".tool_calls").Array())
+	finish := "tool_calls"
+	if remaining == 0 {
+		finish = "stop"
+		// An empty array is not the same as no array to every client; the model asked
+		// for nothing that survived, so say exactly that.
+		if next, err := sjson.Delete(out, msg+".tool_calls"); err == nil {
+			out = next
+		}
+	}
+	next, err := sjson.Set(out, msg+".content",
+		withNotice(gjson.Get(out, msg+".content").String(), notice))
+	if err != nil {
+		return body, false
+	}
+	out = next
+	if next, err := sjson.Set(out, "choices.0.finish_reason", finish); err == nil {
+		out = next
+	}
+	if next, err := sjson.SetRaw(out, "x_ogr", `{"decision":"block","continuation":"drop_calls"}`); err == nil {
+		out = next
+	}
+	return out, true
+}
+
 func chatChunk(model string, delta map[string]any, finish string) map[string]any {
 	choice := map[string]any{"index": 0, "delta": delta}
 	if finish != "" {
@@ -295,6 +427,10 @@ type chatDecoder struct {
 	// usage-only frame is one the client never asked for and must not receive.
 	suppressUsage bool
 }
+
+// SawCalls — see protocol.CallWatcher. A chunk carrying a tool-call delta has
+// already allocated the accumulator, so a non-empty map IS "bytes went out".
+func (d *chatDecoder) SawCalls() bool { return len(d.calls) > 0 }
 
 // RecognizedFrames — see protocol.FrameCounter.
 func (d *chatDecoder) RecognizedFrames() int { return d.frames }

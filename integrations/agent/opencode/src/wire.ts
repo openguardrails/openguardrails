@@ -28,7 +28,7 @@
  * WHO REPORTED IT — `"name/version"`, on every event AND on the heartbeat.
  * One constant so the two can never name different builds.
  */
-export const INTEGRATION = "ogr-opencode-auto-mode/0.3.0"
+export const INTEGRATION = "ogr-opencode-auto-mode/0.4.0"
 
 export interface WireEvent {
   kind: "step/request" | "step/response"
@@ -69,6 +69,25 @@ export interface WireEvent {
    * named "".
    */
   session_hint?: string
+  /**
+   * WHAT WAS MASKED — the OGR 1.4 local-redaction report: the ruleset id this
+   * step ran under and the tokens MINTED in this step (never values). Absent
+   * when local redaction is off or the host never offered the messages hook;
+   * `ruleset: ""` when it is on but no ruleset was ever obtained.
+   */
+  redaction?: WireRedaction
+}
+
+export interface WireRedaction {
+  ruleset: string
+  masked: Array<{ token: string; rule: string }>
+}
+
+/** What the heartbeat answers with; `rules.id` is how a ruleset change reaches a running plugin. */
+export interface HeartbeatReply {
+  ok?: boolean
+  rules?: { id?: string }
+  [key: string]: unknown
 }
 
 /** One tool call as a canonical step/response payload carries it. */
@@ -144,6 +163,12 @@ export class OgrClient {
     private readonly log: WireLog,
     private readonly source: () => RuntimeSource | null,
     private readonly timeoutMs: () => number,
+    /**
+     * The EGRESS pass every event takes immediately before serialisation
+     * (local-redaction D6): known secret values → their tokens, so the OGR
+     * client is masked exactly like the provider is. Identity when unset.
+     */
+    private readonly egress: (event: WireEvent) => WireEvent = (e) => e,
   ) {}
 
   /** Whether a runtime is configured RIGHT NOW (the source is live). */
@@ -183,7 +208,7 @@ export class OgrClient {
     try {
       // Stamped HERE, not at each construction site: one send path means the
       // build id cannot go missing on one kind of event only.
-      const res = await this.post("/v1/evaluate", { ...event, integration: INTEGRATION })
+      const res = await this.post("/v1/evaluate", { ...this.egress(event), integration: INTEGRATION })
       if (!res) return null
       if (!res.ok) {
         this.evaluateErrors += 1
@@ -205,17 +230,33 @@ export class OgrClient {
    * runtime tells "agent idle" from "integration went dark". A failed beat
    * is a lost signal, never a lost enforcement.
    */
-  async heartbeat(integration: string, agentId: string, intervalS: number): Promise<void> {
+  async heartbeat(
+    integration: string,
+    agentId: string,
+    intervalS: number,
+    extra: Record<string, unknown> = {},
+  ): Promise<HeartbeatReply | null> {
     try {
       const res = await this.post("/v1/heartbeat", {
         integration,
         ...agentId ? { agent_id: agentId } : {},
         interval_s: intervalS,
         counters: { events_sent: this.eventsSent, evaluate_errors: this.evaluateErrors },
+        ...extra,
       })
-      if (res && !res.ok) this.log.warn(`[openguardrails] heartbeat answered ${res.status}`)
+      if (!res) return null
+      if (!res.ok) {
+        this.log.warn(`[openguardrails] heartbeat answered ${res.status}`)
+        return null
+      }
+      try {
+        return (await res.json()) as HeartbeatReply
+      } catch {
+        return null
+      }
     } catch (err) {
       this.log.warn(`[openguardrails] heartbeat failed (${String(err)})`)
+      return null
     }
   }
 }

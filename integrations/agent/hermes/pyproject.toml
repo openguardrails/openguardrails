@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "openguardrails-instrumentation-hermes"
-version = "1.0.0"
-description = "Guard a Hermes agent through the OpenGuardrails (OGR) v0.8 Runtime API — two evaluates per model call, hand-rolled over stdlib, zero dependencies."
+version = "2.0.0"
+description = "Guard a Hermes agent through the OpenGuardrails (OGR) Runtime API — two evaluates per model call plus local secrets redaction (mask before the request leaves the host, restore only into a tool's arguments), hand-rolled over stdlib, zero dependencies."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"

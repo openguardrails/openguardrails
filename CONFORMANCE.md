@@ -43,7 +43,7 @@ An integration is **OGR-conformant** if it implements
    evaluate failure, and a 429 all as "could not look" (see
    [Degraded mode](specification/degraded-mode.md));
 5. judges streamed answers once, whole, behind a held-back tail
-   ([streaming](specification/runtime-api.md#streaming-hold-the-tail-judge-once)) —
+   ([streaming](specification/runtime-api.md#streaming-release-a-bounded-head-judge-once)) —
    never chunk-by-chunk, and never releasing the tail or executing a tool
    call before the verdict.
 

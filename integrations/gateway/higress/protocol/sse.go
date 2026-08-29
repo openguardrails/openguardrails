@@ -41,6 +41,26 @@ type Decoder interface {
 	Output() Output
 }
 
+/*
+ * CallWatcher is implemented by a Decoder that can say whether it has seen any
+ * TOOL-CALL bytes yet. Optional, and type-asserted exactly like FrameCounter.
+ *
+ * ⚠️⚠️ It exists for ONE decision, and getting it wrong executes an action nobody
+ * approved. A refused stream that already released bytes can be ended on a normal
+ * `stop` — which is what lets an agent loop survive — only while the client cannot
+ * have assembled an actionable tool call from what it has. Once tool-call deltas are
+ * out, the client holds a partial call, and harnesses act on `tool_calls` being
+ * non-empty rather than on the finish reason (measured in hermes:
+ * `if assistant_message.tool_calls:`). Ending THAT on `stop` would have it run a call
+ * with truncated arguments.
+ *
+ * ⚠️ A decoder that does not implement this is treated as HAVING seen calls — the
+ * side that keeps the hard retraction, which is today's behaviour and refuses whole.
+ */
+type CallWatcher interface {
+	SawCalls() bool
+}
+
 // FrameCounter is implemented by a Decoder that counts the data frames it
 // RECOGNISED as its own protocol's — a chat chunk with a `choices` array, an
 // anthropic event of a known type, a `response.*` event. It exists to split an
@@ -60,6 +80,18 @@ func (s *Scanner) RecognizedFrames() int {
 		return c.RecognizedFrames()
 	}
 	return 0
+}
+
+// SawCalls delegates to the decoder — see CallWatcher.
+//
+// ⚠️ TRUE when the decoder cannot answer, which is the side that keeps the hard
+// retraction. The opposite default would end a stream normally while the client held
+// a partial call.
+func (s *Scanner) SawCalls() bool {
+	if w, ok := s.dec.(CallWatcher); ok {
+		return w.SawCalls()
+	}
+	return true
 }
 
 // ContentMeter is implemented by a Decoder that can report, cheaply, how much
@@ -109,25 +141,77 @@ type Scanner struct {
 
 func NewScanner(dec Decoder) *Scanner { return &Scanner{dec: dec} }
 
+/*
+ * Segment is one complete SSE FRAME on its way to the caller, tagged with the
+ * running client-visible content total at the moment it was produced.
+ *
+ * ⚠️⚠️ **A FRAME, NEVER A LINE AND NEVER A CHUNK.** The frame is what the client
+ * DISPATCHES — a `data:` line is inert until its blank terminator arrives — so it is
+ * the smallest unit that may be released on its own. And the CHUNK is far too coarse
+ * to be that unit: measured on this lab, one upstream chunk is ~16 KB carrying 329
+ * bytes of content, so a release rule working in whole chunks cannot express any
+ * bound smaller than a third of the answer. That is not a tuning problem, it is the
+ * difference between a head budget that means what it says and one that silently
+ * rounds to "the first chunk".
+ *
+ * ⚠️ Anything that is not a terminated frame — a comment, a trailing partial, the
+ * end-of-stream Flush — accumulates into the segment being built and is closed out
+ * at the end of the chunk. Never dropped and never reordered.
+ */
+type Segment struct {
+	Bytes []byte
+	// Content is the scanner's running ContentBytes() AFTER this segment, i.e.
+	// exactly the exposure a caller holds once it has been released.
+	Content int
+}
+
 // Chunk processes one raw chunk and returns the bytes to forward.
+//
+// The concatenation of ChunkSegments, for callers that do not enforce on the stream.
 func (s *Scanner) Chunk(chunk []byte, isLast bool) []byte {
+	var out []byte
+	for _, seg := range s.ChunkSegments(chunk, isLast) {
+		out = append(out, seg.Bytes...)
+	}
+	return out
+}
+
+// ChunkSegments processes one raw chunk and returns the bytes to forward, split at
+// FRAME boundaries so a release rule can work in units the client can actually act
+// on. See Segment.
+func (s *Scanner) ChunkSegments(chunk []byte, isLast bool) []Segment {
 	text := s.carry + string(chunk)
 	s.carry = ""
 
-	out := make([]byte, 0, len(chunk)+64)
+	var segs []Segment
+	cur := make([]byte, 0, len(chunk)+64)
 	start := 0
 	for i := 0; i < len(text); i++ {
 		if text[i] != '\n' {
 			continue
 		}
-		out = append(out, s.dec.Line(text[start:i], isLast)...)
-		out = append(out, '\n')
+		line := text[start:i]
+		cur = append(cur, s.dec.Line(line, isLast)...)
+		cur = append(cur, '\n')
 		start = i + 1
+		/*
+		 * ⚠️ An EMPTY line terminates a frame, and that is where a segment closes —
+		 * the blank line travels WITH the data line it terminates, never as a segment
+		 * of its own. Releasing a `data:` line while holding its terminator would give
+		 * the client an event it can never dispatch: bytes delivered, nothing rendered,
+		 * and the exposure counted against the budget all the same.
+		 * ⚠️ `\r` is trimmed for the emptiness test only — a CRLF stream's terminator
+		 * is still a terminator, and the bytes forwarded are untouched either way.
+		 */
+		if strings.TrimRight(line, "\r") == "" {
+			segs = append(segs, Segment{Bytes: cur, Content: s.ContentBytes()})
+			cur = make([]byte, 0, 64)
+		}
 	}
 	if start < len(text) {
 		tail := text[start:]
 		if isLast {
-			out = append(out, s.dec.Line(tail, true)...)
+			cur = append(cur, s.dec.Line(tail, true)...)
 		} else {
 			s.carry = tail
 		}
@@ -136,9 +220,15 @@ func (s *Scanner) Chunk(chunk []byte, isLast bool) []byte {
 		// Backstop for a stream that ends without its own terminator — a dropped
 		// upstream connection. Nothing more is coming, so whatever the restorer is
 		// holding is text, not the start of a token.
-		out = append(out, s.dec.Flush()...)
+		cur = append(cur, s.dec.Flush()...)
 	}
-	return out
+	// Whatever did not end on a frame boundary — a comment, a flush, a stream that
+	// never terminates its last frame — closes the chunk as its own segment rather
+	// than being dropped or merged into the NEXT chunk's first frame.
+	if len(cur) > 0 {
+		segs = append(segs, Segment{Bytes: cur, Content: s.ContentBytes()})
+	}
+	return segs
 }
 
 // Output is the reply reassembled so far.

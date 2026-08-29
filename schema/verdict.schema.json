@@ -208,6 +208,37 @@
           }
         }
       }
+    },
+    "continuation": {
+      "type": "object",
+      "description": "HOW to express this refusal to a caller that is an agent loop. Present only on `block`, and OPTIONAL: a runtime MAY omit it and a PEP MAY ignore it, in which case the refusal is rendered as it always was. It NEVER weakens the decision — the action still does not proceed; it selects the shape the refusal takes so that one refused step does not end the caller's session. `drop_calls`: remove the named `payload.tool_calls.N` elements from the reply, keep the rest, append `notice`. `withhold`: replace the text at each path with `notice` and forward the request. `answer`: render `notice` as the whole reply. Paths follow the same grammar as `findings[].path`, against the body as transported.",
+      "properties": {
+        "style": {
+          "type": "string",
+          "enum": [
+            "drop_calls",
+            "withhold",
+            "answer"
+          ]
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Payload paths to act on. Empty for `answer`."
+        },
+        "notice": {
+          "type": "string",
+          "maxLength": 2000,
+          "description": "Prose the MODEL reads: why, and what it may do instead."
+        }
+      },
+      "required": [
+        "style",
+        "notice"
+      ],
+      "additionalProperties": false
     }
   }
 }

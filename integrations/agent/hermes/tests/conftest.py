@@ -21,20 +21,25 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import openguardrails_instrumentation_hermes.bridge as bridge  # noqa: E402
-from hermes_testkit import API_KEY, MockRuntime  # noqa: E402
+from hermes_testkit import API_KEY, RULESET, MockRuntime  # noqa: E402
 
 _OGR_VARS = (
     "OGR_RUNTIME_URL", "OGR_API_KEY",
     "OGR_AGENT_ID", "OGR_AGENT_TYPE", "OGR_AGENT_WORKSPACE", "OGR_AGENT_USER",
     "OGR_FAIL_MODE", "OGR_TIMEOUT", "OGR_REFUSAL_TEXT", "OGR_REDACT_MASK",
+    "OGR_SESSION_TAG",
+    "OGR_LOCAL_REDACTION", "OGR_RULES_CACHE", "OGR_RESTORE_OUTPUT",
+    "OGR_LOCAL_REDACTION_TIERS",
 )
 
 
 @pytest.fixture
-def clean_env(monkeypatch):
-    """No OGR config leaks in from the developer's shell."""
+def clean_env(monkeypatch, tmp_path):
+    """No OGR config leaks in from the developer's shell — and the ruleset
+    cache lands under tmp_path, never in the developer's ~/.openguardrails."""
     for var in _OGR_VARS:
         monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("OGR_RULES_CACHE", str(tmp_path / "rules.json"))
     bridge.reset()
     yield monkeypatch
     bridge.reset()
@@ -42,9 +47,10 @@ def clean_env(monkeypatch):
 
 @pytest.fixture
 def guarded(clean_env):
-    """A configured bridge pointed at a strict mock runtime. Yields the mock;
-    teardown asserts every event the suite sent was wire-conformant."""
-    rt = MockRuntime()
+    """A configured bridge pointed at a strict mock runtime that serves the
+    inline ruleset. Yields the mock; teardown asserts every event the suite
+    sent was wire-conformant."""
+    rt = MockRuntime(ruleset=RULESET)
     clean_env.setenv("OGR_RUNTIME_URL", rt.url)
     clean_env.setenv("OGR_API_KEY", API_KEY)
     bridge.reset()
@@ -53,6 +59,18 @@ def guarded(clean_env):
         assert rt.violations == [], f"non-conformant events reached the wire: {rt.violations}"
     finally:
         rt.close()
+
+
+@pytest.fixture
+def protected(guarded):
+    """`guarded`, with the ruleset fetched SYNCHRONOUSLY so a test can rely on
+    masking from its first request (the plugin itself fetches in the
+    background and masks with the cache meanwhile)."""
+    client = bridge.get_client()
+    if client.redactor.ruleset is None:
+        client.redactor.store.fetch()
+    assert client.redactor.ruleset is not None, "the mock's ruleset did not load"
+    return guarded
 
 
 @pytest.fixture

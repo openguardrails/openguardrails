@@ -13,6 +13,13 @@ Hermes' hooks land on it like this:
                           -> a FRAGMENT vantage: one exec about to run, sent
                              as its own canonical step/response
 
+    llm_request     (mw)  -> 2.0: MASK the outbound provider request
+                             (local_redaction.py) + the session tag
+    llm_execution   (mw)  -> 2.0: fail-closed with NO ruleset refuses the call
+    tool_execution  (mw)  -> 2.0: RESTORE tokens into the tool's arguments,
+                             after every judgement and approval; an
+                             unrestorable token refuses the call instead
+
 The seam split, which shapes everything here: Hermes DISCARDS what
 pre/post_api_request return (agent/conversation_loop.py invokes them for
 effect only), so the hooks that hold the step's content cannot enforce, and
@@ -32,6 +39,7 @@ raw — the events say what this vantage actually sees.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import threading
@@ -39,6 +47,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from . import local_redaction
 from .wire import OgrClient
 
 logger = logging.getLogger("ogr-guard")
@@ -62,11 +71,20 @@ _pending_steps: dict[str, tuple[str, str]] = {}
 # new round starts so a stale verdict can never land on a later answer.
 _parked: dict[str, dict[str, Any]] = {}
 
+# session_id -> the tokens the llm_request mask MINTED for the step about to
+# be sent: set by the middleware, consumed by the very next pre_api_request
+# so that step/request event carries `redaction.masked` (design §4.1, §4.4).
+_step_masked: dict[str, list[dict[str, str]]] = {}
+
 
 def get_client() -> OgrClient:
     global _client
-    if _client is None:
-        _client = OgrClient()
+    with _lock:
+        if _client is None:
+            _client = OgrClient()
+            # Cache first, then the feed in the background — the first
+            # request masks with whatever is cached, never waits on the wire.
+            _client.redactor.start()
     return _client
 
 
@@ -78,6 +96,7 @@ def reset() -> None:
         _client = None
         _pending_steps.clear()
         _parked.clear()
+        _step_masked.clear()
 
 
 def _now() -> str:
@@ -186,10 +205,14 @@ def on_pre_api_request(session_id="", task_id="", turn_id="", api_request_id="",
         # either way it must not land on THIS round's answer).
         _parked.pop(session_id, None)
         _pending_steps[key] = (step_id, started_at)
+        # What the llm_request mask minted for THIS step (2.0). The messages
+        # below are the masked ones — the middleware runs before this hook.
+        masked = _step_masked.pop(session_id, [])
     messages = [_plain_message(m) for m in (request_messages or conversation_history or [])]
     verdict = client.evaluate("step/request", step_id, "canonical",
                               {"messages": messages},
-                              session_hint=_session_tag(session_id) if session_id else "")
+                              session_hint=_session_tag(session_id) if session_id else "",
+                              session_id=session_id, masked=masked)
     if client.blocked(verdict):
         logger.warning("ogr-guard: step/request blocked %s", _brief(verdict))
         with _lock:
@@ -235,7 +258,13 @@ def on_post_api_request(session_id="", task_id="", turn_id="", api_request_id=""
     if started_at:
         payload["timing"] = {"started_at": started_at, "completed_at": _now()}
     verdict = client.evaluate("step/response", step_id, "canonical", payload,
-                              session_hint=_session_tag(session_id) if session_id else "")
+                              session_hint=_session_tag(session_id) if session_id else "",
+                              session_id=session_id)
+    if client.redactor.enabled:
+        # The runtime scored the MASKED text (D6), so that is what a span's
+        # offsets index. Same map, same rules, every value now known ⇒ the
+        # same string evaluate() transported, minting nothing new.
+        text, _ = client.redactor.mask_egress(text, session_id)
     if client.blocked(verdict):
         logger.warning("ogr-guard: step/response blocked %s", _brief(verdict))
         with _lock:
@@ -270,21 +299,44 @@ def on_pre_tool_call(tool_name="", args=None, session_id="", tool_call_id="", **
     """
     with _lock:
         parked = _parked.get(session_id)
-    if parked is None:
-        return None
-    verdict = parked["verdict"]
-    if verdict.get("decision") == "block":
-        return {"action": "block", "message": _brief(verdict)}
-    # allow + spans naming a tool call's arguments: the redaction cannot be
-    # applied here — this hook can block or pass, never rewrite — so the
-    # softer decision degrades to the denial it was a gentler form of. The
-    # message says what to do, because the reader is the agent: strip the
-    # value and retry is the action a span on an action was reaching for.
-    if any(str(s.get("path", "")).startswith("payload.tool_calls") for s in _spans(verdict)):
-        return {"action": "block",
-                "message": (f"{_brief(verdict)} — arguments contain content that must "
-                            f"be redacted; remove the flagged value and retry")}
+    if parked is not None:
+        verdict = parked["verdict"]
+        if verdict.get("decision") == "block":
+            return {"action": "block", "message": _brief(verdict)}
+        # allow + spans naming a tool call's arguments: the redaction cannot be
+        # applied here — this hook can block or pass, never rewrite — so the
+        # softer decision degrades to the denial it was a gentler form of. The
+        # message says what to do, because the reader is the agent: strip the
+        # value and retry is the action a span on an action was reaching for.
+        if any(str(s.get("path", "")).startswith("payload.tool_calls")
+               for s in _spans(verdict)):
+            return {"action": "block",
+                    "message": (f"{_brief(verdict)} — arguments contain content that must "
+                                f"be redacted; remove the flagged value and retry")}
+    # 2.0 — a token this session never issued (a resumed session, a
+    # hallucinated number, a token from the gateway path) cannot be restored
+    # into the call, and forwarding the literal is worse than refusing: a
+    # shell expands `${OGR_SECRET_7}` to nothing and the call fails downstream
+    # with nothing naming why. Blocked HERE, on the harness's own block path,
+    # and again in tool_execution for a Hermes without pre_tool_call.
+    notice = _unrestorable_notice(args, session_id)
+    if notice:
+        return {"action": "block", "message": notice}
     return None
+
+
+def _unrestorable_notice(args: Any, session_id: str) -> str:
+    """The §4.3 notice when `args` carries a `${OGR_…}` token with no map
+    entry in this session, else ""."""
+    redactor = get_client().redactor
+    if not redactor.enabled or not isinstance(args, (dict, list, str)):
+        return ""
+    _, unresolved = redactor.restore_args(args, session_id)
+    if not unresolved:
+        return ""
+    logger.warning("ogr-guard: tool call carries unrestorable token(s) %s — refused",
+                   ", ".join(unresolved))
+    return local_redaction.unresolved_notice(unresolved)
 
 
 def on_transform_llm_output(response_text="", session_id="", **_):
@@ -298,7 +350,22 @@ def on_transform_llm_output(response_text="", session_id="", **_):
     are applied in place before the content proceeds, as the Verdict spec
     requires; a span set that cannot be applied withholds the answer, never
     ships it — "redacted" must not be a label on the verbatim value.
+
+    2.0: with OGR_RESTORE_OUTPUT=true (default false — D7: hermes gateways
+    deliver the final answer to Telegram/Slack/Discord, each one an egress)
+    the session's tokens are restored in the FINAL text, after enforcement.
     """
+    out = _enforce_output(response_text, session_id)
+    redactor = get_client().redactor
+    if redactor.enabled and redactor.restore_output and session_id:
+        base = out if isinstance(out, str) else response_text
+        restored, _ = redactor.restore_text(base, session_id)
+        if restored != base:
+            return restored
+    return out
+
+
+def _enforce_output(response_text: str, session_id: str) -> str | None:
     with _lock:
         parked = _parked.pop(session_id, None)
     if parked is None:
@@ -409,10 +476,17 @@ def guard_exec(command: str, cwd: str = "/workspace") -> tuple[bool, str]:
         "name": "bash",
         "arguments": {"command": command, "cwd": cwd},
     }]}
+    # Session-less: this vantage holds no session. The wire masks the body
+    # from every session's map (D6) — the exec runs AFTER restore, so the real
+    # argv is exactly where the value has come back. The log line is masked
+    # the same way: a log is an egress too.
     verdict = client.evaluate("step/response", step_id, "canonical", payload)
     allowed = not client.blocked(verdict)
     if not allowed:
-        logger.warning("ogr-guard: exec blocked %s :: %s", _brief(verdict), command)
+        shown = command
+        if client.redactor.enabled:
+            shown, _ = client.redactor.mask_egress(command, "")
+        logger.warning("ogr-guard: exec blocked %s :: %s", _brief(verdict), shown)
     return allowed, _brief(verdict)
 
 
@@ -460,11 +534,35 @@ def _session_tag(session_id: str) -> str:
 
 
 def on_llm_request_middleware(request=None, session_id="", api_mode="", **_):
-    """llm_request middleware: return {"request": ...} with the session tag."""
-    if not _SESSION_TAG_ENABLED or not session_id or not isinstance(request, dict):
+    """llm_request middleware: {"request": ...} with (2.0) every secret masked
+    to a `${OGR_SECRET_n}` token, plus the session tag.
+
+    This is the ONE seam where the complete outbound provider request is
+    mutable, and it runs BEFORE pre_api_request — so the step/request event
+    the guard sends is the masked one for free. The tokens minted here are
+    recorded for that event's `redaction.masked`.
+    """
+    if not isinstance(request, dict):
+        return None
+    changed = False
+    redactor = get_client().redactor
+    if redactor.enabled:
+        # No ruleset (no cache, fetch failed): under fail-open the request
+        # goes out UNMASKED and this warns on every request until one
+        # arrives; under fail-closed llm_execution refuses the call.
+        redactor.warn_if_unprotected()
+        masked_request, minted = redactor.mask_request(request, session_id)
+        if minted or masked_request != request:
+            request = masked_request
+            changed = True
+        if session_id:
+            with _lock:
+                _step_masked[session_id] = minted
+    if not _SESSION_TAG_ENABLED or not session_id:
+        if changed:
+            return {"request": request, "plugin": "ogr-guard", "reason": "local redaction"}
         return None
     tag = _session_tag(session_id)
-    changed = False
     if "anthropic" in (api_mode or ""):
         metadata = request.get("metadata")
         if not isinstance(metadata, dict):
@@ -482,4 +580,51 @@ def on_llm_request_middleware(request=None, session_id="", api_mode="", **_):
             changed = True
     if not changed:
         return None
-    return {"request": request, "plugin": "ogr-guard", "reason": "session tag"}
+    return {"request": request, "plugin": "ogr-guard", "reason": "local redaction + session tag"}
+
+
+# --------------------------------------------------------------------------- #
+# 2.0 — the restore seam and the fail-closed gate
+# --------------------------------------------------------------------------- #
+def on_tool_execution_middleware(tool_name="", args=None, next_call=None, session_id="", **_):
+    """tool_execution middleware — the LAST mutable point before dispatch,
+    after pre_tool_call, the guardrails and the approval gate (design D7):
+    every `${OGR_SECRET_n}` in the arguments becomes its value HERE and
+    nowhere earlier, so the runtime, the human approval prompt and every
+    hook judged the token.
+
+    An unrestorable token refuses the call — a tool-error result the model
+    can act on (the §4.3 notice) — rather than forwarding a literal a shell
+    expands to nothing. pre_tool_call blocks the same call earlier where
+    Hermes runs it; this is the seam that holds on a build without it.
+    """
+    if next_call is None:
+        return None
+    redactor = get_client().redactor
+    if not redactor.enabled or not isinstance(args, dict):
+        return next_call(args)
+    restored, unresolved = redactor.restore_args(args, session_id)
+    if unresolved:
+        logger.warning("ogr-guard: %s refused — unrestorable token(s) %s",
+                       tool_name, ", ".join(unresolved))
+        return json.dumps({"error": local_redaction.unresolved_notice(unresolved)},
+                          ensure_ascii=False)
+    return next_call(restored)
+
+
+def on_llm_execution_middleware(request=None, next_call=None, session_id="", **_):
+    """llm_execution middleware — the fail-CLOSED gate for "no ruleset at all"
+    (no cache, fetch failed). llm_request can only rewrite, never refuse, so
+    the refusal lives here: returning None is the one "no response" Hermes
+    already understands (it routes it through its own retry/fallback path
+    and surfaces the error), and nothing provider-shaped is fabricated.
+    Under the default fail-open the call proceeds, warned per request."""
+    if next_call is None:
+        return None
+    client = get_client()
+    if client.redactor.enabled and client.fail_mode == "closed" \
+            and client.redactor.ruleset is None:
+        logger.error("ogr-guard: fail-closed and NO ruleset (fetch failed, no cache) — "
+                     "model call refused")
+        return None
+    return next_call(request)

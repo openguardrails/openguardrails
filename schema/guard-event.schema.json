@@ -2,7 +2,7 @@
  "$schema": "https://json-schema.org/draft/2020-12/schema",
  "$id": "https://openguardrails.com/schema/1.0/guard-event.schema.json",
  "title": "GuardEvent",
- "description": "A unit observed at an OGR integration point, on the one observed plane: LLM messages. Two kinds: the two halves of a step (one model call). Every field is required except 'integration', 'connection' and 'session_hint'; the empty string on an identity field is the explicit 'no assertion'. All fields are flat, top-level snake_case; objects are reserved for inherently structured data (payload).",
+ "description": "A unit observed at an OGR integration point, on the one observed plane: LLM messages. Two kinds: the two halves of a step (one model call). Every field is required except 'integration', 'connection', 'session_hint' and (1.4) 'redaction'; the empty string on an identity field is the explicit 'no assertion'. All fields are flat, top-level snake_case; objects are reserved for inherently structured data (payload).",
  "type": "object",
  "required": [
   "kind",
@@ -70,6 +70,49 @@
    "type": "string",
    "maxLength": 128,
    "description": "OPTIONAL. The producer's own name for the CONVERSATION this step belongs to — opaque, stable for the life of one conversation, distinct across concurrent conversations. Integrations that hold a natural session id SHOULD send it on every event of the session, side calls and subagents included. A GROUPING HINT, not v0.7's declared coordinates: the runtime still derives turns/steps and may decline the grouping where its own evidence contradicts it. A runtime MUST NOT derive authorization, policy selection, ordering, or trust from it."
+  },
+  "redaction": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "ruleset",
+    "masked"
+   ],
+   "description": "OPTIONAL (OGR 1.4). What an integration doing LOCAL REDACTION masked on the host before this step left it — see specification/local-redaction.md. Tokens, never values. Absent means the integration does not do local redaction or has it off; a runtime MUST accept the event and draw no diagnosis. A CLAIM per the `integration` rule: self-declared, never an input to a decision; a runtime SHOULD verify each reported token occurs in the body before counting it, and MUST count it nowhere else.",
+   "properties": {
+    "ruleset": {
+     "type": "string",
+     "maxLength": 64,
+     "description": "The id of the ruleset the integration ran, exactly as GET /v1/rules served it ('rs_' + 32 hex). The empty string means local redaction is ON but no ruleset was ever obtained (fail-open) — 'protected by nothing', which is different from absent."
+    },
+    "masked": {
+     "type": "array",
+     "maxItems": 256,
+     "description": "The placeholders MINTED in this step — new values only; tokens already in the history are just text now.",
+     "items": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+       "token",
+       "rule"
+      ],
+      "properties": {
+       "token": {
+        "type": "string",
+        "maxLength": 64,
+        "pattern": "^\\$\\{OGR_[A-Z_]+_[0-9]+\\}$",
+        "description": "The placeholder, in the one OGR shape (`${OGR_SECRET_3}`). Never the value."
+       },
+       "rule": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "description": "Which rule minted it: the check_id, or check_id/pattern_id where the rule names its patterns (`entity_api_key/gitlab`) — the coverage statistic per issuer."
+       }
+      }
+     }
+    }
+   }
   },
   "obligation_results": {
    "type": "array",

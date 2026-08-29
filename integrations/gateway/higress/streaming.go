@@ -142,8 +142,25 @@ func (s *streamProcessor) settleMode(chunk []byte) {
 }
 
 // ProcessChunk restores placeholders in one raw chunk and accumulates what the model
-// produced.
+// produced. The concatenation of ProcessChunkSegments, for the lane that forwards the
+// stream untouched.
 func (s *streamProcessor) ProcessChunk(chunk []byte, isLast bool) []byte {
+	var out []byte
+	for _, seg := range s.ProcessChunkSegments(chunk, isLast) {
+		out = append(out, seg.Bytes...)
+	}
+	return out
+}
+
+/*
+ * ProcessChunkSegments is the same work, split at SSE FRAME boundaries and tagged
+ * with the running content total — the unit the tail-hold releases in.
+ *
+ * ⚠️ A non-SSE body is ONE segment carrying the whole chunk: there are no frames to
+ * split and the hold buffers it whole anyway (`head < 0`), so a content tag would
+ * be meaningless. `ContentBytes()` returns raw length there, for the log's benefit.
+ */
+func (s *streamProcessor) ProcessChunkSegments(chunk []byte, isLast bool) []protocol.Segment {
 	if len(chunk) > 0 && s.firstAt.IsZero() {
 		s.firstAt = time.Now()
 	}
@@ -159,9 +176,12 @@ func (s *streamProcessor) ProcessChunk(chunk []byte, isLast bool) []byte {
 		if s.raw.Len() < maxRawAccum {
 			s.raw.Write(chunk)
 		}
-		return chunk
+		if len(chunk) == 0 {
+			return nil
+		}
+		return []protocol.Segment{{Bytes: chunk, Content: s.ContentBytes()}}
 	}
-	return s.scan.Chunk(chunk, isLast)
+	return s.scan.ChunkSegments(chunk, isLast)
 }
 
 // Bytes is how much the upstream sent.
@@ -178,6 +198,21 @@ func (s *streamProcessor) ContentBytes() int {
 		return s.raw.Len()
 	}
 	return s.scan.ContentBytes()
+}
+
+/*
+ * SawCalls reports whether the decoder has reassembled any TOOL-CALL bytes yet —
+ * see protocol.CallWatcher for the one decision it feeds.
+ *
+ * ⚠️ Answers TRUE for anything it cannot ask: a non-SSE body, a missing scanner, or
+ * a decoder that does not implement the interface. "Assume a call may be out there"
+ * keeps the hard retraction, which is the behaviour this build already had.
+ */
+func (s *streamProcessor) SawCalls() bool {
+	if !s.sse || s.scan == nil {
+		return true
+	}
+	return s.scan.SawCalls()
 }
 
 // SawBytes reports whether there was anything to read at all.

@@ -31,3 +31,8 @@ Protocol v0.8 merged the two recipes into one; plugins rewritten against it:
   **[`gateway/mitmproxy`](gateway/mitmproxy/)**,
   **[`gateway/openai-anthropic`](gateway/openai-anthropic/)** — rewritten
   against v0.8.
+- **[Local redaction](../specification/local-redaction.md) (OGR 1.4)** — masking
+  secrets on the host before a request leaves for the provider, with rules
+  served by `GET /v1/rules`: `agent/hermes` 2.0, `agent/opencode` 0.4 and
+  `agent/openclaw` 0.4 (in progress). A gateway does not do it — the runtime
+  masks on its behalf — and no other agent plugin does yet.

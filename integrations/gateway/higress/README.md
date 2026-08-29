@@ -238,7 +238,7 @@ the consumer headers from client requests at the edge, before AUTHN, or use
 headers no client can reach — and verify it on your own deployment; ours did
 not.
 
-## Judging a STREAMED answer: hold the tail, judge once
+## Judging a STREAMED answer: release a bounded head, judge once
 
 **Not while it grows.** The pipeline measured mid-stream judgement directly: at
 25% of the reply visible, false positives on `mt_harm_correct` are 0.353
@@ -246,37 +246,63 @@ against 0.000 on the whole reply — all of it the answer that agrees on the
 surface and corrects underneath ("是的，很多人有这种念头——但这个想法是错的").
 Early detection is a fit prefilter and an unfit blocking criterion. v0.8
 codified the alternative (and deleted the `ogr-partial` interim evaluates and
-the `output_mode` lane switch that preceded it):
+the `output_mode` lane switch that preceded it); **3.10.0 moved the bound from
+the answer's tail to its head**:
 
 ```
-first token ──► … stream flows to the caller … ──► last stream_tail_chars WITHHELD
+first token ──► first stream_head_release_bytes RELEASED ──► everything after WITHHELD
                                                         │
                                     stream ends: reassemble the WHOLE answer,
                                     ONE step/response evaluate (canonical shape,
                                     transcribed usage + observed timing)
                                                         │
-                                        allow ─► release the held tail
-                                        block ─► drop the tail, CUT the stream
+                                        allow ─► release everything held
+                                        block ─► drop it, CUT the stream
 ```
 
-- The withheld tail is `stream_tail_chars` of client-visible content (default
-  200, counted in UTF-8 bytes of text/reasoning/tool-arguments — never SSE
-  framing; on multi-byte text the same setting withholds fewer *characters*,
-  so set it higher if that matters). Release granularity is the chunk, so the
-  hold is a floor, not an exact figure.
-- **Tool calls never execute before the verdict**, whatever the tail setting: a
+- ⚠️ **Why the head and not the tail.** `stream_tail_chars` (≤ 3.9.0, default
+  200) guaranteed "at least 200 bytes withheld", which says *nothing about
+  exposure*: what reached the caller was `total − 200`, unbounded in the length
+  of the answer. A ~900-byte answer to a prohibited question was therefore
+  delivered essentially whole and then retracted, because the verdict cannot
+  exist before the last token. Bounding the HEAD makes exposure a **constant**,
+  independent of the answer's length and of judge latency.
+- The released head is `stream_head_release_bytes` of client-visible content
+  (default **32**, counted in UTF-8 bytes of text/reasoning/tool-arguments —
+  never SSE framing, so contentless opening frames are free and the stream
+  looks alive immediately). It is a **ceiling**: a chunk that would carry the
+  caller past the bound is held whole, never trimmed.
+- **32 is a liveness token, not a delivery** — about ten characters, enough for
+  a client to render "the stream started" and measure an honest TTFT, and
+  enough to buy the judge the whole generation on the overwhelming majority of
+  requests that are never refused. `0` releases nothing: a spinner until the
+  judged answer arrives, and every block a clean refusal.
+- **Tool calls never execute before the verdict**, whatever the setting: a
   provider stream only completes tool calls at its end, so argument
-  completions, `finish_reason` and `[DONE]` are always inside the held tail —
-  and the final chunk is never released by arithmetic, only by the verdict.
+  completions, `finish_reason` and `[DONE]` are always inside the held
+  remainder — and the final chunk is never released by arithmetic, only by the
+  verdict.
 - **A block cuts the stream so the answer never completes as sent.** If nothing
-  was released yet (short answer, non-SSE reply, tail larger than the answer)
-  the caller gets a true refusal in its own protocol; otherwise the stream ends
-  with the protocol's retraction frame (`content_filter` / `refusal` stop) —
-  the head has been read and cannot be un-delivered, which is the accepted,
-  spec-stated cost of streaming.
-- **TTFT is unchanged** — the evaluate round-trip delays only the tail. A
-  deployment that can accept no exposure at all sets the tail huge (the spec's
-  `tail = ∞` limit case degenerates to buffering) or `stream: false`.
+  was released yet (a zero budget, a non-SSE reply, an answer whose first chunk
+  already exceeds the budget) the caller gets a true refusal in its own
+  protocol; otherwise the stream ends with the protocol's retraction frame
+  (`content_filter` / `refusal` stop) — the head has been read and cannot be
+  un-delivered, which is the accepted, spec-stated cost of streaming.
+- ⚠️ **What this gave up, stated rather than hidden.** Under the tail rule an
+  answer shorter than the tail released *nothing*, so a model refusing an
+  unsafe question in one sentence produced a CLEAN refusal by arithmetic. A
+  head budget spends itself on the first bytes instead, so that answer now
+  leaks its opening fragment. The trade was taken deliberately: the tail bought
+  that property by delivering the whole of every longer answer. Set the budget
+  to `0` to have it back.
+- ⚠️ **The request half no longer lifts the bound.** A request judged clean
+  releases nothing extra: the *response* is unjudged until end of stream
+  whatever the request half said. A request judged BLOCK does tighten — unspent
+  budget is forfeit and nothing further is delivered.
+- ⚠️ **The stream is kept alive with SSE comment frames** (`: ogr`) while it is
+  held. With the bound at the head an enforced stream is quiet for the whole
+  generation, and an already-open stream silent for 30s is cut by the client's
+  own idle timeout.
 - A response the client streams but the provider answers whole (non-SSE) is
   held whole: partial JSON is useless to a client, so there is nothing to
   release early.
@@ -317,6 +343,47 @@ split (buffered/streamed × observe/enforce) the reply took:
   mode injects nothing — observe never touches a body — so chat streams
   under observe report usage only when the client opted in. That coverage
   gap is the price of the observe contract, stated rather than papered over.
+
+## Refusing without ending the caller's run (3.9.0)
+
+A refusal used to come back as `finish_reason: "content_filter"` (openai.chat) or
+`stop_reason: "refusal"` (anthropic.messages). That is the right thing to tell a chatbot
+client and the wrong thing to tell an AGENT: those two strings are a TERMINAL condition
+in every harness we measured — hermes branches on `finish_reason == "content_filter"`
+alone, never retries, and abandons the run. One refused tool call in the middle of a
+task ended the task.
+
+So when the runtime sends a `continuation` on a `block`, this plugin renders the refusal
+in a shape the caller's loop survives:
+
+| `style` | what the caller gets |
+|---|---|
+| `drop_calls` | the reply with the refused tool calls REMOVED, the calls the policy allowed intact, the reason appended as text, and `finish_reason` matching what survived |
+| `withhold` | the request forwarded with the refused tool result replaced by the reason |
+| `answer` | the reason as an ordinary completed reply |
+
+⚠️ **Nothing about the refusal weakens.** The refused action is not forwarded, the
+withheld content does not reach the model, `refused` still counts it, and the decision
+the runtime recorded is still `block`. What moves is the token the turn ends on — and
+the WHY moves with it, into an `x_ogr` object on the body (`{"decision":"block",
+"continuation":"…"}`) that a client can log without any loop branching on it.
+
+⚠️ **No directive ⇒ nothing changes.** An older runtime sends none, and a runtime that
+could not name an honest shape sends none; both land on the hard refusal this plugin has
+always rendered. An unrecognised `style` does too — a directive from a newer runtime is
+not guessed at.
+
+⚠️ **All or nothing.** If any path in the directive fails to resolve against the body,
+the whole thing is abandoned and the turn is refused whole. A partial drop would forward
+some refused calls under a notice claiming they were refused, which reads as a working
+control and is not one.
+
+⚠️ **On a stream the ending is chosen by what the caller already holds.** While no
+tool-call bytes have been released the stream can end on a normal completion, with the
+surviving calls re-emitted as fresh frames. Once tool-call bytes are out, the client
+holds a partial call and harnesses act on tool calls being present rather than on the
+finish reason — so the stream is cut with the hard retraction instead, because a normal
+completion there would invite it to run a call with truncated arguments.
 
 ## Redaction: applying the verdict's spans
 
@@ -422,7 +489,7 @@ the traffic pass with `decision=` empty).
 | `timeout_ms` | `5000` | the PDP budget, enforce only. A CEILING for the worst case, not a target; the runtime's `OGR_MODEL_TIMEOUT_MS` must fit strictly inside it |
 | `fail_mode` | `open` | **open is the spec's default** (an unanswered evaluate proceeds, counted `unchecked`); `closed` refuses when the PDP is unreachable, answers garbage, reports unjudged paths, or the reply itself is unreadable |
 | `media_max_bytes` | `4194304` (4 MiB) | above this, an inline media part (a base64 image, audio clip, video or document) is DESCRIBED in the event instead of sent — `payload._ogr_media` carries kind/type/size and the value becomes `ogr-media:elided`. `0` sends every body verbatim. ⚠️ The body FORWARDED to the model is never touched, and only base64-shaped values are ever elided: the event payload is what the runtime judges, so prose must reach it whole. ⚠️ Since 3.8.0 the EFFECTIVE cap is `min(this, what the runtime advertises)`, per media KIND — see *What the runtime accepts* below |
-| `stream_tail_chars` | `200` | how much client-visible content a streamed answer withholds until the end-of-stream verdict (UTF-8 bytes; the spec's reference default). `0` still gates stream completion on the verdict; a huge value degenerates to buffering |
+| `stream_head_release_bytes` | `32` | how much client-visible content a streamed answer may deliver BEFORE the end-of-stream verdict (UTF-8 bytes of text/reasoning/tool-arguments, never SSE framing). Everything after it is withheld, so this is the exposure bound. A CEILING — a chunk crossing it is held whole. `0` releases nothing (a spinner, and every block a clean refusal); a value larger than any answer restores the pre-3.10.0 behaviour of delivering the reply and retracting it. ⚠️ Replaces `stream_tail_chars`, which is accepted, IGNORED and warned about at startup |
 | `agent_id_header` | `x-ogr-agent-id`, else `x-mse-consumer` | which header carries the agent's identity; configuring one replaces the whole chain |
 | `agent_workspace_header` | `x-ogr-agent-workspace`, else `x-mse-consumer-group` | which header carries the agent's workspace; configuring one replaces the whole chain |
 | `agent_type_header` | `x-ogr-agent-type` | which header carries the kind of agent |
