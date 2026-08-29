@@ -1,7 +1,7 @@
 {
   "name": "openguardrails-instrumentation-codex",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "OpenGuardrails (OGR) v1.0 for OpenAI Codex — a PermissionRequest auto-mode hook that lets an OGR runtime approve safe tool calls (deferring everything unclear to you), a PreToolUse guardrail that denies on block even when approvals are bypassed, and local secrets redaction through a loopback masking proxy so credentials never reach the model provider. The runtime decides.",
   "license": "Apache-2.0",
   "type": "module",

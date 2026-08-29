@@ -1,7 +1,7 @@
 {
   "name": "@openguardrails/instrumentation-claude-code",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "OpenGuardrails (OGR) v1.0 enforcement for Claude Code — a PreToolUse hook that evaluates each held tool call against an OGR runtime and denies on block, even in bypass mode, plus local secrets redaction through a loopback masking proxy so credentials never reach the model provider. The runtime decides.",
   "license": "Apache-2.0",
   "type": "module",

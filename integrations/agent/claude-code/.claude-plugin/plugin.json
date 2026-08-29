@@ -1,10 +1,19 @@
 {
   "name": "openguardrails",
   "description": "OpenGuardrails (OGR) v0.8 enforcement for Claude Code — a PreToolUse hook that sends each held tool call to an OGR runtime as a canonical step/response and denies on a block verdict. Fires above the permission system, so it enforces even in bypass mode.",
-  "version": "1.0.0",
-  "author": { "name": "OpenGuardrails", "url": "https://openguardrails.com" },
+  "version": "2.1.0",
+  "author": {
+    "name": "OpenGuardrails",
+    "url": "https://openguardrails.com"
+  },
   "homepage": "https://openguardrails.com/agent/",
   "repository": "https://github.com/openguardrails/openguardrails/tree/main/integrations/agent/claude-code",
   "license": "Apache-2.0",
-  "keywords": ["security", "guardrails", "prompt-injection", "agent-security", "ogr"]
+  "keywords": [
+    "security",
+    "guardrails",
+    "prompt-injection",
+    "agent-security",
+    "ogr"
+  ]
 }

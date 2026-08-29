@@ -115,12 +115,11 @@ Codex's host is **Rust** and its hooks are separate processes, so there is no
 JavaScript seam inside Codex to install one on, and there is not going to be
 one. The next vantage down is a socket in front of it.
 
-```sh
-npm i -g @openguardrails/ogr-local
-```
-
-Then point Codex at it in `~/.codex/config.toml` — **which line depends on how
-you signed in**:
+**The proxy ships with this plugin** — `hooks/ogr-local.mjs`, zero
+dependencies like every other file here — and the `SessionStart` hook starts
+it. There is nothing to install. The one thing you do set is where Codex sends
+its requests, in `~/.codex/config.toml` — **which line depends on how you
+signed in**:
 
 ```toml
 # signed in with ChatGPT
@@ -136,10 +135,11 @@ Codex's built-in providers are deliberately not overridable
 left for this. It also overrides the ChatGPT-login endpoint, which a
 per-provider entry would not reach.
 
-That is the only manual step. The plugin's `SessionStart` hook starts the
-daemon (idempotently — the port is the lock), works out which endpoint you
-would have been talking to by reading `auth.json`, and **reads `config.toml`
-back**: if the proxy is up but Codex is not pointed at it, it says so on every
+That is the only manual step, and it is unavoidable: a hook is a child
+process and cannot rewrite Codex's configuration. The `SessionStart` hook
+starts the daemon (idempotently — the port is the lock), works out which
+endpoint you would have been talking to by reading `auth.json`, and **reads
+`config.toml` back**: if the proxy is up but Codex is not pointed at it, it says so on every
 session start rather than letting a session look protected while nothing is
 masked. A hook is a child process and cannot change Codex's configuration.
 

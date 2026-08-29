@@ -23,9 +23,13 @@
  * upstream left for exactly this. It also overrides the ChatGPT-login
  * endpoint, which a per-provider entry would not reach.
  *
+ * ⚠️ The proxy SHIPS WITH THIS PLUGIN — `hooks/ogr-local.mjs`, built from
+ * `integrations/agent/ogr-local/src` and checked in, because a Codex plugin
+ * installs as a directory with no `npm install` and no build step. There is
+ * nothing for the user to install separately.
+ *
  * Never fails the session.
  */
-import { execFileSync } from "node:child_process"
 import { readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
@@ -68,6 +72,9 @@ function configuredBaseUrl() {
   }
 }
 
+/** Names this build in the daemon's status, so a shared daemon says whose it is. */
+const INTEGRATION = "ogr-codex/2.1.0"
+
 const say = (message) => process.stderr.write(`[OpenGuardrails] ${message}\n`)
 
 async function listening() {
@@ -86,14 +93,12 @@ async function main() {
   let status = await listening()
   if (!status) {
     try {
-      execFileSync(process.env.OGR_LOCAL_BIN || "ogr-local", ["ensure", "--port", String(PORT)], {
-        stdio: ["ignore", "ignore", "inherit"],
-        timeout: 15_000,
-      })
-    } catch {
+      const { ensure } = await import(new URL("./ogr-local.mjs", import.meta.url).href)
+      await ensure({ port: PORT, args: ["--served-by", INTEGRATION] })
+    } catch (err) {
       say(
-        "could not start the local masking proxy. Install it with `npm i -g @openguardrails/ogr-local`, "
-        + "or set OGR_LOCAL_REDACTION=0 to stop this message. Secrets in your prompts will reach the model provider.",
+        `could not start the local masking proxy (${err?.message ?? err}). `
+        + "Set OGR_LOCAL_REDACTION=0 to stop this message. Secrets in your prompts will reach the model provider.",
       )
       return
     }

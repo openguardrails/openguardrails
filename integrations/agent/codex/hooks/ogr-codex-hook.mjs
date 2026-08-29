@@ -152,7 +152,7 @@ function currentGenerationOf(transcriptPath) {
  * row rather than minting a second and reporting the old build as dark — so
  * every replica overwrites the others' version.
  */
-const INTEGRATION = "ogr-codex/2.0.0"
+const INTEGRATION = "ogr-codex/2.1.0"
 
 // --- GuardEvent → /v1/evaluate → Verdict --------------------------------------
 
