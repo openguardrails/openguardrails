@@ -116,11 +116,10 @@ interceptor. Claude Code runs its hooks as separate **processes**, so there
 is no seam inside the agent to install one on. The next vantage down is a
 socket in front of it.
 
-```sh
-npm i -g @openguardrails/ogr-local
-```
-
-Then point Claude Code at it, in `~/.claude/settings.json`:
+**The proxy ships with this plugin** — `hooks/ogr-local.mjs`, zero
+dependencies like every other file here — and the `SessionStart` hook starts
+it. There is nothing to install. The one thing you do set is where Claude
+Code sends its requests, in `~/.claude/settings.json`:
 
 ```json
 {
@@ -130,8 +129,10 @@ Then point Claude Code at it, in `~/.claude/settings.json`:
 }
 ```
 
-That is the only manual step. The plugin's `SessionStart` hook starts the
-daemon (idempotently — the port is the lock), and **checks that line**: if
+That is the only manual step, and it is unavoidable: a hook is a child
+process, so it can start the daemon but can never set the parent's
+environment. The `SessionStart` hook starts the daemon (idempotently — the
+port is the lock) and **checks that line**: if
 the proxy is up but `ANTHROPIC_BASE_URL` does not point at it, it says so on
 every session start rather than letting a session look protected while
 nothing is masked. A hook is a child process and cannot set the variable

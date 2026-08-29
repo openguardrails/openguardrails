@@ -69,6 +69,16 @@ export interface ProxyOptions extends Omit<PipeOptions, "redactor"> {
   failClosed?: boolean
   /** Shut down after this many ms with no request (0 = never). */
   idleMs?: number
+  /**
+   * Which plugin's build this is, e.g. `ogr-claude-code/2.1.0`.
+   *
+   * ⚠️ Both plugins ship their own bundle and both reach for the SAME port,
+   * so whichever harness starts first is the one whose build ends up masking
+   * for the other. That is fine — the masking contract is the SERVED ruleset,
+   * not the code — but it must not be invisible: without this, "which build
+   * is masking my Codex session" has no answer at all.
+   */
+  servedBy?: string
 }
 
 export interface RunningProxy {
@@ -288,6 +298,7 @@ export async function startProxy(opts: ProxyOptions & { port?: number; host?: st
     if (url.pathname === "/__ogr/status") {
       return reply(200, {
         ok: true,
+        served_by: opts.servedBy ?? "",
         upstream: fallback,
         ruleset: pipe.redactor.rulesetId,
         masking: pipe.redactor.masking && pipe.redactor.ready,

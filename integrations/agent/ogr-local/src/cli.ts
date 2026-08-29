@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * `ogr-local` — the command a `SessionStart` hook runs.
  *
@@ -17,16 +16,9 @@ import { LocalRedactor } from "@openguardrails/local-redaction"
 import { baseUrlFor, ensure, port, probe } from "./daemon.js"
 import { startProxy } from "./server.js"
 
-const argv = process.argv.slice(2)
-const flag = (name: string): string | undefined => {
-  const at = argv.indexOf(`--${name}`)
-  return at !== -1 ? argv[at + 1] : undefined
-}
-const has = (name: string): boolean => argv.includes(`--${name}`)
-
 const log = { info: (m: string) => console.error(m), warn: (m: string) => console.error(m) }
 
-async function serve(): Promise<void> {
+async function serve(argv: string[], flag: (n: string) => string | undefined, has: (n: string) => boolean): Promise<void> {
   const runtimeUrl = flag("runtime") ?? process.env["OGR_RUNTIME_URL"] ?? "https://openguardrails.com"
   const apiKey = flag("api-key") ?? process.env["OGR_API_KEY"] ?? ""
   if (!apiKey) {
@@ -52,12 +44,16 @@ async function serve(): Promise<void> {
     redactor,
     ...(flag("upstream") ? { upstream: flag("upstream")! } : {}),
     ...(flag("host") ? { hosts: flag("host")!.split(",").map((h) => h.trim()).filter(Boolean) } : {}),
+    ...(flag("served-by") ? { servedBy: flag("served-by")! } : {}),
     port: Number(flag("port") ?? port()),
     failClosed: has("fail-closed") || process.env["OGR_FAIL_MODE"] === "closed",
     idleMs: Number.isFinite(idleMs) ? idleMs : 0,
     log,
   })
-  log.info(`[ogr-local] listening on ${proxy.url} — ruleset ${redactor.rulesetId || "(none)"}`)
+  log.info(
+    `[ogr-local] listening on ${proxy.url} — ruleset ${redactor.rulesetId || "(none)"}`
+    + (flag("served-by") ? ` — served by ${flag("served-by")}` : ""),
+  )
 
   // Refresh the ruleset on the same cadence a plugin's heartbeat would.
   const timer = setInterval(() => void redactor.refresh(), 60_000)
@@ -68,10 +64,23 @@ async function serve(): Promise<void> {
   }
 }
 
-async function main(): Promise<void> {
+/**
+ * The command line, as a function.
+ *
+ * Exported rather than run at import: this module is ALSO the module a
+ * `SessionStart` hook imports for {@link ensure}, and a top-level dispatch
+ * would fire on that import with the hook's own argv.
+ */
+export async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
+  const flag = (name: string): string | undefined => {
+    const at = argv.indexOf(`--${name}`)
+    return at !== -1 ? argv[at + 1] : undefined
+  }
+  const has = (name: string): boolean => argv.includes(`--${name}`)
+
   switch (argv[0]) {
     case "serve":
-      return serve()
+      return serve(argv, flag, has)
     case "ensure": {
       const url = await ensure({
         ...(flag("port") ? { port: Number(flag("port")) } : {}),
@@ -100,12 +109,11 @@ async function main(): Promise<void> {
       return
     }
     default:
-      console.error("usage: ogr-local <ensure|serve|status|base-url> [--port N] [--upstream URL] [--host a,b] [--fail-closed]")
+      console.error(
+        "usage: ogr-local <ensure|serve|status|base-url> [--port N] [--upstream URL] [--host a,b] [--served-by NAME] [--fail-closed]",
+      )
       process.exit(2)
   }
 }
 
-void main().catch((err: unknown) => {
-  console.error(`[ogr-local] ${String(err)}`)
-  process.exit(1)
-})
+

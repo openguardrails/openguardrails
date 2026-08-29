@@ -36,6 +36,8 @@ export const stateDir = (): string => join(homedir(), ".openguardrails")
 
 export interface Status {
   ok: true
+  /** Which plugin's build is behind this port (both ship one and share it). */
+  served_by: string
   upstream: string | null
   ruleset: string
   masking: boolean
@@ -90,7 +92,12 @@ export async function ensure(opts: EnsureOptions = {}): Promise<string | null> {
     /* a log we cannot open is not a reason to skip the mask */
   }
 
-  const entry = fileURLToPath(new URL("./cli.js", import.meta.url))
+  // ⚠️ The daemon re-executes THIS FILE. In the bundle each plugin ships,
+  // `import.meta.url` is that single file, so there is nothing to resolve and
+  // no sibling to lose: whatever the hook imported to call `ensure` is
+  // exactly what gets spawned. A path to a sibling entry point would be a
+  // second thing the bundler had to keep in step.
+  const entry = process.env["OGR_LOCAL_ENTRY"] || fileURLToPath(import.meta.url)
   const child = spawn(process.execPath, [entry, "serve", "--port", String(p), ...(opts.args ?? [])], {
     detached: true,
     // ⚠️ stdin must be `ignore`, not inherited: a detached child holding the

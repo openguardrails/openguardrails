@@ -53,7 +53,7 @@ function validateEvent(ev) {
   }
   // Presence is optional on the WIRE; for THIS integration it is mandatory —
   // the mock tolerating a missing `integration` must not let ours stop sending it.
-  if (ev.integration !== "ogr-claude-code/2.0.0") errs.push(`integration ${ev.integration}`)
+  if (ev.integration !== "ogr-claude-code/2.1.0") errs.push(`integration ${ev.integration}`)
   if (typeof ev.payload !== "object" || ev.payload === null || Array.isArray(ev.payload)) {
     errs.push("payload must be an object")
   }

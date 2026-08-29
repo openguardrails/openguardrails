@@ -1,7 +1,20 @@
-# @openguardrails/ogr-local
+# ogr-local
 
 **Local secrets redaction for harnesses whose plugins run outside the agent's
 process — [Claude Code](../claude-code) and [OpenAI Codex](../codex).**
+
+⚠️ **This is SOURCE, not a package anyone installs.** It is bundled into each
+of those two plugins as `hooks/ogr-local.mjs` and checked in there, because a
+Claude Code or Codex plugin installs as a *directory* out of this repo — no
+`npm install`, no build step. A proxy the user had to install separately
+would be a second install step in front of a feature whose whole point is
+that it needs no thought, and the commonest outcome of a second install step
+is that it does not happen: the harness then runs with a base URL pointing at
+nothing, or with masking quietly off.
+
+The source lives here, once, beside `local-redaction` — copying a masking
+core into two plugin directories is exactly the drift the conformance corpus
+exists to prevent.
 
 Every credential in the outbound model request is replaced with
 `${OGR_SECRET_n}` **on this machine**. The runtime judges the placeholder, the
@@ -29,16 +42,24 @@ For those, the next vantage down is a socket in front of the harness.
 
 ## Install
 
-```sh
-npm i -g @openguardrails/ogr-local
-```
-
-The harness plugins start it for you from their `SessionStart` hook. You only
-run it by hand to check on it:
+Nothing to install: it arrives with the plugin, and the plugin's
+`SessionStart` hook starts it. To check on a running one:
 
 ```sh
-ogr-local status
+node <plugin>/hooks/ogr-local.mjs status
 ```
+
+### Rebuilding the bundle
+
+```sh
+npm --prefix integrations/agent/ogr-local run bundle
+```
+
+Both plugins get the identical build. Every bundle carries a hash of the
+sources it came from, and `tests/bundle.spec.mjs` recomputes it — **a
+checked-in artifact that silently drifts from its source is the one real cost
+of shipping it this way**, so editing `src/` without rebundling is a red test
+rather than an invisible state.
 
 ## Wiring
 
@@ -55,7 +76,7 @@ openai_base_url = "http://127.0.0.1:8787/https/chatgpt.com/backend-api/codex"
 openai_base_url = "http://127.0.0.1:8787/https/api.openai.com/v1"
 
 # or ask:
-ogr-local base-url https://api.anthropic.com
+node <plugin>/hooks/ogr-local.mjs base-url https://api.anthropic.com
 ```
 
 Both harnesses resolve their provider URL **statically at startup** — Claude
@@ -74,10 +95,10 @@ provider, nothing masked — is said out loud.
 
 | | |
 |---|---|
-| `ogr-local ensure` | make sure a daemon is listening; print its URL. Idempotent — the port is the lock, and the check is a live request, so a stale record cannot lie |
-| `ogr-local serve` | run in the foreground (what `ensure` spawns) |
-| `ogr-local status` | ruleset, session count, and what has been masked |
-| `ogr-local base-url <url>` | the base URL to point a harness at, for one upstream |
+| `ensure` | make sure a daemon is listening; print its URL. Idempotent — the port is the lock, and the check is a live request, so a stale record cannot lie |
+| `serve` | run in the foreground (what `ensure` spawns) |
+| `status` | ruleset, session count, and what has been masked |
+| `base-url <url>` | the base URL to point a harness at, for one upstream |
 
 Configuration is environment, shared with the rest of the OGR integrations:
 `OGR_API_KEY` (required — the ruleset is your organization's),
@@ -102,6 +123,14 @@ Configuration is environment, shared with the rest of the OGR integrations:
   ruleset, so it would forward everything unmasked while a harness pointed at
   it looked protected. Better to not be listening at all.
 
+## One port, two plugins
+
+Both plugins ship their own bundle and both reach for **8787**, so whichever
+harness starts first is the one whose build masks for the other. That is fine
+— the masking contract is the *served ruleset*, not the code — but it is not
+allowed to be invisible: `/__ogr/status` reports `served_by`, so "which build
+is masking my Codex session" has an answer.
+
 ## Honest limits
 
 - **If the daemon is down, the harness cannot reach its provider.** That is
@@ -120,6 +149,10 @@ Configuration is environment, shared with the rest of the OGR integrations:
 
 ```sh
 npm install     # from the repo root (npm workspace)
-npm run build
+npm run build   # tsc, then bundle into both plugins
 npm test
 ```
+
+⚠️ `pretest` runs `tsc` and deliberately **not** the bundler — regenerating
+the artifact that the staleness guard exists to check would mean the guard
+could never fail.

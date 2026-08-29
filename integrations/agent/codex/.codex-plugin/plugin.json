@@ -1,8 +1,16 @@
 {
   "name": "openguardrails-codex",
-  "version": "1.0.0",
+  "version": "2.1.0",
   "description": "Auto mode for Codex over the OpenGuardrails (OGR) v0.8 protocol: a PermissionRequest hook auto-approves tool calls an OGR runtime judges safe and defers everything unclear to you, plus a PreToolUse guardrail that denies blocked calls even when approvals are bypassed.",
-  "keywords": ["codex", "openai-codex", "auto-mode", "security", "guardrails", "ogr", "openguardrails"],
+  "keywords": [
+    "codex",
+    "openai-codex",
+    "auto-mode",
+    "security",
+    "guardrails",
+    "ogr",
+    "openguardrails"
+  ],
   "hooks": "./hooks/hooks.json",
   "interface": {
     "displayName": "OpenGuardrails Auto Mode"

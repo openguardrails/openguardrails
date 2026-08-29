@@ -21,21 +21,25 @@
  * at it — and reports the gap loudly rather than leaving a session that
  * looks protected and is not.
  *
+ * ⚠️ The proxy SHIPS WITH THIS PLUGIN — `hooks/ogr-local.mjs`, built from
+ * `integrations/agent/ogr-local/src` and checked in, because a Claude Code
+ * plugin installs as a directory with no `npm install` and no build step.
+ * There is nothing for the user to install separately, which is the point:
+ * the commonest outcome of a second install step is that it does not happen,
+ * and a base URL pointing at a proxy nobody started is worse than no proxy.
+ *
  * Never fails the session. A masking proxy that could not start is a reason
  * to work unprotected and know it, never a reason to be unable to work.
  */
-import { execFileSync } from "node:child_process"
 
 const PORT = Number(process.env.OGR_LOCAL_PORT || 8787)
 const UPSTREAM = process.env.OGR_LOCAL_UPSTREAM || "https://api.anthropic.com"
 const EXPECTED = `http://127.0.0.1:${PORT}/https/${new URL(UPSTREAM).host}${new URL(UPSTREAM).pathname.replace(/\/$/, "")}`
 
-const say = (message) => process.stderr.write(`[OpenGuardrails] ${message}\n`)
+/** Names this build in the daemon's status, so a shared daemon says whose it is. */
+const INTEGRATION = "ogr-claude-code/2.1.0"
 
-/** The `ogr-local` entry point: an explicit path, else the one on PATH. */
-function binary() {
-  return process.env.OGR_LOCAL_BIN || "ogr-local"
-}
+const say = (message) => process.stderr.write(`[OpenGuardrails] ${message}\n`)
 
 async function listening() {
   try {
@@ -56,15 +60,14 @@ async function main() {
   if (!status) {
     try {
       // `ensure` is idempotent and returns as soon as the daemon answers, so
-      // a `--resume` storm cannot start a second one: the port is the lock.
-      execFileSync(binary(), ["ensure", "--port", String(PORT)], {
-        stdio: ["ignore", "ignore", "inherit"],
-        timeout: 15_000,
-      })
-    } catch {
+      // a `--resume` storm cannot start a second one: the port IS the lock,
+      // and the check is a live request, so a stale record cannot lie.
+      const { ensure } = await import(new URL("./ogr-local.mjs", import.meta.url).href)
+      await ensure({ port: PORT, args: ["--served-by", INTEGRATION] })
+    } catch (err) {
       say(
-        `could not start the local masking proxy (${binary()}). Install it with `
-        + "`npm i -g @openguardrails/ogr-local`, or set OGR_LOCAL_REDACTION=0 to stop this message. "
+        `could not start the local masking proxy (${err?.message ?? err}). `
+        + "Set OGR_LOCAL_REDACTION=0 to stop this message. "
         + "Secrets in your prompts will reach the model provider.",
       )
       return
