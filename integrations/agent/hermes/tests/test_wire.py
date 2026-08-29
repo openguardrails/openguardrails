@@ -15,16 +15,20 @@ def test_event_is_exactly_the_required_fields(guarded):
     optional ones this integration sends. The strict mock 400s any drift, so
     this is belt on top of braces.
 
-    Here that is ``integration`` alone — restored to the event on 2026-08-17
+    Here that is ``integration`` — restored to the event on 2026-08-17
     because the heartbeat's record is keyed on the integration NAME and therefore
     reports whichever replica beat last — it cannot say which build produced a
-    given piece of traffic. ``session_hint`` rides along only when the vantage
-    holds a session; this client holds none.
+    given piece of traffic — and, since 2.0, ``redaction``: the local-redaction
+    report (the ruleset id this process runs, the tokens minted in this step),
+    sent on every event while local redaction is on. ``session_hint`` rides
+    along only when the vantage holds a session; this client holds none.
     """
     c = _client()
     verdict = c.evaluate("step/request", "s1", "canonical", {"messages": []})
     assert verdict is not None and verdict["decision"] == "allow"
-    assert set(guarded.events[0]) == REQUIRED_FIELDS | {"integration"}
+    assert set(guarded.events[0]) == REQUIRED_FIELDS | {"integration", "redaction"}
+    # A bare client never fetched a ruleset: on, nothing obtained, nothing minted.
+    assert guarded.events[0]["redaction"] == {"ruleset": "", "masked": []}
     # The SAME string the heartbeat sends — two literals would drift and each
     # would look right on its own.
     assert guarded.events[0]["integration"] == INTEGRATION
@@ -142,6 +146,19 @@ def test_heartbeat_carries_the_build_id_and_counters(guarded, clean_env):
     assert hb["integration"] == INTEGRATION
     assert hb["agent_id"] == "hermes-lab"
     assert hb["counters"] == {"events_sent": 1, "evaluate_errors": 0}
+    # 2.0: which ruleset THIS process is on ("" = none obtained yet).
+    assert hb["ruleset"] == ""
+
+
+def test_local_redaction_off_sends_no_redaction_field_and_no_ruleset(guarded, clean_env):
+    """Off means exactly 1.x on the wire: an older runtime sees nothing new,
+    and a runtime with the feature draws no diagnosis (design §4.4)."""
+    clean_env.setenv("OGR_LOCAL_REDACTION", "false")
+    c = _client()
+    c.evaluate("step/request", "s1", "canonical", {"messages": []})
+    assert "redaction" not in guarded.events[0]
+    c.heartbeat()
+    assert "ruleset" not in guarded.heartbeats[0]
 
 
 def test_heartbeat_never_raises_while_dark(dark):

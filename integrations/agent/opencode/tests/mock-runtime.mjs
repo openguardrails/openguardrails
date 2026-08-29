@@ -6,7 +6,13 @@
  * both answers 400 (as a conformant runtime must) and lands in
  * `violations` so the test fails loudly instead of passing by accident.
  */
+import { readFileSync } from "node:fs"
 import { createServer } from "node:http"
+
+/** The conformance ruleset — what `GET /v1/rules` serves unless a test rotates it. */
+export const CONFORMANCE = JSON.parse(
+  readFileSync(new URL("../../local-redaction/conformance/local-redaction.json", import.meta.url), "utf8"),
+)
 
 /** The v1.0 GuardEvent required field set — no others beyond OPTIONAL_FIELDS. */
 const REQUIRED_FIELDS = [
@@ -32,7 +38,22 @@ const REQUIRED_FIELDS = [
  * that a missing `integration` is not, which is what lets a runtime and a
  * reporter roll forward independently.
  */
-const OPTIONAL_FIELDS = ["integration", "session_hint"]
+const OPTIONAL_FIELDS = ["integration", "session_hint", "redaction"]
+
+/** The OGR 1.4 `redaction` report: a ruleset id and minted tokens, never values. */
+function redactionProblems(r) {
+  if (typeof r !== "object" || r === null) return ["redaction is not an object"]
+  const problems = []
+  if (typeof r.ruleset !== "string") problems.push("redaction.ruleset is not a string")
+  if (!Array.isArray(r.masked)) return [...problems, "redaction.masked is not an array"]
+  for (const m of r.masked) {
+    if (typeof m?.token !== "string" || !/^\$\{OGR_[A-Z_]+_[0-9A-Z]+\}$/.test(m.token)) problems.push(`redaction.masked token ${JSON.stringify(m?.token)}`)
+    if (typeof m?.rule !== "string" || m.rule === "") problems.push("redaction.masked entry without a rule")
+  }
+  const extra = Object.keys(r).filter((k) => k !== "ruleset" && k !== "masked")
+  if (extra.length) problems.push(`redaction carries unexpected [${extra.join(", ")}]`)
+  return problems
+}
 
 const KINDS = new Set(["step/request", "step/response"])
 const PROTOCOLS = new Set(["openai.chat", "openai.responses", "anthropic.messages", "canonical"])
@@ -61,6 +82,7 @@ export function violationsOf(event) {
   if (typeof event.payload !== "object" || event.payload === null || Array.isArray(event.payload)) {
     problems.push("payload is not an object")
   }
+  if ("redaction" in event) problems.push(...redactionProblems(event.redaction))
   return problems
 }
 
@@ -74,6 +96,8 @@ export async function startMockRuntime(decide = () => "allow") {
   const heartbeats = []
   const violations = []
   let failNext = 0
+  let ruleset = CONFORMANCE.ruleset
+  let rulesFetches = 0
 
   const server = createServer((req, res) => {
     let body = ""
@@ -110,7 +134,18 @@ export async function startMockRuntime(decide = () => "allow") {
           violations.push("heartbeat carried neither integration nor agent_id")
           return reply(400, { error: "invalid_body" })
         }
-        return reply(200, { ok: true })
+        if ("ruleset" in json && typeof json.ruleset !== "string") violations.push("heartbeat ruleset is not a string")
+        return reply(200, { ok: true, rules: { id: ruleset.id } })
+      }
+      if (req.method === "GET" && req.url.endsWith("/v1/rules")) {
+        rulesFetches += 1
+        if (req.headers.authorization !== "Bearer ogr_mock") return reply(401, { error: "unauthorized" })
+        if (req.headers["if-none-match"] === `"${ruleset.id}"`) {
+          res.writeHead(304, { etag: `"${ruleset.id}"` })
+          return res.end()
+        }
+        res.writeHead(200, { "content-type": "application/json", etag: `"${ruleset.id}"` })
+        return res.end(JSON.stringify({ ruleset }))
       }
       reply(404, { error: "not found" })
     })
@@ -127,6 +162,12 @@ export async function startMockRuntime(decide = () => "allow") {
     violations,
     /** Make the next N evaluate calls fail, to exercise the degraded paths. */
     failNextEvaluate(n) { failNext = n },
+    /** How many times `GET /v1/rules` was asked (304s included). */
+    get rulesFetches() { return rulesFetches },
+    /** The ruleset currently served — and the id the heartbeat reply names. */
+    get ruleset() { return ruleset },
+    /** Rotate the served ruleset, as an operator editing the org's rules would. */
+    setRuleset(next) { ruleset = next },
     async close() { await new Promise((resolve) => server.close(resolve)) },
   }
 }

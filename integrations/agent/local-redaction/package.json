@@ -1,0 +1,51 @@
+{
+  "name": "@openguardrails/local-redaction",
+  "version": "0.1.0",
+  "description": "Local secrets redaction for OGR agent integrations — fetch and verify the org's secret ruleset from an OpenGuardrails runtime, mask on the way out, restore into a tool's arguments on the host. The reference mask()/restore() beside the conformance corpus (OGR 1.4, specification/local-redaction.md).",
+  "type": "module",
+  "license": "Apache-2.0",
+  "author": "OpenGuardrails",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./conformance/local-redaction.json": "./conformance/local-redaction.json"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "src",
+    "conformance"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "pretest": "npm run build",
+    "test": "node --test tests/*.spec.mjs",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "redaction",
+    "secrets",
+    "ai",
+    "agent",
+    "security",
+    "guardrails",
+    "ogr",
+    "openguardrails"
+  ],
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^5.7.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/openguardrails/openguardrails.git",
+    "directory": "integrations/agent/local-redaction"
+  },
+  "homepage": "https://openguardrails.com",
+  "publishConfig": {
+    "access": "public"
+  }
+}

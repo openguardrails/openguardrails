@@ -2,7 +2,7 @@
 # binding in ../specification/runtime-api.md. The Markdown specification is
 # authoritative; this document is its machine-readable projection, kept in
 # lockstep with the JSON Schemas in this directory
-# (guard-event.schema.json, verdict.schema.json).
+# (guard-event.schema.json, verdict.schema.json, ruleset.schema.json).
 openapi: 3.1.0
 
 info:
@@ -135,11 +135,27 @@ paths:
                 integration:
                   type: string
                   description: The reporting integration and build, e.g. "ogr-higress/3.0.0".
+                instance_id:
+                  type: string
+                  maxLength: 128
+                  description: |
+                    Opaque id the reporter mints for itself, stable for the life
+                    of the reporting process and not across restarts. Version
+                    and counters are recorded per (integration, instance_id).
                 agent_id:
                   type: string
                 interval_s:
                   type: integer
                   minimum: 1
+                ruleset:
+                  type: string
+                  maxLength: 64
+                  description: |
+                    Optional (1.4). The id of the local-redaction ruleset this
+                    instance is masking with, exactly as GET /v1/rules served
+                    it — so the per-instance record can say which ruleset each
+                    reporting process is on. Omitted by an integration not
+                    doing local redaction.
                 counters:
                   type: object
                   additionalProperties:
@@ -161,6 +177,20 @@ paths:
                       Optional. The same object GET /v1/limits returns, so a
                       reporter that already beats learns its caps without a
                       second call. Absent means UNKNOWN, never "zero".
+                  rules:
+                    type: object
+                    required: [id]
+                    properties:
+                      id:
+                        type: string
+                        pattern: "^rs_[0-9a-f]{32}$"
+                    description: |
+                      Optional (1.4). The id of the ruleset GET /v1/rules
+                      currently serves, so a reporter that already beats learns
+                      of a change within one interval without polling the
+                      feed. Absent means the runtime serves no feed or did not
+                      say — never that the ruleset is empty; a reporter holding
+                      a cached ruleset keeps masking with it.
         "400": { $ref: "#/components/responses/InvalidBody" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "429": { $ref: "#/components/responses/RateLimited" }
@@ -189,6 +219,51 @@ paths:
                 properties:
                   limits: { $ref: "#/components/schemas/Limits" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/rules:
+    get:
+      tags: [liveness]
+      operationId: rules
+      summary: The local-redaction rule feed (1.4).
+      description: |
+        The secret patterns this caller's organization masks with on the
+        host, before a request leaves for the model provider — served by the
+        runtime so that an open-source integration ships none of its own
+        (specification/local-redaction.md). Dialect `ogr-re-1`; every rule
+        carries examples an integration MUST run at load, disabling by id any
+        rule that fails in its own engine.
+
+        ADVISORY to the integration and AUTHORITATIVE at the runtime, which
+        runs the identical ruleset on every event it receives. A fetch that
+        failed means UNKNOWN, never "no rules": the integration falls back to
+        its cached ruleset, and with none to its configured fail mode.
+      parameters:
+        - in: header
+          name: If-None-Match
+          required: false
+          schema:
+            type: string
+          description: The id of the ruleset the integration holds, quoted; a match answers 304.
+      responses:
+        "200":
+          description: The organization's current ruleset.
+          headers:
+            ETag:
+              schema:
+                type: string
+              description: The ruleset id, quoted — what the next request sends as If-None-Match.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ruleset]
+                properties:
+                  ruleset: { $ref: "#/components/schemas/SecretRuleset" }
+        "304":
+          description: The ruleset the integration holds is current.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404":
+          description: This runtime serves no rule feed. An integration treats it as UNKNOWN, exactly like a failed fetch.
 
   /v1/health:
     get:
@@ -321,3 +396,5 @@ components:
       $ref: "./guard-event.schema.json"
     Verdict:
       $ref: "./verdict.schema.json"
+    SecretRuleset:
+      $ref: "./ruleset.schema.json"

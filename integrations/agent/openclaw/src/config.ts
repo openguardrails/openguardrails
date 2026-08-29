@@ -59,6 +59,33 @@ export interface RuntimeOptions {
   user?: string
 }
 
+/**
+ * Local secrets redaction (OGR 1.4, specification/local-redaction.md): mask
+ * every credential as it ENTERS the session history — tool results, written
+ * messages — with `${OGR_SECRET_n}`, so the outbound model request is masked
+ * by construction; judge the tool call on the placeholder; restore the value
+ * into the tool's params on this host after judgement. ON by default. The
+ * ruleset is the org's, fetched from the runtime with the API key; the
+ * plugin ships none.
+ */
+export interface LocalRedactionConfig {
+  /** Mask at all (default true; env `OGR_LOCAL_REDACTION=0|false|off` turns it off). */
+  enabled?: boolean
+  /** Where the fetched ruleset is cached (default `~/.openguardrails/rules-<hash>.json`; env `OGR_RULES_CACHE`). */
+  cachePath?: string
+  /** Which tiers to mask (default both; env `OGR_LOCAL_REDACTION_TIERS=strong,heuristic`). */
+  tiers?: RedactionTier[]
+  /**
+   * Mask at the HTTP client — the in-process interceptor on `fetch` (and
+   * undici's dispatcher where undici is resolvable), the primary path
+   * (default true; env `OGR_LOCAL_REDACTION_HTTP=0|false|off` turns it off,
+   * leaving the ingress-hook masking alone).
+   */
+  http?: boolean
+}
+
+export type RedactionTier = "strong" | "heuristic"
+
 /** Plugin config, delivered through OpenClaw `plugins.entries.openguardrails.config`. */
 export interface GuardrailsOptions {
   /** The OpenGuardrails runtime connection and identity claims. */
@@ -69,6 +96,8 @@ export interface GuardrailsOptions {
   timeoutMs?: number
   /** Also judge outbound channel messages, not just tool calls (default true). */
   guardMessages?: boolean
+  /** Local secrets redaction (default on). */
+  localRedaction?: LocalRedactionConfig
 }
 
 /** The five identity claims exactly as every event carries them. */
@@ -86,6 +115,23 @@ export interface ResolvedConfig {
   failMode: FailMode
   timeoutMs: number
   guardMessages: boolean
+  localRedaction: { enabled: boolean; cachePath: string | undefined; tiers: RedactionTier[]; http: boolean }
+}
+
+/** `OGR_LOCAL_REDACTION`: unset or anything but `0`/`false`/`off` means on. */
+export function envFlag(value: string | undefined, fallback: boolean): boolean {
+  if (value === undefined || value === "") return fallback
+  return !["0", "false", "off", "no"].includes(value.trim().toLowerCase())
+}
+
+/** `OGR_LOCAL_REDACTION_TIERS`: a comma list; unknown words are dropped, an empty result means both. */
+export function envTiers(value: string | undefined): RedactionTier[] | undefined {
+  if (value === undefined || value.trim() === "") return undefined
+  const tiers = value
+    .split(",")
+    .map((t) => t.trim().toLowerCase())
+    .filter((t): t is RedactionTier => t === "strong" || t === "heuristic")
+  return tiers.length > 0 ? tiers : undefined
 }
 
 /** Config → environment → default, per field. */
@@ -103,5 +149,11 @@ export function resolveConfig(options?: GuardrailsOptions): ResolvedConfig {
     failMode: options?.failMode ?? "open",
     timeoutMs: options?.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     guardMessages: options?.guardMessages ?? true,
+    localRedaction: {
+      enabled: options?.localRedaction?.enabled ?? envFlag(process.env["OGR_LOCAL_REDACTION"], true),
+      cachePath: options?.localRedaction?.cachePath || process.env["OGR_RULES_CACHE"] || undefined,
+      tiers: options?.localRedaction?.tiers ?? envTiers(process.env["OGR_LOCAL_REDACTION_TIERS"]) ?? ["strong", "heuristic"],
+      http: options?.localRedaction?.http ?? envFlag(process.env["OGR_LOCAL_REDACTION_HTTP"], true),
+    },
   }
 }

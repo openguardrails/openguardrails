@@ -9,6 +9,66 @@ version is independent of any implementation's package version.
 
 ## [Unreleased]
 
+### Added
+- **Local secrets redaction, the TypeScript half (OGR 1.4 —
+  `specification/local-redaction.md`, design in the AIRS repo).** A new shared
+  package `integrations/agent/local-redaction/` (`@openguardrails/local-redaction`,
+  zero runtime deps): `loadRuleset` (`GET /v1/rules`, `If-None-Match`/304, a 0600
+  cache under `~/.openguardrails/`), `compileRuleset` (runs every rule's own
+  `examples` in this engine and DISABLES a failing rule by id), the per-session
+  value↔token `SessionMap` (in memory, bound 256, `${OGR_SECRET_X}` over the bound),
+  `mask` with the §4.1 procedure (zero-width normalisation with an index map back,
+  known values first, served order, longest-wins overlap, never inside a token),
+  `maskRequest` over every string leaf, `restore` (whole-token, markdown-escape
+  tolerant, never fuzzy) and `UNRESTORABLE_NOTICE`, plus the conformance corpus
+  `conformance/local-redaction.json` the Python reference will share.
+- **`@openguardrails/opencode-auto-mode` 0.4.0** — masks the messages sent to the
+  model on `experimental.chat.messages.transform` (verified against
+  `@opencode-ai/plugin` 1.14.28; a host without it gets no masking and no
+  `redaction` field), tokenises `tool.execute.after` output before it enters
+  history, restores `args` in `tool.execute.before` AFTER the guard's judge call (an
+  unresolved token throws the notice), sends `redaction: { ruleset, masked }` on
+  every event and `ruleset` on the heartbeat, and refetches when the heartbeat reply's
+  `rules.id` moves. Options `localRedaction.{enabled,cachePath,tiers}`; env
+  `OGR_LOCAL_REDACTION`, `OGR_RULES_CACHE`, `OGR_LOCAL_REDACTION_TIERS`.
+- **`openguardrails-instrumentation-openclaw` 0.4.0** — the INGRESS model, since
+  `llm_input` is observer-only: masks at `tool_result_persist` and
+  `before_message_write` (both synchronous), restores `params` in a second
+  `before_tool_call` handler at priority 10 (below the guard's 50, so judgement sees
+  placeholders), same `redaction` report, same heartbeat `ruleset`, same options. The
+  system prompt is NOT covered — `before_prompt_build`'s event carries no system
+  prompt and its `systemPrompt` result is an override — and the README says so.
+
+### Changed
+- **Streaming enforcement is bounded from the HEAD of the answer, not its tail
+  ([runtime-api.md § streaming](specification/runtime-api.md#streaming-release-a-bounded-head-judge-once)).**
+  The recipe said "withhold the final `tail` characters (reference default 200)".
+  That rule guarantees only that 200 bytes are withheld — it says NOTHING about
+  exposure, because what reaches the client is `total − 200`, unbounded in the
+  length of the answer. Measured on the reference gateway: a ~900-byte reply to a
+  prohibited question was delivered essentially whole and then retracted, since the
+  verdict cannot exist before the last token. The bound is now the FIRST `head`
+  bytes of client-visible content (reference default **32**), which makes exposure a
+  CONSTANT, independent of both the answer's length and the judge's latency.
+  ⚠️ **Normative, and a CEILING**: a chunk that would carry the client past the
+  bound is withheld whole rather than truncated, and `head = 0` is valid and
+  releases nothing. Counted in UTF-8 bytes of text/reasoning/tool-arguments, never
+  transport framing — so contentless frames still flow and a stream reads as live
+  from its first frame.
+  ⚠️ **Nothing about enforcement changed.** The answer is still judged exactly once,
+  whole, at stream end; tool calls still never execute before the verdict, because a
+  provider stream only completes them at its end and the terminal frames are always
+  inside the held remainder.
+  ⚠️ **What it gives up, stated rather than hidden**: under the tail rule an answer
+  SHORTER than the tail released nothing, so a model refusing an unsafe question in
+  one sentence produced a clean refusal by arithmetic. A head budget spends itself on
+  the first bytes, so that answer now leaks its opening fragment and a block is a
+  retraction. The tail bought that property by delivering the whole of every longer
+  answer; `head = 0` buys it back honestly.
+  The reference gateway implements this as `stream_head_release_bytes` in
+  **higress 3.10.0**, which accepts, IGNORES and warns about the old
+  `stream_tail_chars`.
+
 ### Removed
 - **`findings[].action`** — the per-finding `flag` | `redact` | `block`
   contribution. No runtime ever emitted it, so every consumer branching on
@@ -24,6 +84,90 @@ version is independent of any implementation's package version.
   release is days old and no such runtime is known to exist.
 
 ### Added
+- **Local redaction (1.4) — the secret never leaves the host
+  ([local-redaction.md](specification/local-redaction.md),
+  [GuardEvent § `redaction`](specification/guard-event.md#redaction),
+  [Runtime API § `GET /v1/rules`](specification/runtime-api.md#get-v1rules),
+  [schema/ruleset.schema.json](schema/ruleset.schema.json))** — the client-side
+  contract for an integration standing INSIDE the agent's process: mask every
+  secret in the outbound provider request ON THE HOST, before it leaves, and
+  restore the value into a tool's arguments only after the call has been judged
+  and approved. Today every `sk-…`, every `.env` an agent reads and every
+  `Authorization:` header it composes reaches the provider verbatim, and a
+  runtime sees it AFTERWARDS, as a finding, from a copy that has already left;
+  an in-process integration is the one vantage where "the secret does not leave
+  the machine" can be true, so that is where masking goes. The placeholder is
+  the existing `${OGR_SECRET_n}` shape, session-scoped and value-stable, held in
+  memory and never on disk. Three pieces, all additive-optional: a fourth
+  OPTIONAL GuardEvent field, `redaction: {ruleset, masked[]}` — the tokens
+  MINTED in this step and the rule that minted each, never values; a rule feed,
+  `GET /v1/rules` with `ETag`/`If-None-Match` → `304`, so an open-source
+  integration ships NO patterns and the organization's set is served, with the
+  current id advertised on the heartbeat response as `rules.id` and reported
+  back on the heartbeat request as `ruleset`; and a regex dialect, `ogr-re-1`,
+  the intersection of the engines the rules run in, with every rule carrying
+  `examples` an integration MUST run at load, disabling by id what fails rather
+  than running it wrong.
+  ⚠️ **Not a decision, and nothing on the gateway path.** `decision` is
+  untouched, the report takes no part in composition, and a gateway keeps the
+  `modifications.spans` contract it has — at a gateway the secret has already
+  left the host, and the runtime masks on its behalf.
+  ⚠️ **The OGR client is an egress too**: every event sent to the runtime passes
+  through the same map, or the feature protects the secret from the provider
+  and hands it to us. A consequence the runtime relies on: it judges TOKENS,
+  and `${OGR_SECRET_1}` in a `curl -H "Authorization: …"` still says a
+  credential is flowing to that host.
+  ⚠️ **Restore is whole-token exact match, into tool arguments only, after every
+  judgement and approval, and never into user-facing or channel-delivered text
+  by default.** A restorer that guesses — prefix, fuzzy, positional — is an
+  exfiltration oracle; an unrestorable token BLOCKS the call with a notice the
+  model can act on, because a shell expands the literal to nothing and the call
+  fails downstream with nothing naming why.
+  ⚠️ **`redaction` is a CLAIM, per the `integration` rule** — self-declared,
+  never an input to a decision; the runtime verifies each reported token
+  occurs in the body before counting it. A token in traffic is a SUCCESS
+  record and raises nothing; a secret the runtime still finds on a step
+  carrying the report is a finding WITH a diagnosis — stale ruleset, missed
+  rule, or uncovered shape — where before it was a mystery.
+  ⚠️ **`pii` is excluded, on purpose.** A secret is opaque, so masking it is
+  lossless for the model and can be done blind; a PII value has semantics and
+  masking it changes what the model can do. PII stays a judged, runtime-side
+  redaction.
+  ⚠️ **A fetch that failed means UNKNOWN, never "no rules"** — cache, then fail
+  mode — and absent `rules` on a heartbeat never means empty. Optional in both
+  directions, as `limits` is: an integration that never fetched masks nothing
+  and is judged exactly as before.
+  This is not v0.4's local-redaction specification returning: that one
+  specified a redactor SERVICE and a wire field describing what it had done,
+  and v0.7 deleted it; this one specifies a client behaviour and a rule feed,
+  and the transported body is judged as an ordinary event. Reference
+  integrations: hermes 2.0, opencode 0.4, openclaw 0.4 (in progress).
+- **`verdict.continuation` — how to say no to an agent
+  ([verdict.md](specification/verdict.md#continuation--how-to-say-no-to-an-agent-13))**
+  — an OPTIONAL rendering directive beside a `block`, saying which SHAPE the refusal
+  should take for a caller that is an agent loop: `drop_calls` (remove the refused
+  tool calls, keep the rest), `withhold` (replace a tool result with a notice and
+  forward the request), `answer` (render the notice as the whole reply).
+  ⚠️⚠️ **It changes nothing about what is enforced.** The refused action still does
+  not proceed and `decision` still says `block`; only the token the turn ends on
+  moves. It exists because the obvious rendering — `finish_reason: "content_filter"`
+  / `stop_reason: "refusal"` — is a TERMINAL condition in every agent harness
+  measured: not retried, no reason given to the model, the whole run abandoned. One
+  refused step ended a nine-step task, and the decision was right while the rendering
+  threw away the agent's remaining work.
+  ⚠️ **Optional in BOTH directions.** A runtime may omit it; a PEP that ignores it
+  refuses exactly as it did before, which is the strict side — ignoring this key can
+  never let something through. So the two ends roll forward independently.
+  ⚠️ **The style follows the POSITION of the blocking findings, not the guardrail**:
+  only a tool call can be dropped, only a tool result withheld, and a runtime must not
+  emit a positional style whose paths it cannot name. A partial rendering that
+  forwards some refused calls under a notice claiming they were refused is worse than
+  refusing the turn whole.
+  ⚠️ **`withhold` is not a redaction** — its replacement must never enter the PEP's
+  restore map, or the model's reply rehydrates the content that was withheld. And on a
+  stream a PEP must not end on a normal completion once tool-call bytes have reached
+  the client: harnesses act on tool calls being present rather than on the finish
+  reason, so it would run a call with truncated arguments.
 - **Mandate — the authorization envelope ([mandate.md](specification/mandate.md),
   [schema/mandate.schema.json](schema/mandate.schema.json))** — the operator's
   declaration of what one workspace's agents may do, judged against the tool

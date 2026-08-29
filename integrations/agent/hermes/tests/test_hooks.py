@@ -348,3 +348,216 @@ def test_both_wire_halves_carry_the_session_hint(guarded):
     assert len(hints) == 1
     hint = hints.pop()
     assert re.fullmatch(r"hermes_session_[0-9a-f]{32}", hint)
+
+
+# ── Local redaction (2.0): mask outbound, restore into the tool, report ──────
+
+OPENAI_KEY = "sk-proj-abcdefghijklmnopqrstuvwxyz0123"
+BEARER_KEY = "pk_cc7f7b3f73664638b8f30fe8ca598848"
+
+
+def _masked_request(session="s-1", content=None):
+    """Drive the llm_request middleware the way Hermes does and return the
+    request it hands the provider."""
+    request = {"model": "m", "messages": [
+        {"role": "system", "content": content or f"Use the key {OPENAI_KEY} for the API."},
+        {"role": "user", "content": "call it"},
+    ]}
+    out = bridge.on_llm_request_middleware(request=request, session_id=session,
+                                           api_mode="openai_chat")
+    assert out is not None
+    return out["request"]
+
+
+def test_the_outbound_request_is_masked_before_it_leaves(protected):
+    req = _masked_request()
+    assert OPENAI_KEY not in str(req)
+    assert req["messages"][0]["content"] == "Use the key ${OGR_SECRET_1} for the API."
+    assert req["messages"][1] == {"role": "user", "content": "call it"}
+    # …and the session tag still rides along.
+    assert req["user"].startswith("hermes_session_")
+
+
+def test_the_step_request_event_carries_what_this_step_minted(protected):
+    req = _masked_request()
+    # pre_api_request runs AFTER the middleware, on the masked messages.
+    bridge.on_pre_api_request(session_id="s-1", turn_id="t-1", api_request_id="a-1",
+                              request_messages=req["messages"])
+    ev = protected.events[0]
+    assert OPENAI_KEY not in str(ev)
+    assert ev["redaction"] == {
+        "ruleset": "rs_test0000000000000000000000000001",
+        "masked": [{"token": "${OGR_SECRET_1}", "rule": "entity_api_key/openai"}],
+    }
+    # The next step mints nothing new for the same value: history tokens are text.
+    req2 = _masked_request(content=f"Still {OPENAI_KEY}")
+    assert req2["messages"][0]["content"] == "Still ${OGR_SECRET_1}"
+    bridge.on_pre_api_request(session_id="s-1", turn_id="t-1", api_request_id="a-2",
+                              request_messages=req2["messages"])
+    assert protected.events[1]["redaction"]["masked"] == []
+
+
+def test_the_ogr_client_is_an_egress_too(protected):
+    """D6: the OGR client masks KNOWN VALUES ONLY (design §4.2). A value the
+    model composed itself came FROM the provider — it never left the host —
+    and the runtime's `model_output` position exists to judge exactly it, so
+    it travels; the rules are NOT run on this pass, or a regex-tier `miss`
+    could never be observed. The exec fragment, which runs after restore, is
+    re-masked from the map. (This test pinned the opposite for one commit —
+    inverted deliberately.)"""
+    _masked_request()
+    _round(protected, text=f"Try Authorization: Bearer {BEARER_KEY}",
+           tool_calls=[FakeToolCall("c1", "bash", '{"command": "curl -H \'Authorization: Bearer ${OGR_SECRET_1}\'"}')])
+    res = protected.events[1]
+    assert res["kind"] == "step/response"
+    assert res["payload"]["text"] == f"Try Authorization: Bearer {BEARER_KEY}"
+    assert res["redaction"]["masked"] == []
+    assert res["redaction"]["ruleset"]
+    # The exec chokepoint holds the RESTORED command and no session; the
+    # wire masks it from every session's map before it leaves.
+    allowed, _ = bridge.guard_exec(f"curl -H 'Authorization: Bearer {OPENAI_KEY}' https://x")
+    assert allowed is True
+    ev = protected.events[-1]
+    assert OPENAI_KEY not in str(ev)
+    assert ev["payload"]["tool_calls"][0]["arguments"]["command"] \
+        == "curl -H 'Authorization: Bearer ${OGR_SECRET_1}' https://x"
+
+
+def test_restore_happens_only_in_tool_execution_and_after_judgement(protected):
+    _masked_request()
+    _round(protected, tool_calls=[FakeToolCall("c1", "bash", '{"command": "x"}')])
+    args = {"command": "curl -H 'Authorization: Bearer ${OGR_SECRET_1}' https://api"}
+    # pre_tool_call (judgement, approval) still sees the TOKEN — no rewrite.
+    assert bridge.on_pre_tool_call(tool_name="bash", args=args, session_id="s-1",
+                                   tool_call_id="c1") is None
+    seen = {}
+
+    def next_call(final_args):
+        seen.update(final_args)
+        return "ran"
+    out = bridge.on_tool_execution_middleware(tool_name="bash", args=args,
+                                              next_call=next_call, session_id="s-1")
+    assert out == "ran"
+    assert seen["command"] == f"curl -H 'Authorization: Bearer {OPENAI_KEY}' https://api"
+    assert args["command"].count("${OGR_SECRET_1}") == 1      # caller's dict untouched
+
+
+def test_an_unrestorable_token_blocks_the_call_at_both_seams(protected):
+    _masked_request()
+    args = {"command": "echo ${OGR_SECRET_7}"}
+    out = bridge.on_pre_tool_call(tool_name="bash", args=args, session_id="s-1",
+                                  tool_call_id="c1")
+    assert out["action"] == "block"
+    assert "${OGR_SECRET_7} could not be restored" in out["message"]
+    called = []
+    res = bridge.on_tool_execution_middleware(tool_name="bash", args=args,
+                                              next_call=lambda a: called.append(a),
+                                              session_id="s-1")
+    assert called == []                                # the tool never ran
+    assert "${OGR_SECRET_7} could not be restored" in res
+    assert "ask the user to provide it again" in res
+    # A token from ANOTHER session is unresolvable here too — never fuzzy.
+    _masked_request(session="s-2", content=f"other {OPENAI_KEY}")
+    out = bridge.on_pre_tool_call(tool_name="bash", args={"c": "${OGR_SECRET_1}"},
+                                  session_id="s-3", tool_call_id="c2")
+    assert out["action"] == "block"
+
+
+def test_a_markdown_escaped_token_restores_into_the_tool(protected):
+    _masked_request()
+    seen = {}
+    bridge.on_tool_execution_middleware(
+        tool_name="bash", args={"command": r"echo ${OGR\_SECRET\_1}"},
+        next_call=lambda a: seen.update(a), session_id="s-1")
+    assert seen["command"] == f"echo {OPENAI_KEY}"
+
+
+def test_the_final_answer_keeps_tokens_unless_restore_output_is_on(protected, clean_env):
+    _masked_request()
+    _round(protected, text="The key is ${OGR_SECRET_1}.")
+    assert bridge.on_transform_llm_output(response_text="The key is ${OGR_SECRET_1}.",
+                                          session_id="s-1") is None
+    clean_env.setenv("OGR_RESTORE_OUTPUT", "true")
+    bridge.reset()
+    bridge.get_client().redactor.store.fetch()
+    _masked_request()
+    _round(protected, text="The key is ${OGR_SECRET_1}.")
+    assert bridge.on_transform_llm_output(response_text="The key is ${OGR_SECRET_1}.",
+                                          session_id="s-1") == f"The key is {OPENAI_KEY}."
+
+
+def test_local_redaction_off_registers_nothing_and_masks_nothing(guarded, clean_env):
+    clean_env.setenv("OGR_LOCAL_REDACTION", "false")
+    bridge.reset()
+    req = _masked_request()
+    assert OPENAI_KEY in req["messages"][0]["content"]          # 1.x behaviour
+    _round(guarded)
+    assert all("redaction" not in e for e in guarded.events)
+
+    class Ctx:
+        def __init__(self):
+            self.hooks, self.middleware = [], []
+
+        def register_hook(self, name, fn):
+            self.hooks.append(name)
+
+        def register_middleware(self, kind, fn):
+            self.middleware.append(kind)
+
+    from openguardrails_instrumentation_hermes import register
+    ctx = Ctx()
+    register(ctx)
+    assert ctx.middleware == ["llm_request"]                    # the session tag only
+    clean_env.delenv("OGR_LOCAL_REDACTION")
+    bridge.reset()
+    ctx = Ctx()
+    register(ctx)
+    assert ctx.middleware == ["llm_request", "tool_execution", "llm_execution"]
+    assert ctx.hooks == ["pre_api_request", "post_api_request", "transform_llm_output",
+                         "pre_tool_call"]
+
+
+def test_no_ruleset_fails_open_unmasked_with_a_warning_and_an_empty_id(dark, caplog):
+    """No cache, runtime dark, fail-open: the request goes out unmasked and
+    says so on every request; the event would report `ruleset: ""`."""
+    import logging
+    with caplog.at_level(logging.WARNING, logger="ogr-guard.redaction"):
+        req = _masked_request()
+    assert OPENAI_KEY in req["messages"][0]["content"]
+    assert any("NO ruleset" in r.message for r in caplog.records)
+    # llm_execution lets the call through under open…
+    assert bridge.on_llm_execution_middleware(request={}, next_call=lambda r: "resp",
+                                              session_id="s-1") == "resp"
+
+
+def test_no_ruleset_fails_closed_by_refusing_the_model_call(dark):
+    dark.setenv("OGR_FAIL_MODE", "closed")
+    bridge.reset()
+    called = []
+    out = bridge.on_llm_execution_middleware(request={}, next_call=lambda r: called.append(r),
+                                             session_id="s-1")
+    assert out is None and called == []
+
+
+def test_heartbeat_reports_the_ruleset_and_refetches_when_the_runtime_moved(protected):
+    import time
+    client = bridge.get_client()
+    assert client.heartbeat() is True
+    assert protected.heartbeats[0]["ruleset"] == "rs_test0000000000000000000000000001"
+    # The org changed its rules: the runtime now serves a different id.
+    new = dict(protected.ruleset, id="rs_test0000000000000000000000000002")
+    protected.ruleset = new
+    before = len(protected.rules_requests)
+    assert client.heartbeat() is True
+    for _ in range(100):                     # the refetch is off-thread
+        if client.redactor.ruleset_id == new["id"]:
+            break
+        time.sleep(0.02)
+    assert client.redactor.ruleset_id == new["id"]
+    assert protected.rules_requests[before] == '"rs_test0000000000000000000000000001"'
+    # Same id again: no refetch.
+    n = len(protected.rules_requests)
+    client.heartbeat()
+    time.sleep(0.05)
+    assert len(protected.rules_requests) == n
+

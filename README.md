@@ -216,6 +216,7 @@ agent developers integrate by calling it directly:
 | [Verdict](specification/verdict.md) | The runtime's decision about an event | — |
 | [obligations](specification/obligations.md) | What the enforcement point must DO before an action proceeds — carried beside an `allow` | XACML obligations |
 | [artifact scan](specification/artifact-scan.md) | The sibling contract a scanner implements — hash-first, range-negotiated, pluggable | ICAP |
+| [local redaction](specification/local-redaction.md) | What an in-process integration does so a secret never leaves the host — mask on the way out, restore into a tool, rules served by the runtime | — |
 | [composition](specification/composition.md) | How multiple detectors' answers combine into one decision | — |
 | [degraded mode](specification/degraded-mode.md) | What an integration does when the runtime is unreachable (default: fail open) | — |
 | [Runtime API](specification/runtime-api.md) | The HTTP binding a runtime exposes, the recipe, and the minimal integration | OTLP/HTTP |
@@ -261,13 +262,14 @@ The v0.6 SDK packages were retired in v0.7 — the API is the integration
 surface. v0.8 merged the two integration recipes into one, and every
 integration below speaks it (v1.0 releases the same wire unchanged):
 
-| Category | Target | Status |
-|---|---|---|
-| **Gateway** | Higress (Go/WASM) | [`integrations/gateway/higress`](integrations/gateway/higress/) — **the reference gateway integration** |
-| | OpenAI/Anthropic example · mitmproxy | current |
-| **Agent** | DeepSeek Harness (`dsh`) | [`integrations/agent/dsh`](integrations/agent/dsh/) — **the reference agent-direct integration** |
-| | litellm | [`integrations/agent/litellm`](integrations/agent/litellm/) — current |
-| | Claude Code · Codex · opencode · OpenClaw · Hermes · LangGraph | current |
+| Category | Target | Status | [Local redaction](specification/local-redaction.md) (1.4) |
+|---|---|---|---|
+| **Gateway** | Higress (Go/WASM) | [`integrations/gateway/higress`](integrations/gateway/higress/) — **the reference gateway integration** | n/a (the runtime masks for it) |
+| | OpenAI/Anthropic example · mitmproxy | current | n/a (the runtime masks for it) |
+| **Agent** | DeepSeek Harness (`dsh`) | [`integrations/agent/dsh`](integrations/agent/dsh/) — **the reference agent-direct integration** | no |
+| | litellm | [`integrations/agent/litellm`](integrations/agent/litellm/) — current | no |
+| | Hermes · opencode · OpenClaw | current | 2.0 / 0.4 / 0.4 (in progress) |
+| | Claude Code · Codex · LangGraph | current | no |
 
 ## Development
 

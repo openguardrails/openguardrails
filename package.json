@@ -4,7 +4,10 @@
   "description": "OpenGuardrails protocol, core runtimes, integrations, benchmark, examples, skill, and website.",
   "license": "Apache-2.0",
   "workspaces": [
-    "integrations/agent/dsh"
+    "integrations/agent/local-redaction",
+    "integrations/agent/dsh",
+    "integrations/agent/opencode",
+    "integrations/agent/openclaw"
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",

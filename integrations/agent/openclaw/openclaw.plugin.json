@@ -1,10 +1,12 @@
 {
   "id": "openguardrails",
   "name": "OpenGuardrails",
-  "description": "Judge every tool call and outbound channel message through an OpenGuardrails runtime (OGR v0.8) — block enforced in place, fail-open by default.",
+  "description": "Judge every tool call and outbound channel message through an OpenGuardrails runtime (OGR v1.0) — block enforced in place, fail-open by default; secrets masked on this host before they reach the model (OGR 1.4).",
   "activation": {
     "onStartup": true,
-    "onCapabilities": ["hook"]
+    "onCapabilities": [
+      "hook"
+    ]
   },
   "configSchema": {
     "type": "object",
@@ -15,17 +17,38 @@
         "description": "OpenGuardrails runtime connection and identity claims; each field falls back to OGR_* environment variables, then to \"\" (no assertion).",
         "additionalProperties": false,
         "properties": {
-          "url": { "type": "string", "description": "Runtime base URL (default https://openguardrails.com). A mounted prefix belongs in it." },
-          "apiKey": { "type": "string", "description": "Organization API key; unset disables the runtime connection (and with it every guard)." },
-          "agentId": { "type": "string", "description": "agent_id claim — WHICH agent, unique in the organization." },
-          "agentType": { "type": "string", "description": "agent_type claim — what KIND of agent (default \"openclaw\")." },
-          "workspace": { "type": "string", "description": "agent_workspace claim — the platform policy group, NOT a directory." },
-          "user": { "type": "string", "description": "agent_user claim — who is using the assistant." }
+          "url": {
+            "type": "string",
+            "description": "Runtime base URL (default https://openguardrails.com). A mounted prefix belongs in it."
+          },
+          "apiKey": {
+            "type": "string",
+            "description": "Organization API key; unset disables the runtime connection (and with it every guard)."
+          },
+          "agentId": {
+            "type": "string",
+            "description": "agent_id claim — WHICH agent, unique in the organization."
+          },
+          "agentType": {
+            "type": "string",
+            "description": "agent_type claim — what KIND of agent (default \"openclaw\")."
+          },
+          "workspace": {
+            "type": "string",
+            "description": "agent_workspace claim — the platform policy group, NOT a directory."
+          },
+          "user": {
+            "type": "string",
+            "description": "agent_user claim — who is using the assistant."
+          }
         }
       },
       "failMode": {
         "type": "string",
-        "enum": ["open", "closed"],
+        "enum": [
+          "open",
+          "closed"
+        ],
         "description": "Degraded-mode posture when the runtime cannot answer: open (default) proceeds loudly, closed refuses the action."
       },
       "timeoutMs": {
@@ -35,6 +58,36 @@
       "guardMessages": {
         "type": "boolean",
         "description": "Also judge outbound channel messages, not just tool calls (default true)."
+      },
+      "localRedaction": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Local secrets redaction (OGR 1.4): mask every outbound model request at this process's HTTP client (system prompt included), restore placeholders into tool params on this host after judgement; the ingress hooks are the fallback. On by default; the ruleset is fetched from the runtime.",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Mask at all (default true; env OGR_LOCAL_REDACTION=0|false|off turns it off)."
+          },
+          "http": {
+            "type": "boolean",
+            "description": "Mask at the HTTP client — the in-process fetch/undici interceptor, the primary path (default true; env OGR_LOCAL_REDACTION_HTTP=0|false|off leaves only the ingress-hook masking)."
+          },
+          "cachePath": {
+            "type": "string",
+            "description": "Where the fetched ruleset is cached, mode 0600 (default ~/.openguardrails/rules-<hash>.json; env OGR_RULES_CACHE)."
+          },
+          "tiers": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "strong",
+                "heuristic"
+              ]
+            },
+            "description": "Which rule tiers to mask (default both; env OGR_LOCAL_REDACTION_TIERS)."
+          }
+        }
       }
     }
   }

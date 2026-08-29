@@ -45,14 +45,69 @@ verdict tells the truth about partial coverage instead of failing silently.
 | `modifications` | object | MAY | Spans the enforcement point MUST apply in place. |
 | `unjudged` | array<string> | SHOULD | Payload paths this verdict could NOT judge. |
 | `latency_ms` | number | MAY | Runtime-observed decision latency. |
+| `continuation` | object | MAY | HOW to express a refusal to an agent loop. See below. |
 
 What v0.8 removed: the `session_id`/`turn`/`step` echo and `attribution`
 (there are no declared coordinates left to echo — the ledger lives entirely
 in the runtime, and an integration has no decision to make from them),
 `ogr_version` (the runtime adapts; version negotiation left the wire), and
 `output_mode` (streaming enforcement is the integration's held-back tail —
-[runtime-api § streaming](runtime-api.md#streaming-hold-the-tail-judge-once)
+[runtime-api § streaming](runtime-api.md#streaming-release-a-bounded-head-judge-once)
 — so the runtime no longer selects a lane to report).
+
+## `continuation` — how to say no to an agent (1.3)
+
+⚠️⚠️ **A RENDERING, NEVER A DECISION.** `continuation` MUST NOT change what is
+enforced: the refused action still does not proceed, the withheld content still does
+not reach the model, and `decision` still says `block`. It answers a question the wire
+never asked — *how should the enforcement point express this refusal to a caller that
+is an agent loop rather than a person?*
+
+It exists because the obvious rendering ends the caller's whole session. A refusal
+delivered as `finish_reason: "content_filter"` (OpenAI) or `stop_reason: "refusal"`
+(Anthropic) is, in every agent harness measured, a TERMINAL condition: not retried, no
+reason surfaced to the model, the run abandoned. One refused tool call in step 9 of a
+task ends the task. The decision was correct and the rendering discarded the agent's
+remaining work.
+
+```json
+{ "decision": "block",
+  "continuation": {
+    "style": "drop_calls",
+    "paths": ["payload.choices.0.message.tool_calls.1"],
+    "notice": "This action was refused by a security policy and was NOT executed. Reason: … You may pursue the user's goal by other legitimate means, but you MUST NOT retry this action in a disguised form …" } }
+```
+
+| `style` | The enforcement point SHOULD |
+|---|---|
+| `drop_calls` | remove the `paths` (whole tool-call elements) from the reply, keep the calls that survive, append `notice` to the assistant's text, and set the finish reason to match what SURVIVED |
+| `withhold` | replace the text at each of `paths` with `notice` and forward the request |
+| `answer` | render `notice` as the whole reply, on this protocol's NORMAL completion |
+
+- **OPTIONAL in both directions, and that is load-bearing.** A runtime MAY omit it; an
+  enforcement point that does not implement it reads `decision: "block"` and refuses
+  exactly as before. Ignoring it is always SAFE — it fails toward the stricter
+  behaviour, never toward letting something through — which is what lets the two ends
+  roll forward independently.
+- **A style names WHERE the refusal sits, not which guardrail fired.** A runtime
+  SHOULD derive it from the position of the blocking findings: only a tool call can be
+  dropped, only a tool result can be withheld, and anything else can only be answered.
+  A runtime MUST NOT emit a positional style whose paths it cannot name.
+- ⚠️ **`withhold` is NOT a redaction.** Its replacement MUST NOT enter whatever map the
+  enforcement point uses to restore `modifications` placeholders on the way back;
+  restoring it would return the withheld content inside the model's own reply.
+- ⚠️ **On a stream, an enforcement point MUST NOT end on a normal completion once
+  tool-call bytes have reached the client.** The client then holds a partial call, and
+  harnesses act on the presence of tool calls rather than on the finish reason — so a
+  normal completion invites it to run a call with truncated arguments. Retract instead.
+- ⚠️ **`notice` is read by a MODEL.** It SHOULD say what was refused and what the agent
+  may legitimately do instead, and it SHOULD forbid retrying the same action in
+  disguised form. A runtime SHOULD NOT put detector internals in it, and SHOULD weigh
+  what it reveals: a notice reaching an AGENT is telling the governed party the rule it
+  must follow, while one reaching a PERSON may be a detector oracle.
+- A verdict carrying `require_approval` semantics MUST NOT carry a continuation: its
+  meaning is *suspend and ask a human*, and a notice inviting the agent to find another
+  way routes it around the person the policy summoned.
 
 ## `findings`
 

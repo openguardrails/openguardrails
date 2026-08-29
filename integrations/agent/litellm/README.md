@@ -112,7 +112,7 @@ call it on a timer if you want fleet coverage to distinguish idle from dark.
 A streamed response is judged **exactly once, whole, at stream end** —
 never chunk-by-chunk. litellm's `async_post_call_streaming_iterator_hook`
 wraps the entire stream, so from this seat the v1.0
-[tail-hold](../../../specification/runtime-api.md#streaming-hold-the-tail-judge-once)
+[tail-hold](../../../specification/runtime-api.md#streaming-release-a-bounded-head-judge-once)
 degenerates to **tail = ∞**: every chunk is buffered, the reassembled
 response (litellm's own `stream_chunk_builder` when it can produce a raw
 `openai.chat` body, the spec's `canonical` shape otherwise) gets the step's

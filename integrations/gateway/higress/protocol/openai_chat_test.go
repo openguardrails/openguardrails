@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
@@ -207,5 +208,65 @@ func TestChatUsageReadsTheDetailCounters(t *testing.T) {
 	u := out.Usage
 	if u == nil || u.CacheReadTokens != 25 || u.ReasoningTokens != 12 {
 		t.Fatalf("detail counters lost: %+v", u)
+	}
+}
+
+/*
+ * ⚠️⚠️ ChunkSegments is what makes a head budget smaller than one arrival spendable:
+ * an upstream chunk here is ~16 KB, so releasing in whole chunks cannot express any
+ * bound below a third of the answer. Three properties, and each one has a failure
+ * the others do not catch.
+ */
+func TestChunkSegmentsSplitsAtFrameBoundaries(t *testing.T) {
+	frame := func(txt string) string {
+		return `data: {"choices":[{"index":0,"delta":{"content":"` + txt + `"}}]}` + "\n\n"
+	}
+	raw := frame("ab") + frame("cde") + frame("f")
+
+	s := NewScanner(openAIChat{}.NewDecoder(NewRestorer(nil)))
+	segs := s.ChunkSegments([]byte(raw), false)
+
+	if len(segs) != 3 {
+		t.Fatalf("got %d segments, want one per frame", len(segs))
+	}
+	// ① The running content tag is the exposure AFTER each frame — what the release
+	// rule compares against — and it is cumulative, not per-frame.
+	for i, want := range []int{2, 5, 6} {
+		if segs[i].Content != want {
+			t.Errorf("segment %d content tag = %d, want %d", i, segs[i].Content, want)
+		}
+	}
+	// ② Every segment is a COMPLETE frame: releasing a `data:` line without its blank
+	// terminator hands the client an event it can never dispatch.
+	for i, seg := range segs {
+		if !bytes.HasSuffix(seg.Bytes, []byte("\n\n")) {
+			t.Errorf("segment %d does not end on a frame boundary: %q", i, seg.Bytes)
+		}
+	}
+	// ③ Concatenated, they are byte-identical to what the unheld lane forwards — the
+	// split is a release unit, never a change to the stream.
+	var joined []byte
+	for _, seg := range segs {
+		joined = append(joined, seg.Bytes...)
+	}
+	if got := string(NewScanner(openAIChat{}.NewDecoder(NewRestorer(nil))).Chunk([]byte(raw), false)); got != string(joined) {
+		t.Fatalf("segments != Chunk output:\n  %q\n  %q", joined, got)
+	}
+}
+
+// ⚠️ A frame split across two arrivals must not be released in halves: the carry
+// holds the partial line, so the first arrival yields no complete frame at all.
+func TestChunkSegmentsHoldsAFrameSplitAcrossArrivals(t *testing.T) {
+	full := `data: {"choices":[{"index":0,"delta":{"content":"hello"}}]}` + "\n\n"
+	s := NewScanner(openAIChat{}.NewDecoder(NewRestorer(nil)))
+	if segs := s.ChunkSegments([]byte(full[:20]), false); len(segs) != 0 {
+		t.Fatalf("a partial frame produced %d segments — the client would get half an event", len(segs))
+	}
+	segs := s.ChunkSegments([]byte(full[20:]), false)
+	if len(segs) != 1 || string(segs[0].Bytes) != full {
+		t.Fatalf("the rejoined frame came out as %q", segs)
+	}
+	if segs[0].Content != 5 {
+		t.Fatalf("content tag = %d, want 5", segs[0].Content)
 	}
 }

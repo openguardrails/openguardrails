@@ -56,7 +56,7 @@ and adds the tool inventory to every `step/request` (tool *definitions* are
 an attack surface too). Anything else — notably model-level `.stream` —
 deliberately does not exist on the wrapper, so an unjudged call path fails
 loudly instead of silently bypassing the guard. Token-level streaming needs
-the spec's [held-tail dance](../../../specification/runtime-api.md#streaming-hold-the-tail-judge-once)
+the spec's [held-tail dance](../../../specification/runtime-api.md#streaming-release-a-bounded-head-judge-once)
 and is not implemented here; graph-level streaming of node results is
 unaffected.
 

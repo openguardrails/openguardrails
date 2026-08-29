@@ -304,6 +304,54 @@ type Protocol interface {
 	// is already on the caller's screen; this is the frame that tells a client to
 	// take the message back.
 	Retract(model string) string
+
+	// SoftRefuse renders the refusal as an ORDINARY completed reply carrying the
+	// notice as the assistant's text — a normal stop, not a content filter.
+	//
+	// ⚠️ Same refusal, different token. See soft.go: `content_filter` /
+	// `stop_reason: "refusal"` is what every agent harness treats as terminal, so a
+	// refused tool call ends the whole session instead of the one action. The WHY
+	// moves to the `x_ogr` body key, which nothing branches on.
+	SoftRefuse(model, notice string) string
+
+	// SoftRefuseStream is SoftRefuse in SSE frames, ending on this protocol's normal
+	// completion — the buffered lane's continuation shape.
+	SoftRefuseStream(model, notice string) string
+
+	// DropCalls removes the named tool calls from a complete reply, appends the
+	// notice to the assistant's text, and corrects the finish reason to match what
+	// SURVIVED. It is the only rendering that lets an agent loop keep running: the
+	// calls the policy allowed still execute, and the model reads why the others
+	// did not.
+	//
+	// `paths` are transported-body paths with the `payload.` prefix already stripped,
+	// naming whole array ELEMENTS (a call is refused whole — blanking its arguments
+	// would leave the agent a call it can still issue).
+	//
+	// ⚠️⚠️ Returns false when ANY path fails to resolve, and the caller MUST then
+	// fall back to a hard refusal. A partial drop forwards refused calls under a
+	// notice claiming they were refused.
+	DropCalls(body string, paths []string, notice string) (string, bool)
+
+	// RetractSoft ends a stream that has ALREADY released bytes on this protocol's
+	// normal completion, delivering the notice mid-stream where the protocol allows
+	// it. The counterpart of Retract, which ends the same stream on the terminal
+	// token.
+	//
+	// ⚠️⚠️ The caller must only reach this when NO tool-call bytes have been released
+	// (protocol.CallWatcher). With a partial call in the client's hands, a normal
+	// completion invites it to run a call with truncated arguments.
+	RetractSoft(model, notice string) string
+
+	// DropCallsStream is DropCalls for a STREAM: it renders the surviving calls as
+	// fresh frames, the notice as text, and a finish reason matching what survived.
+	// Returns false when this protocol cannot express it mid-stream, and the caller
+	// then falls back to RetractSoft (the loop still survives; the survivors do not).
+	//
+	// ⚠️⚠️ Only callable when NO tool-call bytes have been released
+	// (tailHold.mayEndSoftly) — which is also what makes emitting calls at fresh
+	// indexes safe: the client has no partial call at any index to collide with.
+	DropCallsStream(model string, survivors []Action, notice string) (string, bool)
 }
 
 // --- the registry ------------------------------------------------------------

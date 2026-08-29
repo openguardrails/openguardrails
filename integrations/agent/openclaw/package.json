@@ -1,6 +1,6 @@
 {
   "name": "openguardrails-instrumentation-openclaw",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Guard an OpenClaw assistant's tool calls and channel traffic through an OpenGuardrails runtime — OGR v0.8, one evaluate call per held action, no SDK, no core changes.",
   "type": "module",
   "license": "Apache-2.0",
@@ -43,6 +43,9 @@
     "ogr",
     "openguardrails"
   ],
+  "dependencies": {
+    "@openguardrails/local-redaction": "^0.1.0"
+  },
   "devDependencies": {
     "@types/node": "^22",
     "typescript": "^5.7.0"

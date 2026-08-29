@@ -3,7 +3,7 @@
 A `GuardEvent` is the unit an integration point submits to the runtime.
 Keywords per RFC 2119.
 
-**Eight required fields, and exactly three optional.** v0.8 removed every knob a
+**Eight required fields, and exactly four optional.** v0.8 removed every knob a
 producer could choose to skip: what a runtime can derive is not on the wire at
 all (coordinates, timestamps, protocol versioning), and what only the producer
 can know is mandatory — with the empty string as the explicit "I have nothing
@@ -12,12 +12,13 @@ endpoint.
 
 The optional fields are [`integration`](#integration) — the reporter's own
 `name/version` — [`connection`](#connection), the reporter's opaque
-downstream-flow id, and [`session_hint`](#session_hint), the producer's own
-name for the conversation this step belongs to. Integrations SHOULD send all
-three when they hold the fact. They are OPTIONAL rather than required so the
-two ends of a deployment can roll forward independently: making any of them
-mandatory would reject every build already in the field, turning a diagnostic
-into an outage.
+downstream-flow id, [`session_hint`](#session_hint), the producer's own
+name for the conversation this step belongs to, and — since 1.4 —
+[`redaction`](#redaction), what an integration masked on the host before this
+step left it. Integrations SHOULD send each when they hold the fact. They are
+OPTIONAL rather than required so the two ends of a deployment can roll forward
+independently: making any of them mandatory would reject every build already
+in the field, turning a diagnostic into an outage.
 
 ## Kinds
 
@@ -365,6 +366,42 @@ generation, a subagent) was made on behalf of.
 A runtime MUST NOT treat it as authorization, policy selection, ordering, or
 trust of any kind — the `integration` rule. It is scoped to the credential
 that carried it: two tenants' identical hints never meet.
+
+## `redaction`
+
+`redaction` is the per-step report of an integration doing
+[local redaction](local-redaction.md) (OGR 1.4) — masking secrets on the host
+before the request left it, so the model, the runtime and everything between
+them see `${OGR_SECRET_n}` where the credential was:
+
+```json
+"redaction": {
+  "ruleset": "rs_9f2c1e0a7b3d4c5e8f1a2b3c4d5e6f70",
+  "masked": [
+    { "token": "${OGR_SECRET_3}", "rule": "entity_api_key/gitlab" }
+  ]
+}
+```
+
+- `ruleset` — the id of the ruleset the integration ran, exactly as
+  [`GET /v1/rules`](runtime-api.md#get-v1rules) served it. The empty string
+  means local redaction is on but no ruleset was ever obtained.
+- `masked[]` — the tokens MINTED in this step, never values; at most 256
+  entries. Each `token` matches `^\$\{OGR_[A-Z_]+_[0-9]+\}$`; each `rule` is a
+  `check_id` or `check_id/pattern_id`, at most 128 characters.
+
+Integrations doing local redaction SHOULD send it on every event. **Absent**
+means the integration does not do local redaction or has it switched off; a
+runtime MUST accept such an event and MUST draw no diagnosis from it.
+
+⚠️ It is a **CLAIM, per the [`integration`](#integration) rule**: self-declared,
+never an input to a decision. Nothing bounds what a caller reports it masked,
+so a runtime MUST NOT derive trust, authorization or policy selection from it,
+SHOULD verify that each reported token occurs in the body before counting it,
+and MUST count it nowhere else. What it is FOR is a diagnosis: a token in
+traffic is a success record and raises nothing, while a secret the runtime
+still finds on a step carrying this report can be named — a stale ruleset, a
+missed rule, or a shape no rule covers — instead of being a mystery.
 
 There is **no `event_id` on the request**. Identifiers are the runtime's job:
 

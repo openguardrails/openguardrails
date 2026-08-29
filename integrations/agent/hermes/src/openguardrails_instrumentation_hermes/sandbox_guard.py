@@ -10,7 +10,10 @@ This is the one place the integration patches Hermes internals; it is
 optional and fails open (logs + runs normally) if Hermes' layout differs.
 The guard itself is one evaluate: bridge.guard_exec sends the command as a
 canonical step/response fragment and the configured fail mode governs an
-unanswered call, exactly as at every other seam.
+unanswered call, exactly as at every other seam. Since 2.0 this wrapper runs
+AFTER local redaction restored the real value into the argv — so the fragment
+is re-masked from the same value→token map at the wire before it leaves
+(design D6: the OGR client is an egress too).
 
 (v0.6 note: this module used to also compile OGR policy into srt/OpenShell
 sandbox settings and correlate the exec with its pre_tool_call via a

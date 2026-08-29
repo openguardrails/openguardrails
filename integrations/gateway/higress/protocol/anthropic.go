@@ -315,6 +315,145 @@ func (anthropicMessages) Refuse(model, reason string) string {
 	return string(out)
 }
 
+// --- continuations -----------------------------------------------------------
+
+// SoftRefuse: the notice as an ordinary assistant reply, `stop_reason: "end_turn"`.
+func (anthropicMessages) SoftRefuse(model, notice string) string {
+	out, err := json.Marshal(map[string]any{
+		"id": "msg_ogr_refusal", "type": "message", "role": "assistant", "model": model,
+		"content":     []map[string]any{{"type": "text", "text": notice}},
+		"stop_reason": "end_turn", "stop_sequence": nil,
+		"usage": map[string]any{"input_tokens": 0, "output_tokens": 0},
+		"x_ogr": xOGR("answer"),
+	})
+	if err != nil {
+		return `{"type":"error","error":{"type":"invalid_request_error","message":"refused"}}`
+	}
+	return string(out)
+}
+
+func (a anthropicMessages) SoftRefuseStream(model, notice string) string {
+	start, _ := json.Marshal(map[string]any{
+		"type": "message_start",
+		"message": map[string]any{
+			"id": "msg_ogr", "type": "message", "role": "assistant", "model": model,
+			"content": []any{}, "stop_reason": nil, "stop_sequence": nil,
+			"usage": map[string]any{"input_tokens": 0, "output_tokens": 0},
+			// The marker rides the first frame — see the chat adapter.
+			"x_ogr": xOGR("answer"),
+		},
+	})
+	blockStart, _ := json.Marshal(map[string]any{
+		"type": "content_block_start", "index": 0,
+		"content_block": map[string]any{"type": "text", "text": ""},
+	})
+	delta, _ := json.Marshal(map[string]any{
+		"type": "content_block_delta", "index": 0,
+		"delta": map[string]any{"type": "text_delta", "text": notice},
+	})
+	blockStop, _ := json.Marshal(map[string]any{"type": "content_block_stop", "index": 0})
+	// ⚠️ `end_turn`, where Retract sends `refusal`. Everything else about the sequence
+	// is identical — an SDK assembles a reply from these events, so a shortened
+	// sequence leaves the client waiting rather than rendering anything.
+	msgDelta, _ := json.Marshal(map[string]any{
+		"type":  "message_delta",
+		"delta": map[string]any{"stop_reason": "end_turn", "stop_sequence": nil},
+		"usage": map[string]any{"output_tokens": 0},
+	})
+	stop, _ := json.Marshal(map[string]any{"type": "message_stop"})
+	return anthropicEvent("message_start", string(start)) +
+		anthropicEvent("content_block_start", string(blockStart)) +
+		anthropicEvent("content_block_delta", string(delta)) +
+		anthropicEvent("content_block_stop", string(blockStop)) +
+		anthropicEvent("message_delta", string(msgDelta)) +
+		anthropicEvent("message_stop", string(stop))
+}
+
+/*
+ * RetractSoft ends the stream on `end_turn` and — unlike the other two adapters —
+ * WITHOUT the notice.
+ *
+ * ⚠️ A KNOWN GAP, stated rather than faked. This protocol addresses content by BLOCK
+ * INDEX, and mid-stream this seam does not know which indexes are in use: opening a
+ * new block at a guessed index either collides with a live one (corrupting the block
+ * the client is assembling) or leaves a hole. So the loop survives — which is the
+ * whole point — but the agent learns only that the turn ended, not why. Closing it
+ * needs the decoder's next free index plumbed through to here; worth doing when an
+ * anthropic-speaking harness is actually in front of this.
+ */
+func (a anthropicMessages) RetractSoft(model, notice string) string {
+	delta, _ := json.Marshal(map[string]any{
+		"type":  "message_delta",
+		"delta": map[string]any{"stop_reason": "end_turn", "stop_sequence": nil},
+		"usage": map[string]any{"output_tokens": 0},
+	})
+	stop, _ := json.Marshal(map[string]any{"type": "message_stop"})
+	return anthropicEvent("message_delta", string(delta)) +
+		anthropicEvent("message_stop", string(stop))
+}
+
+/*
+ * DropCallsStream: not expressible here, so the caller falls back to RetractSoft —
+ * the loop still survives, but the surviving calls do not.
+ *
+ * ⚠️ This protocol addresses content by BLOCK INDEX and this seam does not know
+ * which indexes the client has already seen, so a fresh tool_use block cannot be
+ * opened safely mid-stream. Same gap, and same fix, as RetractSoft above.
+ */
+func (anthropicMessages) DropCallsStream(model string, survivors []Action, notice string) (string, bool) {
+	return "", false
+}
+
+func (anthropicMessages) DropCalls(body string, paths []string, notice string) (string, bool) {
+	ordered := dropGroups(paths)
+	if ordered == nil || !allResolve(body, ordered) {
+		return body, false
+	}
+	out := body
+	for _, p := range ordered {
+		next, err := sjson.Delete(out, p)
+		if err != nil {
+			return body, false
+		}
+		out = next
+	}
+	/*
+	 * ⚠️ The notice is its own text BLOCK appended to `content`, not glued onto an
+	 * existing one: this protocol interleaves text and tool_use, so there may be
+	 * several text blocks or none, and picking one to extend would either mangle the
+	 * model's prose or silently drop the notice when it said nothing at all.
+	 */
+	next, err := sjson.SetRaw(out, "content.-1", mustJSON(map[string]any{
+		"type": "text", "text": notice,
+	}))
+	if err != nil {
+		return body, false
+	}
+	out = next
+	stop := "end_turn"
+	for _, b := range gjson.Get(out, "content").Array() {
+		if b.Get("type").String() == "tool_use" {
+			stop = "tool_use"
+			break
+		}
+	}
+	if next, err := sjson.Set(out, "stop_reason", stop); err == nil {
+		out = next
+	}
+	if next, err := sjson.SetRaw(out, "x_ogr", `{"decision":"block","continuation":"drop_calls"}`); err == nil {
+		out = next
+	}
+	return out, true
+}
+
+func mustJSON(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return "null"
+	}
+	return string(b)
+}
+
 // RefuseStream is the full Messages event sequence. A client's SDK assembles a reply
 // from these events, so a partial sequence leaves it waiting rather than rendering
 // the refusal.
@@ -387,6 +526,16 @@ type anthropicDecoder struct {
 	// frames counts data payloads whose `type` this decoder handles — see
 	// protocol.FrameCounter.
 	frames int
+}
+
+// SawCalls — see protocol.CallWatcher.
+func (d *anthropicDecoder) SawCalls() bool {
+	for _, b := range d.blocks {
+		if b != nil && b.kind == "tool_use" {
+			return true
+		}
+	}
+	return false
 }
 
 // RecognizedFrames — see protocol.FrameCounter.

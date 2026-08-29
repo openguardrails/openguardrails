@@ -1,6 +1,6 @@
 name: ogr-guard
-version: 1.1.0
-description: "Guard a Hermes agent through the OpenGuardrails (OGR) v0.8 Runtime API: two evaluates per model call, verdicts enforced on the answer, the tool calls, and the real exec."
+version: 2.0.0
+description: "Guard a Hermes agent through the OpenGuardrails (OGR) Runtime API: two evaluates per model call, verdicts enforced on the answer, the tool calls, and the real exec — and, since 2.0, local secrets redaction: secrets are masked to ${OGR_SECRET_n} before the request leaves the host and restored only into a tool's arguments after judgement."
 author: "OpenGuardrails"
 hooks:
   - pre_api_request
@@ -9,13 +9,32 @@ hooks:
   # substitute what the user sees. Withholds a block, applies redaction spans.
   - transform_llm_output
   # Enforces the verdict on tool calls: a blocked step/response means the
-  # round's tool calls do not run.
+  # round's tool calls do not run; a call carrying a token this session never
+  # issued is refused with a notice the model can act on.
   - pre_tool_call
+middleware:
+  # Masks the outbound provider request (every string leaf) and stamps the
+  # session tag. Runs before pre_api_request, so the event is the masked one.
+  - llm_request
+  # Restores tokens into the tool's arguments — after every hook, guardrail
+  # and approval; the last mutable point before dispatch.
+  - tool_execution
+  # Fail-closed with no ruleset at all refuses the model call.
+  - llm_execution
 requires_env:
   - name: OGR_RUNTIME_URL
     description: "OpenGuardrails runtime base URL, e.g. https://your-ogr-instance.example.com (blank = no runtime; the fail mode decides, and the default is open = pass-through)"
   - name: OGR_API_KEY
-    description: "Organization API key from your OGR console (Authorization: Bearer)"
+    description: "Organization API key from your OGR console (Authorization: Bearer). Also fetches the org's secret ruleset (GET /v1/rules) for local redaction"
     secret: true
   - name: OGR_AGENT_ID
     description: "WHICH agent this Hermes is, unique in your organization (e.g. hermes-laptop-tom). Blank is valid: identity then derives from the API key"
+optional_env:
+  - name: OGR_LOCAL_REDACTION
+    description: "true (default) | false — mask secrets to ${OGR_SECRET_n} before the request leaves the host; off sends no redaction field and registers no restore middleware"
+  - name: OGR_RULES_CACHE
+    description: "Path of the cached ruleset (default ~/.openguardrails/rules-<sha256(runtime_url)[:8]>.json, mode 0600). Rules only — the value map is never written to disk"
+  - name: OGR_RESTORE_OUTPUT
+    description: "false (default) — restore tokens in the FINAL answer. Off because Hermes gateways deliver the answer to channels, each one an egress"
+  - name: OGR_LOCAL_REDACTION_TIERS
+    description: "strong,heuristic (default) — which rule tiers to mask; a reversible mask over-masking is cheap"

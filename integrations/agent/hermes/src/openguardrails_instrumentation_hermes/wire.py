@@ -21,11 +21,13 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from .local_redaction import Redactor
+
 logger = logging.getLogger("ogr-guard.wire")
 
-# Kept in sync with pyproject.toml. Lives on the HEARTBEAT, not on events —
-# the build id left the GuardEvent in v0.8; fleet coverage reads it here.
-VERSION = "1.0.0"
+# Kept in sync with pyproject.toml and plugin.yaml. Rides every event
+# (`integration`) AND the heartbeat — one constant, two channels.
+VERSION = "2.0.0"
 INTEGRATION = f"openguardrails-instrumentation-hermes/{VERSION}"
 
 # Short and deliberately a hook-path budget, not a model-call budget: every
@@ -50,8 +52,15 @@ class OgrClient:
     OGR_AGENT_USER          to "hermes": the one field this integration DOES
                             know about itself (a label, never an identity).
     OGR_FAIL_MODE         open (default) | closed — what an unanswered
-                          evaluate means (specification/degraded-mode.md)
+                          evaluate means (specification/degraded-mode.md);
+                          since 2.0 also what NO RULESET means for local
+                          redaction (open: proceed unmasked and warn;
+                          closed: refuse the model call)
     OGR_TIMEOUT           per-call budget in seconds, default 4.0
+    OGR_LOCAL_REDACTION   true (default) | false — local secrets redaction
+                          (local_redaction.py; the other OGR_RULES_CACHE /
+                          OGR_RESTORE_OUTPUT / OGR_LOCAL_REDACTION_TIERS
+                          knobs are read there)
     """
 
     def __init__(
@@ -95,6 +104,13 @@ class OgrClient:
         # Heartbeat counters (degraded-mode §2: loud signaling — the
         # evaluate_errors counter is how the runtime learns a PEP went dark).
         self.counters = {"events_sent": 0, "evaluate_errors": 0}
+        # Local redaction (2.0). Constructed here so the wire can mask every
+        # event body it sends (D6) from the SAME map the request mask minted
+        # into; started (cache + background fetch) by the bridge, not here —
+        # a constructor that spawns threads is a constructor tests cannot
+        # call. `enabled` is the env's answer; a client with no runtime still
+        # masks with its cache, and reports `ruleset: ""` when it has none.
+        self.redactor = Redactor(self.runtime_url, self.api_key, timeout=self.timeout)
 
     @property
     def enabled(self) -> bool:
@@ -131,14 +147,30 @@ class OgrClient:
     # the protocol
     # ------------------------------------------------------------------ #
     def evaluate(self, kind: str, step_id: str, llm_protocol: str,
-                 payload: dict[str, Any], session_hint: str = "") -> dict[str, Any] | None:
+                 payload: dict[str, Any], session_hint: str = "",
+                 session_id: str = "",
+                 masked: list[dict[str, str]] | None = None) -> dict[str, Any] | None:
         """Judge ONE event; the Verdict dict, or None when the runtime could
         not answer (unconfigured, timeout, 401/429/5xx, network, bad JSON).
         Deciding what None means is `blocked()`'s job — that is the
         deployment's fail mode, and the degraded-mode spec is explicit that a
-        429 is an outage, not an allow."""
+        429 is an outage, not an allow.
+
+        `session_id` selects the local-redaction map; `masked` is what the
+        request mask minted for this step, reported on the event beside what
+        the egress mask below mints.
+        """
         if not self.enabled:
             return None
+        redaction: dict[str, Any] | None = None
+        if self.redactor.enabled:
+            # D6 — THE OGR CLIENT IS AN EGRESS. Every body leaving for the
+            # runtime passes the same value→token map the provider request
+            # did, plus the rules: without this the feature protects the
+            # secret from the provider and hands it to us. The runtime
+            # judges TOKENS; a value it still finds is a MISS with a name.
+            payload, minted = self.redactor.mask_egress(payload, session_id)
+            redaction = self.redactor.redaction_field(list(masked or []) + minted)
         event = {
             "kind": kind,
             "step_id": step_id,
@@ -163,6 +195,11 @@ class OgrClient:
         # content-derivation provably cannot always answer.
         if session_hint:
             event["session_hint"] = session_hint
+        # OGR 1.4 optional `redaction` (§4.4): the ruleset id this process
+        # runs and the tokens MINTED in this step — never values. Absent when
+        # local redaction is off, so an older runtime draws no diagnosis.
+        if redaction is not None:
+            event["redaction"] = redaction
         try:
             verdict = self._post("/v1/evaluate", event)
         except Exception as exc:  # noqa: BLE001 — every failure is one outcome: no verdict
@@ -202,9 +239,21 @@ class OgrClient:
         body: dict[str, Any] = {"integration": INTEGRATION, "counters": dict(self.counters)}
         if self.identity["agent_id"]:
             body["agent_id"] = self.identity["agent_id"]
+        if self.redactor.enabled:
+            # Which ruleset THIS process is on — the per-instance sync-health
+            # row (§4.4). "" = local redaction on, nothing obtained yet.
+            body["ruleset"] = self.redactor.ruleset_id
         try:
-            self._post("/v1/heartbeat", body)
-            return True
+            resp = self._post("/v1/heartbeat", body)
         except Exception as exc:  # noqa: BLE001
             logger.warning("OGR heartbeat failed (%s)", exc)
             return False
+        # The runtime answers with the id of the ruleset it currently serves
+        # (`rules.id`, beside `limits`): if it is not the one we run, refetch
+        # in the background — one heartbeat interval is the propagation
+        # bound, and the feed is never polled.
+        if self.redactor.enabled and isinstance(resp, dict):
+            rules = resp.get("rules")
+            if isinstance(rules, dict):
+                self.redactor.store.refresh_if(rules.get("id"))
+        return True

@@ -1,0 +1,151 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "https://openguardrails.com/schema/1.0/ruleset.schema.json",
+ "title": "SecretRuleset",
+ "description": "The local-redaction rule feed (OGR 1.4) — what GET /v1/rules serves under its 'ruleset' key: the secret patterns one organization masks with, in dialect ogr-re-1, self-verifying through per-rule examples. ADVISORY to the integration and AUTHORITATIVE at the runtime, which runs the identical set on every event it receives. See specification/local-redaction.md.",
+ "type": "object",
+ "additionalProperties": false,
+ "required": [
+  "id",
+  "generated_at",
+  "family",
+  "dialect",
+  "rules"
+ ],
+ "properties": {
+  "id": {
+   "type": "string",
+   "pattern": "^rs_[0-9a-f]{32}$",
+   "description": "'rs_' + the first 32 hex of a sha256 over the canonical JSON of 'rules', in order — and nothing else: two deployments composing the same set at different moments agree on it. An integration reports the id it was SERVED (redaction.ruleset on every event, ruleset on the heartbeat) and never recomputes it."
+  },
+  "generated_at": {
+   "type": "string",
+   "format": "date-time",
+   "description": "When this composition was produced. Display only; not part of the id."
+  },
+  "family": {
+   "const": "secrets",
+   "description": "The one family this contract covers. PII is excluded by design: a secret is opaque and masking it is lossless for the model; a PII value has semantics."
+  },
+  "dialect": {
+   "const": "ogr-re-1",
+   "description": "The regex intersection every rule stays inside: fixed-width lookbehind only, numbered groups only, no possessive/atomic constructs, no inline flag groups, no \\p{}, no \\b / \\d / \\w, ASCII classes, flags a subset of 'ims'."
+  },
+  "rules": {
+   "type": "array",
+   "description": "Applied in THIS order — it is the overlap tie-break at the integration, and reordering changes the id.",
+   "items": {
+    "$ref": "#/$defs/SecretRule"
+   }
+  }
+ },
+ "$defs": {
+  "SecretRule": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "id",
+    "category",
+    "severity",
+    "tier",
+    "flags",
+    "patterns",
+    "examples"
+   ],
+   "properties": {
+    "id": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 128,
+     "pattern": "^[A-Za-z0-9_.\\-]+$",
+     "description": "The check_id: 'entity_*' for a built-in, 'custom_entity_<key>' for the organization's own. What redaction.masked[].rule names, alone or as 'check_id/pattern_id'."
+    },
+    "category": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 128,
+     "description": "A taxonomy id under security.secret_leak."
+    },
+    "severity": {
+     "enum": [
+      "critical",
+      "high",
+      "medium",
+      "low"
+     ]
+    },
+    "tier": {
+     "enum": [
+      "strong",
+      "heuristic"
+     ],
+     "description": "'strong' — an issuer's format or a standard carrier: the shape IS the claim. 'heuristic' — a shape ordinary text produces by accident ('password = …'); the runtime gates it because a false positive there is a finding a person triages, while a reversible mask over-masking is cheap. An integration SHOULD mask both by default."
+    },
+    "flags": {
+     "type": "string",
+     "pattern": "^[ims]*$",
+     "description": "Regex flags applied to every pattern of this rule; a subset of i, m, s. Inline flag groups are outside the dialect."
+    },
+    "patterns": {
+     "type": "array",
+     "minItems": 1,
+     "items": {
+      "$ref": "#/$defs/SecretRulePattern"
+     }
+    },
+    "group": {
+     "type": "integer",
+     "minimum": 1,
+     "description": "OPTIONAL. The 1-based capturing group that IS the span; absent means the whole match. How a rule says 'the credential, not the header' without a variable-width lookbehind, which the dialect forbids."
+    },
+    "examples": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "match",
+      "nomatch"
+     ],
+     "description": "The rule's own conformance corpus. An integration MUST run it at load in its own engine, and MUST disable — by id, logged — a rule whose examples fail rather than run it wrong. Part of the id: a rule whose corpus changed is a different rule.",
+     "properties": {
+      "match": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       },
+       "description": "Strings at least one of this rule's patterns MUST match."
+      },
+      "nomatch": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       },
+       "description": "Strings none of this rule's patterns may match."
+      }
+     }
+    }
+   }
+  },
+  "SecretRulePattern": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "id",
+    "source"
+   ],
+   "properties": {
+    "id": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 64,
+     "pattern": "^[A-Za-z0-9_.\\-]+$",
+     "description": "Stable within the rule: the issuer or the carrier ('openai', 'gitlab', 'authorization_header'). Reported back as 'check_id/pattern_id' so coverage is counted per issuer."
+    },
+    "source": {
+     "type": "string",
+     "minLength": 1,
+     "description": "The pattern source, in dialect ogr-re-1. Every served pattern excludes '${' so a rule never matches inside an existing placeholder."
+    }
+   }
+  }
+ }
+}

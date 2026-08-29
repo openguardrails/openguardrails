@@ -97,7 +97,7 @@ type Config struct {
 
 	// How much client-visible content (UTF-8 bytes) the streaming lane withholds
 	// until the end-of-stream verdict — see tailhold.go.
-	streamTailChars int
+	streamHeadReleaseBytes int
 
 	// The OGR agent identity: which header(s) carry each field, plus static
 	// fallbacks for a route that fronts exactly one agent. agent_user has no
@@ -211,17 +211,45 @@ func parseConfig(j gjson.Result, c *Config) error {
 	// body is not a verdict, and a verdict whose `unjudged` names the enforced path.
 	c.failClosed = j.Get("fail_mode").String() == "closed"
 
-	// How much of a streamed answer stays withheld until the end-of-stream verdict
-	// (tailhold.go). 200 is the spec's reference default; 0 still gates stream
-	// completion on the verdict (the final chunk is never released early); a huge
-	// value degenerates to buffering, which the spec names as the limit case.
-	c.streamTailChars = 200
-	if v := j.Get("stream_tail_chars"); v.Exists() {
+	/*
+	 * How much of a streamed answer may reach the caller before the end-of-stream
+	 * verdict, in UTF-8 bytes of client-visible content (tailhold.go). Everything
+	 * after it is withheld, so this is the deployment's exposure BOUND, not a
+	 * withholding floor.
+	 *
+	 * ⚠️ **32 is a posture, chosen with its reasoning.** It is roughly ten characters
+	 * — enough that the client renders a first fragment and measures an honest TTFT,
+	 * and enough to buy the judge the generation's whole duration, on the overwhelming
+	 * majority of requests that are never refused at all. `0` releases nothing (a
+	 * spinner, and every block a CLEAN refusal); a value larger than any answer
+	 * degenerates to the old behaviour of delivering the reply and retracting it.
+	 *
+	 * ⚠️ **A CONSTANT PER DEPLOYMENT IS THE POINT.** The predecessor of this knob was
+	 * `headReleaseBytes`, deliberately hard-coded, on the grounds that bounding the
+	 * head is what makes exposure independent of judge latency — with no bound it is
+	 * `latency × token rate` and drifts with the caller's context size, so a coding
+	 * agent shipping 64 KB of conversation leaks proportionally more than a chatbot at
+	 * the same setting. Making it configurable does not weaken that: it is still a
+	 * constant, just one the operator picks.
+	 */
+	c.streamHeadReleaseBytes = 32
+	if v := j.Get("stream_head_release_bytes"); v.Exists() {
 		n := int(v.Int())
 		if n < 0 {
 			n = 0
 		}
-		c.streamTailChars = n
+		c.streamHeadReleaseBytes = n
+	}
+	/*
+	 * ⚠️ `stream_tail_chars` is ACCEPTED AND IGNORED since 3.10.0, and SAID OUT LOUD.
+	 * Silently ignoring it would leave an operator believing a number that no longer
+	 * configures anything — 0054's defect in a config file. The ignoring itself is
+	 * safe in the only direction that matters: whoever raised it wanted MORE withheld,
+	 * and the head bound withholds more than any tail setting ever did.
+	 */
+	if j.Get("stream_tail_chars").Exists() {
+		proxywasm.LogWarnf("[OGR-CONFIG] stream_tail_chars is IGNORED since v%s — the bound moved to the HEAD of the answer; set stream_head_release_bytes (now %d) instead",
+			pluginVersion, c.streamHeadReleaseBytes)
 	}
 
 	/**
@@ -372,8 +400,8 @@ func parseConfig(j gjson.Result, c *Config) error {
 	// not per request. An operator has to be able to confirm what actually loaded —
 	// silence at startup is indistinguishable from a plugin that never loaded at all,
 	// which is the failure this whole integration exists to make visible.
-	proxywasm.LogWarnf("[OGR-CONFIG] v%s mode=%s cluster=%s host=%s base_path=%q timeout=%dms fail=%s tail=%d beat=%ds log=%s protocols=%s",
-		pluginVersion, c.mode, c.cluster, c.host, c.basePath, c.timeoutMs, failLabel(c.failClosed), c.streamTailChars,
+	proxywasm.LogWarnf("[OGR-CONFIG] v%s mode=%s cluster=%s host=%s base_path=%q timeout=%dms fail=%s head=%d beat=%ds log=%s protocols=%s",
+		pluginVersion, c.mode, c.cluster, c.host, c.basePath, c.timeoutMs, failLabel(c.failClosed), c.streamHeadReleaseBytes,
 		heartbeatPeriodMs/1000, logLevelName(logLevel), strings.Join(protocolNames(), ","))
 	return nil
 }
@@ -462,10 +490,6 @@ type reqState struct {
 	spec bool
 	// input is the deep request-half verdict: pending → allow | clamped.
 	input inputState
-	// released counts client-visible content bytes let out while `input` was still
-	// pending — bounded by headReleaseBytes, which is what keeps the exposure
-	// independent of how slow the judge is.
-	released int
 	// sp is the stream reassembler, kept so a verdict landing AFTER end-of-stream
 	// can still run the final judgement.
 	sp *streamProcessor
@@ -815,8 +839,11 @@ func onFastVerdict(ctx wrapper.HttpContext, cfg Config, rs *reqState,
 		 */
 		if v.Stops() {
 			bump(cntRefused, 1)
-			answer(ctx, rs, v.Reason())
-			return
+			next, proceed := refuseRequest(ctx, rs, v, outBody)
+			if !proceed {
+				return
+			}
+			outBody = next
 		}
 		if spans := v.Spans(); len(spans) > 0 {
 			masked, applied, unresolved, learned := applySpans(outBody, spans)
@@ -953,8 +980,13 @@ func onInputVerdict(ctx wrapper.HttpContext, cfg Config, rs *reqState,
 
 	if v.Stops() {
 		bump(cntRefused, 1)
-		answer(ctx, rs, v.Reason())
-		return
+		next, proceed := refuseRequest(ctx, rs, v, outBody)
+		if !proceed {
+			return
+		}
+		// A WITHHELD request goes on: the refused content is gone from the body and
+		// the model gets a notice in its place, so the agent loop keeps its turn.
+		outBody = next
 	}
 	if partiallyJudged("REQ", v, cfg.failClosed) {
 		answer(ctx, rs, partialMessage)
@@ -1090,7 +1122,21 @@ func onResponseBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Acti
 					// the lab's smoke assertions on 2026-08-15: one refusal, zero
 					// counters.
 					bump(cntRefused, 1)
-					_ = proxywasm.ReplaceHttpResponseBody([]byte(rs.proto.Refuse(rs.model, v.Reason())))
+					reply, kept := refusedReply(rs, v, string(body))
+					/*
+					 * ⚠️ A DROPPED-CALLS reply is still the MODEL'S OWN OUTPUT — the
+					 * prose and the calls that survived — so it must go home through
+					 * the same restore the allow branch uses. Skipping it delivers
+					 * our placeholders to the caller verbatim: the agent then acts on
+					 * a literal `${OGR_SECRET_1}`. A wholly synthetic refusal carries
+					 * no placeholders and needs none.
+					 */
+					if kept {
+						if restored, changed := rs.proto.Restore(reply, rs.session.Mapping); changed {
+							reply = restored
+						}
+					}
+					_ = proxywasm.ReplaceHttpResponseBody([]byte(reply))
 					proxywasm.ResumeHttpResponse()
 					return
 				}
@@ -1188,7 +1234,7 @@ func onStreamingResponseBody(ctx wrapper.HttpContext, cfg Config, chunk []byte, 
 			rs.sentAt, rs.injectedUsage)
 		ctx.SetContext(ctxStream, sp)
 	}
-	out := sp.ProcessChunk(chunk, isLast)
+	segs := sp.ProcessChunkSegments(chunk, isLast)
 
 	// ⚠️ NO MID-STREAM JUDGEMENT. It was here — every `stream_judge_chars`, cutting the
 	// rest of the answer on a hit — and the pipeline measured exactly that
@@ -1203,7 +1249,7 @@ func onStreamingResponseBody(ctx wrapper.HttpContext, cfg Config, chunk []byte, 
 	// caller receives goes out by injection, and the whole answer is judged once at
 	// end of stream.
 	if rs.owned {
-		return holdChunk(ctx, cfg, rs, sp, out, isLast)
+		return holdChunk(ctx, cfg, rs, sp, segs, isLast)
 	}
 
 	if isLast {
@@ -1227,6 +1273,12 @@ func onStreamingResponseBody(ctx wrapper.HttpContext, cfg Config, chunk []byte, 
 			// what the RecognizedFrames split above decides.
 			reportUnreadableStream(rs, sp)
 		}
+	}
+	// The unheld lane forwards the frames untouched, in order — the segments are only
+	// a release UNIT for the hold, never a change to what this lane writes.
+	var out []byte
+	for _, seg := range segs {
+		out = append(out, seg.Bytes...)
 	}
 	return out
 }
@@ -1459,6 +1511,86 @@ func applyFail(ctx wrapper.HttpContext, cfg Config, rs *reqState, why string) {
 	armTailHold(ctx, cfg, rs)
 	rs.sentAt = time.Now()
 	proxywasm.ResumeHttpRequest()
+}
+
+/*
+ * refuseRequest renders a refused REQUEST, and is the one site that can let a refused
+ * turn CONTINUE.
+ *
+ * Returns the body to forward and whether to forward it at all. `false` means this
+ * function has already ended the request.
+ *
+ * ⚠️ The default is unchanged: no directive ⇒ the hard refusal this gateway has always
+ * sent. Every other branch is entered only because the runtime named a shape it
+ * decided was honest for this verdict.
+ */
+func refuseRequest(ctx wrapper.HttpContext, rs *reqState, v verdict, outBody string) (string, bool) {
+	c := v.Continuation()
+	if c == nil {
+		answer(ctx, rs, v.Reason())
+		return outBody, false
+	}
+	if c.Style == contWithhold {
+		next, ok := withholdTexts(outBody, c.StrippedPaths(), c.Notice)
+		if ok {
+			logInfof("[OGR-REQ] withheld %d tool result(s) — the turn continues", len(c.Paths))
+			return next, true
+		}
+		/*
+		 * ⚠️ The paths did not resolve, so this is not the body the runtime judged —
+		 * a re-encoding below us, or a directive from a runtime that saw something
+		 * else. Forwarding it would deliver the content we were told to remove, so
+		 * this falls back to the REFUSAL, never to the passthrough.
+		 */
+		logConditionf("req.withhold", "[OGR-REQ] withhold named %d unresolvable path(s) — refusing instead",
+			len(c.Paths))
+		answer(ctx, rs, v.Reason())
+		return outBody, false
+	}
+	// `answer` (and anything positional that cannot apply to a request): the notice
+	// IS the reply. There is no model turn here to edit.
+	softAnswer(ctx, rs, c.Notice)
+	return outBody, false
+}
+
+/*
+ * refusedReply renders a refused buffered REPLY. The bool says whether what comes back
+ * is the model's own body (edited) rather than a synthetic refusal — the caller needs
+ * to know because only the former still carries placeholders to restore.
+ */
+func refusedReply(rs *reqState, v verdict, body string) (string, bool) {
+	c := v.Continuation()
+	if c == nil {
+		return rs.proto.Refuse(rs.model, v.Reason()), false
+	}
+	if c.Style == contDropCalls {
+		if next, ok := rs.proto.DropCalls(body, c.StrippedPaths(), c.Notice); ok {
+			logInfof("[OGR-RESP] dropped %d refused call(s) — the loop continues", len(c.Paths))
+			return next, true
+		}
+		logConditionf("resp.dropcalls", "[OGR-RESP] drop_calls named %d unresolvable path(s) — refusing whole",
+			len(c.Paths))
+		return rs.proto.Refuse(rs.model, v.Reason()), false
+	}
+	return rs.proto.SoftRefuse(rs.model, c.Notice), false
+}
+
+// softAnswer ends the request with a refusal shaped as an ORDINARY completed reply —
+// same refusal, on a stop the agent loop survives. See protocol/soft.go.
+func softAnswer(ctx wrapper.HttpContext, rs *reqState, notice string) {
+	ctx.SetContext(ctxAnswered, true)
+	if rs.streaming {
+		_ = proxywasm.SendHttpResponse(200,
+			[][2]string{
+				{"content-type", "text/event-stream"}, {"cache-control", "no-cache"},
+				{"x-ogr-decision", "block"},
+			},
+			[]byte(rs.proto.SoftRefuseStream(rs.model, notice)), -1)
+		return
+	}
+	_ = proxywasm.SendHttpResponse(200,
+		[][2]string{{"content-type", "application/json"}, {"x-ogr-decision", "block"}},
+		[]byte(rs.proto.SoftRefuse(rs.model, notice)), -1)
 }
 
 // answer ends the request with a refusal the caller's client can render, in the shape
