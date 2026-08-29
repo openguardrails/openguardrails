@@ -102,6 +102,79 @@ and an override of the base `permission` table that adds the **Auto Mode by
 OGR** entry to the Permissions selector (with the shield icon, via the
 package's browser half — still zero core changes).
 
+## Local secrets redaction: the value never leaves this host
+
+Every credential in the outbound model request is replaced with
+`${OGR_SECRET_n}` **on this machine**, before the request goes anywhere. The
+runtime judges the placeholder, the provider is given the placeholder, and
+the real value is put back into the reply's tool-call arguments — locally,
+after judgement — so the tool still runs with the working credential. On by
+default; the ruleset is your organization's, served by the runtime
+([OGR 1.4](../../../specification/local-redaction.md)). **This plugin ships
+no patterns.**
+
+```yaml
+# cordis.yml — or leave it out entirely; the defaults are these
+localRedaction:
+  enabled: true               # OGR_LOCAL_REDACTION=0 turns it off
+  tiers: [strong, heuristic]  # OGR_LOCAL_REDACTION_TIERS
+  cachePath: ""               # OGR_RULES_CACHE; default ~/.openguardrails/rules-<hash>.json
+```
+
+### Where it sits, and why it sits there
+
+**At the HTTP client, and nowhere else — forced, not chosen.** The other
+integrations mask by rewriting the outbound request at a harness hook. dsh
+has no such seam: a loop-built `GenerateOptions` is frozen, its `messages`
+array is frozen, and `@deepseek-ai/dsh-agent-loop`'s own invariant asserts
+that `JSON.stringify(options.messages)` still equals
+`session.deriveMessages()`. Rewriting the request there is both impossible
+and a failed assertion. So the mask is the in-process interceptor on
+`globalThis.fetch` (and undici's dispatcher where it resolves), which is the
+seam every harness shares and for this one is the only seam there is.
+
+Three consequences worth knowing:
+
+- **The system prompt and tool schemas are covered**, which a message-level
+  hook would not be — the interceptor sees the whole body.
+- **There is no restore hook in this plugin, and none is needed.** dsh's
+  `exec.arguments` is `readonly` and `PreToolDecision` has no replace arm, so
+  a host-side restore is not expressible here; it does not have to be,
+  because the interceptor restores the reply's tool-call arguments a layer
+  below, before dsh ever parses them.
+- **Auxiliary calls are masked too.** Compaction and session titling are not
+  *judged* (they are machinery, not the conversation), but they are model
+  calls carrying your history, so the interceptor masks them like any other.
+
+### What the runtime is told, and what it is not
+
+Each event carries an optional `redaction` — the ruleset id and the tokens
+minted for that step, **never a value**. It is a claim, exactly like
+`integration`, and what it buys is diagnosis: a secret found on a step that
+reported a ruleset is a *miss* with a name (a stale ruleset, a plugin bug, a
+shape no regex covers), while the same secret on a step that reported nothing
+is just an ordinary finding.
+
+So the field is **omitted whenever nothing can be shown to be masking**, and
+in that case the event is sent unmasked as well. Reporting a step as
+protected while the provider got the value in the clear would blind the one
+witness that could still have caught it.
+
+### Honest limits
+
+- **One process, one map per conversation.** `dsh web` serves many
+  conversations from one process; each is masked under its own session key,
+  carried from the `llm/stream` seam down to the adapter's `fetch`. A
+  restore, however, consults every key this process has masked under — a
+  token can be minted at either vantage — so the isolation is real for
+  minting and reporting, and soft for restoring.
+- **A fetch captured before this plugin loaded is not covered.** The first
+  tool call after unintercepted model traffic warns, once, loudly. Nothing is
+  denied over it: a masking gap is not an enforcement decision.
+- **The first model call waits for the ruleset** (bounded by `timeoutMs`) on
+  a fresh install with no cache. That is deliberate — it is the request most
+  likely to carry a pasted credential.
+
 ## Known limitations
 
 - **Redaction spans are not applied yet.** A verdict's `modifications.spans`

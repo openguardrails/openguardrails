@@ -181,7 +181,7 @@ function loadDenials(sessionId, turnId) {
  * row rather than minting a second and reporting the old build as dark — so
  * every replica overwrites the others' version.
  */
-const INTEGRATION = "ogr-codex-automode/1.0.0"
+const INTEGRATION = "ogr-codex-automode/2.0.0"
 
 // --- GuardEvent → /v1/evaluate → Verdict --------------------------------------
 
@@ -221,6 +221,48 @@ function buildEvent(input) {
     // inferred from message prefixes, which survives a compacted or trimmed
     // history. A grouping hint only — never authorization, ordering or policy.
     ...(input.session_id ? { session_hint: String(input.session_id) } : {}),
+  }
+}
+
+/** Where the local masking proxy listens, when one is running (`ogr-local`). */
+const LOCAL_PORT = Number(process.env.OGR_LOCAL_PORT || 8787)
+
+/**
+ * The event, with every secret the proxy masked on the way out replaced by
+ * the SAME `${OGR_SECRET_n}` the model provider was given (OGR 1.4).
+ *
+ * ⚠️⚠️ **A HOOK'S VANTAGE IS THE HARNESS'S OWN COPY, WHICH IS THE
+ * CLEARTEXT.** The proxy masks the request on its way to the provider and
+ * restores the reply's tool arguments on the way back, so what Codex hands
+ * this hook is the real credential. Reporting that would hand the runtime a
+ * secret the provider never saw, and the runtime would correctly raise a
+ * leak that did not happen. D6: the OGR client is an egress too.
+ *
+ * ⚠️ The proxy's `mask` is `maskKnown` — it can only REUSE tokens the
+ * request half minted, never allocate one. A token invented here would name
+ * nothing and restore to nothing.
+ *
+ * Never throws; a proxy that is not running means no local redaction, which
+ * is the state every deployment was in before this existed.
+ */
+async function sealed(event) {
+  try {
+    const res = await fetch(`http://127.0.0.1:${LOCAL_PORT}/__ogr/mask`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ value: event.payload, ...(event.session_hint ? { session: event.session_hint } : {}) }),
+      signal: AbortSignal.timeout(1500),
+    })
+    if (!res.ok) return event
+    const body = await res.json()
+    return {
+      ...event,
+      ...(body.value ? { payload: body.value } : {}),
+      ...(body.redaction ? { redaction: body.redaction } : {}),
+    }
+  } catch {
+    // Nothing masked this step, so nothing may claim it was masked.
+    return event
   }
 }
 
@@ -292,7 +334,7 @@ async function main() {
     abstain("denial limit reached for this turn; deferring to the user")
   }
 
-  const verdict = await evaluate(buildEvent(input))
+  const verdict = await evaluate(await sealed(buildEvent(input)))
   if (!verdict) abstain("runtime unavailable, deferring to the user")
 
   switch (verdict.decision) {

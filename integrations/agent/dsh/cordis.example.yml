@@ -73,6 +73,25 @@
           preset: auto-mode
           unresolved: human
 
+    # Local secrets redaction (OGR 1.4). On by default; every field here is
+    # already the default, shown so the shape is discoverable.
+    #
+    # Credentials in the outbound model request become ${OGR_SECRET_n} on
+    # THIS machine — the runtime and the model provider are both given the
+    # placeholder, and the value goes back into the reply's tool-call
+    # arguments locally, after judgement. The patterns are your
+    # organization's, served by the runtime; this plugin ships none.
+    localRedaction:
+      enabled: true
+      # `strong` is carriers and issuer-prefixed keys; `heuristic` adds the
+      # gated assignment shapes (password=…, api_key: …). Drop `heuristic`
+      # if a config-heavy agent finds it masks values the model needs.
+      tiers:
+        - strong
+        - heuristic
+      # Empty = ~/.openguardrails/rules-<hash>.json, one cache per runtime.
+      cachePath: ""
+
 # Put "Auto Mode by OGR" in the Permissions selector. A patch replaces
 # the targeted row's WHOLE `config`, so the base presets are restated
 # verbatim around the new entry — merge `auto-mode` into your own table

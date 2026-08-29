@@ -28,11 +28,12 @@ const EVENT_KEYS = [
 
 // The schema has three optional fields — `integration`, `connection`,
 // `session_hint`. This hook sends two: `integration` (2026-08-17), the
-// reporter's own "name/version", and `session_hint`, the host's `session_id`
-// for the conversation. `connection` is a GATEWAY's field and deliberately
+// reporter's own "name/version"; `session_hint`, the host's `session_id`
+// for the conversation; and `redaction` (OGR 1.4), what the local masking
+// proxy replaced before the request left this machine. `connection` is a GATEWAY's field and deliberately
 // stays out of the allowlist, so a stray copy here would fail loudly. An
 // ALLOWLIST, not a relaxation — an unknown key is still a violation.
-const OPTIONAL_EVENT_KEYS = ["integration", "session_hint"]
+const OPTIONAL_EVENT_KEYS = ["integration", "session_hint", "redaction"]
 
 function validateEvent(ev) {
   const errs = []
@@ -52,7 +53,7 @@ function validateEvent(ev) {
   }
   // Presence is optional on the WIRE; for THIS integration it is mandatory —
   // the mock tolerating a missing `integration` must not let ours stop sending it.
-  if (ev.integration !== "ogr-claude-code/1.0.0") errs.push(`integration ${ev.integration}`)
+  if (ev.integration !== "ogr-claude-code/2.0.0") errs.push(`integration ${ev.integration}`)
   if (typeof ev.payload !== "object" || ev.payload === null || Array.isArray(ev.payload)) {
     errs.push("payload must be an object")
   }
@@ -273,6 +274,74 @@ test("allow with spans on the held call denies (hook cannot redact a pending cal
   })
   eq((await runHook(payload("ls"))).decision, "allow")
   verdictHandler = allowVerdict()
+})
+
+/**
+ * Local secrets redaction: the hook's vantage is the harness's TRANSCRIPT,
+ * which holds the value in the clear — the proxy restored it on the way back
+ * from the provider. So the hook has to ask the proxy to put the tokens back
+ * before it reports, or it hands the runtime a secret the provider never saw
+ * and the runtime raises a leak that did not happen (D6).
+ */
+async function withMaskProxy(reply, body) {
+  const seen = []
+  const proxy = createServer((req, res) => {
+    let raw = ""
+    req.on("data", (c) => (raw += c))
+    req.on("end", () => {
+      seen.push({ path: req.url, body: raw ? JSON.parse(raw) : {} })
+      const { status, body: out } = reply(req)
+      res.writeHead(status, { "content-type": "application/json" })
+      res.end(JSON.stringify(out))
+    })
+  })
+  await new Promise((r) => proxy.listen(0, "127.0.0.1", r))
+  try {
+    return await body({ port: proxy.address().port, seen })
+  } finally {
+    await new Promise((r) => proxy.close(r))
+  }
+}
+
+test("the event carries the proxy's tokens and its redaction report", async () => {
+  await withMaskProxy(
+    () => ({
+      status: 200,
+      body: {
+        value: { tool_calls: [{ id: "t1", name: "Bash", arguments: { command: "deploy ${OGR_SECRET_1}" } }] },
+        changed: true,
+        redaction: { ruleset: "rs_abc", masked: [{ token: "${OGR_SECRET_1}", rule: "entity_api_key/openai_project" }] },
+      },
+    }),
+    async ({ port, seen }) => {
+      requests.length = 0
+      verdictHandler = () => ({ status: 200, body: { event_id: "e", provider: "m", decision: "allow" } })
+      eq((await runHook(payload("deploy sk-proj-realkeyhere"), { OGR_LOCAL_PORT: String(port) })).decision, "allow")
+
+      // The proxy was asked, and asked about the PAYLOAD only — the wire
+      // header is not text a secret rule has any business rewriting.
+      eq(seen.length, 1)
+      eq(seen[0].path, "/__ogr/mask")
+      eq(typeof seen[0].body.value.tool_calls, "object")
+      eq(seen[0].body.session, "sess-1")
+
+      const ev = requests[0].body
+      eq(ev.payload.tool_calls[0].arguments.command, "deploy ${OGR_SECRET_1}")
+      eq(ev.redaction.ruleset, "rs_abc")
+    },
+  )
+})
+
+test("no proxy: the event goes as built, and claims nothing", async () => {
+  requests.length = 0
+  verdictHandler = () => ({ status: 200, body: { event_id: "e", provider: "m", decision: "allow" } })
+  // Port 1 is never listening. Nothing masked this step, so nothing may say
+  // it was masked — the runtime's own detector is the one witness left, and
+  // a `redaction` field here would tell it to treat a real leak as a miss.
+  eq((await runHook(payload("deploy sk-proj-realkeyhere"), { OGR_LOCAL_PORT: "1" })).decision, "allow")
+  const ev = requests[0].body
+  eq(ev.redaction, undefined)
+  eq(ev.payload.tool_calls[0].arguments.command, "deploy sk-proj-realkeyhere")
 })
 
 test("transcript: the held call's generation maps to text/reasoning/model + provider id", async () => {

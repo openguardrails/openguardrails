@@ -102,6 +102,60 @@ All via environment variables:
 | `OGR_AGENT_WORKSPACE` | `""` | `agent_workspace` claim; empty = the API key's workspace |
 | `OGR_AGENT_USER` | `""` | `agent_user` claim |
 
+## Local secrets redaction: the value never leaves this machine
+
+Credentials in your prompts, files and tool output are replaced with
+`${OGR_SECRET_n}` **before the request leaves your machine**. Anthropic is
+given the placeholder; the real value goes back into the tool's arguments
+locally, after judgement, so the tool still runs. The ruleset is your
+organization's, served by the runtime — nothing here ships patterns.
+
+⚠️ **It needs a small proxy, and that is not a design preference.** The other
+OGR integrations mask inside the agent's own process with a `fetch`
+interceptor. Claude Code runs its hooks as separate **processes**, so there
+is no seam inside the agent to install one on. The next vantage down is a
+socket in front of it.
+
+```sh
+npm i -g @openguardrails/ogr-local
+```
+
+Then point Claude Code at it, in `~/.claude/settings.json`:
+
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:8787/https/api.anthropic.com"
+  }
+}
+```
+
+That is the only manual step. The plugin's `SessionStart` hook starts the
+daemon (idempotently — the port is the lock), and **checks that line**: if
+the proxy is up but `ANTHROPIC_BASE_URL` does not point at it, it says so on
+every session start rather than letting a session look protected while
+nothing is masked. A hook is a child process and cannot set the variable
+itself.
+
+Turn it off with `OGR_LOCAL_REDACTION=0`; move the port with
+`OGR_LOCAL_PORT`. See [`@openguardrails/ogr-local`](../ogr-local) for what
+the proxy does and does not do — in particular, it holds no credential, is
+not an open proxy, and offers no way to turn a token back into a secret.
+
+### What the runtime is told
+
+The PreToolUse hook reads Claude Code's **transcript**, which holds the value
+in the clear — the proxy restored it on the way back. So before reporting, the
+hook asks the proxy to put the tokens back, and attaches the step's
+`redaction`: the ruleset id and the tokens minted, never a value. Without
+that the runtime would be handed a secret the provider never saw and would
+correctly raise a leak that did not happen.
+
+**With no proxy running, the event goes as built and claims nothing.** That
+is deliberate: nothing masked the step, so nothing may say it was masked —
+the runtime's own detector is the one witness left, and a `redaction` field
+there would tell it to treat a real leak as a miss.
+
 ## Honest limits: the fragment vantage
 
 A Claude Code hook never holds the model call — it holds **one tool call about

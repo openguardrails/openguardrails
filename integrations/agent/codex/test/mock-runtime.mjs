@@ -16,13 +16,15 @@ const EVENT_KEYS = [
   "agent_user", "llm_protocol", "payload",
 ].sort()
 
-// The schema has three optional fields — `integration`, `connection`,
-// `session_hint`. These hooks send two: `integration` (2026-08-17), the
-// reporter's own "name/version", and `session_hint`, the host's `session_id`
-// for the conversation. `connection` is a GATEWAY's field and deliberately
-// stays out of the allowlist, so a stray copy here would fail loudly. An
-// ALLOWLIST, not a relaxation — an unknown key is still a violation.
-const OPTIONAL_EVENT_KEYS = ["integration", "session_hint"]
+// The schema has four optional fields — `integration`, `connection`,
+// `session_hint`, `redaction`. These hooks send three: `integration`
+// (2026-08-17), the reporter's own "name/version"; `session_hint`, the host's
+// `session_id` for the conversation; and `redaction` (OGR 1.4), what the
+// local masking proxy replaced before the request left this machine.
+// `connection` is a GATEWAY's field and deliberately stays out of the
+// allowlist, so a stray copy here would fail loudly. An ALLOWLIST, not a
+// relaxation — an unknown key is still a violation.
+const OPTIONAL_EVENT_KEYS = ["integration", "session_hint", "redaction"]
 
 function validateEvent(ev) {
   const errs = []

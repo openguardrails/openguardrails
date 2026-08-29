@@ -101,6 +101,66 @@ The guardrail hook maps the same verdicts to `PreToolUse` output: `block` →
 `deny` (even under `bypassPermissions`), `allow` → silent, no verdict →
 `OGR_FAIL_MODE`.
 
+## Local secrets redaction: the value never leaves this machine
+
+Credentials in your prompts, files and tool output are replaced with
+`${OGR_SECRET_n}` **before the request leaves your machine**. The provider is
+given the placeholder; the real value goes back into the tool's arguments
+locally, after judgement, so the tool still runs. The ruleset is your
+organization's, served by the runtime — nothing here ships patterns.
+
+⚠️ **It needs a small proxy, and Codex leaves no alternative.** The other OGR
+integrations mask inside the agent's own process with a `fetch` interceptor.
+Codex's host is **Rust** and its hooks are separate processes, so there is no
+JavaScript seam inside Codex to install one on, and there is not going to be
+one. The next vantage down is a socket in front of it.
+
+```sh
+npm i -g @openguardrails/ogr-local
+```
+
+Then point Codex at it in `~/.codex/config.toml` — **which line depends on how
+you signed in**:
+
+```toml
+# signed in with ChatGPT
+openai_base_url = "http://127.0.0.1:8787/https/chatgpt.com/backend-api/codex"
+
+# signed in with an API key
+openai_base_url = "http://127.0.0.1:8787/https/api.openai.com/v1"
+```
+
+⚠️ **The top-level `openai_base_url`, not `model_providers.openai.base_url`.**
+Codex's built-in providers are deliberately not overridable
+(`merge_configured_model_providers`), and the top-level key is the one hook
+left for this. It also overrides the ChatGPT-login endpoint, which a
+per-provider entry would not reach.
+
+That is the only manual step. The plugin's `SessionStart` hook starts the
+daemon (idempotently — the port is the lock), works out which endpoint you
+would have been talking to by reading `auth.json`, and **reads `config.toml`
+back**: if the proxy is up but Codex is not pointed at it, it says so on every
+session start rather than letting a session look protected while nothing is
+masked. A hook is a child process and cannot change Codex's configuration.
+
+Turn it off with `OGR_LOCAL_REDACTION=0`; move the port with
+`OGR_LOCAL_PORT`; name the upstream yourself with `OGR_LOCAL_UPSTREAM`. See
+[`@openguardrails/ogr-local`](../ogr-local) for what the proxy does and does
+not do — in particular, it holds no credential, is not an open proxy, and
+offers no way to turn a token back into a secret.
+
+### What the runtime is told
+
+Both hooks read Codex's own rollout, which holds the value in the clear — the
+proxy restored it on the way back. So before reporting, each hook asks the
+proxy to put the tokens back, and attaches the step's `redaction`: the ruleset
+id and the tokens minted, never a value. Without that the runtime would be
+handed a secret the provider never saw and would correctly raise a leak that
+did not happen.
+
+**With no proxy running, the event goes as built and claims nothing** —
+nothing masked the step, so nothing may say it was masked.
+
 ## Honest limits: the fragment vantage
 
 A Codex hook never holds the model call — it holds **one tool call awaiting
