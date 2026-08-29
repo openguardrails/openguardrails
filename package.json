@@ -5,6 +5,7 @@
   "license": "Apache-2.0",
   "workspaces": [
     "integrations/agent/local-redaction",
+    "integrations/agent/ogr-local",
     "integrations/agent/dsh",
     "integrations/agent/opencode",
     "integrations/agent/openclaw"

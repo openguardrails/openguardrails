@@ -18,6 +18,10 @@ export type ModelProtocol = "openai.chat" | "anthropic.messages" | "openai.respo
 export const DEFAULT_MODEL_HOSTS: readonly string[] = [
   "api.openai.com",
   "api.anthropic.com",
+  // Codex's backend when the user is signed in with ChatGPT rather than an
+  // API key (`CHATGPT_CODEX_BASE_URL` in `codex-rs/model-provider-info`).
+  // It speaks `openai.responses` like the API-key endpoint does.
+  "chatgpt.com",
   "openrouter.ai",
   "generativelanguage.googleapis.com",
 ]

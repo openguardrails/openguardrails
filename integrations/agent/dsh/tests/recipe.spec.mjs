@@ -307,7 +307,7 @@ test("the heartbeat carries the build id and the degraded-mode counters", async 
     // live-but-idle agent.
     await tick(20)
     assert.ok(runtime.beats.length >= 1, "a beat arrived before the first event")
-    assert.equal(runtime.beats[0].integration, "ogr-dsh/0.3.0")
+    assert.equal(runtime.beats[0].integration, "ogr-dsh/0.4.0")
     assert.match(runtime.beats[0].agent_id, /^dsh-/)
 
     // An outage shows up in the counters — v0.8's only record that steps

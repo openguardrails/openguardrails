@@ -6,6 +6,28 @@
 # hand or can't use the plugin system. There is no build step — each hook is a
 # single zero-dependency Node ≥ 18 file under hooks/.
 
+# --- Local secrets redaction (optional but recommended) ----------------------
+# Credentials never leave this machine: `npm i -g @openguardrails/ogr-local`,
+# then point Codex's provider URL at the local masking proxy. WHICH line
+# depends on how you signed in — ChatGPT and API-key sign-ins are different
+# hosts, and the proxy carries the upstream in its path.
+#
+# ⚠️ The TOP-LEVEL key, not [model_providers.openai].base_url: Codex's
+# built-in providers are deliberately not overridable, and this is the one
+# hook left for it. It also covers the ChatGPT-login endpoint.
+#
+#   openai_base_url = "http://127.0.0.1:8787/https/chatgpt.com/backend-api/codex"   # ChatGPT sign-in
+#   openai_base_url = "http://127.0.0.1:8787/https/api.openai.com/v1"               # API key
+
+# --- SessionStart: start the masking proxy, and check Codex points at it -----
+[[hooks.SessionStart]]
+
+  [[hooks.SessionStart.hooks]]
+  type = "command"
+  command = "node /ABSOLUTE/PATH/TO/openguardrails/integrations/agent/codex/hooks/ogr-codex-session-start.mjs"
+  timeoutSec = 20
+  statusMessage = "OpenGuardrails local redaction"
+
 # --- Auto mode: remove prompts for calls an OGR runtime judges safe ----------
 # Fires in the approval path, before the user prompt. allow -> runs unattended,
 # block -> denied, everything else (incl. runtime unavailable) -> your prompt.

@@ -153,7 +153,7 @@ function assistantTurnOf(transcriptPath, toolUseId, toolName, toolInput) {
  * row rather than minting a second and reporting the old build as dark — so
  * every replica overwrites the others' version.
  */
-const INTEGRATION = "ogr-claude-code/1.0.0"
+const INTEGRATION = "ogr-claude-code/2.0.0"
 
 // --- GuardEvent → /v1/evaluate → Verdict --------------------------------------
 
@@ -193,6 +193,52 @@ function buildEvent(input) {
     // trimmed history. A grouping hint only — never authorization, ordering or
     // policy selection (guard-event.md § session_hint).
     ...(input.session_id ? { session_hint: String(input.session_id) } : {}),
+  }
+}
+
+/** Where the local masking proxy listens, when one is running (`ogr-local`). */
+const LOCAL_PORT = Number(process.env.OGR_LOCAL_PORT || 8787)
+
+/**
+ * The event, with every secret the proxy masked on the way out replaced by
+ * the SAME `${OGR_SECRET_n}` the model provider was given (OGR 1.4).
+ *
+ * ⚠️⚠️ **THE HOOK'S VANTAGE IS THE HARNESS'S TRANSCRIPT, WHICH IS THE
+ * CLEARTEXT COPY.** The proxy masks the request on its way to the provider
+ * and restores the reply's tool arguments on the way back, so what Claude
+ * Code holds — and what this hook reads — is the real credential. Sending
+ * that straight on would hand the runtime a secret the provider never saw,
+ * and the runtime would correctly raise it as a leak that did not happen.
+ * D6 in one line: the OGR client is an egress too.
+ *
+ * ⚠️ `mask` on the proxy is `maskKnown`, so it can only REUSE tokens the
+ * request half minted; it never allocates a new one. A token this event
+ * invented would name nothing and restore to nothing.
+ *
+ * Never throws and never delays a decision beyond its own short budget: a
+ * proxy that is not running means no local redaction, which is the state
+ * every deployment was in before this existed.
+ */
+async function sealed(event) {
+  try {
+    const res = await fetch(`http://127.0.0.1:${LOCAL_PORT}/__ogr/mask`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ value: event.payload, ...(event.session_hint ? { session: event.session_hint } : {}) }),
+      signal: AbortSignal.timeout(1500),
+    })
+    if (!res.ok) return event
+    const body = await res.json()
+    return {
+      ...event,
+      ...(body.value ? { payload: body.value } : {}),
+      ...(body.redaction ? { redaction: body.redaction } : {}),
+    }
+  } catch {
+    // No proxy, or it did not answer in time. The event goes as built —
+    // which is the honest thing: nothing masked it, so nothing should claim
+    // it was masked, and the runtime's own detector is the one witness left.
+    return event
   }
 }
 
@@ -255,7 +301,7 @@ async function main() {
   }
   if (!input.tool_name) emitAllow() // nothing held → nothing to judge
 
-  const verdict = await evaluate(buildEvent(input))
+  const verdict = await evaluate(await sealed(buildEvent(input)))
   if (!verdict) emitFailMode("runtime unavailable")
 
   if (verdict.decision === "block") emitDeny(reasonOf(verdict))

@@ -108,4 +108,50 @@ export interface GuardrailsOptions {
   heartbeatS?: number
   /** Auto mode: answer approval asks with the step verdict for auto-preset sessions. */
   auto?: AutoApprovalConfig
+  /** Local secrets redaction (default on). */
+  localRedaction?: LocalRedactionConfig
+}
+
+/** Which tiers of the served ruleset the local mask applies. */
+export type RedactionTier = "strong" | "heuristic"
+
+/**
+ * Local secrets redaction (OGR 1.4, specification/local-redaction.md): mask
+ * every credential in the OUTBOUND model request with `${OGR_SECRET_n}` so
+ * the value never leaves this host, judge the placeholder, and restore the
+ * value into the reply's tool-call arguments before the harness parses them.
+ * ON by default. The ruleset is the organization's, fetched from the runtime
+ * with the API key; this plugin ships none.
+ *
+ * ⚠️ dsh masks at the HTTP CLIENT and nowhere else, and that is forced, not
+ * chosen. A loop-built `GenerateOptions` is frozen, its `messages` array is
+ * frozen, and `@deepseek-ai/dsh-agent-loop`'s own invariant asserts that
+ * `JSON.stringify(options.messages)` still equals `session.deriveMessages()`
+ * — so rewriting the request at the `llm/stream` seam is both impossible and
+ * a failed assertion. The in-process interceptor is the seam every harness
+ * shares, and for this one it is the only seam there is.
+ */
+export interface LocalRedactionConfig {
+  /** Mask at all (default true; env `OGR_LOCAL_REDACTION=0|false|off` turns it off). */
+  enabled?: boolean
+  /** Where the fetched ruleset is cached (default `~/.openguardrails/rules-<hash>.json`; env `OGR_RULES_CACHE`). */
+  cachePath?: string
+  /** Which tiers to mask (default both; env `OGR_LOCAL_REDACTION_TIERS=strong,heuristic`). */
+  tiers?: RedactionTier[]
+}
+
+/** `OGR_LOCAL_REDACTION`: unset or anything but `0`/`false`/`off`/`no` means on. */
+export function envFlag(value: string | undefined, fallback: boolean): boolean {
+  if (value === undefined || value === "") return fallback
+  return !["0", "false", "off", "no"].includes(value.trim().toLowerCase())
+}
+
+/** `OGR_LOCAL_REDACTION_TIERS`: a comma list; unknown words are dropped, an empty result means both. */
+export function envTiers(value: string | undefined): RedactionTier[] | undefined {
+  if (value === undefined || value.trim() === "") return undefined
+  const tiers = value
+    .split(",")
+    .map((t) => t.trim().toLowerCase())
+    .filter((t): t is RedactionTier => t === "strong" || t === "heuristic")
+  return tiers.length > 0 ? tiers : undefined
 }

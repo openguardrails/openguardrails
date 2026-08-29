@@ -204,6 +204,65 @@ test("allow with spans on the held call denies (hook cannot redact a pending cal
   mock.verdictHandler = allowVerdict()
 })
 
+/**
+ * Local secrets redaction. A hook's vantage is Codex's own rollout, which
+ * holds the value in the clear — the masking proxy restored it on the way
+ * back from the provider. So the hook must ask the proxy to put the tokens
+ * back before it reports, or the runtime is handed a secret the provider
+ * never saw and raises a leak that did not happen (D6).
+ */
+async function withMaskProxy(reply, body) {
+  const { createServer } = await import("node:http")
+  const seen = []
+  const proxy = createServer((req, res) => {
+    let raw = ""
+    req.on("data", (c) => (raw += c))
+    req.on("end", () => {
+      seen.push({ path: req.url, body: raw ? JSON.parse(raw) : {} })
+      res.writeHead(200, { "content-type": "application/json" })
+      res.end(JSON.stringify(reply()))
+    })
+  })
+  await new Promise((r) => proxy.listen(0, "127.0.0.1", r))
+  try {
+    return await body({ port: proxy.address().port, seen })
+  } finally {
+    await new Promise((r) => proxy.close(r))
+  }
+}
+
+test("the event carries the proxy's tokens and its redaction report", async () => {
+  await withMaskProxy(
+    () => ({
+      value: { tool_calls: [{ id: "t1", name: "Bash", arguments: { command: "deploy ${OGR_SECRET_1}" } }] },
+      changed: true,
+      redaction: { ruleset: "rs_abc", masked: [{ token: "${OGR_SECRET_1}", rule: "entity_api_key/openai_project" }] },
+    }),
+    async ({ port, seen }) => {
+      mock.verdictHandler = allowVerdict()
+      mock.requests.length = 0
+      eq((await runHook(payload("deploy sk-proj-realkeyhere"), { OGR_LOCAL_PORT: String(port) })).decision, "allow")
+      eq(seen.length, 1)
+      eq(seen[0].path, "/__ogr/mask")
+      const ev = mock.requests[0].body
+      eq(ev.payload.tool_calls[0].arguments.command, "deploy ${OGR_SECRET_1}")
+      eq(ev.redaction.ruleset, "rs_abc")
+    },
+  )
+})
+
+test("no proxy: the event goes as built, and claims nothing", async () => {
+  mock.verdictHandler = allowVerdict()
+  mock.requests.length = 0
+  // Port 1 is never listening. Nothing masked this step, so nothing may say
+  // it was masked — a `redaction` field here would tell the runtime to treat
+  // a real leak as a miss against a ruleset that never ran.
+  eq((await runHook(payload("deploy sk-proj-realkeyhere"), { OGR_LOCAL_PORT: "1" })).decision, "allow")
+  const ev = mock.requests[0].body
+  eq(ev.redaction, undefined)
+  eq(ev.payload.tool_calls[0].arguments.command, "deploy sk-proj-realkeyhere")
+})
+
 test("rollout: the current generation maps to text/reasoning (older generations don't)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "ogr-codex-test-"))
   const rollout = join(dir, "rollout.jsonl")

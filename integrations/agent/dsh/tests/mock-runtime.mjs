@@ -20,13 +20,15 @@ const EVENT_FIELDS = [
 ]
 
 /**
- * The schema has three optional fields — `integration`, `connection`,
- * `session_hint`. This plugin sends one: `integration` (2026-08-17), the
- * reporter's own `"name/version"`. An ALLOWLIST, not a relaxation — an unknown key is still a
- * violation; only a MISSING `integration` stopped being one, which is what lets
- * a runtime and a reporter roll forward independently.
+ * The schema has four optional fields — `integration`, `connection`,
+ * `session_hint`, `redaction`. This plugin sends two: `integration`
+ * (2026-08-17), the reporter's own `"name/version"`, and `redaction`
+ * (OGR 1.4, 2026-08-29), what this host masked before sending. An ALLOWLIST,
+ * not a relaxation — an unknown key is still a violation; only a MISSING
+ * optional stopped being one, which is what lets a runtime and a reporter
+ * roll forward independently.
  */
-const OPTIONAL_EVENT_FIELDS = ["integration"]
+const OPTIONAL_EVENT_FIELDS = ["integration", "redaction"]
 
 const KINDS = ["step/request", "step/response"]
 const PROTOCOLS = ["openai.chat", "openai.responses", "anthropic.messages", "canonical"]
@@ -55,7 +57,34 @@ function eventIssues(e) {
  *   for the decision alone, or an object `{decision, findings, unjudged,
  *   modifications}` to control the whole verdict.
  */
-export async function startMockRuntime(decide = () => "allow") {
+/**
+ * One served secret ruleset, in the `ogr-re-1` dialect the plugins compile.
+ * Deliberately ONE rule with a shape no other fixture uses: a test that
+ * asserts a token appeared should not be able to pass because some other
+ * rule happened to fire.
+ */
+export const TEST_RULESET = {
+  id: "rs_test0001",
+  generated_at: "2026-08-29T00:00:00Z",
+  family: "secrets",
+  dialect: "ogr-re-1",
+  rules: [
+    {
+      id: "entity_api_key",
+      category: "secrets",
+      severity: "critical",
+      tier: "strong",
+      flags: "",
+      patterns: [{ id: "openai_project", source: "sk-proj-[A-Za-z0-9_-]{20,}" }],
+      examples: {
+        match: ["sk-proj-abcdefghijklmnopqrstuvwx"],
+        nomatch: ["sk-proj-short", "an ordinary sentence"],
+      },
+    },
+  ],
+}
+
+export async function startMockRuntime(decide = () => "allow", { rules = null } = {}) {
   const received = []
   const beats = []
   const invalid = []
@@ -93,13 +122,22 @@ export async function startMockRuntime(decide = () => "allow") {
           latency_ms: 1,
         })
       }
+      if (req.method === "GET" && req.url.endsWith("/v1/rules")) {
+        if (!rules) return reply(404, { error: "not found" })
+        // The real route's shape: the ruleset WRAPPED, and the ETag is the
+        // quoted id (`web/src/app/api/public/ogr/v1/rules/route.ts`).
+        res.writeHead(200, { "content-type": "application/json", etag: `"${rules.id}"` })
+        return res.end(JSON.stringify({ ruleset: rules }))
+      }
       if (req.url.endsWith("/v1/heartbeat")) {
         if (json.integration === undefined && json.agent_id === undefined) {
           invalid.push({ event: json, issues: ["heartbeat needs integration or agent_id"] })
           return reply(400, { error: "invalid_body" })
         }
         beats.push(json)
-        return reply(200, { ok: true })
+        // The reply names the CURRENT ruleset: how a running plugin learns
+        // its own is stale without polling the feed.
+        return reply(200, { ok: true, ...rules ? { rules: { id: rules.id } } : {} })
       }
       // /v1/ingest falls through here too: it left the protocol in v0.8, so
       // a plugin that still calls it sees the 404 a v0.8 runtime would give.
@@ -131,8 +169,8 @@ export async function startMockRuntime(decide = () => "allow") {
  * shell's. Any event the mock rejected fails the test — conformance is not
  * optional.
  */
-export async function withRuntime(bootFn, config, decide, body) {
-  const runtime = await startMockRuntime(decide)
+export async function withRuntime(bootFn, config, decide, body, { rules = null } = {}) {
+  const runtime = await startMockRuntime(decide, { rules })
   const saved = { ...process.env }
   process.env.OGR_RUNTIME_URL = runtime.url
   process.env.OGR_API_KEY = "ogr_mockmockmockmockmockmockmock"

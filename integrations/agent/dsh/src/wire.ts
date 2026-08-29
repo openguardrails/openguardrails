@@ -31,7 +31,7 @@
  * WHO REPORTED IT — `"name/version"`, on every event AND on the heartbeat.
  * One constant so the two can never name different builds.
  */
-export const INTEGRATION = "ogr-dsh/0.3.0"
+export const INTEGRATION = "ogr-dsh/0.4.0"
 
 export interface WireEvent {
   kind: "step/request" | "step/response"
@@ -61,6 +61,20 @@ export interface WireEvent {
    * traffic it produced and nothing can overwrite it.
    */
   integration?: string
+  /**
+   * WHAT THIS HOST MASKED BEFORE SENDING (OGR 1.4, the fourth optional wire
+   * field). Tokens, never values: the ruleset id this step ran under and the
+   * `${OGR_SECRET_n}` placeholders minted for it.
+   *
+   * ⚠️ It is a CLAIM, exactly like `integration` — nothing bounds what a
+   * producer says about itself. What it buys is DIAGNOSIS: a secret found on
+   * a step that reported a ruleset is a MISS with a name (stale ruleset, a
+   * plugin bug, or a shape no regex covers), while the same secret on a step
+   * that reported nothing is just an ordinary finding. Absent is therefore
+   * the honest answer whenever nothing can be SHOWN to be masking — this
+   * plugin omits the field rather than assert coverage it cannot prove.
+   */
+  redaction?: { ruleset: string; masked: Array<{ token: string; rule: string }> }
 }
 
 /** One v0.8 finding — what was found, where, and what it contributed. */
@@ -107,6 +121,17 @@ export interface WireHeartbeat {
   agent_id?: string
   interval_s?: number
   counters?: Record<string, number>
+  /**
+   * The local-redaction ruleset this process is masking with. The reply
+   * carries the CURRENT id, so a beat is how a running plugin learns its
+   * ruleset moved — within one interval, without polling the feed.
+   */
+  rules?: { id: string }
+}
+
+/** What `/v1/heartbeat` answers. Only the ruleset id is read. */
+export interface WireHeartbeatReply {
+  rules?: { id?: string }
 }
 
 /** Log sink; the plugin passes dsh's own logger so wire noise stays in the harness log. */
@@ -188,14 +213,18 @@ export class OgrClient {
    * never a lost enforcement, so it warns and moves on. This is where the
    * build id and the degraded-mode counters travel.
    */
-  async heartbeat(body: WireHeartbeat): Promise<void> {
+  async heartbeat(body: WireHeartbeat): Promise<WireHeartbeatReply | null> {
     try {
       const res = await this.post("/v1/heartbeat", body)
-      if (res && !res.ok) {
+      if (!res) return null
+      if (!res.ok) {
         this.log.warn(`[openguardrails] heartbeat answered ${res.status}`)
+        return null
       }
+      return (await res.json()) as WireHeartbeatReply
     } catch (err) {
       this.log.warn(`[openguardrails] heartbeat failed (${String(err)})`)
+      return null
     }
   }
 }
