@@ -242,7 +242,7 @@ an `anthropic.messages` step sends that provider's bodies, and an integration
 holding no provider body at all sends the
 [canonical shape](guard-event.md#canonical-payloads) with
 `llm_protocol: "canonical"`. Everything outside `payload` — the four-tuple,
-`step_id`, the optional three — is identical for every protocol.
+`step_id`, the optional fields — is identical for every protocol.
 
 **Errors** — see [Errors](#errors) above; a schema violation names the field
 that failed, which is the whole migration guide a producer needs:

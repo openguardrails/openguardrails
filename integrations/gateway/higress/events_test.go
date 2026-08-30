@@ -88,7 +88,7 @@ func TestEventsMarshalToTheV10WireShape(t *testing.T) {
 	}
 	// `connection` (3.5.0) is OPTIONAL: allowed on the wire, never required —
 	// this fixture stamps none, so it must be absent (see the dedicated tests).
-	allowed := map[string]bool{"connection": true}
+	allowed := map[string]bool{"connection": true, "initiator": true}
 	for field := range required {
 		allowed[field] = true
 		if !got.Get(field).Exists() {
@@ -562,5 +562,81 @@ func TestAnUnknownConnectionIsAbsentNotEmpty(t *testing.T) {
 	blob, _ := json.Marshal(e)
 	if gjson.ParseBytes(blob).Get("connection").Exists() {
 		t.Error("an unstamped connection must be ABSENT on the wire, not \"\"")
+	}
+}
+
+/**
+ * WHO STARTED IT — the header the BODY cannot carry (OGR 1.5).
+ *
+ * ⚠️ The reason this filter reads a header at all: most harnesses announce a
+ * scheduled run in the prompt and the runtime reads that for itself, but Claude Code's
+ * cron injects the user's own prompt verbatim and declares the fact only out of band.
+ * Both carriers are asserted, because the client emits both and a proxy may drop
+ * either — and the absent case is asserted too: `initiator` is OPTIONAL, so an
+ * interactive request must put NOTHING on the wire rather than an empty string.
+ */
+func TestTheScheduledRunDeclaresItselfInAHeaderTheBodyCannotCarry(t *testing.T) {
+	cases := []struct {
+		name    string
+		headers map[string]string
+		want    string
+	}{
+		{"claude code's billing attribution header", map[string]string{
+			"x-anthropic-billing-header": "cc_version=2.1.220.3fc; cc_entrypoint=cli; cc_workload=cron;",
+		}, "scheduled"},
+		{"claude code's user agent", map[string]string{
+			"user-agent": "claude-cli/2.1.220 (external, cli, workload/cron)",
+		}, "scheduled"},
+		{"mixed case", map[string]string{
+			"x-anthropic-billing-header": "CC_WORKLOAD=CRON;",
+		}, "scheduled"},
+		// ⚠️ An interactive run — which is nearly all traffic — must assert NOTHING.
+		// The client's own comment on that header is "Absent = interactive default",
+		// and an empty string on the wire would be a claim where there is none.
+		{"an ordinary interactive request", map[string]string{
+			"x-anthropic-billing-header": "cc_version=2.1.220.3fc; cc_entrypoint=cli;",
+			"user-agent":                 "claude-cli/2.1.220 (external, cli)",
+		}, ""},
+		{"no headers at all", map[string]string{}, ""},
+		// ⚠️ The word alone is not the claim: this filter must not label a request
+		// because someone's UA mentions a scheduler product.
+		{"a product name that merely contains the word", map[string]string{
+			"user-agent": "cron-monitor/1.0 (scheduled-tasks)",
+		}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := workloadInitiator(func(h string) string { return tc.headers[h] })
+			if got != tc.want {
+				t.Errorf("workloadInitiator = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+/** A gateway sees one request, never the session tree — so it can never say "spawned". */
+func TestTheGatewayNeverClaimsSpawned(t *testing.T) {
+	for _, v := range []string{"spawned", "subagent", "cc_workload=spawned"} {
+		if got := workloadInitiator(func(string) string { return v }); got == "spawned" {
+			t.Errorf("gateway claimed spawned from %q", v)
+		}
+	}
+}
+
+/** The claim reaches the wire, and both halves of one step carry the same value. */
+func TestBothHalvesOfAStepCarryTheSameInitiator(t *testing.T) {
+	d := ctxFor("alice@acme.io")
+	d.initiator = "scheduled"
+	for name, e := range map[string]*GuardEvent{
+		"request":  requestEvent(d, []byte(rawRequest)),
+		"response": responseEvent(d, []byte(`{"choices":[{"message":{"content":"hi"}}]}`)),
+	} {
+		blob, err := json.Marshal(e)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := gjson.ParseBytes(blob).Get("initiator").String(); got != "scheduled" {
+			t.Errorf("%s half: initiator = %q", name, got)
+		}
 	}
 }

@@ -34,8 +34,22 @@ that). It is the one coordinate v0.8 kept, because concurrency makes it
 underivable; everything above it is derived server-side, always. The event is
 eight required fields — `kind`, `step_id`, the identity four-tuple (empty string
 = explicit "no assertion"), `llm_protocol`, `payload` — plus the optional
-`integration` and `connection`. No `ogr_version` (the runtime adapts), no `timestamp` (receive
-time), no declared coordinates and no coordinate echo on the verdict.
+`integration`, `connection` and (3.11.0) `initiator`. No `ogr_version` (the runtime
+adapts), no `timestamp` (receive time), no declared coordinates and no coordinate echo
+on the verdict.
+
+`initiator` (**3.11.0**, OGR 1.5) says a run was **scheduled**, and it exists because
+the BODY cannot say so. Most harnesses announce a scheduled run in the first line of
+the prompt — hermes writes `[IMPORTANT: You are running as a scheduled cron job…]`,
+openclaw `[cron:<id> <name>]` — and the runtime reads those for itself, so this plugin
+has nothing to add for them. Claude Code's cron injects the user's own prompt VERBATIM
+and declares the fact only in a request header (`cc_workload=cron` in its billing
+attribution header, `workload/cron` in its User-Agent; its own source comments "Absent
+= interactive default"). A gateway can see that; nothing downstream can. Absent is the
+normal case and is NOT a claim that a person is present, and the plugin never emits
+`spawned` — it sees one request, not the session tree that would say who spawned whom.
+⚠️ SELF-DECLARED, like `integration`: the CLIENT writes those headers, so it is a
+record and never an input to a decision.
 
 `integration` is this plugin's own `name/version` (e.g. `ogr-higress/3.2.0`),
 stamped on every event since **3.2.0**. It was heartbeat-only in 3.0.0–3.1.0,
@@ -446,9 +460,18 @@ Silence past `interval_s` is a coverage loss, not an absence of risk.
 | `refused` | **everything this filter refused** — a blocked request, a blocked REPLY (buffered or streamed), fail-closed, partial-closed, an unreadable reply under `closed`. A streamed refusal bumps `stream_stopped` too |
 | `upstream_non200` | completion requests whose response came back non-200 — nothing to judge, the step's response half is not reported (3.5.0) |
 | `empty_reply` | well-formed streams whose reassembled answer was genuinely EMPTY — reported as an empty response event so the step keeps its response half; a rising rate is a model/harness symptom, not a filter error (3.6.1) |
+| `post_failed` | **fire-and-forget posts the runtime never took** — the dispatch failed, or it answered anything but 200. Until 3.11.1 these were counted as `reported` and nowhere else, so a gateway posting into a black hole beat identically to one whose events all landed (3.11.1) |
+| `mirror_failed` | the same, on the mirror channel — kept apart so a dead candidate runtime cannot read as lost primary traffic (3.11.1) |
 
 `unchecked` is the one to alert on: it is what a tight `timeout_ms` plus
 `fail_mode: open` produces, and it is invisible in any other signal.
+`post_failed` is the one to RECONCILE on, and it is why `reported` alone never
+answered "did the runtime get this": `reported` counts ATTEMPTS — it is bumped
+after a post that waits for nothing — so before 3.11.1 an observe-mode gateway
+whose runtime had been down for a day reported exactly the same numbers as one
+whose events all landed. ⚠️ It rides the channel it reports on, so during a total
+outage it does not arrive either; it lands on the first beat AFTER, which is when
+the question gets asked.
 `unresolved_spans` is the second, and it fails the other way — nothing masked,
 no error, indistinguishable from a deployment with no redaction policy.
 
