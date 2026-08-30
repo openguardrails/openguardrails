@@ -10,6 +10,38 @@ version is independent of any implementation's package version.
 ## [Unreleased]
 
 ### Added
+- **`post_failed` / `mirror_failed` heartbeat counters — the reference gateway
+  (higress 3.11.1).** Heartbeat `counters` is free-form by design
+  (`specification/runtime-api.md`), and the reference gateway was missing the one
+  number an operator needs to reconcile: `reported` counts fire-and-forget POST
+  ATTEMPTS, bumped after a call that waits for nothing, so a runtime that was DOWN
+  and a runtime that took every event produced the identical beat. Measured on a
+  live deployment 2026-08-29 — five observe-mode gateways carrying `reported` 190k
+  against 39k events actually stored, the missing four fifths being hours of runtime
+  downtime that no counter, log line or console surface could name afterwards.
+  `post_failed` counts a dispatch that never left plus any non-200 answer;
+  `mirror_failed` keeps the candidate-runtime channel apart, so a dead mirror cannot
+  read as lost primary traffic.
+  ⚠️ **It rides the channel it reports on**, so during a total outage the number does
+  not arrive either — it lands on the first beat AFTER, which is exactly when someone
+  asks what was lost. That is a diagnosis delivered late, not a liveness signal.
+  ⚠️ A per-request log line already existed and is not a substitute: it prints on the
+  operator's own box and is rate-limited precisely because the outage case would
+  otherwise write one line per event.
+- **`initiator` — WHO STARTED THE WORK (OGR 1.5, `specification/guard-event.md`).**
+  The fifth optional GuardEvent field: `scheduled` (a scheduler started it, no person
+  is present) or `spawned` (another agent session did). Absent is the normal case and
+  is NOT a claim that a human is present; there is deliberately no `human` value,
+  because nothing can prove one. A CLAIM per the `integration` rule — a record only,
+  never an input to authorization, policy selection, enforcement or rate limiting —
+  and a runtime MUST accept an unknown value by ignoring it rather than rejecting
+  the event.
+  The motivating case is a harness whose scheduled runs carry **no in-band marker at
+  all**: Claude Code's cron injects the user's own prompt verbatim and declares the
+  fact only in a request header (`cc_workload=cron`; its own source comments "Absent
+  = interactive default"). A gateway can read that; the body cannot. Most harnesses
+  announce a scheduled run in the prompt itself and a runtime reads that for itself,
+  which is why the field is for the cases where it cannot.
 - **Local secrets redaction, the TypeScript half (OGR 1.4 —
   `specification/local-redaction.md`, design in the AIRS repo).** A new shared
   package `integrations/agent/local-redaction/` (`@openguardrails/local-redaction`,

@@ -47,7 +47,7 @@ const (
 	// 3.0.0–3.1.0 had only the beat), so it is how a deployment learns which build is
 	// in the VM. Kept honest by TestPluginVersionMatchesTheVERSIONFile — 1.3.0 and
 	// 1.4.0 both shipped while a prior constant still said 1.2.0.
-	pluginVersion = "3.10.0"
+	pluginVersion = "3.11.1"
 
 	kindStepRequest  = "step/request"
 	kindStepResponse = "step/response"
@@ -128,6 +128,25 @@ type GuardEvent struct {
 	// connection property has nothing to assert, and the field is OPTIONAL on
 	// the wire exactly so absence stays valid.
 	Connection string `json:"connection,omitempty"`
+	// Initiator is WHO STARTED the work this step belongs to (OGR 1.5):
+	// "scheduled" when the client declared a scheduled run, "" (omitted) when it
+	// declared nothing — which is the normal case and is NOT a claim that a person
+	// is present.
+	//
+	// It exists because a harness's scheduled runs may carry NO in-band marker at
+	// all. The runtime reads a scheduler banner out of the prompt for itself and
+	// catches hermes, openclaw and opensquilla that way; Claude Code's cron injects
+	// the user's own prompt verbatim and says so only in a request header, which the
+	// body cannot carry and only something in the request path can see. That is this
+	// gateway. See `workloadInitiator` in main.go.
+	//
+	// ⚠️ SELF-DECLARED, like `integration` — the client writes the header — so it is
+	// a RECORD and never an input to a decision. The runtime enforces that; nothing
+	// here may start reading it.
+	//
+	// ⚠️ omitempty, and "spawned" is deliberately never emitted: a gateway sees one
+	// request, not the session tree that would tell it who spawned whom.
+	Initiator string `json:"initiator,omitempty"`
 }
 
 // subjectOf assembles the per-request agent identity. The consumer IS the agent: one
@@ -158,6 +177,10 @@ type deriveCtx struct {
 	// stamped by the one constructor below, so the two halves of a step and
 	// every speculative/tail-hold path carry the same value.
 	connection string
+	// WHO STARTED IT, off the request headers — see GuardEvent.Initiator. Resolved
+	// ONCE per request and stamped by the one constructor below, so the two halves
+	// of a step cannot disagree about it.
+	initiator string
 	// The CLIENT's wire protocol, detected per request. Never a constant: it was
 	// `openai.chat` for every event an old build sent, which made 693,197 stored
 	// events unfalsifiable. v0.8 makes the field REQUIRED, which is why a request
@@ -179,6 +202,7 @@ func (d *deriveCtx) event(kind string, payload json.RawMessage) *GuardEvent {
 		Payload:     payload,
 		Integration: integrationID(),
 		Connection:  d.connection,
+		Initiator:   d.initiator,
 	}
 }
 

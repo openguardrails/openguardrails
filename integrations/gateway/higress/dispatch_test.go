@@ -115,3 +115,53 @@ func TestNoWrapperHttpClientInTheEventPath(t *testing.T) {
 		}
 	}
 }
+
+// ⚠️ THE TEST FOR THE OUTAGE NOBODY COULD SEE.
+//
+// `report` bumps `reported` after `post` returns, and `post` waits for nothing — so
+// before 3.11.1 a dispatch that failed and a dispatch the runtime never answered 200
+// to were both counted as reported, and the heartbeat of a gateway posting into a
+// black hole was byte-identical to one whose events all landed. Measured 2026-08-29:
+// `reported` 190k against 39k events stored, the difference being hours of runtime
+// downtime that nothing on this side could name afterwards.
+//
+// A per-request log line is not the answer: it prints on the CUSTOMER's box, and
+// `logConditionf` rate-limits it precisely because the outage case would otherwise
+// write one line per event. The counter is the half that reaches us.
+func TestAFireAndForgetPostCountsItsFailures(t *testing.T) {
+	src, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatalf("read main.go: %v", err)
+	}
+	body := string(src)
+	start := strings.Index(body, "func post(client ogrClient")
+	if start < 0 {
+		t.Fatal("func post is gone — this guard names a function that no longer exists")
+	}
+	end := strings.Index(body[start:], "\n}\n")
+	if end < 0 {
+		t.Fatal("cannot find the end of func post")
+	}
+	fn := body[start : start+end]
+
+	// Both failure branches: the dispatch that never left, and the answer that was
+	// not 200. Exactly two, because the callback does not run when dispatch fails —
+	// a third would mean one lost event counted twice.
+	if n := strings.Count(fn, "bump(failSlot, 1)"); n != 2 {
+		t.Errorf("func post bumps its fail slot %d times, want 2 (dispatch error, non-200):\n%s", n, fn)
+	}
+
+	// ⚠️ The two channels must not share a slot: a dead MIRROR reading as lost
+	// primary traffic is the one conclusion `post_failed` exists to rule out.
+	if !strings.Contains(body, `"OGR-REPORT", cntPostFailed)`) {
+		t.Error("the primary report path does not pass cntPostFailed")
+	}
+	if !strings.Contains(body, `"OGR-MIRROR", cntMirrorFailed)`) {
+		t.Error("the mirror path does not pass cntMirrorFailed")
+	}
+
+	// The wire names an operator greps for.
+	if counterNames[cntPostFailed] != "post_failed" || counterNames[cntMirrorFailed] != "mirror_failed" {
+		t.Errorf("wire names are %q/%q", counterNames[cntPostFailed], counterNames[cntMirrorFailed])
+	}
+}

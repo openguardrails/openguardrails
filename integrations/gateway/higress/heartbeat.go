@@ -92,6 +92,27 @@ const (
 	// counted here because a rising rate is a model/harness symptom worth seeing
 	// (the "[no visible output]" nudge loops), never an error of this filter.
 	cntEmptyReply
+	// A fire-and-forget post the runtime never took: the dispatch failed, or it
+	// answered anything but 200. Until 3.11.1 this was counted as `reported` and
+	// nowhere else.
+	//
+	// ⚠️ `reported` counts ATTEMPTS. `report` bumps it after `post` returns, and
+	// `post` waits for nothing by design — so a runtime that is DOWN and a runtime
+	// that took every event produce the identical heartbeat. Measured 2026-08-29:
+	// five observe-mode gateways carried `reported` 190k against 39k events
+	// actually stored, and the missing four fifths was hours of runtime downtime
+	// that no counter, log line or console surface could name after the fact. The
+	// per-request line exists (`post` logs, rate-limited) and is on the CUSTOMER's
+	// box; this is the half that reaches us.
+	//
+	// ⚠️ It travels the channel it reports on, so during a total outage it does
+	// not arrive either — it lands on the first beat AFTER, which is exactly when
+	// someone asks what was lost.
+	cntPostFailed
+	// The same failure on the MIRROR channel, kept apart on purpose: a dead
+	// candidate runtime must not read as lost primary traffic, which is the one
+	// question `post_failed` exists to answer.
+	cntMirrorFailed
 	cntLen
 )
 
@@ -122,6 +143,8 @@ var counterNames = [cntLen]string{
 	cntRefused:         "refused",
 	cntUpstreamNon200:  "upstream_non200",
 	cntEmptyReply:      "empty_reply",
+	cntPostFailed:      "post_failed",
+	cntMirrorFailed:    "mirror_failed",
 }
 
 // bump adds to one counter. A lost increment under contention is acceptable —

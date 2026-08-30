@@ -439,6 +439,7 @@ const (
 	ctxStream         = "ogr_stream_proc"
 	ctxAnswered       = "ogr_answered"
 	ctxSkip           = "ogr_skip"
+	ctxInitiator      = "ogr_initiator"
 	ctxNotModel       = "ogr_not_model"
 )
 
@@ -605,6 +606,11 @@ func onRequestHeaders(ctx wrapper.HttpContext, cfg Config) types.Action {
 	user := getHeader(cfg.agentUserHeader)
 	ctx.SetContext(ctxAgentUser, user)
 
+	// WHO STARTED IT — the wire's optional `initiator` (OGR 1.5). Read here because
+	// it is a HEADER fact: it is gone by the body phase and it never appears in the
+	// body at all.
+	ctx.SetContext(ctxInitiator, workloadInitiator(getHeader))
+
 	// The step's ONE coordinate: a fresh opaque id binding this call's two events.
 	// Minted here, always — earlier builds preferred `x-request-id`, and that header
 	// is client-suppliable: a client retrying with the same id would REUSE a step_id
@@ -616,6 +622,47 @@ func onRequestHeaders(ctx wrapper.HttpContext, cfg Config) types.Action {
 	_ = proxywasm.RemoveHttpRequestHeader("content-length")
 	_ = proxywasm.RemoveHttpRequestHeader("accept-encoding")
 	return types.HeaderStopIteration
+}
+
+/**
+ * workloadInitiator reads the client's own declaration that this is a SCHEDULED run —
+ * the wire's optional `initiator` (spec § initiator, OGR 1.5).
+ *
+ * ⚠️⚠️ **IT EXISTS BECAUSE THE BODY CANNOT SAY IT.** Most harnesses announce a
+ * scheduled run in the first line of the prompt — hermes prefixes `[IMPORTANT: You are
+ * running as a scheduled cron job…]`, openclaw `[cron:<id> <name>]` — and the runtime
+ * reads those for itself, so this filter has nothing to add for them. Claude Code's
+ * cron injects the user's own prompt VERBATIM (`useScheduledTasks.ts` →
+ * `enqueueForLead(task.prompt)`) and declares the fact only out of band. Its own
+ * source comments the header: "Absent = interactive default".
+ *
+ * Two carriers, because the client emits both and a proxy may drop either:
+ *   x-anthropic-billing-header: cc_version=…; cc_entrypoint=cli; cc_workload=cron;
+ *   user-agent: claude-cli/2.1.220 (external, cli, workload/cron)
+ * Verified 2026-08-29 on the local higress lab that BOTH reach this filter verbatim.
+ *
+ * ⚠️ **Substring matching on a bounded, punctuation-delimited token, deliberately.**
+ * `cc_workload=cron;` and `workload/cron` are the shapes the client writes; a stricter
+ * parse of a header whose grammar we do not own buys nothing and breaks the first time
+ * a field is added beside it. The failure direction is safe either way: this is a
+ * RECORD, so a miss costs one label and a false positive costs one label.
+ *
+ * ⚠️ **Never `"spawned"`.** A gateway sees one request, not the session tree that
+ * would tell it who spawned whom.
+ *
+ * ⚠️ **SELF-DECLARED — the CLIENT writes both headers.** Nothing here or downstream may
+ * treat it as authorization, policy selection or a rate-limit input; the `integration`
+ * rule verbatim. Which is also why it is NOT stripped from client requests the way the
+ * gateway-owned identity headers are: there is nothing to protect.
+ */
+func workloadInitiator(getHeader func(string) string) string {
+	for _, h := range []string{"x-anthropic-billing-header", "user-agent"} {
+		v := strings.ToLower(getHeader(h))
+		if strings.Contains(v, "cc_workload=cron") || strings.Contains(v, "workload/cron") {
+			return "scheduled"
+		}
+	}
+	return ""
 }
 
 /**
@@ -732,6 +779,7 @@ func onRequestBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Actio
 			stepID:      stepID,
 			protocol:    proto.Name(),
 			connection:  connectionID(),
+			initiator:   ctx.GetStringContext(ctxInitiator, ""),
 			mediaLimits: resolveMediaLimits(cfg.mediaMaxBytes),
 		},
 		proto: proto,
@@ -1452,7 +1500,7 @@ func report(cfg Config, e *GuardEvent) {
 	if err != nil {
 		return
 	}
-	post(cfg.client, cfg.apiKey, cfg.evaluatePath, payload, cfg.timeoutMs, "OGR-REPORT")
+	post(cfg.client, cfg.apiKey, cfg.evaluatePath, payload, cfg.timeoutMs, "OGR-REPORT", cntPostFailed)
 	bump(cntReported, 1)
 	mirrorEvent(cfg, e)
 }
@@ -1470,21 +1518,35 @@ func mirrorEvent(cfg Config, e *GuardEvent) {
 	if err != nil {
 		return
 	}
-	post(cfg.mirror, cfg.mirrorKey, cfg.mirrorEvaluatePath, payload, cfg.timeoutMs, "OGR-MIRROR")
+	post(cfg.mirror, cfg.mirrorKey, cfg.mirrorEvaluatePath, payload, cfg.timeoutMs, "OGR-MIRROR", cntMirrorFailed)
 	bump(cntMirrored, 1)
 }
 
-func post(client ogrClient, apiKey, path string, payload []byte, timeoutMs uint32, tag string) {
+// post sends one payload and waits for nothing.
+//
+// ⚠️ `failSlot` is supplied BY THE CALLER, and every caller must supply a real one.
+// Nothing here retries and no caller reads the status, so this counter is the only
+// thing that can afterwards say the runtime was not taking events — and the mirror
+// keeps its own slot so a dead candidate cannot read as lost primary traffic. See
+// heartbeat.go.
+//
+// A dispatch error and a non-200 are counted in the same slot on purpose: both mean
+// the event is gone, and the LOG line beside each says which it was.
+func post(client ogrClient, apiKey, path string, payload []byte, timeoutMs uint32, tag string, failSlot int) {
 	headers := [][2]string{
 		{"Content-Type", "application/json"},
 		{"Authorization", "Bearer " + apiKey},
 	}
+	// ⚠️ The callback does not run when the dispatch itself fails, so these two
+	// branches are exclusive and the slot is bumped exactly once per lost event.
 	if err := client.post(path, headers, payload, timeoutMs,
 		func(status int, body []byte) {
 			if status != 200 {
+				bump(failSlot, 1)
 				logConditionf(tag+".status", "[%s] status=%d body=%s", tag, status, truncate(string(body), 256))
 			}
 		}); err != nil {
+		bump(failSlot, 1)
 		logConditionf(tag+".dispatch", "[%s] dispatch failed: %v", tag, err)
 	}
 }
