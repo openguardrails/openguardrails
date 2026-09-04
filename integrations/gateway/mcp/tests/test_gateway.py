@@ -31,7 +31,7 @@ class FakeAlpaca:
         self.calls.append((name, args))
         if name == "get_account_info": return wrap(self.account)
         if name == "get_all_positions": return wrap(self.positions)
-        if name == "get_stock_latest_trade": return wrap({args["symbols"]: {"price": 500.0}})
+        if name == "get_stock_latest_trade": return wrap({"trades": {args["symbols"]: {"p": 500.0, "t": "2026-09-04T13:00:00Z"}}})
         return wrap({"id": "order-1", "status": "accepted", **args})
 
 
@@ -75,6 +75,7 @@ async def test_pretrade_blocks_oversized_qty_order(gw):
     r = await g.call(principal(cfg, "quant-senior"), "place_stock_order", {"symbol": "SPY", "side": "buy", "qty": "40"})  # 20k
     body = json.loads(r.content[0].text)["_ogr"]
     assert r.is_error and body["stage"] == "pretrade" and "15%" in body["reason"]
+    assert body["findings"][0]["category"] == "security.pretrade.position"
     assert all(c[0] != "place_stock_order" for c in up.calls)
 
 

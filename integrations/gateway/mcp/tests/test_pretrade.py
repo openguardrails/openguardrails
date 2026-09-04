@@ -59,5 +59,6 @@ async def test_ticket_shape():
 async def test_halt_file(tmp_path):
     hf = tmp_path / "HALT"; hf.write_text("x")
     lim = PretradeLimits(halt_file=str(hf))
-    assert (await run({"symbol": "SPY", "side": "buy", "notional": "100"}, Reader(), limits=lim))[0]["severity"] == "critical"
+    f = await run({"symbol": "SPY", "side": "buy", "notional": "100"}, Reader(), limits=lim)
+    assert f[0]["severity"] == "critical" and f[0]["category"] == "security.pretrade.halt"
     assert await run({}, Reader(), cap="order.cancel", limits=lim) == []

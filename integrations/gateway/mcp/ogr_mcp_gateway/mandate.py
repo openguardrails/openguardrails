@@ -22,6 +22,7 @@ DIMENSIONS = ("scope", "capability", "limit", "window", "irreversible")
 
 
 class Ledger(Protocol):
+    def peek(self, workspace: str, limit_id: str, bucket: str) -> int: ...
     def bump(self, workspace: str, limit_id: str, bucket: str) -> int: ...
 
 
@@ -33,6 +34,7 @@ class Verdict:
     capability: str | None = None
     fields: dict = field(default_factory=dict)
     mandate: str = ""
+    pending: list[tuple[str, str, str]] = field(default_factory=list)   # ledger bumps to commit iff the call is forwarded
 
     @property
     def blocked(self) -> bool:
@@ -157,8 +159,10 @@ class Mandate:
                                rule.get("on_violation"), "critical")
         return None
 
-    def check_limits(self, workspace: str, capability: str | None, fields: dict, unjudged: list[str]) -> list[dict]:
+    def check_limits(self, workspace: str, capability: str | None, fields: dict, unjudged: list[str],
+                     pending: list | None = None) -> list[dict]:
         out = []
+        pending = pending if pending is not None else []
         for lim in self.doc.get("limits", []):
             applies = lim.get("applies_to", {}).get("capabilities")
             if applies and capability not in applies:
@@ -178,9 +182,11 @@ class Mandate:
                 if self.ledger is None or window == "per_call":
                     n = 1
                 else:
-                    n = self.ledger.bump(workspace, f"{self.name}:{lim['id']}", self._bucket(window))
+                    key = (workspace, f"{self.name}:{lim['id']}", self._bucket(window))
+                    n = self.ledger.peek(*key) + 1           # a refused call is never charged; see Verdict.pending
+                    pending.append(key)
                 if n > lim["max"]:
-                    out.append(self._f("security.resource_exhaustion", f"{lim['id']}: {n} > {lim['max']} per {window}", action))
+                    out.append(self._f("security.mandate_violation.limit", f"{lim['id']}: {n} > {lim['max']} per {window}", action))
             # concurrency: not observable from a single held call
         return out
 
@@ -207,10 +213,16 @@ class Mandate:
                       self.check_irreversible(capability, fields)):
                 if f:
                     v.findings.append(f)
-            v.findings.extend(self.check_limits(workspace, capability, fields, v.unjudged))
+            v.findings.extend(self.check_limits(workspace, capability, fields, v.unjudged, v.pending))
         if any(f["action"] == "block" for f in v.findings):
             v.decision = "block"
         return v
+
+    def commit(self, v: Verdict) -> None:
+        """Charge the call against its count windows. Call only when the call is actually forwarded."""
+        if self.ledger is not None:
+            for key in v.pending:
+                self.ledger.bump(*key)
 
     def grants(self, tool: str) -> bool:
         """Would this tool's plain capability be allowed at all? Used to hide ungranted tools from

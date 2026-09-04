@@ -50,11 +50,18 @@ def test_window_does_not_apply_to_reads(senior):
     assert v.decision == "allow"
 
 
-def test_rate_limit_counts_across_calls(senior):
+def test_rate_limit_counts_only_committed_calls(senior):
     m = Mandate(senior, MemoryLedger(), RTH)
-    results = [m.evaluate("quant-senior", "place_stock_order", order()) for _ in range(6)]
+    results = []
+    for _ in range(6):
+        v = m.evaluate("quant-senior", "place_stock_order", order()); results.append(v)
+        if not v.blocked:
+            m.commit(v)
     assert [r.decision for r in results] == ["allow"] * 5 + ["block"]
-    assert results[-1].findings[0]["category"] == "security.resource_exhaustion"
+    assert results[-1].findings[0]["category"] == "security.mandate_violation.limit"
+    # refused calls are not charged: without commit the count never moves
+    m2 = Mandate(senior, MemoryLedger(), RTH)
+    assert all(not m2.evaluate("quant-senior", "place_stock_order", order()).blocked for _ in range(20))
 
 
 def test_irreversible_unwind_is_critical(senior):

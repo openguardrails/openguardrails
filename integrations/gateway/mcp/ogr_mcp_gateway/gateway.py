@@ -61,6 +61,8 @@ class UpstreamAccountReader:
 
     async def price(self, symbol: str) -> float | None:
         d = _payload(await self.up.call_tool("get_stock_latest_trade", {"symbols": symbol}))
+        if isinstance(d, dict) and isinstance(d.get("trades"), dict):
+            d = d["trades"]                                   # Alpaca: data.trades.SYM.p
         node = d.get(symbol) if isinstance(d, dict) and symbol in d else d
         if isinstance(node, dict):
             for k in ("price", "p", "trade_price"):
@@ -141,6 +143,8 @@ class Gateway:
         d = await self.decide(p, tool, args)
         result: CallToolResult
         if d.allowed:
+            if d.verdict:
+                self.mandates[p.workspace].commit(d.verdict)      # charge count windows only for forwarded calls
             try:
                 result = await self.up.call_tool(tool, args)
             except Exception as e:  # noqa: BLE001 - the upstream's failure is the caller's to see, not ours to hide

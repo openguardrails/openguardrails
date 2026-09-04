@@ -17,8 +17,9 @@ from typing import Protocol
 from .mandate import finding
 
 DETECTOR = "pretrade"
-CAT_LIMIT = "security.mandate_violation.limit"
-CAT_CAP = "security.mandate_violation.capability"
+CAT = "security.pretrade."   # leaves: halt, drawdown, daily_loss, ticket, price, position, cash, exposure, state
+CAT_LIMIT = CAT + "state"
+CAT_CAP = CAT + "ticket"
 
 
 class AccountReader(Protocol):
@@ -40,7 +41,8 @@ class PretradeLimits:
 
 
 def _f(subject: str, category: str = CAT_LIMIT, severity: str = "high") -> dict:
-    return finding(category, subject, "block", severity, DETECTOR)
+    return finding(category if "." in category.removeprefix(CAT) or category.startswith("security.") else CAT + category,
+                   subject, "block", severity, DETECTOR)
 
 
 def _num(v) -> float | None:
@@ -56,25 +58,25 @@ async def check(capability: str | None, tool: str, args: dict, limits: PretradeL
         return []
     out: list[dict] = []
     if limits.halt_file and Path(limits.halt_file).exists() and capability != "order.cancel":
-        return [_f(f"halt file {limits.halt_file} present: all order.* withheld", CAT_CAP, "critical")]
+        return [_f(f"halt file {limits.halt_file} present: all order.* withheld", CAT + "halt", "critical")]
     if capability not in ("order.place", "order.close"):
         return out
 
     acct = await reader.account()
     equity, cash, last_eq = _num(acct.get("equity")) or 0.0, _num(acct.get("cash")) or 0.0, _num(acct.get("last_equity")) or 0.0
     if equity <= 0:
-        return [_f("account equity unreadable; refusing to size an order")]
+        return [_f("account equity unreadable; refusing to size an order", CAT + "state")]
 
     # account-level stops (apply to closes too: a halted book is a halted book)
     peak = max(ledger.get(workspace, "peak_equity", equity), equity)
     ledger.put(workspace, "peak_equity", peak)
     dd = 1 - equity / peak
     if dd > limits.max_drawdown_pct:
-        out.append(_f(f"drawdown {dd:.1%} from peak {peak:,.0f} exceeds {limits.max_drawdown_pct:.0%}", severity="critical"))
+        out.append(_f(f"drawdown {dd:.1%} from peak {peak:,.0f} exceeds {limits.max_drawdown_pct:.0%}", CAT + "drawdown", "critical"))
     if last_eq > 0:
         dl = 1 - equity / last_eq
         if dl > limits.max_daily_loss_pct:
-            out.append(_f(f"daily loss {dl:.1%} exceeds {limits.max_daily_loss_pct:.0%}", severity="critical"))
+            out.append(_f(f"daily loss {dl:.1%} exceeds {limits.max_daily_loss_pct:.0%}", CAT + "daily_loss", "critical"))
     if out or capability == "order.close":
         return out
 
@@ -100,7 +102,7 @@ async def check(capability: str | None, tool: str, args: dict, limits: PretradeL
         qty = _num(args.get("qty"))
         px = await reader.price(symbol) if qty else None
         if qty is None or px is None:
-            return [_f(f"cannot size order for {symbol}: no notional and no price for qty")]
+            return [_f(f"cannot size order for {symbol}: no notional and no price for qty", CAT + "price")]
         notional = qty * px
     signed = notional if side == "buy" else -notional
 
@@ -108,12 +110,12 @@ async def check(capability: str | None, tool: str, args: dict, limits: PretradeL
     cur = positions.get(symbol, 0.0)
     new = cur + signed
     if new < -1e-6:
-        out.append(_f(f"{symbol}: selling {notional:,.0f} against {cur:,.0f} held would go short", CAT_CAP))
+        out.append(_f(f"{symbol}: selling {notional:,.0f} against {cur:,.0f} held would go short", CAT + "position"))
     if abs(new) > limits.max_position_pct * equity + 1e-6:
-        out.append(_f(f"{symbol}: position {new:,.0f} would exceed {limits.max_position_pct:.0%} of equity {equity:,.0f}"))
+        out.append(_f(f"{symbol}: position {new:,.0f} would exceed {limits.max_position_pct:.0%} of equity {equity:,.0f}", CAT + "position"))
     if side == "buy" and notional > cash + 1e-6:
-        out.append(_f(f"buy {notional:,.0f} exceeds cash {cash:,.0f} (no margin)"))
+        out.append(_f(f"buy {notional:,.0f} exceeds cash {cash:,.0f} (no margin)", CAT + "cash"))
     gross = sum(abs(v) for s, v in positions.items() if s != symbol) + abs(new)
     if gross > limits.max_gross_exposure * equity + 1e-6:
-        out.append(_f(f"gross exposure {gross:,.0f} would exceed {limits.max_gross_exposure:.0%} of equity"))
+        out.append(_f(f"gross exposure {gross:,.0f} would exceed {limits.max_gross_exposure:.0%} of equity", CAT + "exposure"))
     return out

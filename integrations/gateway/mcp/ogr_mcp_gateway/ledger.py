@@ -27,6 +27,11 @@ class SqliteLedger:
             return int(c.execute("SELECT n FROM counts WHERE workspace=? AND limit_id=? AND bucket=?",
                                  (workspace, limit_id, bucket)).fetchone()[0])
 
+    def peek(self, workspace: str, limit_id: str, bucket: str) -> int:
+        with self._lock, self._conn() as c:
+            row = c.execute("SELECT n FROM counts WHERE workspace=? AND limit_id=? AND bucket=?", (workspace, limit_id, bucket)).fetchone()
+        return int(row[0]) if row else 0
+
     def get(self, workspace: str, key: str, default: float = 0.0) -> float:
         with self._lock, self._conn() as c:
             row = c.execute("SELECT value FROM kv WHERE workspace=? AND key=?", (workspace, key)).fetchone()
@@ -43,6 +48,9 @@ class MemoryLedger:
     def __init__(self):
         self.counts: dict[tuple, int] = {}
         self.kv: dict[tuple, float] = {}
+
+    def peek(self, workspace, limit_id, bucket):
+        return self.counts.get((workspace, limit_id, bucket), 0)
 
     def bump(self, workspace, limit_id, bucket):
         k = (workspace, limit_id, bucket); self.counts[k] = self.counts.get(k, 0) + 1; return self.counts[k]
