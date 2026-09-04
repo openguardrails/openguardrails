@@ -1,0 +1,43 @@
+{
+  "listen": { "host": "127.0.0.1", "port": 8790 },
+  "upstream": {
+    "name": "alpaca",
+    "command": "uvx",
+    "args": ["alpaca-mcp-server"],
+    "env": {
+      "ALPACA_API_KEY": "${ALPACA_API_KEY}",
+      "ALPACA_SECRET_KEY": "${ALPACA_SECRET_KEY}",
+      "ALPACA_PAPER_TRADE": "true"
+    }
+  },
+  "principals": [
+    { "token": "${OGR_MCP_TOKEN_JUNIOR}", "agent_id": "dsh-junior",    "agent_type": "dsh",         "workspace": "quant-junior", "user": "tom" },
+    { "token": "${OGR_MCP_TOKEN_MID}",    "agent_id": "codex-mid",     "agent_type": "codex",       "workspace": "quant-mid",    "user": "tom" },
+    { "token": "${OGR_MCP_TOKEN_SENIOR}", "agent_id": "claude-senior", "agent_type": "claude-code", "workspace": "quant-senior", "user": "tom" }
+  ],
+  "mandates": {
+    "quant-junior": "mandates/quant-junior.json",
+    "quant-mid":    "mandates/quant-mid.json",
+    "quant-senior": "mandates/quant-senior.json"
+  },
+  "pretrade": {
+    "enabled": true,
+    "max_position_pct": 0.15,
+    "max_gross_exposure": 1.0,
+    "max_daily_loss_pct": 0.02,
+    "max_drawdown_pct": 0.10,
+    "allowed_order_types": ["market", "limit"],
+    "allowed_time_in_force": ["day"],
+    "allow_extended_hours": false,
+    "halt_file": "HALT"
+  },
+  "runtime": {
+    "url": "${OGR_RUNTIME_URL}",
+    "api_key": "${OGR_API_KEY}",
+    "fail_mode": "closed",
+    "timeout_ms": 5000
+  },
+  "hide_ungranted_tools": true,
+  "audit_log": "ogr-mcp-audit.jsonl",
+  "ledger": "ogr-mcp-ledger.sqlite"
+}

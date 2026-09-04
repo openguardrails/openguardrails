@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "openguardrails-gateway-mcp"
+version = "0.1.0"
+description = "OpenGuardrails MCP gateway: an MCP server in front of another, judging every tool call against a mandate, pre-trade state, and the OGR runtime."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+authors = [{ name = "OpenGuardrails" }]
+keywords = ["ai", "agent", "security", "guardrails", "mcp", "gateway", "mandate", "ogr"]
+dependencies = ["mcp>=2.0", "uvicorn>=0.30"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+
+[project.scripts]
+ogr-mcp-gateway = "ogr_mcp_gateway.serve:main"
+
+[project.urls]
+Specification = "https://github.com/openguardrails/openguardrails/tree/main/specification"
+Source = "https://github.com/openguardrails/openguardrails/tree/main/integrations/gateway/mcp"
+
+[tool.hatch.build.targets.wheel]
+packages = ["ogr_mcp_gateway"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
