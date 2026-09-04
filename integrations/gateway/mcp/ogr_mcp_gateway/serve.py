@@ -17,8 +17,10 @@ import sys
 import mcp_types as types
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-from mcp.server.auth.middleware.auth_context import get_access_token
+from mcp.server.auth.middleware.auth_context import AuthContextMiddleware, get_access_token
+from mcp.server.auth.middleware.bearer_auth import BearerAuthBackend
 from mcp.server.auth.provider import AccessToken, TokenVerifier
+from starlette.middleware.authentication import AuthenticationMiddleware
 from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
 
@@ -86,6 +88,17 @@ def build_server(gw: Gateway, fixed: Principal | None) -> Server:
     return Server("ogr-mcp-gateway", version=__version__, on_list_tools=on_list_tools, on_call_tool=on_call_tool)
 
 
+def build_http_app(server: Server, cfg: Config):
+    """streamable_http_app() installs the bearer middleware only when full OAuth `auth` settings are
+    given; we are a plain resource server with static tokens, so we install the same two
+    middlewares ourselves. RequireAuthMiddleware on the route then sees an authenticated user."""
+    verifier = StaticTokenVerifier(cfg)
+    app = server.streamable_http_app(stateless_http=True, token_verifier=verifier, host=cfg.host)
+    app.add_middleware(AuthContextMiddleware)
+    app.add_middleware(AuthenticationMiddleware, backend=BearerAuthBackend(verifier))
+    return app
+
+
 async def run(cfg: Config, stdio: bool) -> None:
     ledger = SqliteLedger(cfg.ledger) if cfg.ledger else MemoryLedger()
     async with StdioUpstream(cfg) as up:
@@ -104,7 +117,7 @@ async def run(cfg: Config, stdio: bool) -> None:
         else:
             import uvicorn
             server = build_server(gw, None)
-            app = server.streamable_http_app(stateless_http=True, token_verifier=StaticTokenVerifier(cfg), host=cfg.host)
+            app = build_http_app(server, cfg)
             print(f"[ogr-mcp-gateway] listening on http://{cfg.host}:{cfg.port}/mcp", file=sys.stderr)
             await uvicorn.Server(uvicorn.Config(app, host=cfg.host, port=cfg.port, log_level="warning")).serve()
 

@@ -107,3 +107,14 @@ async def test_account_reader_parses_alpaca_shapes():
     assert (await rd.account())["equity"] == "100000"
     assert await rd.positions() == {"SPY": 1234.5, "QQQ": 0.0}
     assert await rd.price("SPY") == 500.0
+
+
+async def test_http_app_has_bearer_auth(gw):
+    from starlette.middleware.authentication import AuthenticationMiddleware
+    from ogr_mcp_gateway.serve import StaticTokenVerifier, build_http_app, build_server
+    g, up, cfg = gw
+    app = build_http_app(build_server(g, None), cfg)
+    assert any(m.cls is AuthenticationMiddleware for m in app.user_middleware)
+    tok = await StaticTokenVerifier(cfg).verify_token(principal(cfg, "quant-senior").token)
+    assert tok and tok.client_id == "claude-senior" and tok.scopes == ["quant-senior"]
+    assert await StaticTokenVerifier(cfg).verify_token("nope") is None
