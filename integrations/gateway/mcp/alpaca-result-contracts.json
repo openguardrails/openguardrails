@@ -1,5 +1,5 @@
 {
-  "$comment": "Result contracts for the alpaca upstream. kind=external_text: the named fields carry third-party text and are the ONLY fields sent to the injection judge (bounded by max_chars). kind=structured: API data; strings longer than max_string_len outside free_text_fields, or instruction-shaped text in a field the schema types as an id/enum/number, withhold the result deterministically. Tools absent here pass through with the audit row marked result_unjudged.",
+  "$comment": "Result contracts for the alpaca upstream. kind=external_text: the named fields carry third-party text and are the ONLY fields sent to the injection judge (bounded by max_chars). kind=structured: API data; strings longer than max_string_len outside free_text_fields, or instruction-shaped text in a field the schema types as an id/enum/number, withhold the result deterministically. Tools absent here pass through with the audit row marked result_unjudged. error_results: an upstream isError result is prose by nature and is exempt from typed-field length checks (instruction shape still applies). rendering=json_or_table: tools that may answer with a rendered table instead of JSON; bound their text by instruction shape only.",
   "upstream": "alpaca",
   "default": {
     "kind": "passthrough"
@@ -13,6 +13,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "cancel_all_orders": {
@@ -23,6 +32,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "cancel_order_by_id": {
@@ -33,6 +51,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "close_all_positions": {
@@ -43,6 +70,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "close_position": {
@@ -53,6 +89,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "create_locate": {
@@ -63,6 +108,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "create_watchlist": {
@@ -73,6 +127,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "delete_watchlist_by_id": {
@@ -83,6 +146,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "do_not_exercise_options_position": {
@@ -93,6 +165,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "exercise_options_position": {
@@ -103,6 +184,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "fetch_alpaca_doc": {
@@ -121,6 +211,16 @@
         "notes",
         "message",
         "name"
+      ],
+      "rendering": "json_or_table",
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_account_activities_by_type": {
@@ -131,6 +231,16 @@
         "notes",
         "message",
         "name"
+      ],
+      "rendering": "json_or_table",
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_account_config": {
@@ -141,6 +251,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_account_info": {
@@ -151,6 +270,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_all_assets": {
@@ -161,6 +289,16 @@
         "notes",
         "message",
         "name"
+      ],
+      "rendering": "json_or_table",
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_all_positions": {
@@ -171,6 +309,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_alpaca_endpoint_docs": {
@@ -189,6 +336,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_calendar": {
@@ -199,6 +355,16 @@
         "notes",
         "message",
         "name"
+      ],
+      "rendering": "json_or_table",
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_clock": {
@@ -209,6 +375,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_corporate_action_announcement": {
@@ -219,6 +394,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_corporate_action_announcements": {
@@ -237,6 +421,16 @@
         "notes",
         "message",
         "name"
+      ],
+      "rendering": "json_or_table",
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_crypto_bars": {
@@ -247,6 +441,16 @@
         "notes",
         "message",
         "name"
+      ],
+      "rendering": "json_or_table",
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_crypto_latest_bar": {
@@ -257,6 +461,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_crypto_latest_orderbook": {
@@ -267,6 +480,16 @@
         "notes",
         "message",
         "name"
+      ],
+      "rendering": "json_or_table",
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_crypto_latest_quote": {
@@ -277,6 +500,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_crypto_latest_trade": {
@@ -287,6 +519,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_crypto_quotes": {
@@ -297,6 +538,16 @@
         "notes",
         "message",
         "name"
+      ],
+      "rendering": "json_or_table",
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_crypto_snapshot": {
@@ -307,6 +558,16 @@
         "notes",
         "message",
         "name"
+      ],
+      "rendering": "json_or_table",
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_crypto_trades": {
@@ -317,6 +578,16 @@
         "notes",
         "message",
         "name"
+      ],
+      "rendering": "json_or_table",
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_fixed_income_latest_quotes": {
@@ -327,6 +598,16 @@
         "notes",
         "message",
         "name"
+      ],
+      "rendering": "json_or_table",
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_locate": {
@@ -337,6 +618,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_locate_quotes": {
@@ -347,6 +637,16 @@
         "notes",
         "message",
         "name"
+      ],
+      "rendering": "json_or_table",
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_locates": {
@@ -357,6 +657,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_market_movers": {
@@ -367,6 +676,16 @@
         "notes",
         "message",
         "name"
+      ],
+      "rendering": "json_or_table",
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_most_active_stocks": {
@@ -377,6 +696,16 @@
         "notes",
         "message",
         "name"
+      ],
+      "rendering": "json_or_table",
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_news": {
@@ -398,6 +727,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_option_bars": {
@@ -408,6 +746,16 @@
         "notes",
         "message",
         "name"
+      ],
+      "rendering": "json_or_table",
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_option_chain": {
@@ -418,6 +766,16 @@
         "notes",
         "message",
         "name"
+      ],
+      "rendering": "json_or_table",
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_option_contract": {
@@ -428,6 +786,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_option_contracts": {
@@ -438,6 +805,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_option_exchange_codes": {
@@ -448,6 +824,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_option_latest_quote": {
@@ -458,6 +843,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_option_latest_trade": {
@@ -468,6 +862,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_option_snapshot": {
@@ -478,6 +881,16 @@
         "notes",
         "message",
         "name"
+      ],
+      "rendering": "json_or_table",
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_option_trades": {
@@ -488,6 +901,16 @@
         "notes",
         "message",
         "name"
+      ],
+      "rendering": "json_or_table",
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_order_by_client_id": {
@@ -498,6 +921,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_order_by_id": {
@@ -508,6 +940,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_orders": {
@@ -518,6 +959,16 @@
         "notes",
         "message",
         "name"
+      ],
+      "rendering": "json_or_table",
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_portfolio_history": {
@@ -528,6 +979,16 @@
         "notes",
         "message",
         "name"
+      ],
+      "rendering": "json_or_table",
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_stock_bars": {
@@ -538,6 +999,16 @@
         "notes",
         "message",
         "name"
+      ],
+      "rendering": "json_or_table",
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_stock_latest_bar": {
@@ -548,6 +1019,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_stock_latest_quote": {
@@ -558,6 +1038,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_stock_latest_trade": {
@@ -568,6 +1057,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_stock_quotes": {
@@ -578,6 +1076,16 @@
         "notes",
         "message",
         "name"
+      ],
+      "rendering": "json_or_table",
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_stock_snapshot": {
@@ -588,6 +1096,16 @@
         "notes",
         "message",
         "name"
+      ],
+      "rendering": "json_or_table",
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_stock_trades": {
@@ -598,6 +1116,16 @@
         "notes",
         "message",
         "name"
+      ],
+      "rendering": "json_or_table",
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_watchlist_by_id": {
@@ -608,6 +1136,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "get_watchlists": {
@@ -618,6 +1155,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "list_alpaca_api_endpoints": {
@@ -636,6 +1182,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "place_option_order": {
@@ -646,6 +1201,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "place_stock_order": {
@@ -656,6 +1220,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "remove_asset_from_watchlist_by_id": {
@@ -666,6 +1239,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "replace_order_by_id": {
@@ -676,6 +1258,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "search_alpaca_api_specs": {
@@ -703,6 +1294,15 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     },
     "update_watchlist_by_id": {
@@ -713,7 +1313,22 @@
         "notes",
         "message",
         "name"
+      ],
+      "long_fields": [
+        "next_page_token",
+        "url",
+        "id",
+        "client_order_id",
+        "asset_id",
+        "t",
+        "timestamp"
       ]
     }
+  },
+  "error_results": {
+    "kind": "prose",
+    "checks": [
+      "instruction_shape"
+    ]
   }
 }
