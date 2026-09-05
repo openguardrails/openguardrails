@@ -1,0 +1,719 @@
+{
+  "$comment": "Result contracts for the alpaca upstream. kind=external_text: the named fields carry third-party text and are the ONLY fields sent to the injection judge (bounded by max_chars). kind=structured: API data; strings longer than max_string_len outside free_text_fields, or instruction-shaped text in a field the schema types as an id/enum/number, withhold the result deterministically. Tools absent here pass through with the audit row marked result_unjudged.",
+  "upstream": "alpaca",
+  "default": {
+    "kind": "passthrough"
+  },
+  "tools": {
+    "add_asset_to_watchlist_by_id": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "cancel_all_orders": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "cancel_order_by_id": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "close_all_positions": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "close_position": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "create_locate": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "create_watchlist": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "delete_watchlist_by_id": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "do_not_exercise_options_position": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "exercise_options_position": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "fetch_alpaca_doc": {
+      "kind": "external_text",
+      "text_fields": [
+        "content",
+        "title"
+      ],
+      "max_chars": 40000
+    },
+    "get_account_activities": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_account_activities_by_type": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_account_config": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_account_info": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_all_assets": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_all_positions": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_alpaca_endpoint_docs": {
+      "kind": "external_text",
+      "text_fields": [
+        "description",
+        "content"
+      ],
+      "max_chars": 40000
+    },
+    "get_asset": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_calendar": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_clock": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_corporate_action_announcement": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_corporate_action_announcements": {
+      "kind": "external_text",
+      "text_fields": [
+        "description",
+        "notes"
+      ],
+      "max_chars": 8000
+    },
+    "get_corporate_actions": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_crypto_bars": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_crypto_latest_bar": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_crypto_latest_orderbook": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_crypto_latest_quote": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_crypto_latest_trade": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_crypto_quotes": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_crypto_snapshot": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_crypto_trades": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_fixed_income_latest_quotes": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_locate": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_locate_quotes": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_locates": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_market_movers": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_most_active_stocks": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_news": {
+      "kind": "external_text",
+      "text_fields": [
+        "headline",
+        "summary",
+        "content",
+        "author",
+        "source"
+      ],
+      "max_chars": 20000
+    },
+    "get_open_position": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_option_bars": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_option_chain": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_option_contract": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_option_contracts": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_option_exchange_codes": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_option_latest_quote": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_option_latest_trade": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_option_snapshot": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_option_trades": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_order_by_client_id": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_order_by_id": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_orders": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_portfolio_history": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_stock_bars": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_stock_latest_bar": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_stock_latest_quote": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_stock_latest_trade": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_stock_quotes": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_stock_snapshot": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_stock_trades": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_watchlist_by_id": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "get_watchlists": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "list_alpaca_api_endpoints": {
+      "kind": "external_text",
+      "text_fields": [
+        "summary",
+        "description"
+      ],
+      "max_chars": 20000
+    },
+    "place_crypto_order": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "place_option_order": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "place_stock_order": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "remove_asset_from_watchlist_by_id": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "replace_order_by_id": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "search_alpaca_api_specs": {
+      "kind": "external_text",
+      "text_fields": [
+        "summary",
+        "description"
+      ],
+      "max_chars": 20000
+    },
+    "search_alpaca_docs": {
+      "kind": "external_text",
+      "text_fields": [
+        "title",
+        "snippet",
+        "content"
+      ],
+      "max_chars": 20000
+    },
+    "update_account_config": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    },
+    "update_watchlist_by_id": {
+      "kind": "structured",
+      "max_string_len": 256,
+      "free_text_fields": [
+        "description",
+        "notes",
+        "message",
+        "name"
+      ]
+    }
+  }
+}
