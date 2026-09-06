@@ -1,0 +1,370 @@
+{
+  "mandate": "quant-mid",
+  "workspace": "quant-mid",
+  "version": "2026-09-04",
+  "on_violation": "block",
+  "bindings": [
+    {
+      "tool": "add_asset_to_watchlist_by_id",
+      "capability": "watchlist.write"
+    },
+    {
+      "tool": "cancel_all_orders",
+      "capability": "order.cancel_all"
+    },
+    {
+      "tool": "cancel_order_by_id",
+      "capability": "order.cancel"
+    },
+    {
+      "tool": "close_all_positions",
+      "capability": "order.unwind"
+    },
+    {
+      "tool": "close_position",
+      "capability": "order.close",
+      "fields": {
+        "instrument": "symbol_or_asset_id"
+      }
+    },
+    {
+      "tool": "create_locate",
+      "capability": "order.short"
+    },
+    {
+      "tool": "create_watchlist",
+      "capability": "watchlist.write"
+    },
+    {
+      "tool": "delete_watchlist_by_id",
+      "capability": "watchlist.write"
+    },
+    {
+      "tool": "do_not_exercise_options_position",
+      "capability": "order.option"
+    },
+    {
+      "tool": "exercise_options_position",
+      "capability": "order.option"
+    },
+    {
+      "tool": "fetch_alpaca_doc",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_account_activities",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_account_activities_by_type",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_account_config",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_account_info",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_all_assets",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_all_positions",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_alpaca_endpoint_docs",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_asset",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_calendar",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_clock",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_corporate_action_announcement",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_corporate_action_announcements",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_corporate_actions",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_crypto_bars",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_crypto_latest_bar",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_crypto_latest_orderbook",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_crypto_latest_quote",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_crypto_latest_trade",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_crypto_quotes",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_crypto_snapshot",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_crypto_trades",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_fixed_income_latest_quotes",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_locate",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_locate_quotes",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_locates",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_market_movers",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_most_active_stocks",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_news",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_open_position",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_option_bars",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_option_chain",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_option_contract",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_option_contracts",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_option_exchange_codes",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_option_latest_quote",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_option_latest_trade",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_option_snapshot",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_option_trades",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_order_by_client_id",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_order_by_id",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_orders",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_portfolio_history",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_stock_bars",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_stock_latest_bar",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_stock_latest_quote",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_stock_latest_trade",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_stock_quotes",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_stock_snapshot",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_stock_trades",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_watchlist_by_id",
+      "capability": "data.read"
+    },
+    {
+      "tool": "get_watchlists",
+      "capability": "data.read"
+    },
+    {
+      "tool": "list_alpaca_api_endpoints",
+      "capability": "data.read"
+    },
+    {
+      "tool": "place_crypto_order",
+      "capability": "order.crypto"
+    },
+    {
+      "tool": "place_option_order",
+      "capability": "order.option"
+    },
+    {
+      "tool": "place_stock_order",
+      "capability": "order.place",
+      "fields": {
+        "instrument": "symbol",
+        "quantity": "qty",
+        "notional": "notional",
+        "side": "side",
+        "order_type": "type",
+        "time_in_force": "time_in_force"
+      },
+      "capability_map": {
+        "side": {
+          "sell_short": "order.short"
+        },
+        "order_class": {
+          "bracket": "order.bracket",
+          "oco": "order.bracket",
+          "oto": "order.bracket"
+        },
+        "extended_hours": {
+          "true": "order.extended_hours"
+        }
+      }
+    },
+    {
+      "tool": "remove_asset_from_watchlist_by_id",
+      "capability": "watchlist.write"
+    },
+    {
+      "tool": "replace_order_by_id",
+      "capability": "order.replace"
+    },
+    {
+      "tool": "search_alpaca_api_specs",
+      "capability": "data.read"
+    },
+    {
+      "tool": "search_alpaca_docs",
+      "capability": "data.read"
+    },
+    {
+      "tool": "update_account_config",
+      "capability": "account.configure"
+    },
+    {
+      "tool": "update_watchlist_by_id",
+      "capability": "watchlist.write"
+    }
+  ],
+  "scope": {
+    "allow": [
+      "XLK",
+      "XLF",
+      "XLE",
+      "XLV",
+      "XLI",
+      "XLP",
+      "XLY",
+      "XLU",
+      "XLB",
+      "XLRE",
+      "SPY",
+      "QQQ",
+      "IWM",
+      "EFA",
+      "EEM",
+      "TLT",
+      "IEF",
+      "GLD",
+      "DBC",
+      "VNQ",
+      "BIL"
+    ]
+  },
+  "capabilities": {
+    "allow": [
+      "data.read",
+      "order.cancel"
+    ]
+  },
+  "limits": [
+    {
+      "id": "read-rate",
+      "metric": "count",
+      "window": "per_minute",
+      "max": 60
+    },
+    {
+      "id": "cancels-per-day",
+      "metric": "count",
+      "window": "per_day",
+      "max": 20,
+      "applies_to": {
+        "capabilities": [
+          "order.cancel"
+        ]
+      }
+    }
+  ]
+}
