@@ -65,6 +65,7 @@ System compromise, judged on actions and data flow.
 | `security.resource_exhaustion` | Loop amplification, runaway API spend, action/order spam — abuse judged on action rates and volume. |
 | `security.shadow_agent` | Several agents hiding behind one identity — the same `agent_id` observed with differing `agent_type` values (one credential driving multiple harnesses). An identity-governance signal emitted by the runtime, not a content judgment. |
 | `security.mandate_violation` | An action outside the **authorization envelope** its operator declared for the agent — a target, instrument, capability, quantity, rate or time window the [mandate](mandate.md) does not grant. The agent is doing its own job, out of bounds. Refine with the subcategories below. |
+| `security.pretrade` | An order-placing action refused by a **pre-trade state check** — a limit that needs live account state the call itself does not carry (position, cash, gross exposure, daily loss, drawdown, an operator halt). The OMS-layer companion of `security.mandate_violation`: the mandate reads the call, pre-trade reads the book. Emitted only by an enforcement point that holds the upstream session (an MCP door), never judged from content. Refine with the subcategories below. |
 | `security.restricted_information` | Acting on information the agent may HOLD but may not ACT ON — material non-public information, another party's pending orders, data admissible for one purpose and used for another. Distinct from `security.data_exfiltration`: nothing left the boundary; the use itself is the violation. |
 | `security.market_manipulation` | An action pattern whose effect is to deceive other participants in a market or auction — orders never meant to trade, self-matching, timing chosen to move a print. Judged on the SHAPE of the actions, not on intent, and typically only visible across a sequence. |
 | `security.persistence` | Durable access left behind after the task — an implanted key, cron entry, service, scheduled job or account that outlives the session that created it. The one agent action whose consequence is unbounded in time. |
@@ -83,6 +84,32 @@ The dimensions are the ones a [mandate](mandate.md) declares:
 | `security.mandate_violation.limit` | HOW MUCH — a declared quantitative bound exceeded: size, count, rate, concurrency, spend. |
 | `security.mandate_violation.window` | WHEN — an action outside the authorized time window. |
 | `security.mandate_violation.irreversible` | An action the mandate reserves to a human: unwinding, deleting, transferring, disclosing. The dimension is not "how much" but "who may decide". |
+
+### `security.pretrade.*` — pre-trade state subcategories
+
+`security.mandate_violation` reads what a tool call carries; [`mandate.md`](mandate.md)
+is explicit that it is not a pre-trade risk control. `security.pretrade` is that other
+thing, named separately so the boundary stays visible: an enforcement point that holds
+the broker session looks the account up before forwarding an `order.*` call and refuses
+on state the call could not show. The leaves name the state that refused it:
+
+| ID | What refused the order |
+|---|---|
+| `security.pretrade.halt` | An operator halt is in force (kill functionality); every order-placing capability is withheld, cancels pass. |
+| `security.pretrade.drawdown` | The book is below its peak by more than the declared drawdown limit. |
+| `security.pretrade.daily_loss` | The book is down more than the declared daily-loss limit from the day's start. |
+| `security.pretrade.ticket` | The ticket's shape is not permitted — order type, time-in-force, session flag, side. |
+| `security.pretrade.price` | A quantity-only ticket could not be priced, so its notional could not be checked. Refused, never guessed. |
+| `security.pretrade.position` | The resulting position would exceed the per-instrument limit or cross to a side (short) the profile withholds. |
+| `security.pretrade.cash` | A purchase exceeds available cash; margin is not granted. |
+| `security.pretrade.exposure` | Gross exposure after the order would exceed the declared multiple of equity. |
+| `security.pretrade.state` | Account state could not be read reliably enough to size an order. |
+
+A pre-trade finding is, like a mandate violation, a finding about the agent's envelope
+rather than about the world, and it carries `detector: "pretrade"` (or `pretrade:<upstream>`)
+so it can never be mistaken for model judgment. It is the enforcement point's own check;
+market-access controls in the regulatory sense (SEC Rule 15c3-5, MiFID II RTS 6) remain
+the broker's.
 
 ⚠️ **A mandate violation is a finding about the AGENT, not about the world.** The
 same order or the same command is compliant for one agent and a violation for
@@ -157,6 +184,7 @@ by an action that was merely *outside what the operator authorized*.
 |---|---|
 | Order in an instrument, venue or account the desk's mandate does not cover | `security.mandate_violation.scope` |
 | Order size, daily turnover, position count or leverage past a declared bound | `security.mandate_violation.limit` |
+| Order refused on live book state — position, cash, exposure, daily loss, drawdown, halt | `security.pretrade.*` |
 | Using an operation the mandate withholds (short, margin, withdrawal, transfer) | `security.mandate_violation.capability` |
 | Trading outside the authorized session/window | `security.mandate_violation.window` |
 | Liquidating the book, or any unwind reserved to a human | `security.mandate_violation.irreversible` |
