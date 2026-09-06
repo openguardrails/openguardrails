@@ -400,8 +400,13 @@ func parseConfig(j gjson.Result, c *Config) error {
 	// not per request. An operator has to be able to confirm what actually loaded —
 	// silence at startup is indistinguishable from a plugin that never loaded at all,
 	// which is the failure this whole integration exists to make visible.
-	proxywasm.LogWarnf("[OGR-CONFIG] v%s mode=%s cluster=%s host=%s base_path=%q timeout=%dms fail=%s head=%d beat=%ds log=%s protocols=%s",
-		pluginVersion, c.mode, c.cluster, c.host, c.basePath, c.timeoutMs, failLabel(c.failClosed), c.streamHeadReleaseBytes,
+	//
+	// ⚠️ `mode=` is what was CONFIGURED. While the temporary beta gate is in the
+	// build it is not what most requests run in, so the line says so itself —
+	// otherwise `mode=enforce` beside a gateway that enforces nothing reads as a
+	// broken plugin. Drop `beta=` with betaflags.go.
+	proxywasm.LogWarnf("[OGR-CONFIG] v%s mode=%s beta=%s cluster=%s host=%s base_path=%q timeout=%dms fail=%s head=%d beat=%ds log=%s protocols=%s",
+		pluginVersion, c.mode, betaFlagOGR, c.cluster, c.host, c.basePath, c.timeoutMs, failLabel(c.failClosed), c.streamHeadReleaseBytes,
 		heartbeatPeriodMs/1000, logLevelName(logLevel), strings.Join(protocolNames(), ","))
 	return nil
 }
@@ -532,6 +537,11 @@ func onRequestHeaders(ctx wrapper.HttpContext, cfg Config) types.Action {
 	// The path is the same signal ai-proxy keys on. Kept for the body phase, where the
 	// shape check can refine it.
 	ctx.SetContext(ctxPath, path)
+
+	// ⚠️ TEMPORARY gray-release gate (betaflags.go): a request without the `og-airs`
+	// beta flag runs in OBSERVE whatever `mode:` says. Stamped here because the
+	// header is gone by the body phase. Delete this line with that file.
+	stampBetaOptIn(ctx)
 
 	/**
 	 * WHO IS THIS, and — the part that matters — WHO GOT TO SAY SO.
@@ -799,7 +809,7 @@ func onRequestBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Actio
 	// this same process. See requestEventTimed: a duration endpoint, not a
 	// timestamp, and never an ordering key.
 	e := requestEventTimed(rs.derive, body, time.Now())
-	if cfg.mode == modeObserve {
+	if effectiveMode(ctx, cfg) == modeObserve {
 		// Nothing is refusable in observe: the request is already gone. The event
 		// still rides /evaluate — the only channel v0.8 has — fire-and-forget, the
 		// verdict discarded, because evaluate records what it judges.
@@ -832,6 +842,11 @@ func onRequestBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Actio
  *             `fail_mode` is why this feature adds no configuration of its own:
  *             the setting that already means "may unjudged content proceed"
  *             answers here too.
+ *
+ * ⚠️ Reads `cfg.mode`, not `effectiveMode`, and that is safe only because of WHERE it
+ * is called: onRequestBody has already returned on the observe branch, so a request
+ * the beta gate (betaflags.go) held out never reaches here. Move the call and this
+ * has to move with it — same for `armTailHold`.
  */
 func speculative(cfg Config, rs *reqState) bool {
 	return cfg.mode == modeEnforce && rs.streaming && !cfg.failClosed
@@ -1119,7 +1134,7 @@ func onResponseHeaders(ctx wrapper.HttpContext, cfg Config) types.Action {
 	// latency an observer must not add; the streaming hook keeps a bounded copy while
 	// the bytes go straight to the caller. Only enforce buffers, because only enforce
 	// can still change the reply — refuse it, or restore what we masked on the way in.
-	if cfg.mode == modeObserve {
+	if effectiveMode(ctx, cfg) == modeObserve {
 		return types.ActionContinue
 	}
 	ctx.BufferResponseBody()
@@ -1145,7 +1160,7 @@ func onResponseBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Acti
 	// put there by the provider): spliced in as a top-level key, byte-preserving.
 	// No first_token_at — buffering is exactly the mode that hides it.
 	e := responseEventTimed(rs.derive, body, bufferedTiming(rs.sentAt))
-	if cfg.mode == modeObserve {
+	if effectiveMode(ctx, cfg) == modeObserve {
 		report(cfg, e)
 		return restoreResponse(rs, body)
 	}

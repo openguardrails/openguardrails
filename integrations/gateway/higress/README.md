@@ -100,6 +100,38 @@ flipping it back, not redeploying.
 ⚠️ **Observe never buffers and never pauses.** Only enforce buffers, because
 only enforce can still change the reply.
 
+### ⚠️ TEMPORARY: the `og-airs` gray-release gate (3.12.0)
+
+**3.12.0** ships a rollout gate (`betaflags.go`) that sits in front of the
+switch above, so a deployment can enforce for a named slice of traffic and
+nothing else. **It is temporary and will be deleted when the MCD rollout is
+done.**
+
+```
+x-higress-ai-beta-flags: some-other-beta,og-airs
+```
+
+The header is a comma-separated token list written at the edge. Membership is
+exact per token after trimming, case-insensitively — `og-airs` enrolls,
+`og-airs-v2` and `xog-airs` do not.
+
+| `x-higress-ai-beta-flags` | `mode: enforce` | `mode: observe` |
+|---|---|---|
+| contains `og-airs` | **enforce** | observe |
+| anything else, or absent | **observe** | observe |
+
+**The gate can only ever narrow.** It never turns an observe deployment into
+an enforcing one, so it is safe to ship ahead of the traffic it is meant to
+catch. A missing header, an empty one, or a request whose headers this filter
+never read all read as "not enrolled" and observe: during a rollout the
+affordable failure is a request that was only reported, not one refused for a
+caller who was never enrolled.
+
+Everything else is unchanged — the same events are computed and reported for
+gated-out traffic, so the console still fills with findings while enforcement
+reaches only the gray set. At `log_level: info` each gated-out request says so
+on one line (`[OGR-BETA]`).
+
 ## Mirror
 
 A second runtime can receive a COPY of every event and decide nothing:
