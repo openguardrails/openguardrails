@@ -32,6 +32,15 @@ export {
   type Span,
 } from "./ruleset.js"
 export {
+  compileRejects,
+  shannonBits,
+  valueRejected,
+  type CompiledReject,
+  type ValuePart,
+  type ValuePredicate,
+  type ValueRule,
+} from "./predicates.js"
+export {
   DEFAULT_BOUND,
   OVERFLOW_TOKEN,
   SECRET_TOKEN_PREFIX,

@@ -62,6 +62,75 @@ class RulesetLoading(unittest.TestCase):
         self.assertEqual([i for i, _ in rs.disabled], ["entity_bearer_token"])
         self.assertIn("does not compile", rs.disabled[0][1])
 
+    def test_reject_value_filters_the_span_and_rescues_its_own_nomatch_example(self):
+        """⚠️⚠️ A RULE IS ITS PATTERNS MINUS ITS FILTERS (OGR 1.4). The fixture's
+        password rule carries a `nomatch` line the pattern alone CANNOT satisfy —
+        it matches `${PASSWORD}` and a filter throws it away — so a reader that
+        skipped `reject_value` would fail the example and disable the rule under
+        D9. That is the field failure this test exists to keep closed: three of
+        the reference runtime's rules were off on every host for five days."""
+        rs = ruleset()
+        rule = next(r for r in rs.rules if r.id == "entity_password_assignment")
+        self.assertEqual(rs.disabled, [])
+        self.assertTrue(rule.spans("password = hunter2hunter2"))
+        self.assertEqual(rule.spans("password = ${PASSWORD}"), [])
+
+        data = copy.deepcopy(RULESET)
+        for raw in data["rules"]:
+            raw.pop("reject_value", None)
+        bare = lr.Ruleset(data)
+        self.assertEqual([i for i, _ in bare.disabled], ["entity_password_assignment"])
+        self.assertIn("must not match but did", bare.disabled[0][1])
+
+    def test_every_predicate_kind_is_understood(self):
+        """The vocabulary is CLOSED so that it can be ported; this is the port."""
+        def spans(predicate, text, part=None):
+            entry = {"predicate": predicate}
+            if part:
+                entry["part"] = part
+            rule, err = lr.compile_rule({
+                "id": "t", "category": "c", "severity": "high", "tier": "strong",
+                "flags": "", "patterns": [{"id": "p", "source": r"V=(.+)"}], "group": 1,
+                "reject_value": [entry], "examples": {"match": [], "nomatch": []},
+            })
+            self.assertIsNone(err or None, err)
+            return len(rule.spans(text))
+
+        self.assertEqual(spans({"kind": "placeholder"}, "V=${TOKEN}"), 0)
+        self.assertEqual(spans({"kind": "placeholder", "anywhere": True}, "V=abc***def"), 0)
+        self.assertEqual(spans({"kind": "placeholder"}, "V=abc***def"), 1)  # anchored by default
+        self.assertEqual(spans({"kind": "secret_noun"}, "V=password"), 0)
+        self.assertEqual(spans({"kind": "variable_reference"}, "V=config.api_key"), 0)
+        self.assertEqual(spans({"kind": "names_secret"}, "V=DB_PASSWORD"), 0)
+        self.assertEqual(spans({"kind": "structural"}, "V=get(name)"), 0)
+        # ⚠️ A run of one character is 0 bits; shape and entropy are different questions.
+        self.assertEqual(spans({"kind": "low_entropy", "min": 3}, "V=aaaaaaaaaa"), 0)
+        self.assertEqual(spans({"kind": "low_entropy", "min": 3}, "V=Zx8Q1pLm9aQvR2tY"), 1)
+        self.assertEqual(spans({"kind": "matches", "pattern": "^/"}, "V=/etc/passwd"), 0)
+        after = {"of": "after", "sep": ":"}
+        self.assertEqual(spans({"kind": "placeholder"}, "V=user:${PW}", after), 0)
+        self.assertEqual(spans({"kind": "placeholder"}, "V=${USER}:realpassword", after), 1)
+
+    def test_a_filter_this_engine_cannot_evaluate_disables_the_rule(self):
+        """⚠️⚠️ Never read as "no filter": filters only ever make a rule match LESS,
+        so skipping one masks far more than the runtime calls a credential — and the
+        plugin would then restore a value into a tool's arguments under a token the
+        runtime never minted."""
+        for reject, expect in (
+            ([{"predicate": {"kind": "time_travel"}}], "unknown predicate"),
+            ([{"predicate": {"kind": "matches", "pattern": "(unbalanced"}}], "does not compile"),
+            ([{"predicate": {"kind": "matches", "pattern": "^/", "flags": "g"}}], "outside the dialect"),
+            ([{"predicate": {"kind": "low_entropy"}}], "numeric min"),
+            ([{"part": {"of": "sideways", "sep": ":"}, "predicate": {"kind": "placeholder"}}], "unknown part"),
+        ):
+            data = copy.deepcopy(RULESET)
+            data["rules"][0]["reject_value"] = reject
+            rs = lr.Ruleset(data)
+            self.assertEqual([i for i, _ in rs.disabled], ["entity_api_key"], reject)
+            self.assertIn(expect, rs.disabled[0][1])
+            # …and the rest of the ruleset still runs.
+            self.assertEqual(len(rs.rules), 2)
+
     def test_tiers_select_which_rules_run(self):
         rs = ruleset({"strong"})
         self.assertEqual([r.id for r in rs.rules], ["entity_api_key", "entity_bearer_token"])
