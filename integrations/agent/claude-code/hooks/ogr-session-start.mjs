@@ -37,7 +37,7 @@ const UPSTREAM = process.env.OGR_LOCAL_UPSTREAM || "https://api.anthropic.com"
 const EXPECTED = `http://127.0.0.1:${PORT}/https/${new URL(UPSTREAM).host}${new URL(UPSTREAM).pathname.replace(/\/$/, "")}`
 
 /** Names this build in the daemon's status, so a shared daemon says whose it is. */
-const INTEGRATION = "ogr-claude-code/2.1.0"
+const INTEGRATION = "ogr-claude-code/2.2.0"
 
 const say = (message) => process.stderr.write(`[OpenGuardrails] ${message}\n`)
 
