@@ -92,9 +92,15 @@ RULESET = {
             "flags": "i",
             "patterns": [
                 {"id": "assignment",
-                 "source": r"\bpassword\s*[:=]\s*[\"']?(?!\$)([^\s\"']{8,})"},
+                 "source": r"\bpassword\s*[:=]\s*[\"']?([^\s\"']{8,})"},
             ],
             "group": 1,
+            # ⚠️ The placeholder filter is a `reject_value` entry, not an inline
+            # `(?!\$)` — which is the shape the runtime actually serves since OGR 1.4,
+            # and the shape whose `nomatch` example the patterns ALONE cannot satisfy.
+            # Without the filter this rule disables itself at load, which is exactly
+            # what happened in the field for five days.
+            "reject_value": [{"predicate": {"kind": "placeholder"}}],
             "examples": {"match": ["password = hunter2hunter2"],
                          "nomatch": ["password = ${PASSWORD}", "password: short"]},
         },

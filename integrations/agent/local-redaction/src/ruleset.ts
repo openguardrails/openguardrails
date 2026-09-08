@@ -8,11 +8,19 @@
  * rule whose examples fail in THIS engine is disabled by name rather than run
  * wrong (D9) — dialects drift silently, and a pattern that compiles to
  * "matches nothing" looks exactly like a pattern that is doing its job.
+ *
+ * ⚠️⚠️ **A RULE IS ITS PATTERNS MINUS ITS `reject_value` FILTERS** (OGR 1.4, served
+ * since 2026-09-06 — `predicates.ts`). D9's corpus tests the WHOLE rule, so a reader
+ * holding only the patterns fails examples it was never able to satisfy and then
+ * disables itself: that is what happened to `password_assignment`, `url_credential`
+ * and `db_connection` for five days. Compile the filters, or disable the rule.
  */
 import { createHash } from "node:crypto"
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
+
+import { type CompiledReject, type ValueRule, compileRejects, valueRejected } from "./predicates.js"
 
 export type RuleTier = "strong" | "heuristic"
 
@@ -32,6 +40,13 @@ export interface Rule {
   patterns: RulePattern[]
   /** 1-based capturing group that IS the span; absent/null ⇒ the whole match. */
   group?: number | null
+  /**
+   * ⚠️⚠️ **WHAT THIS RULE REFUSES TO CALL A CREDENTIAL** (OGR 1.4, served since
+   * 2026-09-06). Applied to the SPAN after the pattern matches — see `predicates.ts`
+   * for why ignoring it is not the safe direction it looks like. Absent ⇒ nothing is
+   * refused, which is every rule written before the field existed.
+   */
+  reject_value?: ValueRule[]
   examples: { match: string[]; nomatch: string[] }
 }
 
@@ -55,6 +70,8 @@ export interface CompiledRule {
   tier: RuleTier
   group: number | undefined
   patterns: CompiledPattern[]
+  /** The rule's `reject_value`, compiled; empty when it declared none. */
+  rejects: CompiledReject[]
 }
 
 export interface DisabledRule {
@@ -102,7 +119,14 @@ export function ruleSpans(rule: CompiledRule, text: string): Array<Span & { patt
       } else {
         span = { start: m.index, end: m.index + m[0].length }
       }
-      if (span && span.end > span.start) out.push({ ...span, pattern: p.id })
+      if (!span || span.end <= span.start) continue
+      // ⚠️ The filters ask about the VALUE, so they run on the SPAN — the group where
+      // one is declared — never on the whole match: `Authorization: bearer` is not the
+      // value. Same position as the runtime's `EntityDetector`.
+      if (rule.rejects.length > 0 && valueRejected(text.slice(span.start, span.end), rule.rejects)) {
+        continue
+      }
+      out.push({ ...span, pattern: p.id })
     }
   }
   return out
@@ -146,7 +170,19 @@ export function compileRuleset(
         break
       }
     }
-    const compiled: CompiledRule = { id: rule.id, category: rule.category, tier: rule.tier, group, patterns }
+    // ⚠️ A filter this engine cannot evaluate is a rule it must not run — reading an
+    // unknown predicate as "no filter" would mask far more than the runtime calls a
+    // credential. `predicates.ts` carries the argument.
+    const rejects = compileRejects(rule.reject_value, rule.id)
+    if ("reason" in rejects && !failure) failure = rejects.reason
+    const compiled: CompiledRule = {
+      id: rule.id,
+      category: rule.category,
+      tier: rule.tier,
+      group,
+      patterns,
+      rejects: "rejects" in rejects ? rejects.rejects : [],
+    }
     if (!failure) failure = verifyExamples(compiled, rule.examples)
     if (failure) {
       disabled.push({ id: rule.id, reason: failure })

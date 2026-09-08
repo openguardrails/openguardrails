@@ -1,6 +1,6 @@
 // GENERATED — do not edit. Source: integrations/agent/ogr-local/src
 // Rebuild: npm --prefix integrations/agent/ogr-local run bundle
-// OGR_LOCAL_SOURCE_STAMP=0a43582b0484
+// OGR_LOCAL_SOURCE_STAMP=c9ae27b44adf
 // version=0.1.0
 
 // src/bundle.ts
@@ -11,6 +11,166 @@ import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+
+// ../local-redaction/dist/predicates.js
+var PLACEHOLDER_SHAPES = [
+  "\\*{3,}",
+  "x{3,}",
+  "\\$\\{",
+  "<",
+  ">",
+  "%[sd]",
+  "\\.{3,}",
+  "\u2026",
+  "changeme",
+  "placeholder",
+  "redacted",
+  "your[_\\-]?password",
+  "your[_\\-]",
+  "example",
+  "\\$"
+];
+var PLACEHOLDER_RE = new RegExp(`^(?:${PLACEHOLDER_SHAPES.join("|")})`, "i");
+var PLACEHOLDER_ANYWHERE_RE = new RegExp(`(?:${PLACEHOLDER_SHAPES.join("|")})`, "i");
+var SECRET_NOUNS = "password|passwd|pwd|secret|api[_\\-]?key|access[_\\-]?token|auth[_\\-]?token|client[_\\-]?secret|refresh[_\\-]?token|id[_\\-]?token|session[_\\-]?token|private[_\\-]?key|key[_\\-]?material|raw[_\\-]?secret|bearer|token";
+var SECRET_NOUN_RE = new RegExp(`^(?:${SECRET_NOUNS})(?:[^A-Za-z0-9_]|$)`, "i");
+var CONTAINS_SECRET_NOUN_RE = new RegExp(`(?:${SECRET_NOUNS})`, "i");
+var VARIABLE_REF_RE = /^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z0-9_$]+|\[[^\]]*\])+$/;
+var IDENT_ONLY_RE = /^[A-Za-z0-9_$.[\]"']+$/;
+var IDENT_PATH_MARK_RE = /[._[]/;
+var STRUCTURAL_RE = /[(){}]/;
+var MAX_VALUE_CHARS = 4096;
+function shannonBits(value) {
+  if (!value)
+    return 0;
+  const counts = /* @__PURE__ */ new Map();
+  for (const ch of value)
+    counts.set(ch, (counts.get(ch) ?? 0) + 1);
+  let bits = 0;
+  for (const n of counts.values()) {
+    const p = n / value.length;
+    bits -= p * Math.log2(p);
+  }
+  return bits;
+}
+function partOf(value, part) {
+  if (!part || part.of === "whole")
+    return value;
+  const i = value.indexOf(part.sep);
+  if (i < 0)
+    return value;
+  return part.of === "after" ? value.slice(i + part.sep.length) : value.slice(0, i);
+}
+function compileRejects(raw, ruleId) {
+  if (raw === void 0 || raw === null)
+    return { rejects: [] };
+  if (!Array.isArray(raw))
+    return { reason: "reject_value is not a list" };
+  const out = [];
+  for (const [i, entry] of raw.entries()) {
+    if (typeof entry !== "object" || entry === null) {
+      return { reason: `reject_value[${i}] is not an object` };
+    }
+    const rule = entry;
+    const predRaw = rule.predicate;
+    if (typeof predRaw !== "object" || predRaw === null || typeof predRaw.kind !== "string") {
+      return { reason: `reject_value[${i}] has no predicate` };
+    }
+    const kind = predRaw.kind;
+    const partRaw = rule.part;
+    if (partRaw !== void 0) {
+      if (typeof partRaw !== "object" || partRaw === null) {
+        return { reason: `reject_value[${i}]: bad part` };
+      }
+      if (partRaw.of !== "whole" && partRaw.of !== "after" && partRaw.of !== "before") {
+        return { reason: `reject_value[${i}]: unknown part ${String(partRaw.of)}` };
+      }
+      if (partRaw.of !== "whole" && typeof partRaw.sep !== "string") {
+        return { reason: `reject_value[${i}]: part without a sep` };
+      }
+    }
+    const part = partRaw;
+    const pred = predRaw;
+    switch (kind) {
+      case "placeholder":
+      case "secret_noun":
+      case "variable_reference":
+      case "names_secret":
+      case "structural":
+        out.push({ part, predicate: pred });
+        break;
+      case "low_entropy": {
+        const min = predRaw["min"];
+        if (typeof min !== "number" || !Number.isFinite(min)) {
+          return { reason: `reject_value[${i}]: low_entropy without a numeric min` };
+        }
+        out.push({ part, predicate: pred });
+        break;
+      }
+      case "matches": {
+        const pattern = predRaw["pattern"];
+        const flags = typeof predRaw["flags"] === "string" ? predRaw["flags"] : "";
+        if (typeof pattern !== "string" || !pattern) {
+          return { reason: `reject_value[${i}]: matches without a pattern` };
+        }
+        if (/[gy]/.test(flags))
+          return { reason: `reject_value[${i}]: matches may not be global` };
+        try {
+          out.push({ part, predicate: pred, re: new RegExp(pattern, flags) });
+        } catch (err) {
+          return { reason: `reject_value[${i}]: matches does not compile: ${String(err)}` };
+        }
+        break;
+      }
+      default:
+        return { reason: `reject_value[${i}]: unknown predicate ${kind} (rule ${ruleId})` };
+    }
+  }
+  return { rejects: out };
+}
+function valueRejected(value, rejects) {
+  if (rejects.length === 0)
+    return false;
+  const bounded = value.length > MAX_VALUE_CHARS ? value.slice(0, MAX_VALUE_CHARS) : value;
+  for (const rule of rejects) {
+    const target = partOf(bounded, rule.part);
+    const pred = rule.predicate;
+    switch (pred.kind) {
+      case "placeholder":
+        if ((pred.anywhere ? PLACEHOLDER_ANYWHERE_RE : PLACEHOLDER_RE).test(target))
+          return true;
+        break;
+      case "secret_noun":
+        if (SECRET_NOUN_RE.test(target))
+          return true;
+        break;
+      case "variable_reference":
+        if (VARIABLE_REF_RE.test(target))
+          return true;
+        break;
+      case "names_secret":
+        if (IDENT_ONLY_RE.test(target) && IDENT_PATH_MARK_RE.test(target) && CONTAINS_SECRET_NOUN_RE.test(target)) {
+          return true;
+        }
+        break;
+      case "structural":
+        if (STRUCTURAL_RE.test(target))
+          return true;
+        break;
+      case "low_entropy":
+        if (shannonBits(target) < pred.min)
+          return true;
+        break;
+      case "matches":
+        if (rule.re?.test(target))
+          return true;
+        break;
+    }
+  }
+  return false;
+}
+
+// ../local-redaction/dist/ruleset.js
 var DEFAULT_TIERS = ["strong", "heuristic"];
 function ruleSpans(rule, text) {
   const out = [];
@@ -30,8 +190,12 @@ function ruleSpans(rule, text) {
       } else {
         span = { start: m.index, end: m.index + m[0].length };
       }
-      if (span && span.end > span.start)
-        out.push({ ...span, pattern: p.id });
+      if (!span || span.end <= span.start)
+        continue;
+      if (rule.rejects.length > 0 && valueRejected(text.slice(span.start, span.end), rule.rejects)) {
+        continue;
+      }
+      out.push({ ...span, pattern: p.id });
     }
   }
   return out;
@@ -64,7 +228,17 @@ function compileRuleset(ruleset, opts = {}) {
         break;
       }
     }
-    const compiled = { id: rule.id, category: rule.category, tier: rule.tier, group, patterns };
+    const rejects = compileRejects(rule.reject_value, rule.id);
+    if ("reason" in rejects && !failure)
+      failure = rejects.reason;
+    const compiled = {
+      id: rule.id,
+      category: rule.category,
+      tier: rule.tier,
+      group,
+      patterns,
+      rejects: "rejects" in rejects ? rejects.rejects : []
+    };
     if (!failure)
       failure = verifyExamples(compiled, rule.examples);
     if (failure) {

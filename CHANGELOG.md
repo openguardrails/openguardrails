@@ -10,6 +10,35 @@ version is independent of any implementation's package version.
 ## [Unreleased]
 
 ### Added
+- **`reject_value` on a local-redaction rule (OGR 1.4) — the filters travel with the
+  patterns.** `GET /v1/rules` now serves, per rule, the closed predicate vocabulary that
+  says what the rule refuses to CALL a credential: `placeholder`, `secret_noun`,
+  `variable_reference`, `names_secret`, `structural`, `low_entropy`, `matches`, each
+  optionally scoped to part of the span. **A rule is its patterns MINUS what its filters
+  throw away**, so serving the patterns alone served half a rule and the two ends
+  disagreed by construction.
+  ⚠️⚠️ **It was not theoretical.** The reference runtime lifted these filters out of its
+  patterns on 2026-09-01 and kept them on its own side; from that day, eight `nomatch`
+  examples across `entity_password_assignment`, `entity_url_credential` and
+  `entity_db_connection` were unsatisfiable from the patterns alone — and
+  *Self-verification* says an integration that fails an example DISABLES that rule by id.
+  So the three rules most likely to carry a real credential were switching themselves off
+  on every instrumented host, silently, because a rule that never fires is
+  indistinguishable from a host with no secrets in its traffic. Reproduced against the
+  live ruleset in both reference engines before the fix, and clean in both after.
+  ⚠️⚠️ **A filter an integration cannot evaluate — an unknown `kind`, a `matches` pattern
+  its engine refuses — MUST disable the rule and say so, and MUST NOT be read as "no
+  filter".** Filters only ever make a rule match LESS, so skipping one masks far more than
+  the runtime calls a credential, and the integration then restores a value into a tool's
+  arguments under a token the runtime never minted.
+  ⚠️ Optional and additive in both directions: absent/empty ⇒ nothing is refused, which is
+  every rule written before the field existed, and an integration that has not implemented
+  it sits exactly where it did before — it over-masks, which on a reversible host-side mask
+  costs nothing. ⚠️ It IS part of the ruleset `id`, so editing only a filter makes every
+  integration refetch. Schema: `schema/ruleset.schema.json`; normative text:
+  `specification/local-redaction.md` § The rule feed and § The predicate vocabulary;
+  reference implementations in `@openguardrails/local-redaction` (`src/predicates.ts`) and
+  the hermes integration.
 - **`post_failed` / `mirror_failed` heartbeat counters — the reference gateway
   (higress 3.11.1).** Heartbeat `counters` is free-form by design
   (`specification/runtime-api.md`), and the reference gateway was missing the one
