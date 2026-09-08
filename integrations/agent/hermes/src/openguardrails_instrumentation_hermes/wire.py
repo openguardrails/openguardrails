@@ -27,7 +27,7 @@ logger = logging.getLogger("ogr-guard.wire")
 
 # Kept in sync with pyproject.toml and plugin.yaml. Rides every event
 # (`integration`) AND the heartbeat — one constant, two channels.
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 INTEGRATION = f"openguardrails-instrumentation-hermes/{VERSION}"
 
 # Short and deliberately a hook-path budget, not a model-call budget: every

@@ -31,7 +31,7 @@
  * WHO REPORTED IT — `"name/version"`, on every event AND on the heartbeat.
  * One constant so the two can never name different builds.
  */
-export const INTEGRATION = "ogr-dsh/0.4.0"
+export const INTEGRATION = "ogr-dsh/0.5.0"
 
 export interface WireEvent {
   kind: "step/request" | "step/response"
