@@ -100,6 +100,33 @@ version is independent of any implementation's package version.
   system prompt is NOT covered — `before_prompt_build`'s event carries no system
   prompt and its `systemPrompt` result is an override — and the README says so.
 
+### Fixed
+- **The bundled proxy's source stamp described a different file from the one it
+  stamped.** `hooks/ogr-local.mjs` is a checked-in build artifact, so it carries an
+  `OGR_LOCAL_SOURCE_STAMP` and a test that recomputes it — the whole defence against
+  "someone edited the source and forgot to rebuild". The stamp was a `readdirSync` over
+  the top-level `*.ts` of two `src/` directories, while esbuild resolved
+  `@openguardrails/local-redaction` through its `exports` and inlined its **compiled
+  `dist/*.js`**. Two independent answers to *what is in this file*, and it could lie in
+  both directions: edit the dependency's `src` without running `tsc` there and the stamp
+  moves while the shipped bytes do not; rebuild its `dist` without touching `src` and the
+  bytes move while the stamp does not — the second one keeps the test **green over an
+  artifact nobody built**.
+  ⚠️ Two changes, and the second is what makes the first structural. The bundle now reads
+  the dependency's TypeScript **source** (an esbuild `alias`), so there is no compiled
+  intermediate in the artifact at all; and the stamp is derived from esbuild's own
+  `metafile.inputs` — every file it actually read — rather than from a directory listing
+  that has to be kept in step by hand. A subdirectory, or a third package arriving
+  through an import, is now covered by construction instead of being bundled and
+  unhashed.
+  ⚠️ `absWorkingDir` is pinned, because `metafile.inputs` is keyed relative to the
+  process cwd and this builds from the package dir, from the repo root, and from a test —
+  one source tree hashing to three stamps is a guard that fails for reasons unrelated to
+  the code. Each new assertion was confirmed to FAIL against the exact deletion it
+  guards. ⚠️ It also drops an unwritten build-ORDER dependency: the old shape needed
+  `npm run build --workspaces` to have compiled `local-redaction` first, which held only
+  because of the order that array happens to list.
+
 ### Changed
 - **Every agent-side plugin gets a new build number, because their MASKING changed.**
   `reject_value` (above) is a behaviour change on the host: the three rules whose
@@ -112,10 +139,11 @@ version is independent of any implementation's package version.
   re-bundled into both hook plugins), `ogr-claude-code` **2.2.0**, `ogr-codex` **2.2.0**,
   `ogr-openclaw` **0.5.0**, `ogr-opencode-auto-mode` **0.5.0**, `ogr-dsh` **0.5.0**, and
   `openguardrails-instrumentation-hermes` **2.1.0**.
-  ⚠️ The bundled `hooks/ogr-local.mjs` carries an `OGR_LOCAL_SOURCE_STAMP` that hashes
-  `ogr-local/src` ALONE, so it did NOT move when the bundled dependency did — the
-  `// version=` line beside it is what separates the two builds today. A stamp that
-  cannot see what it bundles is worth knowing about before it is trusted.
+  ⚠️ **Correction to this entry as first published**: it said the bundled
+  `hooks/ogr-local.mjs` stamp hashes `ogr-local/src` alone and did not move when the
+  dependency changed. Both halves were wrong — `sourceFiles()` had always hashed both
+  packages, and the stamp did move (`0a43582b0484` → `c9ae27b44adf`). The real defect
+  underneath it is in **Fixed** below.
 
 - **Streaming enforcement is bounded from the HEAD of the answer, not its tail
   ([runtime-api.md § streaming](specification/runtime-api.md#streaming-release-a-bounded-head-judge-once)).**
