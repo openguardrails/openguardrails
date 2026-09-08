@@ -1,18 +1,17 @@
 // GENERATED — do not edit. Source: integrations/agent/ogr-local/src
 // Rebuild: npm --prefix integrations/agent/ogr-local run bundle
-// OGR_LOCAL_SOURCE_STAMP=c9ae27b44adf
+// OGR_LOCAL_SOURCE_STAMP=54b68e413d1f
 // version=0.2.0
-
-// src/bundle.ts
+// ogr-local/src/bundle.ts
 import { pathToFileURL } from "node:url";
 
-// ../local-redaction/dist/ruleset.js
+// local-redaction/src/ruleset.ts
 import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-// ../local-redaction/dist/predicates.js
+// local-redaction/src/predicates.ts
 var PLACEHOLDER_SHAPES = [
   "\\*{3,}",
   "x{3,}",
@@ -41,11 +40,9 @@ var IDENT_PATH_MARK_RE = /[._[]/;
 var STRUCTURAL_RE = /[(){}]/;
 var MAX_VALUE_CHARS = 4096;
 function shannonBits(value) {
-  if (!value)
-    return 0;
+  if (!value) return 0;
   const counts = /* @__PURE__ */ new Map();
-  for (const ch of value)
-    counts.set(ch, (counts.get(ch) ?? 0) + 1);
+  for (const ch of value) counts.set(ch, (counts.get(ch) ?? 0) + 1);
   let bits = 0;
   for (const n of counts.values()) {
     const p = n / value.length;
@@ -54,18 +51,14 @@ function shannonBits(value) {
   return bits;
 }
 function partOf(value, part) {
-  if (!part || part.of === "whole")
-    return value;
+  if (!part || part.of === "whole") return value;
   const i = value.indexOf(part.sep);
-  if (i < 0)
-    return value;
+  if (i < 0) return value;
   return part.of === "after" ? value.slice(i + part.sep.length) : value.slice(0, i);
 }
 function compileRejects(raw, ruleId) {
-  if (raw === void 0 || raw === null)
-    return { rejects: [] };
-  if (!Array.isArray(raw))
-    return { reason: "reject_value is not a list" };
+  if (raw === void 0 || raw === null) return { rejects: [] };
+  if (!Array.isArray(raw)) return { reason: "reject_value is not a list" };
   const out = [];
   for (const [i, entry] of raw.entries()) {
     if (typeof entry !== "object" || entry === null) {
@@ -113,8 +106,7 @@ function compileRejects(raw, ruleId) {
         if (typeof pattern !== "string" || !pattern) {
           return { reason: `reject_value[${i}]: matches without a pattern` };
         }
-        if (/[gy]/.test(flags))
-          return { reason: `reject_value[${i}]: matches may not be global` };
+        if (/[gy]/.test(flags)) return { reason: `reject_value[${i}]: matches may not be global` };
         try {
           out.push({ part, predicate: pred, re: new RegExp(pattern, flags) });
         } catch (err) {
@@ -129,24 +121,20 @@ function compileRejects(raw, ruleId) {
   return { rejects: out };
 }
 function valueRejected(value, rejects) {
-  if (rejects.length === 0)
-    return false;
+  if (rejects.length === 0) return false;
   const bounded = value.length > MAX_VALUE_CHARS ? value.slice(0, MAX_VALUE_CHARS) : value;
   for (const rule of rejects) {
     const target = partOf(bounded, rule.part);
     const pred = rule.predicate;
     switch (pred.kind) {
       case "placeholder":
-        if ((pred.anywhere ? PLACEHOLDER_ANYWHERE_RE : PLACEHOLDER_RE).test(target))
-          return true;
+        if ((pred.anywhere ? PLACEHOLDER_ANYWHERE_RE : PLACEHOLDER_RE).test(target)) return true;
         break;
       case "secret_noun":
-        if (SECRET_NOUN_RE.test(target))
-          return true;
+        if (SECRET_NOUN_RE.test(target)) return true;
         break;
       case "variable_reference":
-        if (VARIABLE_REF_RE.test(target))
-          return true;
+        if (VARIABLE_REF_RE.test(target)) return true;
         break;
       case "names_secret":
         if (IDENT_ONLY_RE.test(target) && IDENT_PATH_MARK_RE.test(target) && CONTAINS_SECRET_NOUN_RE.test(target)) {
@@ -154,23 +142,20 @@ function valueRejected(value, rejects) {
         }
         break;
       case "structural":
-        if (STRUCTURAL_RE.test(target))
-          return true;
+        if (STRUCTURAL_RE.test(target)) return true;
         break;
       case "low_entropy":
-        if (shannonBits(target) < pred.min)
-          return true;
+        if (shannonBits(target) < pred.min) return true;
         break;
       case "matches":
-        if (rule.re?.test(target))
-          return true;
+        if (rule.re?.test(target)) return true;
         break;
     }
   }
   return false;
 }
 
-// ../local-redaction/dist/ruleset.js
+// local-redaction/src/ruleset.ts
 var DEFAULT_TIERS = ["strong", "heuristic"];
 function ruleSpans(rule, text) {
   const out = [];
@@ -185,13 +170,11 @@ function ruleSpans(rule, text) {
       let span;
       if (rule.group !== void 0) {
         const g = m.indices?.[rule.group];
-        if (g)
-          span = { start: g[0], end: g[1] };
+        if (g) span = { start: g[0], end: g[1] };
       } else {
         span = { start: m.index, end: m.index + m[0].length };
       }
-      if (!span || span.end <= span.start)
-        continue;
+      if (!span || span.end <= span.start) continue;
       if (rule.rejects.length > 0 && valueRejected(text.slice(span.start, span.end), rule.rejects)) {
         continue;
       }
@@ -203,8 +186,7 @@ function ruleSpans(rule, text) {
 function engineFlags(rule) {
   const wanted = new Set(rule.flags.split(""));
   wanted.add("g");
-  if (rule.group)
-    wanted.add("d");
+  if (rule.group) wanted.add("d");
   return [...wanted].join("");
 }
 function compileRuleset(ruleset, opts = {}) {
@@ -229,8 +211,7 @@ function compileRuleset(ruleset, opts = {}) {
       }
     }
     const rejects = compileRejects(rule.reject_value, rule.id);
-    if ("reason" in rejects && !failure)
-      failure = rejects.reason;
+    if ("reason" in rejects && !failure) failure = rejects.reason;
     const compiled = {
       id: rule.id,
       category: rule.category,
@@ -239,8 +220,7 @@ function compileRuleset(ruleset, opts = {}) {
       patterns,
       rejects: "rejects" in rejects ? rejects.rejects : []
     };
-    if (!failure)
-      failure = verifyExamples(compiled, rule.examples);
+    if (!failure) failure = verifyExamples(compiled, rule.examples);
     if (failure) {
       disabled.push({ id: rule.id, reason: failure });
       opts.log?.(`[openguardrails] local redaction: rule ${rule.id} disabled \u2014 ${failure}`);
@@ -252,12 +232,10 @@ function compileRuleset(ruleset, opts = {}) {
 }
 function verifyExamples(rule, examples) {
   for (const text of examples?.match ?? []) {
-    if (ruleSpans(rule, text).length === 0)
-      return `match example yielded no span: ${JSON.stringify(text)}`;
+    if (ruleSpans(rule, text).length === 0) return `match example yielded no span: ${JSON.stringify(text)}`;
   }
   for (const text of examples?.nomatch ?? []) {
-    if (ruleSpans(rule, text).length > 0)
-      return `nomatch example yielded a span: ${JSON.stringify(text)}`;
+    if (ruleSpans(rule, text).length > 0) return `nomatch example yielded a span: ${JSON.stringify(text)}`;
   }
   return null;
 }
@@ -281,8 +259,7 @@ function writeCachedRuleset(cachePath, ruleset) {
   renameSync(tmp, cachePath);
 }
 function isRuleset(x) {
-  if (typeof x !== "object" || x === null)
-    return false;
+  if (typeof x !== "object" || x === null) return false;
   const r = x;
   return typeof r["id"] === "string" && r["id"].length > 0 && Array.isArray(r["rules"]);
 }
@@ -295,11 +272,9 @@ async function loadRuleset(opts) {
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 5e3);
   try {
     const headers = { authorization: `Bearer ${opts.apiKey}`, accept: "application/json" };
-    if (cached)
-      headers["if-none-match"] = `"${cached.id}"`;
+    if (cached) headers["if-none-match"] = `"${cached.id}"`;
     const res = await fetchImpl(`${base}/v1/rules`, { method: "GET", headers, signal: controller.signal });
-    if (res.status === 304 && cached)
-      return { ruleset: cached, source: "cached" };
+    if (res.status === 304 && cached) return { ruleset: cached, source: "cached" };
     if (!res.ok) {
       return { ruleset: cached, source: cached ? "cached" : "none", error: `rules answered ${res.status}` };
     }
@@ -321,12 +296,18 @@ async function loadRuleset(opts) {
   }
 }
 
-// ../local-redaction/dist/session.js
+// local-redaction/src/session.ts
 var SECRET_TOKEN_PREFIX = "${OGR_SECRET_";
 var OVERFLOW_TOKEN = "${OGR_SECRET_X}";
 var DEFAULT_BOUND = 256;
 var SessionMap = class {
-  id;
+  constructor(id, opts = {}) {
+    this.id = id;
+    this.bound = opts.bound ?? DEFAULT_BOUND;
+    this.warn = opts.warn ?? (() => {
+    });
+    this.allocate = opts.allocate ?? (() => ++this.counter);
+  }
   byValue = /* @__PURE__ */ new Map();
   byToken = /* @__PURE__ */ new Map();
   counter = 0;
@@ -336,13 +317,6 @@ var SessionMap = class {
   bound;
   warn;
   allocate;
-  constructor(id, opts = {}) {
-    this.id = id;
-    this.bound = opts.bound ?? DEFAULT_BOUND;
-    this.warn = opts.warn ?? (() => {
-    });
-    this.allocate = opts.allocate ?? (() => ++this.counter);
-  }
   get size() {
     return this.byValue.size;
   }
@@ -352,12 +326,13 @@ var SessionMap = class {
   /** The token for a value, minting one when the value is new. */
   tokenFor(value) {
     const known = this.byValue.get(value);
-    if (known !== void 0)
-      return { token: known, fresh: false, restorable: true };
+    if (known !== void 0) return { token: known, fresh: false, restorable: true };
     if (this.byValue.size >= this.bound) {
       if (!this.warnedFull) {
         this.warnedFull = true;
-        this.warn(`[openguardrails] local redaction: session ${this.id} holds ${this.bound} secrets \u2014 further values are masked with the non-restorable ${OVERFLOW_TOKEN}`);
+        this.warn(
+          `[openguardrails] local redaction: session ${this.id} holds ${this.bound} secrets \u2014 further values are masked with the non-restorable ${OVERFLOW_TOKEN}`
+        );
       }
       return { token: OVERFLOW_TOKEN, fresh: true, restorable: false };
     }
@@ -411,8 +386,7 @@ var SessionMaps = class {
     }
     if (this.maps.size >= this.maxSessions) {
       const oldest = this.maps.keys().next();
-      if (!oldest.done)
-        this.maps.delete(oldest.value);
+      if (!oldest.done) this.maps.delete(oldest.value);
     }
     map = new SessionMap(sessionId, this.mapOptions);
     this.maps.set(sessionId, map);
@@ -429,52 +403,44 @@ var SessionMaps = class {
   }
 };
 
-// ../local-redaction/dist/mask.js
+// local-redaction/src/mask.ts
 var TOKEN_RE = /\$\{OGR_[A-Z_]+_[0-9A-Z]+\}/g;
 var STRIP_ONE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u200b-\u200f\u2028-\u202e\u2060\ufeff]/;
 function normalize(text) {
-  if (!STRIP_ONE.test(text))
-    return { stripped: text, index: null };
+  if (!STRIP_ONE.test(text)) return { stripped: text, index: null };
   const chars = [];
   const index = [];
   for (let i = 0; i < text.length; i += 1) {
     const ch = text[i];
-    if (STRIP_ONE.test(ch))
-      continue;
+    if (STRIP_ONE.test(ch)) continue;
     chars.push(ch);
     index.push(i);
   }
   return { stripped: chars.join(""), index };
 }
 function overlapsAny(span, spans) {
-  for (const s of spans)
-    if (span.start < s.end && s.start < span.end)
-      return true;
+  for (const s of spans) if (span.start < s.end && s.start < span.end) return true;
   return false;
 }
 function tokenRanges(text) {
   const out = [];
   TOKEN_RE.lastIndex = 0;
   let m;
-  while ((m = TOKEN_RE.exec(text)) !== null)
-    out.push({ start: m.index, end: m.index + m[0].length });
+  while ((m = TOKEN_RE.exec(text)) !== null) out.push({ start: m.index, end: m.index + m[0].length });
   return out;
 }
 function mask(text, map, compiled) {
-  if (text === "")
-    return { text, minted: [] };
+  if (text === "") return { text, minted: [] };
   const { stripped, index } = normalize(text);
   const tokens = tokenRanges(stripped);
   const accepted = [];
   for (const value of map.values()) {
-    if (value === "")
-      continue;
+    if (value === "") continue;
     const token = map.tokenFor(value).token;
     let at = stripped.indexOf(value);
     while (at !== -1) {
       const span = { start: at, end: at + value.length };
-      if (!overlapsAny(span, tokens) && !overlapsAny(span, accepted))
-        accepted.push({ ...span, token });
+      if (!overlapsAny(span, tokens) && !overlapsAny(span, accepted)) accepted.push({ ...span, token });
       at = stripped.indexOf(value, span.end);
     }
   }
@@ -483,16 +449,14 @@ function mask(text, map, compiled) {
     const candidates = [];
     for (const rule of compiled.rules) {
       for (const s of ruleSpans(rule, stripped)) {
-        if (overlapsAny(s, tokens))
-          continue;
+        if (overlapsAny(s, tokens)) continue;
         candidates.push({ start: s.start, end: s.end, rule: `${rule.id}/${s.pattern}`, order: candidates.length });
       }
     }
     candidates.sort((a, b) => b.end - b.start - (a.end - a.start) || a.order - b.order);
     const chosen = [];
     for (const c of candidates) {
-      if (overlapsAny(c, accepted) || overlapsAny(c, chosen))
-        continue;
+      if (overlapsAny(c, accepted) || overlapsAny(c, chosen)) continue;
       chosen.push(c);
     }
     chosen.sort((a, b) => a.start - b.start);
@@ -507,8 +471,7 @@ function mask(text, map, compiled) {
       }
     }
   }
-  if (accepted.length === 0)
-    return { text, minted };
+  if (accepted.length === 0) return { text, minted };
   accepted.sort((a, b) => a.start - b.start);
   let out = "";
   let cursor = 0;
@@ -557,23 +520,18 @@ function maskLeaves(value, map, compiled) {
   let changed = false;
   const walk = (v, key, parent) => {
     if (typeof v === "string") {
-      if (key !== null && STRUCTURAL_KEYS.has(key))
-        return v;
-      if (key === "data" && parent && isImageBlock(parent))
-        return v;
+      if (key !== null && STRUCTURAL_KEYS.has(key)) return v;
+      if (key === "data" && parent && isImageBlock(parent)) return v;
       const r = mask(v, map, compiled);
-      if (r.text !== v)
-        changed = true;
+      if (r.text !== v) changed = true;
       minted.push(...r.minted);
       return r.text;
     }
-    if (Array.isArray(v))
-      return v.map((item) => walk(item, null, null));
+    if (Array.isArray(v)) return v.map((item) => walk(item, null, null));
     if (typeof v === "object" && v !== null) {
       const src = v;
       const out2 = {};
-      for (const k of Object.keys(src))
-        out2[k] = walk(src[k], k, src);
+      for (const k of Object.keys(src)) out2[k] = walk(src[k], k, src);
       return out2;
     }
     return v;
@@ -585,7 +543,7 @@ function maskKnown(value, map) {
   return maskLeaves(value, map, null);
 }
 
-// ../local-redaction/dist/restore.js
+// local-redaction/src/restore.ts
 var ESCAPABLE = /* @__PURE__ */ new Set(["_", "*", "$", "{", "}", "[", "]", "(", ")", "#", "+", "-", ".", "!", "`", "~", "|", "<", ">", "\\"]);
 var MATCH_NONE = 0;
 var MATCH_FULL = 1;
@@ -593,16 +551,12 @@ var MATCH_TRUNCATED = 2;
 function matchKey(text, i, key) {
   let p = i;
   for (let k = 0; k < key.length; k += 1) {
-    if (p >= text.length)
-      return [0, MATCH_TRUNCATED];
+    if (p >= text.length) return [0, MATCH_TRUNCATED];
     if (text[p] === "\\" && key[k] !== "\\") {
-      if (p + 1 >= text.length)
-        return [0, MATCH_TRUNCATED];
-      if (ESCAPABLE.has(text[p + 1]))
-        p += 1;
+      if (p + 1 >= text.length) return [0, MATCH_TRUNCATED];
+      if (ESCAPABLE.has(text[p + 1])) p += 1;
     }
-    if (text[p] !== key[k])
-      return [0, MATCH_NONE];
+    if (text[p] !== key[k]) return [0, MATCH_NONE];
     p += 1;
   }
   return [p - i, MATCH_FULL];
@@ -612,8 +566,7 @@ function tokensIn(text) {
   const out = /* @__PURE__ */ new Set();
   TOKEN_SHAPE_RE.lastIndex = 0;
   let m;
-  while ((m = TOKEN_SHAPE_RE.exec(text)) !== null)
-    out.add(m[0].replaceAll("\\", ""));
+  while ((m = TOKEN_SHAPE_RE.exec(text)) !== null) out.add(m[0].replaceAll("\\", ""));
   return [...out];
 }
 var jsonStringEncode = (value) => JSON.stringify(value).slice(1, -1);
@@ -623,23 +576,19 @@ function createStreamRestorer(map, opts = {}) {
     let partial = false;
     for (const k of keys) {
       const [raw, status] = matchKey(text, i, k);
-      if (status === MATCH_FULL)
-        return [k, raw, false];
-      if (status === MATCH_TRUNCATED)
-        partial = true;
+      if (status === MATCH_FULL) return [k, raw, false];
+      if (status === MATCH_TRUNCATED) partial = true;
     }
     return ["", 0, partial];
   };
   const extract = (text, isLast) => {
     const keys = map.tokens();
-    if (keys.length === 0 || text === "")
-      return { output: text, pending: "" };
+    if (keys.length === 0 || text === "") return { output: text, pending: "" };
     const starts = /* @__PURE__ */ new Set(["\\"]);
     let longest = 0;
     for (const k of keys) {
       starts.add(k[0]);
-      if (k.length > longest)
-        longest = k.length;
+      if (k.length > longest) longest = k.length;
     }
     const maxRaw = longest * 2 + 2;
     const parts = [];
@@ -692,19 +641,15 @@ function restoreArgs(args, map) {
   const walk = (v) => {
     if (typeof v === "string") {
       const r = restore(v, map);
-      for (const t of r.unresolved)
-        unresolved.add(t);
-      if (r.text !== v)
-        changed = true;
+      for (const t of r.unresolved) unresolved.add(t);
+      if (r.text !== v) changed = true;
       return r.text;
     }
-    if (Array.isArray(v))
-      return v.map(walk);
+    if (Array.isArray(v)) return v.map(walk);
     if (typeof v === "object" && v !== null) {
       const src = v;
       const out2 = {};
-      for (const k of Object.keys(src))
-        out2[k] = walk(src[k]);
+      for (const k of Object.keys(src)) out2[k] = walk(src[k]);
       return out2;
     }
     return v;
@@ -726,7 +671,7 @@ function restoreArgsAcross(args, maps) {
 }
 var EMPTY_MAP = { tokens: () => [], valueOf: () => void 0 };
 
-// ../local-redaction/dist/protocol.js
+// local-redaction/src/protocol.ts
 var DEFAULT_MODEL_HOSTS = [
   "api.openai.com",
   "api.anthropic.com",
@@ -740,52 +685,42 @@ var DEFAULT_MODEL_HOSTS = [
 var DEFAULT_MODEL_HOST_SUFFIXES = [".openai.azure.com"];
 function isModelHost(hostname, extra = []) {
   const h = hostname.toLowerCase();
-  if (DEFAULT_MODEL_HOSTS.includes(h) || extra.some((x) => x.toLowerCase() === h))
-    return true;
+  if (DEFAULT_MODEL_HOSTS.includes(h) || extra.some((x) => x.toLowerCase() === h)) return true;
   return DEFAULT_MODEL_HOST_SUFFIXES.some((s) => h.endsWith(s));
 }
 var asDict = (v) => typeof v === "object" && v !== null && !Array.isArray(v) ? v : null;
 var asArray = (v) => Array.isArray(v) ? v : [];
 function anthropicShaped(body) {
-  if (body["system"] !== void 0)
-    return true;
+  if (body["system"] !== void 0) return true;
   const tools = asArray(body["tools"]).map(asDict);
-  if (tools.some((t) => t && t["input_schema"] !== void 0))
-    return true;
-  return asArray(body["messages"]).some((m) => asArray(asDict(m)?.["content"]).some((b) => {
-    const t = asDict(b)?.["type"];
-    return t === "tool_use" || t === "tool_result" || t === "thinking" || t === "redacted_thinking";
-  }));
+  if (tools.some((t) => t && t["input_schema"] !== void 0)) return true;
+  return asArray(body["messages"]).some(
+    (m) => asArray(asDict(m)?.["content"]).some((b) => {
+      const t = asDict(b)?.["type"];
+      return t === "tool_use" || t === "tool_result" || t === "thinking" || t === "redacted_thinking";
+    })
+  );
 }
 function sniffProtocol(body, url) {
   const b = asDict(body);
-  if (!b)
-    return null;
+  if (!b) return null;
   const path = url?.pathname ?? "";
-  if (path.endsWith("/count_tokens"))
-    return null;
+  if (path.endsWith("/count_tokens")) return null;
   const messages = Array.isArray(b["messages"]);
   if (messages) {
-    if (path.endsWith("/messages"))
-      return "anthropic.messages";
-    if (path.endsWith("/chat/completions"))
-      return "openai.chat";
+    if (path.endsWith("/messages")) return "anthropic.messages";
+    if (path.endsWith("/chat/completions")) return "openai.chat";
     return anthropicShaped(b) ? "anthropic.messages" : "openai.chat";
   }
-  if (path.endsWith("/responses") && (b["input"] !== void 0 || b["instructions"] !== void 0))
-    return "openai.responses";
-  if (b["input"] !== void 0 && typeof b["model"] === "string")
-    return "openai.responses";
-  if (typeof b["instructions"] === "string" && typeof b["model"] === "string")
-    return "openai.responses";
+  if (path.endsWith("/responses") && (b["input"] !== void 0 || b["instructions"] !== void 0)) return "openai.responses";
+  if (b["input"] !== void 0 && typeof b["model"] === "string") return "openai.responses";
+  if (typeof b["instructions"] === "string" && typeof b["model"] === "string") return "openai.responses";
   return null;
 }
 function stampedSession(body) {
   const b = asDict(body);
-  if (!b)
-    return null;
-  if (typeof b["user"] === "string" && b["user"] !== "")
-    return b["user"];
+  if (!b) return null;
+  if (typeof b["user"] === "string" && b["user"] !== "") return b["user"];
   const uid = asDict(b["metadata"])?.["user_id"];
   return typeof uid === "string" && uid !== "" ? uid : null;
 }
@@ -797,17 +732,14 @@ function restoreResponseBody(protocol, text, map) {
     return null;
   }
   const body = asDict(parsed);
-  if (!body)
-    return null;
+  if (!body) return null;
   let changed = false;
   const unresolved = /* @__PURE__ */ new Set();
   const jsonField = (holder, key) => {
     const v = holder[key];
-    if (typeof v !== "string")
-      return;
+    if (typeof v !== "string") return;
     const r = restoreJsonText(v, map);
-    for (const t of r.unresolved)
-      unresolved.add(t);
+    for (const t of r.unresolved) unresolved.add(t);
     if (r.text !== v) {
       holder[key] = r.text;
       changed = true;
@@ -818,18 +750,15 @@ function restoreResponseBody(protocol, text, map) {
       for (const choice of asArray(body["choices"]).map(asDict)) {
         for (const tc of asArray(asDict(choice?.["message"])?.["tool_calls"]).map(asDict)) {
           const fn = asDict(tc?.["function"]);
-          if (fn)
-            jsonField(fn, "arguments");
+          if (fn) jsonField(fn, "arguments");
         }
       }
       break;
     case "anthropic.messages":
       for (const block of asArray(body["content"]).map(asDict)) {
-        if (!block || block["type"] !== "tool_use" || block["input"] === void 0)
-          continue;
+        if (!block || block["type"] !== "tool_use" || block["input"] === void 0) continue;
         const r = restoreArgs(block["input"], map);
-        for (const t of r.unresolved)
-          unresolved.add(t);
+        for (const t of r.unresolved) unresolved.add(t);
         if (r.changed) {
           block["input"] = r.args;
           changed = true;
@@ -838,15 +767,14 @@ function restoreResponseBody(protocol, text, map) {
       break;
     case "openai.responses":
       for (const item of asArray(body["output"]).map(asDict)) {
-        if (item && item["type"] === "function_call")
-          jsonField(item, "arguments");
+        if (item && item["type"] === "function_call") jsonField(item, "arguments");
       }
       break;
   }
   return { body: changed ? JSON.stringify(parsed) : text, changed, unresolved: [...unresolved] };
 }
 
-// ../local-redaction/dist/sse.js
+// local-redaction/src/sse.ts
 var parse = (payload) => {
   try {
     const v = JSON.parse(payload);
@@ -880,8 +808,7 @@ function chatDecoder(r, map, report) {
   let model = "";
   const finish = (t) => {
     const left = tokensIn(t.seen).filter((k) => map.valueOf(k) === void 0);
-    if (left.length)
-      report(left);
+    if (left.length) report(left);
     t.seen = "";
   };
   const flush = () => {
@@ -899,24 +826,23 @@ function chatDecoder(r, map, report) {
     }
     let out = "";
     for (const [c, tool_calls] of byChoice) {
-      out += dataFrame(JSON.stringify({
-        id: "chatcmpl-ogr-flush",
-        object: "chat.completion.chunk",
-        ...model ? { model } : {},
-        choices: [{ index: c, delta: { tool_calls } }]
-      }));
+      out += dataFrame(
+        JSON.stringify({
+          id: "chatcmpl-ogr-flush",
+          object: "chat.completion.chunk",
+          ...model ? { model } : {},
+          choices: [{ index: c, delta: { tool_calls } }]
+        })
+      );
     }
     return out;
   };
   return {
     data(payload, isLast) {
-      if (payload === "[DONE]")
-        return { before: flush(), payload: null };
+      if (payload === "[DONE]") return { before: flush(), payload: null };
       const parsed = parse(payload);
-      if (!parsed)
-        return { before: "", payload: null };
-      if (typeof parsed["model"] === "string" && !model)
-        model = parsed["model"];
+      if (!parsed) return { before: "", payload: null };
+      if (typeof parsed["model"] === "string" && !model) model = parsed["model"];
       const choices = list(parsed["choices"]).map(dict);
       const closing = choices.some((c) => typeof c?.["finish_reason"] === "string");
       let modified = false;
@@ -925,8 +851,7 @@ function chatDecoder(r, map, report) {
         list(dict(choice?.["delta"])?.["tool_calls"]).forEach((tc, n) => {
           const call = dict(tc);
           const fn = dict(call?.["function"]);
-          if (!call || !fn || typeof fn["arguments"] !== "string")
-            return;
+          if (!call || !fn || typeof fn["arguments"] !== "string") return;
           const i = typeof call["index"] === "number" ? call["index"] : n;
           const t = tail(calls, `${index}:${i}`);
           const original = fn["arguments"];
@@ -949,37 +874,35 @@ function anthropicDecoder(r, map, report) {
   const kinds = /* @__PURE__ */ new Map();
   const flushBlock = (key) => {
     const t = blocks.get(key);
-    if (!t)
-      return "";
+    if (!t) return "";
     let out = "";
     if (t.pending !== "") {
-      out = eventFrame("content_block_delta", JSON.stringify({ type: "content_block_delta", index: Number(key), delta: { type: "input_json_delta", partial_json: t.pending } }));
+      out = eventFrame(
+        "content_block_delta",
+        JSON.stringify({ type: "content_block_delta", index: Number(key), delta: { type: "input_json_delta", partial_json: t.pending } })
+      );
       t.seen += t.pending;
       t.pending = "";
     }
     const left = tokensIn(t.seen).filter((k) => map.valueOf(k) === void 0);
-    if (left.length)
-      report(left);
+    if (left.length) report(left);
     t.seen = "";
     return out;
   };
   const flush = () => {
     let out = "";
-    for (const key of blocks.keys())
-      out += flushBlock(key);
+    for (const key of blocks.keys()) out += flushBlock(key);
     return out;
   };
   return {
     data(payload, isLast) {
       const parsed = parse(payload);
-      if (!parsed)
-        return { before: "", payload: null };
+      if (!parsed) return { before: "", payload: null };
       const key = String(typeof parsed["index"] === "number" ? parsed["index"] : 0);
       switch (parsed["type"]) {
         case "content_block_start": {
           const kind = dict(parsed["content_block"])?.["type"];
-          if (typeof kind === "string")
-            kinds.set(key, kind);
+          if (typeof kind === "string") kinds.set(key, kind);
           return { before: "", payload: null };
         }
         case "content_block_delta": {
@@ -991,8 +914,7 @@ function anthropicDecoder(r, map, report) {
           const original = delta["partial_json"];
           const restored = r.feed(t, original, isLast);
           t.seen += restored;
-          if (restored === original)
-            return { before: "", payload: null };
+          if (restored === original) return { before: "", payload: null };
           delta["partial_json"] = restored;
           return { before: "", payload: JSON.stringify(parsed) };
         }
@@ -1012,11 +934,13 @@ function responsesDecoder(r, map, report) {
   const items = tails();
   const flushItem = (key) => {
     const t = items.get(key);
-    if (!t)
-      return "";
+    if (!t) return "";
     let out = "";
     if (t.pending !== "") {
-      out = eventFrame("response.function_call_arguments.delta", JSON.stringify({ type: "response.function_call_arguments.delta", output_index: Number(key), delta: t.pending }));
+      out = eventFrame(
+        "response.function_call_arguments.delta",
+        JSON.stringify({ type: "response.function_call_arguments.delta", output_index: Number(key), delta: t.pending })
+      );
       t.seen += t.pending;
       t.pending = "";
     }
@@ -1025,37 +949,30 @@ function responsesDecoder(r, map, report) {
   };
   const flush = () => {
     let out = "";
-    for (const key of items.keys())
-      out += flushItem(key);
+    for (const key of items.keys()) out += flushItem(key);
     return out;
   };
   const whole = (holder, field) => {
-    if (!holder || typeof holder[field] !== "string")
-      return false;
+    if (!holder || typeof holder[field] !== "string") return false;
     const res = restoreJsonText(holder[field], map);
-    if (res.unresolved.length)
-      report(res.unresolved);
-    if (res.text === holder[field])
-      return false;
+    if (res.unresolved.length) report(res.unresolved);
+    if (res.text === holder[field]) return false;
     holder[field] = res.text;
     return true;
   };
   return {
     data(payload, isLast) {
       const parsed = parse(payload);
-      if (!parsed)
-        return { before: "", payload: null };
+      if (!parsed) return { before: "", payload: null };
       const key = String(typeof parsed["output_index"] === "number" ? parsed["output_index"] : 0);
       switch (parsed["type"]) {
         case "response.function_call_arguments.delta": {
-          if (typeof parsed["delta"] !== "string")
-            return { before: "", payload: null };
+          if (typeof parsed["delta"] !== "string") return { before: "", payload: null };
           const t = tail(items, key);
           const original = parsed["delta"];
           const restored = r.feed(t, original, isLast);
           t.seen += restored;
-          if (restored === original)
-            return { before: "", payload: null };
+          if (restored === original) return { before: "", payload: null };
           parsed["delta"] = restored;
           return { before: "", payload: JSON.stringify(parsed) };
         }
@@ -1075,8 +992,7 @@ function responsesDecoder(r, map, report) {
           const before = flush();
           let changed = false;
           for (const item of list(dict(parsed["response"])?.["output"]).map(dict)) {
-            if (item?.["type"] === "function_call" && whole(item, "arguments"))
-              changed = true;
+            if (item?.["type"] === "function_call" && whole(item, "arguments")) changed = true;
           }
           return { before, payload: changed ? JSON.stringify(parsed) : null };
         }
@@ -1103,16 +1019,13 @@ function createSseRestorer(protocol, map, opts = {}) {
         dataAt = i;
       }
     });
-    if (count !== 1)
-      return text;
+    if (count !== 1) return text;
     const line = lines[dataAt];
     const ending = line.endsWith("\r\n") ? "\r\n" : line.endsWith("\n") ? "\n" : "";
     let payload = line.slice(5, line.length - ending.length);
-    if (payload.startsWith(" "))
-      payload = payload.slice(1);
+    if (payload.startsWith(" ")) payload = payload.slice(1);
     const out = decoder.data(payload, isLast);
-    if (out.payload !== null)
-      lines[dataAt] = `data: ${out.payload}${ending}`;
+    if (out.payload !== null) lines[dataAt] = `data: ${out.payload}${ending}`;
     return out.before + lines.join("");
   };
   return {
@@ -1121,8 +1034,7 @@ function createSseRestorer(protocol, map, opts = {}) {
       let out = "";
       for (; ; ) {
         const m = FRAME_END.exec(carry);
-        if (!m)
-          break;
+        if (!m) break;
         const end = m.index + m[0].length;
         out += frame(carry.slice(0, end), false);
         carry = carry.slice(end);
@@ -1140,7 +1052,7 @@ function createSseRestorer(protocol, map, opts = {}) {
   };
 }
 
-// ../local-redaction/dist/redactor.js
+// local-redaction/src/redactor.ts
 var LocalRedactor = class {
   compiled = null;
   maps;
@@ -1182,25 +1094,24 @@ var LocalRedactor = class {
    * interceptor installed the integration decides for itself (true).
    */
   get masking() {
-    if (!this.http)
-      return true;
+    if (!this.http) return true;
     return this.http.sawTraffic || this.fallbackActive;
   }
   cachePath() {
-    if (this.opts.cachePath)
-      return this.opts.cachePath;
+    if (this.opts.cachePath) return this.opts.cachePath;
     const src = this.opts.source();
     return src ? defaultCachePath(src.runtimeUrl) : null;
   }
   adopt(ruleset, from) {
-    if (this.compiled?.id === ruleset.id)
-      return;
+    if (this.compiled?.id === ruleset.id) return;
     const compiled = compileRuleset(ruleset, {
       ...this.opts.tiers ? { tiers: this.opts.tiers } : {},
       log: (m) => this.log.warn(m)
     });
     this.compiled = compiled;
-    this.log.info(`[openguardrails] local redaction: ruleset ${compiled.id} (${from}) \u2014 ${compiled.rules.length} rules` + (compiled.disabled.length ? `, ${compiled.disabled.length} disabled` : "") + (compiled.skipped.length ? `, ${compiled.skipped.length} outside the configured tiers` : ""));
+    this.log.info(
+      `[openguardrails] local redaction: ruleset ${compiled.id} (${from}) \u2014 ${compiled.rules.length} rules` + (compiled.disabled.length ? `, ${compiled.disabled.length} disabled` : "") + (compiled.skipped.length ? `, ${compiled.skipped.length} outside the configured tiers` : "")
+    );
   }
   /**
    * Bring the ruleset up. With a cache: compile it now, refresh in the
@@ -1219,12 +1130,10 @@ var LocalRedactor = class {
   }
   /** Fetch (with `If-None-Match`) and adopt whatever comes back; coalesces concurrent calls. */
   refresh() {
-    if (this.refreshing)
-      return this.refreshing;
+    if (this.refreshing) return this.refreshing;
     this.refreshing = (async () => {
       const src = this.opts.source();
-      if (!src)
-        return;
+      if (!src) return;
       const result = await loadRuleset({
         runtimeUrl: src.runtimeUrl,
         apiKey: src.apiKey,
@@ -1232,10 +1141,8 @@ var LocalRedactor = class {
         ...this.opts.fetch ? { fetch: this.opts.fetch } : {},
         ...this.opts.timeoutMs !== void 0 ? { timeoutMs: this.opts.timeoutMs } : {}
       });
-      if (result.error)
-        this.log.warn(`[openguardrails] local redaction: ${result.error}`);
-      if (result.ruleset)
-        this.adopt(result.ruleset, result.source);
+      if (result.error) this.log.warn(`[openguardrails] local redaction: ${result.error}`);
+      if (result.ruleset) this.adopt(result.ruleset, result.source);
     })().finally(() => {
       this.refreshing = null;
     });
@@ -1248,8 +1155,7 @@ var LocalRedactor = class {
    */
   onHeartbeat(reply) {
     const id = reply?.rules?.id;
-    if (typeof id === "string" && id !== "" && id !== this.rulesetId)
-      void this.refresh();
+    if (typeof id === "string" && id !== "" && id !== this.rulesetId) void this.refresh();
   }
   /** Said on every request that goes out unprotected (§4.5) — loud on purpose. */
   warnUnprotected(what) {
@@ -1265,14 +1171,11 @@ var LocalRedactor = class {
    */
   sessionsFor(sessionId) {
     const keys = [sessionId];
-    for (const k of this.http?.sessions() ?? [])
-      if (!keys.includes(k))
-        keys.push(k);
+    for (const k of this.http?.sessions() ?? []) if (!keys.includes(k)) keys.push(k);
     return keys;
   }
   record(sessionId, minted) {
-    if (minted.length === 0)
-      return;
+    if (minted.length === 0) return;
     const list2 = this.pending.get(sessionId) ?? [];
     list2.push(...minted);
     this.pending.set(sessionId, list2);
@@ -1302,7 +1205,10 @@ var LocalRedactor = class {
    * a value with no token in it restores to itself.
    */
   restoreArgs(sessionId, args) {
-    return restoreArgsAcross(args, this.sessionsFor(sessionId).map((k) => this.session(k)));
+    return restoreArgsAcross(
+      args,
+      this.sessionsFor(sessionId).map((k) => this.session(k))
+    );
   }
   /**
    * The `redaction` field for the next event of this session — drains the
@@ -1312,13 +1218,11 @@ var LocalRedactor = class {
    * no `redaction` field, so the runtime never reads the step as protected.
    */
   report(sessionId) {
-    if (!this.masking)
-      return void 0;
+    if (!this.masking) return void 0;
     const masked = [];
     for (const key of this.sessionsFor(sessionId)) {
       const list2 = this.pending.get(key);
-      if (!list2)
-        continue;
+      if (!list2) continue;
       masked.push(...list2);
       this.pending.delete(key);
     }
@@ -1326,7 +1230,7 @@ var LocalRedactor = class {
   }
 };
 
-// src/daemon.ts
+// ogr-local/src/daemon.ts
 import { spawn } from "node:child_process";
 import { openSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
@@ -1387,11 +1291,11 @@ function baseUrlFor(upstream, p = port()) {
   return `http://127.0.0.1:${p}/${u.protocol.replace(":", "")}/${u.host}${path}`;
 }
 
-// src/server.ts
+// ogr-local/src/server.ts
 import { createServer } from "node:http";
 import { Readable } from "node:stream";
 
-// src/pipe.ts
+// ogr-local/src/pipe.ts
 var DEFAULT_SESSION = "process";
 var Pipe = class {
   constructor(opts) {
@@ -1490,7 +1394,7 @@ var Pipe = class {
   }
 };
 
-// src/server.ts
+// ogr-local/src/server.ts
 var HOP_BY_HOP = /* @__PURE__ */ new Set([
   "connection",
   "keep-alive",
@@ -1688,7 +1592,7 @@ async function startProxy(opts) {
   return { url: `http://127.0.0.1:${port2}`, port: port2, pipe, close };
 }
 
-// src/cli.ts
+// ogr-local/src/cli.ts
 var log = { info: (m) => console.error(m), warn: (m) => console.error(m) };
 async function serve(argv, flag, has) {
   const runtimeUrl = flag("runtime") ?? process.env["OGR_RUNTIME_URL"] ?? "https://openguardrails.com";
@@ -1768,7 +1672,7 @@ async function main(argv = process.argv.slice(2)) {
   }
 }
 
-// src/bundle.ts
+// ogr-local/src/bundle.ts
 function invokedAsScript() {
   const entry = process.argv[1];
   if (!entry) return false;
