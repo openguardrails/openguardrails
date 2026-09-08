@@ -73,7 +73,7 @@ function configuredBaseUrl() {
 }
 
 /** Names this build in the daemon's status, so a shared daemon says whose it is. */
-const INTEGRATION = "ogr-codex/2.1.0"
+const INTEGRATION = "ogr-codex/2.2.0"
 
 const say = (message) => process.stderr.write(`[OpenGuardrails] ${message}\n`)
 

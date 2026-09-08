@@ -1,6 +1,6 @@
 {
   "name": "@openguardrails/dsh",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "OpenGuardrails for DeepSeek Harness (dsh): the v1.0 reference agent-direct integration — every model call judged twice at the loop's own seams (pre-model, post-model behind a held stream tail), one endpoint, no SDK. Local secrets redaction keeps credentials on the host. Includes Auto Mode: approval prompts answered by the step verdict. No core changes.",
   "type": "module",
   "license": "Apache-2.0",
@@ -68,7 +68,7 @@
     }
   },
   "dependencies": {
-    "@openguardrails/local-redaction": "^0.1.0"
+    "@openguardrails/local-redaction": "^0.2.0"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",

@@ -1,7 +1,7 @@
 // GENERATED — do not edit. Source: integrations/agent/ogr-local/src
 // Rebuild: npm --prefix integrations/agent/ogr-local run bundle
 // OGR_LOCAL_SOURCE_STAMP=c9ae27b44adf
-// version=0.1.0
+// version=0.2.0
 
 // src/bundle.ts
 import { pathToFileURL } from "node:url";
