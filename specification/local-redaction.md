@@ -238,6 +238,10 @@ to the producer and authoritative at the runtime. The shape is
         "patterns": [ { "id": "openai", "source": "…" },
                       { "id": "gitlab", "source": "…" } ],
         "group": 1,                                 // OPTIONAL: the capture group that IS the span
+        "reject_value": [                           // OPTIONAL: what this rule refuses to call a credential
+          { "predicate": { "kind": "placeholder" } },
+          { "part": { "of": "after", "sep": ":" },
+            "predicate": { "kind": "low_entropy", "min": 2.0 } } ],
         "examples": { "match": ["…"], "nomatch": ["…"] } }
     ] } }
 ```
@@ -258,6 +262,51 @@ to the producer and authoritative at the runtime. The shape is
 - **`group`** — the 1-based capturing group that IS the span; absent ⇒ the
   whole match. This is how a rule says *the credential, not the header*
   WITHOUT a lookbehind, which the dialect could not otherwise express.
+- ⚠️⚠️ **`reject_value` — A RULE IS ITS PATTERNS MINUS ITS FILTERS, and an
+  integration MUST evaluate them.** Each entry says when a match is THROWN
+  AWAY; they are ANDed as *reject if any fires*, and they are applied to the
+  SPAN (the `group` where one is declared, the whole match otherwise) because
+  they ask about the VALUE — `Authorization: bearer` is not the value. Absent
+  or empty ⇒ nothing is refused, which is every rule written before the field
+  existed. It is part of the `id`, so editing only a filter makes every
+  integration refetch.
+  ⚠️ **An integration that applies only the patterns is running a DIFFERENT
+  rule from the runtime**, and it will find that out by failing that rule's own
+  `nomatch` examples — whose consequence under *Self-verification* below is to
+  disable the rule. That is the observed failure this field exists to close: a
+  runtime whose filters lived only on its own side had three of its most
+  important rules — the password position, a URL's userinfo and a database
+  connection string — self-disabling on every instrumented host, silently,
+  because a rule that never fires is indistinguishable from a host with no
+  secrets in its traffic.
+  ⚠️⚠️ **A filter an integration cannot evaluate — an unknown `kind`, a
+  `matches` pattern its engine refuses — MUST disable the rule, by id, with the
+  reason, exactly like a failing example. It MUST NOT be read as "no filter".**
+  Filters only ever make a rule match LESS, so skipping one masks far more than
+  the runtime calls a credential, and the integration then restores a value into
+  a tool's arguments under a token the runtime never minted.
+
+### The predicate vocabulary
+
+CLOSED, and closed on purpose: every integration has to implement it, and it
+runs in-process on every value a rule matches, so each predicate is a single
+bounded pass over the span — none backtracks, none recurses, none takes a
+callback. A `part` selects what the predicate is asked about (`{"of":"after",
+"sep":":"}` cuts at the FIRST separator and answers the whole span when it does
+not occur); absent ⇒ the whole span.
+
+| `kind` | rejects the value when |
+|---|---|
+| `placeholder` | it OPENS with a shape meaning nobody filled it in — `***`, `${…}`, `<…>`, `xxx`, `%s`, `…`, `changeme`, `placeholder`, `redacted`, `example`, a bare `$`. With `"anywhere": true`, anywhere in it: a doc that removed a real token's MIDDLE says just as loudly that nothing leaked |
+| `secret_noun` | it IS the word — `password=PASSWORD`, `token: token` |
+| `variable_reference` | it is a dotted or indexed identifier — `config.api_key`, `os.environ["TOKEN"]` |
+| `names_secret` | it is an identifier PATH naming a secret: identifier characters only **and** containing a secret noun **and** carrying a `.`, `_` or `[` — `DB_PASSWORD`, `cfg.db.pwd`. The conjunction is why this is a vocabulary and not a pattern library |
+| `structural` | it contains `(`, `)`, `{` or `}` — it is code, and the credential is computed somewhere else |
+| `low_entropy` | its Shannon entropy is below `min` bits per character. The one predicate no regex can express at all: `hunter2hunter2` and a real 20-character key are the same SHAPE |
+| `matches` | it matches `pattern` under `flags` (⊆ `ims`). Global/sticky flags are forbidden: the test is one `.test()` and a global regex carries state between calls |
+
+An integration MUST bound the value it examines (the reference implementations
+stop at 4096 characters); past that, this is not a credential.
 - **Caching.** An integration SHOULD cache the ruleset locally (the reference
   caches with owner-only permissions), MUST send `If-None-Match` with the
   cached id on refresh, and MUST treat `304` as *unchanged*. The heartbeat
@@ -291,7 +340,9 @@ is the INTERSECTION, and a served rule MUST stay inside it:
 
 ⚠️⚠️ **Every rule carries `examples`, and an integration MUST run them at
 load.** `match` strings MUST each produce a match and `nomatch` strings MUST
-each produce none, in the integration's OWN engine. A rule that fails its
+each produce none, in the integration's OWN engine — **with `reject_value`
+applied**, since the corpus tests the whole rule and several shipped `nomatch`
+strings are satisfiable only by a filter. A rule that fails its
 examples, or will not compile, MUST be DISABLED by id and logged — never run
 in the state the failure left it — and the rest of the ruleset MUST run. The
 integration still reports the served `ruleset` id: a miss the runtime then
