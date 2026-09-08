@@ -98,6 +98,14 @@
      "minimum": 1,
      "description": "OPTIONAL. The 1-based capturing group that IS the span; absent means the whole match. How a rule says 'the credential, not the header' without a variable-width lookbehind, which the dialect forbids."
     },
+    "reject_value": {
+     "type": "array",
+     "maxItems": 16,
+     "items": {
+      "$ref": "#/$defs/ValueRule"
+     },
+     "description": "OPTIONAL. What this rule refuses to CALL a credential, applied to the SPAN (the 'group' where one is declared, the whole match otherwise) after the pattern matches. A rule IS its patterns MINUS these filters: an integration that ignores them is running a different rule from the runtime, and will fail this rule's own 'nomatch' examples — whose consequence is to disable the rule. Absent or empty means nothing is refused. Part of the id. MUST be evaluated, or the rule MUST be disabled: a filter an engine cannot evaluate is never to be read as 'no filter', because filters only ever make a rule match LESS."
+    },
     "examples": {
      "type": "object",
      "additionalProperties": false,
@@ -144,6 +152,83 @@
      "type": "string",
      "minLength": 1,
      "description": "The pattern source, in dialect ogr-re-1. Every served pattern excludes '${' so a rule never matches inside an existing placeholder."
+    }
+   }
+  },
+  "ValueRule": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "predicate"
+   ],
+   "description": "One filter. Filters are ANDed as 'reject if any fires'. The vocabulary is CLOSED so that every integration can implement it: each predicate is a single bounded pass over the matched span, none backtracks, none recurses.",
+   "properties": {
+    "part": {
+     "$ref": "#/$defs/ValuePart"
+    },
+    "predicate": {
+     "$ref": "#/$defs/ValuePredicate"
+    }
+   }
+  },
+  "ValuePart": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "of"
+   ],
+   "description": "WHICH PART of the span the predicate is asked about; absent means the whole of it. 'after'/'before' cut at the FIRST occurrence of 'sep' and answer the whole span when it does not occur — how a carrier rule asks about the password half of 'user:password'.",
+   "properties": {
+    "of": {
+     "enum": [
+      "whole",
+      "after",
+      "before"
+     ]
+    },
+    "sep": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 16
+    }
+   }
+  },
+  "ValuePredicate": {
+   "type": "object",
+   "required": [
+    "kind"
+   ],
+   "description": "The seven predicate kinds. 'placeholder' — the value opens with (or, with anywhere:true, contains) a shape meaning nobody filled it in: ***, ${...}, <...>, xxx, %s, changeme, example, a bare $. 'secret_noun' — the value IS the word (password=PASSWORD). 'variable_reference' — a dotted or indexed identifier (config.api_key, os.environ[\"X\"]). 'names_secret' — an identifier PATH naming a secret: identifier characters only AND containing a secret noun AND carrying a '.', '_' or '[' (DB_PASSWORD, cfg.db.pwd). 'structural' — the value contains (){}, so it is code and the credential is computed elsewhere. 'low_entropy' — Shannon bits per character below 'min'. 'matches' — the value matches 'pattern' under 'flags' (a subset of ims; global/sticky flags are forbidden because the test is a single .test()). An UNKNOWN kind disables the rule.",
+   "properties": {
+    "kind": {
+     "enum": [
+      "placeholder",
+      "secret_noun",
+      "variable_reference",
+      "names_secret",
+      "structural",
+      "low_entropy",
+      "matches"
+     ]
+    },
+    "anywhere": {
+     "type": "boolean",
+     "description": "placeholder only: look through the whole span, not just its head."
+    },
+    "min": {
+     "type": "number",
+     "description": "low_entropy only: bits per character below which the value is rejected."
+    },
+    "pattern": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 512,
+     "description": "matches only."
+    },
+    "flags": {
+     "type": "string",
+     "pattern": "^[ims]*$",
+     "description": "matches only; a subset of ims."
     }
    }
   }

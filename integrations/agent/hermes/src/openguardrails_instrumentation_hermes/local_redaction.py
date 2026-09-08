@@ -12,7 +12,9 @@ Four pieces, each small:
                  compiled with CPython `re`, SELF-VERIFIED through each rule's
                  `examples` (a rule that fails in this engine is DISABLED and
                  logged by id, never run wrong). Cached on disk (0600), the id
-                 is the ETag.
+                 is the ETag. A rule is its patterns MINUS its `reject_value`
+                 filters — the closed predicate vocabulary below, served with
+                 the patterns since OGR 1.4.
   SessionMap   — value <-> token, per session, IN MEMORY ONLY. Persisting it
                  would write the secrets to the disk hermes keeps them off.
   mask()       — known values first (longest first), then the rules in served
@@ -31,6 +33,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import os
 import re
 import tempfile
@@ -87,30 +90,201 @@ _FLAG_MAP = {"i": re.IGNORECASE, "m": re.MULTILINE, "s": re.DOTALL}
 
 
 # --------------------------------------------------------------------------- #
+# reject_value — what a rule refuses to CALL a credential (OGR 1.4 §4.6)
+# --------------------------------------------------------------------------- #
+#
+# A RULE IS ITS PATTERNS MINUS WHAT ITS FILTERS THROW AWAY. A reader that applies
+# only the patterns runs a DIFFERENT rule from the one the runtime runs — and it
+# finds that out by failing that rule's own `nomatch` examples, whose consequence
+# under D9 is to DISABLE the rule by id. That happened: between 2026-09-01 and
+# 2026-09-06 the filters lived only inside AIRS, eight examples across
+# `password_assignment`, `url_credential` and `db_connection` were unsatisfiable
+# from the patterns alone, and those three rules — the ones most likely to carry a
+# real credential — were switching themselves off on every host, silently, because
+# a rule that never fires looks exactly like a host with no secrets in its traffic.
+#
+# The vocabulary is CLOSED so it can be ported: seven predicate kinds, two part
+# selectors, each one bounded pass over the matched span, none backtracking. The
+# normative reference is AIRS's `scripts/secret-rules-conformance.py`; this and the
+# TypeScript `predicates.ts` are its two ports. Every constant below is a
+# TRANSCRIPTION of AIRS's `policy-engine/valuePredicates.ts` — the examples corpus
+# is what catches one that drifted.
+#
+# ⚠️ AN UNKNOWN PREDICATE KIND DISABLES THE RULE and is never read as "no filter":
+# filters only ever make a rule match LESS, so skipping one masks far more than the
+# runtime calls a credential, and the plugin would then hand the tool back a value
+# under a token nobody minted for it.
+
+_PLACEHOLDER_SHAPES = [
+    r"\*{3,}", r"x{3,}", r"\$\{", r"<", r">", r"%[sd]", r"\.{3,}", "\u2026",
+    r"changeme", r"placeholder", r"redacted", r"your[_\-]?password", r"your[_\-]",
+    r"example", r"\$",
+]
+_PLACEHOLDER_RE = re.compile("^(?:" + "|".join(_PLACEHOLDER_SHAPES) + ")", re.IGNORECASE)
+_PLACEHOLDER_ANYWHERE_RE = re.compile("(?:" + "|".join(_PLACEHOLDER_SHAPES) + ")", re.IGNORECASE)
+
+_SECRET_NOUNS = (
+    r"password|passwd|pwd|secret|api[_\-]?key|access[_\-]?token|auth[_\-]?token|"
+    r"client[_\-]?secret|refresh[_\-]?token|id[_\-]?token|session[_\-]?token|"
+    r"private[_\-]?key|key[_\-]?material|raw[_\-]?secret|bearer|token"
+)
+_SECRET_NOUN_RE = re.compile("^(?:" + _SECRET_NOUNS + r")(?:[^A-Za-z0-9_]|$)", re.IGNORECASE)
+_CONTAINS_SECRET_NOUN_RE = re.compile("(?:" + _SECRET_NOUNS + ")", re.IGNORECASE)
+_VARIABLE_REF_RE = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z0-9_$]+|\[[^\]]*\])+$")
+_IDENT_ONLY_RE = re.compile(r"^[A-Za-z0-9_$.\[\]\"']+$")
+_IDENT_PATH_MARK_RE = re.compile(r"[._\[]")
+_STRUCTURAL_RE = re.compile(r"[(){}]")
+
+_SIMPLE_PREDICATES = {"placeholder", "secret_noun", "variable_reference", "names_secret", "structural"}
+_MAX_VALUE_CHARS = 4096
+
+
+def _shannon_bits(value: str) -> float:
+    """Bits per character — the one predicate no regex can express at all."""
+    if not value:
+        return 0.0
+    counts: dict[str, int] = {}
+    for ch in value:
+        counts[ch] = counts.get(ch, 0) + 1
+    bits = 0.0
+    for n in counts.values():
+        p = n / len(value)
+        bits -= p * math.log2(p)
+    return bits
+
+
+def _part_of(value: str, part: Any) -> str:
+    if not isinstance(part, dict) or part.get("of") == "whole":
+        return value
+    sep = part.get("sep") or ""
+    i = value.find(sep)
+    if i < 0:
+        return value
+    return value[i + len(sep):] if part.get("of") == "after" else value[:i]
+
+
+def compile_rejects(raw: Any, rule_id: str) -> tuple[list[dict[str, Any]] | None, str]:
+    """Validate a served rule's `reject_value`, compiling any `matches` pattern.
+
+    Returns (filters, "") or (None, reason). The caller disables the rule on a
+    reason — see the note above on why an unknown kind is not "no filter".
+
+    ⚠️ A `matches` flag outside the dialect is a reason, not a silent drop: `i`/`m`/`s`
+    are the whole of it, and a rule asking for something else was written against an
+    engine this is not.
+    """
+    if raw is None:
+        return [], ""
+    if not isinstance(raw, list):
+        return None, "reject_value is not a list"
+    out: list[dict[str, Any]] = []
+    for i, entry in enumerate(raw):
+        if not isinstance(entry, dict):
+            return None, f"reject_value[{i}] is not an object"
+        pred = entry.get("predicate")
+        if not isinstance(pred, dict) or not isinstance(pred.get("kind"), str):
+            return None, f"reject_value[{i}] has no predicate"
+        part = entry.get("part")
+        if part is not None:
+            if not isinstance(part, dict) or part.get("of") not in ("whole", "after", "before"):
+                return None, f"reject_value[{i}]: unknown part"
+            if part.get("of") != "whole" and not isinstance(part.get("sep"), str):
+                return None, f"reject_value[{i}]: part without a sep"
+        kind = pred["kind"]
+        compiled: dict[str, Any] = {"part": part, "predicate": pred}
+        if kind in _SIMPLE_PREDICATES:
+            pass
+        elif kind == "low_entropy":
+            if not isinstance(pred.get("min"), (int, float)):
+                return None, f"reject_value[{i}]: low_entropy without a numeric min"
+        elif kind == "matches":
+            source = pred.get("pattern")
+            if not isinstance(source, str) or not source:
+                return None, f"reject_value[{i}]: matches without a pattern"
+            flags = 0
+            for ch in str(pred.get("flags") or ""):
+                if ch not in _FLAG_MAP:
+                    return None, f"reject_value[{i}]: matches flag {ch!r} is outside the dialect"
+                flags |= _FLAG_MAP[ch]
+            try:
+                compiled["re"] = re.compile(source, flags)
+            except re.error as exc:
+                return None, f"reject_value[{i}]: matches does not compile: {exc}"
+        else:
+            return None, f"reject_value[{i}]: unknown predicate {kind!r} (rule {rule_id})"
+        out.append(compiled)
+    return out, ""
+
+
+def _value_rejected(value: str, rejects: list[dict[str, Any]]) -> bool:
+    """Do any of this rule's filters REJECT the span? ANDed as "reject if any fires"."""
+    if not rejects:
+        return False
+    bounded = value[:_MAX_VALUE_CHARS]
+    for rule in rejects:
+        target = _part_of(bounded, rule.get("part"))
+        pred = rule["predicate"]
+        kind = pred["kind"]
+        if kind == "placeholder":
+            if (_PLACEHOLDER_ANYWHERE_RE if pred.get("anywhere") else _PLACEHOLDER_RE).search(target):
+                return True
+        elif kind == "secret_noun":
+            if _SECRET_NOUN_RE.search(target):
+                return True
+        elif kind == "variable_reference":
+            if _VARIABLE_REF_RE.search(target):
+                return True
+        elif kind == "names_secret":
+            if (_IDENT_ONLY_RE.search(target) and _IDENT_PATH_MARK_RE.search(target)
+                    and _CONTAINS_SECRET_NOUN_RE.search(target)):
+                return True
+        elif kind == "structural":
+            if _STRUCTURAL_RE.search(target):
+                return True
+        elif kind == "low_entropy":
+            if _shannon_bits(target) < float(pred["min"]):
+                return True
+        elif kind == "matches":
+            if rule["re"].search(target):
+                return True
+    return False
+
+
+# --------------------------------------------------------------------------- #
 # the ruleset
 # --------------------------------------------------------------------------- #
 class Rule:
     """One compiled rule. `patterns` is [(pattern_id, compiled)]."""
 
-    __slots__ = ("id", "category", "severity", "tier", "group", "patterns")
+    __slots__ = ("id", "category", "severity", "tier", "group", "patterns", "rejects")
 
     def __init__(self, id: str, category: str, severity: str, tier: str,
-                 group: int | None, patterns: list[tuple[str, re.Pattern[str]]]) -> None:
+                 group: int | None, patterns: list[tuple[str, re.Pattern[str]]],
+                 rejects: list[dict[str, Any]] | None = None) -> None:
         self.id = id
         self.category = category
         self.severity = severity
         self.tier = tier
         self.group = group
         self.patterns = patterns
+        self.rejects = rejects or []
 
     def spans(self, text: str) -> list[tuple[int, int, str]]:
-        """Every (start, end, pattern_id) this rule claims in `text`."""
+        """Every (start, end, pattern_id) this rule claims in `text`.
+
+        ⚠️ The filters run on the SPAN — the group where the rule declares one — and
+        never on the whole match: they ask about the VALUE, and `Authorization: bearer`
+        is not the value. Same position as the runtime's own `EntityDetector`.
+        """
         out: list[tuple[int, int, str]] = []
         for pid, rx in self.patterns:
             for m in rx.finditer(text):
                 start, end = _span(m, self.group)
-                if start >= 0 and end > start:
-                    out.append((start, end, pid))
+                if start < 0 or end <= start:
+                    continue
+                if self.rejects and _value_rejected(text[start:end], self.rejects):
+                    continue
+                out.append((start, end, pid))
         return out
 
 
@@ -142,6 +316,11 @@ def compile_rule(raw: dict[str, Any]) -> tuple[Rule | None, str]:
     at compile time, and a V8-only construct that DOES compile here can match
     something else entirely. The examples are the only thing that proves the
     rule means the same thing in this engine.
+
+    ⚠️ And the examples test the WHOLE rule — patterns MINUS `reject_value` — so the
+    filters are compiled and applied BEFORE they run. A reader that skipped them
+    would fail examples it was never able to satisfy and disable itself; see the
+    reject_value section above.
     """
     rid = str(raw.get("id") or "")
     if not rid:
@@ -165,6 +344,11 @@ def compile_rule(raw: dict[str, Any]) -> tuple[Rule | None, str]:
         patterns.append((str(p.get("id") or f"p{i}"), rx))
     if not patterns:
         return None, "no patterns"
+    # A filter this engine cannot evaluate is a rule it must not run — see the
+    # reject_value section above for why "no filter" is the dangerous reading.
+    rejects, reject_err = compile_rejects(raw.get("reject_value"), rid)
+    if rejects is None:
+        return None, reject_err
     rule = Rule(
         rid,
         str(raw.get("category") or ""),
@@ -172,6 +356,7 @@ def compile_rule(raw: dict[str, Any]) -> tuple[Rule | None, str]:
         str(raw.get("tier") or "strong"),
         group,
         patterns,
+        rejects,
     )
     examples = raw.get("examples") or {}
     for sample in examples.get("match") or []:

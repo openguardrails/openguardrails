@@ -8,7 +8,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { test } from "node:test"
 
-import { compileRuleset, defaultCachePath, loadRuleset, LocalRedactor, mask, SessionMap } from "../dist/index.js"
+import { compileRuleset, defaultCachePath, loadRuleset, LocalRedactor, mask, ruleSpans, SessionMap } from "../dist/index.js"
 
 const corpus = JSON.parse(readFileSync(new URL("../conformance/local-redaction.json", import.meta.url), "utf8"))
 
@@ -54,6 +54,105 @@ test("a group names the span, and needs the d flag the compiler adds", () => {
   assert.equal(c.rules.length, 1)
   const r = mask("key=AKIAIOSFODNN7EXAMPLE", new SessionMap("s"), c)
   assert.equal(r.text, "key=${OGR_SECRET_1}")
+})
+
+/**
+ * ⚠️⚠️ A RULE IS ITS PATTERNS MINUS ITS FILTERS (OGR 1.4 §"The rule feed"). Applying
+ * only the patterns is running a different rule from the runtime — and the way that
+ * shows up is a `nomatch` example the patterns alone cannot satisfy, i.e. the rule
+ * disabling ITSELF. Three of the reference runtime's shipped rules are in exactly that
+ * shape, so this is the contract, not a nicety.
+ */
+test("reject_value filters the span, and a nomatch example that only a filter satisfies passes", () => {
+  const pw = {
+    id: "entity_password_assignment",
+    category: "security.secret_leak.password",
+    severity: "high",
+    tier: "heuristic",
+    flags: "i",
+    patterns: [{ id: "assignment", source: "password[ \\t]*=[ \\t]*([^\\s\"',;]{8,})" }],
+    group: 1,
+    reject_value: [{ predicate: { kind: "placeholder" } }, { predicate: { kind: "structural" } }],
+    // ⚠️ Neither nomatch line is refused by the pattern: both match it and are thrown
+    // away by a filter. Without reject_value this rule disables itself.
+    examples: {
+      match: ["password = Zx8Q1pLm9aQvR2tY"],
+      nomatch: ["password = ${DB_PASSWORD}", "password = get_secret(name)"],
+    },
+  }
+  const c = compileRuleset(ruleset([pw]))
+  assert.deepEqual(c.disabled, [])
+  assert.equal(c.rules.length, 1)
+  assert.deepEqual(
+    ruleSpans(c.rules[0], "password = Zx8Q1pLm9aQvR2tY").map((s) => s.start),
+    [11],
+  )
+  assert.deepEqual(ruleSpans(c.rules[0], "password = ${DB_PASSWORD}"), [])
+
+  // And the same rule WITHOUT the filters is the field failure this closes.
+  const { reject_value, ...bare } = pw
+  const without = compileRuleset(ruleset([bare]))
+  assert.equal(without.rules.length, 0)
+  assert.match(without.disabled[0].reason, /nomatch example yielded a span/)
+})
+
+test("every predicate kind is understood, and each one is asked about the part it names", () => {
+  const one = (predicate, part) =>
+    compileRuleset(
+      ruleset([
+        rule({
+          patterns: [{ id: "p", source: "V=(.+)" }],
+          group: 1,
+          reject_value: [part ? { part, predicate } : { predicate }],
+          examples: { match: [], nomatch: [] },
+        }),
+      ]),
+    ).rules[0]
+  const spans = (r, text) => ruleSpans(r, text).length
+  assert.equal(spans(one({ kind: "placeholder" }), "V=${TOKEN}"), 0)
+  assert.equal(spans(one({ kind: "placeholder", anywhere: true }), "V=abc***def"), 0)
+  assert.equal(spans(one({ kind: "placeholder" }), "V=abc***def"), 1) // anchored by default
+  assert.equal(spans(one({ kind: "secret_noun" }), "V=password"), 0)
+  assert.equal(spans(one({ kind: "variable_reference" }), "V=config.api_key"), 0)
+  assert.equal(spans(one({ kind: "names_secret" }), "V=DB_PASSWORD"), 0)
+  assert.equal(spans(one({ kind: "structural" }), "V=get(name)"), 0)
+  // ⚠️ `hunter2hunter2` and a real key are the same SHAPE and not the same entropy —
+  // which is the whole reason this predicate exists. A run of one character is 0 bits.
+  assert.equal(spans(one({ kind: "low_entropy", min: 3 }), "V=aaaaaaaaaa"), 0)
+  assert.equal(spans(one({ kind: "low_entropy", min: 3 }), "V=Zx8Q1pLm9aQvR2tY"), 1)
+  assert.equal(spans(one({ kind: "matches", pattern: "^/", flags: "" }), "V=/etc/passwd"), 0)
+  // `part`: the filter asks about the half after the separator, not the whole span.
+  const half = one({ kind: "placeholder" }, { of: "after", sep: ":" })
+  assert.equal(spans(half, "V=user:${PW}"), 0)
+  assert.equal(spans(half, "V=${USER}:realpassword"), 1)
+})
+
+/**
+ * ⚠️⚠️ A filter this engine cannot evaluate is a rule it must not run. Reading an
+ * unknown kind as "no filter" would mask far more than the runtime calls a credential
+ * — and the value would then be restored into a tool's arguments under a token the
+ * runtime never minted.
+ */
+test("an unevaluable filter disables the rule and names it, rather than being skipped", () => {
+  const unknown = compileRuleset(
+    ruleset([rule({ reject_value: [{ predicate: { kind: "time_travel" } }] })]),
+  )
+  assert.equal(unknown.rules.length, 0)
+  assert.match(unknown.disabled[0].reason, /unknown predicate time_travel/)
+
+  const uncompilable = compileRuleset(
+    ruleset([rule({ reject_value: [{ predicate: { kind: "matches", pattern: "(unbalanced" } }] })]),
+  )
+  assert.equal(uncompilable.rules.length, 0)
+  assert.match(uncompilable.disabled[0].reason, /does not compile/)
+
+  // ⚠️ A global flag is refused: the test is one `.test()` and a global regex carries
+  // `lastIndex`, so it would answer differently on every other value it saw.
+  const global = compileRuleset(
+    ruleset([rule({ reject_value: [{ predicate: { kind: "matches", pattern: "^/", flags: "g" } }] })]),
+  )
+  assert.equal(global.rules.length, 0)
+  assert.match(global.disabled[0].reason, /may not be global/)
 })
 
 test("tiers: the heuristic tier is honoured by default and can be left out", () => {
