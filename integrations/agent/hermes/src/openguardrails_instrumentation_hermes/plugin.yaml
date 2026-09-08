@@ -1,5 +1,5 @@
 name: ogr-guard
-version: 2.0.0
+version: 2.1.0
 description: "Guard a Hermes agent through the OpenGuardrails (OGR) Runtime API: two evaluates per model call, verdicts enforced on the answer, the tool calls, and the real exec — and, since 2.0, local secrets redaction: secrets are masked to ${OGR_SECRET_n} before the request leaves the host and restored only into a tool's arguments after judgement."
 author: "OpenGuardrails"
 hooks:

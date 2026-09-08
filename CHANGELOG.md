@@ -101,6 +101,22 @@ version is independent of any implementation's package version.
   prompt and its `systemPrompt` result is an override — and the README says so.
 
 ### Changed
+- **Every agent-side plugin gets a new build number, because their MASKING changed.**
+  `reject_value` (above) is a behaviour change on the host: the three rules whose
+  `nomatch` examples were unsatisfiable now evaluate their filters and stop disabling
+  themselves. Shipping that under the old number would leave the wire's `integration`
+  stamp — the one field that answers *which build produced this event* — unable to tell
+  a host that masks correctly from one whose three best rules were switched off.
+  So: `@openguardrails/local-redaction` **0.2.0** (the reference `mask()`/`restore()`
+  plus `src/predicates.ts`), `@openguardrails/ogr-local` **0.2.0** (the loopback proxy,
+  re-bundled into both hook plugins), `ogr-claude-code` **2.2.0**, `ogr-codex` **2.2.0**,
+  `ogr-openclaw` **0.5.0**, `ogr-opencode-auto-mode` **0.5.0**, `ogr-dsh` **0.5.0**, and
+  `openguardrails-instrumentation-hermes` **2.1.0**.
+  ⚠️ The bundled `hooks/ogr-local.mjs` carries an `OGR_LOCAL_SOURCE_STAMP` that hashes
+  `ogr-local/src` ALONE, so it did NOT move when the bundled dependency did — the
+  `// version=` line beside it is what separates the two builds today. A stamp that
+  cannot see what it bundles is worth knowing about before it is trusted.
+
 - **Streaming enforcement is bounded from the HEAD of the answer, not its tail
   ([runtime-api.md § streaming](specification/runtime-api.md#streaming-release-a-bounded-head-judge-once)).**
   The recipe said "withhold the final `tail` characters (reference default 200)".
