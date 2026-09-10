@@ -215,6 +215,8 @@ agent developers integrate by calling it directly:
 | [GuardEvent](specification/guard-event.md) | The typed unit observed at an integration point | span / log record |
 | [Verdict](specification/verdict.md) | The runtime's decision about an event | — |
 | [obligations](specification/obligations.md) | What the enforcement point must DO before an action proceeds — carried beside an `allow` | XACML obligations |
+| [mandate](specification/mandate.md) | The authorization envelope — what an agent in a workspace may DO; configuration, never on the wire | — |
+| [grounding](specification/grounding.md) | The evidence envelope — what an agent may CLAIM, checked against a record provider; configuration, never on the wire (1.7 draft) | — |
 | [artifact scan](specification/artifact-scan.md) | The sibling contract a scanner implements — hash-first, range-negotiated, pluggable | ICAP |
 | [local redaction](specification/local-redaction.md) | What an in-process integration does so a secret never leaves the host — mask on the way out, restore into a tool, rules served by the runtime | — |
 | [composition](specification/composition.md) | How multiple detectors' answers combine into one decision | — |

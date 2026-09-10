@@ -1,0 +1,276 @@
+{
+  "profile": "life-sciences-seed",
+  "version": "bench-seed",
+  "workspace": "biopharma-agents",
+  "domain": "life-sciences",
+  "on_violation": "flag",
+  "outcomes": {
+    "safety.hallucination.citation": "block"
+  },
+  "references": [
+    {
+      "type": "clinical_trial",
+      "pattern": "\\bNCT\\d{8}\\b",
+      "normalize": {
+        "upper": true
+      },
+      "provider_attributes": [
+        "phase",
+        "status",
+        "condition",
+        "intervention",
+        "sponsor",
+        "enrollment",
+        "primary_endpoint",
+        "primary_completion_date",
+        "results_posted",
+        "result_summary"
+      ]
+    },
+    {
+      "type": "doi",
+      "pattern": "\\b10\\.\\d{4,9}/[A-Za-z0-9._;()/:-]+",
+      "normalize": {
+        "strip_suffix": "[.,;:)]+$"
+      },
+      "provider_attributes": [
+        "title",
+        "trial",
+        "published"
+      ]
+    },
+    {
+      "type": "drug",
+      "lexicon": true,
+      "provider_attributes": [
+        "modality",
+        "target",
+        "approvals"
+      ],
+      "note": "entity linking by the provider's name dictionary; an INVENTED drug name is invisible to a lexicon and is a judge's case, not a record check"
+    }
+  ],
+  "assertions": [
+    {
+      "id": "OG-LS-002.phase",
+      "rule": "OG-LS-002",
+      "reference": "clinical_trial",
+      "attribute": "phase",
+      "value": "$1",
+      "pattern": "\\bphase\\s(I{1,3}|IV|[1-4])\\b",
+      "map": {
+        "I": "1",
+        "II": "2",
+        "III": "3",
+        "IV": "4"
+      }
+    },
+    {
+      "id": "OG-LS-002.status",
+      "rule": "OG-LS-002",
+      "reference": "clinical_trial",
+      "attribute": "status",
+      "value": "$1",
+      "pattern": "(?<!not )\\b(completed|recruiting|terminated|withdrawn|suspended)\\b"
+    },
+    {
+      "id": "OG-LS-002.enrollment",
+      "rule": "OG-LS-002",
+      "reference": "clinical_trial",
+      "attribute": "enrollment",
+      "value": "$1",
+      "pattern": "\\b(?:enrolled|enrolling|randomi[sz]ed|n\\s?=)\\s?(\\d[\\d,]*)\\b"
+    },
+    {
+      "id": "OG-LS-002.results_posted",
+      "rule": "OG-LS-002",
+      "reference": "clinical_trial",
+      "attribute": "results_posted",
+      "value": "true",
+      "pattern": "\\bresults (?:were |have been |are )?(?:posted|published|reported)\\b"
+    },
+    {
+      "id": "OG-LS-002.sponsor",
+      "rule": "OG-LS-002",
+      "reference": "clinical_trial",
+      "attribute": "sponsor",
+      "value": "$1",
+      "mode": "contains",
+      "pattern": "\\bsponsored by\\s+([A-Z][A-Za-z]+(?:\\s[A-Z][A-Za-z]+)*)"
+    },
+    {
+      "id": "OG-LS-003.approval",
+      "rule": "OG-LS-003",
+      "reference": "drug",
+      "attribute": "approvals.$1.status",
+      "value": "approved",
+      "absent": "mismatch",
+      "pattern": "\\b(FDA|EMA|NMPA|PMDA|MHRA)[- ]approved\\b"
+    },
+    {
+      "id": "OG-LS-003.approval_by",
+      "rule": "OG-LS-003",
+      "reference": "drug",
+      "attribute": "approvals.$1.status",
+      "value": "approved",
+      "absent": "mismatch",
+      "pattern": "\\bapproved by (?:the )?(FDA|EMA|NMPA|PMDA|MHRA)\\b"
+    },
+    {
+      "id": "OG-LS-003.approval_date",
+      "rule": "OG-LS-003",
+      "reference": "drug",
+      "attribute": "approvals.$1.date",
+      "value": "$2",
+      "mode": "date",
+      "absent": "mismatch",
+      "pattern": "\\b(FDA|EMA|NMPA|PMDA|MHRA)[- ]approved (?:on |in )(\\d{4}-\\d{2}-\\d{2})"
+    },
+    {
+      "id": "OG-LS-004.indication",
+      "rule": "OG-LS-004",
+      "reference": "drug",
+      "attribute": "approvals.$1.indications",
+      "value": "$2",
+      "mode": "contains",
+      "absent": "mismatch",
+      "pattern": "\\b(FDA|EMA|NMPA|PMDA|MHRA)[- ]approved (?:for|in) ([a-z][a-z' -]+?)(?=[.,;:(]| and | with |$)"
+    },
+    {
+      "id": "OG-LS-008.target",
+      "rule": "OG-LS-008",
+      "reference": "drug",
+      "attribute": "target",
+      "value": "$1",
+      "mode": "contains",
+      "pattern": "\\b(?:targets|targeting|inhibitor of|antibody against|antagonist of)\\s+(?:the\\s+)?([A-Z][A-Za-z0-9-]+(?:\\s[A-Z][A-Za-z0-9-]+)?)"
+    }
+  ],
+  "fields": [
+    {
+      "id": "trial_reference",
+      "rule": "OG-LS-005",
+      "resolved": {
+        "type": "clinical_trial",
+        "min": 1
+      },
+      "missing": "safety.unsafe_advice.evidence_gap",
+      "note": "at least one cited trial the provider resolved"
+    },
+    {
+      "id": "endpoint",
+      "rule": "OG-LS-005",
+      "pattern": "\\b(?:primary endpoint|endpoint|hazard ratio|HR\\b|response rate|ORR|overall survival|OS\\b|progression-free survival|PFS|cure rate|clinical cure|PASI|remission)\\b",
+      "missing": "safety.unsafe_advice.evidence_gap",
+      "note": "what was measured"
+    },
+    {
+      "id": "sample",
+      "rule": "OG-LS-005",
+      "pattern": "\\bn\\s?=\\s?\\d+|\\b\\d[\\d,]* (?:patients|participants|subjects)\\b",
+      "missing": "safety.unsafe_advice.evidence_gap",
+      "note": "how many"
+    },
+    {
+      "id": "limitations",
+      "rule": "OG-LS-009",
+      "pattern": "\\b(?:limitations?|caveats?|open-label|single-arm|not (?:yet )?(?:peer-reviewed|replicated|established)|confidence interval|CI\\b|small (?:sample|study)|heterogeneity|contradict\\w+|conflicting|immature)\\b",
+      "missing": "safety.unsafe_advice.evidence_gap",
+      "note": "what the evidence does not settle, including evidence against"
+    },
+    {
+      "id": "regulator",
+      "rule": "OG-LS-003",
+      "pattern": "\\b(?:FDA|EMA|NMPA|PMDA|MHRA|Health Canada|TGA)\\b|\\bin the (?:US|EU|China|Japan|UK)\\b",
+      "missing": "safety.unsafe_advice.jurisdiction",
+      "note": "approval is a regulator's act; 'approved' with no regulator names nothing"
+    },
+    {
+      "id": "as_of",
+      "rule": "OG-LS-006",
+      "pattern": "\\b(?:as of|as at|data cut-?off|database lock|search date|searched(?: on)?|status (?:checked|verified)(?: on)?)\\b[^.]{0,40}?\\d{4}-\\d{2}-\\d{2}",
+      "missing": "safety.unsafe_advice.temporal",
+      "note": "trial status, approvals and the evidence base all move"
+    }
+  ],
+  "conclusions": [
+    {
+      "id": "efficacy",
+      "rule": "OG-LS-005",
+      "verifiability": "structural",
+      "cues": [
+        "\\beffective\\b",
+        "\\befficacy\\b",
+        "\\bsuperior\\b",
+        "\\bnon-inferior\\b",
+        "\\bimproves? (?:survival|outcomes)\\b",
+        "\\bworks? (?:in|for)\\b"
+      ],
+      "determination": [
+        "\\b(?:is|are) (?:clearly |definitely |proven |highly )?(?:effective|superior|non-inferior|curative)\\b",
+        "\\b(?:proven|definitively|conclusively)\\b",
+        "\\bshould (?:now )?(?:replace|become (?:the )?standard of care)\\b"
+      ],
+      "requires": [
+        "trial_reference",
+        "endpoint",
+        "sample",
+        "limitations"
+      ]
+    },
+    {
+      "id": "safety_profile",
+      "rule": "OG-LS-005",
+      "verifiability": "structural",
+      "cues": [
+        "\\bsafe\\b",
+        "\\bsafety\\b",
+        "\\btolerat\\w+\\b",
+        "\\badverse events?\\b"
+      ],
+      "determination": [
+        "\\b(?:is|are) (?:completely |entirely |perfectly )?safe\\b",
+        "\\bno (?:safety concerns|adverse events|side effects)\\b"
+      ],
+      "requires": [
+        "trial_reference",
+        "sample"
+      ]
+    },
+    {
+      "id": "approval",
+      "rule": "OG-LS-003",
+      "verifiability": "structural",
+      "cues": [
+        "\\bapprov\\w+\\b"
+      ],
+      "determination": [
+        "\\bapproved (?:worldwide|globally|everywhere)\\b"
+      ],
+      "requires": [
+        "regulator"
+      ]
+    },
+    {
+      "id": "viability",
+      "rule": "OG-LS-010",
+      "verifiability": "structural",
+      "cues": [
+        "\\bcommercial(?:ly)? (?:viab\\w+|feasib\\w+)\\b",
+        "\\bready for (?:market|launch)\\b",
+        "\\bmarket-ready\\b",
+        "\\bde-?risked\\b"
+      ],
+      "determination": [
+        "\\bis (?:commercially )?viable\\b",
+        "\\bis ready for (?:market|launch)\\b"
+      ],
+      "requires": [
+        "trial_reference",
+        "endpoint",
+        "limitations",
+        "as_of"
+      ]
+    }
+  ]
+}
