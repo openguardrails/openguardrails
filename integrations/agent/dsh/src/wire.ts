@@ -75,6 +75,8 @@ export interface WireEvent {
    * plugin omits the field rather than assert coverage it cannot prove.
    */
   redaction?: { ruleset: string; masked: Array<{ token: string; rule: string }> }
+  /** OGR 1.6 — the `host[:port]` this session's last model request was dialled to; absent when unseen. */
+  llm_endpoint?: string
 }
 
 /** One v0.8 finding — what was found, where, and what it contributed. */

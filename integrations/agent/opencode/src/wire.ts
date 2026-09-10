@@ -76,6 +76,12 @@ export interface WireEvent {
    * `ruleset: ""` when it is on but no ruleset was ever obtained.
    */
   redaction?: WireRedaction
+  /**
+   * WHERE THE AGENT POINTED THE MODEL REQUEST — OGR 1.6, `host[:port]`, from the
+   * interceptor's view of this session's last model call. Absent when nothing has
+   * been intercepted for the session: a runtime must not be handed a guess.
+   */
+  llm_endpoint?: string
 }
 
 export interface WireRedaction {
