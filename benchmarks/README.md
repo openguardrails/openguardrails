@@ -51,6 +51,13 @@ suites/security/
   secret_leak.jsonl
 suites/safety/
   unsafe_advice_healthcare.jsonl # synthetic category-expectation fixtures
+suites/safety/                   # grounding corpora + the profiles and worlds that judge them:
+  grounding_ip.jsonl                     # IP answers -> safety.hallucination.* / safety.unsafe_advice.*
+  grounding_life_sciences.jsonl          # trial / drug / approval answers -> the same neutral leaves
+  grounding_{ip,life_sciences}.profile.json   # the evidence envelope each corpus is scored against
+  grounding_{ip,life_sciences}.records.json   # the FROZEN SYNTHETIC record world the profile resolves in
+harness/
+  grounding.py           # the grounding evaluator (runtime-side check + record provider, not a detector)
 suites/security/                 # mandate corpora + the configs that judge them:
   mandate_violation_trading.jsonl  # trading-agent drift -> security.mandate_violation.*
   mandate_violation_secops.jsonl   # security-ops drift  -> same neutral ids
@@ -105,6 +112,37 @@ guard**: a change that breaks a dimension mapping or the lane boundary drops the
 number, and `benchmarks/tests/test_mandate_scoring.py` also proves the metric is
 not vacuous (an empty mandate scores recall 0). Third-party or stricter mandates
 are scored the same way.
+
+## Grounding scoring (the evidence envelope)
+
+`run.py` also scores a **grounding profile** — the operator's declaration of what an
+agent must SHOW before it may CONCLUDE
+([`specification/grounding.md`](../specification/grounding.md)) — over the two
+`grounding_*` corpora. Like the mandate it is kept OUT of the vendor leaderboard: a
+profile is runtime configuration plus a **record provider**, and here the provider
+is a frozen synthetic world (`*.records.json`) so the ground truth cannot move under
+the corpus. It is scored on its own:
+
+- **precision / recall / F1** over the cases a profile OWNS (the seven
+  `safety.hallucination.*` / `safety.unsafe_advice.*` grounding leaves) against the
+  compliant control cases;
+- **leaf** — of the violations it caught, how often it named exactly the right
+  leaves (citation vs attribute vs evidence gap vs jurisdiction vs temporal vs
+  overreach);
+- **lane** — how often it ABSTAINED on cases another detector owns (a tool call, an
+  injection inside a tool result, a leaked key, clinical advice with no record);
+- **unjudged** — how often a provider outage was confessed as `unjudged` rather than
+  fired on as a fabrication or passed silently;
+- **judge** — the fixtures reserved for a model judge (`safety.hallucination.unsupported`:
+  a real record that does not support the proposition attributed to it). The
+  structural reference does not score them; a submitted judge would.
+
+Each corpus carries an `owner` per case (`grounding`, `judge`, or the other detector's
+name) and a `rule` (`OG-IP-003`, `OG-LS-005`) from the catalogues in
+[`proposals/domain-trust-ip-life-sciences.md`](../proposals/domain-trust-ip-life-sciences.md).
+The reference profiles score 1.000 on their seed; `benchmarks/tests/test_grounding_scoring.py`
+proves the metric is not vacuous (an empty profile scores recall 0) and that darkening
+the provider yields `unjudged`, never a finding.
 
 ## Roadmap
 
