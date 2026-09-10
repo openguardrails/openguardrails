@@ -31,6 +31,15 @@ tail-hold streaming. A GuardEvent has exactly three optional fields —
 `integration`, `connection`, `session_hint` — and adding one is an
 additive-optional spec change, never a required one.
 
+Two configuration-only siblings sit beside the wire and never on it: the
+**mandate** (1.3, `specification/mandate.md` — what an agent may DO) and the
+**grounding profile** (1.7 draft, `specification/grounding.md` — what it may
+CLAIM, resolved against a record provider). Verticals (healthcare, trading, IP,
+life sciences) are informative mappings onto the neutral `safety.* / security.* /
+privacy.*` ids — never a taxonomy axis; the domain rule catalogues live in
+`proposals/domain-trust-ip-life-sciences.md`, the profiles and frozen record
+worlds under `benchmarks/suites/safety/grounding_*`.
+
 OGR supports two integration points operationally: agent-direct hooks and
 gateway hooks — same protocol, different vantage. All bindings and runnable
 integration examples belong under `integrations/`; a gateway implementation

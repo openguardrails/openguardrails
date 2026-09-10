@@ -10,6 +10,38 @@ version is independent of any implementation's package version.
 ## [Unreleased]
 
 ### Added
+- **Grounding — the EVIDENCE ENVELOPE (OGR 1.7, DRAFT, `specification/grounding.md`).**
+  The mandate bounds what an agent may DO; a **grounding profile** bounds what it may
+  CLAIM: which identifiers count as references, what the answer may assert about a
+  resolved record, and what a conclusion of a declared class (an FTO view, an efficacy
+  claim, a viability call) must SHOW before it may be rendered. Configuration-only, like
+  the mandate — resolved by workspace, never on the wire — and evaluated against a
+  **record provider** (a patent office, a trial registry, a vendor database) whose
+  credential is the runtime's. Its one new mechanism is the three-way provider answer:
+  *found* → check assertions; *not found* → `safety.hallucination.citation`;
+  *unavailable* → the reference goes in the verdict's `unjudged`, because "could not
+  look" is neither "found nothing" nor "found a fabrication". Default outcome is `flag`,
+  not `block`: an epistemic guardrail's usual remedy is that the answer should say less.
+  Schema: `schema/grounding-profile.schema.json`.
+  - **Seven neutral leaves in the taxonomy** — `safety.hallucination.{citation,
+    attribute, unsupported}` and `safety.unsafe_advice.{overreach, evidence_gap,
+    jurisdiction, temporal}` — domain-neutral by construction (a fabricated patent, a
+    fabricated trial id and a fabricated case citation are one leaf), with **informative
+    intellectual-property and life-sciences mappings** beside healthcare and trading.
+    Verticals stay verticals; the verdict schema's `safety|security|privacy|x` pattern
+    is unchanged.
+  - **Rules carry an honest verifiability label** — `record`, `structural`, or
+    `judgment`. A runtime MUST NOT implement a `judgment` rule (`unsupported`: a real
+    record that does not support the proposition attributed to it) by lexicon and report
+    it as judged; the corpora carry those as fixtures for a model judge.
+  - **Benchmark:** `benchmarks/suites/safety/grounding_{ip,life_sciences}.{jsonl,
+    profile.json, records.json}` — two seed profiles (`OG-IP-*`, `OG-LS-*` rule
+    catalogues in `proposals/domain-trust-ip-life-sciences.md`), two FROZEN SYNTHETIC
+    record worlds, 57 cases; `harness/grounding.py` is the reference evaluator, scored
+    by `run.py` separately from the vendor leaderboard (precision / recall / F1, leaf
+    accuracy, lane discipline, **unjudged honesty**, judge-fixture count). The
+    reference scores 1.000 on its own seed and an empty profile scores recall 0
+    (`benchmarks/tests/test_grounding_*.py`).
 - **`llm_endpoint` on a GuardEvent (OGR 1.6) — WHERE THE AGENT POINTED THE MODEL
   REQUEST.** The sixth optional field: `host[:port]`, no scheme/path/userinfo/query.
   It answers *where did the agent dial*, not *who finally served it* — a gateway sends

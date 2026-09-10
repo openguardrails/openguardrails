@@ -29,3 +29,8 @@ churning the wire. This mirrors the sibling runtime repo's `docs/proposals/`.
 - [`quant-agent-mandate.md`](quant-agent-mandate.md) — a quant/trading-agent
   profile of the [authorization envelope](../specification/mandate.md), with a
   candidate dimension set and the open questions worth deciding with a partner.
+- [`domain-trust-ip-life-sciences.md`](domain-trust-ip-life-sciences.md) — the
+  intellectual-property and life-sciences profiles of the
+  [evidence envelope](../specification/grounding.md): two rule catalogues
+  (`OG-IP-*`, `OG-LS-*`) with their verifiability, what a domain/data partner
+  contributes versus what OGR does, and the open questions.
