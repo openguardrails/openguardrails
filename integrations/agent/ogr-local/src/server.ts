@@ -320,10 +320,14 @@ export async function startProxy(opts: ProxyOptions & { port?: number; host?: st
       // request half already named, and the two would never restore alike.
       const session = body.session ?? pipe.knownSessions()[0] ?? "process"
       const masked = pipe.redactor.maskKnown(session, body.value ?? null)
+      // OGR 1.6: where this session's last model request was dialled — the proxy is
+      // the one thing on this host that saw the URL, so the hook cannot know it otherwise.
+      const endpoint = pipe.hostFor(session)
       return reply(200, {
         value: masked.value,
         changed: masked.changed,
         ...(pipe.report(session) ? { redaction: pipe.report(session) } : {}),
+        ...(endpoint ? { llm_endpoint: endpoint } : {}),
       })
     }
     return reply(404, { error: "not_found" })

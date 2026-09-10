@@ -56,6 +56,8 @@ export const DEFAULT_SESSION = "process"
 export class Pipe {
   readonly counters = { requests: 0, streams: 0, restored: 0, passed: 0, minted: 0 }
   private readonly sessions = new Set<string>()
+  /** session → the `host[:port]` of its most recent model request — the wire's `llm_endpoint` (OGR 1.6). */
+  private readonly lastHost = new Map<string, string>()
 
   constructor(private readonly opts: PipeOptions) {}
 
@@ -87,6 +89,9 @@ export class Pipe {
       ? this.opts.sessionKey({ url, body, headers })
       : (stampedSession(body) ?? DEFAULT_SESSION)
     this.sessions.add(session)
+    // The URL is in hand exactly here: remember where this session's model request
+    // was dialled, for the hook's `llm_endpoint` (OGR 1.6).
+    this.lastHost.set(session, url.host.toLowerCase())
 
     const masked = this.redactor.maskValue(session, body)
     this.counters.requests += 1
@@ -98,6 +103,11 @@ export class Pipe {
       changed: masked.changed,
       minted: masked.minted.length,
     }
+  }
+
+  /** Where this session's most recent model request was dialled — `host[:port]`, or "". */
+  hostFor(session: string): string {
+    return this.lastHost.get(session) ?? ""
   }
 
   /** Put the values back into a buffered reply's tool-call arguments. */

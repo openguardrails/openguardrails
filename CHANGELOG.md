@@ -10,6 +10,20 @@ version is independent of any implementation's package version.
 ## [Unreleased]
 
 ### Added
+- **`llm_endpoint` on a GuardEvent (OGR 1.6) — WHERE THE AGENT POINTED THE MODEL
+  REQUEST.** The sixth optional field: `host[:port]`, no scheme/path/userinfo/query.
+  It answers *where did the agent dial*, not *who finally served it* — a gateway sends
+  the `:authority` it received, an agent-side plugin the host of the URL it intercepted,
+  a hook-based integration with no HTTP view sends nothing and a runtime MUST NOT infer
+  one. What it buys is the one signal nothing in a body can carry: a model request
+  pointed at a host that is no known vendor and not the tenant's own names a RELAY on
+  the model channel, and a credential sitting in the context goes wherever that request
+  goes. A CLAIM per the `integration` rule — record, display, grade; never authorization
+  or policy. ⚠️ A malformed value MUST be ignored, never rejected; the length bound (253)
+  is the only refusal. ⚠️ `.strict()` refuses UNKNOWN keys, so a runtime must ship the
+  key before any producer sends it — rollback order is runtime first. Reference runtime:
+  the `secret_uses` ledger's `llm_endpoint` column and `events.llm_endpoint`
+  (docs/secret-protection-design.md §5).
 - **`reject_value` on a local-redaction rule (OGR 1.4) — the filters travel with the
   patterns.** `GET /v1/rules` now serves, per rule, the closed predicate vocabulary that
   says what the rule refuses to CALL a credential: `placeholder`, `secret_noun`,

@@ -99,6 +99,13 @@ export interface HttpInterceptorHandle {
   status(): InterceptorStatus
   sessions(): string[]
   /**
+   * WHERE THE LAST MODEL REQUEST OF THIS SESSION WAS POINTED — `host[:port]`, the wire's
+   * `llm_endpoint` (OGR 1.6), or `""` when the interceptor has not seen one for the
+   * session. The interceptor is the one seam that holds the URL and mints the tokens at
+   * the same moment, which is what makes an unknown relay host legible to the runtime.
+   */
+  hostFor(session: string): string
+  /**
    * The self-check: a plugin calls this from its tool hook. Returns whether
    * any model traffic has been intercepted; the first `false` fires `onMiss`
    * (default: one warning) — model traffic is not passing through, nothing
@@ -164,6 +171,8 @@ class Core {
   readonly counters = { requests: 0, streams: 0, restored: 0, skipped: 0, minted: 0 }
   readonly unrestorable: string[] = []
   private readonly sessionKeys = new Map<string, true>()
+  /** session → the `host[:port]` of its most recent model request (the wire's `llm_endpoint`). */
+  private readonly lastHost = new Map<string, string>()
   /**
    * The bodies the fetch half is dispatching right now. The undici half sits
    * under it on the same global dispatcher, so a request the fetch wrapper
@@ -188,12 +197,19 @@ class Core {
     return matched ? sniffProtocol(body, url) : null
   }
 
-  noteSession(key: string): void {
+  hostFor(session: string): string {
+    return this.lastHost.get(session) ?? ""
+  }
+  noteSession(key: string, host = ""): void {
     this.sessionKeys.delete(key)
     this.sessionKeys.set(key, true)
+    if (host) this.lastHost.set(key, host.toLowerCase())
     if (this.sessionKeys.size > MAX_SESSIONS) {
       const oldest = this.sessionKeys.keys().next()
-      if (!oldest.done) this.sessionKeys.delete(oldest.value)
+      if (!oldest.done) {
+        this.sessionKeys.delete(oldest.value)
+        this.lastHost.delete(oldest.value)
+      }
     }
   }
   sessions(): string[] {
@@ -228,7 +244,9 @@ class Core {
       redactor.warnUnprotected("this model request")
     }
     const session = this.opts.sessionKey ? this.opts.sessionKey({ url, body, headers }) : (stampedSession(body) ?? DEFAULT_SESSION_KEY)
-    this.noteSession(session)
+    // The URL is in hand exactly here and nowhere else — remember its host for the
+    // wire's `llm_endpoint` (OGR 1.6), the one seam that sees a relay for what it is.
+    this.noteSession(session, url.host)
     const masked = redactor.maskValue(session, body)
     this.sawTraffic = true
     this.counters.requests += 1
@@ -631,6 +649,9 @@ class Handle implements HttpInterceptorHandle {
   }
   sessions(): string[] {
     return this.core.sessions()
+  }
+  hostFor(session: string): string {
+    return this.core.hostFor(session)
   }
   noteToolCall(): boolean {
     return this.core.noteToolCall()

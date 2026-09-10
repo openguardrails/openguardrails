@@ -1,6 +1,6 @@
 // GENERATED — do not edit. Source: integrations/agent/ogr-local/src
 // Rebuild: npm --prefix integrations/agent/ogr-local run bundle
-// OGR_LOCAL_SOURCE_STAMP=54b68e413d1f
+// OGR_LOCAL_SOURCE_STAMP=21e59bc3dd96
 // version=0.2.0
 // ogr-local/src/bundle.ts
 import { pathToFileURL } from "node:url";
@@ -1303,6 +1303,8 @@ var Pipe = class {
   }
   counters = { requests: 0, streams: 0, restored: 0, passed: 0, minted: 0 };
   sessions = /* @__PURE__ */ new Set();
+  /** session → the `host[:port]` of its most recent model request — the wire's `llm_endpoint` (OGR 1.6). */
+  lastHost = /* @__PURE__ */ new Map();
   get redactor() {
     return this.opts.redactor;
   }
@@ -1327,6 +1329,7 @@ var Pipe = class {
     if (!protocol) return null;
     const session = this.opts.sessionKey ? this.opts.sessionKey({ url, body, headers }) : stampedSession(body) ?? DEFAULT_SESSION;
     this.sessions.add(session);
+    this.lastHost.set(session, url.host.toLowerCase());
     const masked = this.redactor.maskValue(session, body);
     this.counters.requests += 1;
     this.counters.minted += masked.minted.length;
@@ -1337,6 +1340,10 @@ var Pipe = class {
       changed: masked.changed,
       minted: masked.minted.length
     };
+  }
+  /** Where this session's most recent model request was dialled — `host[:port]`, or "". */
+  hostFor(session) {
+    return this.lastHost.get(session) ?? "";
   }
   /** Put the values back into a buffered reply's tool-call arguments. */
   restore(plan, text) {
@@ -1564,10 +1571,12 @@ async function startProxy(opts) {
       }
       const session = body.session ?? pipe.knownSessions()[0] ?? "process";
       const masked = pipe.redactor.maskKnown(session, body.value ?? null);
+      const endpoint = pipe.hostFor(session);
       return reply(200, {
         value: masked.value,
         changed: masked.changed,
-        ...pipe.report(session) ? { redaction: pipe.report(session) } : {}
+        ...pipe.report(session) ? { redaction: pipe.report(session) } : {},
+        ...endpoint ? { llm_endpoint: endpoint } : {}
       });
     }
     return reply(404, { error: "not_found" });

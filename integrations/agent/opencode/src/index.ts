@@ -241,6 +241,9 @@ export const OpenGuardrailsPlugin: Plugin = async (_input, options) => {
    */
   const heldCallEvent = (callId: string, name: string, args: unknown, sessionId?: string): WireEvent => {
     const report = masking() && sessionId ? redactor!.report(sessionId) : undefined
+    // OGR 1.6: the host this session's last model request was dialled to — the
+    // interceptor's fact, sent only when it holds one.
+    const endpoint = sessionId ? (http?.hostFor(sessionId) ?? "") : ""
     return {
       kind: "step/response",
       step_id: mintStepId(),
@@ -249,6 +252,7 @@ export const OpenGuardrailsPlugin: Plugin = async (_input, options) => {
       payload: { tool_calls: [{ id: callId, name, arguments: args }] },
       ...(sessionId ? { session_hint: sessionId } : {}),
       ...(report ? { redaction: report } : {}),
+      ...(endpoint ? { llm_endpoint: endpoint } : {}),
     }
   }
 

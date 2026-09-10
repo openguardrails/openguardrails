@@ -405,6 +405,10 @@ export function apply(ctx: Context, config: Config): void {
       const report = redactor.report(sessionKey)
       if (report) sealed = { ...sealed, redaction: report }
     }
+    // OGR 1.6: where this session's last model request was dialled — the interceptor's
+    // fact, sent only when it holds one.
+    const endpoint = http?.hostFor(sessionKey) ?? ""
+    if (endpoint) sealed = { ...sealed, llm_endpoint: endpoint }
     const verdict = await client.evaluate(sealed)
     if (!verdict) counters.evaluate_errors += 1
     return verdict
