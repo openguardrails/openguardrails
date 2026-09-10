@@ -76,6 +76,8 @@ export interface WireEvent {
    * was ever obtained.
    */
   redaction?: WireRedaction
+  /** OGR 1.6 — the `host[:port]` this session's last model request was dialled to; absent when unseen. */
+  llm_endpoint?: string
 }
 
 export interface WireRedaction {

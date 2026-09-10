@@ -60,6 +60,8 @@ export interface TrafficWitness {
   readonly sawTraffic: boolean
   /** The session keys the interceptor has masked under. */
   sessions(): string[]
+  /** The `host[:port]` of the session's most recent model request, or "" — the wire's `llm_endpoint` (OGR 1.6). */
+  hostFor(session: string): string
 }
 
 export class LocalRedactor {

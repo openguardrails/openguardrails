@@ -292,9 +292,12 @@ const plugin: PluginEntry = {
       ctx.sessionKey ? { session_hint: ctx.sessionKey } : {}
 
     /** The OGR 1.4 report for this step, while something provably masks. */
-    const redaction = (ctx: HookCtx): { redaction?: WireEvent["redaction"] } => {
+    const redaction = (ctx: HookCtx): { redaction?: WireEvent["redaction"]; llm_endpoint?: string } => {
       const report = masking() ? redactor!.report(sessionOf(ctx)) : undefined
-      return report ? { redaction: report } : {}
+      // OGR 1.6: where this session's last model request was dialled — the
+      // interceptor's fact, sent only when it holds one.
+      const endpoint = http?.hostFor(sessionOf(ctx)) ?? ""
+      return { ...(report ? { redaction: report } : {}), ...(endpoint ? { llm_endpoint: endpoint } : {}) }
     }
 
     let warnedNoRuntime = false

@@ -47,7 +47,7 @@ const (
 	// 3.0.0–3.1.0 had only the beat), so it is how a deployment learns which build is
 	// in the VM. Kept honest by TestPluginVersionMatchesTheVERSIONFile — 1.3.0 and
 	// 1.4.0 both shipped while a prior constant still said 1.2.0.
-	pluginVersion = "3.12.0"
+	pluginVersion = "3.13.0"
 
 	kindStepRequest  = "step/request"
 	kindStepResponse = "step/response"
@@ -147,6 +147,20 @@ type GuardEvent struct {
 	// ⚠️ omitempty, and "spawned" is deliberately never emitted: a gateway sees one
 	// request, not the session tree that would tell it who spawned whom.
 	Initiator string `json:"initiator,omitempty"`
+	// LlmEndpoint is WHERE THE CLIENT POINTED THE MODEL REQUEST (OGR 1.6): the
+	// `:authority` this gateway RECEIVED, lower-cased, `host[:port]`. It is the
+	// address the agent DIALLED — before this gateway's own routing and before
+	// ai-proxy rewrites the upstream — which is exactly the question the field asks
+	// (spec § llm_endpoint: "where did the agent dial, not who finally served it").
+	//
+	// What it buys the runtime is the one signal a body cannot carry: a credential
+	// sitting in the context goes wherever the request goes, and a request pointed at
+	// a host that is no known vendor and not the tenant's own names a RELAY.
+	//
+	// ⚠️ SELF-DECLARED like `integration` and `initiator` — a RECORD, never an input
+	// to a decision; the runtime enforces that. ⚠️ omitempty: a host that answers no
+	// authority sends nothing rather than "".
+	LlmEndpoint string `json:"llm_endpoint,omitempty"`
 }
 
 // subjectOf assembles the per-request agent identity. The consumer IS the agent: one
@@ -181,6 +195,9 @@ type deriveCtx struct {
 	// ONCE per request and stamped by the one constructor below, so the two halves
 	// of a step cannot disagree about it.
 	initiator string
+	// WHERE THE CLIENT DIALLED — see GuardEvent.LlmEndpoint. Resolved ONCE per request
+	// off `:authority` and stamped by the one constructor below.
+	llmEndpoint string
 	// The CLIENT's wire protocol, detected per request. Never a constant: it was
 	// `openai.chat` for every event an old build sent, which made 693,197 stored
 	// events unfalsifiable. v0.8 makes the field REQUIRED, which is why a request
@@ -203,6 +220,7 @@ func (d *deriveCtx) event(kind string, payload json.RawMessage) *GuardEvent {
 		Integration: integrationID(),
 		Connection:  d.connection,
 		Initiator:   d.initiator,
+		LlmEndpoint: d.llmEndpoint,
 	}
 }
 

@@ -230,6 +230,8 @@ async function sealed(event) {
       ...event,
       ...(body.value ? { payload: body.value } : {}),
       ...(body.redaction ? { redaction: body.redaction } : {}),
+      // OGR 1.6: the host the proxy saw this session's model request dialled to.
+      ...(body.llm_endpoint ? { llm_endpoint: body.llm_endpoint } : {}),
     }
   } catch {
     // Nothing masked this step, so nothing may claim it was masked.
