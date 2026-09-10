@@ -445,6 +445,7 @@ const (
 	ctxAnswered       = "ogr_answered"
 	ctxSkip           = "ogr_skip"
 	ctxInitiator      = "ogr_initiator"
+	ctxLlmEndpoint    = "ogr_llm_endpoint"
 	ctxNotModel       = "ogr_not_model"
 )
 
@@ -621,6 +622,12 @@ func onRequestHeaders(ctx wrapper.HttpContext, cfg Config) types.Action {
 	// body at all.
 	ctx.SetContext(ctxInitiator, workloadInitiator(getHeader))
 
+	// WHERE THE CLIENT DIALLED — the wire's optional `llm_endpoint` (OGR 1.6). A
+	// header fact like `initiator`: `:authority` is what the client configured as its
+	// model host, read BEFORE ai-proxy rewrites the upstream, which is the question the
+	// field asks. See GuardEvent.LlmEndpoint.
+	ctx.SetContext(ctxLlmEndpoint, llmEndpointOf(getHeader(":authority")))
+
 	// The step's ONE coordinate: a fresh opaque id binding this call's two events.
 	// Minted here, always — earlier builds preferred `x-request-id`, and that header
 	// is client-suppliable: a client retrying with the same id would REUSE a step_id
@@ -665,6 +672,29 @@ func onRequestHeaders(ctx wrapper.HttpContext, cfg Config) types.Action {
  * rule verbatim. Which is also why it is NOT stripped from client requests the way the
  * gateway-owned identity headers are: there is nothing to protect.
  */
+// llmEndpointOf normalises a received `:authority` into the wire's `llm_endpoint`:
+// lower-cased `host[:port]`, userinfo stripped, and "" for anything that is not a
+// host — the spec says a malformed value is IGNORED, and the cheapest place to
+// honour that is before it is sent. Bounded at 253 (RFC 1035 plus a port).
+func llmEndpointOf(authority string) string {
+	a := strings.ToLower(strings.TrimSpace(authority))
+	if at := strings.LastIndexByte(a, '@'); at >= 0 {
+		a = a[at+1:]
+	}
+	if i := strings.IndexAny(a, "/?#"); i >= 0 {
+		a = a[:i]
+	}
+	if a == "" || len(a) > 253 {
+		return ""
+	}
+	for _, r := range a {
+		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '.' || r == '-' || r == ':' || r == '[' || r == ']') {
+			return ""
+		}
+	}
+	return a
+}
+
 func workloadInitiator(getHeader func(string) string) string {
 	for _, h := range []string{"x-anthropic-billing-header", "user-agent"} {
 		v := strings.ToLower(getHeader(h))
@@ -790,6 +820,7 @@ func onRequestBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Actio
 			protocol:    proto.Name(),
 			connection:  connectionID(),
 			initiator:   ctx.GetStringContext(ctxInitiator, ""),
+			llmEndpoint: ctx.GetStringContext(ctxLlmEndpoint, ""),
 			mediaLimits: resolveMediaLimits(cfg.mediaMaxBytes),
 		},
 		proto: proto,

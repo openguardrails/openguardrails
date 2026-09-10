@@ -2,7 +2,7 @@
  "$schema": "https://json-schema.org/draft/2020-12/schema",
  "$id": "https://openguardrails.com/schema/1.0/guard-event.schema.json",
  "title": "GuardEvent",
- "description": "A unit observed at an OGR integration point, on the one observed plane: LLM messages. Two kinds: the two halves of a step (one model call). Every field is required except 'integration', 'connection', 'session_hint', (1.4) 'redaction' and (1.5) 'initiator'; the empty string on an identity field is the explicit 'no assertion'. All fields are flat, top-level snake_case; objects are reserved for inherently structured data (payload).",
+ "description": "A unit observed at an OGR integration point, on the one observed plane: LLM messages. Two kinds: the two halves of a step (one model call). Every field is required except 'integration', 'connection', 'session_hint', (1.4) 'redaction', (1.5) 'initiator' and (1.6) 'llm_endpoint'; the empty string on an identity field is the explicit 'no assertion'. All fields are flat, top-level snake_case; objects are reserved for inherently structured data (payload).",
  "type": "object",
  "required": [
   "kind",
@@ -80,6 +80,12 @@
    ],
    "description": "OPTIONAL (OGR 1.5). WHO STARTED the work this step belongs to, when the producer knows and nothing in the body says so: 'scheduled' — a scheduler did, and no person is present; 'spawned' — another agent session did. ABSENT is the normal case and is NOT a claim that a human is present: a producer that cannot tell omits it, and so does one whose banner already says it in the body. There is deliberately no 'human' value — nothing can prove one, so a runtime would have to ignore it. A CLAIM per the `integration` rule: self-declared, a RECORD only, and a runtime MUST NOT derive authorization, policy selection, enforcement or rate limiting from it. A runtime MUST accept an unknown value by ignoring it rather than rejecting the event.",
    "$comment": "The motivating case is a harness whose scheduled runs carry no in-band marker at all — Claude Code's cron injects the user's prompt verbatim and declares the fact only in a request header. A gateway can see that header; the body cannot."
+  },
+  "llm_endpoint": {
+   "type": "string",
+   "maxLength": 253,
+   "description": "OPTIONAL (OGR 1.6). The HOST the agent pointed the model request at — 'host[:port]', no scheme, path, userinfo or query. Answers WHERE THE AGENT DIALLED, not who finally served it: a gateway reports the ':authority' it received, an agent-side plugin the host of the URL it intercepted, an integration with no HTTP view sends nothing. A CLAIM per the `integration` rule: self-declared, a RECORD only, and a runtime MUST NOT derive authorization, policy selection, enforcement or trust from it. A runtime MUST accept a malformed value by ignoring it rather than rejecting the event; the length bound is the only refusal.",
+   "$comment": "What it is for: a credential sitting in the context goes wherever the request goes, and a request pointed at a host that is no known model vendor and not the tenant's own is the one signal that names a RELAY on the model channel — which nothing in the body can reveal."
   },
   "redaction": {
    "type": "object",

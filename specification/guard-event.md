@@ -15,8 +15,9 @@ The optional fields are [`integration`](#integration) — the reporter's own
 downstream-flow id, [`session_hint`](#session_hint), the producer's own
 name for the conversation this step belongs to, — since 1.4 —
 [`redaction`](#redaction), what an integration masked on the host before this
-step left it, and — since 1.5 — [`initiator`](#initiator), who started the work
-this step belongs to. Integrations SHOULD send each when they hold the fact. They are
+step left it, — since 1.5 — [`initiator`](#initiator), who started the work
+this step belongs to, and — since 1.6 — [`llm_endpoint`](#llm_endpoint), the host
+the agent pointed the model request at. Integrations SHOULD send each when they hold the fact. They are
 OPTIONAL rather than required so the two ends of a deployment can roll forward
 independently: making any of them mandatory would reject every build already
 in the field, turning a diagnostic into an outage.
@@ -404,6 +405,41 @@ User-Agent; its own source comments that header "Absent = interactive
 default"). A gateway sitting in front of it can see that; the body cannot. Any
 integration holding an equivalent fact — a cron runner invoking an SDK, a
 harness plugin that knows why it woke up — SHOULD send it.
+
+## `llm_endpoint`
+
+`llm_endpoint` (OGR 1.6) is the HOST the agent pointed the model request at —
+`host[:port]`, no scheme, path, userinfo or query:
+
+```json
+"llm_endpoint": "api.openai.com"
+```
+
+It answers *where did the agent dial*, not *who finally served it*. The
+distinction decides what each integration reports:
+
+- a **gateway** reports the `:authority` it RECEIVED — the address the client
+  configured, before the gateway's own routing and any provider rewrite;
+- an **agent-side plugin** reports the host of the URL it intercepted;
+- an integration with no HTTP view (a hook that sees messages, not requests)
+  sends nothing, and a runtime MUST NOT infer one.
+
+What it is FOR is the credential ledger: a secret that sits in the context
+goes wherever the request goes, and a request pointed at a host that is no
+known model vendor and not the tenant's own is the one signal that names a
+**relay** — a party that is neither the vendor nor the tenant, sitting on the
+model channel, which nothing in the body can reveal.
+
+⚠️ **A runtime MUST accept a malformed value by IGNORING it**, never by
+rejecting the event: a bad claim about where the agent dialled is not a reason
+to lose the event. The only refusal is the length bound (253, RFC 1035 plus a
+port). A runtime SHOULD normalise the value to a lower-cased `host[:port]` and
+MAY take the host out of a full URL a producer sent by mistake.
+
+⚠️ It is a CLAIM, per the [`integration`](#integration) rule: self-declared,
+bounded only by the credential that carried it, and a **RECORD ONLY**. A
+runtime MUST NOT derive authorization, policy selection, enforcement or trust
+from it. Absent is the whole installed base before 1.6.
 
 ## `redaction`
 
