@@ -37,7 +37,7 @@
           "fp": 0,
           "fn": 2,
           "tn": 14,
-          "p95ms": 0.002
+          "p95ms": 0.0023
         },
         "malicious_command": {
           "precision": 1.0,
@@ -47,7 +47,7 @@
           "fp": 0,
           "fn": 4,
           "tn": 14,
-          "p95ms": 0.0022
+          "p95ms": 0.0025
         },
         "data_exfiltration": {
           "precision": 1.0,
@@ -57,7 +57,7 @@
           "fp": 0,
           "fn": 7,
           "tn": 14,
-          "p95ms": 0.0028
+          "p95ms": 0.0032
         },
         "secret_leak": {
           "precision": 1.0,
@@ -67,11 +67,11 @@
           "fp": 0,
           "fn": 6,
           "tn": 14,
-          "p95ms": 0.0021
+          "p95ms": 0.0024
         }
       },
       "macroF1": 0.641,
-      "p95ms": 0.0028
+      "p95ms": 0.0032
     },
     {
       "name": "keyword-baseline",
@@ -85,7 +85,7 @@
           "fp": 4,
           "fn": 7,
           "tn": 10,
-          "p95ms": 0.0037
+          "p95ms": 0.0073
         },
         "malicious_command": {
           "precision": 0.714,
@@ -95,7 +95,7 @@
           "fp": 4,
           "fn": 2,
           "tn": 10,
-          "p95ms": 0.0019
+          "p95ms": 0.0021
         },
         "data_exfiltration": {
           "precision": 0.636,
@@ -105,7 +105,7 @@
           "fp": 4,
           "fn": 3,
           "tn": 10,
-          "p95ms": 0.0018
+          "p95ms": 0.002
         },
         "secret_leak": {
           "precision": 0.556,
@@ -115,11 +115,11 @@
           "fp": 4,
           "fn": 3,
           "tn": 10,
-          "p95ms": 0.0016
+          "p95ms": 0.0018
         }
       },
       "macroF1": 0.611,
-      "p95ms": 0.0037
+      "p95ms": 0.0073
     },
     {
       "name": "block-all",
@@ -163,7 +163,7 @@
           "fp": 14,
           "fn": 0,
           "tn": 0,
-          "p95ms": 0.0
+          "p95ms": 0.0001
         }
       },
       "macroF1": 0.591,
@@ -181,7 +181,7 @@
           "fp": 0,
           "fn": 8,
           "tn": 14,
-          "p95ms": 0.002
+          "p95ms": 0.0035
         },
         "malicious_command": {
           "precision": 1.0,
@@ -191,7 +191,7 @@
           "fp": 0,
           "fn": 4,
           "tn": 14,
-          "p95ms": 0.0016
+          "p95ms": 0.0019
         },
         "data_exfiltration": {
           "precision": 1.0,
@@ -201,7 +201,7 @@
           "fp": 0,
           "fn": 8,
           "tn": 14,
-          "p95ms": 0.0022
+          "p95ms": 0.0025
         },
         "secret_leak": {
           "precision": 1.0,
@@ -211,11 +211,11 @@
           "fp": 0,
           "fn": 6,
           "tn": 14,
-          "p95ms": 0.0017
+          "p95ms": 0.0018
         }
       },
       "macroF1": 0.491,
-      "p95ms": 0.0022
+      "p95ms": 0.0035
     },
     {
       "name": "llm-judge",
@@ -229,7 +229,7 @@
           "fp": 0,
           "fn": 2,
           "tn": 14,
-          "p95ms": 0.0019
+          "p95ms": 0.0031
         },
         "malicious_command": {
           "precision": 1.0,
@@ -239,7 +239,7 @@
           "fp": 0,
           "fn": 10,
           "tn": 14,
-          "p95ms": 0.0007
+          "p95ms": 0.0008
         },
         "data_exfiltration": {
           "precision": 1.0,
@@ -249,7 +249,7 @@
           "fp": 0,
           "fn": 8,
           "tn": 14,
-          "p95ms": 0.0008
+          "p95ms": 0.0009
         },
         "secret_leak": {
           "precision": 0.0,
@@ -259,11 +259,11 @@
           "fp": 0,
           "fn": 8,
           "tn": 14,
-          "p95ms": 0.0006
+          "p95ms": 0.0007
         }
       },
       "macroF1": 0.38,
-      "p95ms": 0.0019
+      "p95ms": 0.0031
     },
     {
       "name": "allow-all",
@@ -287,7 +287,7 @@
           "fp": 0,
           "fn": 12,
           "tn": 14,
-          "p95ms": 0.0
+          "p95ms": 0.0001
         },
         "data_exfiltration": {
           "precision": 0.0,
@@ -307,7 +307,7 @@
           "fp": 0,
           "fn": 8,
           "tn": 14,
-          "p95ms": 0.0
+          "p95ms": 0.0001
         }
       },
       "macroF1": 0.0,
@@ -329,7 +329,7 @@
         "dimensionAccuracy": 1.0,
         "laneDiscipline": 1.0,
         "laneCases": 4,
-        "p95ms": 0.0389
+        "p95ms": 0.0456
       },
       {
         "suite": "mandate_violation_secops",
@@ -344,7 +344,50 @@
         "dimensionAccuracy": 1.0,
         "laneDiscipline": 1.0,
         "laneCases": 5,
-        "p95ms": 0.014
+        "p95ms": 0.0153
+      }
+    ],
+    "macroF1": 1.0
+  },
+  "grounding": {
+    "suites": [
+      {
+        "suite": "grounding_ip",
+        "profile": "grounding_ip.profile.json",
+        "records": "grounding_ip.records.json",
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "tp": 17,
+        "fp": 0,
+        "fn": 0,
+        "tn": 5,
+        "leafAccuracy": 1.0,
+        "laneDiscipline": 1.0,
+        "laneCases": 3,
+        "unjudgedHonesty": 1.0,
+        "unjudgedCases": 1,
+        "judgeCases": 3,
+        "p95ms": 0.1102
+      },
+      {
+        "suite": "grounding_life_sciences",
+        "profile": "grounding_life_sciences.profile.json",
+        "records": "grounding_life_sciences.records.json",
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "tp": 17,
+        "fp": 0,
+        "fn": 0,
+        "tn": 5,
+        "leafAccuracy": 1.0,
+        "laneDiscipline": 1.0,
+        "laneCases": 3,
+        "unjudgedHonesty": 1.0,
+        "unjudgedCases": 1,
+        "judgeCases": 2,
+        "p95ms": 0.1118
       }
     ],
     "macroF1": 1.0
