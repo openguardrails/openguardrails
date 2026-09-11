@@ -34,7 +34,8 @@ that). It is the one coordinate v0.8 kept, because concurrency makes it
 underivable; everything above it is derived server-side, always. The event is
 eight required fields — `kind`, `step_id`, the identity four-tuple (empty string
 = explicit "no assertion"), `llm_protocol`, `payload` — plus the optional
-`integration`, `connection` and (3.11.0) `initiator`. No `ogr_version` (the runtime
+`integration`, `connection`, (3.11.0) `initiator`, (3.13.0) `llm_endpoint` and
+(3.14.0) `transport`. No `ogr_version` (the runtime
 adapts), no `timestamp` (receive time), no declared coordinates and no coordinate echo
 on the verdict.
 

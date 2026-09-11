@@ -67,7 +67,7 @@ func (openAIChat) ParseRequest(body gjson.Result) (*Conversation, bool) {
 			turn := Turn{
 				Role:      RoleAssistant,
 				Text:      chatText(m.Get("content")),
-				Reasoning: m.Get("reasoning_content").String(),
+				Reasoning: chatReasoning(m),
 				Actions:   chatActions(m),
 			}
 			if turn.Text != "" || turn.Reasoning != "" || len(turn.Actions) > 0 {
@@ -113,6 +113,38 @@ func chatText(c gjson.Result) string {
 	return b.String()
 }
 
+// chatReasoningFields are the two spellings a Chat Completions body carries the
+// model's thinking under. `reasoning_content` is the one DeepSeek introduced and
+// vLLM emits; `reasoning` is what OpenRouter normalises to and what the qwen3.6
+// family sends. A vendor sends ONE of them — the assumption that `reasoning` only
+// ever appears BESIDE `reasoning_content` ("some vendors mirror the field") is
+// what this list exists to stop anyone making again.
+//
+// ⚠️ ONE LIST, EVERY READER — the parse, the stream accumulator, the buffered
+// restore and the streamed restore all walk it, because a reader that knows only
+// one spelling fails SILENTLY in whichever direction it sits:
+//
+//   - A PARSE that misses it reports the reply EMPTY. `Output.Empty()` counts a
+//     pure-reasoning reply's whole response half `unreadable`, and a fail-closed
+//     gateway REFUSES it — the 2026-08-23 deepseek loss (9.5% of steps), which was
+//     fixed for `reasoning_content` alone and reappears verbatim one spelling over.
+//   - A RESTORE that misses it hands the client `${OGR_PHONE_1}` in the thinking
+//     pane of an answer whose prose came back correct.
+//
+// Order is the probe order: first spelling PRESENT wins, so a body carrying both
+// is read once rather than twice.
+var chatReasoningFields = [2]string{"reasoning_content", "reasoning"}
+
+// chatReasoning reads whichever spelling a message used.
+func chatReasoning(msg gjson.Result) string {
+	for _, f := range chatReasoningFields {
+		if r := msg.Get(f); r.Type == gjson.String && r.String() != "" {
+			return r.String()
+		}
+	}
+	return ""
+}
+
 func chatActions(msg gjson.Result) []Action {
 	var out []Action
 	for _, tc := range msg.Get("tool_calls").Array() {
@@ -133,7 +165,7 @@ func (openAIChat) ParseResponse(body gjson.Result) Output {
 	msg := body.Get("choices.0.message")
 	return Output{
 		Text:      msg.Get("content").String(),
-		Reasoning: msg.Get("reasoning_content").String(),
+		Reasoning: chatReasoning(msg),
 		Actions:   chatActions(msg),
 		Usage:     chatUsage(body.Get("usage")),
 	}
@@ -197,6 +229,13 @@ func (openAIChat) Restore(body string, mapping map[string]string) (string, bool)
 		return body, false
 	}
 	out, changed := restoreAt(body, "choices.0.message.content", mapping)
+	// The model's thinking, under whichever spelling this vendor used — both are
+	// restored when both are present, because a client reads one of them and
+	// nothing here says which. See chatReasoningFields.
+	for _, f := range chatReasoningFields {
+		next, ok := restoreAt(out, "choices.0.message."+f, mapping)
+		out, changed = next, changed || ok
+	}
 	// ⚠️ The arguments are not an afterthought, they are the half that MATTERS. An
 	// unrestored line of prose is a cosmetic defect the reader can see; an unrestored
 	// `{"to": "${OGR_EMAIL_1}"}` is an agent acting on a value that names nothing —
@@ -417,6 +456,12 @@ type chatDecoder struct {
 	textBuf      string
 	reasoningBuf string
 
+	// reasoningSeen[i] records that this stream carried chatReasoningFields[i], so
+	// a flushed tail is emitted under every spelling the client has been reading —
+	// emitting only the first would leave a mirroring vendor's client short its
+	// last few characters, which is the defect Flush exists to prevent.
+	reasoningSeen [len(chatReasoningFields)]bool
+
 	// frames counts data payloads recognised as THIS protocol's — a chunk
 	// carrying a `choices` array or a `usage` object, or the `[DONE]`
 	// terminator, which no other protocol of the three emits. See
@@ -508,15 +553,29 @@ func (d *chatDecoder) Line(line string, isLast bool) string {
 		d.text.WriteString(c.String())
 		modified = d.rewrite(modified, "choices.0.delta.content", &d.textBuf, c.String(), isLast)
 	}
-	if c := parsed.Get("choices.0.delta.reasoning_content"); c.Type == gjson.String {
-		d.reasoning.WriteString(c.String())
-		before := modified
-		modified = d.rewrite(modified, "choices.0.delta.reasoning_content", &d.reasoningBuf, c.String(), isLast)
-		// Some vendors mirror the field; keep the two consistent or a client reading
-		// the other one shows placeholders.
-		if modified != before && parsed.Get("choices.0.delta.reasoning").Exists() {
-			if next, err := sjson.Set(modified, "choices.0.delta.reasoning",
-				gjson.Get(modified, "choices.0.delta.reasoning_content").String()); err == nil {
+	// ⚠️ ACCUMULATED ONCE, RESTORED ONCE, THEN COPIED — see chatReasoningFields.
+	// The pending tail is ONE buffer, so feeding a mirrored pair through the
+	// restorer twice would consume it twice and the second field would come out
+	// mangled. The other spelling gets a COPY of the restored value, and only when
+	// it arrived EQUAL to the field we restored: two fields carrying different text
+	// are two different things, and overwriting one with the other would invent
+	// content the model never produced.
+	if i, original, ok := chatDeltaReasoning(parsed); ok {
+		field := chatReasoningFields[i]
+		d.reasoningSeen[i] = true
+		d.reasoning.WriteString(original)
+		modified = d.rewrite(modified, "choices.0.delta."+field, &d.reasoningBuf, original, isLast)
+		restored := gjson.Get(modified, "choices.0.delta."+field).String()
+		for j, other := range chatReasoningFields {
+			if j == i {
+				continue
+			}
+			o := parsed.Get("choices.0.delta." + other)
+			if o.Type != gjson.String || o.String() != original {
+				continue
+			}
+			d.reasoningSeen[j] = true
+			if next, err := sjson.Set(modified, "choices.0.delta."+other, restored); err == nil {
 				modified = next
 			}
 		}
@@ -553,6 +612,18 @@ func (d *chatDecoder) Line(line string, isLast bool) string {
 	return prefix + "data: " + modified
 }
 
+// chatDeltaReasoning picks the reasoning field this delta carries: the index into
+// chatReasoningFields of the first spelling PRESENT, and its text. A frame with
+// neither answers false.
+func chatDeltaReasoning(parsed gjson.Result) (int, string, bool) {
+	for i, f := range chatReasoningFields {
+		if c := parsed.Get("choices.0.delta." + f); c.Type == gjson.String {
+			return i, c.String(), true
+		}
+	}
+	return 0, "", false
+}
+
 func (d *chatDecoder) rewrite(frame, path string, buf *string, original string, isLast bool) string {
 	restored := d.r.Feed(buf, original, isLast)
 	if restored == original {
@@ -572,13 +643,31 @@ func (d *chatDecoder) Flush() string {
 		Index    int `json:"index"`
 		Function fn  `json:"function"`
 	}
-	delta := struct {
-		Content   string `json:"content,omitempty"`
-		Reasoning string `json:"reasoning_content,omitempty"`
-		ToolCalls []call `json:"tool_calls,omitempty"`
-	}{Content: d.textBuf, Reasoning: d.reasoningBuf}
+	// ⚠️ A MAP, not a tagged struct, because the reasoning field's NAME is the
+	// stream's, not ours: a reply that arrived as `reasoning` must not have its
+	// tail flushed under `reasoning_content`, which the client is not reading.
+	delta := map[string]any{}
+	if d.textBuf != "" {
+		delta["content"] = d.textBuf
+	}
+	if d.reasoningBuf != "" {
+		sighted := false
+		for i, seen := range d.reasoningSeen {
+			if seen {
+				delta[chatReasoningFields[i]] = d.reasoningBuf
+				sighted = true
+			}
+		}
+		// A held tail with no sighting is unreachable — the buffer only fills from a
+		// delta — but a tail dropped on the floor is exactly the loss Flush exists to
+		// prevent, so it goes out under the commoner spelling rather than nowhere.
+		if !sighted {
+			delta[chatReasoningFields[0]] = d.reasoningBuf
+		}
+	}
 	d.textBuf, d.reasoningBuf = "", ""
 
+	var calls []call
 	idx := make([]int, 0, len(d.calls))
 	for i := range d.calls {
 		idx = append(idx, i)
@@ -589,10 +678,13 @@ func (d *chatDecoder) Flush() string {
 		if c.pending == "" {
 			continue
 		}
-		delta.ToolCalls = append(delta.ToolCalls, call{Index: i, Function: fn{Arguments: c.pending}})
+		calls = append(calls, call{Index: i, Function: fn{Arguments: c.pending}})
 		c.pending = ""
 	}
-	if delta.Content == "" && delta.Reasoning == "" && len(delta.ToolCalls) == 0 {
+	if len(calls) > 0 {
+		delta["tool_calls"] = calls
+	}
+	if len(delta) == 0 {
 		return ""
 	}
 	out, err := json.Marshal(map[string]any{

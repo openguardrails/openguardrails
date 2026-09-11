@@ -743,6 +743,41 @@ func connectionID() string {
 	return inst + "#" + strconv.FormatUint(ordinal, 36)
 }
 
+/*
+ * envoyRequestTime is WHEN ENVOY SAW THIS REQUEST — the other end of the span whose
+ * near end is this plugin's hook, i.e. the filter chain and the body buffering that
+ * happen before any guardrail exists.
+ *
+ * ⚠️ SAME PROCESS, SAME CLOCK as `time.Now()` here, which is the only reason the
+ * subtraction is legitimate at all. Every other pair of instants in this feature
+ * spans two machines and is handled by the NTP formulas instead.
+ *
+ * ⚠️ The property is an int64 of NANOSECONDS since the epoch, little-endian — but
+ * the encoding is Envoy's, not the ABI's, so a host that spells it differently would
+ * hand back a plausible-looking integer. Hence the sanity window: a value that is
+ * not within the last minute is not a slow filter chain, it is a different encoding,
+ * and it answers 0 = NOT MEASURED. A wrong number here would land in an analytics
+ * column and be read as a fact.
+ */
+func envoyRequestTime() time.Time {
+	raw, err := proxywasm.GetProperty([]string{"request", "time"})
+	if err != nil || len(raw) < 8 {
+		return time.Time{}
+	}
+	var nanos int64
+	for i := 0; i < 8; i++ {
+		nanos |= int64(raw[i]) << (8 * uint(i))
+	}
+	if nanos <= 0 {
+		return time.Time{}
+	}
+	at := time.Unix(0, nanos)
+	if d := time.Since(at); d < 0 || d > time.Minute {
+		return time.Time{}
+	}
+	return at
+}
+
 // stepSeq disambiguates step ids minted in the same nanosecond. Per-VM (each Envoy
 // worker has its own Wasm VM), which is exactly enough: within a VM the counter
 // separates them, across VMs a same-nanosecond collision would also need equal
@@ -773,6 +808,9 @@ func onRequestBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Actio
 	if ctx.GetBoolContext(ctxSkip, false) || len(body) == 0 {
 		return types.ActionContinue
 	}
+	// ⚠️ THE FIRST LINE THAT DOES WORK, because everything below it is time the
+	// caller is paying for and nothing above it is ours (OGR 1.8, `transport`).
+	hookAt := time.Now()
 	parsed := gjson.ParseBytes(body)
 	subj := subjectFromCtx(ctx, cfg)
 
@@ -816,10 +854,15 @@ func onRequestBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Actio
 	rs := &reqState{
 		session: newSessionState(),
 		derive: &deriveCtx{
-			subj:        subj,
-			stepID:      stepID,
-			protocol:    proto.Name(),
-			connection:  connectionID(),
+			subj:       subj,
+			stepID:     stepID,
+			protocol:   proto.Name(),
+			connection: connectionID(),
+			// The two ends of `transport.GwMs` — what the gateway spent before a
+			// guardrail existed. `envoyRequestTime` answers zero where the host will
+			// not say, and the field is then omitted rather than guessed.
+			envoyAt:     envoyRequestTime(),
+			hookAt:      hookAt,
 			initiator:   ctx.GetStringContext(ctxInitiator, ""),
 			llmEndpoint: ctx.GetStringContext(ctxLlmEndpoint, ""),
 			mediaLimits: resolveMediaLimits(cfg.mediaMaxBytes),
@@ -899,8 +942,15 @@ func startSpeculative(ctx wrapper.HttpContext, cfg Config, rs *reqState, e *Guar
 		finishRequest(ctx, rs, body)
 		return
 	}
+	// ⚠️ The dispatch instant is closed over rather than threaded through
+	// `callResponse` (dispatch.go deliberately keeps that signature narrow): only the
+	// two REQUEST-half calls a caller actually waits on are timed, because only they
+	// are in front of the first token — and only the request half has a later event
+	// of its own to carry the answer. See `observeEvaluate`.
+	fastSentAt := time.Now()
 	err = cfg.client.post(cfg.evaluatePath, laneHeaders(cfg, laneFast), payload, cfg.timeoutMs,
 		func(status int, respBody []byte) {
+			rs.derive.observeEvaluate(fastSentAt, time.Now(), parseVerdict(respBody))
 			onFastVerdict(ctx, cfg, rs, payload, body, status, respBody)
 		})
 	if err != nil {
@@ -1024,8 +1074,12 @@ func enforceRequest(ctx wrapper.HttpContext, cfg Config, rs *reqState, e *GuardE
 		finishRequest(ctx, rs, body)
 		return
 	}
+	// The serial enforce path's request half — the call the caller is held on. See
+	// the fast lane above for why the instant is closed over.
+	sentAt := time.Now()
 	err = cfg.client.post(cfg.evaluatePath, ogrHeaders(cfg), payload, cfg.timeoutMs,
 		func(status int, respBody []byte) {
+			rs.derive.observeEvaluate(sentAt, time.Now(), parseVerdict(respBody))
 			onInputVerdict(ctx, cfg, rs, body, status, respBody)
 		})
 	if err != nil {

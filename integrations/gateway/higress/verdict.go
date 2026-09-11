@@ -1,6 +1,8 @@
 package main
 
 import (
+	"time"
+
 	"github.com/tidwall/gjson"
 )
 
@@ -44,6 +46,33 @@ func (v verdict) Stops() bool { return v.Decision() == "block" }
 // attacker a detector oracle — so the refusal is a fixed sentence.
 func (v verdict) Reason() string {
 	return "This request was refused by the organization's AI usage policy."
+}
+
+/*
+ * Timing is the runtime's own two instants (OGR 1.8): when it received the request
+ * and when it serialized this verdict. Zero times when the verdict carries none —
+ * an older runtime, or one that answered before the field existed.
+ *
+ * ⚠️ NEITHER IS TO BE SUBTRACTED FROM THIS PROCESS'S CLOCK. They are two points of
+ * an NTP exchange whose other two this gateway holds (dispatch, receive), and the
+ * formulas in `observeEvaluate` are what turn them into a network duration without
+ * either end trusting the other's clock. Subtracting one of them from `time.Now()`
+ * measures the clock offset and calls it latency — which is exactly the reading this
+ * plugin's own `timing.completed_at` once produced at a steady 2.1 seconds.
+ */
+func (v verdict) Timing() (received, responded time.Time) {
+	t := v.root.Get("timing")
+	if !t.IsObject() {
+		return time.Time{}, time.Time{}
+	}
+	parse := func(k string) time.Time {
+		at, err := time.Parse(time.RFC3339Nano, t.Get(k).String())
+		if err != nil {
+			return time.Time{}
+		}
+		return at
+	}
+	return parse("received_at"), parse("responded_at")
 }
 
 // Spans returns the modification spans the runtime asks this PEP to apply in place:
