@@ -45,6 +45,9 @@ func TestOffsetsAreCharactersNotBytes(t *testing.T) {
 	// The regression this suite exists for: on a Chinese prompt, byte slicing lands a
 	// third of the way into the span, so the value that had to be removed reaches the
 	// model while the logs say "masked". Found live 2026-07-30.
+	//
+	// The repo is English-only; the non-ASCII literal below is the fixture, not prose.
+	// Rewriting it in ASCII makes every character one byte and this test vacuous.
 	body := `{"messages":[{"role":"user","content":"请原样复述这个邮箱：kate@example.com"}]}`
 	spans := []Span{{
 		Path: "payload.messages.0.content", Start: 10, End: 26,

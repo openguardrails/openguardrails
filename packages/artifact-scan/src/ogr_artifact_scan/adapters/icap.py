@@ -1,8 +1,8 @@
 """ICAP RESPMOD (RFC 3507) — how every enterprise AV/DLP appliance already
 accepts bytes.
 
-⚠️⚠️ **This is the adapter that matters for private deployment.** A bank or a 大厂
-has an ICAP endpoint today and no appetite for a new API; asking them to implement
+⚠️⚠️ **This is the adapter that matters for private deployment.** A bank or a large
+enterprise has an ICAP endpoint today and no appetite for a new API; asking them to implement
 our JSON is asking them not to buy. It is worth more than the other adapters
 combined for exactly that reason.
 

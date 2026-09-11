@@ -430,7 +430,7 @@ def _replacement_for(span: dict[str, Any]) -> str:
     """What goes in place of a span: the verdict's own `replacement` — a
     `${OGR_PHONE_1}`-style placeholder, stable per value, so two mentions of
     one number still read as one number. `OGR_REDACT_MASK` swaps in a flat
-    string (e.g. `[已隐去]`) for customer-facing output, at the cost of that
+    string (e.g. `[redacted]`) for customer-facing output, at the cost of that
     distinction — a fair trade at the end of the line, where nobody restores
     anything."""
     mask = os.environ.get("OGR_REDACT_MASK", "").strip()
