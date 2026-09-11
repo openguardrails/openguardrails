@@ -46,6 +46,20 @@ integration examples belong under `integrations/`; a gateway implementation
 is not an OGR-operated service. `examples/minimal-agent/` is the runnable
 form of the spec's minimal integration.
 
+## Language
+
+This repository is **English-only**. That covers source, docs, comments, the
+CHANGELOG — and equally **commit messages and pull request titles/bodies**.
+It is a public open-standard repo: outside implementers read the history as
+well as the files. Discuss the work in whatever language you like; nothing
+written into the repo follows.
+
+The one exception is a CJK **test fixture** that exists to exercise
+multibyte/UTF-8 behaviour — `integrations/gateway/higress/redact_test.go`
+(`TestOffsetsAreCharactersNotBytes`) and `tailhold_test.go` (a byte budget
+spent on 3-byte chunks) go vacuous in ASCII. Their comments stay English,
+and each says why the literal is there.
+
 ## Integration status (2026-08-15)
 
 - `integrations/gateway/higress` — the v0.8 reference gateway integration

@@ -289,7 +289,8 @@ not.
 **Not while it grows.** The pipeline measured mid-stream judgement directly: at
 25% of the reply visible, false positives on `mt_harm_correct` are 0.353
 against 0.000 on the whole reply — all of it the answer that agrees on the
-surface and corrects underneath ("是的，很多人有这种念头——但这个想法是错的").
+surface and corrects underneath ("Yes, a lot of people think that — but the
+thought is wrong").
 Early detection is a fit prefilter and an unfit blocking criterion. v0.8
 codified the alternative (and deleted the `ogr-partial` interim evaluates and
 the `output_mode` lane switch that preceded it); **3.10.0 moved the bound from

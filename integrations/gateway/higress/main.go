@@ -503,7 +503,8 @@ type reqState struct {
 	// ended: the upstream stream is complete and the final judgement is waiting on
 	// `input`. ⚠️ Without this the response half could be put to the PDP while the
 	// request half was still in flight — two evaluates for one step, concurrently,
-	// which is exactly the case a short refusal ("我不能回答", five tokens) produces.
+	// which is exactly the case a short refusal ("I can't answer that", five tokens)
+	// produces.
 	ended bool
 	// lastOut is when a byte last reached the caller, for the keepalive below.
 	lastOut time.Time

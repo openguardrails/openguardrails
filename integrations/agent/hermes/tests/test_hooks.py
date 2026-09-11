@@ -115,20 +115,22 @@ def test_response_block_denies_the_rounds_tool_calls(guarded):
 
 def test_response_block_withholds_the_answer(guarded):
     guarded.decide = _block_on("step/response")
-    _round(guarded, text="去哪都好玩")
-    out = bridge.on_transform_llm_output(response_text="去哪都好玩", session_id="s-1")
+    _round(guarded, text="anywhere you go is fun")
+    out = bridge.on_transform_llm_output(response_text="anywhere you go is fun",
+                                         session_id="s-1")
     assert isinstance(out, str) and out
-    assert "去哪都好玩" not in out
+    assert "anywhere you go is fun" not in out
     # The refusal reaches an end user: no taxonomy ids, no finding internals.
     assert "security." not in out and "OGR" not in out
 
 
 def test_tenant_owns_the_refusal_copy(guarded, clean_env):
-    clean_env.setenv("OGR_REFUSAL_TEXT", "抱歉，我只能回答本行业务相关的问题。")
+    clean_env.setenv("OGR_REFUSAL_TEXT",
+                     "Sorry, I can only answer questions about our own business.")
     guarded.decide = _block_on("step/response")
     _round(guarded)
     assert bridge.on_transform_llm_output(response_text="x", session_id="s-1") \
-        == "抱歉，我只能回答本行业务相关的问题。"
+        == "Sorry, I can only answer questions about our own business."
 
 
 def test_a_block_never_leaks_into_the_next_round(guarded):

@@ -151,6 +151,8 @@ func TestTheBudgetIsACeilingAndIsNeverOvershot(t *testing.T) {
  * budget to 0 — and that is the only way to have it.
  */
 func TestACleanRefusalNowRequiresAZeroBudget(t *testing.T) {
+	// English-only repo, deliberate exception: the head budget is counted in BYTES,
+	// so the chunks have to be multibyte for the arithmetic below to mean anything.
 	refusal := []string{"抱歉，", "我不能", "回答这个问题。"} // 9 + 9 + 21 = 39 bytes
 
 	f := &tailFixture{h: newTailHold(32, true)}

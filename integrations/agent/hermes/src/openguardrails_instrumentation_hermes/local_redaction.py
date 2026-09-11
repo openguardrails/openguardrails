@@ -1,6 +1,6 @@
 """Local secrets redaction — the secret never leaves the host (OGR 1.4).
 
-The reversible half of "脱敏": mask every secret in the OUTBOUND model request
+The reversible half of redaction: mask every secret in the OUTBOUND model request
 into a `${OGR_SECRET_n}` token before it leaves the machine, restore the value
 into a tool's arguments on the way INTO the tool — after every judgement and
 approval — and never anywhere else. Stdlib only, like the rest of this
