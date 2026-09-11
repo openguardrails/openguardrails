@@ -75,6 +75,96 @@ func TestVendorReasoningIsReadAsReasoning(t *testing.T) {
 	}
 }
 
+func TestBareReasoningIsReadAsReasoning(t *testing.T) {
+	// ⚠️ THE OTHER SPELLING, AND IT ARRIVES ALONE. `reasoning_content` is DeepSeek's
+	// and vLLM's; `reasoning` is what OpenRouter normalises to and what the qwen3.6
+	// family sends — 240 deltas of it against 0 of `reasoning_content` on the traffic
+	// that found this. A reader that knows only the first reports the reply EMPTY.
+	conv, _ := openAIChat{}.ParseRequest(gjson.Parse(`{"messages":[
+	  {"role":"user","content":"go"},
+	  {"role":"assistant","content":"sure","reasoning":"first I will..."}]}`))
+	if got := conv.Turns[1].Reasoning; got != "first I will..." {
+		t.Errorf("request turn Reasoning = %q", got)
+	}
+	out := openAIChat{}.ParseResponse(gjson.Parse(
+		`{"choices":[{"message":{"role":"assistant","content":"sure","reasoning":"because"}}]}`))
+	if out.Reasoning != "because" {
+		t.Errorf("response Reasoning = %q", out.Reasoning)
+	}
+	if out.Empty() {
+		t.Error("a reply with prose and bare reasoning reads as empty")
+	}
+}
+
+func TestBufferedRestoreCoversBothReasoningSpellings(t *testing.T) {
+	// An unrestored placeholder in the thinking pane is the cosmetic half of the
+	// same defect — and it was ONLY ever fixed for one spelling, in the stream.
+	mapping := map[string]string{"${OGR_PHONE_1}": "13800000000"}
+	for _, field := range []string{"reasoning_content", "reasoning"} {
+		body := `{"choices":[{"message":{"content":"done","` + field + `":"call ${OGR_PHONE_1} first"}}]}`
+		out, changed := openAIChat{}.Restore(body, mapping)
+		if !changed {
+			t.Fatalf("%s: nothing restored", field)
+		}
+		if got := gjson.Get(out, "choices.0.message."+field).String(); got != "call 13800000000 first" {
+			t.Errorf("%s restored to %q", field, got)
+		}
+	}
+}
+
+func TestAStreamedBareReasoningIsAccumulatedAndRestored(t *testing.T) {
+	// Both halves of the bug in one stream: the text has to reach Output (or the
+	// response half is lost as `unreadable`), and the placeholder has to come back
+	// out restored under the SPELLING THE CLIENT IS READING.
+	mapping := map[string]string{"${OGR_PHONE_1}": "13800000000"}
+	dec := openAIChat{}.NewDecoder(NewRestorer(mapping))
+	scan := NewScanner(dec)
+	var out strings.Builder
+	for _, frag := range []string{"call ${OGR", "_PHONE", "_1} now"} {
+		out.Write(scan.Chunk([]byte(`data: {"choices":[{"delta":{"reasoning":"`+frag+`"}}]}`+"\n\n"), false))
+	}
+	out.Write(scan.Chunk([]byte("data: [DONE]\n\n"), true))
+
+	got := dec.Output()
+	if got.Reasoning != "call ${OGR_PHONE_1} now" {
+		t.Errorf("accumulated reasoning = %q", got.Reasoning)
+	}
+	if got.Empty() {
+		t.Error("a pure bare-reasoning reply reads as empty")
+	}
+	if !strings.Contains(out.String(), "13800000000") {
+		t.Errorf("placeholder not restored to the client:\n%s", out.String())
+	}
+	if strings.Contains(out.String(), "${OGR_PHONE_1}") {
+		t.Errorf("placeholder still on the wire:\n%s", out.String())
+	}
+	// ⚠️ The held tail is flushed under the stream's OWN spelling: a client reading
+	// `reasoning` never sees a `reasoning_content` frame.
+	if strings.Contains(out.String(), "reasoning_content") {
+		t.Errorf("flushed under the wrong field name:\n%s", out.String())
+	}
+}
+
+func TestAMirroredReasoningPairStaysConsistent(t *testing.T) {
+	// A vendor that sends both must not be accumulated twice (one pending tail is
+	// shared) and must not be delivered half-restored.
+	mapping := map[string]string{"${OGR_PHONE_1}": "13800000000"}
+	dec := openAIChat{}.NewDecoder(NewRestorer(mapping))
+	scan := NewScanner(dec)
+	var out strings.Builder
+	line := `data: {"choices":[{"delta":{"reasoning_content":"call ${OGR_PHONE_1}","reasoning":"call ${OGR_PHONE_1}"}}]}` + "\n\n"
+	out.Write(scan.Chunk([]byte(line), false))
+	out.Write(scan.Chunk([]byte("data: [DONE]\n\n"), true))
+
+	if got := dec.Output().Reasoning; got != "call ${OGR_PHONE_1}" {
+		t.Errorf("mirrored reasoning counted %d times: %q", strings.Count(got, "call"), got)
+	}
+	frame := out.String()
+	if strings.Count(frame, "13800000000") != 2 {
+		t.Errorf("both spellings should carry the restored value:\n%s", frame)
+	}
+}
+
 func TestAHalfTokenSplitAcrossArgumentDeltasStillRestores(t *testing.T) {
 	// ⚠️ The normal case, not the exception: deltas are token-sized and the placeholder
 	// is fourteen characters. Restoring only when a whole token fits inside one delta is

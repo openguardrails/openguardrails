@@ -131,6 +131,24 @@ func TestAPureReasoningReplyIsNotEmpty(t *testing.T) {
 	}
 }
 
+func TestAPureBareReasoningReplyIsNotEmpty(t *testing.T) {
+	// ⚠️ THE SAME LOSS, ONE SPELLING OVER. The fix above was written against
+	// `reasoning_content` and the vendor list moved: qwen3.6-plus streams
+	// `reasoning` and nothing else (240 deltas to 0 on the traffic that found it),
+	// so the reply read EMPTY again — `unreadable` on observe, REFUSED under
+	// fail-closed — and the placeholders in it were never restored. Both halves
+	// followed from one `if`, which is why this test guards the pair.
+	sp := newStreamProcessor(chatProto(t), nil, true, time.Time{}, false)
+	sp.ProcessChunk([]byte(`data: {"choices":[{"index":0,"delta":{"role":"assistant","reasoning":"Let me check the ledger first."}}]}`+"\n\n"), false)
+	sp.ProcessChunk([]byte(`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`+"\n\n"+"data: [DONE]\n\n"), true)
+	if sp.Result().Empty() {
+		t.Fatal("a pure bare-reasoning reply reads as empty — its response half is lost as 'unreadable'")
+	}
+	if got := sp.Result().Reasoning; got != "Let me check the ledger first." {
+		t.Fatalf("reasoning not reassembled: %q", got)
+	}
+}
+
 func TestAWellFormedEmptyStreamRecognisesFrames(t *testing.T) {
 	// The model genuinely producing NOTHING (the "[no visible output]" nudge
 	// loops) is a well-formed stream with empty deltas. It must be separable
