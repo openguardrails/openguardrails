@@ -47,7 +47,7 @@ const (
 	// 3.0.0–3.1.0 had only the beat), so it is how a deployment learns which build is
 	// in the VM. Kept honest by TestPluginVersionMatchesTheVERSIONFile — 1.3.0 and
 	// 1.4.0 both shipped while a prior constant still said 1.2.0.
-	pluginVersion = "3.13.0"
+	pluginVersion = "3.14.0"
 
 	kindStepRequest  = "step/request"
 	kindStepResponse = "step/response"
@@ -161,6 +161,51 @@ type GuardEvent struct {
 	// to a decision; the runtime enforces that. ⚠️ omitempty: a host that answers no
 	// authority sends nothing rather than "".
 	LlmEndpoint string `json:"llm_endpoint,omitempty"`
+	// Transport is WHERE THE TIME WENT on the way to a verdict (OGR 1.8) — see the
+	// `transport` type. Omitted whole when nothing was measured.
+	Transport *transport `json:"transport,omitempty"`
+}
+
+// transport carries the hop durations this gateway can measure, so a TTFT
+// regression is attributable to a LAYER instead of argued about.
+//
+// ⚠️⚠️ **EVERY FIELD IS A DURATION MEASURED INSIDE ONE CLOCK, AND THAT IS THE WHOLE
+// DESIGN.** The obvious build — stamp four timestamps, subtract the neighbours —
+// produces one number spanning two machines' clocks, and it is not a small error:
+// this gateway's own `timing.completed_at` was once measured a steady 2.1s AHEAD of
+// the runtime's receive time on 2,997 of 3,000 events, on a LAB box whose container
+// clock matched its host to under a second. Read as network, that is two seconds of
+// fiction. `timing`'s spec section states the rule; this type obeys it.
+//
+// `NetMs` is the exception that proves it: it is the round trip THIS process timed,
+// minus the `server_ms` the runtime reported for the same call — two same-clock
+// differences subtracted, which is the NTP delay formula and needs no synchronised
+// clocks. ⚠️ It does not split into outbound and inbound. That split is unavailable
+// without synchronised clocks and must not be invented by halving this.
+type transport struct {
+	// GwMs: Envoy received the request → this plugin's hook ran. Filter chain and
+	// body buffering, i.e. everything the gateway does before a guardrail exists.
+	GwMs int64 `json:"gw_ms,omitempty"`
+	// PluginMs: this plugin's hook entry → the event was BUILT.
+	//
+	// ⚠️ The final `json.Marshal` and the dispatch itself are OUTSIDE this number and
+	// outside `NetMs` (which starts at the dispatch). That sliver is the copy of an
+	// already-serialised payload, and naming it here is better than folding it into
+	// "network", where it would be indistinguishable from a slow hop.
+	PluginMs int64 `json:"plugin_ms,omitempty"`
+	// NetMs: the wire, both directions, for THIS STEP's request-half evaluate.
+	//
+	// ⚠️ It rides the step/response because a round trip is only known once it ends —
+	// the request half's own row cannot carry it. The request half is the one in
+	// front of the first token, which is why that is the half worth carrying.
+	NetMs int64 `json:"net_ms,omitempty"`
+	// SkewMs: this gateway's clock MINUS the runtime's (the NTP offset), signed.
+	//
+	// ⚠️ A DIAGNOSTIC AND NOTHING ELSE. Nothing corrects by it — a correction would
+	// make every stored duration depend on a number that moves — it is here so the
+	// next "is the customer's gateway seven hours behind?" is a reading rather than
+	// an investigation.
+	SkewMs int64 `json:"skew_ms,omitempty"`
 }
 
 // subjectOf assembles the per-request agent identity. The consumer IS the agent: one
@@ -198,6 +243,17 @@ type deriveCtx struct {
 	// WHERE THE CLIENT DIALLED — see GuardEvent.LlmEndpoint. Resolved ONCE per request
 	// off `:authority` and stamped by the one constructor below.
 	llmEndpoint string
+	// WHEN ENVOY SAW THE REQUEST and when this plugin's hook ran — the two ends of
+	// `transport.GwMs`, both on THIS process's clock. A zero `envoyAt` means the host
+	// would not answer the property, and the field is then omitted rather than
+	// guessed.
+	envoyAt time.Time
+	hookAt  time.Time
+	// The request half's completed evaluate, filled by `onInputVerdict` and stamped
+	// onto the RESPONSE event by the one constructor. Zero until that call returns —
+	// which is why the request event never carries them.
+	netMs  int64
+	skewMs int64
 	// The CLIENT's wire protocol, detected per request. Never a constant: it was
 	// `openai.chat` for every event an old build sent, which made 693,197 stored
 	// events unfalsifiable. v0.8 makes the field REQUIRED, which is why a request
@@ -221,7 +277,84 @@ func (d *deriveCtx) event(kind string, payload json.RawMessage) *GuardEvent {
 		Connection:  d.connection,
 		Initiator:   d.initiator,
 		LlmEndpoint: d.llmEndpoint,
+		// ⚠️ HERE, like every other per-request fact, and for the same reason: a
+		// second construction path is how a field goes missing on one kind of event
+		// only. `PluginMs` is measured AT CONSTRUCTION, so it is this plugin's work up
+		// to the moment the event existed — see the type.
+		Transport: d.transportNow(),
 	}
+}
+
+// transportNow renders what is measurable at the moment an event is built. Returns
+// nil when nothing is — an absent object, never one full of zeros: a zero that means
+// "not measured" and a zero that means "instant" must not be the same bytes.
+func (d *deriveCtx) transportNow() *transport {
+	t := transport{NetMs: d.netMs, SkewMs: d.skewMs}
+	if !d.envoyAt.IsZero() && !d.hookAt.IsZero() {
+		t.GwMs = msBetween(d.envoyAt, d.hookAt)
+	}
+	if !d.hookAt.IsZero() {
+		t.PluginMs = msBetween(d.hookAt, time.Now())
+	}
+	if t == (transport{}) {
+		return nil
+	}
+	return &t
+}
+
+/*
+ * observeEvaluate records what ONE completed evaluate call says about the path
+ * between this gateway and the runtime, for the REQUEST half of this step — the half
+ * that sits in front of the first token, and the only half whose round trip has a
+ * later event of its own to ride on.
+ *
+ * ⚠️⚠️ **THIS IS AN NTP EXCHANGE AND THE FORMULAS ARE NTP'S.** Four instants: this
+ * process dispatched at `sentAt` and received at `recvAt`; the runtime received at
+ * `t3` and answered at `t4`. Neither pair can be subtracted from the other — that is
+ * a clock offset wearing a duration's name — but two same-clock differences
+ * subtracted give the round-trip WIRE time with the offset cancelled:
+ *
+ *	delay = (recvAt − sentAt) − (t4 − t3)
+ *	skew  = ((sentAt − t3) + (recvAt − t4)) / 2
+ *
+ * ⚠️ `skew` is written in the OURS-MINUS-THEIRS direction, which is NTP's offset
+ * negated, because that is the direction the field is named in and the direction an
+ * operator reads it in: POSITIVE means this gateway's clock is AHEAD of the
+ * runtime's, which is what the 2026-08 lab box was by 2.1 seconds. Flipping the sign
+ * here without flipping the field's documentation would make the one number whose
+ * entire content is its sign say the opposite of what it means.
+ *
+ * ⚠️ `delay` does NOT split into outbound and inbound. Halving it assumes a
+ * symmetric path, which is an assumption and not a measurement, so it is not done
+ * here and must not be done downstream.
+ *
+ * ⚠️ A NEGATIVE delay means the runtime reported spending longer than this whole
+ * call took — a broken measurement on one side, never a fast network — and it
+ * answers 0 = NOT MEASURED rather than a number somebody would plot.
+ */
+func (d *deriveCtx) observeEvaluate(sentAt, recvAt time.Time, v verdict) {
+	t3, t4 := v.Timing()
+	if t3.IsZero() || t4.IsZero() || sentAt.IsZero() || recvAt.IsZero() {
+		return
+	}
+	delay := recvAt.Sub(sentAt) - t4.Sub(t3)
+	if delay < 0 {
+		return
+	}
+	d.netMs = delay.Milliseconds()
+	d.skewMs = ((sentAt.Sub(t3) + recvAt.Sub(t4)) / 2).Milliseconds()
+}
+
+// msBetween is a non-negative millisecond span. A negative one is a clock that moved
+// under us (wall-clock adjustment, or a host property from a different clock than
+// `time.Now`), and the honest answer to that is 0 = not measured, never a negative
+// duration in a UInt32 column.
+func msBetween(from, to time.Time) int64 {
+	ms := to.Sub(from).Milliseconds()
+	if ms < 0 {
+		return 0
+	}
+	return ms
 }
 
 // requestEvent is the step's first half: the provider request body, verbatim —

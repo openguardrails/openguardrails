@@ -46,6 +46,7 @@ verdict tells the truth about partial coverage instead of failing silently.
 | `unjudged` | array<string> | SHOULD | Payload paths this verdict could NOT judge. |
 | `latency_ms` | number | MAY | Runtime-observed decision latency. |
 | `continuation` | object | MAY | HOW to express a refusal to an agent loop. See below. |
+| `timing` | object | MAY | `{received_at, responded_at}` — the runtime's own two instants (1.8). See below. |
 
 What v0.8 removed: the `session_id`/`turn`/`step` echo and `attribution`
 (there are no declared coordinates left to echo — the ledger lives entirely
@@ -54,6 +55,41 @@ in the runtime, and an integration has no decision to make from them),
 `output_mode` (streaming enforcement is the integration's held-back tail —
 [runtime-api § streaming](runtime-api.md#streaming-release-a-bounded-head-judge-once)
 — so the runtime no longer selects a lane to report).
+
+## `timing` — the runtime's own two instants (1.8)
+
+```json
+"timing": { "received_at": "2026-09-11T02:14:07.118Z", "responded_at": "2026-09-11T02:14:07.362Z" }
+```
+
+Both RFC 3339 with sub-second precision, both stamped by the runtime: when it
+received the request, and when it serialized this verdict. A runtime SHOULD send
+them; an integration MAY ignore them.
+
+`responded_at − received_at` is the WHOLE handler — authentication, parsing,
+storage, reassembly, and the evaluation — where `latency_ms` is the evaluation
+alone. The gap between the two is where an integration finds a runtime that is
+slow for a reason the evaluation cannot see.
+
+**These are not for an integration to subtract from its own clock.** With the two
+instants an integration already holds — when it dispatched, when the answer came
+back — these complete the four points of an NTP exchange, and two same-clock
+differences then give the round-trip network time with the clock offset cancelled:
+
+```
+delay = (received_back − dispatched) − (responded_at − received_at)
+skew  = ((dispatched − received_at) + (received_back − responded_at)) / 2
+```
+
+An integration MUST NOT report `received_at − dispatched` as a network duration.
+It is a clock offset plus a network duration, and nothing in it says which part is
+which: on one measured deployment the two clocks differed by 2.1 seconds while the
+hop was under a millisecond. `delay` does NOT decompose into outbound and inbound —
+that requires synchronised clocks — and an integration MUST NOT report half of it
+as either.
+
+An integration MAY report `delay` and `skew` back on a later event
+([GuardEvent § transport](guard-event.md#transport-where-the-time-went-18)).
 
 ## `continuation` — how to say no to an agent (1.3)
 

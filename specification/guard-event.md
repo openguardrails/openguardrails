@@ -16,8 +16,10 @@ downstream-flow id, [`session_hint`](#session_hint), the producer's own
 name for the conversation this step belongs to, — since 1.4 —
 [`redaction`](#redaction), what an integration masked on the host before this
 step left it, — since 1.5 — [`initiator`](#initiator), who started the work
-this step belongs to, and — since 1.6 — [`llm_endpoint`](#llm_endpoint), the host
-the agent pointed the model request at. Integrations SHOULD send each when they hold the fact. They are
+this step belongs to, — since 1.6 — [`llm_endpoint`](#llm_endpoint), the host
+the agent pointed the model request at, and — since 1.8 —
+[`transport`](#transport--where-the-time-went-18), where the time went on the way
+here. Integrations SHOULD send each when they hold the fact. They are
 OPTIONAL rather than required so the two ends of a deployment can roll forward
 independently: making any of them mandatory would reject every build already
 in the field, turning a diagnostic into an outage.
@@ -440,6 +442,56 @@ MAY take the host out of a full URL a producer sent by mistake.
 bounded only by the credential that carried it, and a **RECORD ONLY**. A
 runtime MUST NOT derive authorization, policy selection, enforcement or trust
 from it. Absent is the whole installed base before 1.6.
+
+## `transport` — where the time went (1.8)
+
+`transport` (OGR 1.8) is what the integration can measure about the path a
+request took to a verdict, so a first-token regression is attributable to a
+LAYER rather than argued about:
+
+```json
+"transport": { "gw_ms": 3, "plugin_ms": 8, "net_ms": 80, "skew_ms": 2100 }
+```
+
+| Field | Meaning |
+|---|---|
+| `gw_ms` | the host had the request before the guard code did — filter chain, body buffering |
+| `plugin_ms` | the guard code's own work, up to the moment it built this event |
+| `net_ms` | the wire, BOTH directions, for the evaluate call this step's request half made |
+| `skew_ms` | the integration's clock MINUS the runtime's, signed — a DIAGNOSTIC |
+
+⚠️⚠️ **EVERY VALUE IS A DURATION MEASURED INSIDE ONE CLOCK, AND AN INTEGRATION
+MUST NOT PRODUCE ONE ANY OTHER WAY.** The obvious implementation — stamp four
+timestamps across the two parties and subtract the neighbours — yields one number
+that spans two machines' clocks, and the error is not small: on a measured
+deployment an integration's own stamps sat a steady 2.1 seconds from the
+runtime's receive time on 2,997 of 3,000 events, on a host whose clock matched
+its own machine to under a second. Reported as network, that is two seconds of
+fiction in a latency board. This is the same rule [`timing`](#usage-and-timing)
+states, applied to the delivery path instead of the generation.
+
+`net_ms` is how that rule is kept while still measuring the wire: it is the
+integration's OWN round trip minus the `responded_at − received_at` the runtime
+reported in the [verdict's `timing`](verdict.md#timing--the-runtimes-own-two-instants-18)
+— two same-clock differences subtracted, the NTP delay formula, no synchronised
+clocks required. ⚠️ It does NOT decompose into outbound and inbound; an
+integration MUST NOT report half of it as either.
+
+⚠️ `net_ms` and `skew_ms` describe a call that ALREADY COMPLETED, so they ride
+the `step/response` and describe that step's REQUEST half — the half in front of
+the first token. A round trip cannot ride the event that started it. A one-sided
+step carries neither, and an integration MUST NOT carry them across steps: they
+would then name a call the reader cannot find.
+
+⚠️ Absent fields and an absent object are both normal — an integration with no
+view of a hop omits it. `0` is a measured zero; **an unmeasured hop is an ABSENT
+key**, and a runtime MUST NOT read one as the other (a zero averaged into a
+quantile is a hop that was never timed pulling every reader toward it).
+
+⚠️ It is a CLAIM, per the [`integration`](#integration) rule: self-declared and a
+**RECORD ONLY**. A runtime MUST NOT derive authorization, policy selection,
+enforcement or trust from it — and MUST NOT correct any stored time by `skew_ms`,
+which would make every recorded duration depend on a number that moves.
 
 ## `redaction`
 

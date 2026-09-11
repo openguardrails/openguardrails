@@ -640,3 +640,89 @@ func TestBothHalvesOfAStepCarryTheSameInitiator(t *testing.T) {
 		}
 	}
 }
+
+func TestTheNetworkIsMeasuredWithoutTrustingEitherClock(t *testing.T) {
+	// ⚠️ THE CASE THIS FEATURE EXISTS FOR. The runtime's clock is 2.1 SECONDS ahead
+	// of this gateway's — the real reading from a lab box in 2026-08 — and the true
+	// wire time is 40ms in each direction. The naive build (t3 − t2) would report
+	// 2,140ms of "network". The NTP delay formula reports 80 and names the 2.1s as
+	// what it is.
+	sentAt := time.Date(2026, 9, 11, 10, 0, 0, 0, time.UTC)
+	recvAt := sentAt.Add(280 * time.Millisecond) // 40 out + 200 server + 40 back
+	offset := 2100 * time.Millisecond
+	t3 := sentAt.Add(40 * time.Millisecond).Add(offset)
+	t4 := t3.Add(200 * time.Millisecond)
+
+	d := &deriveCtx{}
+	body := []byte(`{"decision":"allow","timing":{"received_at":"` +
+		t3.Format(time.RFC3339Nano) + `","responded_at":"` + t4.Format(time.RFC3339Nano) + `"}}`)
+	d.observeEvaluate(sentAt, recvAt, parseVerdict(body))
+
+	if d.netMs != 80 {
+		t.Errorf("net_ms = %d, want 80 (the wire, both directions)", d.netMs)
+	}
+	// The offset is reported so a 2.1s clock gap is a reading, not an investigation.
+	if d.skewMs != -2100 {
+		t.Errorf("skew_ms = %d, want -2100 (this gateway BEHIND the runtime)", d.skewMs)
+	}
+}
+
+func TestAVerdictWithoutTimingMeasuresNothing(t *testing.T) {
+	// An older runtime answers without the field. 0 = NOT MEASURED, and `omitempty`
+	// keeps it off the wire entirely — a zero that means "instant" and a zero that
+	// means "nobody looked" must never be the same bytes.
+	d := &deriveCtx{}
+	d.observeEvaluate(time.Now().Add(-time.Second), time.Now(), parseVerdict([]byte(`{"decision":"allow"}`)))
+	if d.netMs != 0 || d.skewMs != 0 {
+		t.Errorf("net=%d skew=%d — a verdict with no timing must measure nothing", d.netMs, d.skewMs)
+	}
+	if tr := d.transportNow(); tr != nil {
+		t.Errorf("transport = %+v, want nil when nothing was measured", tr)
+	}
+}
+
+func TestAServerSlowerThanTheWholeCallMeasuresNothing(t *testing.T) {
+	// The runtime claims 500ms inside a call that took 300 — one side's measurement
+	// is broken, and the honest answer is silence rather than a negative or a zero
+	// somebody would plot as a fast network.
+	sentAt := time.Date(2026, 9, 11, 10, 0, 0, 0, time.UTC)
+	recvAt := sentAt.Add(300 * time.Millisecond)
+	t3 := sentAt
+	t4 := t3.Add(500 * time.Millisecond)
+	d := &deriveCtx{}
+	body := []byte(`{"decision":"allow","timing":{"received_at":"` +
+		t3.Format(time.RFC3339Nano) + `","responded_at":"` + t4.Format(time.RFC3339Nano) + `"}}`)
+	d.observeEvaluate(sentAt, recvAt, parseVerdict(body))
+	if d.netMs != 0 {
+		t.Errorf("net_ms = %d, want 0", d.netMs)
+	}
+}
+
+func TestTransportRidesTheOneConstructor(t *testing.T) {
+	// The stamping seam: every event goes through `d.event`, so a gateway hop cannot
+	// be present on one kind of event and missing on another.
+	d := &deriveCtx{
+		stepID:  "st-1",
+		envoyAt: time.Now().Add(-30 * time.Millisecond),
+		hookAt:  time.Now().Add(-10 * time.Millisecond),
+		netMs:   80,
+		skewMs:  -2100,
+	}
+	e := d.event(kindStepResponse, json.RawMessage(`{}`))
+	if e.Transport == nil {
+		t.Fatal("no transport stamped")
+	}
+	if e.Transport.GwMs != 20 {
+		t.Errorf("gw_ms = %d, want 20", e.Transport.GwMs)
+	}
+	if e.Transport.NetMs != 80 || e.Transport.SkewMs != -2100 {
+		t.Errorf("carried net=%d skew=%d", e.Transport.NetMs, e.Transport.SkewMs)
+	}
+	blob, err := json.Marshal(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !gjson.GetBytes(blob, "transport.net_ms").Exists() {
+		t.Errorf("transport absent from the wire object: %s", blob)
+	}
+}
