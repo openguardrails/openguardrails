@@ -102,17 +102,17 @@
         ],
         "expect": [
           {
-            "text": "use OGRK00000001 now",
+            "text": "use OGRKP0000001 now",
             "minted": [
               {
-                "token": "OGRK00000001",
+                "token": "OGRKP0000001",
                 "rule": "entity_api_key/openai"
               }
             ]
           }
         ],
         "values": {
-          "OGRK00000001": "sk-proj-abcdefghijklmnopqrstuvwxyz0123456789"
+          "OGRKP0000001": "sk-proj-abcdefghijklmnopqrstuvwxyz0123456789"
         }
       },
       {
@@ -122,10 +122,10 @@
         ],
         "expect": [
           {
-            "text": "curl -H \"Authorization: Bearer OGRK00000001\" https://api.example.com",
+            "text": "curl -H \"Authorization: Bearer OGRKP0000001\" https://api.example.com",
             "minted": [
               {
-                "token": "OGRK00000001",
+                "token": "OGRKP0000001",
                 "rule": "entity_bearer_token/authorization_header"
               }
             ]
@@ -141,31 +141,31 @@
         ],
         "expect": [
           {
-            "text": "key OGRK00000001",
+            "text": "key OGRKP0000001",
             "minted": [
               {
-                "token": "OGRK00000001",
+                "token": "OGRKP0000001",
                 "rule": "entity_aws_key_id/aws_access_key_id"
               }
             ]
           },
           {
-            "text": "again OGRK00000001 and OGRK00000002",
+            "text": "again OGRKP0000001 and OGRKP0000002",
             "minted": [
               {
-                "token": "OGRK00000002",
+                "token": "OGRKP0000002",
                 "rule": "entity_api_key/openai"
               }
             ]
           },
           {
-            "text": "OGRK00000001",
+            "text": "OGRKP0000001",
             "minted": []
           }
         ],
         "values": {
-          "OGRK00000001": "AKIAIOSFODNN7EXAMPLE",
-          "OGRK00000002": "sk-proj-abcdefghijklmnopqrstuvwxyz0123456789"
+          "OGRKP0000001": "AKIAIOSFODNN7EXAMPLE",
+          "OGRKP0000002": "sk-proj-abcdefghijklmnopqrstuvwxyz0123456789"
         }
       },
       {
@@ -175,10 +175,10 @@
         ],
         "expect": [
           {
-            "text": "token ${OGR_SECRET_9} and ${OGR_PHONE_2} stay; OGRK00000001 goes",
+            "text": "token ${OGR_SECRET_9} and ${OGR_PHONE_2} stay; OGRKP0000001 goes",
             "minted": [
               {
-                "token": "OGRK00000001",
+                "token": "OGRKP0000001",
                 "rule": "entity_aws_key_id/aws_access_key_id"
               }
             ]
@@ -193,21 +193,21 @@
         ],
         "expect": [
           {
-            "text": "OGRK00000001",
+            "text": "OGRKP0000001",
             "minted": [
               {
-                "token": "OGRK00000001",
+                "token": "OGRKP0000001",
                 "rule": "entity_aws_key_id/aws_access_key_id"
               }
             ]
           },
           {
-            "text": "OGRK00000001",
+            "text": "OGRKP0000001",
             "minted": []
           }
         ],
         "values": {
-          "OGRK00000001": "AKIAIOSFODNN7EXAMPLE"
+          "OGRKP0000001": "AKIAIOSFODNN7EXAMPLE"
         }
       },
       {
@@ -217,17 +217,17 @@
         ],
         "expect": [
           {
-            "text": "Authorization: Bearer OGRK00000001",
+            "text": "Authorization: Bearer OGRKP0000001",
             "minted": [
               {
-                "token": "OGRK00000001",
+                "token": "OGRKP0000001",
                 "rule": "entity_bearer_token/authorization_header"
               }
             ]
           }
         ],
         "values": {
-          "OGRK00000001": "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij.extra"
+          "OGRKP0000001": "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij.extra"
         }
       },
       {
@@ -237,10 +237,10 @@
         ],
         "expect": [
           {
-            "text": "Authorization: Bearer OGRK00000001",
+            "text": "Authorization: Bearer OGRKP0000001",
             "minted": [
               {
-                "token": "OGRK00000001",
+                "token": "OGRKP0000001",
                 "rule": "entity_api_key/openai"
               }
             ]
@@ -255,16 +255,16 @@
         ],
         "expect": [
           {
-            "text": "OGRK00000001",
+            "text": "OGRKP0000001",
             "minted": [
               {
-                "token": "OGRK00000001",
+                "token": "OGRKP0000001",
                 "rule": "entity_api_key/openai"
               }
             ]
           },
           {
-            "text": "prefix-OGRK00000001suffix",
+            "text": "prefix-OGRKP0000001suffix",
             "minted": []
           }
         ]
@@ -276,14 +276,14 @@
         ],
         "expect": [
           {
-            "text": "a=OGRK00000001 b=OGRK00000002",
+            "text": "a=OGRKP0000001 b=OGRKP0000002",
             "minted": [
               {
-                "token": "OGRK00000001",
+                "token": "OGRKP0000001",
                 "rule": "entity_aws_key_id/aws_access_key_id"
               },
               {
-                "token": "OGRK00000002",
+                "token": "OGRKP0000002",
                 "rule": "entity_aws_key_id/aws_access_key_id"
               }
             ]
@@ -307,9 +307,9 @@
       {
         "name": "a whole token restores",
         "map": {
-          "OGRK00000001": "AKIAIOSFODNN7EXAMPLE"
+          "OGRKP0000001": "AKIAIOSFODNN7EXAMPLE"
         },
-        "input": "aws s3 ls --key OGRK00000001 --region us-east-1",
+        "input": "aws s3 ls --key OGRKP0000001 --region us-east-1",
         "expect": {
           "text": "aws s3 ls --key AKIAIOSFODNN7EXAMPLE --region us-east-1",
           "unresolved": []
@@ -340,39 +340,39 @@
       {
         "name": "a token this session never issued is reported, never guessed",
         "map": {
-          "OGRK00000001": "AKIAIOSFODNN7EXAMPLE"
+          "OGRKP0000001": "AKIAIOSFODNN7EXAMPLE"
         },
-        "input": "curl -H 'Authorization: Bearer OGRK00000007'",
+        "input": "curl -H 'Authorization: Bearer OGRKP0000007'",
         "expect": {
-          "text": "curl -H 'Authorization: Bearer OGRK00000007'",
+          "text": "curl -H 'Authorization: Bearer OGRKP0000007'",
           "unresolved": [
-            "OGRK00000007"
+            "OGRKP0000007"
           ]
         }
       },
       {
-        "name": "no prefix matching: OGRK00000012 is not OGRK00000001, and fixed width means no key is another's prefix",
+        "name": "no prefix matching: OGRKP0000012 is not OGRKP0000001, and fixed width means no key is another's prefix",
         "map": {
-          "OGRK00000001": "AKIAIOSFODNN7EXAMPLE"
+          "OGRKP0000001": "AKIAIOSFODNN7EXAMPLE"
         },
-        "input": "OGRK00000012",
+        "input": "OGRKP0000012",
         "expect": {
-          "text": "OGRK00000012",
+          "text": "OGRKP0000012",
           "unresolved": [
-            "OGRK00000012"
+            "OGRKP0000012"
           ]
         }
       },
       {
         "name": "the overflow placeholder is by construction unresolved",
         "map": {
-          "OGRK00000001": "AKIAIOSFODNN7EXAMPLE"
+          "OGRKP0000001": "AKIAIOSFODNN7EXAMPLE"
         },
-        "input": "OGRKXXXXXXXX",
+        "input": "OGRKPXXXXXXX",
         "expect": {
-          "text": "OGRKXXXXXXXX",
+          "text": "OGRKPXXXXXXX",
           "unresolved": [
-            "OGRKXXXXXXXX"
+            "OGRKPXXXXXXX"
           ]
         }
       },
@@ -390,9 +390,9 @@
       {
         "name": "a backslash before a non-escapable character is literal, so C:\\name never opens a token",
         "map": {
-          "OGRK00000001": "AKIAIOSFODNN7EXAMPLE"
+          "OGRKP0000001": "AKIAIOSFODNN7EXAMPLE"
         },
-        "input": "C:\\name and OGRK00000001",
+        "input": "C:\\name and OGRKP0000001",
         "expect": {
           "text": "C:\\name and AKIAIOSFODNN7EXAMPLE",
           "unresolved": []
@@ -401,10 +401,10 @@
       {
         "name": "several tokens, longest key first, each restored exactly once",
         "map": {
-          "OGRK00000001": "one",
-          "OGRK00000010": "ten"
+          "OGRKP0000001": "one",
+          "OGRKP0000010": "ten"
         },
-        "input": "OGRK00000010/OGRK00000001/OGRK00000010",
+        "input": "OGRKP0000010/OGRKP0000001/OGRKP0000010",
         "expect": {
           "text": "ten/one/ten",
           "unresolved": []
@@ -415,10 +415,10 @@
       {
         "name": "a token split across three deltas restores once its last piece arrives; nothing is emitted early",
         "map": {
-          "OGRK00000001": "AKIAIOSFODNN7EXAMPLE"
+          "OGRKP0000001": "AKIAIOSFODNN7EXAMPLE"
         },
         "deltas": [
-          "aws --key OGRK000",
+          "aws --key OGRKP00",
           "0000",
           "1 ls"
         ],
@@ -432,25 +432,25 @@
       {
         "name": "a partial token at end of stream is text, delivered by the final flush",
         "map": {
-          "OGRK00000001": "AKIAIOSFODNN7EXAMPLE"
+          "OGRKP0000001": "AKIAIOSFODNN7EXAMPLE"
         },
         "deltas": [
           "cost: O",
-          "GRK0000"
+          "GRKP000"
         ],
         "expect": [
           "cost: ",
           ""
         ],
-        "end": "OGRK0000"
+        "end": "OGRKP000"
       },
       {
         "name": "a token that completes inside one delta restores in that delta",
         "map": {
-          "OGRK00000001": "AKIAIOSFODNN7EXAMPLE"
+          "OGRKP0000001": "AKIAIOSFODNN7EXAMPLE"
         },
         "deltas": [
-          "key=OGRK00000001;"
+          "key=OGRKP0000001;"
         ],
         "expect": [
           "key=AKIAIOSFODNN7EXAMPLE;"
@@ -458,14 +458,14 @@
         "end": ""
       },
       {
-        "name": "a key held across a delta boundary completes as the token it is: OGRK0000001 then 0 is token 10, not token 1 followed by 0",
+        "name": "a key held across a delta boundary completes as the token it is: OGRKP000001 then 0 is token 10, not token 1 followed by 0",
         "map": {
-          "OGRK00000001": "one",
-          "OGRK00000010": "ten"
+          "OGRKP0000001": "one",
+          "OGRKP0000010": "ten"
         },
         "deltas": [
-          "OGRK0000001",
-          "0/OGRK00000001"
+          "OGRKP000001",
+          "0/OGRKP0000001"
         ],
         "expect": [
           "",
@@ -491,11 +491,11 @@
       {
         "name": "a backslash before a non-escapable character never opens a token, streamed or not",
         "map": {
-          "OGRK00000001": "AKIAIOSFODNN7EXAMPLE"
+          "OGRKP0000001": "AKIAIOSFODNN7EXAMPLE"
         },
         "deltas": [
           "C:\\",
-          "name OGRK00000001"
+          "name OGRKP0000001"
         ],
         "expect": [
           "C:",
@@ -506,18 +506,19 @@
       {
         "name": "a token this session never issued is passed through as text, never guessed",
         "map": {
-          "OGRK00000001": "AKIAIOSFODNN7EXAMPLE"
+          "OGRKP0000001": "AKIAIOSFODNN7EXAMPLE"
         },
         "deltas": [
-          "OGRK0000000",
-          "7 and OGRK00000001"
+          "OGRKP000000",
+          "7 and OGRKP0000001"
         ],
         "expect": [
           "",
-          "OGRK00000007 and AKIAIOSFODNN7EXAMPLE"
+          "OGRKP0000007 and AKIAIOSFODNN7EXAMPLE"
         ],
         "end": ""
       }
     ]
-  }
+  },
+  "minter": "P"
 }

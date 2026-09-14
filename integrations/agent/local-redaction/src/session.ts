@@ -8,13 +8,13 @@
  * with a fresh map and re-masks its raw history (design §3).
  *
  * Bounded at 256 values per session. Over the bound a new value is STILL
- * masked, with the fixed non-restorable `OGRKXXXXXXXX` — refusing to mask
+ * masked, with the fixed non-restorable `OGRKPXXXXXXX` — refusing to mask
  * is the wrong side to fail on — and a warning says so once per session.
  */
 
 /**
- * The placeholder shape this library mints: `OGRK` + eight zero-padded digits —
- * `OGRK00000001`. A VALUE shape, not a variable shape (2026-09-14, measured across
+ * The placeholder shape this library mints: `OGRK` + a MINTER LETTER + seven
+ * zero-padded digits — `OGRKP0000001`. A VALUE shape, not a variable shape (2026-09-14, measured across
  * five model setups, `proposals/secrets-placeholder-shape.md`): `${OGR_SECRET_n}`
  * reached a tool call verbatim 43% of the time — a model reads `${…}` as a shell
  * variable and "helpfully" rewrites it to `$OGR_SECRET_1`, which restores to
@@ -27,15 +27,36 @@
  */
 export const SECRET_TOKEN_PREFIX = "OGRK"
 
-/** The digits after the prefix — zero-padded, so every token is exactly 12 characters. */
-export const SECRET_TOKEN_DIGITS = 8
+/**
+ * WHO MINTED IT — the fifth character. One letter per allocator that can write into
+ * one model context: `P` is this library (the in-process interceptor and the loopback
+ * proxy), `F` is openafw, `R` is the AIRS runtime.
+ *
+ * ⚠️⚠️ **THIS IS WHAT KEEPS TWO ALLOCATORS FROM COLLIDING, AND A FLOOR WAS NOT
+ * ENOUGH.** Both ends used to number into ONE namespace; the runtime defended it by
+ * reading the highest number already in the body and numbering above it. That sees
+ * ONE request, while the runtime's registry spans an agent's sessions for days: a
+ * token minted here in session A and one minted there in session B can name two
+ * different values in one model context, and whichever side restores splices the
+ * WRONG secret into a tool call with nothing throwing. A letter closes it by
+ * construction; the runtime's floor is deleted.
+ *
+ * ⚠️ ONE letter, not a per-minter PREFIX: the shape is matched in ~15 places across
+ * three repos, and a fourth minter must not mean editing all of them.
+ * `OGRK[0-9A-Z][0-9X]{7,}` (see {@link TOKEN_RE}) admits any minter with no change
+ * anywhere.
+ */
+export const SECRET_TOKEN_MINTER = "P"
+
+/** The digits after the minter letter — zero-padded, so every token is 12 characters. */
+export const SECRET_TOKEN_DIGITS = 7
 
 /** The non-restorable placeholder a full map masks new values with. */
-export const OVERFLOW_TOKEN = "OGRKXXXXXXXX"
+export const OVERFLOW_TOKEN = `${SECRET_TOKEN_PREFIX}${SECRET_TOKEN_MINTER}XXXXXXX`
 
-/** The token for registration number `n`. */
+/** This library's token for registration number `n`. */
 export function secretToken(n: number): string {
-  return `${SECRET_TOKEN_PREFIX}${String(n).padStart(SECRET_TOKEN_DIGITS, "0")}`
+  return `${SECRET_TOKEN_PREFIX}${SECRET_TOKEN_MINTER}${String(n).padStart(SECRET_TOKEN_DIGITS, "0")}`
 }
 
 export const DEFAULT_BOUND = 256
@@ -56,7 +77,7 @@ export interface SessionMapOptions {
    * {@link SessionMaps} registry hands every map ONE shared allocator, so a
    * token number is unique across every session the process holds — two
    * maps in one process (the host's session and the HTTP interceptor's)
-   * can then never mint `OGRK00000001` for two different values, which is
+   * can then never mint `OGRKP0000001` for two different values, which is
    * the collision design §3 warns about and a restore across maps would
    * otherwise be ambiguous under. Value-stability stays per session.
    */

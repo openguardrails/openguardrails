@@ -308,9 +308,9 @@ test("the event carries the proxy's tokens and its redaction report", async () =
     () => ({
       status: 200,
       body: {
-        value: { tool_calls: [{ id: "t1", name: "Bash", arguments: { command: "deploy OGRK00000001" } }] },
+        value: { tool_calls: [{ id: "t1", name: "Bash", arguments: { command: "deploy OGRKP0000001" } }] },
         changed: true,
-        redaction: { ruleset: "rs_abc", masked: [{ token: "OGRK00000001", rule: "entity_api_key/openai_project" }] },
+        redaction: { ruleset: "rs_abc", masked: [{ token: "OGRKP0000001", rule: "entity_api_key/openai_project" }] },
       },
     }),
     async ({ port, seen }) => {
@@ -326,7 +326,7 @@ test("the event carries the proxy's tokens and its redaction report", async () =
       eq(seen[0].body.session, "sess-1")
 
       const ev = requests[0].body
-      eq(ev.payload.tool_calls[0].arguments.command, "deploy OGRK00000001")
+      eq(ev.payload.tool_calls[0].arguments.command, "deploy OGRKP0000001")
       eq(ev.redaction.ruleset, "rs_abc")
     },
   )

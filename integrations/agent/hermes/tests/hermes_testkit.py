@@ -32,8 +32,8 @@ REQUIRED_FIELDS = {
 #: value.
 OPTIONAL_FIELDS = {"integration", "session_hint", "redaction"}
 
-# Either placeholder shape: `OGRK00000001` (secrets, since 2026-09-14) or `${OGR_<TYPE>_n}`.
-_TOKEN_RE = re.compile(r"^(?:OGRK[0-9]{8,}|\$\{OGR_[A-Z_]+_[0-9A-Z]+\})$")
+# Either placeholder shape, ANY minter: `OGRK<letter><7>` (secrets) or `${OGR_<TYPE>_n}`.
+_TOKEN_RE = re.compile(r"^(?:OGRK[0-9A-Z][0-9X]{7,}|\$\{OGR_[A-Z_]+_[0-9A-Z]+\})$")
 
 #: The inline ruleset the mock serves — three rules lifted from the runtime's
 #: `entities.ts` (the openai prefix, the anthropic prefix, and the bearer

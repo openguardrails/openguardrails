@@ -1,6 +1,6 @@
 // GENERATED — do not edit. Source: integrations/agent/ogr-local/src
 // Rebuild: npm --prefix integrations/agent/ogr-local run bundle
-// OGR_LOCAL_SOURCE_STAMP=ef22d1731c5e
+// OGR_LOCAL_SOURCE_STAMP=e16b0cae56ce
 // version=0.2.0
 // ogr-local/src/bundle.ts
 import { pathToFileURL } from "node:url";
@@ -298,10 +298,11 @@ async function loadRuleset(opts) {
 
 // local-redaction/src/session.ts
 var SECRET_TOKEN_PREFIX = "OGRK";
-var SECRET_TOKEN_DIGITS = 8;
-var OVERFLOW_TOKEN = "OGRKXXXXXXXX";
+var SECRET_TOKEN_MINTER = "P";
+var SECRET_TOKEN_DIGITS = 7;
+var OVERFLOW_TOKEN = `${SECRET_TOKEN_PREFIX}${SECRET_TOKEN_MINTER}XXXXXXX`;
 function secretToken(n) {
-  return `${SECRET_TOKEN_PREFIX}${String(n).padStart(SECRET_TOKEN_DIGITS, "0")}`;
+  return `${SECRET_TOKEN_PREFIX}${SECRET_TOKEN_MINTER}${String(n).padStart(SECRET_TOKEN_DIGITS, "0")}`;
 }
 var DEFAULT_BOUND = 256;
 var SessionMap = class {
@@ -425,7 +426,7 @@ var SessionMaps = class {
 };
 
 // local-redaction/src/mask.ts
-var TOKEN_RE = /OGRK[0-9X]{8,}|\$\{OGR_[A-Z_]+_[0-9A-Z]+\}/g;
+var TOKEN_RE = /OGRK[0-9A-Z][0-9X]{7,}|\$\{OGR_[A-Z_]+_[0-9A-Z]+\}/g;
 var STRIP_ONE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u200b-\u200f\u2028-\u202e\u2060\ufeff]/;
 function normalize(text) {
   if (!STRIP_ONE.test(text)) return { stripped: text, index: null };
@@ -582,7 +583,7 @@ function matchKey(text, i, key) {
   }
   return [p - i, MATCH_FULL];
 }
-var TOKEN_SHAPE_RE = /OGRK[0-9X]{8,}|\\?\$\\?\{OGR(?:\\?_[A-Z]+)*\\?_[0-9A-Z]+\\?\}/g;
+var TOKEN_SHAPE_RE = /OGRK[0-9A-Z][0-9X]{7,}|\\?\$\\?\{OGR(?:\\?_[A-Z]+)*\\?_[0-9A-Z]+\\?\}/g;
 function tokensIn(text) {
   const out = /* @__PURE__ */ new Set();
   TOKEN_SHAPE_RE.lastIndex = 0;

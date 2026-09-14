@@ -23,7 +23,7 @@
  *   before_tool_call   canonical step/response {tool_calls: [the call]},
  *                      judged BEFORE the tool runs: block → `{ block }`.
  *                      A SECOND handler at a lower priority restores
- *                      `OGRK00000001`-style placeholders in `params` — after
+ *                      `OGRKP0000001`-style placeholders in `params` — after
  *                      the judge, which saw the placeholder; the tool gets
  *                      the value. An unrestorable token → `{ block }` with
  *                      the notice.

@@ -42,7 +42,8 @@ function seeded(fixture) {
       assert.ok(map.adopt(token, value), `legacy fixture token must be adoptable (${token})`)
       continue
     }
-    const n = Number(/(?:_|OGRK)0*([0-9]+)\}?$/.exec(token)[1])
+    // `OGRKP0000010` or the legacy `${OGR_SECRET_10}` — the minter letter is skipped.
+    const n = Number(/(?:_|OGRK[0-9A-Z])0*([0-9]+)\}?$/.exec(token)[1])
     while (map.size < n - 1) map.tokenFor(`filler-${map.size}`)
     const grant = map.tokenFor(value)
     assert.equal(grant.token, token, `fixture map must be seedable in order (${token})`)

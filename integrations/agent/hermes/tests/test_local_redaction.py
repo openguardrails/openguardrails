@@ -141,8 +141,8 @@ class RulesetLoading(unittest.TestCase):
         rs = ruleset()
         text = "AUTHORIZATION: BEARER " + BEARER
         masked, minted = lr.mask(text, lr.SessionMap(), rs)
-        self.assertEqual(masked, "AUTHORIZATION: BEARER OGRK00000001")
-        self.assertEqual(minted, [{"token": "OGRK00000001",
+        self.assertEqual(masked, "AUTHORIZATION: BEARER OGRKP0000001")
+        self.assertEqual(minted, [{"token": "OGRKP0000001",
                                    "rule": "entity_bearer_token/authorization_header"}])
 
 
@@ -217,28 +217,28 @@ class RulesetStore(unittest.TestCase):
         smap = lr.SessionMap()
         live = "sk-proj-LIVEVALUEnotanexample0123456789"   # not one of the examples
         masked, _ = lr.mask("token " + live, smap, store.current)
-        self.assertEqual(masked, "token OGRK00000001")
+        self.assertEqual(masked, "token OGRKP0000001")
         self.assertNotIn(live, open(self.cache).read())
 
 
 class SessionMapBound(unittest.TestCase):
     def test_tokens_number_from_one_and_are_value_stable(self):
         smap = lr.SessionMap()
-        self.assertEqual(smap.token_for("a"), ("OGRK00000001", True))
-        self.assertEqual(smap.token_for("b"), ("OGRK00000002", True))
-        self.assertEqual(smap.token_for("a"), ("OGRK00000001", False))
+        self.assertEqual(smap.token_for("a"), ("OGRKP0000001", True))
+        self.assertEqual(smap.token_for("b"), ("OGRKP0000002", True))
+        self.assertEqual(smap.token_for("a"), ("OGRKP0000001", False))
 
     def test_a_full_map_masks_with_the_non_restorable_placeholder(self):
         smap = lr.SessionMap(limit=3)
         for v in ("v1", "v2", "v3"):
             smap.token_for(v)
         with self.assertLogs("ogr-guard.redaction", level="WARNING"):
-            self.assertEqual(smap.token_for("v4"), ("OGRKXXXXXXXX", False))
+            self.assertEqual(smap.token_for("v4"), ("OGRKPXXXXXXX", False))
         # Known values keep working past the bound; the overflow is never mapped.
-        self.assertEqual(smap.token_for("v2"), ("OGRK00000002", False))
-        self.assertNotIn("OGRKXXXXXXXX", smap.by_token)
-        _, unresolved = lr.restore("use OGRKXXXXXXXX", smap)
-        self.assertEqual(unresolved, ["OGRKXXXXXXXX"])
+        self.assertEqual(smap.token_for("v2"), ("OGRKP0000002", False))
+        self.assertNotIn("OGRKPXXXXXXX", smap.by_token)
+        _, unresolved = lr.restore("use OGRKPXXXXXXX", smap)
+        self.assertEqual(unresolved, ["OGRKPXXXXXXX"])
 
     def test_the_default_bound_is_256(self):
         self.assertEqual(lr.MAX_VALUES, 256)
@@ -253,8 +253,8 @@ class Mask(unittest.TestCase):
     def test_round_trip(self):
         text = f'curl -H "Authorization: Bearer {BEARER}" https://api.example/v1'
         masked, minted = lr.mask(text, self.smap, self.rs)
-        self.assertEqual(masked, 'curl -H "Authorization: Bearer OGRK00000001" https://api.example/v1')
-        self.assertEqual(minted, [{"token": "OGRK00000001",
+        self.assertEqual(masked, 'curl -H "Authorization: Bearer OGRKP0000001" https://api.example/v1')
+        self.assertEqual(minted, [{"token": "OGRKP0000001",
                                    "rule": "entity_bearer_token/authorization_header"}])
         restored, unresolved = lr.restore(masked, self.smap)
         self.assertEqual(restored, text)
@@ -263,49 +263,49 @@ class Mask(unittest.TestCase):
     def test_known_values_are_stable_across_steps_and_minted_once(self):
         m1, minted1 = lr.mask(f"key {OPENAI}", self.smap, self.rs)
         m2, minted2 = lr.mask(f"again {OPENAI} and {OPENAI}", self.smap, self.rs)
-        self.assertEqual(m1, "key OGRK00000001")
-        self.assertEqual(m2, "again OGRK00000001 and OGRK00000001")
+        self.assertEqual(m1, "key OGRKP0000001")
+        self.assertEqual(m2, "again OGRKP0000001 and OGRKP0000001")
         self.assertEqual(len(minted1), 1)
         self.assertEqual(minted2, [])          # history tokens are just text now
         # Known values are replaced even with NO ruleset (fail-open, cache lost).
         m3, minted3 = lr.mask(f"still {OPENAI}", self.smap, None)
-        self.assertEqual((m3, minted3), ("still OGRK00000001", []))
+        self.assertEqual((m3, minted3), ("still OGRKP0000001", []))
 
     def test_overlap_longest_wins(self):
         """The anthropic form is also an openai-shaped `sk-…` match: one span,
         the longer, and the pattern that owns it is reported."""
         masked, minted = lr.mask(f"k={ANTHROPIC}", self.smap, self.rs)
-        self.assertEqual(masked, "k=OGRK00000001")
+        self.assertEqual(masked, "k=OGRKP0000001")
         self.assertEqual(len(minted), 1)
-        self.assertEqual(self.smap.by_token["OGRK00000001"], ANTHROPIC)
+        self.assertEqual(self.smap.by_token["OGRKP0000001"], ANTHROPIC)
         # Equal length ⇒ served (array) order; here both patterns sit in one
         # rule and the first-listed wins, which is the openai arm.
         self.assertEqual(minted[0]["rule"], "entity_api_key/openai")
 
     def test_no_rematch_inside_an_existing_token(self):
-        text = "Authorization: Bearer OGRK00000001 and ${OGR_PHONE_2} then sk-${TOKEN}"
+        text = "Authorization: Bearer OGRKP0000001 and ${OGR_PHONE_2} then sk-${TOKEN}"
         masked, minted = lr.mask(text, self.smap, self.rs)
         self.assertEqual(masked, text)
         self.assertEqual(minted, [])
         # …and a known value inside a token is not re-masked either.
         self.smap.token_for("SECRET")
-        masked, _ = lr.mask("OGRK00000001", self.smap, self.rs)
-        self.assertEqual(masked, "OGRK00000001")
+        masked, _ = lr.mask("OGRKP0000001", self.smap, self.rs)
+        self.assertEqual(masked, "OGRKP0000001")
 
     def test_a_zero_width_split_value_is_still_masked_whole(self):
         split = OPENAI[:10] + "\u200b" + OPENAI[10:20] + "\u200d" + OPENAI[20:]
         masked, minted = lr.mask(f"key={split}!", self.smap, self.rs)
         # The splice removes the split characters WITH the value…
-        self.assertEqual(masked, "key=OGRK00000001!")
+        self.assertEqual(masked, "key=OGRKP0000001!")
         # …and the value restored is the clean one.
-        self.assertEqual(self.smap.by_token["OGRK00000001"], OPENAI)
+        self.assertEqual(self.smap.by_token["OGRKP0000001"], OPENAI)
         # Text outside the span keeps its own control characters.
         masked, _ = lr.mask(f"a\u200bb {OPENAI}", self.smap, self.rs)
-        self.assertEqual(masked, "a\u200bb OGRK00000001")
+        self.assertEqual(masked, "a\u200bb OGRKP0000001")
 
     def test_heuristic_tier_runs_by_default_and_only_the_value_is_the_span(self):
         masked, minted = lr.mask("password = hunter2hunter2", self.smap, self.rs)
-        self.assertEqual(masked, "password = OGRK00000001")
+        self.assertEqual(masked, "password = OGRKP0000001")
         self.assertEqual(minted[0]["rule"], "entity_password_assignment/assignment")
 
     def test_request_walk_keeps_structure(self):
@@ -331,39 +331,39 @@ class Mask(unittest.TestCase):
         self.assertEqual(masked["model"], "m")
         self.assertEqual(masked["temperature"], 0.2)
         self.assertEqual(len(masked["messages"]), 3)
-        self.assertEqual(masked["messages"][0]["content"], "The key is OGRK00000001.")
+        self.assertEqual(masked["messages"][0]["content"], "The key is OGRKP0000001.")
         blocks = masked["messages"][1]["content"]
         self.assertEqual([b["type"] for b in blocks], ["text", "image_url"])
-        self.assertEqual(blocks[0]["text"], "use OGRK00000001 please")
+        self.assertEqual(blocks[0]["text"], "use OGRKP0000001 please")
         self.assertEqual(blocks[1]["image_url"]["url"], "data:image/png;base64,AAAA")
-        self.assertEqual(masked["messages"][2]["content"], "Authorization: Bearer OGRK00000002\nok")
+        self.assertEqual(masked["messages"][2]["content"], "Authorization: Bearer OGRKP0000002\nok")
         self.assertEqual(masked["messages"][2]["tool_call_id"], "c1")
-        self.assertEqual(masked["tools"][0]["function"]["description"], "example OGRK00000003")
+        self.assertEqual(masked["tools"][0]["function"]["description"], "example OGRKP0000003")
         # Transport carries the DEPLOYMENT's own credential to the provider:
         # masking it would break the call with nothing naming why.
         self.assertEqual(masked["extra_headers"]["Authorization"], f"Bearer {BEARER}")
         self.assertEqual([m["token"] for m in minted],
-                         ["OGRK00000001", "OGRK00000002", "OGRK00000003"])
+                         ["OGRKP0000001", "OGRKP0000002", "OGRKP0000003"])
 
     def test_responses_input_and_anthropic_system_are_walked_too(self):
         req = {"input": [{"role": "user", "content": [{"type": "input_text", "text": OPENAI}]}],
                "system": f"Bearer: {ANTHROPIC}"}
         masked, _ = lr.mask_request(req, self.smap, self.rs)
-        self.assertEqual(masked["input"][0]["content"][0]["text"], "OGRK00000001")
-        self.assertEqual(masked["system"], "Bearer: OGRK00000002")
+        self.assertEqual(masked["input"][0]["content"][0]["text"], "OGRKP0000001")
+        self.assertEqual(masked["system"], "Bearer: OGRKP0000002")
 
     def test_masked_report_never_carries_a_value(self):
         _, minted = lr.mask(f"{OPENAI} {BEARER}", self.smap, self.rs)
         for m in minted:
             self.assertEqual(set(m), {"token", "rule"})
-            self.assertRegex(m["token"], r"^OGRK\d{8}$")
+            self.assertRegex(m["token"], r"^OGRK[A-Z]\d{7}$")
 
 
 class Restore(unittest.TestCase):
     def setUp(self):
         self.smap = lr.SessionMap()
-        self.smap.token_for(OPENAI)       # OGRK00000001
-        self.smap.token_for(BEARER)       # OGRK00000002
+        self.smap.token_for(OPENAI)       # OGRKP0000001
+        self.smap.token_for(BEARER)       # OGRKP0000002
 
     def test_markdown_escaped_token_restores(self):
         # The `${OGR_…}` shape is no longer minted but stays restorable: an older
@@ -377,29 +377,29 @@ class Restore(unittest.TestCase):
         self.assertEqual(unresolved, [])
 
     def test_a_backslash_before_a_non_escapable_stays_literal(self):
-        restored, _ = lr.restore(r"C:\name OGRK00000001", self.smap)
+        restored, _ = lr.restore(r"C:\name OGRKP0000001", self.smap)
         self.assertEqual(restored, rf"C:\name {OPENAI}")
 
     def test_never_fuzzy_never_prefix(self):
         # A longer number that merely STARTS with a known token's text.
-        restored, unresolved = lr.restore("OGRK00000010", self.smap)
-        self.assertEqual(restored, "OGRK00000010")
-        self.assertEqual(unresolved, ["OGRK00000010"])
+        restored, unresolved = lr.restore("OGRKP0000010", self.smap)
+        self.assertEqual(restored, "OGRKP0000010")
+        self.assertEqual(unresolved, ["OGRKP0000010"])
         # A typo'd token is not "close enough".
         restored, unresolved = lr.restore("${OGR_SECRET_1", self.smap)
         self.assertEqual(restored, "${OGR_SECRET_1")
         self.assertEqual(unresolved, [])
 
     def test_unresolved_tokens_are_reported_in_order_without_duplicates(self):
-        text = "OGRK00000007 OGRK00000001 ${OGR\\_SECRET\\_9} ${OGR_PHONE_3} OGRK00000007"
+        text = "OGRKP0000007 OGRKP0000001 ${OGR\\_SECRET\\_9} ${OGR_PHONE_3} OGRKP0000007"
         restored, unresolved = lr.restore(text, self.smap)
         self.assertIn(OPENAI, restored)
-        self.assertEqual(unresolved, ["OGRK00000007", "${OGR_SECRET_9}", "${OGR_PHONE_3}"])
+        self.assertEqual(unresolved, ["OGRKP0000007", "${OGR_SECRET_9}", "${OGR_PHONE_3}"])
 
     def test_restore_args_walks_every_string_leaf(self):
-        args = {"command": "curl -H 'Authorization: Bearer OGRK00000002'",
-                "env": {"OPENAI_API_KEY": "OGRK00000001"},
-                "paths": ["OGRK00000001", 3, None],
+        args = {"command": "curl -H 'Authorization: Bearer OGRKP0000002'",
+                "env": {"OPENAI_API_KEY": "OGRKP0000001"},
+                "paths": ["OGRKP0000001", 3, None],
                 "timeout": 30}
         before = copy.deepcopy(args)
         restored, unresolved = lr.restore_args(args, self.smap)
@@ -411,10 +411,10 @@ class Restore(unittest.TestCase):
         self.assertEqual(restored["timeout"], 30)
 
     def test_an_unresolved_token_anywhere_in_the_args_is_reported(self):
-        _, unresolved = lr.restore_args({"a": {"b": ["fine", "OGRK00000042"]}}, self.smap)
-        self.assertEqual(unresolved, ["OGRK00000042"])
+        _, unresolved = lr.restore_args({"a": {"b": ["fine", "OGRKP0000042"]}}, self.smap)
+        self.assertEqual(unresolved, ["OGRKP0000042"])
         notice = lr.unresolved_notice(unresolved)
-        self.assertIn("OGRK00000042 could not be restored", notice)
+        self.assertIn("OGRKP0000042 could not be restored", notice)
         self.assertIn("ask the user to provide it again", notice)
 
 

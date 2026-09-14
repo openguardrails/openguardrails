@@ -95,10 +95,10 @@ test("openai.chat: the body is masked whole, the system prompt included, and the
     assert.equal(res.status, 200)
     const [req] = p.received
     const sent = JSON.parse(req.raw)
-    assert.equal(sent.messages[0].content, "You hold OGRK00000001.")
-    assert.equal(sent.messages[1].content[0].text, "use OGRK00000002")
-    assert.equal(sent.messages[2].content, "OGRK00000001\n")
-    assert.equal(sent.tools[0].function.description, "never print OGRK00000001")
+    assert.equal(sent.messages[0].content, "You hold OGRKP0000001.")
+    assert.equal(sent.messages[1].content[0].text, "use OGRKP0000002")
+    assert.equal(sent.messages[2].content, "OGRKP0000001\n")
+    assert.equal(sent.tools[0].function.description, "never print OGRKP0000001")
     assert.equal(sent.model, "gpt-4.1")
     assert.ok(!req.raw.includes(AWS) && !req.raw.includes(OPENAI))
     assert.equal(req.headers.authorization, "Bearer sk-provider-key-stays")
@@ -108,7 +108,7 @@ test("openai.chat: the body is masked whole, the system prompt included, and the
     assert.equal(h.status().requests, 1)
     assert.deepEqual(h.sessions(), ["process"])
     // The minted report is drained by the next event of any host session.
-    assert.deepEqual(red.report("host-session").masked.map((m) => m.token), ["OGRK00000001", "OGRK00000002"])
+    assert.deepEqual(red.report("host-session").masked.map((m) => m.token), ["OGRKP0000001", "OGRKP0000002"])
   } finally {
     h.uninstall()
     await p.close()
@@ -131,11 +131,11 @@ test("anthropic.messages: the top-level system prompt and tool_result blocks are
       }),
     })
     const sent = JSON.parse(p.received[0].raw)
-    assert.equal(sent.system[0].text, "key OGRK00000001")
-    assert.equal(sent.messages[0].content[0].content[0].text, ".env: OGRK00000002")
+    assert.equal(sent.system[0].text, "key OGRKP0000001")
+    assert.equal(sent.messages[0].content[0].content[0].text, ".env: OGRKP0000002")
     assert.equal(sent.metadata.user_id, "u-42")
     assert.deepEqual(h.sessions(), ["u-42"])
-    assert.equal(red.session("u-42").valueOf("OGRK00000001"), AWS)
+    assert.equal(red.session("u-42").valueOf("OGRKP0000001"), AWS)
   } finally {
     h.uninstall()
     await p.close()
@@ -153,33 +153,33 @@ test("non-streaming reply: restored inside tool-call arguments, never in prose; 
             index: 0,
             message: {
               role: "assistant",
-              content: "I used OGRK00000001 and OGRK00000002",
-              tool_calls: [{ id: "call_1", type: "function", function: { name: "bash", arguments: '{"cmd":"aws --key OGRK00000001 --pw OGRK00000002 --missing OGRK00000009"}' } }],
+              content: "I used OGRKP0000001 and OGRKP0000002",
+              tool_calls: [{ id: "call_1", type: "function", function: { name: "bash", arguments: '{"cmd":"aws --key OGRKP0000001 --pw OGRKP0000002 --missing OGRKP0000009"}' } }],
             },
             finish_reason: "tool_calls",
           }],
         }),
       }
     }
-    return { body: JSON.stringify({ content: [{ type: "text", text: "OGRK00000001" }, { type: "tool_use", id: "t", name: "bash", input: { cmd: "echo OGRK00000001", nested: ["OGRK00000002"] } }] }) }
+    return { body: JSON.stringify({ content: [{ type: "text", text: "OGRKP0000001" }, { type: "tool_use", id: "t", name: "bash", input: { cmd: "echo OGRKP0000001", nested: ["OGRKP0000002"] } }] }) }
   })
   const h = install(red)
   try {
     red.session("process").tokenFor('pa"ss')
     await h.fetch(`${p.url}/v1/chat/completions`, { method: "POST", body: JSON.stringify({ model: "m", messages: [{ role: "user", content: `k ${AWS}` }] }) })
-    // OGRK00000001 = pa"ss (seeded), OGRK00000002 = AWS (masked out of the request)
+    // OGRKP0000001 = pa"ss (seeded), OGRKP0000002 = AWS (masked out of the request)
     const res = await h.fetch(`${p.url}/v1/chat/completions`, { method: "POST", body: JSON.stringify({ model: "m", messages: [{ role: "user", content: "again" }] }) })
     const text = await res.text()
     assert.equal(res.headers.get("content-length"), String(Buffer.byteLength(text)))
     const reply = JSON.parse(text)
-    assert.equal(reply.choices[0].message.content, "I used OGRK00000001 and OGRK00000002")
-    assert.deepEqual(JSON.parse(reply.choices[0].message.tool_calls[0].function.arguments), { cmd: `aws --key pa"ss --pw ${AWS} --missing \OGRK00000009` })
-    assert.deepEqual(h.status().unrestorable, ["OGRK00000009"])
+    assert.equal(reply.choices[0].message.content, "I used OGRKP0000001 and OGRKP0000002")
+    assert.deepEqual(JSON.parse(reply.choices[0].message.tool_calls[0].function.arguments), { cmd: `aws --key pa"ss --pw ${AWS} --missing \OGRKP0000009` })
+    assert.deepEqual(h.status().unrestorable, ["OGRKP0000009"])
     assert.equal(h.status().restored, 2) // both replies carried a restorable argument
 
     const a = await h.fetch(`${p.url}/v1/messages`, { method: "POST", body: JSON.stringify({ model: "m", system: "x", messages: [{ role: "user", content: "hi" }] }) })
     const reply2 = await a.json()
-    assert.equal(reply2.content[0].text, "OGRK00000001")
+    assert.equal(reply2.content[0].text, "OGRKP0000001")
     assert.deepEqual(reply2.content[1].input, { cmd: 'echo pa"ss', nested: [AWS] })
   } finally {
     h.uninstall()
@@ -195,9 +195,9 @@ test("streamed reply (openai.chat): an argument split across three deltas is res
   const red = await redactorWith()
   const p = await provider(() => ({
     sse: [
-      chatChunk({ role: "assistant", content: "key: OGRK00000001" }),
+      chatChunk({ role: "assistant", content: "key: OGRKP0000001" }),
       chatChunk({ tool_calls: [{ index: 0, id: "call_1", type: "function", function: { name: "bash", arguments: "" } }] }),
-      chatChunk({ tool_calls: [{ index: 0, function: { arguments: '{"cmd":"aws --key OGRK000' } }] }),
+      chatChunk({ tool_calls: [{ index: 0, function: { arguments: '{"cmd":"aws --key OGRKP00' } }] }),
       chatChunk({ tool_calls: [{ index: 0, function: { arguments: "0000" } }] }),
       chatChunk({ tool_calls: [{ index: 0, function: { arguments: '1 ls"}' } }] }),
       chatChunk({}, "tool_calls"),
@@ -212,7 +212,7 @@ test("streamed reply (openai.chat): an argument split across three deltas is res
     const data = text.split("\n\n").filter((f) => f.startsWith("data:")).map((f) => f.slice(6))
     assert.equal(data.at(-1), "[DONE]")
     const parsed = data.slice(0, -1).map((d) => JSON.parse(d))
-    assert.equal(parsed[0].choices[0].delta.content, "key: OGRK00000001")
+    assert.equal(parsed[0].choices[0].delta.content, "key: OGRKP0000001")
     const args = parsed.flatMap((c) => c.choices[0].delta.tool_calls ?? []).map((tc) => tc.function?.arguments ?? "").join("")
     assert.deepEqual(JSON.parse(args), { cmd: `aws --key ${AWS} ls` })
     assert.equal(h.status().streams, 1)
@@ -229,10 +229,10 @@ test("streamed reply (anthropic.messages): input_json_delta across three deltas 
     sse: [
       ev("message_start", { type: "message_start", message: { id: "m", role: "assistant", content: [] } }),
       ev("content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }),
-      ev("content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "using OGRK00000001" } }),
+      ev("content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "using OGRKP0000001" } }),
       ev("content_block_stop", { type: "content_block_stop", index: 0 }),
       ev("content_block_start", { type: "content_block_start", index: 1, content_block: { type: "tool_use", id: "t", name: "bash", input: {} } }),
-      ev("content_block_delta", { type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: '{"cmd": "echo OGRK0' } }),
+      ev("content_block_delta", { type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: '{"cmd": "echo OGRKP' } }),
       ev("content_block_delta", { type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: "0000" } }),
       ev("content_block_delta", { type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: '001"}' } }),
       ev("content_block_stop", { type: "content_block_stop", index: 1 }),
@@ -247,7 +247,7 @@ test("streamed reply (anthropic.messages): input_json_delta across three deltas 
     const data = text.split("\n\n").filter(Boolean).map((f) => JSON.parse(f.split("\n").find((l) => l.startsWith("data:")).slice(6)))
     const json = data.filter((d) => d.type === "content_block_delta" && d.delta.type === "input_json_delta").map((d) => d.delta.partial_json).join("")
     assert.deepEqual(JSON.parse(json), { cmd: `echo ${AWS}` })
-    assert.equal(data.find((d) => d.delta?.type === "text_delta").delta.text, "using OGRK00000001")
+    assert.equal(data.find((d) => d.delta?.type === "text_delta").delta.text, "using OGRKP0000001")
   } finally {
     h.uninstall()
     await p.close()
@@ -284,8 +284,8 @@ test("a Request object and a streamed request body are both read, masked and for
     await h.fetch(req)
     const stream = new Blob([JSON.stringify({ model: "m", messages: [{ role: "user", content: OPENAI }] })]).stream()
     await h.fetch(`${p.url}/v1/chat/completions`, { method: "POST", headers: { "content-type": "application/json" }, body: stream, duplex: "half" })
-    assert.equal(JSON.parse(p.received[0].raw).messages[0].content, "OGRK00000001")
-    assert.equal(JSON.parse(p.received[1].raw).messages[0].content, "OGRK00000002")
+    assert.equal(JSON.parse(p.received[0].raw).messages[0].content, "OGRKP0000001")
+    assert.equal(JSON.parse(p.received[1].raw).messages[0].content, "OGRKP0000002")
   } finally {
     h.uninstall()
     await p.close()
@@ -309,9 +309,9 @@ test("the self-check: a tool call before any traffic warns once and yields no re
     red.fallbackActive = false
     await h.fetch(`${p.url}/v1/chat/completions`, { method: "POST", body: JSON.stringify({ model: "m", messages: [{ role: "user", content: AWS }] }) })
     assert.equal(h.noteToolCall(), true)
-    assert.deepEqual(red.report("sess"), { ruleset: corpus.ruleset.id, masked: [{ token: "OGRK00000001", rule: "entity_aws_key_id/aws_access_key_id" }] })
+    assert.deepEqual(red.report("sess"), { ruleset: corpus.ruleset.id, masked: [{ token: "OGRKP0000001", rule: "entity_aws_key_id/aws_access_key_id" }] })
     // …and restoreArgs on the host's session reaches the interceptor's map.
-    assert.deepEqual(red.restoreArgs("sess", { k: "OGRK00000001" }), { args: { k: AWS }, unresolved: [], changed: true })
+    assert.deepEqual(red.restoreArgs("sess", { k: "OGRKP0000001" }), { args: { k: AWS }, unresolved: [], changed: true })
   } finally {
     h.uninstall()
     await p.close()
@@ -390,13 +390,13 @@ test("reportFor: a hook's claim names the tokens present in ITS event, with thei
   const req = r.maskValue("s1", { messages: [{ role: "user", content: "use sk-proj-abcdefghijklmnopqrstuvwx and AKIAIOSFODNN7EXAMPLE" }] })
   assert.equal(req.minted.length, 2)
   // … the tool call the model wrote back carries ONE of them.
-  const event = { tool_calls: [{ name: "Bash", arguments: { command: "aws configure set aws_access_key_id OGRK00000002" } }] }
+  const event = { tool_calls: [{ name: "Bash", arguments: { command: "aws configure set aws_access_key_id OGRKP0000002" } }] }
   const claim = r.reportFor("s1", event)
-  assert.deepEqual(claim.masked, [{ token: "OGRK00000002", rule: "entity_aws_key_id/aws_access_key_id" }])
+  assert.deepEqual(claim.masked, [{ token: "OGRKP0000002", rule: "entity_aws_key_id/aws_access_key_id" }])
   // Nothing drained: the per-step report still holds both, and a second reportFor answers the same.
-  assert.deepEqual(r.reportFor("s1", event).masked.map((m) => m.token), ["OGRK00000002"])
+  assert.deepEqual(r.reportFor("s1", event).masked.map((m) => m.token), ["OGRKP0000002"])
   assert.equal(r.report("s1").masked.length, 2)
   // A token this session never issued is not claimed.
-  assert.deepEqual(r.reportFor("s1", { text: "OGRK00000099" }).masked, [])
+  assert.deepEqual(r.reportFor("s1", { text: "OGRKP0000099" }).masked, [])
   rmSync(dir, { recursive: true, force: true })
 })

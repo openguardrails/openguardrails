@@ -116,8 +116,8 @@
        "token": {
         "type": "string",
         "maxLength": 64,
-        "pattern": "^(?:OGRK[0-9]{8,}|\\$\\{OGR_[A-Z_]+_[0-9]+\\})$",
-        "description": "The placeholder, in either OGR shape: `OGRK00000003` (secrets, minted since OGR 1.9) or `${OGR_SECRET_3}` (the shape minted before it, still recognised). Never the value."
+        "pattern": "^(?:OGRK[0-9A-Z][0-9X]{7,}|\\$\\{OGR_[A-Z_]+_[0-9]+\\})$",
+        "description": "The placeholder, in either OGR shape: `OGRKP0000003` (secrets — the fifth character names the MINTER, so a producer's numbering can never collide with a runtime's) or `${OGR_SECRET_3}` (the shape minted before it, still recognised). Never the value."
        },
        "rule": {
         "type": "string",

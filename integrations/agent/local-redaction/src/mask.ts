@@ -34,12 +34,13 @@ export interface MaskResult {
 }
 
 /**
- * Any placeholder, whichever allocator minted it and in either shape: the secrets
- * shape `OGRK00000001` (minted since 2026-09-14) and the `${OGR_<TYPE>_n}` shape
+ * Any placeholder, WHICHEVER ALLOCATOR MINTED IT — the fifth character is the
+ * minter's letter, so this recognises `OGRKP…` (ours), `OGRKF…` (openafw) and
+ * `OGRKR…` (the runtime) alike, plus the `${OGR_<TYPE>_n}` shape
  * (pii on the gateway path, and every secrets token minted before the switch).
  * A rule never matches inside one.
  */
-export const TOKEN_RE = /OGRK[0-9X]{8,}|\$\{OGR_[A-Z_]+_[0-9A-Z]+\}/g
+export const TOKEN_RE = /OGRK[0-9A-Z][0-9X]{7,}|\$\{OGR_[A-Z_]+_[0-9A-Z]+\}/g
 
 /**
  * What is stripped for matching: C0 controls other than `\t` `\n` `\r`, DEL,

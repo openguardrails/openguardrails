@@ -113,7 +113,7 @@ for the two actions it can refuse.
 
 The map is in memory, per process, never on disk (256 values per session;
 over that a new value is still masked, with the fixed non-restorable
-`OGRKXXXXXXXX`).
+`OGRKPXXXXXXX`).
 
 ## What it enforces
 

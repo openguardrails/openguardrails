@@ -95,7 +95,7 @@ test("the provider gets a token; the harness gets the value back", async () => {
   await withProxy(
     jsonReply({
       id: "msg_1",
-      content: [{ type: "tool_use", id: "t1", name: "deploy", input: { token: "OGRK00000001" } }],
+      content: [{ type: "tool_use", id: "t1", name: "deploy", input: { token: "OGRKP0000001" } }],
     }),
     async ({ proxy, provider }) => {
       const res = await fetch(`${proxy.url}/http/127.0.0.1:${provider.port}/v1/messages`, {
@@ -107,7 +107,7 @@ test("the provider gets a token; the harness gets the value back", async () => {
 
       // What the provider saw
       assert.equal(provider.seen[0].body.includes(KEY), false, "the credential reached the provider")
-      assert.match(provider.seen[0].body, /OGRK00000001/)
+      assert.match(provider.seen[0].body, /OGRKP0000001/)
       // What the harness got back — the real value, in the tool's arguments
       assert.equal(back.content[0].input.token, KEY)
     },
@@ -158,7 +158,7 @@ test("a streamed reply comes back with its tool arguments restored", async () =>
   const sse = (_req, res) => {
     res.writeHead(200, { "content-type": "text/event-stream" })
     res.write('event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"t1","name":"deploy","input":{}}}\n\n')
-    res.write('event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"token\\":\\"OGRK00000001\\"}"}}\n\n')
+    res.write('event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"token\\":\\"OGRKP0000001\\"}"}}\n\n')
     res.write('event: message_stop\ndata: {"type":"message_stop"}\n\n')
     res.end()
   }
@@ -200,7 +200,7 @@ test("/__ogr/mask tokenises a hook's own event, and never mints", async () => {
       body: JSON.stringify({ value: { text: `the key is ${KEY}`, other: "sk-proj-neverseenbeforeaaaaaaaa" } }),
     })
     const { value, redaction } = await res.json()
-    assert.equal(value.text, "the key is OGRK00000001", "a value the request half already named must reuse its token")
+    assert.equal(value.text, "the key is OGRKP0000001", "a value the request half already named must reuse its token")
     assert.equal(value.other, "sk-proj-neverseenbeforeaaaaaaaa",
       "the control surface must not MINT — a second token for a value the provider never saw restores to nothing")
     assert.equal(redaction.ruleset, RULESET.id)
@@ -233,7 +233,7 @@ test("the upstream is read from the path, and the base URL is derivable", () => 
 test("a decompressed reply does not keep the provider's content-encoding", async () => {
   const { gzipSync } = await import("node:zlib")
   const gz = (_req, res) => {
-    const body = gzipSync(JSON.stringify({ content: [{ type: "tool_use", id: "t1", name: "d", input: { token: "OGRK00000001" } }] }))
+    const body = gzipSync(JSON.stringify({ content: [{ type: "tool_use", id: "t1", name: "d", input: { token: "OGRKP0000001" } }] }))
     res.writeHead(200, { "content-type": "application/json", "content-encoding": "gzip", "content-length": String(body.length) })
     res.end(body)
   }
@@ -300,7 +300,7 @@ test("a zstd-compressed model request (Codex 0.153) is decoded, masked, and forw
     const sent = provider.seen[0]
     assert.equal(sent.headers["content-encoding"], undefined, "the upstream must get the decoded body, without the encoding header")
     assert.equal(sent.body.includes(KEY), false, "the credential reached the provider inside a compressed body")
-    assert.match(sent.body, /OGRK00000001/)
+    assert.match(sent.body, /OGRKP0000001/)
     assert.equal(proxy.pipe.counters.passed, 0)
     assert.equal(proxy.pipe.counters.requests, 1)
     // gzip takes the same door
@@ -355,8 +355,8 @@ test("the proxy's session is the bare session id a hook is handed — Claude Cod
       body: JSON.stringify({ session: sid, value: { tool_calls: [{ name: "Bash", arguments: { command: `printf ${KEY}` } }] } }),
     })).json()
     assert.equal(masked.changed, true, "the hook's event must carry the token the provider was given")
-    assert.equal(masked.value.tool_calls[0].arguments.command, "printf OGRK00000001")
-    assert.deepEqual(masked.redaction.masked, [{ token: "OGRK00000001", rule: "entity_api_key/openai_project" }])
+    assert.equal(masked.value.tool_calls[0].arguments.command, "printf OGRKP0000001")
+    assert.deepEqual(masked.redaction.masked, [{ token: "OGRKP0000001", rule: "entity_api_key/openai_project" }])
     // The claim is about THIS event: a second hook event that carries no token claims none —
     // the drained per-step report would have named the request's values here.
     const plain = await (await fetch(`${proxy.url}/__ogr/mask`, {
@@ -400,8 +400,8 @@ test("an SSE reply with NO content-type (the ChatGPT Codex backend) is still res
   const sse = (_req, res) => {
     // Exactly what chatgpt.com/backend-api/codex/responses sends: chunked, typeless.
     res.writeHead(200, {})
-    res.write(`event: response.custom_tool_call_input.done\ndata: ${JSON.stringify({ type: "response.custom_tool_call_input.done", output_index: 0, input: "run(\"OGRK00000001\")" })}\n\n`)
-    res.write(`event: response.completed\ndata: ${JSON.stringify({ type: "response.completed", response: { id: "r", output: [{ type: "custom_tool_call", input: "run(\"OGRK00000001\")" }] } })}\n\n`)
+    res.write(`event: response.custom_tool_call_input.done\ndata: ${JSON.stringify({ type: "response.custom_tool_call_input.done", output_index: 0, input: "run(\"OGRKP0000001\")" })}\n\n`)
+    res.write(`event: response.completed\ndata: ${JSON.stringify({ type: "response.completed", response: { id: "r", output: [{ type: "custom_tool_call", input: "run(\"OGRKP0000001\")" }] } })}\n\n`)
     res.end()
   }
   await withProxy(sse, async ({ proxy, provider }) => {
@@ -411,7 +411,7 @@ test("an SSE reply with NO content-type (the ChatGPT Codex backend) is still res
       body: JSON.stringify({ model: "gpt-6", stream: true, prompt_cache_key: "s1", input: [{ role: "user", content: [{ type: "input_text", text: KEY }] }] }),
     })
     const text = await res.text()
-    assert.equal(text.includes("OGRK00000001"), false, "the harness got a tool call it cannot run")
+    assert.equal(text.includes("OGRKP0000001"), false, "the harness got a tool call it cannot run")
     const inputs = text.split("\n").filter((l) => l.startsWith("data: ")).map((l) => JSON.parse(l.slice(6)))
     assert.equal(inputs[0].input, `run("${KEY}")`)
     assert.equal(inputs[1].response.output[0].input, `run("${KEY}")`)
