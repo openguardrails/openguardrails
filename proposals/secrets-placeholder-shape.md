@@ -1,8 +1,8 @@
-# Proposal: a value-shaped secrets placeholder — `OGRKnnnnnnnn`
+# Proposal: a value-shaped, minter-namespaced secrets placeholder — `OGRK<minter><nnnnnnn>`
 
 > **Status: DRAFT — non-normative.** Proposes changing the placeholder shape that
 > [local redaction](../specification/local-redaction.md) (OGR 1.4) mints for the
-> `security.secret_leak.*` family from `${OGR_SECRET_n}` to **`OGRK` + eight zero-padded digits** (`OGRK00000001`),
+> `security.secret_leak.*` family from `${OGR_SECRET_n}` to **`OGRK` + a minter letter + seven zero-padded digits** (`OGRKF0000001`),
 > and adding `redaction.unresolved[]` to the [`redaction`](../specification/guard-event.md#redaction)
 > report. PII placeholders (`${OGR_EMAIL_n}`, …) are NOT in scope. Measured on
 > 2026-09-14 by the OpenAFW project; scripts and raw results in
@@ -46,7 +46,7 @@ Pooled, n = 44 per shape:
 | mustache | `{{OGR_SECRET_1}}` | 20 | 9 | 11 | 1 | 0 | 45 % |
 | URI | `ogr://secret/1` | 29 | 0 | 9 | 2 | 0 | 66 % |
 | fake key | `sk-ogr-1-Xk7Q…` | 39 | 0 | 0 | 3 | 2 | 89 % |
-| credential id | `OGRK00000001` | 39 | 0 | 0 | 4 | 1 | 89 % |
+| credential id | `OGRK00000001` (letterless, round 1) | 39 | 0 | 0 | 4 | 1 | 89 % |
 | **hyphen** | **`OGR-SECRET-1`** | **41** | **0** | **0** | 2 | 0 | **93 %** |
 
 "Pre-check only" is a first turn spent on `ls .env` / `git --version`; it is a
@@ -83,9 +83,33 @@ belong in a clone URL"), and those refusals land on both shapes alike.
 
 ### 3.1 Placeholder shape (local-redaction.md, "Placeholders")
 
-For the `security.secret_leak.*` family the placeholder is **`OGRK` followed
-by the registration number zero-padded to eight digits**: `OGRK00000001`.
-Matching regex `OGRK[0-9]{8,}`; the width grows only past 99 999 999.
+For the `security.secret_leak.*` family the placeholder is **`OGRK`, one
+upper-case MINTER LETTER, then the registration number zero-padded to seven
+digits**: `OGRKF0000001`. Matching regex `OGRK[A-Z][0-9]{7,}`; twelve
+characters, and the width grows only past 9 999 999 per minter.
+
+The letter names WHO minted the token — `F` the local firewall (OpenAFW),
+`P` an in-process harness plugin, `R` the runtime — and it is not
+decoration:
+
+⚠️⚠️ **Two minters sharing one counter space fail as a WRONG VALUE, silently.**
+A host's counter is per host and permanent; a runtime's is per agent and
+expires; the "seed above the highest number in this body" floor only sees the
+body in hand. A body carrying no host token therefore gives the runtime a
+floor of zero, both mint number 1 for DIFFERENT values, and one model context
+then holds one token naming two secrets — whichever side restores splices the
+wrong credential into a tool call and nothing throws. With a letter each side
+mints into its own space, a foreign token is plain text to every other reader,
+and the worst case degrades to two names for one value, each independently
+restorable. The floor and `occupiedPlaceholders` retire with it.
+
+⚠️ A reader MUST match `OGRK[A-Z][0-9]{7,}` rather than enumerating letters, so
+a new minter needs no code change: CI found five copies of the token regex in
+the protocol repo alone and eight in the reference runtime.
+
+A minter MUST restore only its own namespace, and MUST NOT report another
+minter's token as unresolved — refusing a tool call over a token the next
+restorer can answer is the failure this rule prevents.
 
 - Letters and digits only: nothing a markdown renderer escapes (the
   underscore escape tolerance stays only for the legacy shape), not a valid
@@ -131,13 +155,24 @@ a claim under the same rule as `masked[]`: never an input to a decision.
 ```json
 "redaction": {
   "ruleset": "rs_9f2c1e0a7b3d4c5e8f1a2b3c4d5e6f70",
-  "masked": [ { "token": "OGRK00000003", "rule": "entity_api_key/gitlab" } ],
-  "unresolved": [ "OGRK00000007" ]
+  "masked": [ { "token": "OGRKF0000003", "rule": "entity_api_key/gitlab" } ],
+  "unresolved": [ "OGRKF0000007" ]
 }
 ```
 
 The `token` pattern in `guard-event.schema.json` becomes
-`^(OGRK[0-9]{8,}|\$\{OGR_[A-Z_]+_[0-9]+\})$`.
+`^(?:OGRK[0-9A-Z][0-9X]{7,}|\$\{OGR_[A-Z_]+_[0-9]+\})$` — the `$` outside the
+alternation, so neither branch admits a trailing tail. Two details the
+implementations found, both deliberate:
+
+- ⚠️ **The run must admit `X`.** The overflow placeholder a full map mints
+  (`OGRKFXXXXXXX`) is a FRESH grant, so it is reported in `masked[]` like any
+  other; a pattern of `[0-9]` there turns a masking success into a rejected
+  event at exactly the moment an integration is under pressure.
+- **Position five stays `[0-9A-Z]`, admitting the letterless shape.** A schema
+  is the tolerant end: one extra character class accepts a producer built
+  during the window when the shape had no letter, and rejecting it buys
+  nothing. Same reasoning as the optional-field rule.
 
 ## 4. Migration
 
@@ -145,7 +180,12 @@ The `token` pattern in `guard-event.schema.json` becomes
   host-minted new value). §3.2 makes that safe: they are distinct strings in
   one map.
 - The conformance corpus keeps its `${OGR_SECRET_n}` cases (a restorer must
-  still answer them) and gains fixed-width cases for mask, restore and stream.
+  still answer them) and gains namespaced cases for mask, restore and stream.
+  It declares the minter it was produced under as a top-level `"minter"`, so a
+  runner mints under that letter and compares tokens byte for byte instead of
+  translating them; a case whose delta boundary falls INSIDE the prefix
+  (`"cost: O"` + `"GRK0000"`) is re-split by hand, since only a whole run can
+  be rewritten mechanically.
 - `redaction.masked[].token` pattern widened as in §3.3; old integrations keep
   reporting the legacy shape and remain valid.
 
@@ -171,9 +211,13 @@ The `token` pattern in `guard-event.schema.json` becomes
 ## 6. Recommendations on the two open points (converged between the OpenAFW
 and AIRS sides, 2026-09-14; for the maintainer to ratify)
 
-1. **Eight digits, as measured.** `OGRK00000001` is the shape that was run
-   through all three rounds; the counter is per registry, so the width is
-   never reached in practice, and `[0-9]{8,}` admits growth.
+1. **Twelve characters: `OGRK` + letter + seven digits.** The letterless
+   `OGRK00000001` was run through the first three rounds and the letter was
+   re-measured in a fourth (§2): identical on DeepSeek (52/52 both) and Qwen
+   (46 vs 45 of 52), and on Claude Code 16/16 vs 13/16, where all three misses
+   are the scenario refusals every shape draws (a reserved documentation
+   domain, a token in a clone URL) and none mentions the token's format. The
+   counter is per minter per registry, so seven digits are never exhausted.
 2. **The gateway path switches too.** The premise "no model writes a
    runtime-minted token back" does not hold: on the gateway path the
    runtime-minted token enters the model's context exactly as a host-minted
