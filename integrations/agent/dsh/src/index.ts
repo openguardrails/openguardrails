@@ -244,7 +244,7 @@ export function apply(ctx: Context, config: Config): void {
   // ---- local secrets redaction (OGR 1.4) ----------------------------------
   //
   // The value never leaves this host: every credential in the outbound model
-  // request becomes `${OGR_SECRET_n}`, the runtime judges the placeholder,
+  // request becomes `OGRK00000001`-style, the runtime judges the placeholder,
   // and the interceptor puts the value back into the reply's tool-call
   // arguments before dsh parses them. There is deliberately no restore hook
   // in this plugin — dsh's `exec.arguments` is `readonly` and
@@ -381,7 +381,7 @@ export function apply(ctx: Context, config: Config): void {
    * secrets are already tokens and a `maskKnown` pass suffices. dsh has no
    * such hook — the request is frozen — so this plugin is the FIRST thing on
    * the host to see the step, and it MINTS here: `maskValue` walks the
-   * payload, mints `${OGR_SECRET_n}` for what it finds, and the interceptor
+   * payload, mints `OGRK00000001`-style for what it finds, and the interceptor
    * a few frames later meets the same values already in the session map and
    * reuses the same tokens. The provider and the runtime are therefore given
    * the identical text. Reversing these two (letting the interceptor mint

@@ -53,7 +53,7 @@ test("a group names the span, and needs the d flag the compiler adds", () => {
   const c = compileRuleset(ruleset([rule({ patterns: [{ id: "p", source: "key=(AKIA[A-Z0-9]{16})" }], group: 1, examples: { match: ["key=AKIAIOSFODNN7EXAMPLE"], nomatch: [] } })]))
   assert.equal(c.rules.length, 1)
   const r = mask("key=AKIAIOSFODNN7EXAMPLE", new SessionMap("s"), c)
-  assert.equal(r.text, "key=${OGR_SECRET_1}")
+  assert.equal(r.text, "key=OGRK00000001")
 })
 
 /**
@@ -242,8 +242,8 @@ test("LocalRedactor: start() awaits the first fetch when nothing is cached, then
   assert.match(logs[0], /ruleset rs_conformance.* \(fetched\) — 3 rules/)
 
   const r = red.mask("sess", "AKIAIOSFODNN7EXAMPLE")
-  assert.equal(r.text, "${OGR_SECRET_1}")
-  assert.deepEqual(red.report("sess"), { ruleset: corpus.ruleset.id, masked: [{ token: "${OGR_SECRET_1}", rule: "entity_aws_key_id/aws_access_key_id" }] })
+  assert.equal(r.text, "OGRK00000001")
+  assert.deepEqual(red.report("sess"), { ruleset: corpus.ruleset.id, masked: [{ token: "OGRK00000001", rule: "entity_aws_key_id/aws_access_key_id" }] })
   assert.deepEqual(red.report("sess"), { ruleset: corpus.ruleset.id, masked: [] }) // drained
 
   // The same id on the heartbeat: nothing happens. A new id: one refetch.

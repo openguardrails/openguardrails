@@ -12,7 +12,7 @@
  *     value that is a substring of another cannot corrupt it).
  *  3. Then the ruleset, in SERVED order, over the remaining text. Overlaps
  *     resolve longest-wins; equal lengths fall to array order. A match is
- *     never taken inside an existing `${OGR_…}` token.
+ *     never taken inside an existing placeholder (either shape, `TOKEN_RE`).
  *  4. Splice, highest offset first. Nothing else changes.
  *
  * `minted` lists the tokens this call created — new values only. History
@@ -33,8 +33,13 @@ export interface MaskResult {
   minted: Minted[]
 }
 
-/** Any placeholder of the OGR shape, whichever allocator minted it. */
-export const TOKEN_RE = /\$\{OGR_[A-Z_]+_[0-9A-Z]+\}/g
+/**
+ * Any placeholder, whichever allocator minted it and in either shape: the secrets
+ * shape `OGRK00000001` (minted since 2026-09-14) and the `${OGR_<TYPE>_n}` shape
+ * (pii on the gateway path, and every secrets token minted before the switch).
+ * A rule never matches inside one.
+ */
+export const TOKEN_RE = /OGRK[0-9X]{8,}|\$\{OGR_[A-Z_]+_[0-9A-Z]+\}/g
 
 /**
  * What is stripped for matching: C0 controls other than `\t` `\n` `\r`, DEL,

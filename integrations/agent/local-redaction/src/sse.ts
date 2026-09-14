@@ -230,8 +230,8 @@ function anthropicDecoder(r: StreamRestorer, map: SessionMap, report: (tokens: s
  * ⚠️⚠️ **AND THE CUSTOM TOOL CALL — `response.custom_tool_call_input.delta` /
  * `.done`, item type `custom_tool_call`, field `input` — IS HOW CODEX 0.153
  * RUNS ITS SHELL** (2026-09-11, found with mitmproxy behind the proxy: the
- * provider was given `${OGR_SECRET_13}`, the harness executed
- * `printf '%s' '${OGR_SECRET_13}' | wc -c` and got 16, and nothing anywhere
+ * provider was given `OGRK00000013`, the harness executed
+ * `printf '%s' 'OGRK00000013' | wc -c` and got 16, and nothing anywhere
  * said a restore had been skipped). Its `input` is FREEFORM TEXT (Codex
  * sends a JS-repl program), not a JSON document, so it is restored with the
  * plain restorer rather than the JSON-escaping one. ⚠️ A held tail is flushed

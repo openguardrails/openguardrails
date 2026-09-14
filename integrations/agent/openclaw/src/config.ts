@@ -62,7 +62,7 @@ export interface RuntimeOptions {
 /**
  * Local secrets redaction (OGR 1.4, specification/local-redaction.md): mask
  * every credential as it ENTERS the session history — tool results, written
- * messages — with `${OGR_SECRET_n}`, so the outbound model request is masked
+ * messages — with `OGRK00000001`-style, so the outbound model request is masked
  * by construction; judge the tool call on the placeholder; restore the value
  * into the tool's params on this host after judgement. ON by default. The
  * ruleset is the org's, fetched from the runtime with the API key; the

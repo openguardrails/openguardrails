@@ -24,7 +24,7 @@
  *                         a tool error and must find a safer path); the
  *                         verdict is recorded under the `callID`. THEN the
  *                         call's arguments are restored (local redaction):
- *                         the judge saw `${OGR_SECRET_n}`, the tool gets the
+ *                         the judge saw `OGRK00000001`-style, the tool gets the
  *                         value. An unrestorable token throws the notice.
  *
  *   permission.ask        opencode's own permission prompt. Answered from
@@ -308,7 +308,7 @@ export const OpenGuardrailsPlugin: Plugin = async (_input, options) => {
    * vantages mint into different maps) and is idempotent over a value with
    * no token in it. An unrestorable token refuses the call with a notice the
    * model can act on — the plugin's existing deny-and-continue shape —
-   * because a shell would expand `${OGR_SECRET_7}` to nothing and fail
+   * because a shell would expand `OGRK00000007` to nothing and fail
    * somewhere unnamed.
    */
   function restoreInto(output: ToolExecuteBeforeOutput, sessionId: string, tool: string): void {

@@ -105,7 +105,7 @@ All via environment variables:
 ## Local secrets redaction: the value never leaves this machine
 
 Credentials in your prompts, files and tool output are replaced with
-`${OGR_SECRET_n}` **before the request leaves your machine**. Anthropic is
+`OGRK00000001`-style **before the request leaves your machine**. Anthropic is
 given the placeholder; the real value goes back into the tool's arguments
 locally, after judgement, so the tool still runs. The ruleset is your
 organization's, served by the runtime — nothing here ships patterns.

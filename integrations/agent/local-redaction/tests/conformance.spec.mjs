@@ -37,11 +37,17 @@ for (const c of corpus.cases.mask) {
 function seeded(fixture) {
   const map = new SessionMap("conformance")
   for (const [token, value] of Object.entries(fixture)) {
-    const n = Number(/_([0-9]+)\}$/.exec(token)[1])
+    // A legacy `${OGR_SECRET_n}` fixture is a token minted elsewhere: adopted, not minted.
+    if (token.startsWith("${")) {
+      assert.ok(map.adopt(token, value), `legacy fixture token must be adoptable (${token})`)
+      continue
+    }
+    const n = Number(/(?:_|OGRK)0*([0-9]+)\}?$/.exec(token)[1])
     while (map.size < n - 1) map.tokenFor(`filler-${map.size}`)
     const grant = map.tokenFor(value)
     assert.equal(grant.token, token, `fixture map must be seedable in order (${token})`)
   }
+
   return map
 }
 

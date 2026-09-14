@@ -17,7 +17,7 @@ core into two plugin directories is exactly the drift the conformance corpus
 exists to prevent.
 
 Every credential in the outbound model request is replaced with
-`${OGR_SECRET_n}` **on this machine**. The runtime judges the placeholder, the
+`OGRK00000001`-style **on this machine**. The runtime judges the placeholder, the
 model provider is given the placeholder, and the real value is put back into
 the reply's tool-call arguments — locally — so the tool still runs with a
 working credential. Same contract as the in-process masking the other
