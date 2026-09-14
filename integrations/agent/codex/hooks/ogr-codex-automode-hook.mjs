@@ -229,7 +229,7 @@ const LOCAL_PORT = Number(process.env.OGR_LOCAL_PORT || 8787)
 
 /**
  * The event, with every secret the proxy masked on the way out replaced by
- * the SAME `OGRK00000001`-style the model provider was given (OGR 1.4).
+ * the SAME `OGRKP0000001`-style the model provider was given (OGR 1.4).
  *
  * ⚠️⚠️ **A HOOK'S VANTAGE IS THE HARNESS'S OWN COPY, WHICH IS THE
  * CLEARTEXT.** The proxy masks the request on its way to the provider and

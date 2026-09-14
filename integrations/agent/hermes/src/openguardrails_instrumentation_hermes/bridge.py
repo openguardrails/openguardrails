@@ -535,7 +535,7 @@ def _session_tag(session_id: str) -> str:
 
 def on_llm_request_middleware(request=None, session_id="", api_mode="", **_):
     """llm_request middleware: {"request": ...} with (2.0) every secret masked
-    to a `OGRK00000001`-style token, plus the session tag.
+    to a `OGRKP0000001`-style token, plus the session tag.
 
     This is the ONE seam where the complete outbound provider request is
     mutable, and it runs BEFORE pre_api_request — so the step/request event
@@ -589,7 +589,7 @@ def on_llm_request_middleware(request=None, session_id="", api_mode="", **_):
 def on_tool_execution_middleware(tool_name="", args=None, next_call=None, session_id="", **_):
     """tool_execution middleware — the LAST mutable point before dispatch,
     after pre_tool_call, the guardrails and the approval gate (design D7):
-    every `OGRK00000001`-style in the arguments becomes its value HERE and
+    every `OGRKP0000001`-style in the arguments becomes its value HERE and
     nowhere earlier, so the runtime, the human approval prompt and every
     hook judged the token.
 

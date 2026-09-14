@@ -1,7 +1,7 @@
 """Local secrets redaction — the secret never leaves the host (OGR 1.4).
 
 The reversible half of redaction: mask every secret in the OUTBOUND model request
-into a `OGRK00000001`-style token before it leaves the machine, restore the value
+into an ``OGRKP0000001`` token before it leaves the machine, restore the value
 into a tool's arguments on the way INTO the tool — after every judgement and
 approval — and never anywhere else. Stdlib only, like the rest of this
 package: `re`, `json`, `urllib`, `os`, `threading`.
@@ -50,14 +50,16 @@ TOKEN_TYPE = "SECRET"
 #: A placeholder as minted — by this plugin, by the runtime for the gateway
 #: path, or by pii masking. `X` is the fixed non-restorable placeholder a
 #: full map mints (§4.5): it matches the shape and can never be restored.
-#: Either shape: the secrets shape ``OGRK00000001`` (minted since 2026-09-14 — a
-#: value shape a model copies verbatim, where ``OGRK00000001`-style` was rewritten as a
+#: Either shape: the secrets shape ``OGRKP0000001`` — the fifth character names the
+#: MINTER (``P`` this plugin, ``F`` openafw, ``R`` the runtime), which is what keeps
+#: two allocators from handing one number to two values (minted since 2026-09-14 — a
+#: value shape a model copies verbatim, where ``${OGR_SECRET_n}`` was rewritten as a
 #: shell variable) and the ``${OGR_<TYPE>_n}`` shape (pii, and older tokens).
-TOKEN_RE = re.compile(r"OGRK[0-9X]{8,}|\$\{OGR_[A-Z_]+_[0-9A-Z]+\}")
+TOKEN_RE = re.compile(r"OGRK[0-9A-Z][0-9X]{7,}|\$\{OGR_[A-Z_]+_[0-9A-Z]+\}")
 
 #: The same shape with markdown escapes tolerated, for reporting an escaped
 #: token that no map entry matched (`${OGR\_SECRET\_9}`).
-_ESCAPED_TOKEN_RE = re.compile(r"OGRK[0-9X]{8,}|\\?\$\\?\{OGR(?:\\?_[A-Z]+)+\\?_[0-9A-Z]+\\?\}")
+_ESCAPED_TOKEN_RE = re.compile(r"OGRK[0-9A-Z][0-9X]{7,}|\\?\$\\?\{OGR(?:\\?_[A-Z]+)+\\?_[0-9A-Z]+\\?\}")
 
 #: Zero-width / control characters, stripped for MATCHING only — a token or a
 #: value split by a ZWSP is still that token or value. hermes's own
@@ -71,7 +73,11 @@ CONTROL_CHARS_RE = re.compile(
 )
 
 #: The fixed non-restorable placeholder for a value seen after the map filled.
-FULL_TOKEN = "OGRKXXXXXXXX"
+#: One letter per allocator that can write into one model context; see the TS
+#: library's `SECRET_TOKEN_MINTER` for the collision it closes.
+TOKEN_MINTER = "P"
+
+FULL_TOKEN = "OGRK%sXXXXXXX" % TOKEN_MINTER
 
 #: Bound per session (§3, the `maxTokens` figure).
 MAX_VALUES = 256
@@ -551,7 +557,7 @@ class RulesetStore:
 class SessionMap:
     """value <-> token for ONE session. In memory, never on disk. Bounded:
     past MAX_VALUES a new value is still masked — with the fixed
-    `OGRKXXXXXXXX`, which restores to nothing — because over the bound,
+    ``OGRKPXXXXXXX``, which restores to nothing — because over the bound,
     refusing to mask is the wrong side to fail on (§4.5)."""
 
     def __init__(self, limit: int = MAX_VALUES) -> None:
@@ -575,7 +581,7 @@ class SessionMap:
                                    "with the non-restorable %s", self.limit, FULL_TOKEN)
                 return FULL_TOKEN, False
             self.counter += 1
-            tok = "OGRK%08d" % self.counter
+            tok = "OGRK%s%07d" % (TOKEN_MINTER, self.counter)
             self.by_value[value] = tok
             self.by_token[tok] = value
             return tok, True

@@ -64,7 +64,7 @@ export interface WireEvent {
   /**
    * WHAT THIS HOST MASKED BEFORE SENDING (OGR 1.4, the fourth optional wire
    * field). Tokens, never values: the ruleset id this step ran under and the
-   * `OGRK00000001`-style placeholders minted for it.
+   * `OGRKP0000001`-style placeholders minted for it.
    *
    * ⚠️ It is a CLAIM, exactly like `integration` — nothing bounds what a
    * producer says about itself. What it buys is DIAGNOSIS: a secret found on

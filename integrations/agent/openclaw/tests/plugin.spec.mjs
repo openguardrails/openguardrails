@@ -309,11 +309,11 @@ async function bootRedacting(decide, options = {}) {
   // `register` is synchronous, so the fetch lands in the background: the
   // observable is a tool result coming back masked. The probe runs in
   // `sess-1` — token numbers are allocated once per process, so after it
-  // `sess-1` holds AWS as OGRK00000001 and the next mint anywhere is 2.
+  // `sess-1` holds AWS as OGRKP0000001 and the next mint anywhere is 2.
   const probe = { role: "toolResult", toolCallId: "probe", toolName: "read", content: [{ type: "text", text: AWS }], isError: false, timestamp: 0 }
   for (let i = 0; i < 100; i += 1) {
     const out = booted.handlers.get("tool_result_persist")({ toolName: "read", toolCallId: "probe", message: probe }, { sessionKey: "sess-1" })
-    if (out?.message?.content?.[0]?.text === "OGRK00000001") break
+    if (out?.message?.content?.[0]?.text === "OGRKP0000001") break
     await new Promise((r) => setTimeout(r, 10))
   }
   return booted
@@ -344,7 +344,7 @@ test("a tool result is tokenised as it is persisted; the same value gets the sam
   const { handlers, runtime } = await bootRedacting(() => "allow")
   try {
     const out = persist(handlers, `OPENAI=${OPENAI}\nAWS=${AWS}\n`)
-    assert.equal(out.message.content[0].text, "OPENAI=OGRK00000002\nAWS=OGRK00000001\n")
+    assert.equal(out.message.content[0].text, "OPENAI=OGRKP0000002\nAWS=OGRKP0000001\n")
     assert.equal(out.message.role, "toolResult")
     assert.equal(out.message.toolName, "read")
     assert.equal(out.message.timestamp, 1)
@@ -352,7 +352,7 @@ test("a tool result is tokenised as it is persisted; the same value gets the sam
       { message: { role: "user", content: `please use ${AWS}`, timestamp: 2 } },
       { sessionKey: "sess-1" },
     )
-    assert.equal(again.message.content, "please use OGRK00000001")
+    assert.equal(again.message.content, "please use OGRKP0000001")
     // A message with nothing to mask is left to the host untouched.
     assert.equal(handlers.get("before_message_write")({ message: { role: "user", content: "hi", timestamp: 3 } }, { sessionKey: "sess-1" }), undefined)
   } finally {
@@ -365,18 +365,18 @@ test("the call is judged on the placeholder, restored into params after the guar
   try {
     persist(handlers, `key ${AWS}`)
     const result = await handlers.get("before_tool_call")(
-      { toolName: "bash", toolCallId: `call-${++seq}`, params: { command: "aws s3 ls", env: { AWS_ACCESS_KEY_ID: "OGRK00000001" } } },
+      { toolName: "bash", toolCallId: `call-${++seq}`, params: { command: "aws s3 ls", env: { AWS_ACCESS_KEY_ID: "OGRKP0000001" } } },
       { sessionKey: "sess-1" },
     )
     assert.deepEqual(result.params, { command: "aws s3 ls", env: { AWS_ACCESS_KEY_ID: AWS } })
     assert.ok(!result.block)
     const [event] = runtime.received
     assert.deepEqual(runtime.violations, [])
-    assert.equal(event.payload.tool_calls[0].arguments.env.AWS_ACCESS_KEY_ID, "OGRK00000001")
+    assert.equal(event.payload.tool_calls[0].arguments.env.AWS_ACCESS_KEY_ID, "OGRKP0000001")
     assert.ok(!JSON.stringify(event).includes(AWS))
     assert.deepEqual(event.redaction, {
       ruleset: CONFORMANCE.ruleset.id,
-      masked: [{ token: "OGRK00000001", rule: "entity_aws_key_id/aws_access_key_id" }],
+      masked: [{ token: "OGRKP0000001", rule: "entity_aws_key_id/aws_access_key_id" }],
     })
     await toolCall(handlers)
     assert.deepEqual(runtime.received[1].redaction, { ruleset: CONFORMANCE.ruleset.id, masked: [] })
@@ -390,7 +390,7 @@ test("a blocked call is never restored", async () => {
   try {
     persist(handlers, `key ${AWS}`)
     const result = await handlers.get("before_tool_call")(
-      { toolName: "bash", toolCallId: `call-${++seq}`, params: { command: "echo OGRK00000001" } },
+      { toolName: "bash", toolCallId: `call-${++seq}`, params: { command: "echo OGRKP0000001" } },
       { sessionKey: "sess-1" },
     )
     assert.equal(result.block, true)
@@ -404,11 +404,11 @@ test("an unresolvable placeholder blocks the call with the notice", async () => 
   const { handlers, runtime } = await bootRedacting(() => "allow")
   try {
     const result = await handlers.get("before_tool_call")(
-      { toolName: "bash", toolCallId: `call-${++seq}`, params: { command: "curl -H 'Authorization: Bearer OGRK00000007'" } },
+      { toolName: "bash", toolCallId: `call-${++seq}`, params: { command: "curl -H 'Authorization: Bearer OGRKP0000007'" } },
       { sessionKey: "sess-1" },
     )
     assert.equal(result.block, true)
-    assert.match(result.blockReason, /OGRK00000007 could not be restored: it is not a placeholder this session issued/)
+    assert.match(result.blockReason, /OGRKP0000007 could not be restored: it is not a placeholder this session issued/)
   } finally {
     await runtime.close()
   }
@@ -420,7 +420,7 @@ test("D6: an outbound channel message carrying a known value reaches the runtime
     persist(handlers, `key ${AWS}`)
     assert.equal(await handlers.get("message_sending")({ content: `here: ${AWS}` }, { sessionKey: "sess-1" }), undefined)
     const event = runtime.received.at(-1)
-    assert.equal(event.payload.text, "here: OGRK00000001")
+    assert.equal(event.payload.text, "here: OGRKP0000001")
     assert.equal(event.redaction.ruleset, CONFORMANCE.ruleset.id)
     assert.deepEqual(runtime.violations, [])
   } finally {
@@ -471,7 +471,7 @@ async function startProvider() {
       res.writeHead(200, { "content-type": "application/json" })
       res.end(JSON.stringify({
         id: "m", type: "message", role: "assistant", stop_reason: "tool_use",
-        content: [{ type: "text", text: "using OGRK00000001" }, { type: "tool_use", id: "toolu_1", name: "bash", input: { command: "aws s3 ls --key OGRK00000001" } }],
+        content: [{ type: "text", text: "using OGRKP0000001" }, { type: "tool_use", id: "toolu_1", name: "bash", input: { command: "aws s3 ls --key OGRKP0000001" } }],
       }))
     })
   })
@@ -504,21 +504,21 @@ test("the interceptor is installed with the redactor: the model request — syst
     const res = await modelCall(provider.url, `my key is ${AWS}`)
     const reply = await res.json()
     const [sent] = provider.received
-    assert.equal(sent.body.system, "You are a shell. Deploy key: OGRK00000001")
-    assert.equal(sent.body.messages[0].content, "my key is OGRK00000002")
+    assert.equal(sent.body.system, "You are a shell. Deploy key: OGRKP0000001")
+    assert.equal(sent.body.messages[0].content, "my key is OGRKP0000002")
     assert.equal(sent.headers["x-api-key"], "provider-key")
     assert.ok(!Object.keys(sent.headers).some((k) => k.startsWith("x-ogr-")))
     assert.deepEqual(reply.content[1].input, { command: `aws s3 ls --key ${OPENAI}` })
-    assert.equal(reply.content[0].text, "using OGRK00000001")
+    assert.equal(reply.content[0].text, "using OGRKP0000001")
     assert.equal(interceptorStatus().sawTraffic, true)
     const result = await handlers.get("before_tool_call")(
-      { toolName: "bash", toolCallId: `call-${++seq}`, params: { command: "aws s3 ls", env: { AWS_ACCESS_KEY_ID: "OGRK00000002" } } },
+      { toolName: "bash", toolCallId: `call-${++seq}`, params: { command: "aws s3 ls", env: { AWS_ACCESS_KEY_ID: "OGRKP0000002" } } },
       { sessionKey: "sess-1" },
     )
     assert.deepEqual(result.params, { command: "aws s3 ls", env: { AWS_ACCESS_KEY_ID: AWS } })
     const event = runtime.received.at(-1)
-    assert.equal(event.payload.tool_calls[0].arguments.env.AWS_ACCESS_KEY_ID, "OGRK00000002")
-    assert.deepEqual(event.redaction.masked.map((m) => m.token), ["OGRK00000001", "OGRK00000002"])
+    assert.equal(event.payload.tool_calls[0].arguments.env.AWS_ACCESS_KEY_ID, "OGRKP0000002")
+    assert.deepEqual(event.redaction.masked.map((m) => m.token), ["OGRKP0000001", "OGRKP0000002"])
     assert.deepEqual(runtime.violations, [])
     assert.equal(interceptorStatus().requests, 1) // the runtime's own calls passed through untouched
   } finally {
@@ -532,12 +532,12 @@ test("the ingress hooks mask until the interceptor has seen traffic, then step a
   const provider = await startProvider()
   try {
     // Unproven: the ingress hook masks (the probe already did, in sess-1).
-    assert.equal(persist(handlers, `k ${OPENAI}`).message.content[0].text, "k OGRK00000002")
+    assert.equal(persist(handlers, `k ${OPENAI}`).message.content[0].text, "k OGRKP0000002")
     await (await modelCall(provider.url, "hi")).text()
     // Proven: the same hook now leaves the message to the host, and the wire is masked by the interceptor.
     assert.equal(persist(handlers, `k ${AWS} again`), undefined)
     await (await modelCall(provider.url, `and ${AWS}`)).text()
-    assert.equal(provider.received[1].body.messages[0].content, "and OGRK00000004")
+    assert.equal(provider.received[1].body.messages[0].content, "and OGRKP0000004")
     assert.equal(handlers.get("before_message_write")({ message: { role: "user", content: AWS, timestamp: 1 } }, { sessionKey: "sess-1" }), undefined)
   } finally {
     await provider.close()

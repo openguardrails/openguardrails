@@ -6,7 +6,7 @@ the [OpenGuardrails (OGR)](https://github.com/openguardrails/openguardrails)
 (`specification/runtime-api.md`): two `POST /v1/evaluate` calls per model
 call, verdicts enforced before the answer is shown and before any tool call
 or exec runs — and, since **2.0**, [local secrets redaction](#local-redaction-20):
-secrets are masked to `OGRK00000001`-style **before the request leaves the host**
+secrets are masked to `OGRKP0000001`-style **before the request leaves the host**
 and restored only into a tool's arguments, after judgement. Zero dependencies;
 the whole wire is hand-rolled over stdlib `urllib` in
 [`src/.../wire.py`](src/openguardrails_instrumentation_hermes/wire.py) and
@@ -42,7 +42,7 @@ embedding):
 | `OGR_REFUSAL_TEXT` | a generic sentence | What the user sees instead of a blocked answer. Says nothing about why by design — categories and rule text are internals (and a map of what to route around); they stay in the runtime's record and this plugin's log. |
 | `OGR_SESSION_TAG` | `on` | 1.1.0: stamp an opaque session tag (`user` = `hermes_session_<sha256[:32]>` on OpenAI modes, `metadata.user_id` on the Anthropic mode) onto every OUTBOUND model request, via Hermes' `llm_request` middleware. This is for the GATEWAY in front of the model: an OGR runtime observing there reads the tag and reassembles the session exactly instead of inferring it from conversation prefixes — which survives context compaction and history trimming. Never overwrites a value the deployment already set; `off` disables. Attribution only, like every self-declared OGR field. |
 | `OGR_REDACT_MASK` | keep placeholders | Replace redaction spans with this flat string (e.g. `[redacted]`) instead of the verdict's `${OGR_PHONE_1}`-style placeholders. |
-| `OGR_LOCAL_REDACTION` | `true` | 2.0: mask secrets to `OGRK00000001`-style before the request leaves the host ([below](#local-redaction-20)). `false` = exactly the 1.x wire: no `redaction` field on events, no restore middleware registered. |
+| `OGR_LOCAL_REDACTION` | `true` | 2.0: mask secrets to `OGRKP0000001`-style before the request leaves the host ([below](#local-redaction-20)). `false` = exactly the 1.x wire: no `redaction` field on events, no restore middleware registered. |
 | `OGR_RULES_CACHE` | `~/.openguardrails/rules-<sha256(runtime_url)[:8]>.json` | Where the fetched ruleset is cached (mode 0600, written atomically). Rules only — the value↔token map is never written to disk. |
 | `OGR_RESTORE_OUTPUT` | `false` | Restore this session's tokens in the FINAL answer. Off by default: Hermes gateways deliver the answer to Telegram/Slack/Discord, each one an egress. The user asked the agent to USE the secret, not to read it back. |
 | `OGR_LOCAL_REDACTION_TIERS` | `strong,heuristic` | Which rule tiers to mask. Both by default — a reversible mask over-masking costs the model its view of one value; the tool still gets the real one. |
@@ -104,11 +104,11 @@ here and only here.
 every `.env` an agent reads, every `Authorization:` header in a curl it
 composes goes to the model provider verbatim — the runtime sees it
 *afterwards*, as a finding, from a copy that has already left. Since 2.0 the
-plugin masks each secret to a `OGRK00000001`-style token **on the host, before
+plugin masks each secret to a `OGRKP0000001`-style token **on the host, before
 the request leaves**, and restores the value **only into a tool's
 arguments, after every judgement** — so the provider, the runtime and the
 human approval prompt all see `curl -H "Authorization: Bearer
-OGRK00000001"`, and the tool runs with the real value. A secret is
+OGRKP0000001"`, and the tool runs with the real value. A secret is
 opaque to the model (it has no use for the bytes, only for the fact that
 there is one and where it goes), which is exactly why the mask is lossless
 and can be applied blind.
@@ -126,7 +126,7 @@ and can be applied blind.
   never run wrong. Both tiers (`strong`, `heuristic`) are masked by default.
 - **The map is per session, in memory, never on disk.** A value seen twice
   in one session gets the same token; the map holds 256 values, past which a
-  new value is still masked, with the fixed non-restorable `OGRKXXXXXXXX`
+  new value is still masked, with the fixed non-restorable `OGRKPXXXXXXX`
   and a warning — over the bound, refusing to mask is the wrong side to fail
   on.
 - **Restore is exact.** Whole-token match against this session's map,

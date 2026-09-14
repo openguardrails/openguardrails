@@ -100,7 +100,7 @@ secret, not to read it back.
 ## Local secrets redaction
 
 **The secret never leaves the host.** Every credential in the messages sent
-to the model is replaced with a `OGRK00000001`-style placeholder; the model
+to the model is replaced with a `OGRKP0000001`-style placeholder; the model
 works with the placeholder; when it puts one in a tool call, the value is
 restored into the arguments on this machine — *after* the runtime has judged
 the call on the placeholder — and the tool runs with the real thing.
@@ -126,7 +126,7 @@ request, reporting `ruleset: ""`; `"closed"` refuses the model call.
 
 The map is in memory, per process, never on disk (256 values per session;
 over that a new value is still masked, with the fixed non-restorable
-`OGRKXXXXXXXX`). A resumed session starts with a fresh map, so a
+`OGRKPXXXXXXX`). A resumed session starts with a fresh map, so a
 placeholder the model remembers from an earlier process cannot be restored
 — the call is refused with the notice rather than run with an empty value.
 

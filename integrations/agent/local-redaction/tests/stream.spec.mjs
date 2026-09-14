@@ -20,8 +20,8 @@ function seeded(values) {
 test("feed: a token split across three deltas restores once the last piece arrives; nothing is emitted early", () => {
   const r = createStreamRestorer(seeded([AWS]))
   const state = { pending: "" }
-  assert.equal(r.feed(state, 'aws --key OGRK000', false), "aws --key ")
-  assert.equal(state.pending, "OGRK000")
+  assert.equal(r.feed(state, 'aws --key OGRKP00', false), "aws --key ")
+  assert.equal(state.pending, "OGRKP00")
   assert.equal(r.feed(state, "0000", false), "")
   assert.equal(r.feed(state, "1 ls", false), `${AWS} ls`)
   assert.equal(state.pending, "")
@@ -35,12 +35,12 @@ test("feed: a partial token at end of stream is text, not lost", () => {
   assert.equal(state.pending, "")
 })
 
-test("feed: a key held across a delta boundary completes as the token it is — OGRK0000001 then 0 is token 10", () => {
+test("feed: a key held across a delta boundary completes as the token it is — OGRKP000001 then 0 is token 10", () => {
   const map = seeded(["one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"])
   const r = createStreamRestorer(map)
   const state = { pending: "" }
-  assert.equal(r.feed(state, "OGRK0000001", false), "")
-  assert.equal(r.feed(state, "0/OGRK00000001", false), "ten/one")
+  assert.equal(r.feed(state, "OGRKP000001", false), "")
+  assert.equal(r.feed(state, "0/OGRKP0000001", false), "ten/one")
 })
 
 test("feed: a markdown-escaped legacy token split at the escape restores; a lone backslash before a non-escapable is text", () => {
@@ -58,14 +58,14 @@ test("feed: two fields keep separate tails — one call's half token is never co
   const r = createStreamRestorer(seeded([AWS]))
   const a = { pending: "" }
   const b = { pending: "" }
-  assert.equal(r.feed(a, "OGRK0000", false), "")
+  assert.equal(r.feed(a, "OGRKP000", false), "")
   assert.equal(r.feed(b, "0001", false), "0001")
   assert.equal(r.feed(a, "0001", false), AWS)
 })
 
 test("jsonStringEncode: a value with a quote lands in JSON text escaped, so the document still parses", () => {
   const map = seeded(['pa"ss\\word'])
-  const r = restoreJsonText('{"password":"OGRK00000001"}', map)
+  const r = restoreJsonText('{"password":"OGRKP0000001"}', map)
   assert.deepEqual(JSON.parse(r.text), { password: 'pa"ss\\word' })
   assert.equal(jsonStringEncode("a\nb"), "a\\nb")
 })
@@ -84,9 +84,9 @@ const chatChunk = (delta, finish = null) =>
 test("openai.chat stream: an argument split across three deltas is restored, prose and reasoning are not, and the assembled call parses", () => {
   const sse = createSseRestorer("openai.chat", seeded([AWS]))
   const frames = [
-    chatChunk({ role: "assistant", content: "using OGRK00000001 now" }),
+    chatChunk({ role: "assistant", content: "using OGRKP0000001 now" }),
     chatChunk({ tool_calls: [{ index: 0, id: "call_1", type: "function", function: { name: "bash", arguments: "" } }] }),
-    chatChunk({ tool_calls: [{ index: 0, function: { arguments: '{"cmd":"aws --key OGRK000' } }] }),
+    chatChunk({ tool_calls: [{ index: 0, function: { arguments: '{"cmd":"aws --key OGRKP00' } }] }),
     chatChunk({ tool_calls: [{ index: 0, function: { arguments: "0000" } }] }),
     chatChunk({ tool_calls: [{ index: 0, function: { arguments: '1 ls"}' } }] }),
     chatChunk({}, "tool_calls"),
@@ -100,7 +100,7 @@ test("openai.chat stream: an argument split across three deltas is restored, pro
   const data = payloads(out)
   assert.equal(data.at(-1), "[DONE]")
   const parsed = data.slice(0, -1).map((d) => JSON.parse(d))
-  assert.equal(parsed[0].choices[0].delta.content, "using OGRK00000001 now")
+  assert.equal(parsed[0].choices[0].delta.content, "using OGRKP0000001 now")
   const args = parsed.flatMap((p) => p.choices[0].delta.tool_calls ?? []).map((tc) => tc.function?.arguments ?? "").join("")
   assert.deepEqual(JSON.parse(args), { cmd: `aws --key ${AWS} ls` })
   // No argument delta went out carrying a token fragment the client would concatenate into a placeholder.
@@ -129,10 +129,10 @@ test("anthropic stream: input_json_delta across deltas restores, text_delta does
   const frames = [
     ev("message_start", { type: "message_start", message: { id: "m", type: "message", role: "assistant", content: [] } }),
     ev("content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }),
-    ev("content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "I will use OGRK00000001." } }),
+    ev("content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "I will use OGRKP0000001." } }),
     ev("content_block_stop", { type: "content_block_stop", index: 0 }),
     ev("content_block_start", { type: "content_block_start", index: 1, content_block: { type: "tool_use", id: "toolu_1", name: "bash", input: {} } }),
-    ev("content_block_delta", { type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: '{"cmd": "echo OGRK0' } }),
+    ev("content_block_delta", { type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: '{"cmd": "echo OGRKP' } }),
     ev("content_block_delta", { type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: "0000" } }),
     ev("content_block_delta", { type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: '001"}' } }),
     ev("content_block_stop", { type: "content_block_stop", index: 1 }),
@@ -145,7 +145,7 @@ test("anthropic stream: input_json_delta across deltas restores, text_delta does
   out += sse.end()
   const data = payloads(out).map((d) => JSON.parse(d))
   const text = data.filter((d) => d.type === "content_block_delta" && d.delta.type === "text_delta").map((d) => d.delta.text).join("")
-  assert.equal(text, "I will use OGRK00000001.")
+  assert.equal(text, "I will use OGRKP0000001.")
   const json = data.filter((d) => d.type === "content_block_delta" && d.delta.type === "input_json_delta").map((d) => d.delta.partial_json).join("")
   assert.deepEqual(JSON.parse(json), { cmd: `echo ${AWS}` })
   // Every event: line still names its data's type — a flush frame is a whole frame.
@@ -172,14 +172,14 @@ test("openai.responses stream: argument deltas restore, the .done and completed 
   const item = { type: "function_call", id: "fc_1", call_id: "call_1", name: "bash", arguments: "" }
   const frames = [
     ev("response.output_item.added", { type: "response.output_item.added", output_index: 0, item }),
-    ev("response.function_call_arguments.delta", { type: "response.function_call_arguments.delta", output_index: 0, delta: '{"cmd":"OGRK0000' }),
+    ev("response.function_call_arguments.delta", { type: "response.function_call_arguments.delta", output_index: 0, delta: '{"cmd":"OGRKP000' }),
     ev("response.function_call_arguments.delta", { type: "response.function_call_arguments.delta", output_index: 0, delta: '0001"}' }),
-    ev("response.function_call_arguments.done", { type: "response.function_call_arguments.done", output_index: 0, arguments: '{"cmd":"OGRK00000001"}' }),
-    ev("response.output_item.done", { type: "response.output_item.done", output_index: 0, item: { ...item, arguments: '{"cmd":"OGRK00000001"}' } }),
-    ev("response.output_text.delta", { type: "response.output_text.delta", output_index: 1, delta: "the key is OGRK00000001" }),
+    ev("response.function_call_arguments.done", { type: "response.function_call_arguments.done", output_index: 0, arguments: '{"cmd":"OGRKP0000001"}' }),
+    ev("response.output_item.done", { type: "response.output_item.done", output_index: 0, item: { ...item, arguments: '{"cmd":"OGRKP0000001"}' } }),
+    ev("response.output_text.delta", { type: "response.output_text.delta", output_index: 1, delta: "the key is OGRKP0000001" }),
     ev("response.completed", {
       type: "response.completed",
-      response: { id: "r", output: [{ ...item, arguments: '{"cmd":"OGRK00000001"}' }, { type: "message", content: [{ type: "output_text", text: "the key is OGRK00000001" }] }] },
+      response: { id: "r", output: [{ ...item, arguments: '{"cmd":"OGRKP0000001"}' }, { type: "message", content: [{ type: "output_text", text: "the key is OGRKP0000001" }] }] },
     }),
   ]
   let out = ""
@@ -192,8 +192,8 @@ test("openai.responses stream: argument deltas restore, the .done and completed 
   assert.deepEqual(JSON.parse(data.find((d) => d.type === "response.output_item.done").item.arguments), { cmd: AWS })
   const completed = data.find((d) => d.type === "response.completed").response
   assert.deepEqual(JSON.parse(completed.output[0].arguments), { cmd: AWS })
-  assert.equal(completed.output[1].content[0].text, "the key is OGRK00000001")
-  assert.equal(data.find((d) => d.type === "response.output_text.delta").delta, "the key is OGRK00000001")
+  assert.equal(completed.output[1].content[0].text, "the key is OGRKP0000001")
+  assert.equal(data.find((d) => d.type === "response.output_text.delta").delta, "the key is OGRKP0000001")
 })
 
 test("a stream with nothing to restore passes through byte-identical, CRLF endings and comments included", () => {
@@ -205,22 +205,22 @@ test("a stream with nothing to restore passes through byte-identical, CRLF endin
 test("unresolved tokens in a streamed argument are reported once the field completes", () => {
   const seen = []
   const sse = createSseRestorer("openai.chat", seeded([AWS]), { onUnresolved: (t) => seen.push(...t) })
-  sse.feed(chatChunk({ tool_calls: [{ index: 0, function: { arguments: '{"k":"OGRK00000007"}' } }] }))
+  sse.feed(chatChunk({ tool_calls: [{ index: 0, function: { arguments: '{"k":"OGRKP0000007"}' } }] }))
   sse.feed(chatChunk({}, "tool_calls"))
   sse.end()
-  assert.deepEqual(seen, ["OGRK00000007"])
+  assert.deepEqual(seen, ["OGRKP0000007"])
 })
 
 test("openai.responses: Codex's CUSTOM tool call — input deltas, the done frames and the terminal output — restore, under its own spelling", () => {
   // Codex 0.153 runs its shell as a custom_tool_call whose `input` is a freeform
   // JS-repl program; found unrestored with mitmproxy behind the proxy (the tool ran
-  // `printf '%s' 'OGRK00000013' | wc -c` and answered 16).
+  // `printf '%s' 'OGRKP0000013' | wc -c` and answered 16).
   const sse = createSseRestorer("openai.responses", seeded([AWS]))
   const item = { id: "ctc_1", type: "custom_tool_call", name: "js_repl", call_id: "c1", status: "in_progress" }
-  const program = `text(await tools.exec_command({cmd:"printf '%s' '${"OGRK00000001"}' | wc -c"}));`
+  const program = `text(await tools.exec_command({cmd:"printf '%s' '${"OGRKP0000001"}' | wc -c"}));`
   const frames = [
     ev("response.output_item.added", { type: "response.output_item.added", output_index: 0, item }),
-    ev("response.custom_tool_call_input.delta", { type: "response.custom_tool_call_input.delta", output_index: 0, delta: "text(await tools.exec_command({cmd:\"printf '%s' 'OGRK0000" }),
+    ev("response.custom_tool_call_input.delta", { type: "response.custom_tool_call_input.delta", output_index: 0, delta: "text(await tools.exec_command({cmd:\"printf '%s' 'OGRKP000" }),
     ev("response.custom_tool_call_input.delta", { type: "response.custom_tool_call_input.delta", output_index: 0, delta: "0001' | wc -c\"}));" }),
     ev("response.custom_tool_call_input.done", { type: "response.custom_tool_call_input.done", output_index: 0, input: program }),
     ev("response.output_item.done", { type: "response.output_item.done", output_index: 0, item: { ...item, status: "completed", input: program } }),
