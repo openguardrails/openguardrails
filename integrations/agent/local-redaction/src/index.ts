@@ -81,6 +81,7 @@ export {
   restoreResponseBody,
   sniffProtocol,
   stampedSession,
+  sessionOfStamp,
   type ModelProtocol,
   type RestoreBodyResult,
 } from "./protocol.js"

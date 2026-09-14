@@ -3,7 +3,7 @@
 The reference `mask()` / `restore()` for **OGR local secrets redaction**
 (OGR 1.4, `specification/local-redaction.md`): the secret never leaves the
 host. An agent integration masks every credential in the outbound provider
-request with a `${OGR_SECRET_n}` placeholder, judges the model's tool calls
+request with a `OGRK00000001`-style placeholder, judges the model's tool calls
 on the placeholder, and restores the real value into the tool's arguments —
 on the host, after judgement, and nowhere else.
 
@@ -121,7 +121,7 @@ interceptorStatus()          // { fetch: "wrapped", undici: "installed" | "unava
 
 The session map is **in memory, per process, never on disk**, bounded at
 256 values per session. Over the bound a new value is still masked, with the
-fixed non-restorable `${OGR_SECRET_X}`, and a warning says so.
+fixed non-restorable `OGRKXXXXXXXX`, and a warning says so.
 
 ## What `restore` does — and refuses to do
 

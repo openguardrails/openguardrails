@@ -117,7 +117,7 @@ export type RedactionTier = "strong" | "heuristic"
 
 /**
  * Local secrets redaction (OGR 1.4, specification/local-redaction.md): mask
- * every credential in the OUTBOUND model request with `${OGR_SECRET_n}` so
+ * every credential in the OUTBOUND model request with `OGRK00000001`-style so
  * the value never leaves this host, judge the placeholder, and restore the
  * value into the reply's tool-call arguments before the harness parses them.
  * ON by default. The ruleset is the organization's, fetched from the runtime

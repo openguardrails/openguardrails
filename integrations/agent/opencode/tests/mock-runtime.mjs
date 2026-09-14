@@ -47,7 +47,7 @@ function redactionProblems(r) {
   if (typeof r.ruleset !== "string") problems.push("redaction.ruleset is not a string")
   if (!Array.isArray(r.masked)) return [...problems, "redaction.masked is not an array"]
   for (const m of r.masked) {
-    if (typeof m?.token !== "string" || !/^\$\{OGR_[A-Z_]+_[0-9A-Z]+\}$/.test(m.token)) problems.push(`redaction.masked token ${JSON.stringify(m?.token)}`)
+    if (typeof m?.token !== "string" || !/^(?:OGRK[0-9X]{8,}|\$\{OGR_[A-Z_]+_[0-9A-Z]+\})$/.test(m.token)) problems.push(`redaction.masked token ${JSON.stringify(m?.token)}`)
     if (typeof m?.rule !== "string" || m.rule === "") problems.push("redaction.masked entry without a rule")
   }
   const extra = Object.keys(r).filter((k) => k !== "ruleset" && k !== "masked")

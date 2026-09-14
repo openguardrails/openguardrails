@@ -30,7 +30,7 @@ as a directory with no `npm install` and no build step.
 
 **Six harnesses, two shapes.** Local secrets redaction
 ([OGR 1.4](../../specification/local-redaction.md)) replaces every credential
-in the outbound model request with `${OGR_SECRET_n}` on the host, and restores
+in the outbound model request with `OGRK00000001`-style on the host, and restores
 it into the reply's tool-call arguments after judgement. *Where* that happens
 is decided by one question: **can code run inside the agent's own process?**
 

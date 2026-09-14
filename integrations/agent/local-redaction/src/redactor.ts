@@ -14,7 +14,7 @@
  * What "unprotected" costs the caller is the caller's `failMode` to decide.
  */
 import { mask, maskKnown, maskLeaves, type MaskResult, type Minted, type WalkResult } from "./mask.js"
-import { restore, restoreArgsAcross, type RestoreArgsResult, type RestoreResult } from "./restore.js"
+import { restore, restoreArgsAcross, type RestoreArgsResult, type RestoreResult, tokensIn } from "./restore.js"
 import {
   compileRuleset,
   defaultCachePath,
@@ -68,6 +68,8 @@ export class LocalRedactor {
   private compiled: CompiledRuleset | null = null
   private readonly maps: SessionMaps
   private readonly pending = new Map<string, Minted[]>()
+  /** session → token → the `<rule>/<pattern>` it was minted under (never drained). */
+  private readonly rules = new Map<string, Map<string, string>>()
   private refreshing: Promise<void> | null = null
   private readonly log: RedactorLog
   private readonly opts: RedactorOptions
@@ -206,6 +208,54 @@ export class LocalRedactor {
     const list = this.pending.get(sessionId) ?? []
     list.push(...minted)
     this.pending.set(sessionId, list)
+    // The rule each token was minted under, kept for the session's life: a claim
+    // about ONE event (`reportFor`) is answered from here, never from the drained
+    // per-step list.
+    const rules = this.rules.get(sessionId) ?? new Map<string, string>()
+    for (const m of minted) rules.set(m.token, m.rule)
+    this.rules.set(sessionId, rules)
+  }
+
+  /**
+   * The claim for ONE event: every token that OCCURS in `value`, with the rule it
+   * was minted under — nothing more.
+   *
+   * ⚠️⚠️ **A HOOK'S EVENT IS NOT THE STEP THAT MINTED THE TOKENS** (2026-09-11).
+   * `report()` drains "what was minted since the last report", which is the right
+   * claim where the plugin builds the model request AND the event (the in-process
+   * interceptor). A Claude Code / Codex hook holds one TOOL CALL: its event carries
+   * the tokens the model wrote into that call, while the drained list names the
+   * values the previous REQUEST masked — the user's prompt, a file the agent read
+   * — which are not in the event at all. The runtime counts only tokens that occur
+   * in the body, so the drained claim credited the plugin with ZERO on every hook
+   * event, masking or not. Nothing is drained here.
+   */
+  reportFor(sessionId: string, value: unknown): RedactionReport | undefined {
+    if (!this.masking) return undefined
+    let text: string
+    try {
+      text = typeof value === "string" ? value : JSON.stringify(value) ?? ""
+    } catch {
+      text = ""
+    }
+    const masked: Minted[] = []
+    const seen = new Set<string>()
+    for (const token of tokensIn(text)) {
+      if (seen.has(token)) continue
+      seen.add(token)
+      let rule = ""
+      for (const key of this.sessionsFor(sessionId)) {
+        const r = this.rules.get(key)?.get(token)
+        if (r !== undefined) {
+          rule = r
+          break
+        }
+      }
+      // A token no map of ours issued is not ours to claim.
+      if (rule === "") continue
+      masked.push({ token, rule })
+    }
+    return { ruleset: this.rulesetId, masked }
   }
 
   /** Mask one text for the session; minted tokens are recorded for the next report. */

@@ -105,7 +105,7 @@ package's browser half — still zero core changes).
 ## Local secrets redaction: the value never leaves this host
 
 Every credential in the outbound model request is replaced with
-`${OGR_SECRET_n}` **on this machine**, before the request goes anywhere. The
+`OGRK00000001`-style **on this machine**, before the request goes anywhere. The
 runtime judges the placeholder, the provider is given the placeholder, and
 the real value is put back into the reply's tool-call arguments — locally,
 after judgement — so the tool still runs with the working credential. On by

@@ -58,7 +58,7 @@ test("the runtime is shown a token, never the key", async () => {
       await stream(REQUEST, ANSWER)
       const sent = JSON.stringify(runtime.received)
       assert.equal(sent.includes(KEY), false, "the API key reached the runtime in the clear")
-      assert.match(sent, /\$\{OGR_SECRET_1\}/, "the key was not replaced by a placeholder")
+      assert.match(sent, /OGRK00000001/, "the key was not replaced by a placeholder")
     }, { rules: TEST_RULESET }))
 })
 
@@ -69,7 +69,7 @@ test("the step reports WHAT it masked — tokens and a ruleset id, never values"
       const request = runtime.received.find((e) => e.kind === "step/request")
       assert.equal(request.redaction.ruleset, TEST_RULESET.id)
       assert.deepEqual(request.redaction.masked, [
-        { token: "${OGR_SECRET_1}", rule: "entity_api_key/openai_project" },
+        { token: "OGRK00000001", rule: "entity_api_key/openai_project" },
       ])
       // The report is DRAINED: the same token must not be claimed twice, or
       // a coverage count is a count of events rather than of secrets.
@@ -85,7 +85,7 @@ test("one value, one token — across steps of the same session", async () => {
       await stream(REQUEST, ANSWER)
       const requests = runtime.received.filter((e) => e.kind === "step/request")
       assert.equal(requests.length, 2)
-      const tokens = requests.map((e) => JSON.stringify(e.payload).match(/\$\{OGR_SECRET_\d+\}/)[0])
+      const tokens = requests.map((e) => JSON.stringify(e.payload).match(/OGRK\d{8}/)[0])
       assert.equal(tokens[0], tokens[1], "the same secret must map to the same token, or a restore picks one at random")
       // Minted ONCE. The second step re-uses the map entry, so it has
       // nothing new to report — that is what makes `masked` a count of

@@ -128,7 +128,7 @@ test("the shipped bundle proxies a redaction round trip end to end", async () =>
       seen.push(body)
       const payload = Buffer.from(JSON.stringify({
         id: "msg_1",
-        content: [{ type: "tool_use", id: "t1", name: "deploy", input: { token: "${OGR_SECRET_1}" } }],
+        content: [{ type: "tool_use", id: "t1", name: "deploy", input: { token: "OGRK00000001" } }],
       }))
       res.writeHead(200, { "content-type": "application/json", "content-length": String(payload.length) })
       res.end(payload)
@@ -175,7 +175,7 @@ test("the shipped bundle proxies a redaction round trip end to end", async () =>
     })
     const back = await res.json()
     assert.equal(seen[0].includes(KEY), false, "the credential reached the provider")
-    assert.match(seen[0], /\$\{OGR_SECRET_1\}/)
+    assert.match(seen[0], /OGRK00000001/)
     assert.equal(back.content[0].input.token, KEY, "the harness did not get the value back")
   } finally {
     await proxy.close()

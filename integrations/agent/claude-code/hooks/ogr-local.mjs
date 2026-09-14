@@ -1,6 +1,6 @@
 // GENERATED — do not edit. Source: integrations/agent/ogr-local/src
 // Rebuild: npm --prefix integrations/agent/ogr-local run bundle
-// OGR_LOCAL_SOURCE_STAMP=21e59bc3dd96
+// OGR_LOCAL_SOURCE_STAMP=ef22d1731c5e
 // version=0.2.0
 // ogr-local/src/bundle.ts
 import { pathToFileURL } from "node:url";
@@ -297,8 +297,12 @@ async function loadRuleset(opts) {
 }
 
 // local-redaction/src/session.ts
-var SECRET_TOKEN_PREFIX = "${OGR_SECRET_";
-var OVERFLOW_TOKEN = "${OGR_SECRET_X}";
+var SECRET_TOKEN_PREFIX = "OGRK";
+var SECRET_TOKEN_DIGITS = 8;
+var OVERFLOW_TOKEN = "OGRKXXXXXXXX";
+function secretToken(n) {
+  return `${SECRET_TOKEN_PREFIX}${String(n).padStart(SECRET_TOKEN_DIGITS, "0")}`;
+}
 var DEFAULT_BOUND = 256;
 var SessionMap = class {
   constructor(id, opts = {}) {
@@ -336,7 +340,7 @@ var SessionMap = class {
       }
       return { token: OVERFLOW_TOKEN, fresh: true, restorable: false };
     }
-    const token = `${SECRET_TOKEN_PREFIX}${this.allocate()}}`;
+    const token = secretToken(this.allocate());
     this.byValue.set(value, token);
     this.byToken.set(token, value);
     this.valuesLongestFirst = null;
@@ -345,6 +349,23 @@ var SessionMap = class {
   }
   valueOf(token) {
     return this.byToken.get(token);
+  }
+  /**
+   * Bind a token minted ELSEWHERE — by an older plugin under the `${OGR_SECRET_n}`
+   * shape, by the gateway path — so this map restores it too. A value already
+   * bound keeps its token (the first name wins, as {@link tokenFor}); a token
+   * already bound to another value is refused rather than re-pointed.
+   */
+  adopt(token, value) {
+    if (token === "" || value === "") return false;
+    const held = this.byToken.get(token);
+    if (held !== void 0) return held === value;
+    if (this.byValue.has(value)) return false;
+    this.byValue.set(value, token);
+    this.byToken.set(token, value);
+    this.valuesLongestFirst = null;
+    this.tokensLongestFirst = null;
+    return true;
   }
   /** Every known value, longest first — the order a value substitution must run in. */
   values() {
@@ -404,7 +425,7 @@ var SessionMaps = class {
 };
 
 // local-redaction/src/mask.ts
-var TOKEN_RE = /\$\{OGR_[A-Z_]+_[0-9A-Z]+\}/g;
+var TOKEN_RE = /OGRK[0-9X]{8,}|\$\{OGR_[A-Z_]+_[0-9A-Z]+\}/g;
 var STRIP_ONE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u200b-\u200f\u2028-\u202e\u2060\ufeff]/;
 function normalize(text) {
   if (!STRIP_ONE.test(text)) return { stripped: text, index: null };
@@ -561,7 +582,7 @@ function matchKey(text, i, key) {
   }
   return [p - i, MATCH_FULL];
 }
-var TOKEN_SHAPE_RE = /\\?\$\\?\{OGR(?:\\?_[A-Z]+)*\\?_[0-9A-Z]+\\?\}/g;
+var TOKEN_SHAPE_RE = /OGRK[0-9X]{8,}|\\?\$\\?\{OGR(?:\\?_[A-Z]+)*\\?_[0-9A-Z]+\\?\}/g;
 function tokensIn(text) {
   const out = /* @__PURE__ */ new Set();
   TOKEN_SHAPE_RE.lastIndex = 0;
@@ -720,9 +741,25 @@ function sniffProtocol(body, url) {
 function stampedSession(body) {
   const b = asDict(body);
   if (!b) return null;
-  if (typeof b["user"] === "string" && b["user"] !== "") return b["user"];
+  if (typeof b["user"] === "string" && b["user"] !== "") return sessionOfStamp(b["user"]);
   const uid = asDict(b["metadata"])?.["user_id"];
-  return typeof uid === "string" && uid !== "" ? uid : null;
+  if (typeof uid === "string" && uid !== "") return sessionOfStamp(uid);
+  const pck = b["prompt_cache_key"];
+  return typeof pck === "string" && pck !== "" ? pck : null;
+}
+function sessionOfStamp(stamp) {
+  const t = stamp.trim();
+  if (t.startsWith("{")) {
+    try {
+      const parsed = asDict(JSON.parse(t));
+      const sid = parsed?.["session_id"];
+      if (typeof sid === "string" && sid !== "") return sid;
+    } catch {
+    }
+  }
+  const m = /(?:^|_)session_([A-Za-z0-9-]{8,})$/.exec(t);
+  if (m) return m[1];
+  return t;
 }
 function restoreResponseBody(protocol, text, map) {
   let parsed;
@@ -735,6 +772,16 @@ function restoreResponseBody(protocol, text, map) {
   if (!body) return null;
   let changed = false;
   const unresolved = /* @__PURE__ */ new Set();
+  const textField = (holder, key) => {
+    const v = holder[key];
+    if (typeof v !== "string") return;
+    const r = restore(v, map);
+    for (const t of r.unresolved) unresolved.add(t);
+    if (r.text !== v) {
+      holder[key] = r.text;
+      changed = true;
+    }
+  };
   const jsonField = (holder, key) => {
     const v = holder[key];
     if (typeof v !== "string") return;
@@ -768,6 +815,7 @@ function restoreResponseBody(protocol, text, map) {
     case "openai.responses":
       for (const item of asArray(body["output"]).map(asDict)) {
         if (item && item["type"] === "function_call") jsonField(item, "arguments");
+        if (item && item["type"] === "custom_tool_call") textField(item, "input");
       }
       break;
   }
@@ -932,14 +980,16 @@ function anthropicDecoder(r, map, report) {
 }
 function responsesDecoder(r, map, report) {
   const items = tails();
+  const kinds = /* @__PURE__ */ new Map();
   const flushItem = (key) => {
     const t = items.get(key);
     if (!t) return "";
     let out = "";
     if (t.pending !== "") {
+      const kind = kinds.get(key) ?? "function_call_arguments";
       out = eventFrame(
-        "response.function_call_arguments.delta",
-        JSON.stringify({ type: "response.function_call_arguments.delta", output_index: Number(key), delta: t.pending })
+        `response.${kind}.delta`,
+        JSON.stringify({ type: `response.${kind}.delta`, output_index: Number(key), delta: t.pending })
       );
       t.seen += t.pending;
       t.pending = "";
@@ -952,13 +1002,30 @@ function responsesDecoder(r, map, report) {
     for (const key of items.keys()) out += flushItem(key);
     return out;
   };
-  const whole = (holder, field) => {
+  const whole = (holder, field, json = true) => {
     if (!holder || typeof holder[field] !== "string") return false;
-    const res = restoreJsonText(holder[field], map);
+    const res = json ? restoreJsonText(holder[field], map) : restore(holder[field], map);
     if (res.unresolved.length) report(res.unresolved);
     if (res.text === holder[field]) return false;
     holder[field] = res.text;
     return true;
+  };
+  const wholeItem = (item) => {
+    if (!item) return false;
+    if (item["type"] === "function_call") return whole(item, "arguments");
+    if (item["type"] === "custom_tool_call") return whole(item, "input", false);
+    return false;
+  };
+  const delta = (parsed, key, kind, isLast) => {
+    if (typeof parsed["delta"] !== "string") return { before: "", payload: null };
+    kinds.set(key, kind);
+    const t = tail(items, key);
+    const original = parsed["delta"];
+    const restored = r.feed(t, original, isLast);
+    t.seen += restored;
+    if (restored === original) return { before: "", payload: null };
+    parsed["delta"] = restored;
+    return { before: "", payload: JSON.stringify(parsed) };
   };
   return {
     data(payload, isLast) {
@@ -966,24 +1033,21 @@ function responsesDecoder(r, map, report) {
       if (!parsed) return { before: "", payload: null };
       const key = String(typeof parsed["output_index"] === "number" ? parsed["output_index"] : 0);
       switch (parsed["type"]) {
-        case "response.function_call_arguments.delta": {
-          if (typeof parsed["delta"] !== "string") return { before: "", payload: null };
-          const t = tail(items, key);
-          const original = parsed["delta"];
-          const restored = r.feed(t, original, isLast);
-          t.seen += restored;
-          if (restored === original) return { before: "", payload: null };
-          parsed["delta"] = restored;
-          return { before: "", payload: JSON.stringify(parsed) };
-        }
+        case "response.function_call_arguments.delta":
+          return delta(parsed, key, "function_call_arguments", isLast);
+        case "response.custom_tool_call_input.delta":
+          return delta(parsed, key, "custom_tool_call_input", isLast);
         case "response.function_call_arguments.done": {
           const before = flushItem(key);
           return { before, payload: whole(parsed, "arguments") ? JSON.stringify(parsed) : null };
         }
+        case "response.custom_tool_call_input.done": {
+          const before = flushItem(key);
+          return { before, payload: whole(parsed, "input", false) ? JSON.stringify(parsed) : null };
+        }
         case "response.output_item.done": {
           const before = flushItem(key);
-          const item = dict(parsed["item"]);
-          const changed = item?.["type"] === "function_call" && whole(item, "arguments");
+          const changed = wholeItem(dict(parsed["item"]));
           return { before, payload: changed ? JSON.stringify(parsed) : null };
         }
         case "response.completed":
@@ -992,7 +1056,7 @@ function responsesDecoder(r, map, report) {
           const before = flush();
           let changed = false;
           for (const item of list(dict(parsed["response"])?.["output"]).map(dict)) {
-            if (item?.["type"] === "function_call" && whole(item, "arguments")) changed = true;
+            if (wholeItem(item)) changed = true;
           }
           return { before, payload: changed ? JSON.stringify(parsed) : null };
         }
@@ -1057,6 +1121,8 @@ var LocalRedactor = class {
   compiled = null;
   maps;
   pending = /* @__PURE__ */ new Map();
+  /** session → token → the `<rule>/<pattern>` it was minted under (never drained). */
+  rules = /* @__PURE__ */ new Map();
   refreshing = null;
   log;
   opts;
@@ -1179,6 +1245,49 @@ var LocalRedactor = class {
     const list2 = this.pending.get(sessionId) ?? [];
     list2.push(...minted);
     this.pending.set(sessionId, list2);
+    const rules = this.rules.get(sessionId) ?? /* @__PURE__ */ new Map();
+    for (const m of minted) rules.set(m.token, m.rule);
+    this.rules.set(sessionId, rules);
+  }
+  /**
+   * The claim for ONE event: every token that OCCURS in `value`, with the rule it
+   * was minted under — nothing more.
+   *
+   * ⚠️⚠️ **A HOOK'S EVENT IS NOT THE STEP THAT MINTED THE TOKENS** (2026-09-11).
+   * `report()` drains "what was minted since the last report", which is the right
+   * claim where the plugin builds the model request AND the event (the in-process
+   * interceptor). A Claude Code / Codex hook holds one TOOL CALL: its event carries
+   * the tokens the model wrote into that call, while the drained list names the
+   * values the previous REQUEST masked — the user's prompt, a file the agent read
+   * — which are not in the event at all. The runtime counts only tokens that occur
+   * in the body, so the drained claim credited the plugin with ZERO on every hook
+   * event, masking or not. Nothing is drained here.
+   */
+  reportFor(sessionId, value) {
+    if (!this.masking) return void 0;
+    let text;
+    try {
+      text = typeof value === "string" ? value : JSON.stringify(value) ?? "";
+    } catch {
+      text = "";
+    }
+    const masked = [];
+    const seen = /* @__PURE__ */ new Set();
+    for (const token of tokensIn(text)) {
+      if (seen.has(token)) continue;
+      seen.add(token);
+      let rule = "";
+      for (const key of this.sessionsFor(sessionId)) {
+        const r = this.rules.get(key)?.get(token);
+        if (r !== void 0) {
+          rule = r;
+          break;
+        }
+      }
+      if (rule === "") continue;
+      masked.push({ token, rule });
+    }
+    return { ruleset: this.rulesetId, masked };
   }
   /** Mask one text for the session; minted tokens are recorded for the next report. */
   mask(sessionId, text) {
@@ -1294,6 +1403,7 @@ function baseUrlFor(upstream, p = port()) {
 // ogr-local/src/server.ts
 import { createServer } from "node:http";
 import { Readable } from "node:stream";
+import { brotliDecompressSync, gunzipSync, inflateSync, zstdDecompressSync } from "node:zlib";
 
 // ogr-local/src/pipe.ts
 var DEFAULT_SESSION = "process";
@@ -1301,7 +1411,7 @@ var Pipe = class {
   constructor(opts) {
     this.opts = opts;
   }
-  counters = { requests: 0, streams: 0, restored: 0, passed: 0, minted: 0 };
+  counters = { requests: 0, streams: 0, restored: 0, passed: 0, minted: 0, unreadable: 0, upgrades_refused: 0 };
   sessions = /* @__PURE__ */ new Set();
   /** session → the `host[:port]` of its most recent model request — the wire's `llm_endpoint` (OGR 1.6). */
   lastHost = /* @__PURE__ */ new Map();
@@ -1396,6 +1506,10 @@ var Pipe = class {
     }
     return { ruleset, masked };
   }
+  /** The claim for ONE hook event: the tokens present in it, with their rules (nothing drained). */
+  reportFor(session, value) {
+    return this.redactor.reportFor(session, value);
+  }
   knownSessions() {
     return [...this.sessions];
   }
@@ -1415,6 +1529,20 @@ var HOP_BY_HOP = /* @__PURE__ */ new Set([
   "content-length"
 ]);
 var DROP_UPSTREAM = /* @__PURE__ */ new Set([...HOP_BY_HOP, "accept-encoding"]);
+function decodeRequestBody(raw, encoding) {
+  const enc = (encoding ?? "").trim().toLowerCase();
+  if (enc === "" || enc === "identity") return raw;
+  try {
+    if (enc === "gzip" || enc === "x-gzip") return gunzipSync(raw);
+    if (enc === "deflate") return inflateSync(raw);
+    if (enc === "br") return brotliDecompressSync(raw);
+    if (enc === "zstd") return zstdDecompressSync(raw);
+  } catch {
+    return null;
+  }
+  return null;
+}
+var JSON_TYPES = /^application\/(?:json|.*\+json)\b/i;
 var nowMs = () => Date.now();
 var trimSlash = (u) => u.endsWith("/") ? u.slice(0, -1) : u;
 function upstreamFor(url, fallback) {
@@ -1471,20 +1599,37 @@ async function startProxy(opts) {
       if (v === void 0 || DROP_UPSTREAM.has(k.toLowerCase())) continue;
       headers.set(k, Array.isArray(v) ? v.join(", ") : v);
     }
+    const encoding = req.headers["content-encoding"];
+    const decoded = decodeRequestBody(raw, Array.isArray(encoding) ? encoding[0] : encoding);
+    if (decoded === null) {
+      pipe.counters.unreadable += 1;
+      log2.warn(`[ogr-local] refused a request with content-encoding ${String(encoding)} this build cannot decode`);
+      return refuse(res, 415, "ogr_local_unreadable_body", `content-encoding ${String(encoding)} is not one this proxy can decode; the body was NOT forwarded`);
+    }
+    if (decoded !== raw) headers.delete("content-encoding");
+    const contentType = String(req.headers["content-type"] ?? "");
     let plan = null;
-    let out = raw.length > 0 ? raw : void 0;
-    if (raw.length > 0) {
+    let out = decoded.length > 0 ? decoded : void 0;
+    if (decoded.length > 0) {
       if (!pipe.redactor.ready) {
-        if (opts.failClosed && looksLikeModelCall(raw)) {
+        if (opts.failClosed && looksLikeModelCall(decoded)) {
           res.writeHead(503, { "content-type": "application/json" });
           res.end(JSON.stringify({ error: "ogr_local_unprotected", detail: "no secret ruleset in hand and the deployment is fail-closed" }));
           return;
         }
         pipe.redactor.warnUnprotected("this model request");
       }
-      plan = pipe.mask(target, headers, raw.toString("utf8"));
+      const text2 = decoded.toString("utf8");
+      plan = pipe.mask(target, headers, text2);
       if (plan) out = Buffer.from(plan.body, "utf8");
-      else pipe.counters.passed += 1;
+      else {
+        if (JSON_TYPES.test(contentType) && !parses(text2)) {
+          pipe.counters.unreadable += 1;
+          log2.warn(`[ogr-local] refused an application/json request whose body does not parse \u2014 NOT forwarded`);
+          return refuse(res, 415, "ogr_local_unreadable_body", "the JSON body does not parse; it was NOT forwarded to the model host");
+        }
+        pipe.counters.passed += 1;
+      }
     }
     if (out) headers.set("content-length", String(out.byteLength));
     const upstreamRes = await fetch(target, {
@@ -1506,7 +1651,9 @@ async function startProxy(opts) {
       else res.end();
       return;
     }
-    if (type.includes("text/event-stream")) {
+    const wantsSse = String(req.headers["accept"] ?? "").includes("text/event-stream") || /"stream"\s*:\s*true/.test(plan.body);
+    const isSse = type.includes("text/event-stream") || !type.includes("json") && wantsSse;
+    if (isSse) {
       delete replyHeaders["content-length"];
       res.writeHead(upstreamRes.status, replyHeaders);
       const restorer = pipe.streamRestorer(plan);
@@ -1530,6 +1677,14 @@ async function startProxy(opts) {
     const bytes = Buffer.from(JSON.stringify({ error, detail }), "utf8");
     res.writeHead(status, { "content-type": "application/json", "content-length": String(bytes.byteLength) });
     res.end(bytes);
+  }
+  function parses(text) {
+    try {
+      JSON.parse(text);
+      return true;
+    } catch {
+      return false;
+    }
   }
   function looksLikeModelCall(raw) {
     try {
@@ -1572,15 +1727,28 @@ async function startProxy(opts) {
       const session = body.session ?? pipe.knownSessions()[0] ?? "process";
       const masked = pipe.redactor.maskKnown(session, body.value ?? null);
       const endpoint = pipe.hostFor(session);
+      const redaction = pipe.reportFor(session, masked.value);
       return reply(200, {
         value: masked.value,
         changed: masked.changed,
-        ...pipe.report(session) ? { redaction: pipe.report(session) } : {},
+        ...redaction ? { redaction } : {},
         ...endpoint ? { llm_endpoint: endpoint } : {}
       });
     }
     return reply(404, { error: "not_found" });
   }
+  server.on("upgrade", (_req, socket) => {
+    pipe.counters.upgrades_refused += 1;
+    const body = JSON.stringify({ error: "ogr_local_websocket_unsupported", detail: "this proxy masks HTTP request bodies only; the harness falls back to POST" });
+    socket.end(
+      `HTTP/1.1 405 Method Not Allowed\r
+content-type: application/json\r
+content-length: ${Buffer.byteLength(body)}\r
+connection: close\r
+\r
+${body}`
+    );
+  });
   await new Promise((resolve) => server.listen(opts.port ?? 0, opts.host ?? "127.0.0.1", resolve));
   const address = server.address();
   const port2 = typeof address === "object" && address ? address.port : 0;

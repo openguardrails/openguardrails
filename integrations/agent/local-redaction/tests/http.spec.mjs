@@ -7,13 +7,15 @@
  * report.
  */
 import assert from "node:assert/strict"
-import { mkdtempSync, readFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { createServer } from "node:http"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { test } from "node:test"
 
 import {
+  sessionOfStamp,
+  stampedSession,
   installHttpInterceptor,
   interceptorStatus,
   LocalRedactor,
@@ -93,10 +95,10 @@ test("openai.chat: the body is masked whole, the system prompt included, and the
     assert.equal(res.status, 200)
     const [req] = p.received
     const sent = JSON.parse(req.raw)
-    assert.equal(sent.messages[0].content, "You hold ${OGR_SECRET_1}.")
-    assert.equal(sent.messages[1].content[0].text, "use ${OGR_SECRET_2}")
-    assert.equal(sent.messages[2].content, "${OGR_SECRET_1}\n")
-    assert.equal(sent.tools[0].function.description, "never print ${OGR_SECRET_1}")
+    assert.equal(sent.messages[0].content, "You hold OGRK00000001.")
+    assert.equal(sent.messages[1].content[0].text, "use OGRK00000002")
+    assert.equal(sent.messages[2].content, "OGRK00000001\n")
+    assert.equal(sent.tools[0].function.description, "never print OGRK00000001")
     assert.equal(sent.model, "gpt-4.1")
     assert.ok(!req.raw.includes(AWS) && !req.raw.includes(OPENAI))
     assert.equal(req.headers.authorization, "Bearer sk-provider-key-stays")
@@ -106,7 +108,7 @@ test("openai.chat: the body is masked whole, the system prompt included, and the
     assert.equal(h.status().requests, 1)
     assert.deepEqual(h.sessions(), ["process"])
     // The minted report is drained by the next event of any host session.
-    assert.deepEqual(red.report("host-session").masked.map((m) => m.token), ["${OGR_SECRET_1}", "${OGR_SECRET_2}"])
+    assert.deepEqual(red.report("host-session").masked.map((m) => m.token), ["OGRK00000001", "OGRK00000002"])
   } finally {
     h.uninstall()
     await p.close()
@@ -129,11 +131,11 @@ test("anthropic.messages: the top-level system prompt and tool_result blocks are
       }),
     })
     const sent = JSON.parse(p.received[0].raw)
-    assert.equal(sent.system[0].text, "key ${OGR_SECRET_1}")
-    assert.equal(sent.messages[0].content[0].content[0].text, ".env: ${OGR_SECRET_2}")
+    assert.equal(sent.system[0].text, "key OGRK00000001")
+    assert.equal(sent.messages[0].content[0].content[0].text, ".env: OGRK00000002")
     assert.equal(sent.metadata.user_id, "u-42")
     assert.deepEqual(h.sessions(), ["u-42"])
-    assert.equal(red.session("u-42").valueOf("${OGR_SECRET_1}"), AWS)
+    assert.equal(red.session("u-42").valueOf("OGRK00000001"), AWS)
   } finally {
     h.uninstall()
     await p.close()
@@ -151,33 +153,33 @@ test("non-streaming reply: restored inside tool-call arguments, never in prose; 
             index: 0,
             message: {
               role: "assistant",
-              content: "I used ${OGR_SECRET_1} and ${OGR_SECRET_2}",
-              tool_calls: [{ id: "call_1", type: "function", function: { name: "bash", arguments: '{"cmd":"aws --key ${OGR_SECRET_1} --pw ${OGR_SECRET_2} --missing ${OGR_SECRET_9}"}' } }],
+              content: "I used OGRK00000001 and OGRK00000002",
+              tool_calls: [{ id: "call_1", type: "function", function: { name: "bash", arguments: '{"cmd":"aws --key OGRK00000001 --pw OGRK00000002 --missing OGRK00000009"}' } }],
             },
             finish_reason: "tool_calls",
           }],
         }),
       }
     }
-    return { body: JSON.stringify({ content: [{ type: "text", text: "${OGR_SECRET_1}" }, { type: "tool_use", id: "t", name: "bash", input: { cmd: "echo ${OGR_SECRET_1}", nested: ["${OGR_SECRET_2}"] } }] }) }
+    return { body: JSON.stringify({ content: [{ type: "text", text: "OGRK00000001" }, { type: "tool_use", id: "t", name: "bash", input: { cmd: "echo OGRK00000001", nested: ["OGRK00000002"] } }] }) }
   })
   const h = install(red)
   try {
     red.session("process").tokenFor('pa"ss')
     await h.fetch(`${p.url}/v1/chat/completions`, { method: "POST", body: JSON.stringify({ model: "m", messages: [{ role: "user", content: `k ${AWS}` }] }) })
-    // ${OGR_SECRET_1} = pa"ss (seeded), ${OGR_SECRET_2} = AWS (masked out of the request)
+    // OGRK00000001 = pa"ss (seeded), OGRK00000002 = AWS (masked out of the request)
     const res = await h.fetch(`${p.url}/v1/chat/completions`, { method: "POST", body: JSON.stringify({ model: "m", messages: [{ role: "user", content: "again" }] }) })
     const text = await res.text()
     assert.equal(res.headers.get("content-length"), String(Buffer.byteLength(text)))
     const reply = JSON.parse(text)
-    assert.equal(reply.choices[0].message.content, "I used ${OGR_SECRET_1} and ${OGR_SECRET_2}")
-    assert.deepEqual(JSON.parse(reply.choices[0].message.tool_calls[0].function.arguments), { cmd: `aws --key pa"ss --pw ${AWS} --missing \${OGR_SECRET_9}` })
-    assert.deepEqual(h.status().unrestorable, ["${OGR_SECRET_9}"])
+    assert.equal(reply.choices[0].message.content, "I used OGRK00000001 and OGRK00000002")
+    assert.deepEqual(JSON.parse(reply.choices[0].message.tool_calls[0].function.arguments), { cmd: `aws --key pa"ss --pw ${AWS} --missing \OGRK00000009` })
+    assert.deepEqual(h.status().unrestorable, ["OGRK00000009"])
     assert.equal(h.status().restored, 2) // both replies carried a restorable argument
 
     const a = await h.fetch(`${p.url}/v1/messages`, { method: "POST", body: JSON.stringify({ model: "m", system: "x", messages: [{ role: "user", content: "hi" }] }) })
     const reply2 = await a.json()
-    assert.equal(reply2.content[0].text, "${OGR_SECRET_1}")
+    assert.equal(reply2.content[0].text, "OGRK00000001")
     assert.deepEqual(reply2.content[1].input, { cmd: 'echo pa"ss', nested: [AWS] })
   } finally {
     h.uninstall()
@@ -193,11 +195,11 @@ test("streamed reply (openai.chat): an argument split across three deltas is res
   const red = await redactorWith()
   const p = await provider(() => ({
     sse: [
-      chatChunk({ role: "assistant", content: "key: ${OGR_SECRET_1}" }),
+      chatChunk({ role: "assistant", content: "key: OGRK00000001" }),
       chatChunk({ tool_calls: [{ index: 0, id: "call_1", type: "function", function: { name: "bash", arguments: "" } }] }),
-      chatChunk({ tool_calls: [{ index: 0, function: { arguments: '{"cmd":"aws --key ${OGR_SE' } }] }),
-      chatChunk({ tool_calls: [{ index: 0, function: { arguments: "CRET_1" } }] }),
-      chatChunk({ tool_calls: [{ index: 0, function: { arguments: '} ls"}' } }] }),
+      chatChunk({ tool_calls: [{ index: 0, function: { arguments: '{"cmd":"aws --key OGRK000' } }] }),
+      chatChunk({ tool_calls: [{ index: 0, function: { arguments: "0000" } }] }),
+      chatChunk({ tool_calls: [{ index: 0, function: { arguments: '1 ls"}' } }] }),
       chatChunk({}, "tool_calls"),
       "data: [DONE]\n\n",
     ],
@@ -210,7 +212,7 @@ test("streamed reply (openai.chat): an argument split across three deltas is res
     const data = text.split("\n\n").filter((f) => f.startsWith("data:")).map((f) => f.slice(6))
     assert.equal(data.at(-1), "[DONE]")
     const parsed = data.slice(0, -1).map((d) => JSON.parse(d))
-    assert.equal(parsed[0].choices[0].delta.content, "key: ${OGR_SECRET_1}")
+    assert.equal(parsed[0].choices[0].delta.content, "key: OGRK00000001")
     const args = parsed.flatMap((c) => c.choices[0].delta.tool_calls ?? []).map((tc) => tc.function?.arguments ?? "").join("")
     assert.deepEqual(JSON.parse(args), { cmd: `aws --key ${AWS} ls` })
     assert.equal(h.status().streams, 1)
@@ -227,12 +229,12 @@ test("streamed reply (anthropic.messages): input_json_delta across three deltas 
     sse: [
       ev("message_start", { type: "message_start", message: { id: "m", role: "assistant", content: [] } }),
       ev("content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }),
-      ev("content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "using ${OGR_SECRET_1}" } }),
+      ev("content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "using OGRK00000001" } }),
       ev("content_block_stop", { type: "content_block_stop", index: 0 }),
       ev("content_block_start", { type: "content_block_start", index: 1, content_block: { type: "tool_use", id: "t", name: "bash", input: {} } }),
-      ev("content_block_delta", { type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: '{"cmd": "echo ${OGR_' } }),
-      ev("content_block_delta", { type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: "SECRET_1" } }),
-      ev("content_block_delta", { type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: '}"}' } }),
+      ev("content_block_delta", { type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: '{"cmd": "echo OGRK0' } }),
+      ev("content_block_delta", { type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: "0000" } }),
+      ev("content_block_delta", { type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: '001"}' } }),
       ev("content_block_stop", { type: "content_block_stop", index: 1 }),
       ev("message_delta", { type: "message_delta", delta: { stop_reason: "tool_use" } }),
       ev("message_stop", { type: "message_stop" }),
@@ -245,7 +247,7 @@ test("streamed reply (anthropic.messages): input_json_delta across three deltas 
     const data = text.split("\n\n").filter(Boolean).map((f) => JSON.parse(f.split("\n").find((l) => l.startsWith("data:")).slice(6)))
     const json = data.filter((d) => d.type === "content_block_delta" && d.delta.type === "input_json_delta").map((d) => d.delta.partial_json).join("")
     assert.deepEqual(JSON.parse(json), { cmd: `echo ${AWS}` })
-    assert.equal(data.find((d) => d.delta?.type === "text_delta").delta.text, "using ${OGR_SECRET_1}")
+    assert.equal(data.find((d) => d.delta?.type === "text_delta").delta.text, "using OGRK00000001")
   } finally {
     h.uninstall()
     await p.close()
@@ -282,8 +284,8 @@ test("a Request object and a streamed request body are both read, masked and for
     await h.fetch(req)
     const stream = new Blob([JSON.stringify({ model: "m", messages: [{ role: "user", content: OPENAI }] })]).stream()
     await h.fetch(`${p.url}/v1/chat/completions`, { method: "POST", headers: { "content-type": "application/json" }, body: stream, duplex: "half" })
-    assert.equal(JSON.parse(p.received[0].raw).messages[0].content, "${OGR_SECRET_1}")
-    assert.equal(JSON.parse(p.received[1].raw).messages[0].content, "${OGR_SECRET_2}")
+    assert.equal(JSON.parse(p.received[0].raw).messages[0].content, "OGRK00000001")
+    assert.equal(JSON.parse(p.received[1].raw).messages[0].content, "OGRK00000002")
   } finally {
     h.uninstall()
     await p.close()
@@ -307,9 +309,9 @@ test("the self-check: a tool call before any traffic warns once and yields no re
     red.fallbackActive = false
     await h.fetch(`${p.url}/v1/chat/completions`, { method: "POST", body: JSON.stringify({ model: "m", messages: [{ role: "user", content: AWS }] }) })
     assert.equal(h.noteToolCall(), true)
-    assert.deepEqual(red.report("sess"), { ruleset: corpus.ruleset.id, masked: [{ token: "${OGR_SECRET_1}", rule: "entity_aws_key_id/aws_access_key_id" }] })
+    assert.deepEqual(red.report("sess"), { ruleset: corpus.ruleset.id, masked: [{ token: "OGRK00000001", rule: "entity_aws_key_id/aws_access_key_id" }] })
     // …and restoreArgs on the host's session reaches the interceptor's map.
-    assert.deepEqual(red.restoreArgs("sess", { k: "${OGR_SECRET_1}" }), { args: { k: AWS }, unresolved: [], changed: true })
+    assert.deepEqual(red.restoreArgs("sess", { k: "OGRK00000001" }), { args: { k: AWS }, unresolved: [], changed: true })
   } finally {
     h.uninstall()
     await p.close()
@@ -353,4 +355,48 @@ test("installing on globalThis wraps fetch, a second install replaces the first,
   assert.equal(globalThis.fetch, original)
   assert.equal(interceptorStatus().installed, false)
   assert.equal(red.http, null)
+})
+
+test("stampedSession: the map key is the bare session id the harness's hooks are handed", () => {
+  // Claude Code 2.x — a JSON stamp; the hook gets `session_id` alone.
+  const cc = JSON.stringify({ device_id: "0e2d", account_uuid: "dc62", session_id: "484d2bc1-b7e9-4f28-9d97-d08777526aa6" })
+  assert.equal(stampedSession({ metadata: { user_id: cc } }), "484d2bc1-b7e9-4f28-9d97-d08777526aa6")
+  // The older Claude Code spelling.
+  assert.equal(sessionOfStamp("user_ab12_account_cd34_session_11111111-2222-3333-4444-555555555555"), "11111111-2222-3333-4444-555555555555")
+  // An opaque stamp is the key as before.
+  assert.equal(stampedSession({ user: "u-42" }), "u-42")
+  // Codex: no user field, prompt_cache_key is the session.
+  assert.equal(stampedSession({ model: "gpt-6", input: [], prompt_cache_key: "01a0-codex" }), "01a0-codex")
+  assert.equal(stampedSession({ model: "gpt-6", input: [] }), null)
+  // A JSON stamp WITHOUT session_id is left whole — never the device or account id.
+  const noSid = JSON.stringify({ device_id: "0e2d", account_uuid: "dc62" })
+  assert.equal(sessionOfStamp(noSid), noSid)
+})
+
+test("reportFor: a hook's claim names the tokens present in ITS event, with their rules, and drains nothing", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ogr-lr-"))
+  const cache = join(dir, "rules.json")
+  writeCachedRuleset(cache, {
+    id: "rs_reportfor", generated_at: "2026-09-11T00:00:00Z", family: "secrets", dialect: "ogr-re-1",
+    rules: [
+      { id: "entity_api_key", category: "secrets", severity: "critical", tier: "strong", flags: "", patterns: [{ id: "openai_project", source: "sk-proj-[A-Za-z0-9_-]{20,}" }], examples: { match: ["sk-proj-abcdefghijklmnopqrstuvwx"], nomatch: ["sk-proj-short"] } },
+      { id: "entity_aws_key_id", category: "secrets", severity: "critical", tier: "strong", flags: "", patterns: [{ id: "aws_access_key_id", source: "AKIA[A-Z0-9]{16}" }], examples: { match: ["AKIAIOSFODNN7EXAMPLE"], nomatch: ["AKIA1234"] } },
+    ],
+  })
+  const r = new LocalRedactor({ source: () => null, cachePath: cache, log: { info() {}, warn() {} } })
+  await r.start()
+  r.fallbackActive = true
+  // The model request masked two values (the user's prompt) …
+  const req = r.maskValue("s1", { messages: [{ role: "user", content: "use sk-proj-abcdefghijklmnopqrstuvwx and AKIAIOSFODNN7EXAMPLE" }] })
+  assert.equal(req.minted.length, 2)
+  // … the tool call the model wrote back carries ONE of them.
+  const event = { tool_calls: [{ name: "Bash", arguments: { command: "aws configure set aws_access_key_id OGRK00000002" } }] }
+  const claim = r.reportFor("s1", event)
+  assert.deepEqual(claim.masked, [{ token: "OGRK00000002", rule: "entity_aws_key_id/aws_access_key_id" }])
+  // Nothing drained: the per-step report still holds both, and a second reportFor answers the same.
+  assert.deepEqual(r.reportFor("s1", event).masked.map((m) => m.token), ["OGRK00000002"])
+  assert.equal(r.report("s1").masked.length, 2)
+  // A token this session never issued is not claimed.
+  assert.deepEqual(r.reportFor("s1", { text: "OGRK00000099" }).masked, [])
+  rmSync(dir, { recursive: true, force: true })
 })

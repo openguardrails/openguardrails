@@ -8,15 +8,35 @@
  * with a fresh map and re-masks its raw history (design §3).
  *
  * Bounded at 256 values per session. Over the bound a new value is STILL
- * masked, with the fixed non-restorable `${OGR_SECRET_X}` — refusing to mask
+ * masked, with the fixed non-restorable `OGRKXXXXXXXX` — refusing to mask
  * is the wrong side to fail on — and a warning says so once per session.
  */
 
-/** The placeholder shape this library mints and restores. */
-export const SECRET_TOKEN_PREFIX = "${OGR_SECRET_"
+/**
+ * The placeholder shape this library mints: `OGRK` + eight zero-padded digits —
+ * `OGRK00000001`. A VALUE shape, not a variable shape (2026-09-14, measured across
+ * five model setups, `proposals/secrets-placeholder-shape.md`): `${OGR_SECRET_n}`
+ * reached a tool call verbatim 43% of the time — a model reads `${…}` as a shell
+ * variable and "helpfully" rewrites it to `$OGR_SECRET_1`, which restores to
+ * nothing — and the word SECRET beside a visible sequence reads as a canary the
+ * model refuses to send anywhere. An opaque, fixed-width, letters-and-digits token
+ * is copied byte for byte, because that is how models treat every credential id.
+ * Fixed width is the delimiter: the restorer stays a whole-key exact match.
+ * The old shape is still RECOGNISED (never re-masked, still restorable) — see
+ * `TOKEN_RE` — but no longer minted.
+ */
+export const SECRET_TOKEN_PREFIX = "OGRK"
+
+/** The digits after the prefix — zero-padded, so every token is exactly 12 characters. */
+export const SECRET_TOKEN_DIGITS = 8
 
 /** The non-restorable placeholder a full map masks new values with. */
-export const OVERFLOW_TOKEN = "${OGR_SECRET_X}"
+export const OVERFLOW_TOKEN = "OGRKXXXXXXXX"
+
+/** The token for registration number `n`. */
+export function secretToken(n: number): string {
+  return `${SECRET_TOKEN_PREFIX}${String(n).padStart(SECRET_TOKEN_DIGITS, "0")}`
+}
 
 export const DEFAULT_BOUND = 256
 
@@ -36,7 +56,7 @@ export interface SessionMapOptions {
    * {@link SessionMaps} registry hands every map ONE shared allocator, so a
    * token number is unique across every session the process holds — two
    * maps in one process (the host's session and the HTTP interceptor's)
-   * can then never mint `${OGR_SECRET_1}` for two different values, which is
+   * can then never mint `OGRK00000001` for two different values, which is
    * the collision design §3 warns about and a restore across maps would
    * otherwise be ambiguous under. Value-stability stays per session.
    */
@@ -84,7 +104,7 @@ export class SessionMap {
       }
       return { token: OVERFLOW_TOKEN, fresh: true, restorable: false }
     }
-    const token = `${SECRET_TOKEN_PREFIX}${this.allocate()}}`
+    const token = secretToken(this.allocate())
     this.byValue.set(value, token)
     this.byToken.set(token, value)
     this.valuesLongestFirst = null
@@ -94,6 +114,24 @@ export class SessionMap {
 
   valueOf(token: string): string | undefined {
     return this.byToken.get(token)
+  }
+
+  /**
+   * Bind a token minted ELSEWHERE — by an older plugin under the `${OGR_SECRET_n}`
+   * shape, by the gateway path — so this map restores it too. A value already
+   * bound keeps its token (the first name wins, as {@link tokenFor}); a token
+   * already bound to another value is refused rather than re-pointed.
+   */
+  adopt(token: string, value: string): boolean {
+    if (token === "" || value === "") return false
+    const held = this.byToken.get(token)
+    if (held !== undefined) return held === value
+    if (this.byValue.has(value)) return false
+    this.byValue.set(value, token)
+    this.byToken.set(token, value)
+    this.valuesLongestFirst = null
+    this.tokensLongestFirst = null
+    return true
   }
 
   /** Every known value, longest first — the order a value substitution must run in. */

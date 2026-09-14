@@ -24,7 +24,7 @@
  * delta.
  */
 import type { ModelProtocol } from "./protocol.js"
-import { createStreamRestorer, jsonStringEncode, restoreJsonText, tokensIn, type StreamRestorer } from "./restore.js"
+import { createStreamRestorer, jsonStringEncode, restoreJsonText, tokensIn, type StreamRestorer, restore } from "./restore.js"
 import type { SessionMap } from "./session.js"
 
 /** One protocol's view of a `data:` payload. */
@@ -226,17 +226,33 @@ function anthropicDecoder(r: StreamRestorer, map: SessionMap, report: (tokens: s
  * `output_index`; the `.done` and terminal events REPEAT the whole value and
  * an SDK builds its result from them, so those are restored whole — inside
  * `arguments` only.
+ *
+ * ⚠️⚠️ **AND THE CUSTOM TOOL CALL — `response.custom_tool_call_input.delta` /
+ * `.done`, item type `custom_tool_call`, field `input` — IS HOW CODEX 0.153
+ * RUNS ITS SHELL** (2026-09-11, found with mitmproxy behind the proxy: the
+ * provider was given `OGRK00000013`, the harness executed
+ * `printf '%s' 'OGRK00000013' | wc -c` and got 16, and nothing anywhere
+ * said a restore had been skipped). Its `input` is FREEFORM TEXT (Codex
+ * sends a JS-repl program), not a JSON document, so it is restored with the
+ * plain restorer rather than the JSON-escaping one. ⚠️ A held tail is flushed
+ * under the SPELLING its stream used — a `custom_tool_call_input` tail emitted
+ * as a `function_call_arguments` delta would be the reasoning-field bug wearing
+ * a tool call's clothes.
  */
+type ResponsesKind = "function_call_arguments" | "custom_tool_call_input"
+
 function responsesDecoder(r: StreamRestorer, map: SessionMap, report: (tokens: string[]) => void): FrameDecoder {
   const items = tails()
+  const kinds = new Map<string, ResponsesKind>()
   const flushItem = (key: string): string => {
     const t = items.get(key)
     if (!t) return ""
     let out = ""
     if (t.pending !== "") {
+      const kind = kinds.get(key) ?? "function_call_arguments"
       out = eventFrame(
-        "response.function_call_arguments.delta",
-        JSON.stringify({ type: "response.function_call_arguments.delta", output_index: Number(key), delta: t.pending }),
+        `response.${kind}.delta`,
+        JSON.stringify({ type: `response.${kind}.delta`, output_index: Number(key), delta: t.pending }),
       )
       t.seen += t.pending
       t.pending = ""
@@ -249,13 +265,31 @@ function responsesDecoder(r: StreamRestorer, map: SessionMap, report: (tokens: s
     for (const key of items.keys()) out += flushItem(key)
     return out
   }
-  const whole = (holder: Record<string, unknown> | null, field: string): boolean => {
+  const whole = (holder: Record<string, unknown> | null, field: string, json = true): boolean => {
     if (!holder || typeof holder[field] !== "string") return false
-    const res = restoreJsonText(holder[field] as string, map)
+    const res = json ? restoreJsonText(holder[field] as string, map) : restore(holder[field] as string, map)
     if (res.unresolved.length) report(res.unresolved)
     if (res.text === holder[field]) return false
     holder[field] = res.text
     return true
+  }
+  /** Restore a completed output ITEM of either tool-call shape, in place. */
+  const wholeItem = (item: Record<string, unknown> | null): boolean => {
+    if (!item) return false
+    if (item["type"] === "function_call") return whole(item, "arguments")
+    if (item["type"] === "custom_tool_call") return whole(item, "input", false)
+    return false
+  }
+  const delta = (parsed: Record<string, unknown>, key: string, kind: ResponsesKind, isLast: boolean) => {
+    if (typeof parsed["delta"] !== "string") return { before: "", payload: null }
+    kinds.set(key, kind)
+    const t = tail(items, key)
+    const original = parsed["delta"] as string
+    const restored = r.feed(t, original, isLast)
+    t.seen += restored
+    if (restored === original) return { before: "", payload: null }
+    parsed["delta"] = restored
+    return { before: "", payload: JSON.stringify(parsed) }
   }
   return {
     data(payload, isLast) {
@@ -263,24 +297,21 @@ function responsesDecoder(r: StreamRestorer, map: SessionMap, report: (tokens: s
       if (!parsed) return { before: "", payload: null }
       const key = String(typeof parsed["output_index"] === "number" ? parsed["output_index"] : 0)
       switch (parsed["type"]) {
-        case "response.function_call_arguments.delta": {
-          if (typeof parsed["delta"] !== "string") return { before: "", payload: null }
-          const t = tail(items, key)
-          const original = parsed["delta"] as string
-          const restored = r.feed(t, original, isLast)
-          t.seen += restored
-          if (restored === original) return { before: "", payload: null }
-          parsed["delta"] = restored
-          return { before: "", payload: JSON.stringify(parsed) }
-        }
+        case "response.function_call_arguments.delta":
+          return delta(parsed, key, "function_call_arguments", isLast)
+        case "response.custom_tool_call_input.delta":
+          return delta(parsed, key, "custom_tool_call_input", isLast)
         case "response.function_call_arguments.done": {
           const before = flushItem(key)
           return { before, payload: whole(parsed, "arguments") ? JSON.stringify(parsed) : null }
         }
+        case "response.custom_tool_call_input.done": {
+          const before = flushItem(key)
+          return { before, payload: whole(parsed, "input", false) ? JSON.stringify(parsed) : null }
+        }
         case "response.output_item.done": {
           const before = flushItem(key)
-          const item = dict(parsed["item"])
-          const changed = item?.["type"] === "function_call" && whole(item, "arguments")
+          const changed = wholeItem(dict(parsed["item"]))
           return { before, payload: changed ? JSON.stringify(parsed) : null }
         }
         case "response.completed":
@@ -289,7 +320,7 @@ function responsesDecoder(r: StreamRestorer, map: SessionMap, report: (tokens: s
           const before = flush()
           let changed = false
           for (const item of list(dict(parsed["response"])?.["output"]).map(dict)) {
-            if (item?.["type"] === "function_call" && whole(item, "arguments")) changed = true
+            if (wholeItem(item)) changed = true
           }
           return { before, payload: changed ? JSON.stringify(parsed) : null }
         }

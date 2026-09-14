@@ -374,7 +374,7 @@ def _masked_request(session="s-1", content=None):
 def test_the_outbound_request_is_masked_before_it_leaves(protected):
     req = _masked_request()
     assert OPENAI_KEY not in str(req)
-    assert req["messages"][0]["content"] == "Use the key ${OGR_SECRET_1} for the API."
+    assert req["messages"][0]["content"] == "Use the key OGRK00000001 for the API."
     assert req["messages"][1] == {"role": "user", "content": "call it"}
     # …and the session tag still rides along.
     assert req["user"].startswith("hermes_session_")
@@ -389,11 +389,11 @@ def test_the_step_request_event_carries_what_this_step_minted(protected):
     assert OPENAI_KEY not in str(ev)
     assert ev["redaction"] == {
         "ruleset": "rs_test0000000000000000000000000001",
-        "masked": [{"token": "${OGR_SECRET_1}", "rule": "entity_api_key/openai"}],
+        "masked": [{"token": "OGRK00000001", "rule": "entity_api_key/openai"}],
     }
     # The next step mints nothing new for the same value: history tokens are text.
     req2 = _masked_request(content=f"Still {OPENAI_KEY}")
-    assert req2["messages"][0]["content"] == "Still ${OGR_SECRET_1}"
+    assert req2["messages"][0]["content"] == "Still OGRK00000001"
     bridge.on_pre_api_request(session_id="s-1", turn_id="t-1", api_request_id="a-2",
                               request_messages=req2["messages"])
     assert protected.events[1]["redaction"]["masked"] == []
@@ -409,7 +409,7 @@ def test_the_ogr_client_is_an_egress_too(protected):
     inverted deliberately.)"""
     _masked_request()
     _round(protected, text=f"Try Authorization: Bearer {BEARER_KEY}",
-           tool_calls=[FakeToolCall("c1", "bash", '{"command": "curl -H \'Authorization: Bearer ${OGR_SECRET_1}\'"}')])
+           tool_calls=[FakeToolCall("c1", "bash", '{"command": "curl -H \'Authorization: Bearer OGRK00000001\'"}')])
     res = protected.events[1]
     assert res["kind"] == "step/response"
     assert res["payload"]["text"] == f"Try Authorization: Bearer {BEARER_KEY}"
@@ -422,13 +422,13 @@ def test_the_ogr_client_is_an_egress_too(protected):
     ev = protected.events[-1]
     assert OPENAI_KEY not in str(ev)
     assert ev["payload"]["tool_calls"][0]["arguments"]["command"] \
-        == "curl -H 'Authorization: Bearer ${OGR_SECRET_1}' https://x"
+        == "curl -H 'Authorization: Bearer OGRK00000001' https://x"
 
 
 def test_restore_happens_only_in_tool_execution_and_after_judgement(protected):
     _masked_request()
     _round(protected, tool_calls=[FakeToolCall("c1", "bash", '{"command": "x"}')])
-    args = {"command": "curl -H 'Authorization: Bearer ${OGR_SECRET_1}' https://api"}
+    args = {"command": "curl -H 'Authorization: Bearer OGRK00000001' https://api"}
     # pre_tool_call (judgement, approval) still sees the TOKEN — no rewrite.
     assert bridge.on_pre_tool_call(tool_name="bash", args=args, session_id="s-1",
                                    tool_call_id="c1") is None
@@ -441,50 +441,52 @@ def test_restore_happens_only_in_tool_execution_and_after_judgement(protected):
                                               next_call=next_call, session_id="s-1")
     assert out == "ran"
     assert seen["command"] == f"curl -H 'Authorization: Bearer {OPENAI_KEY}' https://api"
-    assert args["command"].count("${OGR_SECRET_1}") == 1      # caller's dict untouched
+    assert args["command"].count("OGRK00000001") == 1      # caller's dict untouched
 
 
 def test_an_unrestorable_token_blocks_the_call_at_both_seams(protected):
     _masked_request()
-    args = {"command": "echo ${OGR_SECRET_7}"}
+    args = {"command": "echo OGRK00000007"}
     out = bridge.on_pre_tool_call(tool_name="bash", args=args, session_id="s-1",
                                   tool_call_id="c1")
     assert out["action"] == "block"
-    assert "${OGR_SECRET_7} could not be restored" in out["message"]
+    assert "OGRK00000007 could not be restored" in out["message"]
     called = []
     res = bridge.on_tool_execution_middleware(tool_name="bash", args=args,
                                               next_call=lambda a: called.append(a),
                                               session_id="s-1")
     assert called == []                                # the tool never ran
-    assert "${OGR_SECRET_7} could not be restored" in res
+    assert "OGRK00000007 could not be restored" in res
     assert "ask the user to provide it again" in res
     # A token from ANOTHER session is unresolvable here too — never fuzzy.
     _masked_request(session="s-2", content=f"other {OPENAI_KEY}")
-    out = bridge.on_pre_tool_call(tool_name="bash", args={"c": "${OGR_SECRET_1}"},
+    out = bridge.on_pre_tool_call(tool_name="bash", args={"c": "OGRK00000001"},
                                   session_id="s-3", tool_call_id="c2")
     assert out["action"] == "block"
 
 
-def test_a_markdown_escaped_token_restores_into_the_tool(protected):
+def test_the_minted_token_restores_into_the_tool_exactly_as_written(protected):
+    # The secrets shape has nothing a markdown renderer escapes; the legacy
+    # `${OGR_…}` escape absorption is covered in test_local_redaction (adopted tokens).
     _masked_request()
     seen = {}
     bridge.on_tool_execution_middleware(
-        tool_name="bash", args={"command": r"echo ${OGR\_SECRET\_1}"},
+        tool_name="bash", args={"command": "echo OGRK00000001"},
         next_call=lambda a: seen.update(a), session_id="s-1")
     assert seen["command"] == f"echo {OPENAI_KEY}"
 
 
 def test_the_final_answer_keeps_tokens_unless_restore_output_is_on(protected, clean_env):
     _masked_request()
-    _round(protected, text="The key is ${OGR_SECRET_1}.")
-    assert bridge.on_transform_llm_output(response_text="The key is ${OGR_SECRET_1}.",
+    _round(protected, text="The key is OGRK00000001.")
+    assert bridge.on_transform_llm_output(response_text="The key is OGRK00000001.",
                                           session_id="s-1") is None
     clean_env.setenv("OGR_RESTORE_OUTPUT", "true")
     bridge.reset()
     bridge.get_client().redactor.store.fetch()
     _masked_request()
-    _round(protected, text="The key is ${OGR_SECRET_1}.")
-    assert bridge.on_transform_llm_output(response_text="The key is ${OGR_SECRET_1}.",
+    _round(protected, text="The key is OGRK00000001.")
+    assert bridge.on_transform_llm_output(response_text="The key is OGRK00000001.",
                                           session_id="s-1") == f"The key is {OPENAI_KEY}."
 
 

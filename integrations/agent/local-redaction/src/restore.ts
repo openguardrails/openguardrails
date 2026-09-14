@@ -3,15 +3,16 @@
  *
  * Whole-token exact match only, longest key first, with the one latitude the
  * higress `Restorer` defines: a `\` before markdown-escapable punctuation
- * inside a token is absorbed, so `${OGR\_SECRET\_1}` restores. Nothing else
+ * inside a `${OGR_…}` token is absorbed, so `${OGR\_PHONE\_1}` restores; the secrets
+ * shape `OGRK00000001` has nothing a renderer escapes. Nothing else
  * does. ⚠️ NEVER fuzzy, never prefix — a restorer that guesses is an
  * exfiltration oracle: an attacker who can make the model emit near-miss
  * tokens reads back values it was never shown.
  *
- * A `${OGR_…}` shape with no map entry — a resumed session, a hallucinated
- * number, a token from the gateway path, the overflow `${OGR_SECRET_X}` — is
+ * A placeholder shape with no map entry — a resumed session, a hallucinated
+ * number, a token from the gateway path, the overflow `OGRKXXXXXXXX` — is
  * reported as `unresolved`, and the caller blocks the call with
- * {@link UNRESTORABLE_NOTICE}: a shell expands `${OGR_SECRET_7}` to the empty
+ * {@link UNRESTORABLE_NOTICE}: a shell expanded the old `${OGR_SECRET_7}` to the empty
  * string and the call fails somewhere downstream with nothing naming why.
  *
  * The STREAMING form ({@link createStreamRestorer}) is a port of higress
@@ -68,8 +69,12 @@ function matchKey(text: string, i: number, key: string): [raw: number, status: n
   return [p - i, MATCH_FULL]
 }
 
-/** A tolerant scan for placeholder shapes, escaped or not, normalised to the bare token. */
-const TOKEN_SHAPE_RE = /\\?\$\\?\{OGR(?:\\?_[A-Z]+)*\\?_[0-9A-Z]+\\?\}/g
+/**
+ * A tolerant scan for placeholder shapes, normalised to the bare token: the secrets
+ * shape `OGRK00000001` (nothing in it a renderer escapes), and the `${OGR_…}` shape
+ * escaped or not.
+ */
+const TOKEN_SHAPE_RE = /OGRK[0-9X]{8,}|\\?\$\\?\{OGR(?:\\?_[A-Z]+)*\\?_[0-9A-Z]+\\?\}/g
 
 export function tokensIn(text: string): string[] {
   const out = new Set<string>()

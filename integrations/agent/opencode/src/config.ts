@@ -83,7 +83,7 @@ export interface RuntimeOptions {
 
 /**
  * Local secrets redaction (OGR 1.4, specification/local-redaction.md): mask
- * every credential in the messages sent to the model with `${OGR_SECRET_n}`,
+ * every credential in the messages sent to the model with `OGRK00000001`-style,
  * judge the tool call on the placeholder, restore the value into the tool's
  * arguments on this host after judgement. ON by default — it is what makes
  * "secrets never leave the host" true on the agent path. The ruleset is the

@@ -46,7 +46,7 @@ test("undici dispatcher half: a captured fetch and undici.request are both cover
         return
       }
       res.writeHead(200, { "content-type": "application/json" })
-      res.end(JSON.stringify({ choices: [{ message: { content: "${OGR_SECRET_1}", tool_calls: [{ function: { name: "bash", arguments: '{"cmd":"${OGR_SECRET_1}"}' } }] } }] }))
+      res.end(JSON.stringify({ choices: [{ message: { content: "OGRK00000001", tool_calls: [{ function: { name: "bash", arguments: '{"cmd":"OGRK00000001"}' } }] } }] }))
     })
   })
   await new Promise((r) => server.listen(0, "127.0.0.1", r))
@@ -63,9 +63,9 @@ test("undici dispatcher half: a captured fetch and undici.request are both cover
     // 1. The captured (unwrapped) fetch — the dispatcher still sees it.
     const res = await capturedFetch(`${base}/v1/chat/completions`, { method: "POST", headers: { "content-type": "application/json" }, body })
     const reply = await res.json()
-    assert.equal(JSON.parse(received[0].raw).messages[0].content, "k ${OGR_SECRET_1}")
+    assert.equal(JSON.parse(received[0].raw).messages[0].content, "k OGRK00000001")
     assert.equal(received[0].headers["accept-encoding"], "identity")
-    assert.equal(reply.choices[0].message.content, "${OGR_SECRET_1}")
+    assert.equal(reply.choices[0].message.content, "OGRK00000001")
     assert.deepEqual(JSON.parse(reply.choices[0].message.tool_calls[0].function.arguments), { cmd: AWS })
     // 2. undici.request, a string body, a streamed reply.
     const r2 = await undici.request(`${base}/v1/chat/completions/stream`, { method: "POST", headers: { "content-type": "application/json" }, body })
@@ -91,7 +91,7 @@ test("both halves on: a request through the wrapped fetch is masked once and cou
     req.on("end", () => {
       received.push({ headers: req.headers, raw })
       res.writeHead(200, { "content-type": "application/json" })
-      res.end(JSON.stringify({ choices: [{ message: { content: "ok", tool_calls: [{ function: { name: "bash", arguments: '{"cmd":"${OGR_SECRET_1}"}' } }] } }] }))
+      res.end(JSON.stringify({ choices: [{ message: { content: "ok", tool_calls: [{ function: { name: "bash", arguments: '{"cmd":"OGRK00000001"}' } }] } }] }))
     })
   })
   await new Promise((r) => server.listen(0, "127.0.0.1", r))
@@ -106,7 +106,7 @@ test("both halves on: a request through the wrapped fetch is masked once and cou
     assert.equal(h.status().undici, "installed")
     const body = JSON.stringify({ model: "m", messages: [{ role: "user", content: `k ${AWS}` }] })
     const reply = await (await h.fetch(`${base}/v1/chat/completions`, { method: "POST", headers: { "content-type": "application/json" }, body })).json()
-    assert.equal(JSON.parse(received[0].raw).messages[0].content, "k ${OGR_SECRET_1}")
+    assert.equal(JSON.parse(received[0].raw).messages[0].content, "k OGRK00000001")
     assert.ok(!Object.keys(received[0].headers).some((k) => k.startsWith("x-ogr-")))
     assert.deepEqual(JSON.parse(reply.choices[0].message.tool_calls[0].function.arguments), { cmd: AWS })
     assert.equal(h.status().requests, 1)

@@ -24,7 +24,7 @@ const EVENT_KEYS = [
 // `connection` is a GATEWAY's field and deliberately stays out of the
 // allowlist, so a stray copy here would fail loudly. An ALLOWLIST, not a
 // relaxation — an unknown key is still a violation.
-const OPTIONAL_EVENT_KEYS = ["integration", "session_hint", "redaction"]
+const OPTIONAL_EVENT_KEYS = ["integration", "session_hint", "redaction", "initiator", "llm_endpoint"]
 
 function validateEvent(ev) {
   const errs = []
