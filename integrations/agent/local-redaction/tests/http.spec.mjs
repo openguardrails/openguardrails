@@ -7,13 +7,15 @@
  * report.
  */
 import assert from "node:assert/strict"
-import { mkdtempSync, readFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { createServer } from "node:http"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { test } from "node:test"
 
 import {
+  sessionOfStamp,
+  stampedSession,
   installHttpInterceptor,
   interceptorStatus,
   LocalRedactor,
@@ -353,4 +355,48 @@ test("installing on globalThis wraps fetch, a second install replaces the first,
   assert.equal(globalThis.fetch, original)
   assert.equal(interceptorStatus().installed, false)
   assert.equal(red.http, null)
+})
+
+test("stampedSession: the map key is the bare session id the harness's hooks are handed", () => {
+  // Claude Code 2.x — a JSON stamp; the hook gets `session_id` alone.
+  const cc = JSON.stringify({ device_id: "0e2d", account_uuid: "dc62", session_id: "484d2bc1-b7e9-4f28-9d97-d08777526aa6" })
+  assert.equal(stampedSession({ metadata: { user_id: cc } }), "484d2bc1-b7e9-4f28-9d97-d08777526aa6")
+  // The older Claude Code spelling.
+  assert.equal(sessionOfStamp("user_ab12_account_cd34_session_11111111-2222-3333-4444-555555555555"), "11111111-2222-3333-4444-555555555555")
+  // An opaque stamp is the key as before.
+  assert.equal(stampedSession({ user: "u-42" }), "u-42")
+  // Codex: no user field, prompt_cache_key is the session.
+  assert.equal(stampedSession({ model: "gpt-6", input: [], prompt_cache_key: "01a0-codex" }), "01a0-codex")
+  assert.equal(stampedSession({ model: "gpt-6", input: [] }), null)
+  // A JSON stamp WITHOUT session_id is left whole — never the device or account id.
+  const noSid = JSON.stringify({ device_id: "0e2d", account_uuid: "dc62" })
+  assert.equal(sessionOfStamp(noSid), noSid)
+})
+
+test("reportFor: a hook's claim names the tokens present in ITS event, with their rules, and drains nothing", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ogr-lr-"))
+  const cache = join(dir, "rules.json")
+  writeCachedRuleset(cache, {
+    id: "rs_reportfor", generated_at: "2026-09-11T00:00:00Z", family: "secrets", dialect: "ogr-re-1",
+    rules: [
+      { id: "entity_api_key", category: "secrets", severity: "critical", tier: "strong", flags: "", patterns: [{ id: "openai_project", source: "sk-proj-[A-Za-z0-9_-]{20,}" }], examples: { match: ["sk-proj-abcdefghijklmnopqrstuvwx"], nomatch: ["sk-proj-short"] } },
+      { id: "entity_aws_key_id", category: "secrets", severity: "critical", tier: "strong", flags: "", patterns: [{ id: "aws_access_key_id", source: "AKIA[A-Z0-9]{16}" }], examples: { match: ["AKIAIOSFODNN7EXAMPLE"], nomatch: ["AKIA1234"] } },
+    ],
+  })
+  const r = new LocalRedactor({ source: () => null, cachePath: cache, log: { info() {}, warn() {} } })
+  await r.start()
+  r.fallbackActive = true
+  // The model request masked two values (the user's prompt) …
+  const req = r.maskValue("s1", { messages: [{ role: "user", content: "use sk-proj-abcdefghijklmnopqrstuvwx and AKIAIOSFODNN7EXAMPLE" }] })
+  assert.equal(req.minted.length, 2)
+  // … the tool call the model wrote back carries ONE of them.
+  const event = { tool_calls: [{ name: "Bash", arguments: { command: "aws configure set aws_access_key_id ${OGR_SECRET_2}" } }] }
+  const claim = r.reportFor("s1", event)
+  assert.deepEqual(claim.masked, [{ token: "${OGR_SECRET_2}", rule: "entity_aws_key_id/aws_access_key_id" }])
+  // Nothing drained: the per-step report still holds both, and a second reportFor answers the same.
+  assert.deepEqual(r.reportFor("s1", event).masked.map((m) => m.token), ["${OGR_SECRET_2}"])
+  assert.equal(r.report("s1").masked.length, 2)
+  // A token this session never issued is not claimed.
+  assert.deepEqual(r.reportFor("s1", { text: "${OGR_SECRET_99}" }).masked, [])
+  rmSync(dir, { recursive: true, force: true })
 })

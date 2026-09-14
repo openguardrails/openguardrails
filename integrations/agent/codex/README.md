@@ -149,6 +149,15 @@ Turn it off with `OGR_LOCAL_REDACTION=0`; move the port with
 not do — in particular, it holds no credential, is not an open proxy, and
 offers no way to turn a token back into a secret.
 
+**Behind a corporate proxy**: the daemon reaches the provider with Node's own
+`fetch`, which ignores `HTTPS_PROXY` unless `NODE_USE_ENV_PROXY=1` is set
+(and reads lowercase `https_proxy` first). Set both where Codex runs — the
+hooks inherit its environment. Verified end to end with mitmproxy between the
+daemon and the provider on 2026-09-11: no seeded credential left the host in
+any position (prompt, project instructions, tool output, tool call); see
+[`ogr-local`'s README](../ogr-local#what-a-proxy-in-front-of-it-found-2026-09-11)
+for the four defects that run found and fixed.
+
 ### What the runtime is told
 
 Both hooks read Codex's own rollout, which holds the value in the clear — the

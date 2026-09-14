@@ -54,7 +54,7 @@ export interface PipeOptions {
 export const DEFAULT_SESSION = "process"
 
 export class Pipe {
-  readonly counters = { requests: 0, streams: 0, restored: 0, passed: 0, minted: 0 }
+  readonly counters = { requests: 0, streams: 0, restored: 0, passed: 0, minted: 0, unreadable: 0, upgrades_refused: 0 }
   private readonly sessions = new Set<string>()
   /** session → the `host[:port]` of its most recent model request — the wire's `llm_endpoint` (OGR 1.6). */
   private readonly lastHost = new Map<string, string>()
@@ -163,6 +163,11 @@ export class Pipe {
       masked.push(...part.masked)
     }
     return { ruleset, masked }
+  }
+
+  /** The claim for ONE hook event: the tokens present in it, with their rules (nothing drained). */
+  reportFor(session: string, value: unknown): RedactionReport | undefined {
+    return this.redactor.reportFor(session, value)
   }
 
   knownSessions(): string[] {

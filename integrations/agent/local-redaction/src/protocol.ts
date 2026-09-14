@@ -9,7 +9,7 @@
  * FIRST because an Anthropic body and a chat body both carry `messages[]`,
  * and chat is the catch-all by elimination.
  */
-import { restoreArgs, restoreJsonText, tokensIn } from "./restore.js"
+import { restoreArgs, restoreJsonText, tokensIn, restore } from "./restore.js"
 import type { SessionMap } from "./session.js"
 
 export type ModelProtocol = "openai.chat" | "anthropic.messages" | "openai.responses"
@@ -82,9 +82,48 @@ export function sniffProtocol(body: unknown, url?: URL): ModelProtocol | null {
 export function stampedSession(body: unknown): string | null {
   const b = asDict(body)
   if (!b) return null
-  if (typeof b["user"] === "string" && b["user"] !== "") return b["user"]
+  if (typeof b["user"] === "string" && b["user"] !== "") return sessionOfStamp(b["user"])
   const uid = asDict(b["metadata"])?.["user_id"]
-  return typeof uid === "string" && uid !== "" ? uid : null
+  if (typeof uid === "string" && uid !== "") return sessionOfStamp(uid)
+  // Codex stamps no `user` at all; the one per-conversation value on its
+  // `openai.responses` body is `prompt_cache_key`, which IS its session id (the
+  // rollout file is named by it, and the hooks receive the same id as
+  // `session_id`). Read it LAST: a harness that does stamp a user field keeps it.
+  const pck = b["prompt_cache_key"]
+  return typeof pck === "string" && pck !== "" ? pck : null
+}
+
+/**
+ * The SESSION inside a stamp, so the proxy's map key is the id the harness's
+ * own hooks are handed.
+ *
+ * ⚠️⚠️ **A HOOK NAMES ITS SESSION BY THE BARE ID, AND THE MAP MUST BE KEYED
+ * BY THAT SAME STRING** (2026-09-11, found with mitmproxy in front of the
+ * proxy). Claude Code 2.x stamps `metadata.user_id` as a JSON string —
+ * `{"device_id":…,"account_uuid":…,"session_id":"<uuid>"}` — while its
+ * PreToolUse hook is handed the bare `<uuid>` and asks `/__ogr/mask` for
+ * that. Keyed by the whole stamp, the lookup found NO session, masked
+ * nothing, and the hook's event went to the runtime with the plaintext
+ * value — under a `redaction` claim saying the plugin was on, which the
+ * runtime then read as a miss of ours. Nothing threw at either end. The
+ * older `…_session_<uuid>` spelling is kept beside the JSON one — a harness
+ * owns its format and never announces a change, so a spelling is added,
+ * never replaced.
+ */
+export function sessionOfStamp(stamp: string): string {
+  const t = stamp.trim()
+  if (t.startsWith("{")) {
+    try {
+      const parsed = asDict(JSON.parse(t))
+      const sid = parsed?.["session_id"]
+      if (typeof sid === "string" && sid !== "") return sid
+    } catch {
+      /* not JSON: the stamp is the key */
+    }
+  }
+  const m = /(?:^|_)session_([A-Za-z0-9-]{8,})$/.exec(t)
+  if (m) return m[1]!
+  return t
 }
 
 export interface RestoreBodyResult {
@@ -114,6 +153,16 @@ export function restoreResponseBody(protocol: ModelProtocol, text: string, map: 
   if (!body) return null
   let changed = false
   const unresolved = new Set<string>()
+  const textField = (holder: Dict, key: string): void => {
+    const v = holder[key]
+    if (typeof v !== "string") return
+    const r = restore(v, map)
+    for (const t of r.unresolved) unresolved.add(t)
+    if (r.text !== v) {
+      holder[key] = r.text
+      changed = true
+    }
+  }
   const jsonField = (holder: Dict, key: string): void => {
     const v = holder[key]
     if (typeof v !== "string") return
@@ -147,6 +196,9 @@ export function restoreResponseBody(protocol: ModelProtocol, text: string, map: 
     case "openai.responses":
       for (const item of asArray(body["output"]).map(asDict)) {
         if (item && item["type"] === "function_call") jsonField(item, "arguments")
+        // Codex 0.153's shell runs as a CUSTOM tool call whose `input` is freeform
+        // text (a JS-repl program), not JSON — plain restore, no JSON escaping.
+        if (item && item["type"] === "custom_tool_call") textField(item, "input")
       }
       break
   }

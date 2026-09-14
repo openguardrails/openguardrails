@@ -207,3 +207,31 @@ test("unresolved tokens in a streamed argument are reported once the field compl
   sse.end()
   assert.deepEqual(seen, ["${OGR_SECRET_7}"])
 })
+
+test("openai.responses: Codex's CUSTOM tool call — input deltas, the done frames and the terminal output — restore, under its own spelling", () => {
+  // Codex 0.153 runs its shell as a custom_tool_call whose `input` is a freeform
+  // JS-repl program; found unrestored with mitmproxy behind the proxy (the tool ran
+  // `printf '%s' '${OGR_SECRET_13}' | wc -c` and answered 16).
+  const sse = createSseRestorer("openai.responses", seeded([AWS]))
+  const item = { id: "ctc_1", type: "custom_tool_call", name: "js_repl", call_id: "c1", status: "in_progress" }
+  const program = `text(await tools.exec_command({cmd:"printf '%s' '${"${OGR_SECRET_1}"}' | wc -c"}));`
+  const frames = [
+    ev("response.output_item.added", { type: "response.output_item.added", output_index: 0, item }),
+    ev("response.custom_tool_call_input.delta", { type: "response.custom_tool_call_input.delta", output_index: 0, delta: "text(await tools.exec_command({cmd:\"printf '%s' '${OGR_SEC" }),
+    ev("response.custom_tool_call_input.delta", { type: "response.custom_tool_call_input.delta", output_index: 0, delta: "RET_1}' | wc -c\"}));" }),
+    ev("response.custom_tool_call_input.done", { type: "response.custom_tool_call_input.done", output_index: 0, input: program }),
+    ev("response.output_item.done", { type: "response.output_item.done", output_index: 0, item: { ...item, status: "completed", input: program } }),
+    ev("response.completed", { type: "response.completed", response: { id: "r", output: [{ ...item, status: "completed", input: program }] } }),
+  ]
+  let out = ""
+  for (const f of frames) out += sse.feed(f)
+  out += sse.end()
+  const data = payloads(out).map((d) => JSON.parse(d))
+  const expected = `text(await tools.exec_command({cmd:"printf '%s' '${AWS}' | wc -c"}));`
+  const deltas = data.filter((d) => d.type === "response.custom_tool_call_input.delta").map((d) => d.delta).join("")
+  assert.equal(deltas, expected)
+  assert.equal(data.some((d) => d.type === "response.function_call_arguments.delta"), false, "a custom-tool tail must never be flushed under the function-call spelling")
+  assert.equal(data.find((d) => d.type === "response.custom_tool_call_input.done").input, expected)
+  assert.equal(data.find((d) => d.type === "response.output_item.done").item.input, expected)
+  assert.equal(data.find((d) => d.type === "response.completed").response.output[0].input, expected)
+})

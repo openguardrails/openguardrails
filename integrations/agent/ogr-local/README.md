@@ -131,6 +131,55 @@ harness starts first is the one whose build masks for the other. That is fine
 allowed to be invisible: `/__ogr/status` reports `served_by`, so "which build
 is masking my Codex session" has an answer.
 
+## What a proxy in front of it found (2026-09-11)
+
+The first end-to-end run with mitmproxy between this daemon and the
+providers — Claude Code 2.1 and Codex 0.153, seeded credentials in the user
+prompt, the project instructions, a file the agent read and the tool call
+itself — found four ways the mask was silently not on the path. Each is
+fixed here and pinned by a test; each is the kind of failure this proxy is
+most exposed to, because a request it does not understand used to be
+FORWARDED, which looks exactly like a request with nothing to mask:
+
+- **Codex compresses its model requests (`content-encoding: zstd`).**
+  `JSON.parse` on the compressed bytes failed like a non-JSON body does, and
+  the request took the non-model-call pass-through — every credential in the
+  clear, `masking: true` in the status. Bodies are decoded first now (gzip,
+  deflate, br, zstd), and a JSON body the proxy cannot read is **refused
+  (415 `ogr_local_unreadable_body`), never forwarded**. `counters.unreadable`
+  counts them.
+- **The ChatGPT Codex backend answers with no `content-type`**, so an SSE
+  reply looked like a buffered JSON one, failed to parse, and went back to
+  the harness with its tool call still tokenised. A typeless reply to a
+  request that asked for `text/event-stream` (or said `"stream": true`) is a
+  stream.
+- **Codex runs its shell as a `custom_tool_call`** whose `input` is a
+  freeform program, not `function_call.arguments`; the restorer only knew the
+  latter. Both shapes restore now (deltas, `.done` frames, the terminal
+  `response.completed`), each flushed under its own event spelling.
+- **The hook's session key did not match the proxy's.** Claude Code 2.x
+  stamps `metadata.user_id` as a JSON string carrying `session_id`; the hook
+  asks `/__ogr/mask` with the bare id. Keyed by the whole stamp, the lookup
+  found nothing, the hook's event reached the runtime with the plaintext
+  value under a `redaction` claim, and the runtime filed a "plugin miss" —
+  true, and pointing at the wrong end. The map is keyed by the bare session
+  id now (Codex: `prompt_cache_key`), and `/__ogr/mask` answers with a claim
+  about THE EVENT it was handed — the tokens present in it, each with its
+  rule — instead of the drained "minted since the last report" list, which at
+  the hook vantage named the previous request's values and credited every
+  tool-call event with zero.
+
+Also: Codex first tries a **websocket** on `/responses`; the daemon used to
+forward the upgrade as a plain GET (seven 405s from the provider per
+session). It answers 405 on the loopback itself now
+(`counters.upgrades_refused`) and Codex falls back to POST at once. A masked
+websocket channel is separate work.
+
+**Behind a corporate proxy** the daemon's own `fetch` (Node's undici) does
+not read `HTTPS_PROXY` unless `NODE_USE_ENV_PROXY=1` is set (Node ≥ 22.21 /
+24); it also reads the lowercase `https_proxy` first. Both plugins' hooks
+inherit the harness's environment, so set them where the harness runs.
+
 ## Honest limits
 
 - **If the daemon is down, the harness cannot reach its provider.** That is

@@ -15,6 +15,9 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { zstdCompressSync, gzipSync } from "node:zlib"
+import { connect } from "node:net"
+
 import { LocalRedactor } from "@openguardrails/local-redaction"
 import { startProxy, upstreamFor, baseUrlFor } from "../dist/index.js"
 
@@ -275,5 +278,144 @@ test("a client that hangs up mid-stream does not take the daemon down", async ()
     const status = await fetch(`${proxy.url}/__ogr/status`)
     assert.equal(status.ok, true)
     for (const res of open) res.end()
+  })
+})
+
+test("a zstd-compressed model request (Codex 0.153) is decoded, masked, and forwarded plain", async () => {
+  // Found with mitmproxy behind the proxy on 2026-09-11: Codex sends
+  // `content-encoding: zstd`, JSON.parse failed on the bytes, and the body
+  // took the non-model-call pass-through — every credential in the clear,
+  // status reading `masking: true`.
+  await withProxy(jsonReply({ id: "resp_1", output: [] }), async ({ proxy, provider }) => {
+    const body = JSON.stringify({
+      model: "gpt-6", stream: false, store: false, prompt_cache_key: "01a0-codex-session",
+      input: [{ role: "user", content: [{ type: "input_text", text: `use ${KEY} for the deploy` }] }],
+    })
+    const res = await fetch(`${proxy.url}/http/127.0.0.1:${provider.port}/backend-api/codex/responses`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "content-encoding": "zstd", authorization: "Bearer x" },
+      body: zstdCompressSync(Buffer.from(body)),
+    })
+    assert.equal(res.status, 200)
+    const sent = provider.seen[0]
+    assert.equal(sent.headers["content-encoding"], undefined, "the upstream must get the decoded body, without the encoding header")
+    assert.equal(sent.body.includes(KEY), false, "the credential reached the provider inside a compressed body")
+    assert.match(sent.body, /\$\{OGR_SECRET_1\}/)
+    assert.equal(proxy.pipe.counters.passed, 0)
+    assert.equal(proxy.pipe.counters.requests, 1)
+    // gzip takes the same door
+    const res2 = await fetch(`${proxy.url}/http/127.0.0.1:${provider.port}/backend-api/codex/responses`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "content-encoding": "gzip" },
+      body: gzipSync(Buffer.from(body)),
+    })
+    assert.equal(res2.status, 200)
+    assert.equal(provider.seen[1].body.includes(KEY), false)
+  })
+})
+
+test("a JSON model request the proxy cannot read is REFUSED, never forwarded", async () => {
+  await withProxy(jsonReply({ ok: true }), async ({ proxy, provider }) => {
+    // An encoding this build does not undo …
+    const a = await fetch(`${proxy.url}/http/127.0.0.1:${provider.port}/v1/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "content-encoding": "lz4" },
+      body: Buffer.from("whatever"),
+    })
+    assert.equal(a.status, 415)
+    assert.equal((await a.json()).error, "ogr_local_unreadable_body")
+    // … and a body that claims to be JSON and is not.
+    const b = await fetch(`${proxy.url}/http/127.0.0.1:${provider.port}/v1/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{not json " + KEY,
+    })
+    assert.equal(b.status, 415)
+    assert.equal(provider.seen.length, 0, "nothing may reach the provider")
+    assert.equal(proxy.pipe.counters.unreadable, 2)
+  })
+})
+
+test("the proxy's session is the bare session id a hook is handed — Claude Code's JSON stamp included", async () => {
+  // Claude Code 2.x: metadata.user_id = '{"device_id":…,"account_uuid":…,"session_id":"<uuid>"}';
+  // the PreToolUse hook asks /__ogr/mask with the bare <uuid>. Keyed by the whole
+  // stamp, the lookup found nothing and the hook's event carried the plaintext.
+  await withProxy(jsonReply({ id: "msg", content: [] }), async ({ proxy, provider }) => {
+    const sid = "484d2bc1-b7e9-4f28-9d97-d08777526aa6"
+    const stamp = JSON.stringify({ device_id: "0e2d", account_uuid: "dc62", session_id: sid })
+    await fetch(`${proxy.url}/http/127.0.0.1:${provider.port}/v1/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "claude", metadata: { user_id: stamp }, messages: [{ role: "user", content: `token ${KEY}` }] }),
+    })
+    assert.deepEqual(proxy.pipe.knownSessions(), [sid])
+    const masked = await (await fetch(`${proxy.url}/__ogr/mask`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ session: sid, value: { tool_calls: [{ name: "Bash", arguments: { command: `printf ${KEY}` } }] } }),
+    })).json()
+    assert.equal(masked.changed, true, "the hook's event must carry the token the provider was given")
+    assert.equal(masked.value.tool_calls[0].arguments.command, "printf ${OGR_SECRET_1}")
+    assert.deepEqual(masked.redaction.masked, [{ token: "${OGR_SECRET_1}", rule: "entity_api_key/openai_project" }])
+    // The claim is about THIS event: a second hook event that carries no token claims none —
+    // the drained per-step report would have named the request's values here.
+    const plain = await (await fetch(`${proxy.url}/__ogr/mask`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ session: sid, value: { tool_calls: [{ name: "Bash", arguments: { command: "ls" } }] } }),
+    })).json()
+    assert.deepEqual(plain.redaction.masked, [])
+    assert.equal(plain.redaction.ruleset, "rs_proxytest")
+    // Codex: no user field; prompt_cache_key IS the session the hooks are handed.
+    await fetch(`${proxy.url}/http/127.0.0.1:${provider.port}/backend-api/codex/responses`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "gpt-6", prompt_cache_key: "codex-sess-1", input: [{ role: "user", content: [{ type: "input_text", text: KEY }] }] }),
+    })
+    assert.ok(proxy.pipe.knownSessions().includes("codex-sess-1"))
+  })
+})
+
+test("a websocket upgrade is refused on the loopback, not forwarded as a GET", async () => {
+  await withProxy(jsonReply({ ok: true }), async ({ proxy, provider }) => {
+    const reply = await new Promise((resolve, reject) => {
+      const sock = connect(proxy.port, "127.0.0.1", () => {
+        sock.write(
+          `GET /http/127.0.0.1:${provider.port}/backend-api/codex/responses HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n`,
+        )
+      })
+      let buf = ""
+      sock.on("data", (c) => { buf += c })
+      sock.on("end", () => resolve(buf))
+      sock.on("error", reject)
+    })
+    assert.match(reply, /^HTTP\/1\.1 405 /)
+    assert.match(reply, /ogr_local_websocket_unsupported/)
+    assert.equal(provider.seen.length, 0, "the provider must not see the upgrade as a plain GET")
+    assert.equal(proxy.pipe.counters.upgrades_refused, 1)
+  })
+})
+
+test("an SSE reply with NO content-type (the ChatGPT Codex backend) is still restored", async () => {
+  const sse = (_req, res) => {
+    // Exactly what chatgpt.com/backend-api/codex/responses sends: chunked, typeless.
+    res.writeHead(200, {})
+    res.write(`event: response.custom_tool_call_input.done\ndata: ${JSON.stringify({ type: "response.custom_tool_call_input.done", output_index: 0, input: "run(\"${OGR_SECRET_1}\")" })}\n\n`)
+    res.write(`event: response.completed\ndata: ${JSON.stringify({ type: "response.completed", response: { id: "r", output: [{ type: "custom_tool_call", input: "run(\"${OGR_SECRET_1}\")" }] } })}\n\n`)
+    res.end()
+  }
+  await withProxy(sse, async ({ proxy, provider }) => {
+    const res = await fetch(`${proxy.url}/http/127.0.0.1:${provider.port}/backend-api/codex/responses`, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "text/event-stream" },
+      body: JSON.stringify({ model: "gpt-6", stream: true, prompt_cache_key: "s1", input: [{ role: "user", content: [{ type: "input_text", text: KEY }] }] }),
+    })
+    const text = await res.text()
+    assert.equal(text.includes("${OGR_SECRET_1}"), false, "the harness got a tool call it cannot run")
+    const inputs = text.split("\n").filter((l) => l.startsWith("data: ")).map((l) => JSON.parse(l.slice(6)))
+    assert.equal(inputs[0].input, `run("${KEY}")`)
+    assert.equal(inputs[1].response.output[0].input, `run("${KEY}")`)
+    assert.equal(proxy.pipe.counters.streams, 1)
+    assert.equal(proxy.pipe.counters.restored, 1)
   })
 })
