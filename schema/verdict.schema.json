@@ -30,6 +30,25 @@
       "type": "number",
       "minimum": 0
     },
+    "timing": {
+      "type": "object",
+      "description": "OPTIONAL (OGR 1.8). The runtime's OWN two instants: when it received the request and when it serialized this verdict, both RFC 3339 with sub-second precision. `responded_at - received_at` is the WHOLE handler where `latency_ms` is the evaluation alone, and the gap between them is where an integration finds a runtime that is slow for a reason the evaluation cannot see. A runtime SHOULD send them; an integration MAY ignore them. ⚠️ They are NOT for an integration to subtract from its own clock: with the two instants the integration already holds they complete the four points of an NTP exchange, so `delay = (received_back - dispatched) - (responded_at - received_at)` and `skew = ((dispatched - received_at) + (received_back - responded_at)) / 2`. An integration MUST NOT report `received_at - dispatched` as a network duration — it is a clock offset plus a network duration with nothing in it to say which part is which — and MUST NOT report half of `delay` as either direction.",
+      "properties": {
+        "received_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "responded_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "received_at",
+        "responded_at"
+      ],
+      "additionalProperties": false
+    },
     "findings": {
       "type": "array",
       "items": {

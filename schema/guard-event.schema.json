@@ -2,7 +2,7 @@
  "$schema": "https://json-schema.org/draft/2020-12/schema",
  "$id": "https://openguardrails.com/schema/1.0/guard-event.schema.json",
  "title": "GuardEvent",
- "description": "A unit observed at an OGR integration point, on the one observed plane: LLM messages. Two kinds: the two halves of a step (one model call). Every field is required except 'integration', 'connection', 'session_hint', (1.4) 'redaction', (1.5) 'initiator' and (1.6) 'llm_endpoint'; the empty string on an identity field is the explicit 'no assertion'. All fields are flat, top-level snake_case; objects are reserved for inherently structured data (payload).",
+ "description": "A unit observed at an OGR integration point, on the one observed plane: LLM messages. Two kinds: the two halves of a step (one model call). Every field is required except (1.2) 'obligation_results', 'integration', 'connection', 'session_hint', (1.4) 'redaction', (1.5) 'initiator', (1.6) 'llm_endpoint' and (1.8) 'transport'; the empty string on an identity field is the explicit 'no assertion'. All fields are flat, top-level snake_case; objects are reserved for inherently structured data (payload).",
  "type": "object",
  "required": [
   "kind",
@@ -184,6 +184,38 @@
      }
     }
    }
+  },
+  "transport": {
+   "type": "object",
+   "description": "OPTIONAL (OGR 1.8). Where the time went on the way to this verdict, so a first-token regression is attributable to a LAYER rather than argued about. ⚠️⚠️ EVERY VALUE IS A DURATION MEASURED INSIDE ONE CLOCK, and an integration MUST NOT produce one any other way: stamping timestamps across two parties and subtracting the neighbours yields a number spanning two clocks, and on a measured deployment that error was a steady 2.1 seconds on 2,997 of 3,000 events. 'net_ms' is the integration's OWN round trip minus the 'responded_at - received_at' the runtime reported in the verdict's 'timing' — the NTP delay formula, no synchronised clocks required; it does NOT decompose into outbound and inbound and an integration MUST NOT report half of it as either. 'net_ms' and 'skew_ms' describe a call that already completed, so they ride the 'step/response' and describe that step's REQUEST half; a one-sided step carries neither and they MUST NOT be carried across steps. ⚠️ An unmeasured hop is an ABSENT key, never 0 — a runtime MUST NOT read one as the other. ⚠️ A CLAIM per the 'integration' rule: self-declared, a RECORD ONLY, never an input to authorization, policy selection, enforcement or trust — and a runtime MUST NOT correct any stored time by 'skew_ms'.",
+   "properties": {
+    "gw_ms": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 3600000,
+     "description": "The host had the request before the guard code did — filter chain, body buffering."
+    },
+    "plugin_ms": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 3600000,
+     "description": "The guard code's own work, up to the moment it built this event."
+    },
+    "net_ms": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 3600000,
+     "description": "The wire, BOTH directions, for the evaluate call this step's request half made."
+    },
+    "skew_ms": {
+     "type": "integer",
+     "minimum": -3600000,
+     "maximum": 3600000,
+     "description": "The integration's clock MINUS the runtime's, signed. A DIAGNOSTIC — never a correction."
+    }
+   },
+   "additionalProperties": false,
+   "$comment": "The envelope is 'additionalProperties: false' because an unknown TOP-LEVEL key is a producer talking about something else; this sub-object is deliberately tolerant in the other direction — a validator SHOULD strip unknown keys inside it rather than reject the event, so an integration one version ahead reporting a hop this build has no field for keeps validating and loses only the field it added. A diagnostic sub-object must not be the thing that 400s an upgrade."
   }
  }
 }
