@@ -13,18 +13,19 @@ process is it in?**
 | Category | Where the code runs | What it holds | What it is |
 |---|---|---|---|
 | [`gateway/`](gateway/) — **gateway plugins** | inside a product that IS the LLM byte path: an enterprise gateway (Higress), a local agent firewall (OpenAFW), a debugging proxy (mitmproxy) | the request and reply **bytes**, streaming included | A plugin for that product's extension point. Holding the stream is what lets it do the two things nothing else can: apply redaction spans in full, and refuse before the model sees anything — streaming included. Fills the four-tuple from the product's own caller authentication. |
-| [`bridge/`](bridge/) — **standalone bridges** | its own process, beside a service the organization already runs | one **message** at a time — a request body, later the reply body — never the byte path | A converter between a provider's LLM protocol and OGR. The organization's service posts the message, gets back the decision and the rewritten body, and keeps forwarding to the provider itself. Not a plugin: nothing here plugs into anyone's product, and no `base_url` moves. |
+| [`bridge/`](bridge/) — **standalone bridges** | its own process, beside a service the organization already runs | one **message** at a time — a request body, later the reply body (a streamed reply is one message too: relayed in, guarded frames out) — never the provider connection | A converter between a provider's LLM protocol and OGR. The organization's service posts the message, gets back the decision and the rewritten body, and keeps forwarding to the provider itself. Not a plugin: nothing here plugs into anyone's product, and no `base_url` moves. |
 | [`agent/`](agent/) — **agent plugins** | inside the harness loop | the model call itself, or — at hook-based hosts — the tool call about to execute | Every harness exposes a different seam (a hook, an interceptor, a callback), so each plugin speaks OGR directly against whatever its host exposes; there is no shared conversion to factor out. Fills the four-tuple from its own config. Only this seat runs on the host the secret lives on, which is what [local redaction](../specification/local-redaction.md) needs. |
 
 The first two share a vantage — the model channel: one proxied model call = one
 step, provider bodies verbatim — and their OGR side is identical, which is why there
 is one recipe and not three. They differ in what the code holds: a gateway plugin
-holds the bytes and can enforce on a stream; a bridge holds a message and answers
-about it. A gateway plugin can always be built out of a bridge's conversion (the
+holds the bytes and can enforce on a stream from inside the path; a bridge holds a
+message and answers about it — including a streamed reply a service relays through it,
+which is enforcement bought with a hop rather than with the byte path. A gateway plugin can always be built out of a bridge's conversion (the
 Java bridge's `core` is written to be reused that way); the reverse is not true.
 
 ⚠️ **A bridge takes messages, never the `base_url`.** A standalone process that
-clients are re-pointed at, that forwards bytes upstream and reassembles streams, is a
+clients are re-pointed at and that forwards bytes upstream to a provider is a
 gateway — and building one more of those is the job the products in `gateway/`
 already do, with their own I/O model, caller authentication and operations. A
 bridge deliberately stops at the message so the organization's own proxy or façade

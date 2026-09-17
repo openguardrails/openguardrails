@@ -31,7 +31,9 @@ info:
     and runtime health.
 
     All requests and responses are JSON, UTF-8,
-    `Content-Type: application/json`. Field names on the wire are
+    `Content-Type: application/json` — except the optional streamed
+    transport of a `step/response` (OGR 1.9), where the request body is the
+    provider's SSE frames and, with `?payload=true`, so is the answer. Field names on the wire are
     `snake_case`, exactly as in the JSON Schemas. There is no protocol
     version on the wire; the runtime adapts to the events it receives.
 
@@ -93,19 +95,71 @@ paths:
         configured fail mode. The default is open: proceed and record the
         step as unjudged; deployments gating dangerous categories configure
         closed.
+      parameters:
+        - name: payload
+          in: query
+          required: false
+          schema: { type: boolean, default: false }
+          description: |
+            OGR 1.9, optional for a runtime to support and off by default:
+            the verdict also carries `payload`, the body the caller should
+            now use, rendered by the runtime from the verdict it just
+            composed. A PEP in the byte path does not ask for it (returning
+            a rewritten body doubles every request's bytes); it is for a
+            caller that already holds the whole body and would otherwise
+            have to apply spans, restore placeholders and render refusals
+            itself. See the Verdict schema's `payload`.
+        - name: ogr-kind
+          in: header
+          required: false
+          schema: { type: string, enum: ["step/response"] }
+          description: |
+            Streamed transport only (see the `text/event-stream` request
+            body): the event's `kind`, which can only be `step/response`.
+            The other required fields ride headers of the same shape —
+            `ogr-step-id`, `ogr-llm-protocol`, `ogr-agent-id`,
+            `ogr-agent-type`, `ogr-agent-workspace`, `ogr-agent-user` —
+            beside the optional `ogr-session-hint`, `ogr-connection`,
+            `ogr-llm-endpoint`, `ogr-initiator`, `ogr-integration`,
+            `ogr-head-release-bytes` and `ogr-fail-mode`.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               $ref: "#/components/schemas/GuardEvent"
+          text/event-stream:
+            schema:
+              type: string
+              description: |
+                OGR 1.9 STREAMED TRANSPORT, optional for a runtime to
+                support: the provider's SSE frames of one `step/response`,
+                written as they arrive, with the event's other fields as
+                `ogr-*` headers. This is a transport of ONE event, not a
+                sequence of events — the runtime reassembles the frames and
+                judges once, whole, at end of stream. A `step/request` MUST
+                NOT be streamed: a request is one body.
       responses:
         "200":
-          description: The verdict.
+          description: |
+            The verdict — or, for a streamed request with `?payload=true`,
+            the guarded stream to forward to the client.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Verdict"
+            text/event-stream:
+              schema:
+                type: string
+                description: |
+                  The frames to forward: the bounded head released live
+                  (`ogr-head-release-bytes`, reference default 32), the
+                  remainder held until the verdict, placeholders restored
+                  per frame, and at end of stream either the remainder
+                  released or a refusal in the caller's own protocol. The
+                  verdict rides a trailing SSE comment line,
+                  `: ogr {"decision":…,"event_id":…}`, which SSE parsers
+                  ignore by definition.
         "400": { $ref: "#/components/responses/InvalidEvent" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "429": { $ref: "#/components/responses/RateLimited" }

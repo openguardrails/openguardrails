@@ -96,6 +96,11 @@ public final class StepGuard {
         return streamRequested;
     }
 
+    /** Whether this step's verdicts are acted on at all — false in observe mode. */
+    public boolean enforces() {
+        return config.mode().enforces();
+    }
+
     /** token → plaintext learned so far. The reply's restore reads this. */
     public Map<String, String> placeholders() {
         return placeholders;
@@ -119,6 +124,21 @@ public final class StepGuard {
     public void adoptProtocol(Protocol protocol, String model) {
         this.protocol = protocol;
         this.model = model == null ? "" : model;
+    }
+
+    /**
+     * Fills the model name from the REPLY's own frames, for a step whose request half
+     * this process never judged.
+     *
+     * <p>⚠️ Only when it is not already known: the request half's model is what the
+     * caller asked for, and a provider that answers under a different name (an alias, a
+     * routed fallback) must not overwrite it — the refusal the client reads is an answer
+     * to the call it made.
+     */
+    public void adoptModel(String model) {
+        if (this.model.isEmpty() && model != null) {
+            this.model = model;
+        }
     }
 
     /** How long the host held the request before the guard ran — {@code transport.gw_ms}. */
@@ -406,7 +426,8 @@ public final class StepGuard {
             return new StreamOutcome(true, hold.releaseAll(), false, "");
         }
 
-        OgrClient.EvaluateResult result = guard.client().evaluate(event);
+        // ⚠️ No `?payload=true` on this half: see OgrClient#evaluate(GuardEvent, boolean).
+        OgrClient.EvaluateResult result = guard.client().evaluate(event, false);
         if (!result.answered()) {
             guard.counters().evaluateError();
             if (config.failMode().isClosed()) {
@@ -421,11 +442,13 @@ public final class StepGuard {
 
         boolean refuse = verdict.stops() || verdict.mustRefusePartial(config.failMode());
         if (!refuse) {
-            return new StreamOutcome(true, hold.releaseAll(), false, verdict.eventId());
+            return new StreamOutcome(true, hold.releaseAll(), false, verdict.eventId(),
+                verdict.unjudged());
         }
         guard.counters().refusal();
         Continuation c = verdict.stops() ? verdict.continuation() : null;
-        return new StreamOutcome(false, refuseStreamTail(hold, c), false, verdict.eventId());
+        return new StreamOutcome(false, refuseStreamTail(hold, c), false, verdict.eventId(),
+            verdict.unjudged());
     }
 
     private String refuseStreamTail(HeadHold hold, Continuation c) {

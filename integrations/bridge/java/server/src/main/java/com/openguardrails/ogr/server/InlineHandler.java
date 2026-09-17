@@ -5,14 +5,10 @@ import com.openguardrails.ogr.OgrGuard;
 import com.openguardrails.ogr.RequestOutcome;
 import com.openguardrails.ogr.ResponseOutcome;
 import com.openguardrails.ogr.StepGuard;
-import com.openguardrails.ogr.StreamOutcome;
 import com.openguardrails.ogr.json.Json;
-import com.openguardrails.ogr.protocol.FrameResult;
 import com.openguardrails.ogr.protocol.Protocol;
 import com.openguardrails.ogr.protocol.Protocols;
-import com.openguardrails.ogr.protocol.SseFrames;
-import com.openguardrails.ogr.protocol.StreamDecoder;
-import com.openguardrails.ogr.stream.HeadHold;
+import com.openguardrails.ogr.stream.StreamGuard;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 
@@ -175,12 +171,17 @@ final class InlineHandler implements HttpHandler {
     /**
      * The streaming lane: decode frames, release at most the head budget, hold the rest,
      * judge the reassembled whole once at end of stream.
+     *
+     * <p>The mechanism is {@link StreamGuard}, shared with the message door's streamed
+     * transport — the same four parts in the same order, so the two lanes cannot drift
+     * on what a head budget buys or on what a refusal looks like after bytes are gone.
+     * What differs here is only the transport: a provider socket in, the client's own
+     * connection out, and no trailing verdict line because the recipient is the client's
+     * SDK rather than a service that asked us a question.
      */
     private void streamed(HttpExchange exchange, HttpResponse<InputStream> response,
                           StepGuard step, Instant sentAt) throws IOException {
-        StreamDecoder decoder = step.protocol().newDecoder(step.placeholders());
-        HeadHold hold = new HeadHold(settings.streamHeadReleaseBytes);
-        SseFrames frames = new SseFrames();
+        StreamGuard stream = new StreamGuard(step, settings.streamHeadReleaseBytes, sentAt);
 
         copyResponseHeaders(exchange, response);
         exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
@@ -188,42 +189,18 @@ final class InlineHandler implements HttpHandler {
         exchange.sendResponseHeaders(200, 0);
         OutputStream client = exchange.getResponseBody();
 
-        Instant firstTokenAt = null;
         byte[] buffer = new byte[16 * 1024];
         try (InputStream in = response.body()) {
             int n;
             while ((n = in.read(buffer)) > 0) {
-                for (String frame : frames.feed(buffer, n)) {
-                    FrameResult r = decoder.frame(frame);
-                    if (firstTokenAt == null && r.contentBytes > 0) {
-                        firstTokenAt = Instant.now();
-                    }
-                    String release = hold.offer(r);
-                    if (!release.isEmpty()) {
-                        client.write(release.getBytes(StandardCharsets.UTF_8));
-                        client.flush();
-                    }
-                }
-            }
-            String rest = frames.remainder();
-            if (!rest.isEmpty()) {
-                String release = hold.offer(FrameResult.passthrough(rest));
+                String release = stream.feed(buffer, n);
                 if (!release.isEmpty()) {
                     client.write(release.getBytes(StandardCharsets.UTF_8));
+                    client.flush();
                 }
             }
         }
-
-        String flushed = decoder.flush();
-        StreamOutcome outcome = step.guardStreamedResponse(decoder.output(), hold,
-            sentAt, firstTokenAt, Instant.now(), decoder.recognizedFrames());
-        StringBuilder tail = new StringBuilder();
-        if (outcome.allowed && !flushed.isEmpty()) {
-            // The restorer's held tail is part of the ANSWER, so it rides the release.
-            tail.append(flushed);
-        }
-        tail.append(outcome.tail);
-        client.write(tail.toString().getBytes(StandardCharsets.UTF_8));
+        client.write(stream.finish().getBytes(StandardCharsets.UTF_8));
         client.flush();
         client.close();
     }

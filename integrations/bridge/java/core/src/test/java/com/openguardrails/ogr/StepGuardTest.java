@@ -29,6 +29,7 @@ class StepGuardTest {
     /** A runtime stub: one canned verdict per call, and every event it was sent. */
     private static final class FakeRuntime extends OgrClient {
         final List<GuardEvent> events = new ArrayList<GuardEvent>();
+        final List<Boolean> askedForPayload = new ArrayList<Boolean>();
         final List<String> verdicts = new ArrayList<String>();
         int at;
 
@@ -37,9 +38,15 @@ class StepGuardTest {
             Collections.addAll(this.verdicts, verdicts);
         }
 
+        /**
+         * ⚠️ The two-argument form is the one to override: the one-argument
+         * {@code evaluate} delegates to it, so a fake that overrode only that one would
+         * let every call that names the payload question fall through to real HTTP.
+         */
         @Override
-        public EvaluateResult evaluate(GuardEvent event) {
+        public EvaluateResult evaluate(GuardEvent event, boolean wantPayload) {
             events.add(event);
+            askedForPayload.add(Boolean.valueOf(wantPayload));
             if (at >= verdicts.size() || verdicts.get(at) == null) {
                 at++;
                 return new EvaluateResult(Verdict.none(), 0, "unreachable", 0, 0);
@@ -357,6 +364,9 @@ class StepGuardTest {
         // ⚠️ The argument OBJECT, not a JSON string of it: the runtime reads
         // arguments.cmd, and a string would hand the judge an escaped blob.
         assertEquals("ls", Json.str(payload, "tool_calls.0.arguments.cmd"));
+        // ⚠️ And this half asks for NO rendered payload: what would come back is a
+        // document, and a document cannot be spliced into frames already parsed.
+        assertFalse(runtime.askedForPayload.get(1).booleanValue());
         guard.close();
     }
 

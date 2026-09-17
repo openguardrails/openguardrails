@@ -258,6 +258,26 @@
         "notice"
       ],
       "additionalProperties": false
+    },
+    "payload": {
+      "description": "OGR 1.9, present only when the request asked for it (`POST /v1/evaluate?payload=true`): the body the caller should now use, rendered by the runtime from this verdict. The literal string `\"unchanged\"` means nothing about the body changed — use your own copy, and nothing is echoed back. An object is the body to use INSTEAD of the caller's copy: on an `allow`, with the spans applied (request half) or the placeholders restored and output-side spans applied (response half); on a `block` WITH a `continuation`, the continued body to forward (`withhold`) or deliver (`drop_calls`). On a `block` without one — or with `answer` — it is the refusal document in the caller's own `llm_protocol`, which is a STRING of SSE text when `payload_stream` is true. It is a rendering of this verdict and never a different decision: `decision` and `modifications` are unchanged beside it, and a continuation still changes no enforcement. Absent for a `canonical` refusal (there is no client protocol to render into), and absent whenever the parameter was not sent.",
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object"
+        }
+      ]
+    },
+    "payload_stream": {
+      "type": "boolean",
+      "description": "OGR 1.9: `payload` is SSE text to write with `Content-Type: text/event-stream`, not a JSON document — the shape a refusal takes for a request that said `stream: true`. Absent means `payload` is a document."
+    },
+    "unresolved_spans": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "OGR 1.9: how many of `modifications.spans` could not be located in the body the runtime rendered `payload` from. A non-zero count means the payload the caller sent is not the one the offsets were computed against; the spans in question were DISCARDED, never applied to a neighbouring string."
     }
   }
 }

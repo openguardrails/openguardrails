@@ -31,9 +31,11 @@ import java.util.concurrent.Executors;
  *   <li><b>The message door</b> ({@code /guard/v1/step/request},
  *       {@code /guard/v1/step/response}) — the deployment shape of a bridge. The
  *       caller keeps its own provider connection, posts each body and gets the
- *       decision and the rewritten body back. Streaming enforcement is the caller's
- *       problem and the placeholder map travels between the two calls; see
- *       {@link GuardApiHandler}.
+ *       decision and the rewritten body back; the placeholder map travels between the
+ *       two calls. A streamed reply arrives on the same response door as a different
+ *       TRANSPORT ({@code Content-Type: text/event-stream}, fields in {@code ogr-*}
+ *       headers) and the guarded frames come back with the bounded head released live;
+ *       see {@link GuardApiHandler} and {@link GuardStreamHandler}.
  *   <li><b>Inline</b> ({@code /v1/chat/completions}, {@code /v1/responses},
  *       {@code /v1/messages}) — this process in the byte path, applying spans and
  *       refusing before the model sees anything, streaming included. Kept as the

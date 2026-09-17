@@ -9,6 +9,60 @@ version is independent of any implementation's package version.
 
 ## [Unreleased]
 
+## [v1.9] — 2026-09-17 — the verdict can carry the BODY, and a stream is a TRANSPORT
+
+Two additive-optional additions, both for the same caller: a service that holds the
+whole body one hop away from the byte path. Nothing is required of a runtime or of a
+producer, and a PEP written against v1.0 is conformant today.
+
+### Added
+- **`?payload=true` on `POST /v1/evaluate`, and `payload` on the Verdict — the verdict,
+  already carried out.** A verdict is a set of INSTRUCTIONS (apply these spans at these
+  code-point offsets, drop these paths, render a refusal in the protocol your client
+  speaks). A PEP in the byte path carries them out cheaply because it is holding the
+  bytes anyway; a caller one hop away has to reimplement all of it in its own language,
+  and gets no second chance at a refusal document its client's SDK cannot parse. With the
+  parameter, the runtime renders the body to use into the verdict: the literal
+  `"unchanged"` (use your own copy — nothing is echoed back, so an allow never doubles
+  the request's bytes), the rewritten body on an `allow` with spans, the CONTINUED body
+  on a `block` with a `continuation`, or the refusal document in the caller's own
+  `llm_protocol` — SSE text with `payload_stream: true` when the request said
+  `stream: true`. `unresolved_spans` counts spans that could not be located in the body
+  the caller sent, which are DISCARDED rather than applied to a neighbouring string.
+  ⚠️⚠️ **It is a rendering of that verdict, never a second decision**: `decision` and
+  `modifications` are unchanged beside it, and a `block` whose payload is a body to
+  forward is still a block — the refused content did not reach the model and the runtime
+  records it as a block. Whether a `block`'s payload is a refusal or a body to keep using
+  is told by the presence of `continuation`, not by its shape. ⚠️ The parameter rides the
+  URL because the event schema is the protocol's strict surface and a runtime option is
+  not part of it. ⚠️ A PEP in the byte path SHOULD NOT ask for it. Absent for a
+  `canonical` refusal: there is no client protocol to render into.
+  `specification/verdict.md`, `specification/runtime-api.md`,
+  `schema/verdict.schema.json`, `schema/runtime-api.openapi.yaml`.
+- **The STREAMED TRANSPORT of a `step/response`: the same event, its payload arriving as
+  the provider's frames.** `POST /v1/evaluate` with `Content-Type: text/event-stream`,
+  the body being the SSE frames as they arrive and the event's other fields riding
+  `ogr-*` headers (`ogr-kind` — `step/response` only — `ogr-step-id`,
+  `ogr-llm-protocol`, the four-tuple, and the optional `ogr-session-hint`,
+  `ogr-connection`, `ogr-llm-endpoint`, `ogr-initiator`, `ogr-integration`). ⚠️ This is a
+  TRANSPORT OF ONE EVENT, not a sequence of events: the runtime reassembles the frames
+  into the canonical shape and judges once, whole, at end of stream — the bounded-head
+  rule is unchanged and none of it is a per-chunk verdict. Without `?payload=true` the
+  answer is the ordinary Verdict once the stream ends; with it, the answer is itself
+  `text/event-stream` — the frames to forward, the head released live
+  (`ogr-head-release-bytes`, reference default 32; `0` releases nothing), the remainder
+  held, placeholders restored per frame, and at end of stream either the remainder
+  released or the stream ended with a refusal or retraction in the caller's own protocol
+  (`ogr-fail-mode` says what a missing verdict costs). The verdict rides a trailing SSE
+  comment, `: ogr {"decision":…,"event_id":…}`, which SSE parsers ignore by definition.
+  ⚠️ A `step/request` MUST NOT be streamed: a request is one body, judged before anything
+  is sent. ⚠️ A frame that only ANNOUNCES a tool call (a name-only delta, a `tool_use`
+  block start, a `function_call` item) counts against the head budget — found on a live
+  battery, where a `head = 0` block ended on a normal stop while the client already held
+  the call's name — and once the provider's opening frames are out, a refusal is appended
+  INSIDE the message that is already open rather than opening a second one.
+  `specification/runtime-api.md`, `schema/runtime-api.openapi.yaml`.
+
 ## [v1.8] — 2026-09-16 — seven additive-optional releases, collected
 
 **The wire of v1.0, unchanged, plus the optional keys of seven additive releases

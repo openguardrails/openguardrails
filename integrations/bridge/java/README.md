@@ -77,27 +77,74 @@ curl -s localhost:8800/guard/v1/step/response -H 'content-type: application/json
 #   calls removed, the notice appended, the survivors may run.
 ```
 
+### A streamed reply: the same door, the frames as the body
+
+A streamed reply has no single body to put in `body`, and by the time it has one the
+client has already read it. So the response door takes the **frames**, and answers with
+the frames to forward:
+
+```bash
+curl -sN 'localhost:8800/guard/v1/step/response?payload=true' \
+  -H 'content-type: text/event-stream' \
+  -H 'ogr-step-id: <the one the request half minted>' \
+  -H 'ogr-llm-protocol: openai.chat' \
+  -H 'ogr-head-release-bytes: 32' \
+  --data-binary @provider-reply.sse
+# → text/event-stream: at most 32 bytes of client-visible content released LIVE, the
+#   rest held until the verdict, placeholders restored frame by frame, then either the
+#   held remainder or a refusal in the caller's own protocol — and a last line
+#   : ogr {"decision":"allow","step_id":"…","event_id":"…","llm_protocol":"openai.chat"}
+```
+
+Relay what comes back to your client and forward nothing else. The trailing `: ogr` line
+is an SSE **comment**, which every parser ignores by definition, so it may be relayed
+along with the frames; it also carries `degraded`, `unjudged` and `unreadable` when they
+apply. The envelope's other fields ride headers — `ogr-agent-id`, `ogr-agent-type`,
+`ogr-agent-workspace`, `ogr-agent-user`, `ogr-session-hint`, `ogr-connection`,
+`ogr-llm-endpoint`, `ogr-initiator` — and `ogr-placeholders` (a compact JSON object)
+carries the request half's mapping when the two halves land on different replicas.
+
+⚠️ **`ogr-step-id` is required here**, unlike the JSON call: the mapping a streamed reply
+must restore frame by frame is found by it, and a stream that cannot restore delivers
+`${OGR_EMAIL_1}` to the client. ⚠️ **A request half cannot be streamed** (`400`): a
+request is one body, judged before anything is sent. ⚠️ **`?payload=true` is what asks
+for the frames** — the runtime's own spelling and its own default, so the same code is
+correct against either. Without it the same uploaded stream is judged and answered with a
+plain JSON verdict and no frames back: a record rather than a control, for a caller that
+will not pay the hop — your reply bytes now pass through the bridge — but still wants the
+model's output side to exist in the event store.
+
+⚠️ Two headers of that contract are deliberately **not** read here: `ogr-fail-mode` is
+the operator's setting (`OGR_FAIL_MODE`) — a caller that could choose fail-open per
+stream could opt out of the policy by asking — and `ogr-integration` names the code that
+built the event, which through this door is the bridge. Against the runtime the caller
+builds the events and both are properly its to assert.
+
+These are the runtime's own streamed-transport spelling
+([runtime-api.md](../../../specification/runtime-api.md), "Streamed transport"), so a
+caller can point the same code at AIRS directly. What differs is where the stream is
+held: AIRS holds a connection from you for the whole generation, the bridge sits beside
+you and spends one evaluate round trip at the end — and a runtime that does not implement
+the streamed transport (it is optional) still works behind this door.
+
 By default the bridge calls `POST /v1/evaluate?payload=true`
 (`OGR_PAYLOAD_FROM_RUNTIME`), so the runtime applies the spans, restores the
 placeholders, renders the refusal and carries out the continuation, and the verdict's
 `payload` is what the door hands on; against a runtime that answers without one the
 bridge applies the verdict locally as before. A service that can call the runtime
-itself needs no bridge — and for a streamed reply the runtime takes the
-provider's SSE straight in (`Content-Type: text/event-stream` on
-`/v1/evaluate`, fields in `ogr-*` headers) and, with `?payload=true`, streams
-the guarded frames back behind the same bounded head this bridge's inline door
-uses. The full client guide is `openguardrails-airs/docs/evaluate-client-guide.md`.
+itself needs no bridge; the full client guide for doing so is
+`openguardrails-airs/docs/evaluate-client-guide.md`.
 
 `body` may be the provider body inline (as above) or a string containing it; the
 inline form is taken as its raw character range and never re-serialized.
 
-⚠️ **Two things a bridge gives up**, and they belong in whatever runbook describes
-it: streaming enforcement is your service's problem (buffer the reply before asking,
-or accept that a judged-after-delivery stream is a record and not a control), and
-the `placeholders` map has to travel between the two calls or the reply keeps its
+⚠️ **What a bridge asks of you**, and it belongs in whatever runbook describes it: the
+`placeholders` map has to travel between the two calls or the reply keeps its
 placeholders. The map is returned by the first call and accepted by the second so
 a service that load-balances the halves across replicas needs nothing from any one
-process's memory. Both are explained in
+process's memory. And a streamed reply posted as one reassembled body is a **record,
+not a control** — nothing can be withheld from an answer already delivered; use the
+streamed transport above for the other case. Both are explained in
 [DESIGN.md §4](DESIGN.md#4-two-deployment-shapes-and-what-each-gives-up).
 
 **The four-tuple** is required on every event with `""` as the explicit "no
@@ -177,8 +224,8 @@ agent harnesses retry it.
 | `OGR_TIMEOUT_MS` | `5000` | the evaluate budget. A CEILING for the worst case, not a target; the runtime's own model timeout must fit strictly inside it |
 | `OGR_AGENT_ID` / `OGR_AGENT_TYPE` / `OGR_AGENT_WORKSPACE` | `""` | static four-tuple values for a bridge fronting exactly one agent; a message may carry its own. There is no static `agent_user` — a constant user is already what the identity floor gives you |
 | `OGR_CALLER_FALLBACK` | `true` | inline door only: when nothing names the agent, fingerprint the client's own credential into `caller-<hash>` |
-| `OGR_PAYLOAD_FROM_RUNTIME` | `true` | ask the runtime for the rewritten body (`?payload=true`) and hand it on; `false` applies every verdict locally |
-| `OGR_STREAM_HEAD_RELEASE_BYTES` | `32` | inline door only: client-visible content a streamed answer may deliver BEFORE the end-of-stream verdict. `0` releases nothing |
+| `OGR_PAYLOAD_FROM_RUNTIME` | `true` | ask the runtime for the rewritten body (`?payload=true`) and hand it on; `false` applies every verdict locally. ⚠️ A streamed reply never asks, at either setting: what would come back is a document, and a document cannot be spliced into frames the client has already parsed |
+| `OGR_STREAM_HEAD_RELEASE_BYTES` | `32` | client-visible content a streamed answer may deliver BEFORE the end-of-stream verdict, on both streaming lanes. `0` releases nothing; a message-door caller may override per stream with `ogr-head-release-bytes` |
 | `OGR_UPSTREAM_OPENAI` | `https://api.openai.com` | inline door only: where `/v1/chat/completions` and `/v1/responses` forward |
 | `OGR_UPSTREAM_ANTHROPIC` | `https://api.anthropic.com` | inline door only: where `/v1/messages` forwards |
 | `OGR_PROXY_PORT` | `8800` | listen port |
@@ -188,13 +235,14 @@ agent harnesses retry it.
 - **Three protocols.** `openai.chat`, `openai.responses`, `anthropic.messages`.
   Adding one is a new file implementing `Protocol`, a line in `Protocols`, and a row
   in the conformance test.
-- **The message door judges whole bodies.** A streamed reply is your service's to
-  reassemble before it asks; the bridge never sees frames.
-- **A streamed `drop_calls` degrades to a retraction** (inline door). The frames are
-  already written; rendering surviving calls mid-stream is expressible but not
-  implemented here, and falling back to the strict side is the correct default.
-- **Spans against a streamed reply cannot be spliced into frames already forwarded**
-  (inline door). They are counted, never half-applied.
+- **A streamed `drop_calls` degrades to a retraction.** The frames are already written;
+  rendering surviving calls mid-stream is expressible but not implemented here, and
+  falling back to the strict side is the correct default.
+- **Spans against a streamed reply cannot be spliced into frames already forwarded.**
+  They are counted, never half-applied.
+- **No keepalive timer on the streamed door.** One `: keepalive` comment goes out as the
+  judge starts, which is the moment the lane goes quiet; the pause is bounded by
+  `OGR_TIMEOUT_MS`, and a thread per in-flight stream would buy less than it costs.
 - **`openai.chat` stream usage is transcribed, not requested.**
   `OpenAiChat.ensureStreamUsage` exists and the reference server does not call it: a
   proxy that injects `stream_options.include_usage` on the client's behalf then owes
@@ -207,11 +255,13 @@ agent harnesses retry it.
 
 ```bash
 mvn -q install          # both modules
-mvn test                # 64 tests, fully offline
+mvn test                # 77 tests, fully offline
 ```
 
 The tests are offline by construction: a mock runtime and a mock provider, both
 stdlib, with the **real server between them** — the message door exercised as a
-service would call it, and the inline door so the streamed byte path is exercised as
-a client actually sees it. `ConformanceTest` is one conversation written three
+service would call it (its streamed transport over a raw socket, because the JDK's own
+HTTP client will not surface a response before it has finished sending the request body,
+and a test written with it could not tell a live head from a buffered one), and the
+inline door so the streamed byte path is exercised as a client actually sees it. `ConformanceTest` is one conversation written three
 times, and adding a protocol means adding a row to it.

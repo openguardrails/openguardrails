@@ -47,6 +47,9 @@ verdict tells the truth about partial coverage instead of failing silently.
 | `latency_ms` | number | MAY | Runtime-observed decision latency. |
 | `continuation` | object | MAY | HOW to express a refusal to an agent loop. See below. |
 | `timing` | object | MAY | `{received_at, responded_at}` — the runtime's own two instants (1.8). See below. |
+| `payload` | string \| object | MAY | The body to use now, rendered by the runtime — only when the request asked (`?payload=true`, 1.9). See below. |
+| `payload_stream` | boolean | MAY | `payload` is SSE text, not a document (1.9). |
+| `unresolved_spans` | integer | MAY | Spans that could not be located in the body `payload` was rendered from (1.9). |
 
 What v0.8 removed: the `session_id`/`turn`/`step` echo and `attribution`
 (there are no declared coordinates left to echo — the ledger lives entirely
@@ -228,6 +231,49 @@ impossible.
   "could not look", which is not "found nothing". A fail-open enforcement
   point (the [default](degraded-mode.md)) proceeds, and the record already
   says what went unjudged.
+
+## `payload` — the verdict, already carried out (1.9)
+
+A verdict is a set of INSTRUCTIONS: apply these spans at these offsets, drop
+these paths, render a refusal in the protocol your client speaks. An
+enforcement point in the byte path is holding the body anyway and carries
+them out cheaply. A caller that is one hop away — a service asking about a
+message it holds — has to reimplement all of it, correctly, in its own
+language, and gets no second chance at a refusal document its client's SDK
+cannot parse.
+
+So a runtime MAY offer to do it: `POST /v1/evaluate?payload=true` adds
+`payload` to the verdict, and the parameter rides the URL rather than the
+event because the event schema is the protocol's strict surface and a
+runtime option is not part of it.
+
+| `payload` | when | what the caller does |
+|---|---|---|
+| the literal string `"unchanged"` | `allow`, nothing to change | use your own copy — nothing is echoed back, so an allow never doubles the request's bytes |
+| an object, `decision: allow` | spans applied (request half); placeholders restored and output-side spans applied (response half) | use it INSTEAD of your copy |
+| an object, `decision: block`, `continuation` present | `withhold` / `drop_calls` already carried out, finish reason corrected | forward it (request half) or deliver it (response half); surviving calls may run |
+| an object, `decision: block`, no `continuation` (or `answer`) | the refusal document in the caller's own `llm_protocol` | do not call the model / do not deliver the reply; answer the client with it |
+| a string, `payload_stream: true` | as above, for a request that said `stream: true` | write it as `text/event-stream` |
+| absent | `llm_protocol: canonical` (no client protocol to render into), or the parameter was not sent | apply the verdict yourself |
+
+- ⚠️ **`payload` is a rendering of THIS verdict, never a different
+  decision.** `decision` and `modifications` are unchanged beside it, and a
+  `block` carrying a body to forward is still a block: the refused content
+  did not reach the model, the refused call did not run, and the runtime
+  records it as a block. Whether a `block`'s `payload` is a refusal document
+  or a body to keep using is told by the presence of `continuation`, not by
+  the payload's shape.
+- ⚠️ The offsets a runtime renders from index the payload **as transported**,
+  so a caller that sent a normalized copy of its body gets a `payload`
+  rendered from something it does not hold; `unresolved_spans` counts the
+  spans that were discarded for exactly that reason, and they are discarded
+  rather than applied to a neighbouring string.
+- ⚠️ An enforcement point in the byte path SHOULD NOT ask for it: it already
+  holds the bytes, and echoing a rewritten body back doubles every request.
+
+A streamed response is the one case with no `payload` field to carry: see
+[runtime-api § streamed transport](runtime-api.md#streamed-transport-the-same-event-its-payload-as-the-providers-frames),
+where the answer is itself a stream.
 
 ## Example — a blocked exfiltration attempt in call 2 of 3
 

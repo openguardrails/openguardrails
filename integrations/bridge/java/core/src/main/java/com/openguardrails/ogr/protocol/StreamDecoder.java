@@ -46,6 +46,17 @@ public interface StreamDecoder {
     Output output();
 
     /**
+     * The model name the FRAMES themselves carried, or {@code ""}.
+     *
+     * <p>⚠️ It exists for the half this process may never have judged. A streamed reply
+     * that arrives at the message door carries no request half to have learned the model
+     * from, and every refusal document has to be rendered under SOME model name for the
+     * caller's SDK to read it — all three protocols name the model in their own opening
+     * frame, so the frames can always say.
+     */
+    String model();
+
+    /**
      * Data frames this decoder RECOGNISED as its own protocol's.
      *
      * <p>⚠️ It splits an empty reassembly's two very different causes: a well-formed

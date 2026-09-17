@@ -10,6 +10,9 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.Socket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -32,6 +35,17 @@ class ProxyServerTest {
     private static final String REQUEST_STREAM = "{\"model\":\"gpt-5\",\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}],\"stream\":true}";
     private static final String REPLY = "{\"id\":\"chatcmpl-1\",\"object\":\"chat.completion\",\"model\":\"gpt-5\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"here you go\",\"tool_calls\":[{\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"bash\",\"arguments\":\"{\\\"cmd\\\": \\\"rm -rf /\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":8,\"completion_tokens\":4}}";
     private static final String STREAM = "data: {\"id\":\"c\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-5\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"The secret plan is\"}}]}\n\ndata: {\"id\":\"c\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-5\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" to do the thing\"}}]}\n\ndata: {\"id\":\"c\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-5\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n";
+
+    /**
+     * ⚠️ The placeholder arrives in TWO PIECES, which is the whole difficulty of restoring
+     * a streamed reply: neither frame contains a token, so a per-frame replace restores
+     * nothing and the caller's application receives {@code ${OGR_EMAIL_1}} as content.
+     */
+    private static final String STREAM_PLACEHOLDER =
+        "data: {\"id\":\"c\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-5\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"sent to ${OGR_EMA\"}}]}\n\n"
+            + "data: {\"id\":\"c\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-5\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"IL_1} ok\"}}]}\n\n"
+            + "data: {\"id\":\"c\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-5\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+            + "data: [DONE]\n\n";
 
     private static final String ALLOW =
         "{\"event_id\":\"e\",\"provider\":\"mock\",\"decision\":\"allow\"}";
@@ -100,6 +114,29 @@ class ProxyServerTest {
             request.header(headers[i], headers[i + 1]);
         }
         return CLIENT.send(request.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    }
+
+    /** The streamed transport of the message door: the provider's SSE IS the body. */
+    private static HttpResponse<String> postStream(ProxyServer server, String path, String body,
+                                                   String... headers) throws Exception {
+        HttpRequest.Builder request = HttpRequest.newBuilder()
+            .uri(URI.create("http://localhost:" + server.port() + path))
+            .header("content-type", "text/event-stream")
+            .header("authorization", "Bearer sk-client-key")
+            .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8));
+        for (int i = 0; i + 1 < headers.length; i += 2) {
+            request.header(headers[i], headers[i + 1]);
+        }
+        return CLIENT.send(request.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    }
+
+    /** The verdict the streamed door rides on its last line — an SSE comment. */
+    private static Object trailer(String stream) {
+        int at = stream.lastIndexOf(": ogr ");
+        assertTrue(at >= 0, "the streamed door always ends with its verdict line");
+        String line = stream.substring(at + ": ogr ".length());
+        int end = line.indexOf('\n');
+        return Json.parseOrNull((end < 0 ? line : line.substring(0, end)).trim());
     }
 
     // ---------------------------------------------------------------- buffered
@@ -358,6 +395,281 @@ class ProxyServerTest {
         } finally {
             server.stop();
         }
+    }
+
+    // -------------------------------------------------- the streamed message door
+
+    /**
+     * The transport a JSON envelope cannot carry: the frames arrive as they arrive, the
+     * guarded frames come back, and the verdict rides the last line as a comment every
+     * SSE parser ignores.
+     */
+    @Test
+    void theStreamedDoorGuardsTheFramesAndRidesTheVerdictOnATrailer() throws Exception {
+        MockServers.Runtime runtime = runtime(ALLOW);
+        MockServers.Provider provider = provider(REPLY, false);
+        ProxyServer server = proxy(runtime, provider, Mode.ENFORCE, FailMode.OPEN, 32);
+        try {
+            HttpResponse<String> response = postStream(server, "/guard/v1/step/response?payload=true", STREAM,
+                "ogr-step-id", "step-abc", "ogr-llm-protocol", "openai.chat",
+                "ogr-agent-id", "line-a-bot");
+            assertEquals(200, response.statusCode());
+            assertTrue(response.headers().firstValue("content-type").orElse("")
+                .startsWith("text/event-stream"));
+            assertTrue(response.body().contains("The secret plan is"));
+            assertTrue(response.body().contains(" to do the thing"));
+            assertTrue(response.body().contains("[DONE]"));
+
+            Object verdict = trailer(response.body());
+            assertEquals("allow", Json.str(verdict, "decision"));
+            assertEquals("step-abc", Json.str(verdict, "step_id"));
+            assertEquals("openai.chat", Json.str(verdict, "llm_protocol"));
+
+            assertEquals(1, runtime.events.size(), "a stream is ONE event, judged once, at the end");
+            Object event = Json.parseOrNull(runtime.events.get(0));
+            assertEquals("step/response", Json.str(event, "kind"));
+            assertEquals("step-abc", Json.str(event, "step_id"));
+            assertEquals("line-a-bot", Json.str(event, "agent_id"));
+            // ⚠️ No single raw body exists, so the reply is reported in the CANONICAL shape.
+            assertEquals("The secret plan is to do the thing", Json.str(event, "payload.text"));
+        } finally {
+            server.stop();
+        }
+    }
+
+    /**
+     * ⚠️⚠️ What the lane is FOR. The caller relays what comes back, so at a head of 0 a
+     * block is a clean refusal — the answer the runtime refused never reaches anyone.
+     */
+    @Test
+    void theStreamedDoorAtZeroHeadNeverShowsTheRefusedAnswer() throws Exception {
+        MockServers.Runtime runtime = runtime(BLOCK);
+        MockServers.Provider provider = provider(REPLY, false);
+        ProxyServer server = proxy(runtime, provider, Mode.ENFORCE, FailMode.OPEN, 32);
+        try {
+            HttpResponse<String> response = postStream(server, "/guard/v1/step/response?payload=true", STREAM,
+                "ogr-step-id", "step-abc", "ogr-llm-protocol", "openai.chat",
+                "ogr-head-release-bytes", "0");
+            assertEquals(200, response.statusCode());
+            assertFalse(response.body().contains("secret plan"),
+                "not one byte of the refused answer may reach the caller");
+            assertTrue(response.body().contains("content_filter"));
+            assertEquals("block", Json.str(trailer(response.body()), "decision"));
+        } finally {
+            server.stop();
+        }
+    }
+
+    /**
+     * The two halves through the two transports of ONE door: the JSON request half learns
+     * the mapping, the streamed response half restores it FRAME BY FRAME.
+     */
+    @Test
+    void theStreamedDoorRestoresAPlaceholderSplitAcrossFrames() throws Exception {
+        String redacting = "{\"event_id\":\"e\",\"provider\":\"mock\",\"decision\":\"allow\","
+            + "\"modifications\":{\"spans\":[{\"path\":\"payload.messages.0.content\","
+            + "\"start\":5,\"end\":16,\"replacement\":\"${OGR_EMAIL_1}\"}]}}";
+        MockServers.Runtime runtime = runtime(redacting, ALLOW);
+        MockServers.Provider provider = provider(REPLY, false);
+        ProxyServer server = proxy(runtime, provider, Mode.ENFORCE, FailMode.OPEN, 32);
+        try {
+            String envelope = "{\"llm_protocol\":\"openai.chat\",\"body\":" + REQUEST + "}";
+            Object first = Json.parseOrNull(post(server, "/guard/v1/step/request", envelope).body());
+            assertEquals("redacted", Json.str(first, "decision"));
+            String stepId = Json.str(first, "step_id");
+
+            HttpResponse<String> response = postStream(server, "/guard/v1/step/response?payload=true",
+                STREAM_PLACEHOLDER, "ogr-step-id", stepId, "ogr-llm-protocol", "openai.chat");
+            assertTrue(response.body().contains("ada@acme.io"),
+                "the token arrived in two pieces and still has to come back as the value");
+            assertFalse(response.body().contains("OGR_EMAIL"),
+                "a placeholder delivered to the client is the failure this exists to prevent");
+
+            // ⚠️ What the JUDGE reads is the reply AS PRODUCED — still masked, or the
+            // detectors would find the very values we removed.
+            Object event = Json.parseOrNull(runtime.events.get(1));
+            assertEquals("sent to ${OGR_EMAIL_1} ok", Json.str(event, "payload.text"));
+        } finally {
+            server.stop();
+        }
+    }
+
+    /** A caller that carries the mapping itself needs nothing from this process's memory. */
+    @Test
+    void theStreamedDoorAcceptsThePlaceholderMappingAsAHeader() throws Exception {
+        MockServers.Runtime runtime = runtime(ALLOW);
+        MockServers.Provider provider = provider(REPLY, false);
+        ProxyServer server = proxy(runtime, provider, Mode.ENFORCE, FailMode.OPEN, 32);
+        try {
+            HttpResponse<String> response = postStream(server, "/guard/v1/step/response?payload=true",
+                STREAM_PLACEHOLDER, "ogr-step-id", "landed-on-another-replica",
+                "ogr-llm-protocol", "openai.chat",
+                "ogr-placeholders", "{\"${OGR_EMAIL_1}\":\"ada@acme.io\"}");
+            assertTrue(response.body().contains("ada@acme.io"));
+            assertFalse(response.body().contains("OGR_EMAIL"));
+        } finally {
+            server.stop();
+        }
+    }
+
+    /** No {@code ?payload=true}: the reply is judged and RECORDED, and no frames come back. */
+    @Test
+    void theStreamedDoorCanAnswerAPlainVerdictInstead() throws Exception {
+        MockServers.Runtime runtime = runtime(ALLOW);
+        MockServers.Provider provider = provider(REPLY, false);
+        ProxyServer server = proxy(runtime, provider, Mode.ENFORCE, FailMode.OPEN, 32);
+        try {
+            HttpResponse<String> response = postStream(server,
+                "/guard/v1/step/response", STREAM,
+                "ogr-step-id", "step-abc", "ogr-llm-protocol", "openai.chat");
+            assertEquals(200, response.statusCode());
+            assertTrue(response.headers().firstValue("content-type").orElse("")
+                .startsWith("application/json"));
+            Object verdict = Json.parseOrNull(response.body());
+            assertEquals("allow", Json.str(verdict, "decision"));
+            assertEquals("step-abc", Json.str(verdict, "step_id"));
+            assertFalse(response.body().contains("secret plan"),
+                "the caller already delivered its own frames; there is nothing to hand back");
+            assertEquals("The secret plan is to do the thing",
+                Json.str(Json.parseOrNull(runtime.events.get(0)), "payload.text"));
+        } finally {
+            server.stop();
+        }
+    }
+
+    /**
+     * ⚠️ A REQUEST is one body: there is nothing to stream in front of the model, and the
+     * step id is how a streamed reply finds the mapping that must be restored into it.
+     */
+    @Test
+    void theStreamedDoorRefusesWhatItCannotCarry() throws Exception {
+        MockServers.Runtime runtime = runtime(ALLOW);
+        MockServers.Provider provider = provider(REPLY, false);
+        ProxyServer server = proxy(runtime, provider, Mode.ENFORCE, FailMode.OPEN, 32);
+        try {
+            assertEquals(400, postStream(server, "/guard/v1/step/request?payload=true", STREAM,
+                "ogr-step-id", "s", "ogr-llm-protocol", "openai.chat").statusCode());
+            assertEquals(400, postStream(server, "/guard/v1/step/response", STREAM,
+                "ogr-llm-protocol", "openai.chat").statusCode());
+            assertEquals(400, postStream(server, "/guard/v1/step/response", STREAM,
+                "ogr-step-id", "s", "ogr-llm-protocol", "canonical").statusCode());
+            assertEquals(0, runtime.events.size(), "nothing refused at the door is reported");
+        } finally {
+            server.stop();
+        }
+    }
+
+    /**
+     * ⚠️⚠️ The head goes out WHILE THE REPLY IS STILL ARRIVING, and that is the difference
+     * between this lane and "post the whole reply, then wait": a caller relaying what
+     * comes back must be able to show its user the first tokens, or the guard has traded
+     * every stream for a spinner. One frame is uploaded, and its guarded copy has to come
+     * back before the rest of the stream is sent at all.
+     *
+     * <p>⚠️ Driven over a RAW SOCKET, and it has to be: the JDK's own HTTP client does not
+     * surface a response until it has finished sending the request body, so a test
+     * written with it cannot tell this lane apart from one that buffers everything.
+     */
+    @Test
+    void theStreamedDoorReleasesTheHeadWhileTheStreamIsStillArriving() throws Exception {
+        MockServers.Runtime runtime = runtime(ALLOW);
+        MockServers.Provider provider = provider(REPLY, false);
+        ProxyServer server = proxy(runtime, provider, Mode.ENFORCE, FailMode.OPEN, 32);
+        String[] frames = STREAM.split("\n\n");
+        try (Socket socket = new Socket("localhost", server.port())) {
+            socket.setSoTimeout(5000);
+            OutputStream out = socket.getOutputStream();
+            out.write(("POST /guard/v1/step/response?payload=true HTTP/1.1\r\n"
+                + "Host: localhost:" + server.port() + "\r\n"
+                + "Content-Type: text/event-stream\r\n"
+                + "ogr-step-id: live-1\r\n"
+                + "ogr-llm-protocol: openai.chat\r\n"
+                + "Transfer-Encoding: chunked\r\n\r\n").getBytes(StandardCharsets.UTF_8));
+            chunk(out, frames[0] + "\n\n");
+
+            InputStream in = socket.getInputStream();
+            assertTrue(readUntil(in, "The secret plan is").contains("The secret plan is"),
+                "the head is released against a stream that has not ended");
+            assertTrue(runtime.events.isEmpty(), "and nothing has been judged yet");
+
+            for (int i = 1; i < frames.length; i++) {
+                chunk(out, frames[i] + "\n\n");
+            }
+            out.write("0\r\n\r\n".getBytes(StandardCharsets.UTF_8));
+            out.flush();
+
+            String rest = readUntil(in, ": ogr ") + readUntil(in, "\n\n");
+            assertTrue(rest.contains("[DONE]"));
+            assertEquals("allow", Json.str(trailer(rest), "decision"));
+            assertEquals(1, runtime.events.size(), "one stream, one event, judged at the end");
+        } finally {
+            server.stop();
+        }
+    }
+
+    /**
+     * ⚠️ OBSERVE HOLDS NOTHING, at any head budget. A hold buys the ability to refuse and
+     * observe never refuses, so holding there would spend a stream's whole
+     * time-to-first-token to reach a verdict nobody acts on — in the one mode that exists
+     * to be rolled out without changing what anyone sees.
+     */
+    @Test
+    void observeModeNeverHoldsAStream() throws Exception {
+        MockServers.Runtime runtime = runtime(BLOCK);
+        MockServers.Provider provider = provider(REPLY, false);
+        ProxyServer server = proxy(runtime, provider, Mode.OBSERVE, FailMode.CLOSED, 0);
+        String[] frames = STREAM.split("\n\n");
+        try (Socket socket = new Socket("localhost", server.port())) {
+            socket.setSoTimeout(5000);
+            OutputStream out = socket.getOutputStream();
+            out.write(("POST /guard/v1/step/response?payload=true HTTP/1.1\r\n"
+                + "Host: localhost:" + server.port() + "\r\n"
+                + "Content-Type: text/event-stream\r\n"
+                + "ogr-step-id: observed-1\r\n"
+                + "ogr-llm-protocol: openai.chat\r\n"
+                + "Transfer-Encoding: chunked\r\n\r\n").getBytes(StandardCharsets.UTF_8));
+            chunk(out, frames[0] + "\n\n");
+            assertTrue(readUntil(socket.getInputStream(), "The secret plan is")
+                    .contains("The secret plan is"),
+                "a head budget of 0 still releases everything when nothing will be refused");
+
+            for (int i = 1; i < frames.length; i++) {
+                chunk(out, frames[i] + "\n\n");
+            }
+            out.write("0\r\n\r\n".getBytes(StandardCharsets.UTF_8));
+            out.flush();
+            String rest = readUntil(socket.getInputStream(), ": ogr ")
+                + readUntil(socket.getInputStream(), "\n\n");
+            assertEquals("allow", Json.str(trailer(rest), "decision"),
+                "the runtime said block and observe still delivers — that is the mode");
+        } finally {
+            server.stop();
+        }
+    }
+
+    /** One HTTP/1.1 chunk, written and flushed on its own — a frame the server sees now. */
+    private static void chunk(OutputStream out, String body) throws IOException {
+        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        out.write((Integer.toHexString(bytes.length) + "\r\n").getBytes(StandardCharsets.UTF_8));
+        out.write(bytes);
+        out.write("\r\n".getBytes(StandardCharsets.UTF_8));
+        out.flush();
+    }
+
+    /**
+     * Raw bytes until the marker shows up — the socket's read timeout is the assertion
+     * that the server did not simply wait for the whole upload.
+     */
+    private static String readUntil(InputStream in, String marker) throws IOException {
+        StringBuilder sb = new StringBuilder();
+        int c;
+        while ((c = in.read()) >= 0) {
+            sb.append((char) c);
+            if (sb.indexOf(marker) >= 0) {
+                break;
+            }
+        }
+        return sb.toString();
     }
 
     // ----------------------------------------------------------------- identity
