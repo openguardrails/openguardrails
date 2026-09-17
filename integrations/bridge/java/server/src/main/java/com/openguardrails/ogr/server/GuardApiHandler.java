@@ -24,9 +24,14 @@ import java.util.Map;
  *
  * <h2>The answer: three decisions, and the body's meaning follows the decision</h2>
  *
- * The same contract AIRS's built-in LLM door ({@code POST /v1/step/request},
- * {@code POST /v1/step/response}) answers with, so a caller can move between the two
- * without changing a line:
+ * The decision is the same one the runtime composes, in the shape a caller holding a
+ * whole body can act on without reading a verdict — which is the work a bridge exists to
+ * do. (⚠️ The runtime has no door of this shape and is not getting one: AIRS answers
+ * {@code POST /v1/evaluate}, and since 2026-09-17 renders the body to use into the
+ * verdict itself under {@code ?payload=true}. An earlier build of a
+ * {@code /v1/step/*} door there was reverted the day it was written, on the finding
+ * that the input was never the problem — the verdict being a set of instructions was.
+ * This bridge asks for that rendered payload by default and hands it on.)
  *
  * <pre>
  *   POST /guard/v1/step/request    {llm_protocol?, path?, agent_id?, …, body: &lt;raw provider request&gt;}
@@ -63,13 +68,27 @@ import java.util.Map;
  *       {@code redacted}.
  * </ul>
  *
+ * <h2>A streamed reply comes in on the same door, as a different TRANSPORT</h2>
+ *
+ * {@code Content-Type: text/event-stream} on {@code /guard/v1/step/response} says the
+ * body is the provider's frames rather than one JSON document; the envelope's fields ride
+ * {@code ogr-*} headers and what comes back is the guarded stream. A streamed reply is
+ * still ONE message and one {@code step/response} — judged once, whole, at the end — so
+ * this is not a second door, and it is the only transport in which the end-of-stream
+ * decision can still be an ENFORCEMENT: see {@link GuardStreamHandler}, which is where
+ * the bounded head lives. ⚠️ The guarded frames come back only for {@code ?payload=true}
+ * — the runtime's own spelling and its own default — and the caller then relays its reply
+ * bytes THROUGH this process, which is the price. Without the parameter the same stream
+ * is judged and answered with a plain verdict: the record, for a caller that will not pay
+ * it.
+ *
  * <h2>What this lane gives up, said plainly</h2>
  *
  * <ul>
- *   <li><b>Streaming is the caller's problem.</b> There is no held head here, so a
- *       streamed answer is either buffered by the caller before it asks, or judged after
- *       the client has already seen it — a record, not a control. The inline lane exists
- *       for the other case.
+ *   <li><b>A JSON-posted streamed reply is a record, not a control.</b> A caller that
+ *       reassembles the frames itself and posts the result has already delivered the
+ *       answer; nothing here can be withheld. That is what the streamed transport above
+ *       is for, and what the inline lane does from inside the byte path.
  *   <li><b>The mapping has to travel.</b> The token→plaintext map from the request half
  *       is returned as {@code placeholders} and accepted back on the response call, so a
  *       caller that load-balances the two halves across replicas needs nothing from this
@@ -93,6 +112,9 @@ final class GuardApiHandler implements HttpHandler {
     /** What {@code body} says on an allow: the caller's own copy is the body. */
     static final String UNCHANGED = "unchanged";
 
+    /** The only kind the streamed transport can carry; see {@link GuardStreamHandler}. */
+    static final String RESPONSE_KIND = "step/response";
+
     /**
      * The three-way decision. A continued body is a BLOCK the caller carries out, never a
      * redaction; a body that came back byte-identical is an allow; anything else rewritten
@@ -108,11 +130,13 @@ final class GuardApiHandler implements HttpHandler {
     private final OgrGuard guard;
     private final ProxyServer.Settings settings;
     private final StepStore steps;
+    private final GuardStreamHandler streamed;
 
     GuardApiHandler(OgrGuard guard, ProxyServer.Settings settings, StepStore steps) {
         this.guard = guard;
         this.settings = settings;
         this.steps = steps;
+        this.streamed = new GuardStreamHandler(guard, settings, steps);
     }
 
     @Override
@@ -120,6 +144,13 @@ final class GuardApiHandler implements HttpHandler {
         try {
             if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
                 Http.send(exchange, 405, "application/json", "{\"error\":\"method_not_allowed\"}");
+                return;
+            }
+            if (Http.isEventStream(exchange.getRequestHeaders().getFirst("content-type"))) {
+                // ⚠️ The body is the provider's frames, not an envelope, so it must NOT be
+                // read whole first: this lane's whole point is that the head goes out while
+                // the rest is still arriving.
+                streamed.handle(exchange);
                 return;
             }
             String envelope = new String(Http.readAll(exchange.getRequestBody()), StandardCharsets.UTF_8);
@@ -286,17 +317,32 @@ final class GuardApiHandler implements HttpHandler {
     }
 
     private Identity identity(Object envelope) {
-        String id = Json.str(envelope, "agent_id");
-        String type = Json.str(envelope, "agent_type");
-        String workspace = Json.str(envelope, "agent_workspace");
-        String user = Json.str(envelope, "agent_user");
+        return identityOf(
+            Json.str(envelope, "agent_id"),
+            Json.str(envelope, "agent_type"),
+            Json.str(envelope, "agent_workspace"),
+            Json.str(envelope, "agent_user"),
+            settings.identity);
+    }
+
+    /**
+     * The four-tuple the CALLER asserted, over this bridge's configured one — shared with
+     * the streamed transport, which asserts the same four fields as headers.
+     *
+     * <p>⚠️ Field by field, and an empty field falls back rather than erasing: a bridge
+     * configured for one workspace must keep it when a message names only the user, and
+     * {@code agent_user} has no configured value to fall back to because a constant user
+     * is what the identity floor already gives you.
+     */
+    static Identity identityOf(String id, String type, String workspace, String user,
+                               Identity fallback) {
         if (id.isEmpty() && type.isEmpty() && workspace.isEmpty() && user.isEmpty()) {
-            return settings.identity;
+            return fallback;
         }
         return new Identity(
-            id.isEmpty() ? settings.identity.agentId : id,
-            type.isEmpty() ? settings.identity.agentType : type,
-            workspace.isEmpty() ? settings.identity.agentWorkspace : workspace,
+            id.isEmpty() ? fallback.agentId : id,
+            type.isEmpty() ? fallback.agentType : type,
+            workspace.isEmpty() ? fallback.agentWorkspace : workspace,
             user);
     }
 }

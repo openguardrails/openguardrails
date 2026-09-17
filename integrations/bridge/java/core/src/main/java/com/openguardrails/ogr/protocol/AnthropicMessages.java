@@ -278,6 +278,7 @@ public final class AnthropicMessages implements Protocol {
     private static final class MessagesDecoder implements StreamDecoder {
         private final Map<String, String> mapping;
         private final Map<Integer, Block> blocks = new TreeMap<Integer, Block>();
+        private String model = "";
         private int frames;
         private long inputTokens;
         private long outputTokens;
@@ -306,6 +307,10 @@ public final class AnthropicMessages implements Protocol {
             frames++;
 
             if ("message_start".equals(type)) {
+                if (model.isEmpty()) {
+                    // The one frame that names the model; a refusal rendered later needs it.
+                    model = Json.str(parsed, "message.model");
+                }
                 Object u = Json.get(parsed, "message.usage");
                 if (u instanceof Map) {
                     sawUsage = true;
@@ -418,6 +423,11 @@ public final class AnthropicMessages implements Protocol {
                 ? new Usage(inputTokens, outputTokens, 0, cacheRead, cacheWrite)
                 : null;
             return new Output(text.toString(), thinking.toString(), actions, usage);
+        }
+
+        @Override
+        public String model() {
+            return model;
         }
 
         @Override

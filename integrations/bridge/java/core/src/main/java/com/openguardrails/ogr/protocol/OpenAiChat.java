@@ -451,6 +451,11 @@ public final class OpenAiChat implements Protocol {
         }
 
         @Override
+        public String model() {
+            return model;
+        }
+
+        @Override
         public int recognizedFrames() {
             return frames;
         }

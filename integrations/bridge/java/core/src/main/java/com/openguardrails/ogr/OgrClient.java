@@ -25,10 +25,31 @@ public class OgrClient {
     private final HttpClient http;
 
     public OgrClient(OgrConfig config) {
-        this(config, HttpClient.newBuilder()
+        this(config, defaultHttpClient(config));
+    }
+
+    /**
+     * ⚠️⚠️ HTTP/1.1 ON A CLEARTEXT RUNTIME URL, and it is not a preference.
+     *
+     * <p>The JDK's client defaults to HTTP/2, and over {@code http://} that means the
+     * h2c UPGRADE dance — the first request goes out carrying {@code Connection: Upgrade,
+     * HTTP2-Settings} and the client then expects a {@code 101}. A server that does not
+     * implement h2c may simply close the connection, and the JDK reports
+     * {@code "HTTP/1.1 header parser received no bytes"}: no verdict. Measured against a
+     * local runtime, that was EVERY evaluate failing — and failing into fail-open, which
+     * is silent by design, so the traffic went through unjudged with nothing in any log
+     * to say so. Over {@code https://} the same client negotiates by ALPN, which falls
+     * back cleanly, so the pin is only where the hazard is.
+     */
+    private static HttpClient defaultHttpClient(OgrConfig config) {
+        HttpClient.Builder builder = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(5))
-            .followRedirects(HttpClient.Redirect.NEVER)
-            .build());
+            .followRedirects(HttpClient.Redirect.NEVER);
+        String url = config.baseUrl() == null ? "" : config.baseUrl().toLowerCase(java.util.Locale.ROOT);
+        if (!url.startsWith("https://")) {
+            builder.version(HttpClient.Version.HTTP_1_1);
+        }
+        return builder.build();
     }
 
     public OgrClient(OgrConfig config, HttpClient http) {
@@ -70,9 +91,22 @@ public class OgrClient {
      * {@link FailMode}, which is the one decision this class must not make for it.
      */
     public EvaluateResult evaluate(GuardEvent event) {
+        return evaluate(event, config.payloadFromRuntime());
+    }
+
+    /**
+     * As above, with the {@code ?payload=true} question answered explicitly.
+     *
+     * <p>⚠️ A STREAMED reply asks for no payload however the bridge is configured, and
+     * that is not a micro-optimisation: the rendered body would be a document — a
+     * refusal, or the whole reply with its calls dropped — and a document cannot be
+     * spliced into frames the client has already parsed. Asking for one would echo the
+     * entire answer back across the wire to be thrown away.
+     */
+    public EvaluateResult evaluate(GuardEvent event, boolean wantPayload) {
         String body = event.toJson();
         HttpRequest request = HttpRequest.newBuilder()
-            .uri(URI.create(config.endpoint("/v1/evaluate") + (config.payloadFromRuntime() ? "?payload=true" : "")))
+            .uri(URI.create(config.endpoint("/v1/evaluate") + (wantPayload ? "?payload=true" : "")))
             .timeout(config.timeout())
             .header("content-type", "application/json")
             .header("authorization", "Bearer " + config.apiKey())

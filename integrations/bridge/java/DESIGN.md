@@ -194,6 +194,16 @@ tell you it happened. `closed` refuses instead — including on a **partial** ve
 one whose `unjudged` names paths. That is the entire content of the promise: if we
 could not look at it, it does not go through.
 
+⚠️⚠️ **Check what your HTTP client does to a cleartext runtime URL.** The JDK's client
+defaults to HTTP/2, which over `http://` means the h2c *upgrade* handshake; a runtime
+that does not implement h2c may just close the connection, and the client reports
+`HTTP/1.1 header parser received no bytes`. Measured against a local runtime, that was
+**every evaluate failing** — into fail-open, which is silent by design, so the traffic
+went through unjudged with nothing in any log to say so. Pin HTTP/1.1 for `http://`
+(over `https://` ALPN negotiates and falls back cleanly). Whatever your language, the
+test is the same: point the thing at the runtime once and confirm a real `event_id`
+comes back, because "allow" and "nobody answered" look identical from the outside.
+
 ⚠️ Keep a policy block and a degraded refusal **distinguishable** at the HTTP layer
 (a header, a distinct status). Answered identically, an operator cannot tell "we are
 refusing traffic" from "the decision point is down" — opposite problems, opposite
@@ -307,7 +317,9 @@ refusal instead of a retraction.
 provider stream only completes tool calls at its end, so argument completions and the
 terminal frames are always inside the held remainder.
 
-`HeadHold`.
+`HeadHold`, driven by `StreamGuard` — framing, decoding, the bound and the tail in one
+place, because the inline byte path and the message door's streamed transport must not
+drift on what a head budget buys or on what a refusal looks like after bytes are gone.
 
 ### Job 10 — Render the refusal in the CALLER's protocol
 
@@ -427,9 +439,21 @@ This is what [`GuardApiHandler`](server/src/main/java/com/openguardrails/ogr/ser
 implements on `/guard/v1/step/request` and `/guard/v1/step/response`. Two things
 are structurally weaker and should be said out loud to whoever operates it:
 
-- **Streaming is the caller's problem.** There is no held head, so a streamed answer is
-  either buffered by the caller before it asks — paying the whole time-to-first-token — or
-  judged after the client has already seen it, which is a record and not a control.
+- **A streamed reply needs the streamed TRANSPORT, or it is only a record.** Posted as
+  one JSON body it has already been delivered, and nothing can be withheld. So the
+  response door takes the frames themselves — `Content-Type: text/event-stream`, the
+  envelope's fields as `ogr-*` headers — and answers with the frames to forward: the
+  bounded head live, the remainder held, the verdict on a trailing `: ogr {…}` comment
+  line ([`GuardStreamHandler`](server/src/main/java/com/openguardrails/ogr/server/GuardStreamHandler.java),
+  Job 9's machinery unchanged). ⚠️ **The price is a hop**: the caller relays its reply
+  bytes through the bridge, so this buys enforcement with a copy. The frames come back
+  for `?payload=true` — the runtime's own spelling and default for the same question —
+  and without it the same uploaded stream is judged and answered with a plain verdict,
+  for a caller that will not pay the hop: making the output side visible is worth doing
+  even when it cannot be controlled.
+  ⚠️ **This is still not a gateway, and the line is the PROVIDER CONNECTION, not the
+  bytes**: nothing is re-pointed at the bridge, it dials no provider and holds no
+  `base_url`. A streamed reply is one message, which is what a bridge answers about.
 - **The placeholder mapping has to travel.** Between a step's two halves the service must
   carry `token → value`, or the reply keeps the placeholders and the customer's application
   receives `${OGR_EMAIL_1}` where its own data belongs. This implementation returns the map

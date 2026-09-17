@@ -287,6 +287,7 @@ public final class OpenAiResponses implements Protocol {
         private final Restorer textRestorer;
         private final Restorer reasoningRestorer;
         private Usage usage;
+        private String model = "";
         private int frames;
 
         ResponsesDecoder(Map<String, String> mapping) {
@@ -310,6 +311,11 @@ public final class OpenAiResponses implements Protocol {
                 return FrameResult.passthrough(frame);
             }
             frames++;
+            if (model.isEmpty()) {
+                // Every `response.*` frame carries the response object, and it names the
+                // model; a refusal rendered later needs it.
+                model = Json.str(parsed, "response.model");
+            }
 
             if ("response.completed".equals(type) || "response.incomplete".equals(type)) {
                 Usage u = usageOf(Json.get(parsed, "response.usage"));
@@ -417,6 +423,11 @@ public final class OpenAiResponses implements Protocol {
                 }
             }
             return new Output(text.toString(), reasoning.toString(), actions, usage);
+        }
+
+        @Override
+        public String model() {
+            return model;
         }
 
         @Override

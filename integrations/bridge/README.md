@@ -49,18 +49,24 @@ already exists. A bridge has no product to plug into: the code around it is code
 this project will never see, which is why it carries no framework, forces no JSON
 library on anyone, and has to state the rules it cannot enforce.
 
-**Not a gateway.** A bridge does not take the `base_url`. Nothing is re-pointed at
-it, it forwards nothing to any provider, and it holds no stream. The moment it did,
-it would be one more gateway — and the products in `gateway/` already do that job
-with their own I/O model, their own caller authentication and their own operations.
-The bridge stops at the message so the organization's service keeps all of that.
+**Not a gateway.** A bridge does not take the `base_url`. Nothing is re-pointed at it
+and it forwards nothing to any provider. The moment it did, it would be one more
+gateway — and the products in `gateway/` already do that job with their own I/O model,
+their own caller authentication and their own operations. The bridge stops at the
+message so the organization's service keeps all of that.
 
-**What that costs, said out loud.** Because the bridge never holds the stream, a
-streamed reply is either buffered by the service before it asks — paying the whole
-time-to-first-token — or judged after the client has already seen it, which is a
-record and not a control. And the request's redaction spans are applied by the
-bridge into the body it returns, so the service must forward the returned body and
-not its own copy. Both are stated in the Java bridge's
+⚠️ **The line is the provider connection, not the bytes.** A streamed reply IS one
+message, so a service may relay the provider's frames through the bridge and get the
+guarded frames back — which is the only way an end-of-stream decision is still an
+enforcement rather than a record. The bridge still dials nobody: the service keeps its
+own provider connection, and what it hands over is a reply it already holds.
+
+**What that costs, said out loud.** Streamed enforcement costs a hop — the reply bytes
+pass through the bridge — and a service that will not pay it gets a record instead: a
+streamed reply judged after delivery, or reassembled and posted as one body. And the
+request's redaction spans are applied by the bridge into the body it returns, so the
+service must forward the returned body and not its own copy. Both are stated in the
+Java bridge's
 [DESIGN.md §4](java/DESIGN.md#4-two-deployment-shapes-and-what-each-gives-up).
 
 ⚠️ The Java reference server also answers as an inline proxy on `/v1/*`. That door

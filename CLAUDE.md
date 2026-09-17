@@ -3,7 +3,7 @@
 This is a monorepo. Run commands from the repository root unless a component
 README explicitly says otherwise.
 
-**Protocol version: v1.8 (2026-09-16)**, on the wire v1.0 declared stable
+**Protocol version: v1.9 (2026-09-17)**, on the wire v1.0 declared stable
 (2026-08-19): the v0.8 "minimum API" unchanged (one endpoint, one recipe;
 everything derivable left the wire, everything producer-known is required), plus
 the **layer model** as the normative foundational concept (entity axis: tenant →
@@ -11,7 +11,9 @@ workspace → agent-as-endpoint; traffic stack: L6 session · L5 turn · L4 step
 L3 event — the packet, the only layer on the wire — · L2 call · L1 exec).
 Within 1.x changes are additive-optional only — 1.1 media · 1.2 obligations ·
 1.3 mandate + `continuation` · 1.4 local redaction · 1.5 `initiator` ·
-1.6 `llm_endpoint` · 1.7 grounding (DRAFT) · 1.8 `transport` + verdict `timing`.
+1.6 `llm_endpoint` · 1.7 grounding (DRAFT) · 1.8 `transport` + verdict `timing` ·
+1.9 `?payload=true` (the verdict carries the rendered body) + the streamed transport
+of a `step/response`.
 ⚠️ Each ships at the RUNTIME first: `.strict()` rejects unknown keys, so a
 producer one version ahead is a 400 on every event it sends. The v0.7 design rationale
 lives in `../openguardrails-airs/docs/v0.7-ledger-redesign.md`; the layer
@@ -52,14 +54,20 @@ mitmproxy) and holds the stream, so it alone can apply spans in full and refuse
 mid-stream; `bridge/` is a STANDALONE process that holds one MESSAGE at a time — a
 service the organization already runs posts the request body, later the reply body,
 and gets the decision and the rewritten body back while keeping its own provider
-connection; `agent/` is code inside the harness, different at every host, speaking
+connection (a streamed reply IS one message: the service relays the provider's frames
+to the bridge's response door as `text/event-stream` and gets the guarded frames back,
+head-bounded, which is the only shape in which an end-of-stream decision still
+enforces — the line a bridge does not cross is the provider connection, not the
+bytes); `agent/` is code inside the harness, different at every host, speaking
 OGR directly against whatever seam the host exposes (there is no shared conversion
 to factor out of a hook). ⚠️ A bridge takes messages, never the `base_url` — the
 moment it forwards to a provider it is one more gateway, which is the job the
 products in `gateway/` already do. The Java bridge's reference server keeps an
 inline `/v1/*` door ONLY as the offline test bed for `core`'s streaming and span
-code; its deployment shape is `/guard/v1/step/{request,response}`. ⚠️ OpenAFW's
-OGR connection lives in the openafw repository; `integrations/gateway/openafw/` is
+code; its deployment shape is `/guard/v1/step/{request,response}`, the response door
+taking either one JSON body or the provider's SSE frames (`ogr-*` headers, the
+runtime's own streamed-transport spelling, verdict on a trailing `: ogr` comment).
+⚠️ OpenAFW's OGR connection lives in the openafw repository; `integrations/gateway/openafw/` is
 the pointer that places it in the category, not a copy of the code. All bindings
 and runnable integration examples belong under `integrations/`; a gateway
 implementation is not an OGR-operated service.
@@ -92,7 +100,8 @@ comments stay English, and each says why the literal is there.
   OpenAFW, the local AI firewall, is a gateway plugin at the host end of the model
   channel and the one gateway plugin that also does local redaction (minter `F`).
 - `integrations/bridge/java` — the first BRIDGE (Java, CI-covered): a runnable
-  `server` exposing the message door plus the zero-dependency `core` it is built on. Its
+  `server` exposing the message door — JSON bodies and, since 2026-09-17, the streamed
+  transport of its response half — plus the zero-dependency `core` it is built on. Its
   `DESIGN.md` is the language-neutral write-up of what protocol conversion
   requires, and is the file to read before building one in any language.
   ⚠️ `core` must stay dependency-free — it is embedded in hosts that pin their own

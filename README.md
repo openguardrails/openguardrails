@@ -303,7 +303,7 @@ npm install && npm run build && npm test
 
 ## Status
 
-Current protocol version: **v1.8** (see [CHANGELOG.md](CHANGELOG.md) for
+Current protocol version: **v1.9** (see [CHANGELOG.md](CHANGELOG.md) for
 protocol versions). The wire is the one v1.0 declared stable in 2026-08:
 everything since is additive-optional (`additionalProperties: false` rejects
 unknown keys, not absent ones, so both ends roll forward independently), so an

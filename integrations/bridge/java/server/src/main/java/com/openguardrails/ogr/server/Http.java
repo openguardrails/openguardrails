@@ -9,6 +9,7 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 
 /** Small HTTP helpers shared by the two doors. */
 final class Http {
@@ -22,6 +23,18 @@ final class Http {
 
     static boolean isHopByHop(String lowerName) {
         return HOP_BY_HOP.contains(lowerName);
+    }
+
+    /**
+     * Whether a body is an SSE STREAM rather than a document.
+     *
+     * <p>The one switch between the message door's two transports, and the same one the
+     * runtime's own streamed evaluate uses. Prefix match, because a content type may
+     * carry parameters ({@code text/event-stream; charset=utf-8}).
+     */
+    static boolean isEventStream(String contentType) {
+        return contentType != null
+            && contentType.trim().toLowerCase(Locale.ROOT).startsWith("text/event-stream");
     }
 
     static byte[] readAll(InputStream in) throws IOException {
