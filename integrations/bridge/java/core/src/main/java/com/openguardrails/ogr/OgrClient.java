@@ -72,7 +72,7 @@ public class OgrClient {
     public EvaluateResult evaluate(GuardEvent event) {
         String body = event.toJson();
         HttpRequest request = HttpRequest.newBuilder()
-            .uri(URI.create(config.endpoint("/v1/evaluate")))
+            .uri(URI.create(config.endpoint("/v1/evaluate") + (config.payloadFromRuntime() ? "?payload=true" : "")))
             .timeout(config.timeout())
             .header("content-type", "application/json")
             .header("authorization", "Bearer " + config.apiKey())

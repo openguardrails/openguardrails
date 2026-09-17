@@ -96,6 +96,21 @@ which is the decomposition this contract exists to prevent.
 
 **Response `200`** — a Verdict object.
 
+**`?payload=true`** (optional, OGR 1.9, off by default) — the verdict also
+carries `payload`: the body the caller should now use, rendered by the
+runtime from the verdict it just composed. `"unchanged"` when nothing about
+the body changed (use your own copy; nothing is echoed back); the rewritten
+body on an `allow` with spans (request half: spans applied; response half:
+placeholders restored, output-side spans applied); on a `block` with a
+`continuation`, the CONTINUED body to forward (`withhold`) or deliver
+(`drop_calls`); on a `block` without one (or `answer`), the refusal document
+in the caller's own `llm_protocol` — SSE text with `payload_stream: true`
+when the request said `stream: true`. `decision` and `modifications` are
+unchanged beside it; a continuation still changes no enforcement. Absent for
+a `canonical` refusal (no client protocol to render into). A PEP in the byte
+path does not ask for it — returning a rewritten body doubles every
+request's bytes; it is for a caller that already holds the whole body.
+
 **Side effect** — every accepted evaluate also RECORDS the event; evaluate is
 the observation channel. (`/v1/ingest` and the `ogr-partial` interim-judgment
 header were removed in v0.8: with [bounded-head streaming](#streaming-release-a-bounded-head-judge-once)
@@ -546,6 +561,35 @@ releases nothing.
 The accepted cost is that content inside the head has already been seen, so a
 block after it is a retraction rather than a refusal; `head = 0` removes even
 that, at the price of showing the user nothing until the answer is judged.
+
+### Streamed transport: the same event, its payload as the provider's frames
+
+A `step/response` MAY be sent as a stream instead of as one JSON document
+(OGR 1.9, optional for a runtime to support): `POST /v1/evaluate` with
+`Content-Type: text/event-stream`, the body being the provider's SSE frames
+written as they arrive, and the event's other required fields as headers —
+`ogr-kind` (only `step/response`; a request is one body and is sent as
+JSON), `ogr-step-id`, `ogr-llm-protocol` (the dialect the frames are
+decoded by; `canonical` is not a frame dialect), `ogr-agent-id`,
+`ogr-agent-type`, `ogr-agent-workspace`, `ogr-agent-user` (absent = `""`),
+plus the optional `ogr-session-hint`, `ogr-connection`, `ogr-llm-endpoint`,
+`ogr-initiator`, `ogr-integration`. This is a TRANSPORT of one event, not a
+sequence of events: the runtime reassembles the frames into the canonical
+shape and judges once, whole, at end of stream, exactly as above.
+
+Without `?payload=true` the response is the ordinary Verdict, answered after
+the stream ends. With `?payload=true` the response is itself
+`text/event-stream` — the frames to forward to the client, with the bounded
+head released live (`ogr-head-release-bytes`, reference default 32; `0`
+releases nothing), the remainder held, placeholders restored per frame, and
+at end of stream either the remainder released or the stream ended with a
+refusal or retraction in the caller's own protocol; `ogr-fail-mode`
+(`open` | `closed`) says what a missing verdict costs. The verdict rides a
+trailing SSE comment line, `: ogr {"decision":…,"event_id":…}`, which SSE
+parsers ignore by definition. A frame that only announces a tool call (a
+name-only delta, a `tool_use` block start, a `function_call` item) counts
+against the head budget: once it is out the client holds a call entry, and
+the refusal can only be the hard retraction.
 
 ### At a gateway: the four-tuple arrives as headers
 

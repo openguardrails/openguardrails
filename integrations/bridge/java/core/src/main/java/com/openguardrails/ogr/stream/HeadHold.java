@@ -57,6 +57,7 @@ public final class HeadHold {
     private int releasedContentBytes;
     private boolean releasedAnyContent;
     private boolean releasedCalls;
+    private int releasedFrames;
 
     public HeadHold(int headBytes) {
         this.head = Math.max(0, headBytes);
@@ -71,17 +72,31 @@ public final class HeadHold {
             held.add(frame.out);
             return "";
         }
-        if (frame.contentBytes == 0) {
+        /*
+         * ⚠️ A frame that ANNOUNCES a tool call without an argument byte (a name-only
+         * `tool_calls` delta, a `content_block_start` for a `tool_use`, an
+         * `output_item.added` for a `function_call`) is NOT free framing: once it is out
+         * the client holds a `tool_calls` entry, and harnesses branch on that list being
+         * non-empty. It costs one byte of budget, so `head = 0` holds it, and releasing it
+         * records that call bytes went out. Found on the AIRS door's live battery: a
+         * `head = 0` block ended on a normal stop while the client already had the name.
+         */
+        int cost = frame.contentBytes == 0 && frame.carriesCalls ? 1 : frame.contentBytes;
+        if (cost == 0) {
             // Framing is free: a frame carrying no client-visible content may go out
             // whatever the budget says, so the stream reads as live from its first frame.
+            if (!frame.out.isEmpty()) {
+                releasedFrames++;
+            }
             return frame.out;
         }
-        if (releasedContentBytes + frame.contentBytes > head) {
+        if (releasedContentBytes + cost > head) {
             held.add(frame.out);
             return "";
         }
         releasedContentBytes += frame.contentBytes;
         releasedAnyContent = true;
+        releasedFrames++;
         if (frame.carriesCalls) {
             releasedCalls = true;
         }
@@ -109,6 +124,16 @@ public final class HeadHold {
     /** Whether any client-visible content has reached the caller. */
     public boolean sawRelease() {
         return releasedAnyContent;
+    }
+
+    /**
+     * Whether ANY frame went out, framing included. A clean refusal re-opens the message
+     * ({@code message_start}, {@code response.created}); once the provider's own opening
+     * frames are on the wire a second opening is a protocol error to a strict client, and
+     * the refusal has to be appended inside the message that is already open.
+     */
+    public boolean releasedAnything() {
+        return releasedFrames > 0;
     }
 
     /**

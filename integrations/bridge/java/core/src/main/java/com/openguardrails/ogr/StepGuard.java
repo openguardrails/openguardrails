@@ -175,10 +175,20 @@ public final class StepGuard {
                 verdict.eventId(), verdict.unjudged(), placeholders);
         }
 
+        /*
+         * The spans are still applied LOCALLY, for what the runtime cannot hand back:
+         * the token → plaintext map the streamed reply's per-frame restore needs. What is
+         * FORWARDED is the runtime's own rendering when it sent one (`?payload=true`) —
+         * one splice, done where the verdict was composed — and the local result when it
+         * did not (an older runtime).
+         */
         Spans.Result spans = Spans.apply(rawBody, verdict.spans());
         guard.counters().unresolvedSpans(spans.unresolved);
         placeholders.putAll(spans.learned);
-        return new RequestOutcome(RequestOutcome.Act.FORWARD, spans.body, null, false, false,
+        String forward = verdict.hasPayload()
+            ? (verdict.payloadUnchanged() ? rawBody : verdict.payloadRaw())
+            : spans.body;
+        return new RequestOutcome(RequestOutcome.Act.FORWARD, forward, null, false, false,
             verdict.eventId(), verdict.unjudged(), placeholders);
     }
 
@@ -192,6 +202,17 @@ public final class StepGuard {
      */
     private RequestOutcome refuseRequest(Verdict verdict, String rawBody) {
         Continuation c = verdict.continuation();
+        if (verdict.hasPayload() && !verdict.payloadUnchanged()) {
+            // The runtime rendered it: a continued request to FORWARD, or the refusal
+            // document (SSE text when the caller asked for a stream) to answer with.
+            String rendered = verdict.payloadRaw();
+            if (c != null && Continuation.WITHHOLD.equals(c.style)) {
+                return new RequestOutcome(RequestOutcome.Act.FORWARD, rendered, null, false, false,
+                    verdict.eventId(), verdict.unjudged(), placeholders, Continuation.WITHHOLD);
+            }
+            return new RequestOutcome(RequestOutcome.Act.REFUSE, rawBody, rendered,
+                verdict.payloadIsStream(), false, verdict.eventId(), verdict.unjudged(), placeholders);
+        }
         if (c == null) {
             return new RequestOutcome(RequestOutcome.Act.REFUSE, rawBody,
                 refusalDocument(Verdict.REASON), streamRequested, false,
@@ -207,7 +228,7 @@ public final class StepGuard {
                  * model's own reply rehydrate the very content we removed.
                  */
                 return new RequestOutcome(RequestOutcome.Act.FORWARD, next, null, false, false,
-                    verdict.eventId(), verdict.unjudged(), placeholders);
+                    verdict.eventId(), verdict.unjudged(), placeholders, Continuation.WITHHOLD);
             }
             /*
              * ⚠️ The paths did not resolve, so this is not the body the runtime judged.
@@ -294,6 +315,13 @@ public final class StepGuard {
                 protocol.refuse(model, Verdict.REASON), true, verdict.eventId(), verdict.unjudged());
         }
 
+        if (verdict.hasPayload()) {
+            // The runtime applied the spans and restored the placeholders from its own
+            // registry, which is a superset of what this process learned.
+            return new ResponseOutcome(ResponseOutcome.Act.DELIVER,
+                verdict.payloadUnchanged() ? rawBody : verdict.payloadRaw(), null, false,
+                verdict.eventId(), verdict.unjudged());
+        }
         Spans.Result spans = Spans.apply(rawBody, verdict.spans());
         guard.counters().unresolvedSpans(spans.unresolved);
         // Spans first, restore second: the offsets index the body AS TRANSPORTED, and a
@@ -313,6 +341,15 @@ public final class StepGuard {
      */
     private ResponseOutcome refusedReply(Verdict verdict, String rawBody) {
         Continuation c = verdict.continuation();
+        if (verdict.hasPayload() && !verdict.payloadUnchanged()) {
+            String rendered = verdict.payloadRaw();
+            if (c != null && Continuation.DROP_CALLS.equals(c.style)) {
+                return new ResponseOutcome(ResponseOutcome.Act.DELIVER, rendered, null, false,
+                    verdict.eventId(), verdict.unjudged(), Continuation.DROP_CALLS);
+            }
+            return new ResponseOutcome(ResponseOutcome.Act.REFUSE, rawBody, rendered, false,
+                verdict.eventId(), verdict.unjudged());
+        }
         if (c == null) {
             return new ResponseOutcome(ResponseOutcome.Act.REFUSE, rawBody,
                 protocol.refuse(model, Verdict.REASON), false, verdict.eventId(), verdict.unjudged());
@@ -324,7 +361,7 @@ public final class StepGuard {
                 // path that still owes a restore.
                 return new ResponseOutcome(ResponseOutcome.Act.DELIVER,
                     protocol.restore(next, placeholders), null, false,
-                    verdict.eventId(), verdict.unjudged());
+                    verdict.eventId(), verdict.unjudged(), Continuation.DROP_CALLS);
             }
             return new ResponseOutcome(ResponseOutcome.Act.REFUSE, rawBody,
                 protocol.refuse(model, Verdict.REASON), false, verdict.eventId(), verdict.unjudged());
@@ -393,12 +430,22 @@ public final class StepGuard {
 
     private String refuseStreamTail(HeadHold hold, Continuation c) {
         hold.drop();
-        if (!hold.sawRelease()) {
-            // Nothing the caller can already see: a clean refusal, in this protocol's own
-            // frames, which is what `stream_head_release_bytes: 0` buys on every block.
+        if (!hold.releasedAnything()) {
+            // Not a frame on the wire: a clean refusal, in this protocol's own frames,
+            // opening and closing its own message — what `stream_head_release_bytes: 0`
+            // buys on a stream that has not started.
             return c == null
                 ? protocol.refuseStream(model, Verdict.REASON)
                 : protocol.softRefuseStream(model, c.notice);
+        }
+        if (!hold.sawRelease()) {
+            // Only the provider's opening frames went out (`message_start`,
+            // `response.created`, a role delta): the message is open and nothing the caller
+            // can read is in it, so the refusal is delivered INSIDE it — a second
+            // `message_start` is a protocol error to a strict client.
+            return c == null
+                ? protocol.retractWithReason(model, Verdict.REASON)
+                : protocol.retractSoft(model, c.notice);
         }
         if (c != null && !hold.releasedCalls()) {
             return protocol.retractSoft(model, c.notice);

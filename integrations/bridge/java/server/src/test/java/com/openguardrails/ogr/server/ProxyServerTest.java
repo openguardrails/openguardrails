@@ -282,13 +282,17 @@ class ProxyServerTest {
             assertEquals("allow", Json.str(answer, "decision"));
             String stepId = Json.str(answer, "step_id");
             assertFalse(stepId.isEmpty());
-            assertEquals("mail ada@acme.io", Json.str(answer, "body.messages.0.content"));
+            // Nothing changed, so nothing is echoed: the caller forwards its own copy.
+            assertEquals("unchanged", Json.str(answer, "body"));
 
             String second = "{\"step_id\":\"" + stepId + "\",\"body\":" + REPLY + "}";
             HttpResponse<String> reply = post(server, "/guard/v1/step/response", second);
             Object refused = Json.parseOrNull(reply.body());
             assertEquals("block", Json.str(refused, "decision"));
-            assertNotNull(Json.get(refused, "refusal"));
+            // The refusal IS the body, in the caller's own protocol, and there is no
+            // continuation: answer the client with it.
+            assertEquals("content_filter", Json.str(refused, "body.choices.0.finish_reason"));
+            assertEquals("", Json.str(refused, "continuation"));
             assertFalse(reply.body().contains("rm -rf"));
 
             assertEquals(2, runtime.events.size());
@@ -313,6 +317,9 @@ class ProxyServerTest {
         try {
             String envelope = "{\"llm_protocol\":\"openai.chat\",\"body\":" + REQUEST + "}";
             Object first = Json.parseOrNull(post(server, "/guard/v1/step/request", envelope).body());
+            // A rewritten body is a REDACTION, and the returned body is the one to forward.
+            assertEquals("redacted", Json.str(first, "decision"));
+            assertEquals("mail ${OGR_EMAIL_1}", Json.str(first, "body.messages.0.content"));
             assertEquals("ada@acme.io", Json.str(first, "placeholders.${OGR_EMAIL_1}"));
 
             // A DIFFERENT step id, as if the reply landed on another replica.
@@ -320,8 +327,34 @@ class ProxyServerTest {
             String second = "{\"step_id\":\"other-replica-step\",\"llm_protocol\":\"openai.chat\","
                 + "\"placeholders\":{\"${OGR_EMAIL_1}\":\"ada@acme.io\"},\"body\":" + echoed + "}";
             Object reply = Json.parseOrNull(post(server, "/guard/v1/step/response", second).body());
-            assertEquals("allow", Json.str(reply, "decision"));
+            // A restored reply is a REDACTION too: the caller delivers the returned one.
+            assertEquals("redacted", Json.str(reply, "decision"));
             assertEquals("sent to ada@acme.io", Json.str(reply, "body.choices.0.message.content"));
+        } finally {
+            server.stop();
+        }
+    }
+
+    /**
+     * A continuation is a BLOCK the caller carries out, never a redaction: the decision
+     * stays {@code block}, and {@code continuation} says the body is one to forward.
+     */
+    @Test
+    void theOutOfBandDoorReportsAContinuedBodyAsABlock() throws Exception {
+        String withholding = "{\"event_id\":\"e\",\"provider\":\"mock\",\"decision\":\"block\","
+            + "\"continuation\":{\"style\":\"withhold\",\"paths\":[\"payload.messages.0.content\"],"
+            + "\"notice\":\"[withheld by policy]\"}}";
+        MockServers.Runtime runtime = runtime(withholding, ALLOW);
+        MockServers.Provider provider = provider(REPLY, false);
+        ProxyServer server = proxy(runtime, provider, Mode.ENFORCE, FailMode.OPEN, 32);
+        try {
+            String envelope = "{\"llm_protocol\":\"openai.chat\",\"body\":" + REQUEST + "}";
+            Object answer = Json.parseOrNull(post(server, "/guard/v1/step/request", envelope).body());
+            assertEquals("block", Json.str(answer, "decision"));
+            assertEquals("withhold", Json.str(answer, "continuation"));
+            assertEquals("[withheld by policy]", Json.str(answer, "body.messages.0.content"));
+            assertEquals("", Json.str(answer, "placeholders.${OGR_EMAIL_1}"),
+                "a withheld notice never enters the restore map");
         } finally {
             server.stop();
         }

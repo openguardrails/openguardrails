@@ -23,22 +23,24 @@ import java.util.concurrent.Executors;
  *                         └── GuardEvent → POST {OGR_URL}/v1/evaluate → Verdict
  * </pre>
  *
- * <p>This class is the BRIDGE deployed as a proxy — one of two shapes it can take,
- * and the one that can actually enforce (see {@link GuardApiHandler} for the other).
- * It is documentation that runs: the thing a production Java service embeds is
- * {@code ogr-bridge-core}, and this module shows what calling it looks like end to
- * end, including the part every write-up hand-waves — enforcing on a STREAMED reply.
- *
- * <p>Two doors, and they are not interchangeable:
+ * <p>This class is the runnable BRIDGE: a standalone process a service the
+ * organization already runs posts messages to. Two doors, and they are not
+ * interchangeable:
  *
  * <ul>
- *   <li><b>Inline</b> ({@code /v1/chat/completions}, {@code /v1/responses},
- *       {@code /v1/messages}) — this process is in the byte path, so it can apply
- *       redaction spans and refuse before the model sees anything.
- *   <li><b>Out of band</b> ({@code /guard/v1/step/request},
- *       {@code /guard/v1/step/response}) — for a proxy that already holds both bodies and
- *       wants a decision rather than a byte path. Weaker by construction; see
+ *   <li><b>The message door</b> ({@code /guard/v1/step/request},
+ *       {@code /guard/v1/step/response}) — the deployment shape of a bridge. The
+ *       caller keeps its own provider connection, posts each body and gets the
+ *       decision and the rewritten body back. Streaming enforcement is the caller's
+ *       problem and the placeholder map travels between the two calls; see
  *       {@link GuardApiHandler}.
+ *   <li><b>Inline</b> ({@code /v1/chat/completions}, {@code /v1/responses},
+ *       {@code /v1/messages}) — this process in the byte path, applying spans and
+ *       refusing before the model sees anything, streaming included. Kept as the
+ *       offline test bed for {@code ogr-bridge-core}'s streaming and span code and as
+ *       documentation that runs — NOT as a gateway to deploy: a standalone process
+ *       that takes the {@code base_url} is one more gateway, which is the job the
+ *       products under {@code integrations/gateway/} already do.
  * </ul>
  */
 public final class ProxyServer {
@@ -125,6 +127,7 @@ public final class ProxyServer {
             .failMode(FailMode.of(env("OGR_FAIL_MODE", "open")))
             .timeout(Duration.ofMillis(Long.parseLong(env("OGR_TIMEOUT_MS", "5000"))))
             .streamHeadReleaseBytes(Integer.parseInt(env("OGR_STREAM_HEAD_RELEASE_BYTES", "32")))
+            .payloadFromRuntime(!"false".equalsIgnoreCase(env("OGR_PAYLOAD_FROM_RUNTIME", "true")))
             .integrationName(env("OGR_INTEGRATION_NAME", OgrConfig.DEFAULT_INTEGRATION_NAME))
             .defaultIdentity(new Identity(
                 env("OGR_AGENT_ID", ""), env("OGR_AGENT_TYPE", ""),

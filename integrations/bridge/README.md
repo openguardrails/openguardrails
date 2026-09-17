@@ -1,33 +1,72 @@
-# Bridge integrations
+# Standalone bridges
 
-A **bridge** converts between a provider's LLM protocol and OGR, inside a service
-the organization already runs.
+A **bridge** is a standalone process that converts between a provider's LLM
+protocol and OGR, for a service the organization already runs. That service — a
+Java reverse proxy somebody's platform team wrote, a Spring Boot façade, an API
+sidecar, a service-mesh filter — keeps terminating its clients and calling the
+provider exactly as it does today. It posts each **message** to the bridge and gets
+back the decision and the rewritten body:
 
-It is the third seat, and it is not a plugin for a product this project supports —
-it is the conversion itself, for a host nobody here has seen: a Java reverse proxy
-somebody's platform team wrote, a Spring Boot façade, an API sidecar, a service
-mesh filter. The organization's traffic already flows through it; what it lacks is
-the envelope.
+```
+  client ──▶ your service ─────────────────────────────▶ provider
+                 │   ▲
+    request body │   │ decision + rewritten body        (the reply goes the same way)
+                 ▼   │
+               bridge ── GuardEvent → POST {OGR_URL}/v1/evaluate → Verdict
+```
+
+Two calls per model call, bound by the `step_id` the bridge mints:
+
+| call | in | out |
+|---|---|---|
+| `POST /guard/v1/step/request` | `llm_protocol`, the four-tuple, `session_hint`, the provider request body | `decision`, `step_id`, `body`, `placeholders` |
+| `POST /guard/v1/step/response` | `step_id`, `placeholders`, the provider reply body | `decision`, `body` |
+
+Three decisions, and `body` means what the decision says: **`allow`** — nothing
+changed, `body` is the literal `"unchanged"` and the caller uses its own copy;
+**`redacted`** — the body was rewritten (spans applied on the way out, placeholders
+restored on the way back) and the caller must use the returned one; **`block`** — the
+full content the caller needs: a refusal rendered in the caller's own protocol, or,
+with a `continuation`, the body to forward/deliver with the refused part removed.
+
+> **AIRS renders the body for you on request**: `POST /v1/evaluate?payload=true`
+> answers with the ordinary verdict plus a `payload` — `"unchanged"`, the rewritten
+> body (spans applied / placeholders restored / a continuation carried out), or the
+> refusal document in the caller's own protocol. This bridge asks for it by default
+> and hands it on; the local application remains the fallback for a runtime that
+> answers without one, and the reference for building the same thing elsewhere. The
+> client guide is `openguardrails-airs/docs/evaluate-client-guide.md`.
 
 | Target | Source |
 |---|---|
-| Java — a library to embed, plus a runnable reference proxy | [`java/`](java/) |
+| Java — a runnable bridge, plus the zero-dependency `core` it is built from | [`java/`](java/) |
 
-## Why this is not `gateway/`
+## What a bridge is not
 
-A [gateway integration](../gateway/) is a plugin for a **named product** — Higress,
-mitmproxy — whose extension point, configuration surface and lifecycle are somebody
-else's and already exist. Writing one means learning that product.
+**Not a gateway plugin.** A [gateway plugin](../gateway/) runs inside a product that
+is the byte path — Higress, OpenAFW, mitmproxy — through an extension point that
+already exists. A bridge has no product to plug into: the code around it is code
+this project will never see, which is why it carries no framework, forces no JSON
+library on anyone, and has to state the rules it cannot enforce.
 
-A bridge has no product. It is a library plus a documented recipe, and the thing it
-plugs into is whatever the customer built. That difference decides almost everything
-about how it is written: it can carry no framework, must not force a JSON library on
-its host, and has to state the rules it cannot enforce — because the code around it
-is code this project will never see.
+**Not a gateway.** A bridge does not take the `base_url`. Nothing is re-pointed at
+it, it forwards nothing to any provider, and it holds no stream. The moment it did,
+it would be one more gateway — and the products in `gateway/` already do that job
+with their own I/O model, their own caller authentication and their own operations.
+The bridge stops at the message so the organization's service keeps all of that.
 
-They share a vantage. A bridge and a gateway both sit on the model channel and both
-see one proxied model call as one step; the OGR side is identical, which is why
-there is one recipe and not three.
+**What that costs, said out loud.** Because the bridge never holds the stream, a
+streamed reply is either buffered by the service before it asks — paying the whole
+time-to-first-token — or judged after the client has already seen it, which is a
+record and not a control. And the request's redaction spans are applied by the
+bridge into the body it returns, so the service must forward the returned body and
+not its own copy. Both are stated in the Java bridge's
+[DESIGN.md §4](java/DESIGN.md#4-two-deployment-shapes-and-what-each-gives-up).
+
+⚠️ The Java reference server also answers as an inline proxy on `/v1/*`. That door
+exists so `core`'s streaming and span code is tested through a real byte path — a
+mock runtime, a mock provider, the real server between them — and it is the test
+bed, not the deployment shape of a bridge.
 
 ## Why "bridge", and the one thing it must not be called
 
@@ -39,7 +78,8 @@ referents in one sentence, which is how documentation stops being readable. The
 this shape: `"integration": "acme-bridge/1.0.0"`.
 
 The metaphor is a plug adapter, and it is load-bearing rather than decorative:
-**an adapter changes the shape of the plug and leaves the current alone.** That is exactly the contract —
+**an adapter changes the shape of the plug and leaves the current alone.** That is
+exactly the contract —
 
 > The provider body goes on the wire **verbatim**, as `payload`. Only the envelope
 > around it is ours.

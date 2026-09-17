@@ -205,7 +205,7 @@ agent developers integrate by calling it directly:
 | Layer | What it is | Where |
 |---|---|---|
 | **API** | The wire contract a runtime (PDP) exposes: `POST /v1/evaluate` (decide + record), heartbeat, health — carrying `GuardEvent`s and returning `Verdict`s. | [Runtime API binding](specification/runtime-api.md) + [JSON Schemas](schema/) |
-| **Plugin** | A hook for one surface — an agent harness or a gateway — that observes steps, builds events, and enforces verdicts, speaking the API directly. | [`integrations/`](integrations/) |
+| **Plugin** | Code at one seat — inside an agent harness, inside a gateway product that is the byte path, or a standalone bridge beside the organization's own service — that observes steps, builds events, and enforces verdicts, speaking the API directly. | [`integrations/`](integrations/) |
 
 ## The normative components
 
@@ -252,7 +252,7 @@ the [overview](specification/overview.md).
 | Path | What it contains |
 |---|---|
 | [`specification/`](specification/) and [`schema/`](schema/) | Normative protocol, schemas (JSON Schemas + OpenAPI), taxonomy, conformance, and governance. |
-| [`integrations/`](integrations/) | Agent and gateway integrations, each speaking the API directly. |
+| [`integrations/`](integrations/) | Gateway plugins, standalone bridges and agent plugins, each speaking the API directly. |
 | [`benchmarks/`](benchmarks/) | Neutral detector benchmark and leaderboard. |
 | [`examples/`](examples/) | The runnable minimal integration (`minimal-agent/`). |
 | [`skills/openguardrails/`](skills/openguardrails/) | Agent skill for drafting and enforcing policies. |
@@ -266,9 +266,11 @@ integration below speaks it (v1.0 releases the same wire unchanged):
 
 | Category | Target | Status | [Local redaction](specification/local-redaction.md) (1.4) |
 |---|---|---|---|
-| **Gateway** | Higress (Go/WASM) | [`integrations/gateway/higress`](integrations/gateway/higress/) — **the reference gateway integration** | n/a (the runtime masks for it) |
+| **Gateway plugin** — inside a product that is the byte path | Higress (Go/WASM) | [`integrations/gateway/higress`](integrations/gateway/higress/) — **the reference gateway plugin** | n/a (the runtime masks for it) |
+| | OpenAFW (Rust, local AI firewall) | [`integrations/gateway/openafw`](integrations/gateway/openafw/) — the code lives in [its own repository](https://github.com/openguardrails/openafw) | yes — minter `F` |
 | | OpenAI/Anthropic example · mitmproxy | current | n/a (the runtime masks for it) |
-| **Agent** | DeepSeek Harness (`dsh`) | [`integrations/agent/dsh`](integrations/agent/dsh/) — **the reference agent-direct integration** | no |
+| **Standalone bridge** — a process your own service posts messages to | Java (`/guard/v1/step/*`) | [`integrations/bridge/java`](integrations/bridge/java/) | n/a (the runtime masks for it) |
+| **Agent plugin** — inside the harness | DeepSeek Harness (`dsh`) | [`integrations/agent/dsh`](integrations/agent/dsh/) — **the reference agent-direct integration** | no |
 | | litellm | [`integrations/agent/litellm`](integrations/agent/litellm/) — current | no |
 | | Hermes · opencode · OpenClaw | current | 2.0 / 0.4 / 0.4 (in progress) |
 | | Claude Code · Codex · LangGraph | current | no |

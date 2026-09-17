@@ -1,8 +1,9 @@
 # What a bridge has to do to speak OGR
 
-This document is for anyone putting OpenGuardrails AIRS inside a service their own
+This document is for anyone putting OpenGuardrails AIRS beside a service their own
 traffic already flows through — a Java reverse proxy, a Spring Boot gateway, a
-sidecar, an API façade. The clients speak **OpenAI Chat Completions**, **OpenAI
+sidecar, an API façade — as a standalone process that service posts messages to, or
+as a library it embeds. The clients speak **OpenAI Chat Completions**, **OpenAI
 Responses** or **Anthropic Messages**; AIRS speaks **OGR**. The work in between is
 what this file describes, job by job, with the reason for each and the failure it
 prevents.
@@ -12,7 +13,8 @@ between the two protocols, and the metaphor is the contract: an adapter changes 
 shape of the plug and leaves the current alone.
 
 It is written from a working implementation: [`core/`](core/) is the library and
-[`server/`](server/) is a runnable proxy built on it. Where a rule below is
+[`server/`](server/) is the runnable bridge built on it (its inline proxy door is
+the offline test bed for the streaming and span code, not the deployment shape). Where a rule below is
 load-bearing, the code that keeps it is named.
 
 > **The one-sentence version.** OGR conversion is *not* a schema translation. The
@@ -416,28 +418,46 @@ policy selection or trust. Nothing bounds what a caller names itself.
 
 ## 4. Two deployment shapes, and what each gives up
 
-### Inline (the proxy is in the byte path)
+### Standalone (the bridge answers about a message)
 
-The full enforcement point. It can apply redaction spans — only the process holding the
-body can, since the runtime returns offsets and never plaintext — and it can refuse before
-the model sees anything, streaming included. This is what
-[`InlineHandler`](server/src/main/java/com/openguardrails/ogr/server/InlineHandler.java)
-implements, and what the Higress plugin does at a gateway.
-
-### Out of band (the proxy asks for a decision)
-
-A service that already holds both bodies posts them and gets a decision back, with the
-rewritten body when there is one. Two things are structurally weaker and should be said
-out loud to whoever operates it:
+The deployment shape of a bridge. The organization's service keeps its own provider
+connection and posts each body to the bridge — the request before forwarding, the
+reply after — and gets the decision back with the rewritten body when there is one.
+This is what [`GuardApiHandler`](server/src/main/java/com/openguardrails/ogr/server/GuardApiHandler.java)
+implements on `/guard/v1/step/request` and `/guard/v1/step/response`. Two things
+are structurally weaker and should be said out loud to whoever operates it:
 
 - **Streaming is the caller's problem.** There is no held head, so a streamed answer is
   either buffered by the caller before it asks — paying the whole time-to-first-token — or
   judged after the client has already seen it, which is a record and not a control.
-- **The placeholder mapping has to travel.** Between a step's two halves the proxy must
+- **The placeholder mapping has to travel.** Between a step's two halves the service must
   carry `token → value`, or the reply keeps the placeholders and the customer's application
   receives `${OGR_EMAIL_1}` where its own data belongs. This implementation returns the map
   on the request call and accepts it back on the response call, so a caller that
   load-balances the halves across replicas needs nothing from any one process's memory.
+
+And one thing the caller owes: the request's spans are applied into the body the bridge
+**returns**, so the service forwards that body, never its own copy — a copy is a body the
+runtime believes was masked and was not. The door says which case it is in: `decision:
+"allow"` comes with `body: "unchanged"` (use your copy; nothing is echoed back, so an
+allow never doubles the request's bytes), `"redacted"` comes with the rewritten body
+(use it), and `"block"` comes with the full content — a refusal in the caller's own
+protocol, or, beside a `continuation`, the body to forward/deliver with the refused
+part taken out. The runtime renders all of this itself when asked —
+`POST /v1/evaluate?payload=true` adds a `payload` to the verdict — which is what this
+bridge does by default; a service that can call the runtime needs no bridge.
+
+### Inline (the code is in the byte path)
+
+The full enforcement point. It can apply redaction spans itself — only the process holding
+the body can, since the runtime returns offsets and never plaintext — and it can refuse
+before the model sees anything, streaming included. This is what a
+[gateway plugin](../../gateway/) does at a product that already is the byte path, and what
+a service that embeds `core` can do in-process. The reference server's
+[`InlineHandler`](server/src/main/java/com/openguardrails/ogr/server/InlineHandler.java)
+implements it too — as the offline test bed for `core`'s streaming and span code, not as a
+gateway to deploy: a standalone process that takes the `base_url` is one more gateway, which
+is the job the products under `gateway/` already do.
 
 Everything else — detection, the event envelope, the fail mode, span application, refusal
 rendering, restoration — is the same code.

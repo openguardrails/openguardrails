@@ -132,6 +132,20 @@ public final class AnthropicMessages implements Protocol {
     }
 
     @Override
+    public String retractWithReason(String model, String reason) {
+        int index = 99;
+        return SseFrames.event("content_block_start", Json.write(Json.obj(
+                "type", "content_block_start", "index", Integer.valueOf(index),
+                "content_block", Json.obj("type", "text", "text", ""))))
+            + SseFrames.event("content_block_delta", Json.write(Json.obj(
+                "type", "content_block_delta", "index", Integer.valueOf(index),
+                "delta", Json.obj("type", "text_delta", "text", reason))))
+            + SseFrames.event("content_block_stop", Json.write(Json.obj(
+                "type", "content_block_stop", "index", Integer.valueOf(index))))
+            + endStream("refusal");
+    }
+
+    @Override
     public String softRefuse(String model, String notice) {
         return message(model, notice, "end_turn", Refusals.xOgr(com.openguardrails.ogr.Continuation.ANSWER));
     }

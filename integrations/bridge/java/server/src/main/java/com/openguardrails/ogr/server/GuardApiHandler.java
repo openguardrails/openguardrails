@@ -22,15 +22,46 @@ import java.util.Map;
  * The OUT-OF-BAND lane: a proxy that already holds both bodies asks for a decision
  * instead of putting this code in its byte path.
  *
- * <pre>
- *   POST /guard/v1/step/request    {body: &lt;raw provider request body&gt;, …}
- *     → {"decision":"allow","step_id":…,"body":&lt;possibly rewritten&gt;,"placeholders":{…}}
- *     → {"decision":"block","refusal":&lt;a document in the caller's own protocol&gt;}
+ * <h2>The answer: three decisions, and the body's meaning follows the decision</h2>
  *
- *   POST /guard/v1/step/response   {step_id:…, body: &lt;raw provider response body&gt;}
- *     → {"decision":"allow","body":&lt;restored, refused calls dropped&gt;}
- *     → {"decision":"block","refusal":…}
+ * The same contract AIRS's built-in LLM door ({@code POST /v1/step/request},
+ * {@code POST /v1/step/response}) answers with, so a caller can move between the two
+ * without changing a line:
+ *
+ * <pre>
+ *   POST /guard/v1/step/request    {llm_protocol?, path?, agent_id?, …, body: &lt;raw provider request&gt;}
+ *     → {"decision":"allow",    "step_id":…, "body":"unchanged"}
+ *     → {"decision":"redacted", "step_id":…, "body":&lt;the request with spans applied — FORWARD THIS&gt;, "placeholders":{…}}
+ *     → {"decision":"block",    "step_id":…, "body":&lt;a refusal in the caller's own protocol&gt;, "refusal_is_stream"?:true}
+ *     → {"decision":"block",    "step_id":…, "continuation":"withhold", "body":&lt;the request to forward&gt;}
+ *
+ *   POST /guard/v1/step/response   {step_id:…, placeholders?:{…}, body: &lt;raw provider reply&gt;}
+ *     → {"decision":"allow",    "body":"unchanged"}
+ *     → {"decision":"redacted", "body":&lt;the reply with placeholders restored — DELIVER THIS&gt;}
+ *     → {"decision":"block",    "body":&lt;a refusal&gt;}
+ *     → {"decision":"block",    "continuation":"drop_calls", "body":&lt;the reply to deliver&gt;}
  * </pre>
+ *
+ * <ul>
+ *   <li><b>{@code allow}</b> — nothing about the body changed. {@code body} is the literal
+ *       string {@code "unchanged"}: the caller forwards (or delivers) its OWN copy, and no
+ *       bytes are echoed back. On enforce this is what keeps the door from doubling every
+ *       request's size.
+ *   <li><b>{@code redacted}</b> — the body was REWRITTEN and the caller must use the returned
+ *       one, never its own copy: a request with the verdict's spans applied, or a reply
+ *       with the placeholders put back. A copy forwarded instead is a body the runtime
+ *       believes was masked and was not.
+ *   <li><b>{@code block}</b> — the FULL content the caller needs, which depends on the case.
+ *       With no {@code continuation}: a refusal document, in the caller's own protocol —
+ *       answer the client with it, do not call the model / do not act on the reply's tool
+ *       calls ({@code refusal_is_stream} says it is SSE text for a caller that asked for a
+ *       stream). With {@code continuation}: a CONTINUED body — {@code withhold} on the
+ *       request half (forward it; the refused content is replaced by the notice),
+ *       {@code drop_calls} on the response half (deliver it; the refused calls are gone
+ *       and the survivors may run). ⚠️ A continuation changes no enforcement: the decision
+ *       is still a block, which is why a continued body rides {@code block} and never
+ *       {@code redacted}.
+ * </ul>
  *
  * <h2>What this lane gives up, said plainly</h2>
  *
@@ -43,7 +74,7 @@ import java.util.Map;
  *       is returned as {@code placeholders} and accepted back on the response call, so a
  *       caller that load-balances the two halves across replicas needs nothing from this
  *       process's memory. A caller that omits it relies on {@link StepStore}, which is
- *       per process.
+ *       per process. (AIRS's built-in door remembers it server-side instead.)
  * </ul>
  *
  * <h2>⚠️ The raw body, whichever way it arrives</h2>
@@ -58,6 +89,21 @@ final class GuardApiHandler implements HttpHandler {
 
     static final String REQUEST_PATH = "/guard/v1/step/request";
     static final String RESPONSE_PATH = "/guard/v1/step/response";
+
+    /** What {@code body} says on an allow: the caller's own copy is the body. */
+    static final String UNCHANGED = "unchanged";
+
+    /**
+     * The three-way decision. A continued body is a BLOCK the caller carries out, never a
+     * redaction; a body that came back byte-identical is an allow; anything else rewritten
+     * is a redaction the caller must forward instead of its own copy.
+     */
+    static String decisionOf(boolean proceeds, String continuation, boolean changed) {
+        if (!proceeds || continuation != null) {
+            return "block";
+        }
+        return changed ? "redacted" : "allow";
+    }
 
     private final OgrGuard guard;
     private final ProxyServer.Settings settings;
@@ -119,15 +165,24 @@ final class GuardApiHandler implements HttpHandler {
         steps.put(step.stepId(), step);
 
         Map<String, Object> answer = Json.obj(
-            "decision", outcome.forwards() ? "allow" : "block",
+            "decision", decisionOf(outcome.forwards(), outcome.continuation, !rawBody.equals(outcome.body)),
             "step_id", step.stepId(),
             "llm_protocol", protocol.name(),
             "event_id", outcome.eventId);
-        if (outcome.forwards()) {
+        if (!outcome.forwards()) {
+            // The refusal, whole: one JSON document, or SSE text for a caller that asked
+            // for a stream — which is not JSON and must not be spliced in as if it were.
+            answer.put("body", outcome.refusalIsStream ? outcome.refusal : Json.raw(outcome.refusal));
+            if (outcome.refusalIsStream) {
+                answer.put("refusal_is_stream", Boolean.TRUE);
+            }
+        } else if (outcome.continuation != null) {
+            answer.put("continuation", outcome.continuation);
+            answer.put("body", Json.raw(outcome.body));
+        } else if (!rawBody.equals(outcome.body)) {
             answer.put("body", Json.raw(outcome.body));
         } else {
-            answer.put("refusal", Json.raw(outcome.refusal));
-            answer.put("refusal_is_stream", Boolean.valueOf(outcome.refusalIsStream));
+            answer.put("body", UNCHANGED);
         }
         if (outcome.degraded) {
             answer.put("degraded", Boolean.TRUE);
@@ -182,13 +237,18 @@ final class GuardApiHandler implements HttpHandler {
 
         ResponseOutcome outcome = step.guardBufferedResponse(rawBody, Instant.now(), Instant.now());
         Map<String, Object> answer = Json.obj(
-            "decision", outcome.delivers() ? "allow" : "block",
+            "decision", decisionOf(outcome.delivers(), outcome.continuation, !rawBody.equals(outcome.body)),
             "step_id", step.stepId(),
             "event_id", outcome.eventId);
-        if (outcome.delivers()) {
+        if (!outcome.delivers()) {
+            answer.put("body", Json.raw(outcome.refusal));
+        } else if (outcome.continuation != null) {
+            answer.put("continuation", outcome.continuation);
+            answer.put("body", Json.raw(outcome.body));
+        } else if (!rawBody.equals(outcome.body)) {
             answer.put("body", Json.raw(outcome.body));
         } else {
-            answer.put("refusal", Json.raw(outcome.refusal));
+            answer.put("body", UNCHANGED);
         }
         if (outcome.degraded) {
             answer.put("degraded", Boolean.TRUE);
