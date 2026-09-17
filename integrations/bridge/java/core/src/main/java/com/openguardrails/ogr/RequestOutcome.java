@@ -41,8 +41,27 @@ public final class RequestOutcome {
     /** token → plaintext learned from the spans this half applied. Feeds the reply's restore. */
     public final Map<String, String> placeholders;
 
+    /**
+     * The continuation style this outcome carries out, or {@code null}.
+     *
+     * <p>⚠️ Non-null means {@link #body} is a CONTINUED body — the runtime said
+     * {@code block} and named a shape that lets the turn go on ({@code withhold}: the
+     * refused content replaced by the notice, the request still forwarded). The decision
+     * is still a block; only the shape the caller hands on differs. A message door
+     * reports it as {@code decision: "block"} + {@code continuation}, never as a
+     * redaction — see {@code GuardApiHandler}.
+     */
+    public final String continuation;
+
     RequestOutcome(Act act, String body, String refusal, boolean refusalIsStream, boolean degraded,
                    String eventId, List<String> unjudged, Map<String, String> placeholders) {
+        this(act, body, refusal, refusalIsStream, degraded, eventId, unjudged, placeholders, null);
+    }
+
+    RequestOutcome(Act act, String body, String refusal, boolean refusalIsStream, boolean degraded,
+                   String eventId, List<String> unjudged, Map<String, String> placeholders,
+                   String continuation) {
+        this.continuation = continuation;
         this.act = act;
         this.body = body;
         this.refusal = refusal;

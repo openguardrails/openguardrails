@@ -80,4 +80,17 @@ class HeadHoldTest {
         hold.drop();
         assertEquals("", hold.releaseAll());
     }
+
+    /** A name-only tool-call frame is not free framing: held at zero, and counted as released calls otherwise. */
+    @Test
+    void aCallAnnouncementIsNotFreeFraming() {
+        HeadHold zero = new HeadHold(0);
+        assertEquals("", zero.offer(new FrameResult("announce", 0, true)));
+        assertFalse(zero.sawRelease());
+        assertFalse(zero.releasedCalls());
+        HeadHold some = new HeadHold(32);
+        assertEquals("announce", some.offer(new FrameResult("announce", 0, true)));
+        assertTrue(some.sawRelease());
+        assertTrue(some.releasedCalls());
+    }
 }

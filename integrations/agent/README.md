@@ -7,6 +7,13 @@ harness exposes the model call, the plugin sends the paired
 about to execute (hook-based hosts), the plugin sends the canonical
 `step/response` for what it actually holds — each README states its vantage.
 
+An agent plugin speaks OGR **directly**, not through a [bridge](../bridge/): every
+harness exposes a different seam — a hook that runs as a child process, an
+in-process interceptor, a callback with the framework's own objects — so there is
+no shared conversion to factor out, and a translation layer in between would only
+add a hop to code that already has to be written per host. What IS shared sits in
+this directory as libraries (`local-redaction/`, `ogr-local/`), not as a service.
+
 | Target | Source | Local secrets redaction |
 |---|---|---|
 | Claude Code | [`claude-code/`](claude-code/) | via [`ogr-local`](ogr-local/) — hooks are separate processes |

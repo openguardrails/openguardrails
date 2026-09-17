@@ -160,6 +160,15 @@ public final class OpenAiResponses implements Protocol {
     }
 
     @Override
+    public String retractWithReason(String model, String reason) {
+        return SseFrames.event("response.output_text.delta", Json.write(Json.obj(
+                "type", "response.output_text.delta",
+                "item_id", "msg_ogr", "output_index", Integer.valueOf(0),
+                "content_index", Integer.valueOf(0), "delta", reason)))
+            + retract(model);
+    }
+
+    @Override
     public String softRefuse(String model, String notice) {
         return Json.write(response(model, notice, "completed",
             Refusals.xOgr(com.openguardrails.ogr.Continuation.ANSWER)));

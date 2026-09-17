@@ -104,6 +104,13 @@ public interface Protocol {
     String retract(String model);
 
     /**
+     * {@link #retract} with the reason delivered INSIDE the message already open — for a
+     * stream where only the provider's opening frames went out, so a fresh refusal
+     * stream would open the message a second time.
+     */
+    String retractWithReason(String model, String reason);
+
+    /**
      * The refusal as an ORDINARY completed reply carrying the notice as the assistant's
      * text — a normal stop, not a content filter.
      *

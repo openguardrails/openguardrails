@@ -23,8 +23,22 @@ public final class ResponseOutcome {
     public final String eventId;
     public final List<String> unjudged;
 
+    /**
+     * The continuation style this outcome carries out, or {@code null}. Non-null means
+     * {@link #body} is a CONTINUED reply ({@code drop_calls}: the refused calls removed,
+     * the notice appended, the survivors still deliverable) — the runtime's decision is
+     * still a block. See {@link RequestOutcome#continuation}.
+     */
+    public final String continuation;
+
     ResponseOutcome(Act act, String body, String refusal, boolean degraded,
                     String eventId, List<String> unjudged) {
+        this(act, body, refusal, degraded, eventId, unjudged, null);
+    }
+
+    ResponseOutcome(Act act, String body, String refusal, boolean degraded,
+                    String eventId, List<String> unjudged, String continuation) {
+        this.continuation = continuation;
         this.act = act;
         this.body = body;
         this.refusal = refusal;

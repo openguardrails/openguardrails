@@ -359,4 +359,50 @@ class StepGuardTest {
         assertEquals("ls", Json.str(payload, "tool_calls.0.arguments.cmd"));
         guard.close();
     }
+
+    /** A runtime that answered `?payload=true` with a rendered body: that body is what goes on, verbatim. */
+    @Test
+    void theRuntimesRenderedPayloadIsHandedOnVerbatim() {
+        String redactedRequest = "{\"model\":\"gpt-5\",\"messages\":[{\"role\":\"user\",\"content\":\"mail ${OGR_EMAIL_1}\"}]}";
+        String requestVerdict = "{\"event_id\":\"e1\",\"provider\":\"mock\",\"decision\":\"allow\","
+            + "\"modifications\":{\"spans\":[{\"path\":\"payload.messages.0.content\",\"start\":5,\"end\":16,\"replacement\":\"${OGR_EMAIL_1}\"}]},"
+            + "\"payload\":" + redactedRequest + "}";
+        String restoredReply = REPLY.replace("here you go", "sent to ada@acme.io");
+        String replyVerdict = "{\"event_id\":\"e2\",\"provider\":\"mock\",\"decision\":\"allow\",\"payload\":" + restoredReply + "}";
+        OgrGuard guard = new OgrGuard(config(Mode.ENFORCE, FailMode.OPEN),
+            new FakeRuntime(config(Mode.ENFORCE, FailMode.OPEN), requestVerdict, replyVerdict));
+        StepGuard step = step(guard);
+        RequestOutcome req = step.guardRequest(chat(), REQUEST);
+        assertTrue(req.forwards());
+        assertEquals(redactedRequest, req.body, "the runtime's rendering, not a local splice");
+        // …and the local splice still learned the map the streamed path needs.
+        assertEquals("ada@acme.io", req.placeholders.get("${OGR_EMAIL_1}"));
+        ResponseOutcome res = step.guardBufferedResponse(REPLY.replace("here you go", "sent to ${OGR_EMAIL_1}"), Instant.now(), Instant.now());
+        assertTrue(res.delivers());
+        assertEquals(restoredReply, res.body);
+    }
+
+    /** `payload: "unchanged"` means the caller's own copy is the body. */
+    @Test
+    void anUnchangedPayloadKeepsTheCallersOwnBytes() {
+        String v = "{\"event_id\":\"e\",\"provider\":\"mock\",\"decision\":\"allow\",\"payload\":\"unchanged\"}";
+        OgrGuard guard = new OgrGuard(config(Mode.ENFORCE, FailMode.OPEN),
+            new FakeRuntime(config(Mode.ENFORCE, FailMode.OPEN), v, v));
+        StepGuard step = step(guard);
+        assertEquals(REQUEST, step.guardRequest(chat(), REQUEST).body);
+        assertEquals(REPLY, step.guardBufferedResponse(REPLY, Instant.now(), Instant.now()).body);
+    }
+
+    /** A block whose refusal the runtime rendered is answered with that document. */
+    @Test
+    void aRenderedRefusalIsAnsweredWithVerbatim() {
+        String doc = "{\"id\":\"x\",\"object\":\"chat.completion\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"no\"},\"finish_reason\":\"content_filter\"}]}";
+        String v = "{\"event_id\":\"e\",\"provider\":\"mock\",\"decision\":\"block\",\"payload\":" + doc + "}";
+        OgrGuard guard = new OgrGuard(config(Mode.ENFORCE, FailMode.OPEN),
+            new FakeRuntime(config(Mode.ENFORCE, FailMode.OPEN), v, v));
+        RequestOutcome req = step(guard).guardRequest(chat(), REQUEST);
+        assertFalse(req.forwards());
+        assertEquals(doc, req.refusal);
+        assertFalse(req.refusalIsStream);
+    }
 }

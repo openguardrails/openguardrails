@@ -12,7 +12,7 @@ versions and changelogs.
 - Taxonomy additions/changes (`specification/taxonomy.md`)
 - Conformance criteria (`CONFORMANCE.md`)
 - Core runtime changes under `packages/`
-- Agent-hook, gateway-hook, and sandbox-hook bindings under `integrations/`
+- Gateway plugins, standalone bridges and agent plugins under `integrations/`
 - Benchmark, example, skill, and website changes in their respective directories
 
 Keep a change scoped to the smallest relevant directories. When a protocol

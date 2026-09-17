@@ -45,12 +45,23 @@ privacy.*` ids — never a taxonomy axis; the domain rule catalogues live in
 worlds under `benchmarks/suites/safety/grounding_*`.
 
 OGR supports two integration VANTAGES operationally: agent-direct hooks and the
-model channel — same protocol, different seat. `integrations/` splits the second
-one by DELIVERY FORM, and the split is real: `gateway/` is a plugin for a named
-product whose extension point already exists, `bridge/` is the conversion itself
-for a host nobody here has seen (a customer's own proxy or façade), which is why
-it carries no framework and forces no JSON library on its host. All bindings and
-runnable integration examples belong under `integrations/`; a gateway
+model channel — same protocol, different seat. `integrations/` is THREE categories
+(re-cut 2026-09-17), decided by what the code HOLDS and whose process it is in:
+`gateway/` is a plugin inside a product that IS the LLM byte path (Higress, OpenAFW,
+mitmproxy) and holds the stream, so it alone can apply spans in full and refuse
+mid-stream; `bridge/` is a STANDALONE process that holds one MESSAGE at a time — a
+service the organization already runs posts the request body, later the reply body,
+and gets the decision and the rewritten body back while keeping its own provider
+connection; `agent/` is code inside the harness, different at every host, speaking
+OGR directly against whatever seam the host exposes (there is no shared conversion
+to factor out of a hook). ⚠️ A bridge takes messages, never the `base_url` — the
+moment it forwards to a provider it is one more gateway, which is the job the
+products in `gateway/` already do. The Java bridge's reference server keeps an
+inline `/v1/*` door ONLY as the offline test bed for `core`'s streaming and span
+code; its deployment shape is `/guard/v1/step/{request,response}`. ⚠️ OpenAFW's
+OGR connection lives in the openafw repository; `integrations/gateway/openafw/` is
+the pointer that places it in the category, not a copy of the code. All bindings
+and runnable integration examples belong under `integrations/`; a gateway
 implementation is not an OGR-operated service.
 ⚠️ **"adapter" is a per-protocol READER class, never a category** — three of them
 live inside `bridge/java` alone. A directory by that name would give the word two
@@ -77,8 +88,11 @@ comments stay English, and each says why the literal is there.
 
 - `integrations/gateway/higress` — the v0.8 reference gateway integration
   (Go/WASM, CI-covered).
-- `integrations/bridge/java` — the first BRIDGE (Java, CI-covered): a
-  zero-dependency `core` library plus a runnable reference `server`. Its
+- `integrations/gateway/openafw` — a POINTER (no code): the OGR connection inside
+  OpenAFW, the local AI firewall, is a gateway plugin at the host end of the model
+  channel and the one gateway plugin that also does local redaction (minter `F`).
+- `integrations/bridge/java` — the first BRIDGE (Java, CI-covered): a runnable
+  `server` exposing the message door plus the zero-dependency `core` it is built on. Its
   `DESIGN.md` is the language-neutral write-up of what protocol conversion
   requires, and is the file to read before building one in any language.
   ⚠️ `core` must stay dependency-free — it is embedded in hosts that pin their own

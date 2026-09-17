@@ -171,6 +171,11 @@ public final class OpenAiChat implements Protocol {
     }
 
     @Override
+    public String retractWithReason(String model, String reason) {
+        return SseFrames.frame(chunk(model, Json.obj("role", "assistant", "content", reason), null)) + retract(model);
+    }
+
+    @Override
     public String softRefuse(String model, String notice) {
         return completion(model, notice, "stop", Refusals.xOgr(com.openguardrails.ogr.Continuation.ANSWER));
     }
