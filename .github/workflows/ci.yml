@@ -75,3 +75,24 @@ jobs:
       - name: Build plugin.wasm
         working-directory: integrations/gateway/higress
         run: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o plugin.wasm .
+
+  java-proxy:
+    # The Java proxy integration: a library a Java service embeds, plus a runnable
+    # reference proxy. The suite is offline by construction — a mock runtime and a
+    # mock provider, both stdlib, with the REAL proxy between them, so the streamed
+    # byte path is exercised as a client actually sees it.
+    #
+    # Java 11 is the floor the modules compile against (`maven.compiler.release`);
+    # the toolchain here is newer on purpose, so a construct that only compiles on a
+    # recent JDK still fails the release check rather than passing unnoticed.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+      - name: Test
+        working-directory: integrations/gateway/java-proxy
+        run: mvn -B --no-transfer-progress verify

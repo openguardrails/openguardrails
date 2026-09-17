@@ -13,6 +13,7 @@ operate a gateway service.
 | [Higress](https://github.com/alibaba/higress), as a native WASM plugin | [`higress/`](higress/) — the reference gateway integration |
 | [mitmproxy](https://github.com/mitmproxy/mitmproxy) addon | [`mitmproxy/`](mitmproxy/) |
 | OpenAI + Anthropic protocols, a readable single-file proxy | [`openai-anthropic/`](openai-anthropic/) |
+| A Java proxy — a library to embed, plus a runnable reference server | [`java-proxy/`](java-proxy/) |
 
 `higress` is the one that runs INSIDE the gateway: a WASM plugin, called
 **OpenGuardrails AIRS** in the Higress console. Being in the data path is
@@ -25,3 +26,10 @@ one whole-response verdict lands).
 It supersedes an earlier pair — the published `og-connector-higress-go`
 plugin plus a Python adapter that served that plugin's own HTTP contract.
 Speaking OGR natively removed both the translation loss and a network hop.
+
+`java-proxy` is for the common case of a proxy that already exists: an
+organization routes its agent traffic through a service of its own and wants the
+OGR decision inside it rather than a second hop. Its
+[`DESIGN.md`](java-proxy/DESIGN.md) is the protocol-conversion write-up —
+what a proxy has to do, job by job, with the failure each rule prevents — and is
+worth reading before building this into any proxy, in any language.

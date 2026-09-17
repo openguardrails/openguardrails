@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  OpenGuardrails AIRS — the Java proxy integration.
+
+  Two modules, and the split is the point:
+
+    core    the library. What a Java proxy EMBEDS: the protocol adapters, the
+            GuardEvent builder, the /v1/evaluate client, the span applier and
+            the streaming head-hold. No web framework, no server.
+    server  a runnable reference proxy built on the JDK's own HTTP server.
+            Documentation that runs — and the offline test bed for core.
+
+  A host service (Spring Boot, Netty, Vert.x, a servlet filter) takes `core`
+  alone; taking `server` too would drag an HTTP stack it already has.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>com.openguardrails</groupId>
+  <artifactId>ogr-proxy-parent</artifactId>
+  <version>1.0.0</version>
+  <packaging>pom</packaging>
+
+  <name>OpenGuardrails AIRS Java proxy</name>
+  <description>LLM protocol (OpenAI Chat / OpenAI Responses / Anthropic Messages) to OGR GuardEvent conversion, and the enforcement recipe around it.</description>
+  <url>https://github.com/openguardrails/openguardrails</url>
+
+  <licenses>
+    <license>
+      <name>Apache License, Version 2.0</name>
+      <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+    </license>
+  </licenses>
+
+  <modules>
+    <module>core</module>
+    <module>server</module>
+  </modules>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <!--
+      Java 11 is the floor on purpose: java.net.http.HttpClient arrived in 11 and
+      is the only HTTP client this integration needs, and 11 is what an enterprise
+      Java estate is most likely to already have. Nothing here uses records, text
+      blocks or switch expressions, so the source also compiles unchanged on 17+.
+    -->
+    <maven.compiler.release>11</maven.compiler.release>
+    <jackson.version>2.17.2</jackson.version>
+    <junit.version>5.10.2</junit.version>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>com.fasterxml.jackson.core</groupId>
+        <artifactId>jackson-databind</artifactId>
+        <version>${jackson.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.junit.jupiter</groupId>
+        <artifactId>junit-jupiter</artifactId>
+        <version>${junit.version}</version>
+        <scope>test</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <build>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-surefire-plugin</artifactId>
+          <version>3.2.5</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-compiler-plugin</artifactId>
+          <version>3.13.0</version>
+        </plugin>
+      </plugins>
+    </pluginManagement>
+  </build>
+</project>
