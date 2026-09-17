@@ -13,7 +13,8 @@ Two hook categories — same protocol, different seat:
 | Category | Seat | Purpose |
 |---|---|---|
 | [`agent/`](agent/) | inside the harness loop | Holds the model call itself (or, at fragment vantages, the tool call about to execute); fills the four-tuple from its own config. |
-| [`gateway/`](gateway/) | an LLM proxy | One proxied model call = one step; forwards raw provider bodies, fills the four-tuple from its own caller authentication. |
+| [`gateway/`](gateway/) | a plugin for a named LLM proxy | One proxied model call = one step; forwards raw provider bodies, fills the four-tuple from its own caller authentication. |
+| [`bridge/`](bridge/) | a service the organization already runs | The conversion itself, for a host nobody here has seen — a library plus a recipe rather than a plugin for a product. Same vantage as a gateway, same recipe; what differs is that the code around it is code this project will never see. |
 
 ## Status (2026-08-15)
 
@@ -21,12 +22,11 @@ Protocol v0.8 merged the two recipes into one; plugins rewritten against it:
 
 - **[`gateway/higress`](gateway/higress/)** — the v0.8 reference gateway
   integration (Go/WASM, CI-covered).
-- **[`gateway/java-proxy`](gateway/java-proxy/)** — OGR for a proxy an
-  organization already runs: a zero-dependency Java library plus a runnable
-  reference proxy, covering `openai.chat`, `openai.responses` and
-  `anthropic.messages` (CI-covered). Its
-  [`DESIGN.md`](gateway/java-proxy/DESIGN.md) is the language-neutral
-  write-up of what protocol conversion at a proxy actually requires.
+- **[`bridge/java`](bridge/java/)** — the first bridge: a zero-dependency Java
+  library plus a runnable reference proxy, covering `openai.chat`,
+  `openai.responses` and `anthropic.messages` (CI-covered). Its
+  [`DESIGN.md`](bridge/java/DESIGN.md) is the language-neutral write-up of what
+  protocol conversion at a bridge actually requires.
 - **[`agent/dsh`](agent/dsh/)** — the v0.8 reference agent-direct
   integration (npm workspace, CI-covered).
 - **[`agent/litellm`](agent/litellm/)** — v0.8 litellm hook (proxy
