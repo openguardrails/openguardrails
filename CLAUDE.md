@@ -44,10 +44,18 @@ privacy.*` ids — never a taxonomy axis; the domain rule catalogues live in
 `proposals/domain-trust-ip-life-sciences.md`, the profiles and frozen record
 worlds under `benchmarks/suites/safety/grounding_*`.
 
-OGR supports two integration points operationally: agent-direct hooks and
-gateway hooks — same protocol, different vantage. All bindings and runnable
-integration examples belong under `integrations/`; a gateway implementation
-is not an OGR-operated service. `examples/minimal-agent/` is the runnable
+OGR supports two integration VANTAGES operationally: agent-direct hooks and the
+model channel — same protocol, different seat. `integrations/` splits the second
+one by DELIVERY FORM, and the split is real: `gateway/` is a plugin for a named
+product whose extension point already exists, `bridge/` is the conversion itself
+for a host nobody here has seen (a customer's own proxy or façade), which is why
+it carries no framework and forces no JSON library on its host. All bindings and
+runnable integration examples belong under `integrations/`; a gateway
+implementation is not an OGR-operated service.
+⚠️ **"adapter" is a per-protocol READER class, never a category** — three of them
+live inside `bridge/java` alone. A directory by that name would give the word two
+referents; the category is `bridge/`, which is also what the Runtime API's own
+worked example calls this shape (`acme-bridge/1.0.0`). `examples/minimal-agent/` is the runnable
 form of the spec's minimal integration.
 
 ## Language
@@ -60,22 +68,23 @@ written into the repo follows.
 
 The one exception is a CJK **test fixture** that exists to exercise
 multibyte/UTF-8 behaviour — `integrations/gateway/higress/redact_test.go`
-(`TestOffsetsAreCharactersNotBytes`) and `tailhold_test.go` (a byte budget
-spent on 3-byte chunks) go vacuous in ASCII. Their comments stay English,
-and each says why the literal is there.
+(`TestOffsetsAreCharactersNotBytes`), `tailhold_test.go` (a byte budget
+spent on 3-byte chunks) and `integrations/bridge/java/…/RawJsonTest.java`
+(`spansAreCountedInCodePointsNotUtf16Units`) go vacuous in ASCII. Their
+comments stay English, and each says why the literal is there.
 
 ## Integration status (2026-08-15)
 
 - `integrations/gateway/higress` — the v0.8 reference gateway integration
   (Go/WASM, CI-covered).
-- `integrations/gateway/java-proxy` — OGR for a proxy an organization already
-  runs (Java, CI-covered): a zero-dependency `core` library plus a runnable
-  reference `server`. Its `DESIGN.md` is the language-neutral write-up of what
-  protocol conversion at a proxy requires, and is the file to read before
-  building this into any proxy. ⚠️ `core` must stay dependency-free — it is
-  embedded in hosts that pin their own JSON library — and a provider body must
-  never be round-tripped through a JSON writer, which is why reading
-  (`json/Json`) and rewriting (`json/RawJson`) are separate classes.
+- `integrations/bridge/java` — the first BRIDGE (Java, CI-covered): a
+  zero-dependency `core` library plus a runnable reference `server`. Its
+  `DESIGN.md` is the language-neutral write-up of what protocol conversion
+  requires, and is the file to read before building one in any language.
+  ⚠️ `core` must stay dependency-free — it is embedded in hosts that pin their own
+  JSON library — and a provider body must never be round-tripped through a JSON
+  writer, which is why reading (`json/Json`) and rewriting (`json/RawJson`) are
+  separate classes.
 - `integrations/agent/dsh` (`@openguardrails/dsh`) — the v0.8 reference
   agent-direct integration (npm workspace, CI-covered). Its `src/wire.ts`
   is the canonical "hand-rolled evaluate POST" example.
@@ -96,7 +105,7 @@ and each says why the literal is there.
 - Hook plugins: `cd integrations/agent/<claude-code|codex|openclaw|opencode> && npm test`
 - Higress plugin: `cd integrations/gateway/higress && gofmt -l . && go vet ./... && go test ./...`
   (wasm compile check: `GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o plugin.wasm .`)
-- Java proxy: `cd integrations/gateway/java-proxy && mvn verify` (offline — a mock
+- Java bridge: `cd integrations/bridge/java && mvn verify` (offline — a mock
   runtime and a mock provider with the real proxy between them)
 - Release workflows: run `actionlint` against `.github/workflows/*.yml`
 

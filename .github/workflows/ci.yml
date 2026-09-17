@@ -76,11 +76,11 @@ jobs:
         working-directory: integrations/gateway/higress
         run: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o plugin.wasm .
 
-  java-proxy:
-    # The Java proxy integration: a library a Java service embeds, plus a runnable
-    # reference proxy. The suite is offline by construction — a mock runtime and a
-    # mock provider, both stdlib, with the REAL proxy between them, so the streamed
-    # byte path is exercised as a client actually sees it.
+  java-bridge:
+    # The Java bridge: a library a Java service embeds, plus a runnable reference
+    # proxy. The suite is offline by construction — a mock runtime and a mock
+    # provider, both stdlib, with the REAL proxy between them, so the streamed byte
+    # path is exercised as a client actually sees it.
     #
     # Java 11 is the floor the modules compile against (`maven.compiler.release`);
     # the toolchain here is newer on purpose, so a construct that only compiles on a
@@ -94,5 +94,5 @@ jobs:
           java-version: "17"
           cache: maven
       - name: Test
-        working-directory: integrations/gateway/java-proxy
+        working-directory: integrations/bridge/java
         run: mvn -B --no-transfer-progress verify
