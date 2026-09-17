@@ -301,11 +301,14 @@ npm install && npm run build && npm test
 
 ## Status
 
-Current protocol version: **v1.0** — the first stable release (see
-[CHANGELOG.md](CHANGELOG.md) for protocol versions). The wire is stable:
-changes within 1.x are additive-optional (`additionalProperties: false`
-rejects unknown keys, not absent ones, so both ends roll forward
-independently); anything breaking is a new major version. See
+Current protocol version: **v1.8** (see [CHANGELOG.md](CHANGELOG.md) for
+protocol versions). The wire is the one v1.0 declared stable in 2026-08:
+everything since is additive-optional (`additionalProperties: false` rejects
+unknown keys, not absent ones, so both ends roll forward independently), so an
+integration written against v1.0 is conformant today and gains a key at a time.
+⚠️ Each key ships at the RUNTIME first — a producer one version ahead sends a key
+a strict schema does not know, and the answer is a 400 on every event it sends.
+Anything breaking is a new major version. See
 [GOVERNANCE.md](GOVERNANCE.md) for how the spec evolves. Contributions welcome —
 [CONTRIBUTING.md](CONTRIBUTING.md).
 

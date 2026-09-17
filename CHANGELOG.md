@@ -9,7 +9,56 @@ version is independent of any implementation's package version.
 
 ## [Unreleased]
 
+## [v1.8] — 2026-09-16 — seven additive-optional releases, collected
+
+**The wire of v1.0, unchanged, plus the optional keys of seven additive releases
+and two configuration-only siblings** — every one of them additive-optional, which is the whole content of the
+1.x promise: `additionalProperties: false` rejects UNKNOWN keys, not absent ones, so
+each of these left the installed base validating and let the two ends roll forward
+independently. Nothing here is required, nothing here is removed, and a producer
+written against v1.0 is conformant today.
+
+What arrived, in order: **1.1** media parts and `payload._ogr_media` · **1.2**
+obligations and `obligation_results` · **1.3** the mandate and `verdict.continuation`
+· **1.4** local redaction, `GET /v1/rules` and `event.redaction` · **1.5** `initiator`
+· **1.6** `llm_endpoint` · **1.7** the grounding profile (DRAFT) · **1.8**
+`transport` and the verdict's `timing`.
+
+⚠️ **The rollout order is the same for every one of them and it is not symmetric: the
+RUNTIME ships the key first.** A producer one version ahead sends a key a strict
+schema does not know, and the answer is a 400 on every event it sends — a diagnostic
+turned into an outage.
+
 ### Added
+- **`transport` on a GuardEvent and `timing` on a Verdict (OGR 1.8) — WHERE THE TIME
+  WENT, so a first-token regression is attributable to a LAYER instead of argued
+  about.** `transport` carries `gw_ms` (the host had the request before the guard code
+  did), `plugin_ms` (the guard's own work), `net_ms` (the wire, both directions, for
+  this step's request-half evaluate) and `skew_ms`; `timing` carries the runtime's own
+  `received_at` / `responded_at`, whose difference is the WHOLE handler where
+  `latency_ms` is the evaluation alone — and the gap between the two is where a runtime
+  that is slow for a reason the evaluation cannot see shows up.
+  ⚠️⚠️ **EVERY VALUE IS A DURATION MEASURED INSIDE ONE CLOCK, and an integration MUST
+  NOT produce one any other way.** The obvious build — stamp timestamps at both ends
+  and subtract the neighbours — yields a number spanning two machines' clocks, and on a
+  measured deployment that error was a steady **2.1 seconds on 2,997 of 3,000 events**,
+  from a lab box whose container clock matched its host to under a second. So `net_ms`
+  is the integration's OWN round trip minus the `responded_at - received_at` the runtime
+  reported: two same-clock differences subtracted, which is the NTP delay formula and
+  needs no synchronised clocks. ⚠️ It does NOT decompose into outbound and inbound, and
+  halving it is an assumption wearing a measurement's name. ⚠️ `skew_ms` is the NTP
+  offset and a DIAGNOSTIC ONLY — a runtime MUST NOT correct any stored time by it, or
+  every stored duration comes to depend on a number that moves. ⚠️ An unmeasured hop is
+  an ABSENT key, never `0`: a zero that means "instant" and a zero that means "not
+  measured" must not be the same bytes, and a reader MUST NOT sum them into a total.
+  ⚠️ `net_ms` and `skew_ms` describe a round trip that has already completed, so they
+  ride the `step/response` and describe THAT step's request half; a one-sided step
+  carries neither and they MUST NOT be carried across steps. A CLAIM per the
+  `integration` rule: a record only, never an input to authorization or policy.
+  ⚠️ `.strict()` refuses unknown keys, so the RUNTIME ships the field before any
+  producer sends it. Schemas: `schema/guard-event.schema.json` (the `transport`
+  sub-object is deliberately tolerant of unknown keys INSIDE it — a diagnostic must not
+  be the thing that 400s an upgrade), `schema/verdict.schema.json`.
 - **Grounding — the EVIDENCE ENVELOPE (OGR 1.7, DRAFT, `specification/grounding.md`).**
   The mandate bounds what an agent may DO; a **grounding profile** bounds what it may
   CLAIM: which identifiers count as references, what the answer may assert about a
