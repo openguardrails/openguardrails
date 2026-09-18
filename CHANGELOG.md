@@ -9,6 +9,29 @@ version is independent of any implementation's package version.
 
 ## [Unreleased]
 
+### Changed
+- **The producer-written fields' LENGTH BOUNDS are written down** —
+  `specification/guard-event.md` § Field bounds, plus `maxLength` on the five
+  properties that carried none in `schema/guard-event.schema.json`: `step_id` 128,
+  `agent_id` / `agent_workspace` / `agent_user` 255, `agent_type` 64. The optional
+  fields already published theirs (`integration` / `connection` / `session_hint` 128,
+  `initiator` 32, `llm_endpoint` 253). **This is documentation catching up to what
+  runtimes already enforce, not a wire change**: an integrator reading only the schema
+  saw no ceiling at all on the four-tuple or on `step_id`, and could learn one only
+  from a rejection in production. Asked for by a deployment integrating against these
+  fields.
+  - The section also states what the bounds are NOT: there is still **no character
+    set, prefix convention or pattern** on any of them, and a runtime MUST NOT impose
+    one — `st-…` is one gateway's habit, and the senders in this repository mint bare
+    UUIDs, hex strings and vendor call ids.
+  - ⚠️ **A runtime MUST NOT truncate instead of refusing.** Two `step_id`s sharing a
+    prefix are two different model calls; a runtime that shortened them would merge
+    two steps into one, silently and unrecoverably.
+  - ⚠️ **A bound is a floor for whatever stores the value.** This was written after a
+    reference runtime was found keeping `step_id` in a 64-character analytics column:
+    a longer id was judged and answered normally, then the analytics write failed at
+    the far end of the request — visible only as traffic missing from a console.
+
 ## [v1.9] — 2026-09-17 — the verdict can carry the BODY, and a stream is a TRANSPORT
 
 Two additive-optional additions, both for the same caller: a service that holds the

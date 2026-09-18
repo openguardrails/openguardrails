@@ -25,23 +25,28 @@
   "step_id": {
    "type": "string",
    "minLength": 1,
-   "description": "Producer-minted opaque id binding the step/request and step/response of ONE model call. A fresh random id per call; never reused. The one coordinate on the wire — everything above it (session, turn, step numbering) is derived server-side."
+   "maxLength": 128,
+   "description": "Producer-minted opaque id binding the step/request and step/response of ONE model call. A fresh random id per call; never reused. The one coordinate on the wire — everything above it (session, turn, step numbering) is derived server-side. Opaque: no character set or pattern is imposed. At most 128 characters — a runtime refuses a longer value rather than storing a shortened one (specification/guard-event.md § Field bounds)."
   },
   "agent_id": {
    "type": "string",
-   "description": "WHICH agent this is, unique within the organization; policy resolution and the inventory key on it. Empty = derived from the API key (identity floor)."
+   "maxLength": 255,
+   "description": "WHICH agent this is, unique within the organization; policy resolution and the inventory key on it. Empty = derived from the API key (identity floor). Opaque: no character set or pattern is imposed. At most 255 characters — a runtime refuses a longer value rather than storing a shortened one (specification/guard-event.md § Field bounds)."
   },
   "agent_type": {
    "type": "string",
-   "description": "What KIND of agent — the harness or product name. A label, never an identity. Empty = unlabeled."
+   "maxLength": 64,
+   "description": "What KIND of agent — the harness or product name. A label, never an identity. Empty = unlabeled. Opaque: no character set or pattern is imposed. At most 64 characters — a runtime refuses a longer value rather than storing a shortened one (specification/guard-event.md § Field bounds)."
   },
   "agent_workspace": {
    "type": "string",
-   "description": "The named GROUP of agents this one belongs to — one workspace, one policy set. Empty = the API key's workspace."
+   "maxLength": 255,
+   "description": "The named GROUP of agents this one belongs to — one workspace, one policy set. Empty = the API key's workspace. Opaque: no character set or pattern is imposed. At most 255 characters — a runtime refuses a longer value rather than storing a shortened one (specification/guard-event.md § Field bounds)."
   },
   "agent_user": {
    "type": "string",
-   "description": "Who is USING the agent this session/request. An attribute, never a policy boundary. Empty = every session is one user."
+   "maxLength": 255,
+   "description": "Who is USING the agent this session/request. An attribute, never a policy boundary. Empty = every session is one user. Opaque: no character set or pattern is imposed. At most 255 characters — a runtime refuses a longer value rather than storing a shortened one (specification/guard-event.md § Field bounds)."
   },
   "llm_protocol": {
    "enum": [
