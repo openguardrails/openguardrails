@@ -63,7 +63,11 @@ A runtime (the Policy Decision Point) is **OGR-conformant** if it:
 4. composes multi-detector answers per
    [composition](specification/composition.md), including the findings,
    spans and unjudged unions;
-5. never silently drops an event it accepted.
+5. never silently drops an event it accepted — which includes accepting a field
+   it cannot store: every value the runtime keeps verbatim must fit, so its
+   storage clears the [field bounds](specification/guard-event.md#field-bounds),
+   and an over-long value is refused at the door rather than shortened or lost
+   behind the verdict.
 
 ## Mandate support (conditional)
 

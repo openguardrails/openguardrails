@@ -189,7 +189,7 @@ needs no state and no session affinity.
 
 | Field | Description |
 |---|---|
-| `step_id` | Producer-minted opaque id binding the `step/request` and `step/response` of ONE model call. A fresh random id per call (a UUID is fine); never reused. |
+| `step_id` | Producer-minted opaque id binding the `step/request` and `step/response` of ONE model call. A fresh random id per call (a UUID is fine); never reused. Opaque — no format is imposed — and at most 128 characters ([field bounds](#field-bounds)). |
 
 This is the single coordinate v0.8 kept, because it is the single fact a
 runtime cannot derive: an agent running model calls concurrently (parallel
@@ -206,7 +206,9 @@ no `attribution` field to report one.
 ## Identity
 
 The **four-tuple**. All four fields are required on every event; the empty
-string is the explicit "no assertion", never an error:
+string is the explicit "no assertion", never an error. Each is an opaque string
+with a maximum length — 255, except `agent_type`'s 64 ([field
+bounds](#field-bounds)):
 
 | Field | Empty means | Description |
 |---|---|---|
@@ -270,6 +272,50 @@ wire, and a producer sending an owner is asserting something it cannot know.
 ⚠️ **Every identity field is a CLAIM**, bounded by the channel: resolved only
 within the tenant the channel credential proves (`agent_workspace` names a
 workspace inside that tenant, never the tenant itself).
+
+## Field bounds
+
+Every producer-written field on this event is an **opaque string**: there is no
+character set, no prefix convention and no pattern, and a runtime MUST NOT
+impose one. (`st-…` is one gateway's habit, not a format — the senders in this
+repository mint bare UUIDs, hex strings and vendor call ids.) What each field
+does have is a **maximum length**, and a runtime MUST refuse an event that
+exceeds it rather than storing a shortened value:
+
+| Field | Max | Required |
+|---|---|---|
+| `step_id` | 128 | yes, and non-empty |
+| `agent_id` | 255 | yes (may be `""`) |
+| `agent_workspace` | 255 | yes (may be `""`) |
+| `agent_user` | 255 | yes (may be `""`) |
+| `agent_type` | 64 | yes (may be `""`) |
+| `integration` | 128 | optional |
+| `connection` | 128 | optional |
+| `session_hint` | 128 | optional |
+| `initiator` | 32 | optional |
+| `llm_endpoint` | 253 | optional |
+
+Lengths count **Unicode code points**. The bounds are part of the schema
+(`schema/guard-event.schema.json`) and were added to it in 2026-09; before that
+the four-tuple and `step_id` carried none, and an integrator could only learn a
+runtime's limit from a rejection in production.
+
+⚠️ **A runtime MUST NOT truncate instead of refusing.** These values are stored
+verbatim and correlated on — two `step_id`s sharing a prefix are two different
+model calls, and a runtime that shortened them would merge the two steps into
+one, silently and unrecoverably. Refusal is visible; truncation is not.
+
+⚠️ **A bound is a floor for whatever stores the value.** `step_id` in particular
+is kept verbatim by the runtime (as its step/guard correlation id), so every
+column that holds one has to clear 128 — counted in BYTES where the store counts
+bytes, which is 4× the bound unless the field is known to be ASCII in practice.
+A store narrower than the wire fails at the far end of the request, after the
+producer already has its verdict.
+
+⚠️ Producers SHOULD stay well inside these: a UUID (32–36 characters) is the
+recommended `step_id` and every shipped integration is inside 40. The bounds are
+deliberately generous so that no conformant producer is squeezed, not an
+invitation to compose ids out of several others.
 
 ## What v0.8 removed, and where each job went
 

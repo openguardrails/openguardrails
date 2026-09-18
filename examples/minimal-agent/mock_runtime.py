@@ -25,6 +25,12 @@ FIELDS = ("kind", "step_id", "agent_id", "agent_type", "agent_workspace",
           "agent_user", "llm_protocol", "payload")
 KINDS = ("step/request", "step/response")
 PROTOCOLS = ("openai.chat", "openai.responses", "anthropic.messages", "canonical")
+# specification/guard-event.md § Field bounds. Opaque strings, no pattern — but a
+# LENGTH each, and a runtime refuses a longer value instead of storing a shortened
+# one: two step_ids sharing a prefix are two different model calls, so truncating
+# would merge them into one step and nothing would say so.
+BOUNDS = {"step_id": 128, "agent_id": 255, "agent_type": 64,
+          "agent_workspace": 255, "agent_user": 255}
 
 
 def validate(ev) -> list:
@@ -45,6 +51,8 @@ def validate(ev) -> list:
         d.append(f"llm_protocol: not one of {PROTOCOLS}")
     if not isinstance(ev["payload"], dict):
         d.append("payload: must be an object")
+    d += [f"{f}: longer than {m} characters" for f, m in BOUNDS.items()
+          if isinstance(ev[f], str) and len(ev[f]) > m]
     return d
 
 
