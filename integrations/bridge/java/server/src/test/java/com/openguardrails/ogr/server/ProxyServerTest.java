@@ -13,6 +13,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.Socket;
+import java.net.SocketException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -163,6 +164,11 @@ class ProxyServerTest {
             assertEquals("onesec-proxy", Json.str(first, "agent_id"));
             assertEquals("mail ada@acme.io", Json.str(first, "payload.messages.0.content"));
             assertEquals("here you go", Json.str(second, "payload.choices.0.message.content"));
+            // ⚠️⚠️ THE CANONICAL QUESTION AND NOTHING ELSE. Every consequence of a verdict
+            // is this bridge's own work, so it must never depend on an optional extension
+            // of the decision path — no `?payload=true`, no query string at all.
+            assertEquals("/v1/evaluate", runtime.uris.get(0));
+            assertEquals("/v1/evaluate", runtime.uris.get(1));
         } finally {
             server.stop();
         }
@@ -410,7 +416,7 @@ class ProxyServerTest {
         MockServers.Provider provider = provider(REPLY, false);
         ProxyServer server = proxy(runtime, provider, Mode.ENFORCE, FailMode.OPEN, 32);
         try {
-            HttpResponse<String> response = postStream(server, "/guard/v1/step/response?payload=true", STREAM,
+            HttpResponse<String> response = postStream(server, "/guard/v1/step/response", STREAM,
                 "ogr-step-id", "step-abc", "ogr-llm-protocol", "openai.chat",
                 "ogr-agent-id", "line-a-bot");
             assertEquals(200, response.statusCode());
@@ -432,6 +438,7 @@ class ProxyServerTest {
             assertEquals("line-a-bot", Json.str(event, "agent_id"));
             // ⚠️ No single raw body exists, so the reply is reported in the CANONICAL shape.
             assertEquals("The secret plan is to do the thing", Json.str(event, "payload.text"));
+            assertEquals("/v1/evaluate", runtime.uris.get(0), "a stream asks the plain question too");
         } finally {
             server.stop();
         }
@@ -447,7 +454,7 @@ class ProxyServerTest {
         MockServers.Provider provider = provider(REPLY, false);
         ProxyServer server = proxy(runtime, provider, Mode.ENFORCE, FailMode.OPEN, 32);
         try {
-            HttpResponse<String> response = postStream(server, "/guard/v1/step/response?payload=true", STREAM,
+            HttpResponse<String> response = postStream(server, "/guard/v1/step/response", STREAM,
                 "ogr-step-id", "step-abc", "ogr-llm-protocol", "openai.chat",
                 "ogr-head-release-bytes", "0");
             assertEquals(200, response.statusCode());
@@ -478,7 +485,7 @@ class ProxyServerTest {
             assertEquals("redacted", Json.str(first, "decision"));
             String stepId = Json.str(first, "step_id");
 
-            HttpResponse<String> response = postStream(server, "/guard/v1/step/response?payload=true",
+            HttpResponse<String> response = postStream(server, "/guard/v1/step/response",
                 STREAM_PLACEHOLDER, "ogr-step-id", stepId, "ogr-llm-protocol", "openai.chat");
             assertTrue(response.body().contains("ada@acme.io"),
                 "the token arrived in two pieces and still has to come back as the value");
@@ -501,7 +508,7 @@ class ProxyServerTest {
         MockServers.Provider provider = provider(REPLY, false);
         ProxyServer server = proxy(runtime, provider, Mode.ENFORCE, FailMode.OPEN, 32);
         try {
-            HttpResponse<String> response = postStream(server, "/guard/v1/step/response?payload=true",
+            HttpResponse<String> response = postStream(server, "/guard/v1/step/response",
                 STREAM_PLACEHOLDER, "ogr-step-id", "landed-on-another-replica",
                 "ogr-llm-protocol", "openai.chat",
                 "ogr-placeholders", "{\"${OGR_EMAIL_1}\":\"ada@acme.io\"}");
@@ -512,7 +519,7 @@ class ProxyServerTest {
         }
     }
 
-    /** No {@code ?payload=true}: the reply is judged and RECORDED, and no frames come back. */
+    /** {@code ?verdict_only=true}: the reply is judged and RECORDED, and no frames come back. */
     @Test
     void theStreamedDoorCanAnswerAPlainVerdictInstead() throws Exception {
         MockServers.Runtime runtime = runtime(ALLOW);
@@ -520,7 +527,7 @@ class ProxyServerTest {
         ProxyServer server = proxy(runtime, provider, Mode.ENFORCE, FailMode.OPEN, 32);
         try {
             HttpResponse<String> response = postStream(server,
-                "/guard/v1/step/response", STREAM,
+                "/guard/v1/step/response?verdict_only=true", STREAM,
                 "ogr-step-id", "step-abc", "ogr-llm-protocol", "openai.chat");
             assertEquals(200, response.statusCode());
             assertTrue(response.headers().firstValue("content-type").orElse("")
@@ -547,7 +554,7 @@ class ProxyServerTest {
         MockServers.Provider provider = provider(REPLY, false);
         ProxyServer server = proxy(runtime, provider, Mode.ENFORCE, FailMode.OPEN, 32);
         try {
-            assertEquals(400, postStream(server, "/guard/v1/step/request?payload=true", STREAM,
+            assertEquals(400, postStream(server, "/guard/v1/step/request", STREAM,
                 "ogr-step-id", "s", "ogr-llm-protocol", "openai.chat").statusCode());
             assertEquals(400, postStream(server, "/guard/v1/step/response", STREAM,
                 "ogr-llm-protocol", "openai.chat").statusCode());
@@ -576,10 +583,19 @@ class ProxyServerTest {
         MockServers.Provider provider = provider(REPLY, false);
         ProxyServer server = proxy(runtime, provider, Mode.ENFORCE, FailMode.OPEN, 32);
         String[] frames = STREAM.split("\n\n");
+        try {
+            onceMoreIfReset(runtime, ALLOW, () -> liveHead(server, frames, runtime));
+        } finally {
+            server.stop();
+        }
+    }
+
+    private static void liveHead(ProxyServer server, String[] frames, MockServers.Runtime runtime)
+        throws Exception {
         try (Socket socket = new Socket("localhost", server.port())) {
             socket.setSoTimeout(5000);
             OutputStream out = socket.getOutputStream();
-            out.write(("POST /guard/v1/step/response?payload=true HTTP/1.1\r\n"
+            out.write(("POST /guard/v1/step/response HTTP/1.1\r\n"
                 + "Host: localhost:" + server.port() + "\r\n"
                 + "Content-Type: text/event-stream\r\n"
                 + "ogr-step-id: live-1\r\n"
@@ -602,8 +618,6 @@ class ProxyServerTest {
             assertTrue(rest.contains("[DONE]"));
             assertEquals("allow", Json.str(trailer(rest), "decision"));
             assertEquals(1, runtime.events.size(), "one stream, one event, judged at the end");
-        } finally {
-            server.stop();
         }
     }
 
@@ -619,10 +633,18 @@ class ProxyServerTest {
         MockServers.Provider provider = provider(REPLY, false);
         ProxyServer server = proxy(runtime, provider, Mode.OBSERVE, FailMode.CLOSED, 0);
         String[] frames = STREAM.split("\n\n");
+        try {
+            onceMoreIfReset(runtime, BLOCK, () -> observedStream(server, frames));
+        } finally {
+            server.stop();
+        }
+    }
+
+    private static void observedStream(ProxyServer server, String[] frames) throws Exception {
         try (Socket socket = new Socket("localhost", server.port())) {
             socket.setSoTimeout(5000);
             OutputStream out = socket.getOutputStream();
-            out.write(("POST /guard/v1/step/response?payload=true HTTP/1.1\r\n"
+            out.write(("POST /guard/v1/step/response HTTP/1.1\r\n"
                 + "Host: localhost:" + server.port() + "\r\n"
                 + "Content-Type: text/event-stream\r\n"
                 + "ogr-step-id: observed-1\r\n"
@@ -642,9 +664,35 @@ class ProxyServerTest {
                 + readUntil(socket.getInputStream(), "\n\n");
             assertEquals("allow", Json.str(trailer(rest), "decision"),
                 "the runtime said block and observe still delivers — that is the mode");
-        } finally {
-            server.stop();
         }
+    }
+
+    /**
+     * Runs a raw-socket exchange, once more if the connection was RESET rather than
+     * answered.
+     *
+     * <p>⚠️ Not papering over the door: a listener on a recycled ephemeral port can still
+     * be tearing down when the next connect lands — the same hazard MockServers keeps one
+     * server pair per class to avoid — and here it surfaces as a reset before the first
+     * byte. A failed ASSERTION is never retried; only a reset is.
+     */
+    private static void onceMoreIfReset(MockServers.Runtime runtime, String verdict,
+                                        SocketExchange exchange) throws Exception {
+        for (int attempt = 0; ; attempt++) {
+            try {
+                exchange.run();
+                return;
+            } catch (SocketException e) {
+                if (attempt > 0) {
+                    throw e;
+                }
+                runtime.reset(verdict);
+            }
+        }
+    }
+
+    private interface SocketExchange {
+        void run() throws Exception;
     }
 
     /** One HTTP/1.1 chunk, written and flushed on its own — a frame the server sees now. */

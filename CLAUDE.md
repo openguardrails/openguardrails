@@ -65,8 +65,11 @@ moment it forwards to a provider it is one more gateway, which is the job the
 products in `gateway/` already do. The Java bridge's reference server keeps an
 inline `/v1/*` door ONLY as the offline test bed for `core`'s streaming and span
 code; its deployment shape is `/guard/v1/step/{request,response}`, the response door
-taking either one JSON body or the provider's SSE frames (`ogr-*` headers, the
-runtime's own streamed-transport spelling, verdict on a trailing `: ogr` comment).
+taking either one JSON body or the provider's SSE frames (`ogr-*` headers, verdict on
+a trailing `: ogr` comment). ⚠️ The bridge is built on the PLAIN `/v1/evaluate` and the
+ordinary verdict — spans, restoration, refusal rendering, continuations and the
+streaming head-hold are its own work, never `?payload=true` — so it runs against any
+conformant runtime at any version.
 ⚠️ OpenAFW's OGR connection lives in the openafw repository; `integrations/gateway/openafw/` is
 the pointer that places it in the category, not a copy of the code. All bindings
 and runnable integration examples belong under `integrations/`; a gateway

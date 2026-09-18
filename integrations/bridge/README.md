@@ -29,13 +29,13 @@ restored on the way back) and the caller must use the returned one; **`block`** 
 full content the caller needs: a refusal rendered in the caller's own protocol, or,
 with a `continuation`, the body to forward/deliver with the refused part removed.
 
-> **AIRS renders the body for you on request**: `POST /v1/evaluate?payload=true`
-> answers with the ordinary verdict plus a `payload` — `"unchanged"`, the rewritten
-> body (spans applied / placeholders restored / a continuation carried out), or the
-> refusal document in the caller's own protocol. This bridge asks for it by default
-> and hands it on; the local application remains the fallback for a runtime that
-> answers without one, and the reference for building the same thing elsewhere. The
-> client guide is `openguardrails-airs/docs/evaluate-client-guide.md`.
+> ⚠️ **All of that is the bridge's own work, from the plain decision call.** One
+> `POST /v1/evaluate` per half, one ordinary verdict back, and the bridge carries it
+> out: spans applied at code-point offsets, placeholders put back, the refusal
+> rendered in the caller's protocol, a continuation executed, a streamed reply held
+> behind its bounded head. Nothing here depends on an optional extension of the
+> decision path, so a bridge keeps working against a runtime older or newer than
+> itself — and the same list is exactly what a bridge in another language has to do.
 
 | Target | Source |
 |---|---|

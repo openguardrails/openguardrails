@@ -447,10 +447,9 @@ are structurally weaker and should be said out loud to whoever operates it:
   line ([`GuardStreamHandler`](server/src/main/java/com/openguardrails/ogr/server/GuardStreamHandler.java),
   Job 9's machinery unchanged). ⚠️ **The price is a hop**: the caller relays its reply
   bytes through the bridge, so this buys enforcement with a copy. The frames come back
-  for `?payload=true` — the runtime's own spelling and default for the same question —
-  and without it the same uploaded stream is judged and answered with a plain verdict,
-  for a caller that will not pay the hop: making the output side visible is worth doing
-  even when it cannot be controlled.
+  by default, and `?verdict_only=true` judges the same uploaded stream and answers a
+  plain verdict instead, for a caller that will not pay the hop: making the output side
+  visible is worth doing even when it cannot be controlled.
   ⚠️ **This is still not a gateway, and the line is the PROVIDER CONNECTION, not the
   bytes**: nothing is re-pointed at the bridge, it dials no provider and holds no
   `base_url`. A streamed reply is one message, which is what a bridge answers about.
@@ -467,9 +466,14 @@ runtime believes was masked and was not. The door says which case it is in: `dec
 allow never doubles the request's bytes), `"redacted"` comes with the rewritten body
 (use it), and `"block"` comes with the full content — a refusal in the caller's own
 protocol, or, beside a `continuation`, the body to forward/deliver with the refused
-part taken out. The runtime renders all of this itself when asked —
-`POST /v1/evaluate?payload=true` adds a `payload` to the verdict — which is what this
-bridge does by default; a service that can call the runtime needs no bridge.
+part taken out.
+
+⚠️ **Every one of those bodies is rendered HERE, from the plain decision call.** One
+`POST /v1/evaluate` per half, one ordinary verdict back, and the bridge does the rest.
+That is not a limitation to work around: a verdict carries offsets and a replacement
+token, never the plaintext it replaces, so the process holding the body is the only one
+that can carry it out — and a bridge that needs no optional extension of the decision
+path keeps working against a runtime older or newer than itself.
 
 ### Inline (the code is in the byte path)
 

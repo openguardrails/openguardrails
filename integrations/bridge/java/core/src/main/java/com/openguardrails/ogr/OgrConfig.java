@@ -30,7 +30,6 @@ public final class OgrConfig {
     private final FailMode failMode;
     private final Duration timeout;
     private final int streamHeadReleaseBytes;
-    private final boolean payloadFromRuntime;
     private final String integrationName;
     private final String instanceId;
     private final Identity defaultIdentity;
@@ -44,7 +43,6 @@ public final class OgrConfig {
         this.failMode = b.failMode;
         this.timeout = b.timeout;
         this.streamHeadReleaseBytes = b.streamHeadReleaseBytes;
-        this.payloadFromRuntime = b.payloadFromRuntime;
         this.integrationName = b.integrationName;
         this.instanceId = b.instanceId;
         this.defaultIdentity = b.defaultIdentity;
@@ -118,17 +116,6 @@ public final class OgrConfig {
         return streamHeadReleaseBytes;
     }
 
-    /**
-     * Whether evaluate calls ask the runtime for the rewritten body
-     * ({@code POST /v1/evaluate?payload=true}). On, the runtime applies the spans,
-     * restores the placeholders, renders the refusal and carries out the continuation,
-     * and the verdict's {@code payload} is what this bridge hands on; the local
-     * application stays as the fallback for a runtime that answers without one.
-     */
-    public boolean payloadFromRuntime() {
-        return payloadFromRuntime;
-    }
-
     public String integrationName() {
         return integrationName;
     }
@@ -189,7 +176,6 @@ public final class OgrConfig {
         private FailMode failMode = FailMode.OPEN;
         private Duration timeout = Duration.ofMillis(5000);
         private int streamHeadReleaseBytes = 32;
-        private boolean payloadFromRuntime = true;
         private String integrationName = DEFAULT_INTEGRATION_NAME;
         private String instanceId = Ids.mint("inst-");
         private Identity defaultIdentity = Identity.NONE;
@@ -227,11 +213,6 @@ public final class OgrConfig {
 
         public Builder streamHeadReleaseBytes(int v) {
             this.streamHeadReleaseBytes = Math.max(0, v);
-            return this;
-        }
-
-        public Builder payloadFromRuntime(boolean on) {
-            this.payloadFromRuntime = on;
             return this;
         }
 

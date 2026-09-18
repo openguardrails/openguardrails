@@ -45,11 +45,12 @@ keeps all of that and gains the decision.
   the message door (`POST /guard/v1/step/request`, `POST /guard/v1/step/response`)
   for `openai.chat`, `openai.responses` and `anthropic.messages`, built on a
   zero-dependency `core` (CI-covered). Its [`DESIGN.md`](bridge/java/DESIGN.md) is
-  the language-neutral write-up of what the conversion requires. **The runtime
-  renders the result on request** — `POST /v1/evaluate?payload=true` adds a
-  `payload` to the verdict (`"unchanged"`, the rewritten body, or the refusal in the
-  caller's protocol) — so a service that can call the runtime directly needs no
-  bridge process; the client guide is `openguardrails-airs/docs/evaluate-client-guide.md`.
+  the language-neutral write-up of what the conversion requires. A streamed reply is
+  relayed into the same response door as `text/event-stream` and the guarded frames
+  come back. ⚠️ It is built on the **plain** `POST /v1/evaluate` and the ordinary
+  verdict — spans, restoration, refusal rendering, continuations and the streaming
+  head-hold are all its own work — so it runs against any conformant runtime at any
+  version, with nothing optional switched on.
 - **Agent plugins** — [`agent/dsh`](agent/dsh/), the reference agent-direct plugin
   (npm workspace, CI-covered); [`agent/litellm`](agent/litellm/) (proxy enforcing,
   SDK observe-only); [`agent/langgraph`](agent/langgraph/),

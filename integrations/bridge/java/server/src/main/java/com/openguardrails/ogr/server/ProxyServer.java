@@ -129,7 +129,6 @@ public final class ProxyServer {
             .failMode(FailMode.of(env("OGR_FAIL_MODE", "open")))
             .timeout(Duration.ofMillis(Long.parseLong(env("OGR_TIMEOUT_MS", "5000"))))
             .streamHeadReleaseBytes(Integer.parseInt(env("OGR_STREAM_HEAD_RELEASE_BYTES", "32")))
-            .payloadFromRuntime(!"false".equalsIgnoreCase(env("OGR_PAYLOAD_FROM_RUNTIME", "true")))
             .integrationName(env("OGR_INTEGRATION_NAME", OgrConfig.DEFAULT_INTEGRATION_NAME))
             .defaultIdentity(new Identity(
                 env("OGR_AGENT_ID", ""), env("OGR_AGENT_TYPE", ""),
