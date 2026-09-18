@@ -26,12 +26,12 @@ import java.util.Map;
  *
  * The decision is the same one the runtime composes, in the shape a caller holding a
  * whole body can act on without reading a verdict — which is the work a bridge exists to
- * do. (⚠️ The runtime has no door of this shape and is not getting one: AIRS answers
- * {@code POST /v1/evaluate}, and since 2026-09-17 renders the body to use into the
- * verdict itself under {@code ?payload=true}. An earlier build of a
- * {@code /v1/step/*} door there was reverted the day it was written, on the finding
- * that the input was never the problem — the verdict being a set of instructions was.
- * This bridge asks for that rendered payload by default and hands it on.)
+ * do, and all of it happens HERE, from one plain {@code POST /v1/evaluate} and the
+ * ordinary Verdict it answers: spans applied at code-point offsets, placeholders put
+ * back, the refusal rendered in the caller's protocol, the continuation carried out.
+ * (⚠️ The runtime has no door of this shape. Its own {@code /v1/step/*} doors were built
+ * and reverted the same day, 2026-09-17, on the finding that the input was never the
+ * problem — the verdict being a set of instructions was.)
  *
  * <pre>
  *   POST /guard/v1/step/request    {llm_protocol?, path?, agent_id?, …, body: &lt;raw provider request&gt;}
@@ -76,11 +76,9 @@ import java.util.Map;
  * still ONE message and one {@code step/response} — judged once, whole, at the end — so
  * this is not a second door, and it is the only transport in which the end-of-stream
  * decision can still be an ENFORCEMENT: see {@link GuardStreamHandler}, which is where
- * the bounded head lives. ⚠️ The guarded frames come back only for {@code ?payload=true}
- * — the runtime's own spelling and its own default — and the caller then relays its reply
- * bytes THROUGH this process, which is the price. Without the parameter the same stream
- * is judged and answered with a plain verdict: the record, for a caller that will not pay
- * it.
+ * the bounded head lives. ⚠️ The caller relays its reply bytes THROUGH this process,
+ * which is the price; {@code ?verdict_only=true} judges the same stream and answers a
+ * plain verdict instead, for a caller that will not pay it and wants the record.
  *
  * <h2>What this lane gives up, said plainly</h2>
  *

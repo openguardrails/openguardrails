@@ -41,40 +41,6 @@ public final class Verdict {
         return new Verdict(null, "");
     }
 
-    // ------------------------------------------------------------ the payload
-
-    /** Whether the runtime rendered the body to use ({@code ?payload=true} was honoured). */
-    public boolean hasPayload() {
-        return Json.get(root, "payload") != null;
-    }
-
-    /** {@code payload} is the literal {@code "unchanged"}: nothing changed, use your own copy. */
-    public boolean payloadUnchanged() {
-        return "unchanged".equals(Json.get(root, "payload"));
-    }
-
-    /** {@code payload} is SSE text — a refusal for a request that said {@code stream: true}. */
-    public boolean payloadIsStream() {
-        return Json.getBool(root, "payload_stream");
-    }
-
-    /**
-     * The rendered body, VERBATIM out of the verdict text: a JSON document, or the SSE
-     * text when {@link #payloadIsStream()}. {@code null} when there is none, or it is
-     * {@code "unchanged"}.
-     */
-    public String payloadRaw() {
-        Object v = Json.get(root, "payload");
-        if (v == null || "unchanged".equals(v)) {
-            return null;
-        }
-        if (v instanceof String) {
-            return (String) v;
-        }
-        com.openguardrails.ogr.json.RawJson.Range r = com.openguardrails.ogr.json.RawJson.locate(raw, "payload");
-        return r == null ? Json.write(v) : r.of(raw);
-    }
-
     /**
      * Whether this is a VERDICT at all.
      *

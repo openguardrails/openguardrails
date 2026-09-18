@@ -36,12 +36,22 @@ final class MockServers {
     static final class Runtime {
         final HttpServer http;
         final List<String> events = Collections.synchronizedList(new ArrayList<String>());
+        /**
+         * Every evaluate URI, verbatim.
+         *
+         * <p>⚠️ Recorded so a test can pin that the bridge asks the CANONICAL question and
+         * nothing else — {@code /v1/evaluate}, no query string. Everything a verdict asks
+         * for is the bridge's own work, so it must keep working against a runtime that
+         * implements only what the specification requires.
+         */
+        final List<String> uris = Collections.synchronizedList(new ArrayList<String>());
         final List<String> verdicts = Collections.synchronizedList(new ArrayList<String>());
         private int at;
 
         /** Re-arms the canned verdicts and forgets every event seen so far. */
         synchronized void reset(String... verdicts) {
             this.events.clear();
+            this.uris.clear();
             this.verdicts.clear();
             Collections.addAll(this.verdicts, verdicts);
             this.at = 0;
@@ -55,6 +65,7 @@ final class MockServers {
                 public void handle(HttpExchange exchange) throws IOException {
                     String body = read(exchange.getRequestBody());
                     events.add(body);
+                    uris.add(exchange.getRequestURI().toString());
                     String verdict;
                     synchronized (Runtime.this) {
                         verdict = at < Runtime.this.verdicts.size()

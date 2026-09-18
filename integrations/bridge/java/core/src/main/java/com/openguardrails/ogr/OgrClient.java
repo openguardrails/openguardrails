@@ -85,28 +85,22 @@ public class OgrClient {
     /**
      * Judges one event.
      *
+     * <p>⚠️ The CANONICAL call and nothing else: one GuardEvent in, one Verdict out, no
+     * query parameters. Everything a verdict asks for — spans applied at code-point
+     * offsets, placeholders put back, a refusal rendered in the caller's own protocol, a
+     * continuation carried out, a stream's head bounded — this bridge does itself, so it
+     * works against ANY runtime that implements the one endpoint the specification
+     * requires, at any version, including one with no optional extension at all.
+     *
      * <p>Never throws: every failure — timeout, 429, 5xx, socket error, a 200 that is
      * not a verdict — comes back as an {@link EvaluateResult} that does not
      * {@link EvaluateResult#answered()}. The caller applies its
      * {@link FailMode}, which is the one decision this class must not make for it.
      */
     public EvaluateResult evaluate(GuardEvent event) {
-        return evaluate(event, config.payloadFromRuntime());
-    }
-
-    /**
-     * As above, with the {@code ?payload=true} question answered explicitly.
-     *
-     * <p>⚠️ A STREAMED reply asks for no payload however the bridge is configured, and
-     * that is not a micro-optimisation: the rendered body would be a document — a
-     * refusal, or the whole reply with its calls dropped — and a document cannot be
-     * spliced into frames the client has already parsed. Asking for one would echo the
-     * entire answer back across the wire to be thrown away.
-     */
-    public EvaluateResult evaluate(GuardEvent event, boolean wantPayload) {
         String body = event.toJson();
         HttpRequest request = HttpRequest.newBuilder()
-            .uri(URI.create(config.endpoint("/v1/evaluate") + (wantPayload ? "?payload=true" : "")))
+            .uri(URI.create(config.endpoint("/v1/evaluate")))
             .timeout(config.timeout())
             .header("content-type", "application/json")
             .header("authorization", "Bearer " + config.apiKey())

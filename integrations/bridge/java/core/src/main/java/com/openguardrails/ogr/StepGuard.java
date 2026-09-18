@@ -196,19 +196,16 @@ public final class StepGuard {
         }
 
         /*
-         * The spans are still applied LOCALLY, for what the runtime cannot hand back:
-         * the token → plaintext map the streamed reply's per-frame restore needs. What is
-         * FORWARDED is the runtime's own rendering when it sent one (`?payload=true`) —
-         * one splice, done where the verdict was composed — and the local result when it
-         * did not (an older runtime).
+         * The spans are applied HERE, and there is no other place they could be: a verdict
+         * carries offsets and a replacement token, never the plaintext it replaces, so
+         * only the process holding the body can carry one out. The splice also LEARNS the
+         * token → plaintext map — the reply half restores from it, and a streamed reply
+         * restores from it frame by frame.
          */
         Spans.Result spans = Spans.apply(rawBody, verdict.spans());
         guard.counters().unresolvedSpans(spans.unresolved);
         placeholders.putAll(spans.learned);
-        String forward = verdict.hasPayload()
-            ? (verdict.payloadUnchanged() ? rawBody : verdict.payloadRaw())
-            : spans.body;
-        return new RequestOutcome(RequestOutcome.Act.FORWARD, forward, null, false, false,
+        return new RequestOutcome(RequestOutcome.Act.FORWARD, spans.body, null, false, false,
             verdict.eventId(), verdict.unjudged(), placeholders);
     }
 
@@ -222,17 +219,6 @@ public final class StepGuard {
      */
     private RequestOutcome refuseRequest(Verdict verdict, String rawBody) {
         Continuation c = verdict.continuation();
-        if (verdict.hasPayload() && !verdict.payloadUnchanged()) {
-            // The runtime rendered it: a continued request to FORWARD, or the refusal
-            // document (SSE text when the caller asked for a stream) to answer with.
-            String rendered = verdict.payloadRaw();
-            if (c != null && Continuation.WITHHOLD.equals(c.style)) {
-                return new RequestOutcome(RequestOutcome.Act.FORWARD, rendered, null, false, false,
-                    verdict.eventId(), verdict.unjudged(), placeholders, Continuation.WITHHOLD);
-            }
-            return new RequestOutcome(RequestOutcome.Act.REFUSE, rawBody, rendered,
-                verdict.payloadIsStream(), false, verdict.eventId(), verdict.unjudged(), placeholders);
-        }
         if (c == null) {
             return new RequestOutcome(RequestOutcome.Act.REFUSE, rawBody,
                 refusalDocument(Verdict.REASON), streamRequested, false,
@@ -335,13 +321,6 @@ public final class StepGuard {
                 protocol.refuse(model, Verdict.REASON), true, verdict.eventId(), verdict.unjudged());
         }
 
-        if (verdict.hasPayload()) {
-            // The runtime applied the spans and restored the placeholders from its own
-            // registry, which is a superset of what this process learned.
-            return new ResponseOutcome(ResponseOutcome.Act.DELIVER,
-                verdict.payloadUnchanged() ? rawBody : verdict.payloadRaw(), null, false,
-                verdict.eventId(), verdict.unjudged());
-        }
         Spans.Result spans = Spans.apply(rawBody, verdict.spans());
         guard.counters().unresolvedSpans(spans.unresolved);
         // Spans first, restore second: the offsets index the body AS TRANSPORTED, and a
@@ -361,15 +340,6 @@ public final class StepGuard {
      */
     private ResponseOutcome refusedReply(Verdict verdict, String rawBody) {
         Continuation c = verdict.continuation();
-        if (verdict.hasPayload() && !verdict.payloadUnchanged()) {
-            String rendered = verdict.payloadRaw();
-            if (c != null && Continuation.DROP_CALLS.equals(c.style)) {
-                return new ResponseOutcome(ResponseOutcome.Act.DELIVER, rendered, null, false,
-                    verdict.eventId(), verdict.unjudged(), Continuation.DROP_CALLS);
-            }
-            return new ResponseOutcome(ResponseOutcome.Act.REFUSE, rawBody, rendered, false,
-                verdict.eventId(), verdict.unjudged());
-        }
         if (c == null) {
             return new ResponseOutcome(ResponseOutcome.Act.REFUSE, rawBody,
                 protocol.refuse(model, Verdict.REASON), false, verdict.eventId(), verdict.unjudged());
@@ -426,8 +396,7 @@ public final class StepGuard {
             return new StreamOutcome(true, hold.releaseAll(), false, "");
         }
 
-        // ⚠️ No `?payload=true` on this half: see OgrClient#evaluate(GuardEvent, boolean).
-        OgrClient.EvaluateResult result = guard.client().evaluate(event, false);
+        OgrClient.EvaluateResult result = guard.client().evaluate(event);
         if (!result.answered()) {
             guard.counters().evaluateError();
             if (config.failMode().isClosed()) {

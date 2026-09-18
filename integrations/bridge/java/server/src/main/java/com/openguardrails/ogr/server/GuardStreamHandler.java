@@ -22,7 +22,7 @@ import java.util.Map;
  * the provider's frames instead of as one JSON document.
  *
  * <pre>
- *   POST /guard/v1/step/response?payload=true
+ *   POST /guard/v1/step/response
  *   Content-Type: text/event-stream          ← the switch; the body is the provider's SSE
  *   ogr-step-id: &lt;the request half's&gt;         (required — see below)
  *   ogr-llm-protocol: openai.chat | openai.responses | anthropic.messages   (required)
@@ -49,25 +49,24 @@ import java.util.Map;
  * uses. This class is transport only: headers in, frames through, a trailing verdict
  * line out.
  *
- * <h2>The contract is the runtime's own, deliberately</h2>
+ * <h2>⚠️⚠️ Built on the PLAIN evaluate, and that is the point</h2>
  *
- * The header names, the {@code ogr-head-release-bytes} budget and the trailing
- * {@code : ogr {…}} comment are the ones AIRS answers on
- * {@code POST /v1/evaluate} with {@code Content-Type: text/event-stream}
- * (specification/runtime-api.md, "Streamed transport"), so a caller can point this lane
- * at either without changing a line. What differs is WHERE the stream is held: the
- * runtime's own lane holds a connection from the caller for the whole generation, while
- * this one sits beside the caller and spends a single evaluate round trip at the end.
- * A deployment whose runtime is far away, or one whose runtime does not implement the
- * streamed transport at all (it is optional), wants this one.
+ * Nothing here asks the runtime for anything but the one call the specification
+ * requires: the frames are reassembled into the canonical shape and sent as ONE ordinary
+ * {@code step/response} GuardEvent, and one ordinary Verdict comes back. Every
+ * consequence of that verdict is carried out HERE — the bounded head, the per-frame
+ * placeholder restore, the refusal or retraction rendered in the caller's own protocol,
+ * the continuation. So this lane works against any runtime that implements
+ * {@code POST /v1/evaluate}, at any version, with no optional extension switched on and
+ * nothing to negotiate.
  *
- * <p>⚠️ TWO OF THAT CONTRACT'S HEADERS ARE NOT READ HERE, and the reason is the same for
- * both: they name things this process already IS. {@code ogr-fail-mode} is the
- * OPERATOR's setting ({@code OGR_FAIL_MODE}) — a caller that could pick fail-open per
- * stream could opt out of the policy by asking — and {@code ogr-integration} names the
- * code that built the event, which here is this bridge. Against the runtime the caller
- * is the one building events and both are properly its to assert; through a bridge they
- * are not.
+ * <p>⚠️ The identity headers are named {@code ogr-*} rather than {@code x-ogr-*}
+ * because they are this ENVELOPE's fields carried as headers — the same four the JSON
+ * call names in its body — and not the gateway header table of
+ * specification/runtime-api.md, whose entries are claims a proxy reads off someone
+ * else's request and must strip first. ⚠️ There is no {@code ogr-fail-mode}: the fail
+ * mode is the OPERATOR's setting ({@code OGR_FAIL_MODE}), and a caller that could pick
+ * fail-open per stream could opt out of the policy by asking.
  *
  * <h2>⚠️ Why `ogr-step-id` is REQUIRED here when the JSON door mints one</h2>
  *
@@ -145,10 +144,10 @@ final class GuardStreamHandler {
             step.adoptPlaceholders(supplied);
         }
 
-        if (wantsPayload(exchange)) {
-            guarded(exchange, step, protocol, stepId);
-        } else {
+        if (verdictOnly(exchange)) {
             recordOnly(exchange, step, protocol, stepId);
+        } else {
+            guarded(exchange, step, protocol, stepId);
         }
     }
 
@@ -197,7 +196,7 @@ final class GuardStreamHandler {
     }
 
     /**
-     * The RECORD lane (no {@code ?payload=true}): the stream is read, reassembled and
+     * The RECORD lane ({@code ?verdict_only=true}): the stream is read, reassembled and
      * judged, and the answer is an ordinary JSON verdict.
      *
      * <p>⚠️ No body comes back and none could: the caller relayed its own frames to its
@@ -313,23 +312,23 @@ final class GuardStreamHandler {
     }
 
     /**
-     * {@code ?payload=true} asks for the guarded FRAMES; without it the answer is the
-     * verdict alone.
+     * {@code ?verdict_only=true} asks for the verdict ALONE; by default the answer is the
+     * guarded frames.
      *
-     * <p>⚠️ Off by default because that is the runtime's default for the same parameter,
-     * and a contract a caller is told it can point at either implementation must not have
-     * two defaults. A caller that forgets it gets no frames to forward, which it notices
-     * at once — the direction that fails loudly.
+     * <p>⚠️ The guarded frames are the default because they are what this door is FOR —
+     * the streamed counterpart of the body the JSON call hands back. The opt-out is
+     * spelled for what it does rather than borrowed from the runtime's own
+     * {@code ?payload}, which this bridge does not use and must not be confused with.
      */
-    private boolean wantsPayload(HttpExchange exchange) {
+    private boolean verdictOnly(HttpExchange exchange) {
         String query = exchange.getRequestURI().getRawQuery();
         if (query == null) {
             return false;
         }
         for (String part : query.split("&")) {
-            if (part.startsWith("payload=")) {
-                String v = part.substring("payload=".length()).toLowerCase(java.util.Locale.ROOT);
-                return "true".equals(v) || "1".equals(v) || "full".equals(v) || v.isEmpty();
+            if (part.startsWith("verdict_only=")) {
+                String v = part.substring("verdict_only=".length()).toLowerCase(java.util.Locale.ROOT);
+                return !("false".equals(v) || "0".equals(v) || "no".equals(v));
             }
         }
         return false;

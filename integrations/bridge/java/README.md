@@ -84,7 +84,7 @@ client has already read it. So the response door takes the **frames**, and answe
 the frames to forward:
 
 ```bash
-curl -sN 'localhost:8800/guard/v1/step/response?payload=true' \
+curl -sN localhost:8800/guard/v1/step/response \
   -H 'content-type: text/event-stream' \
   -H 'ogr-step-id: <the one the request half minted>' \
   -H 'ogr-llm-protocol: openai.chat' \
@@ -107,32 +107,29 @@ carries the request half's mapping when the two halves land on different replica
 ⚠️ **`ogr-step-id` is required here**, unlike the JSON call: the mapping a streamed reply
 must restore frame by frame is found by it, and a stream that cannot restore delivers
 `${OGR_EMAIL_1}` to the client. ⚠️ **A request half cannot be streamed** (`400`): a
-request is one body, judged before anything is sent. ⚠️ **`?payload=true` is what asks
-for the frames** — the runtime's own spelling and its own default, so the same code is
-correct against either. Without it the same uploaded stream is judged and answered with a
-plain JSON verdict and no frames back: a record rather than a control, for a caller that
-will not pay the hop — your reply bytes now pass through the bridge — but still wants the
-model's output side to exist in the event store.
+request is one body, judged before anything is sent. ⚠️ **The price is a hop** — your
+reply bytes now pass through the bridge. `?verdict_only=true` judges the same uploaded
+stream and answers a plain JSON verdict with no frames back: a record rather than a
+control, for a caller that will not pay the hop but still wants the model's output side
+to exist in the event store.
 
-⚠️ Two headers of that contract are deliberately **not** read here: `ogr-fail-mode` is
-the operator's setting (`OGR_FAIL_MODE`) — a caller that could choose fail-open per
-stream could opt out of the policy by asking — and `ogr-integration` names the code that
-built the event, which through this door is the bridge. Against the runtime the caller
-builds the events and both are properly its to assert.
+⚠️ There is no `ogr-fail-mode`: the fail mode is the operator's setting
+(`OGR_FAIL_MODE`), and a caller that could choose fail-open per stream could opt out of
+the policy by asking. The headers are spelled `ogr-*` rather than `x-ogr-*` because they
+are this envelope's own fields carried as headers — the same four the JSON call names in
+its body — and not the
+[gateway header table](../../../specification/runtime-api.md#at-a-gateway-the-four-tuple-arrives-as-headers),
+whose entries are claims a proxy reads off someone else's request and must strip first.
 
-These are the runtime's own streamed-transport spelling
-([runtime-api.md](../../../specification/runtime-api.md), "Streamed transport"), so a
-caller can point the same code at AIRS directly. What differs is where the stream is
-held: AIRS holds a connection from you for the whole generation, the bridge sits beside
-you and spends one evaluate round trip at the end — and a runtime that does not implement
-the streamed transport (it is optional) still works behind this door.
-
-By default the bridge calls `POST /v1/evaluate?payload=true`
-(`OGR_PAYLOAD_FROM_RUNTIME`), so the runtime applies the spans, restores the
-placeholders, renders the refusal and carries out the continuation, and the verdict's
-`payload` is what the door hands on; against a runtime that answers without one the
-bridge applies the verdict locally as before. A service that can call the runtime
-itself needs no bridge; the full client guide for doing so is
+⚠️⚠️ **The whole door is built on the plain decision call**, and that is deliberate: one
+`POST /v1/evaluate` per half, one ordinary verdict back, and this process does everything
+the verdict asks for — applies the spans at their code-point offsets, learns and restores
+the placeholders (frame by frame on a stream), renders the refusal in the caller's
+protocol, carries out a `withhold` or `drop_calls`, bounds the streamed head. Nothing is
+asked of the runtime beyond the one endpoint the specification requires, so the bridge
+runs against any conformant runtime at any version, with no optional extension switched
+on and nothing to negotiate. A service that would rather do all of that itself can call
+the runtime directly and needs no bridge — the client guide for that is
 `openguardrails-airs/docs/evaluate-client-guide.md`.
 
 `body` may be the provider body inline (as above) or a string containing it; the
@@ -224,7 +221,6 @@ agent harnesses retry it.
 | `OGR_TIMEOUT_MS` | `5000` | the evaluate budget. A CEILING for the worst case, not a target; the runtime's own model timeout must fit strictly inside it |
 | `OGR_AGENT_ID` / `OGR_AGENT_TYPE` / `OGR_AGENT_WORKSPACE` | `""` | static four-tuple values for a bridge fronting exactly one agent; a message may carry its own. There is no static `agent_user` — a constant user is already what the identity floor gives you |
 | `OGR_CALLER_FALLBACK` | `true` | inline door only: when nothing names the agent, fingerprint the client's own credential into `caller-<hash>` |
-| `OGR_PAYLOAD_FROM_RUNTIME` | `true` | ask the runtime for the rewritten body (`?payload=true`) and hand it on; `false` applies every verdict locally. ⚠️ A streamed reply never asks, at either setting: what would come back is a document, and a document cannot be spliced into frames the client has already parsed |
 | `OGR_STREAM_HEAD_RELEASE_BYTES` | `32` | client-visible content a streamed answer may deliver BEFORE the end-of-stream verdict, on both streaming lanes. `0` releases nothing; a message-door caller may override per stream with `ogr-head-release-bytes` |
 | `OGR_UPSTREAM_OPENAI` | `https://api.openai.com` | inline door only: where `/v1/chat/completions` and `/v1/responses` forward |
 | `OGR_UPSTREAM_ANTHROPIC` | `https://api.anthropic.com` | inline door only: where `/v1/messages` forwards |
@@ -255,7 +251,7 @@ agent harnesses retry it.
 
 ```bash
 mvn -q install          # both modules
-mvn test                # 77 tests, fully offline
+mvn test                # 74 tests, fully offline
 ```
 
 The tests are offline by construction: a mock runtime and a mock provider, both
