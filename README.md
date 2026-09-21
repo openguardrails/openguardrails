@@ -217,6 +217,7 @@ agent developers integrate by calling it directly:
 | [obligations](specification/obligations.md) | What the enforcement point must DO before an action proceeds — carried beside an `allow` | XACML obligations |
 | [mandate](specification/mandate.md) | The authorization envelope — what an agent in a workspace may DO; configuration, never on the wire | — |
 | [grounding](specification/grounding.md) | The evidence envelope — what an agent may CLAIM, checked against a record provider; configuration, never on the wire (1.7 draft) | — |
+| [provenance](specification/provenance.md) | The causal envelope — what CAUSED an action; trust derived in the runtime, one optional wire field (`sources`) for the part it cannot derive (1.10 draft) | — |
 | [artifact scan](specification/artifact-scan.md) | The sibling contract a scanner implements — hash-first, range-negotiated, pluggable | ICAP |
 | [local redaction](specification/local-redaction.md) | What an in-process integration does so a secret never leaves the host — mask on the way out, restore into a tool, rules served by the runtime | — |
 | [composition](specification/composition.md) | How multiple detectors' answers combine into one decision | — |
@@ -303,7 +304,7 @@ npm install && npm run build && npm test
 
 ## Status
 
-Current protocol version: **v1.9** (see [CHANGELOG.md](CHANGELOG.md) for
+Current protocol version: **v1.10** (see [CHANGELOG.md](CHANGELOG.md) for
 protocol versions). The wire is the one v1.0 declared stable in 2026-08:
 everything since is additive-optional (`additionalProperties: false` rejects
 unknown keys, not absent ones, so both ends roll forward independently), so an

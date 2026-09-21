@@ -3,7 +3,7 @@
 This is a monorepo. Run commands from the repository root unless a component
 README explicitly says otherwise.
 
-**Protocol version: v1.9 (2026-09-17)**, on the wire v1.0 declared stable
+**Protocol version: v1.10 (2026-09-21)**, on the wire v1.0 declared stable
 (2026-08-19): the v0.8 "minimum API" unchanged (one endpoint, one recipe;
 everything derivable left the wire, everything producer-known is required), plus
 the **layer model** as the normative foundational concept (entity axis: tenant →
@@ -13,7 +13,7 @@ Within 1.x changes are additive-optional only — 1.1 media · 1.2 obligations �
 1.3 mandate + `continuation` · 1.4 local redaction · 1.5 `initiator` ·
 1.6 `llm_endpoint` · 1.7 grounding (DRAFT) · 1.8 `transport` + verdict `timing` ·
 1.9 `?payload=true` (the verdict carries the rendered body) + the streamed transport
-of a `step/response`.
+of a `step/response` · 1.10 provenance + `sources` (DRAFT).
 ⚠️ Each ships at the RUNTIME first: `.strict()` rejects unknown keys, so a
 producer one version ahead is a 400 on every event it sends. The v0.7 design rationale
 lives in `../openguardrails-airs/docs/v0.7-ledger-redesign.md`; the layer
