@@ -128,8 +128,16 @@ compromised producer is worth nothing, and a runtime that promotes content to
 guarding.
 
 `sources` MAY only be used to **lower** trust (`untrusted` → `hostile`), to
-select which detectors run, and to enrich findings and audit. A runtime MUST
-reach the same decision, or a stricter one, with every `sources` entry removed.
+select which detectors run, and to enrich findings and audit. With the field
+present a runtime MUST NOT reach a **less strict** decision than it would
+without it.
+
+⚠️ The asymmetry is the entire safety argument, and it only works in this
+direction. A forged `"dmarc": "pass"` must be unable to BUY anything: if the
+field could loosen an outcome, the cheapest attack on a provenance control
+would be to assert good provenance. So it only ever tightens — and withholding
+it costs precision, never protection, which is also what lets an integration
+adopt it one channel at a time.
 
 ⚠️ **An absent `sources` is not a claim of trustworthiness.** Content with no
 entry is labelled by role derivation alone — a tool result stays `untrusted`.

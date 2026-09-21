@@ -522,6 +522,36 @@ refuse. `usage`/`timing` are specified in
 [GuardEvent § usage and timing](guard-event.md#usage-and-timing) — including
 why `timing` is a set of duration endpoints a runtime must not order by.
 
+### Labelling what a tool returned (1.10 DRAFT, optional)
+
+The recipe does not change: there is no extra call, and an integration that sends
+nothing new stays conformant. A tool result travels in the NEXT `step/request` and
+is judged there, so that is the event where an integration MAY say what the result
+actually was:
+
+```
+  2'. PRE-MODEL  evaluate(step/request {…, payload: <raw body>,
+                    sources: [{path: "payload.messages.3.content",
+                               channel: "email.inbound",
+                               auth: {spf: "pass", dkim: "fail", dmarc: "fail"}}]})
+```
+
+A runtime already derives `trusted` / `user` / `untrusted` from the message roles in
+that body and MUST do so with or without this field. What it cannot derive is that
+the opaque string a tool returned is an email nobody vouched for — that is
+producer-known, so only that goes on the wire.
+
+⚠️ **It may only ever LOWER trust.** With `sources` present a runtime MUST NOT reach
+a less strict decision than it would without it: a forged `"dmarc": "pass"` must be
+unable to buy anything, or asserting good provenance becomes the cheapest attack on
+the control. Omitting the field costs precision, never protection, which is what lets
+an integration adopt it one channel at a time.
+
+See [provenance](provenance.md) for the derivation and propagation rules this feeds,
+[GuardEvent § `sources`](guard-event.md#sources--what-the-untrusted-content-is-110-draft)
+for the field, and [`examples/provenance-agent/`](../examples/provenance-agent/) for a
+runnable episode.
+
 ### Streaming: release a bounded head, judge once
 
 A streamed response is judged EXACTLY ONCE, whole, after the stream ends —

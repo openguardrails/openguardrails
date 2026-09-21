@@ -55,8 +55,10 @@ a runtime or of a producer, and a PEP written against v1.0 is conformant today.
     so `sources` carries it: `path` (resolved through the same registration table as
     `findings[].path`), `channel`, and optional `origin` / `auth` / `fetched_at`.
   - ⚠️ **A CLAIM per the `integration` rule, with one asymmetry: it may only ever LOWER
-    trust.** A runtime MUST NOT promote content on its strength and MUST reach the same
-    decision, or a stricter one, with every entry removed. `"dmarc": "pass"` asserted by
+    trust.** A runtime MUST NOT promote content on its strength, and with the field
+    present MUST NOT reach a LESS strict decision than it would without it — a forged
+    `"dmarc": "pass"` must be unable to buy anything, or asserting good provenance
+    becomes the cheapest attack on the control. `"dmarc": "pass"` asserted by
     the process being guarded is worth nothing — and where a false `integration` label
     costs attribution, a false label here would cost the boundary itself. **Absent is not
     a claim of trustworthiness**, which is what makes the field safe to adopt one
