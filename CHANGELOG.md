@@ -32,6 +32,67 @@ version is independent of any implementation's package version.
     a longer id was judged and answered normally, then the analytics write failed at
     the far end of the request — visible only as traffic missing from a console.
 
+## [v1.10] — 2026-09-21 — PROVENANCE: the causal envelope (DRAFT)
+
+One additive-optional field and a body of runtime-side rules. Nothing is required of
+a runtime or of a producer, and a PEP written against v1.0 is conformant today.
+
+### Added
+- **`sources` on the GuardEvent, and `specification/provenance.md`** — the control
+  that judges an EDGE rather than a text. `security.prompt_injection` asks whether a
+  text contains an instruction; [`mandate`](specification/mandate.md) asks whether an
+  agent may act at all. Neither sees the failure where a fact enters through untrusted
+  data, is written to memory, and determines an action three days later: each step
+  passes on its own merits, the violation lives in the edge between them. Detection is
+  probabilistic and adversarial; provenance is structural, and it is the control that
+  still holds **after injection detection has already failed** — when the injected text
+  carried no signature to find.
+  - **Only ONE thing went on the wire, because only one thing is underivable.** The
+    conversation arrives whole on every `step/request`, so a runtime already sees which
+    messages are system, user and tool result — the whole of `trusted` / `user` /
+    `untrusted` — and it MUST derive those itself. What no payload reveals is that the
+    opaque string a tool returned is an email whose DMARC failed. That is producer-known,
+    so `sources` carries it: `path` (resolved through the same registration table as
+    `findings[].path`), `channel`, and optional `origin` / `auth` / `fetched_at`.
+  - ⚠️ **A CLAIM per the `integration` rule, with one asymmetry: it may only ever LOWER
+    trust.** A runtime MUST NOT promote content on its strength and MUST reach the same
+    decision, or a stricter one, with every entry removed. `"dmarc": "pass"` asserted by
+    the process being guarded is worth nothing — and where a false `integration` label
+    costs attribution, a false label here would cost the boundary itself. **Absent is not
+    a claim of trustworthiness**, which is what makes the field safe to adopt one
+    integration at a time.
+  - **Nothing was added to the Verdict.** A first draft carried the taint graph back to
+    the enforcement point; v0.8's removal of `attribution` already settled that question
+    — the ledger lives entirely in the runtime, everything derivable left the wire, and a
+    causal chain spanning three days and two channels does not fit in a verdict about one
+    step. It would also put judged content into a record that travels to queues, logs and
+    a SIEM, which `findings` forbids. A violation is an ordinary finding whose `path`
+    names **the action**, not the content that tainted it: an enforcement point refuses by
+    path, and on a cross-session edge the tainting content is not in this payload at all.
+  - ⚠️ **Propagation over-taints by construction, and that is the honest choice.** A model
+    does not report which tokens it drew on, so a runtime cannot attribute an action to
+    specific content and MUST NOT pretend it can. Derived content takes the context FLOOR.
+    The resulting false positives are contained at the SINK, not by guessing at the source:
+    policies read the capabilities `mandate.bindings` already defines, read-only
+    capabilities carry no rule at all, `untrusted` flags where `hostile` blocks, and an
+    operator-visible **clearing** exit exists — one that a `GuardEvent` MUST NOT be able to
+    express, since an agent that can launder its own context has no provenance control.
+  - **Memory is the cross-session edge**, and it already had a category:
+    `security.memory_poisoning`. Provenance is what lets a runtime raise it **without
+    having detected an instruction**, because the edge is the evidence. A runtime SHOULD
+    retain `key → trust` for durable writes and MUST label the matching read no higher
+    than `untrusted`.
+- **`security.tainted_action`** (taxonomy) — an action with external effect whose causal
+  chain reaches untrusted content, where the content itself carries no instruction and the
+  action breaches no mandate. Deliberately NOT a `security.prompt_injection` subcategory:
+  the text that taints an action often has no injection signature, so filing it under
+  injection would contradict the very case it exists for. `security.memory_poisoning` is
+  its cross-session special case.
+
+### Deployment note
+⚠️ **This ships at the RUNTIME first.** `.strict()` rejects unknown keys, so any producer
+sending `sources` before the runtime accepts it takes a 400 on every event.
+
 ## [v1.9] — 2026-09-17 — the verdict can carry the BODY, and a stream is a TRANSPORT
 
 Two additive-optional additions, both for the same caller: a service that holds the

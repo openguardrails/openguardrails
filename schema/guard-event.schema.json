@@ -2,7 +2,7 @@
  "$schema": "https://json-schema.org/draft/2020-12/schema",
  "$id": "https://openguardrails.com/schema/1.0/guard-event.schema.json",
  "title": "GuardEvent",
- "description": "A unit observed at an OGR integration point, on the one observed plane: LLM messages. Two kinds: the two halves of a step (one model call). Every field is required except (1.2) 'obligation_results', 'integration', 'connection', 'session_hint', (1.4) 'redaction', (1.5) 'initiator', (1.6) 'llm_endpoint' and (1.8) 'transport'; the empty string on an identity field is the explicit 'no assertion'. All fields are flat, top-level snake_case; objects are reserved for inherently structured data (payload).",
+ "description": "A unit observed at an OGR integration point, on the one observed plane: LLM messages. Two kinds: the two halves of a step (one model call). Every field is required except (1.2) 'obligation_results', 'integration', 'connection', 'session_hint', (1.4) 'redaction', (1.5) 'initiator', (1.6) 'llm_endpoint' (1.8) 'transport' and (1.10) 'sources'; the empty string on an identity field is the explicit 'no assertion'. All fields are flat, top-level snake_case; objects are reserved for inherently structured data (payload).",
  "type": "object",
  "required": [
   "kind",
@@ -221,6 +221,45 @@
    },
    "additionalProperties": false,
    "$comment": "The envelope is 'additionalProperties: false' because an unknown TOP-LEVEL key is a producer talking about something else; this sub-object is deliberately tolerant in the other direction — a validator SHOULD strip unknown keys inside it rather than reject the event, so an integration one version ahead reporting a hop this build has no field for keeps validating and loses only the field it added. A diagnostic sub-object must not be the thing that 400s an upgrade."
+  },
+  "sources": {
+   "type": "array",
+   "maxItems": 64,
+   "description": "OPTIONAL (OGR 1.10 DRAFT). WHAT the untrusted content in this payload ACTUALLY IS \u2014 see specification/provenance.md. A runtime already derives trusted/user/untrusted from message roles; what it cannot derive is that the opaque string a tool returned is an email whose DMARC failed. That fact is producer-known, so it rides here. A CLAIM per the `integration` rule: a runtime MUST NOT RAISE trust on its strength, MAY use it only to lower trust, select detectors and enrich audit, and MUST reach the same decision or a stricter one with every entry removed. Absent is not a claim of trustworthiness \u2014 unlabelled content keeps the trust its role implies.",
+   "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+     "path",
+     "channel"
+    ],
+    "properties": {
+     "path": {
+      "type": "string",
+      "maxLength": 256,
+      "description": "The registered payload path this entry describes, resolved through the same table as findings[].path. A path that names nothing in the payload is dropped, never an error."
+     },
+     "channel": {
+      "type": "string",
+      "maxLength": 64,
+      "description": "HOW the content entered: 'email.inbound', 'web.fetch', 'doc.upload', 'mcp.tool', 'rag.retrieve', \u2026 Open vocabulary; an unknown channel is untrusted like any other, never a reason to reject the event."
+     },
+     "origin": {
+      "type": "string",
+      "maxLength": 255,
+      "description": "The remote identity as the channel names it (a sender address, a URL, a document id). Attribution and audit only."
+     },
+     "auth": {
+      "type": "object",
+      "description": "The channel's OWN authentication result, verbatim and channel-specific (e.g. {spf, dkim, dmarc} for email). Deliberately untyped: a runtime reads what it recognises and ignores the rest. Never a proof \u2014 see the array's description."
+     },
+     "fetched_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 instant the content was obtained, where it differs materially from when this step was built."
+     }
+    }
+   }
   }
  }
 }

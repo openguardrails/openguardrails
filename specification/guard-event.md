@@ -575,6 +575,52 @@ traffic is a success record and raises nothing, while a secret the runtime
 still finds on a step carrying this report can be named — a stale ruleset, a
 missed rule, or a shape no rule covers — instead of being a mystery.
 
+## `sources` — what the untrusted content IS (1.10 DRAFT)
+
+OPTIONAL, and the newest field to earn a place on the wire by the usual test:
+**a runtime cannot derive it.** Everything else about trust it can. The
+conversation arrives whole on every `step/request`, so the runtime already sees
+which messages are system, which are the user's, and which are tool results —
+and that is the whole of `trusted` / `user` / `untrusted`. A runtime MUST derive
+those itself and MUST NOT require this field to do it.
+
+What no payload reveals is what an untrusted string actually is. A tool result
+is opaque: the runtime sees that a tool returned text, not that the text is an
+email whose DMARC failed, nor who sent it. The producer holds that fact alone,
+so it rides here — one entry per registered path:
+
+```json
+"sources": [
+  { "path": "payload.messages.3.content",
+    "channel": "email.inbound",
+    "origin": "billing@vendor-example.com",
+    "auth": { "spf": "pass", "dkim": "fail", "dmarc": "fail" } }
+]
+```
+
+`path` resolves through the same registration table as
+[`findings[].path`](verdict.md#findings); a path naming nothing in the payload is
+dropped, never an error. `channel` is an open vocabulary — an unknown channel is
+untrusted like any other and MUST NOT reject the event. `auth` is deliberately
+untyped: it is the channel's own result, verbatim, and a runtime reads what it
+recognises.
+
+⚠️ **A CLAIM per the [`integration` rule](#integration), with one asymmetry that
+matters more here than anywhere else: it may only ever LOWER trust.** A runtime
+MUST NOT promote content on the strength of this field, and MUST reach the same
+decision, or a stricter one, with every entry removed. `"dmarc": "pass"` asserted
+by the process being guarded is worth exactly nothing — and unlike `integration`,
+where a false label costs attribution, a false label here would cost the boundary
+itself.
+
+⚠️ **Absent is not a claim of trustworthiness.** Unlabelled content keeps the
+trust its role implies; a tool result with no entry stays `untrusted`. A producer
+that omits the field loses precision, never protection — which is what makes the
+field safe to adopt incrementally.
+
+The derivation and propagation rules this feeds, and the enforcement it enables,
+are in [provenance](provenance.md). None of that is on the wire.
+
 There is **no `event_id` on the request**. Identifiers are the runtime's job:
 
 ### Identifiers are born at the runtime
