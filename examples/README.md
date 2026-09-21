@@ -75,6 +75,23 @@ desk, a security engagement) and a ~200-line reference evaluator show why the sa
 tool call is compliant for one agent and a violation for the next. Offline, zero
 dependencies: `cd mandate-agent && ./demo.sh`.
 
+## A third example: the causal envelope
+
+[`provenance-agent/`](provenance-agent/) is the runnable form of
+[`specification/provenance.md`](../specification/provenance.md) — the control that
+judges an **edge** rather than a text, and the one that still holds after injection
+detection has failed. Three steps across four days: an email mentions a changed bank
+account (no imperative, no jailbreak, **no injection signature** — an ordinary
+business message whose DMARC failed), the agent files it in memory, and four days
+later a new session pays an invoice to it. Every step passes on its own merits; the
+violation lives between them.
+
+The demo runs the same episode three ways — point judgment only (`ALLOW`), trust
+derived from message roles (`FLAG`), and with the optional `sources` field
+(`BLOCK`) — which is also how it makes the direction of the conformance rule
+visible: **with** `sources` a runtime MUST NOT reach a **less strict** decision than
+without it. Offline, zero dependencies: `cd provenance-agent && ./demo.sh`.
+
 ## Where to go next
 
 - [`specification/runtime-api.md`](../specification/runtime-api.md) — the

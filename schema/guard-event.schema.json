@@ -225,7 +225,7 @@
   "sources": {
    "type": "array",
    "maxItems": 64,
-   "description": "OPTIONAL (OGR 1.10 DRAFT). WHAT the untrusted content in this payload ACTUALLY IS \u2014 see specification/provenance.md. A runtime already derives trusted/user/untrusted from message roles; what it cannot derive is that the opaque string a tool returned is an email whose DMARC failed. That fact is producer-known, so it rides here. A CLAIM per the `integration` rule: a runtime MUST NOT RAISE trust on its strength, MAY use it only to lower trust, select detectors and enrich audit, and MUST reach the same decision or a stricter one with every entry removed. Absent is not a claim of trustworthiness \u2014 unlabelled content keeps the trust its role implies.",
+   "description": "OPTIONAL (OGR 1.10 DRAFT). WHAT the untrusted content in this payload ACTUALLY IS \u2014 see specification/provenance.md. A runtime already derives trusted/user/untrusted from message roles; what it cannot derive is that the opaque string a tool returned is an email whose DMARC failed. That fact is producer-known, so it rides here. A CLAIM per the `integration` rule: a runtime MUST NOT RAISE trust on its strength, MAY use it only to lower trust, select detectors and enrich audit, and with the field present MUST NOT reach a LESS strict decision than it would without it (a forged 'dmarc: pass' must be unable to buy anything). Absent is not a claim of trustworthiness \u2014 unlabelled content keeps the trust its role implies.",
    "items": {
     "type": "object",
     "additionalProperties": false,

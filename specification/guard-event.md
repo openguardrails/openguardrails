@@ -26,7 +26,7 @@ in the field, turning a diagnostic into an outage.
 
 ## Kinds
 
-An agent's loop runs in [steps](overview.md#the-model) — one model call each.
+An agent's loop runs in [steps](overview.md#the-layer-model) — one model call each.
 An event is one HALF of a step, observed at the moment the integration can
 still refuse it:
 
@@ -607,8 +607,10 @@ recognises.
 
 ⚠️ **A CLAIM per the [`integration` rule](#integration), with one asymmetry that
 matters more here than anywhere else: it may only ever LOWER trust.** A runtime
-MUST NOT promote content on the strength of this field, and MUST reach the same
-decision, or a stricter one, with every entry removed. `"dmarc": "pass"` asserted
+MUST NOT promote content on the strength of this field, and with it present MUST
+NOT reach a LESS strict decision than it would without it — a forged
+`"dmarc": "pass"` must be unable to buy anything, or asserting good provenance
+becomes the cheapest attack on the control. `"dmarc": "pass"` asserted
 by the process being guarded is worth exactly nothing — and unlike `integration`,
 where a false label costs attribution, a false label here would cost the boundary
 itself.
