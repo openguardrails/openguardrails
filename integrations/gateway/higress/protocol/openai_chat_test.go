@@ -354,7 +354,7 @@ func TestChunkSegmentsHoldsAFrameSplitAcrossArrivals(t *testing.T) {
 	}
 	segs := s.ChunkSegments([]byte(full[20:]), false)
 	if len(segs) != 1 || string(segs[0].Bytes) != full {
-		t.Fatalf("the rejoined frame came out as %q", segs)
+		t.Fatalf("the rejoined frame came out as %+v", segs)
 	}
 	if segs[0].Content != 5 {
 		t.Fatalf("content tag = %d, want 5", segs[0].Content)

@@ -113,6 +113,10 @@ const (
 	// candidate runtime must not read as lost primary traffic, which is the one
 	// question `post_failed` exists to answer.
 	cntMirrorFailed
+	// A streamed answer whose withheld tail passed `stream_hold_max_bytes` (3.15.0):
+	// released unenforced under `open`, refused under `closed`. Either way the
+	// stream stopped being held, which is why it is counted and not merely logged.
+	cntHoldOverflow
 	cntLen
 )
 
@@ -145,6 +149,7 @@ var counterNames = [cntLen]string{
 	cntEmptyReply:      "empty_reply",
 	cntPostFailed:      "post_failed",
 	cntMirrorFailed:    "mirror_failed",
+	cntHoldOverflow:    "hold_overflow",
 }
 
 // bump adds to one counter. A lost increment under contention is acceptable —

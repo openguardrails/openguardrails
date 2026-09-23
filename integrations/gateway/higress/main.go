@@ -66,6 +66,9 @@ const (
 	modeObserve = "observe"
 	modeEnforce = "enforce"
 
+	releaseProse = "prose"
+	releaseHead  = "head"
+
 	// The canonical endpoint paths (specification/runtime-api.md): clients MUST
 	// join a configured base with `/v1/...` and hard-code no other prefix. The
 	// prefix this build joins them onto is `base_path`, "" by default; the
@@ -98,6 +101,11 @@ type Config struct {
 	// How much client-visible content (UTF-8 bytes) the streaming lane withholds
 	// until the end-of-stream verdict — see tailhold.go.
 	streamHeadReleaseBytes int
+	// streamRelease picks the release rule for an enforced stream (tailhold.go):
+	// releaseProse (default since 3.15.0) or releaseHead (the 3.10.0 budget).
+	streamRelease string
+	// streamHoldMaxBytes bounds what one stream may have withheld; <= 0 is none.
+	streamHoldMaxBytes int
 
 	// The OGR agent identity: which header(s) carry each field, plus static
 	// fallbacks for a route that fronts exactly one agent. agent_user has no
@@ -239,6 +247,32 @@ func parseConfig(j gjson.Result, c *Config) error {
 			n = 0
 		}
 		c.streamHeadReleaseBytes = n
+	}
+	/*
+	 * ⚠️ `stream_release` — which release rule an enforced stream uses (tailhold.go).
+	 * `prose` (the default since 3.15.0) forwards text and reasoning as the model
+	 * produces them and holds from the first tool-call byte and the ending; `head` is
+	 * the 3.10.0 bound, where `stream_head_release_bytes` above applies. An unknown
+	 * value is SAID and falls to the default — never a silent third behaviour.
+	 */
+	c.streamRelease = releaseProse
+	if v := j.Get("stream_release"); v.Exists() {
+		switch r := v.String(); r {
+		case releaseProse, releaseHead:
+			c.streamRelease = r
+		default:
+			proxywasm.LogWarnf("[OGR-CONFIG] stream_release %q is not one of prose|head — using %s", r, releaseProse)
+		}
+	}
+	/*
+	 * ⚠️ `stream_hold_max_bytes` — the most one stream may have WITHHELD, in raw bytes
+	 * (SSE framing included, since that is what sits in the heap). Default 8 MiB;
+	 * `0` or less means no bound, which is the pre-3.15.0 behaviour and a way to run
+	 * a gateway out of memory. What happens past it is `fail_mode`'s (holdOverflow).
+	 */
+	c.streamHoldMaxBytes = 8 << 20
+	if v := j.Get("stream_hold_max_bytes"); v.Exists() {
+		c.streamHoldMaxBytes = int(v.Int())
 	}
 	/*
 	 * ⚠️ `stream_tail_chars` is ACCEPTED AND IGNORED since 3.10.0, and SAID OUT LOUD.
@@ -405,8 +439,8 @@ func parseConfig(j gjson.Result, c *Config) error {
 	// build it is not what most requests run in, so the line says so itself —
 	// otherwise `mode=enforce` beside a gateway that enforces nothing reads as a
 	// broken plugin. Drop `beta=` with betaflags.go.
-	proxywasm.LogWarnf("[OGR-CONFIG] v%s mode=%s beta=%s cluster=%s host=%s base_path=%q timeout=%dms fail=%s head=%d beat=%ds log=%s protocols=%s",
-		pluginVersion, c.mode, betaFlagOGR, c.cluster, c.host, c.basePath, c.timeoutMs, failLabel(c.failClosed), c.streamHeadReleaseBytes,
+	proxywasm.LogWarnf("[OGR-CONFIG] v%s mode=%s beta=%s cluster=%s host=%s base_path=%q timeout=%dms fail=%s release=%s head=%d hold_max=%d beat=%ds log=%s protocols=%s",
+		pluginVersion, c.mode, betaFlagOGR, c.cluster, c.host, c.basePath, c.timeoutMs, failLabel(c.failClosed), c.streamRelease, c.streamHeadReleaseBytes, c.streamHoldMaxBytes,
 		heartbeatPeriodMs/1000, logLevelName(logLevel), strings.Join(protocolNames(), ","))
 	return nil
 }
@@ -1500,6 +1534,10 @@ const partialMessage = "Part of this request could not be evaluated and this dep
 // could not reassemble the answer to judge it. Neither an outage nor a partial
 // verdict — an operator debugging it looks at the stream decoding, not at
 // connectivity.
+// overflowMessage: the withheld tail passed `stream_hold_max_bytes` under a refusing
+// posture (tailhold.go, holdOverflow).
+const overflowMessage = "This response was too large to hold for evaluation and this deployment is configured to fail closed."
+
 const unreadMessage = "This response could not be read for evaluation and this deployment is configured to fail closed."
 
 // unorderedBudgetHint is appended to a `status=0`, because that status is exactly as
