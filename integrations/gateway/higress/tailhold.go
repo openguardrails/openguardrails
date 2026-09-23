@@ -34,7 +34,8 @@ import (
 //     the answer never completes as sent.
 //
 // ⚠️⚠️ **SINCE 3.15.0 THE DEFAULT RELEASES THE PROSE AND HOLDS THE ACTIONS**
-// (`stream_release: prose`). The head budget below made every enforced stream go
+// (3.15.1: `stream_head_release_bytes: -1`, the default — one knob, the 3.15.0
+// `stream_release` switch is gone). The head budget below made every enforced stream go
 // quiet ~10 characters in and stay quiet for the WHOLE generation, so the caller's
 // wait became the model's generation time plus the judgement: measured at mcd on
 // 2026-09-23, a simple question sat ~2 minutes behind its first fragment, and no
@@ -55,7 +56,8 @@ import (
 //     `message_stop`, `response.completed` are held, so nothing downstream reads the
 //     turn as over and acts on it.
 //
-// `stream_release: head` restores the 3.10.0 posture exactly — the section below.
+// A positive `stream_head_release_bytes` restores the 3.10.0 budget below — with the
+// one difference that tool-call bytes are held whatever it is; `0` releases nothing.
 //
 // ⚠️⚠️ **AND WHAT IS HELD IS BOUNDED (`stream_hold_max_bytes`, default 8 MiB).** The
 // hold kept every withheld frame in the Wasm heap with no ceiling — a long answer
@@ -134,14 +136,13 @@ import (
 // ⚠️ The NAME still says tail because what is withheld is still the tail of the
 // answer; what moved in 3.10.0 is where the boundary is measured FROM.
 type tailHold struct {
-	// head is the most client-visible content, in UTF-8 bytes, that may reach the
-	// caller before the end-of-stream verdict; < 0 means release nothing at all (the
-	// non-SSE degenerate case). 0 is a real setting with the same effect, chosen
-	// rather than fallen into. Ignored under `prose` except for its sign.
+	// head is the most client-visible PROSE, in UTF-8 bytes, that may reach the
+	// caller before the end-of-stream verdict; -1 is no bound (the default), 0
+	// releases nothing. It never releases a segment tagged Hold.
 	head int
-	// prose selects the 3.15.0 release rule: forward every segment until the first
-	// one tagged Hold (a tool-call byte or the ending), whatever its content size.
-	prose bool
+	// holdAll: release nothing early at all — the non-SSE degenerate case, where
+	// partial JSON is useless to a client.
+	holdAll bool
 	// sse records whether the response is a real event stream — it decides which
 	// shape a refusal takes when nothing has been released yet.
 	sse bool
@@ -185,47 +186,40 @@ type heldSeg struct {
 }
 
 func newTailHold(head int, sse bool) *tailHold {
-	if !sse {
-		head = -1 // no frames worth releasing early; hold the whole reply
-	}
-	return &tailHold{head: head, sse: sse}
-}
-
-// newProseHold is the 3.15.0 default — see the file header.
-func newProseHold(sse bool, max int) *tailHold {
-	h := newTailHold(0, sse)
-	h.prose = true
-	h.max = max
-	return h
+	return &tailHold{head: head, sse: sse, holdAll: !sse}
 }
 
 // releasable is the release rule for the segment at the front of the queue.
+//
+// ⚠️ `hold` wins over every budget: tool-call bytes and the reply's ending wait for
+// the verdict whatever `stream_head_release_bytes` says (3.15.1). Under the 3.10.0
+// budget alone a large N used to let call bytes out, which is what `releasedCalls`
+// and the hard retraction existed to survive; it stays as the backstop for a
+// decoder that cannot tag.
 func (h *tailHold) releasable(s heldSeg) bool {
-	if h.bypass {
+	switch {
+	case h.bypass:
 		return true
-	}
-	if h.head < 0 {
+	case h.holdAll, s.hold:
 		return false
+	case h.head < 0:
+		return true
+	default:
+		return s.cumContent <= h.head
 	}
-	if h.prose {
-		return !s.hold
-	}
-	return s.cumContent <= h.head
 }
 
 // push queues one processed chunk and returns the prefix now safe to release.
 //
-// Under `head`: every queued segment whose completed content still fits inside the
-// head budget. ⚠️ A CEILING, not a floor. `cumContent` is the exposure that
+// Every queued segment up to the first tagged `hold` (a tool-call byte or the
+// ending — a snapshot of two monotonic decoder flags, so once one segment is held
+// every later one is too) and, when a budget is set, whose completed content still
+// fits inside it. ⚠️ A CEILING, not a floor. `cumContent` is the exposure that
 // releasing this segment would produce, so `<= head` never overshoots: a frame that
 // would carry the caller past the bound is held WHOLE rather than trimmed, because
 // an SSE frame cut in half is not a frame. Once the front segment fails the test
 // every later one fails it too (cumContent is non-decreasing), so the budget, once
 // spent, stays spent.
-//
-// Under `prose`: every queued segment up to the first tagged `hold`. The tag is a
-// snapshot of two monotonic decoder flags, so once one segment is held every later
-// one is too — the same "once stopped, stays stopped" shape.
 //
 // ⚠️ Contentless frames (the opening role delta, a keepalive comment, usage-only
 // framing) carry the PRECEDING cumContent and so ride out for free while the budget
@@ -312,13 +306,8 @@ func armTailHold(ctx wrapper.HttpContext, cfg Config, rs *reqState) {
 func holdChunk(ctx wrapper.HttpContext, cfg Config, rs *reqState, sp *streamProcessor,
 	segs []protocol.Segment, isLast bool) []byte {
 	if rs.hold == nil {
-		sse := ctx.GetBoolContext(ctxStreaming, true)
-		if cfg.streamRelease == releaseHead {
-			rs.hold = newTailHold(cfg.streamHeadReleaseBytes, sse)
-			rs.hold.max = cfg.streamHoldMaxBytes
-		} else {
-			rs.hold = newProseHold(sse, cfg.streamHoldMaxBytes)
-		}
+		rs.hold = newTailHold(cfg.streamHeadReleaseBytes, ctx.GetBoolContext(ctxStreaming, true))
+		rs.hold.max = cfg.streamHoldMaxBytes
 	}
 	rs.sp = sp
 	if rs.hold.cut {

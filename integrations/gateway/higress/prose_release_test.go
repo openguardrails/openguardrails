@@ -23,7 +23,7 @@ func runProse(t *testing.T, proto string, frames []string) (released, held strin
 		t.Fatalf("%s is not registered", proto)
 	}
 	sp := newStreamProcessor(p, nil, true, time.Time{}, false)
-	h := newProseHold(true, 0)
+	h := proseHold(true, 0)
 	var out strings.Builder
 	for i, f := range frames {
 		last := i == len(frames)-1
@@ -170,14 +170,14 @@ func (silentDecoder) Output() protocol.Output              { return protocol.Out
 
 // A non-SSE reply has no frames worth releasing, prose or not.
 func TestProseHoldsANonSSEReplyWhole(t *testing.T) {
-	h := newProseHold(false, 0)
+	h := proseHold(false, 0)
 	if got := h.push([]byte(`{"choices":[`), 10, false); got != nil {
 		t.Fatalf("released %q of a JSON body", got)
 	}
 }
 
 func TestTheHoldIsBounded(t *testing.T) {
-	h := newProseHold(true, 10)
+	h := proseHold(true, 10)
 	h.push([]byte("prose"), 5, false) // released: not counted
 	if h.overflowed() {
 		t.Fatal("released bytes counted against the hold")
@@ -204,9 +204,37 @@ func TestTheHoldIsBounded(t *testing.T) {
 }
 
 func TestZeroMeansNoBound(t *testing.T) {
-	h := newProseHold(true, 0)
+	h := proseHold(true, 0)
 	h.push([]byte(strings.Repeat("x", 1<<20)), 1, true)
 	if h.overflowed() {
 		t.Fatal("stream_hold_max_bytes 0 bounded the hold")
+	}
+}
+
+func proseHold(sse bool, max int) *tailHold {
+	h := newTailHold(-1, sse)
+	h.max = max
+	return h
+}
+
+// ⚠️ 3.15.1: the budget bounds PROSE only. A tool-call segment is held even when it
+// would fit inside a budget — under 3.10.0 a large N let call bytes out.
+func TestAToolCallIsHeldWhateverTheBudget(t *testing.T) {
+	h := newTailHold(1000, true)
+	if got := h.push([]byte("prose"), 5, false); len(got) != 1 {
+		t.Fatalf("prose inside the budget waited: %q", got)
+	}
+	if got := h.push([]byte("call"), 9, true); got != nil {
+		t.Fatalf("a tool-call segment left inside a 1000-byte budget: %q", got)
+	}
+	if h.releasedCalls {
+		t.Fatal("releasedCalls set although no call byte left")
+	}
+}
+
+func TestAZeroBudgetStillReleasesNothingUnderTheOneKnob(t *testing.T) {
+	h := newTailHold(0, true)
+	if got := h.push([]byte("prose"), 5, false); got != nil {
+		t.Fatalf("0 released %q", got)
 	}
 }

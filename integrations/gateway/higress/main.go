@@ -66,9 +66,6 @@ const (
 	modeObserve = "observe"
 	modeEnforce = "enforce"
 
-	releaseProse = "prose"
-	releaseHead  = "head"
-
 	// The canonical endpoint paths (specification/runtime-api.md): clients MUST
 	// join a configured base with `/v1/...` and hard-code no other prefix. The
 	// prefix this build joins them onto is `base_path`, "" by default; the
@@ -101,9 +98,6 @@ type Config struct {
 	// How much client-visible content (UTF-8 bytes) the streaming lane withholds
 	// until the end-of-stream verdict — see tailhold.go.
 	streamHeadReleaseBytes int
-	// streamRelease picks the release rule for an enforced stream (tailhold.go):
-	// releaseProse (default since 3.15.0) or releaseHead (the 3.10.0 budget).
-	streamRelease string
 	// streamHoldMaxBytes bounds what one stream may have withheld; <= 0 is none.
 	streamHoldMaxBytes int
 
@@ -220,49 +214,47 @@ func parseConfig(j gjson.Result, c *Config) error {
 	c.failClosed = j.Get("fail_mode").String() == "closed"
 
 	/*
-	 * How much of a streamed answer may reach the caller before the end-of-stream
-	 * verdict, in UTF-8 bytes of client-visible content (tailhold.go). Everything
-	 * after it is withheld, so this is the deployment's exposure BOUND, not a
-	 * withholding floor.
+	 * How much of a streamed answer's PROSE may reach the caller before the
+	 * end-of-stream verdict, in UTF-8 bytes of client-visible content (tailhold.go).
+	 * ONE knob since 3.15.1 (Tom: 「stream_release 没有必要，stream_head_release_bytes
+	 * 就够了」):
 	 *
-	 * ⚠️ **32 is a posture, chosen with its reasoning.** It is roughly ten characters
-	 * — enough that the client renders a first fragment and measures an honest TTFT,
-	 * and enough to buy the judge the generation's whole duration, on the overwhelming
-	 * majority of requests that are never refused at all. `0` releases nothing (a
-	 * spinner, and every block a CLEAN refusal); a value larger than any answer
-	 * degenerates to the old behaviour of delivering the reply and retracting it.
+	 *   -1 (default)  no bound on the prose: text and reasoning stream live as the model
+	 *                 produces them — the fix for an enforced stream that went quiet
+	 *                 for the whole generation (mcd, 2026-09-23, ~2 minutes).
+	 *    N > 0        the 3.10.0 head bound: at most N bytes before the verdict.
+	 *    0            nothing before the verdict: a spinner, and every block a CLEAN
+	 *                 refusal.
 	 *
-	 * ⚠️ **A CONSTANT PER DEPLOYMENT IS THE POINT.** The predecessor of this knob was
-	 * `headReleaseBytes`, deliberately hard-coded, on the grounds that bounding the
-	 * head is what makes exposure independent of judge latency — with no bound it is
-	 * `latency × token rate` and drifts with the caller's context size, so a coding
-	 * agent shipping 64 KB of conversation leaks proportionally more than a chatbot at
-	 * the same setting. Making it configurable does not weaken that: it is still a
-	 * constant, just one the operator picks.
+	 * ⚠️⚠️ **WHATEVER THE NUMBER, TOOL-CALL BYTES AND THE REPLY'S ENDING NEVER LEAVE
+	 * BEFORE THE VERDICT** (`protocol.Segment.Hold`). The number bounds PROSE only. So
+	 * no setting lets an agent act on an unjudged call, and a refused call can always
+	 * be dropped with the loop kept running.
+	 *
+	 * ⚠️ `-1` rather than a word, deliberately: ≤ 3.14 clamped a negative to 0, so a
+	 * config written for this build and applied to an older plugin lands on HOLD
+	 * EVERYTHING — the strict side — rather than on the loose one. Any negative reads
+	 * as -1.
+	 * ⚠️ The cost of -1, stated: the answer TEXT's content judgement is
+	 * detect-and-retract. A deployment where a violating answer must never be seen
+	 * first (a public chatbot under a content standard) sets a small N or 0.
 	 */
-	c.streamHeadReleaseBytes = 32
+	c.streamHeadReleaseBytes = -1
 	if v := j.Get("stream_head_release_bytes"); v.Exists() {
 		n := int(v.Int())
 		if n < 0 {
-			n = 0
+			n = -1
 		}
 		c.streamHeadReleaseBytes = n
 	}
 	/*
-	 * ⚠️ `stream_release` — which release rule an enforced stream uses (tailhold.go).
-	 * `prose` (the default since 3.15.0) forwards text and reasoning as the model
-	 * produces them and holds from the first tool-call byte and the ending; `head` is
-	 * the 3.10.0 bound, where `stream_head_release_bytes` above applies. An unknown
-	 * value is SAID and falls to the default — never a silent third behaviour.
+	 * ⚠️ `stream_release` lived for ONE release (3.15.0, no known adopter) and is
+	 * gone. SAID if present, because a config naming `head` expected the head bound
+	 * and now gets whatever `stream_head_release_bytes` says.
 	 */
-	c.streamRelease = releaseProse
-	if v := j.Get("stream_release"); v.Exists() {
-		switch r := v.String(); r {
-		case releaseProse, releaseHead:
-			c.streamRelease = r
-		default:
-			proxywasm.LogWarnf("[OGR-CONFIG] stream_release %q is not one of prose|head — using %s", r, releaseProse)
-		}
+	if j.Get("stream_release").Exists() {
+		proxywasm.LogWarnf("[OGR-CONFIG] stream_release is IGNORED since v%s — stream_head_release_bytes alone decides (now %d; -1 = prose streams live)",
+			pluginVersion, c.streamHeadReleaseBytes)
 	}
 	/*
 	 * ⚠️ `stream_hold_max_bytes` — the most one stream may have WITHHELD, in raw bytes
@@ -277,13 +269,11 @@ func parseConfig(j gjson.Result, c *Config) error {
 	/*
 	 * ⚠️ `stream_tail_chars` is ACCEPTED AND IGNORED since 3.10.0, and SAID OUT LOUD.
 	 * Silently ignoring it would leave an operator believing a number that no longer
-	 * configures anything — 0054's defect in a config file. The ignoring itself is
-	 * safe in the only direction that matters: whoever raised it wanted MORE withheld,
-	 * and the head bound withholds more than any tail setting ever did.
+	 * configures anything — 0054's defect in a config file.
 	 */
 	if j.Get("stream_tail_chars").Exists() {
-		proxywasm.LogWarnf("[OGR-CONFIG] stream_tail_chars is IGNORED since v%s — the bound moved to the HEAD of the answer; set stream_head_release_bytes (now %d) instead",
-			pluginVersion, c.streamHeadReleaseBytes)
+		proxywasm.LogWarnf("[OGR-CONFIG] stream_tail_chars is IGNORED since v3.10.0 — set stream_head_release_bytes instead (now %d; -1 = prose streams live, N = at most N bytes before the verdict, 0 = nothing)",
+			c.streamHeadReleaseBytes)
 	}
 
 	/**
@@ -439,8 +429,8 @@ func parseConfig(j gjson.Result, c *Config) error {
 	// build it is not what most requests run in, so the line says so itself —
 	// otherwise `mode=enforce` beside a gateway that enforces nothing reads as a
 	// broken plugin. Drop `beta=` with betaflags.go.
-	proxywasm.LogWarnf("[OGR-CONFIG] v%s mode=%s beta=%s cluster=%s host=%s base_path=%q timeout=%dms fail=%s release=%s head=%d hold_max=%d beat=%ds log=%s protocols=%s",
-		pluginVersion, c.mode, betaFlagOGR, c.cluster, c.host, c.basePath, c.timeoutMs, failLabel(c.failClosed), c.streamRelease, c.streamHeadReleaseBytes, c.streamHoldMaxBytes,
+	proxywasm.LogWarnf("[OGR-CONFIG] v%s mode=%s beta=%s cluster=%s host=%s base_path=%q timeout=%dms fail=%s head=%d hold_max=%d beat=%ds log=%s protocols=%s",
+		pluginVersion, c.mode, betaFlagOGR, c.cluster, c.host, c.basePath, c.timeoutMs, failLabel(c.failClosed), c.streamHeadReleaseBytes, c.streamHoldMaxBytes,
 		heartbeatPeriodMs/1000, logLevelName(logLevel), strings.Join(protocolNames(), ","))
 	return nil
 }

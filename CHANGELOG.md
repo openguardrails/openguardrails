@@ -9,16 +9,22 @@ version is independent of any implementation's package version.
 
 ## [Unreleased]
 
+### Higress plugin 3.15.1 (implementation, not a wire change)
+- **One knob: `stream_head_release_bytes`**, default `-1` (all prose live); `N` = at
+  most N bytes; `0` = nothing. The 3.15.0 `stream_release` switch is removed (ignored
+  with a startup warning). Tool-call bytes and ending frames now wait for the verdict
+  under EVERY value — a large N used to let call bytes out.
+
 ### Higress plugin 3.15.0 (implementation, not a wire change)
 - **An enforced stream releases the PROSE and holds the ACTIONS** (`stream_release:
-  prose`, the new default). Text and reasoning go out frame by frame as the model
+  prose`, the new default; superseded by 3.15.1's `-1`). Text and reasoning go out frame by frame as the model
   produces them; everything from the first tool-call byte, and every frame that ENDS
   the reply (`finish_reason`, `[DONE]`, `message_delta` / `message_stop`,
   `response.completed` / `.incomplete` / `.failed`), waits for the end-of-stream
   verdict. The 3.10.0 head budget made an enforced stream go quiet ~10 characters in
   for the whole generation — measured at a customer as ~2 minutes of silence on a
   simple question. ⚠️ The cost: the answer text's content judgement is
-  detect-and-retract. `stream_release: head` restores the old posture.
+  detect-and-retract. A positive `stream_head_release_bytes` restores the old posture.
 - **What a stream withholds is bounded** (`stream_hold_max_bytes`, default 8 MiB,
   counter `hold_overflow`). It used to be unbounded in the Wasm heap.
 

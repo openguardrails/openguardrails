@@ -287,7 +287,8 @@ not.
 
 ## Judging a STREAMED answer: release the prose, hold the actions, judge once
 
-**3.15.0 changed the default** (`stream_release: prose`). Under the 3.10.0 head
+**3.15.0 changed the default**; 3.15.1 made it one knob —
+`stream_head_release_bytes: -1`, the default. Under the 3.10.0 head
 budget every enforced stream went quiet ~10 characters in and stayed quiet for
 the whole generation, so the caller waited for the model's generation time plus
 the judgement: a simple question at a customer sat ~2 minutes behind its first
@@ -317,9 +318,21 @@ message_stop, ...     ┘                    allow ─► release what was held
   the stream stops being held — released under `fail_mode: open` and judged for
   the record only, refused under `closed` — and counted as `hold_overflow`.
 
-`stream_release: head` restores the 3.10.0 posture described below.
+One knob, three readings:
 
-### `stream_release: head` — release a bounded head, judge once
+| `stream_head_release_bytes` | before the verdict |
+|---|---|
+| `-1` (default; any negative) | all prose, live |
+| `N > 0` | at most N bytes of prose — the 3.10.0 bound below |
+| `0` | nothing — a spinner, and every block a clean refusal |
+
+⚠️ **Whatever the number, tool-call bytes and the ending frames wait for the
+verdict** — the number bounds prose only (3.15.1; under 3.10.0 a large N let call
+bytes out). `-1` rather than a word because ≤ 3.14 clamped a negative to 0: a
+config written for this build and applied to an older plugin holds everything —
+the strict side. The 3.15.0 `stream_release` key is ignored with a startup warning.
+
+### `stream_head_release_bytes: N` — release a bounded head, judge once
 
 **Not while it grows.** The pipeline measured mid-stream judgement directly: at
 25% of the reply visible, false positives on `mt_harm_correct` are 0.353
@@ -581,9 +594,8 @@ the traffic pass with `decision=` empty).
 | `timeout_ms` | `5000` | the PDP budget, enforce only. A CEILING for the worst case, not a target; the runtime's `OGR_MODEL_TIMEOUT_MS` must fit strictly inside it |
 | `fail_mode` | `open` | **open is the spec's default** (an unanswered evaluate proceeds, counted `unchecked`); `closed` refuses when the PDP is unreachable, answers garbage, reports unjudged paths, or the reply itself is unreadable |
 | `media_max_bytes` | `4194304` (4 MiB) | above this, an inline media part (a base64 image, audio clip, video or document) is DESCRIBED in the event instead of sent — `payload._ogr_media` carries kind/type/size and the value becomes `ogr-media:elided`. `0` sends every body verbatim. ⚠️ The body FORWARDED to the model is never touched, and only base64-shaped values are ever elided: the event payload is what the runtime judges, so prose must reach it whole. ⚠️ Since 3.8.0 the EFFECTIVE cap is `min(this, what the runtime advertises)`, per media KIND — see *What the runtime accepts* below |
-| `stream_release` | `prose` | how an enforced stream is released before its end-of-stream verdict. `prose` (3.15.0): text and reasoning go out as produced; everything from the first tool-call byte and the ending frames wait for the verdict. `head`: the 3.10.0 bound — only `stream_head_release_bytes` goes out. An unknown value is warned about and falls to `prose` |
 | `stream_hold_max_bytes` | `8388608` | the most one stream may have WITHHELD, in raw bytes (SSE framing included — that is what sits in the heap). Past it the stream stops being held: released and judged for the record under `fail_mode: open`, refused under `closed`; counted `hold_overflow` either way. `0` = no bound (pre-3.15.0) |
-| `stream_head_release_bytes` | `32` | **only under `stream_release: head`.** | how much client-visible content a streamed answer may deliver BEFORE the end-of-stream verdict (UTF-8 bytes of text/reasoning/tool-arguments, never SSE framing). Everything after it is withheld, so this is the exposure bound. A CEILING — a chunk crossing it is held whole. `0` releases nothing (a spinner, and every block a clean refusal); a value larger than any answer restores the pre-3.10.0 behaviour of delivering the reply and retracting it. ⚠️ Replaces `stream_tail_chars`, which is accepted, IGNORED and warned about at startup |
+| `stream_head_release_bytes` | `-1` | how much of a streamed answer's PROSE (text and reasoning, UTF-8 bytes, never SSE framing) may reach the caller BEFORE the end-of-stream verdict. `-1` (any negative): all of it, live — the default since 3.15.0. `N`: at most N bytes, a CEILING — a frame crossing it is held whole. `0`: nothing (a spinner, and every block a clean refusal). ⚠️ Tool-call bytes and the ending frames wait for the verdict whatever the value. ⚠️ Replaces `stream_tail_chars` (≤ 3.9) and `stream_release` (3.15.0), both accepted, IGNORED and warned about at startup |
 | `agent_id_header` | `x-ogr-agent-id`, else `x-mse-consumer` | which header carries the agent's identity; configuring one replaces the whole chain |
 | `agent_workspace_header` | `x-ogr-agent-workspace`, else `x-mse-consumer-group` | which header carries the agent's workspace; configuring one replaces the whole chain |
 | `agent_type_header` | `x-ogr-agent-type` | which header carries the kind of agent |
