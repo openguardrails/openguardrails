@@ -471,7 +471,13 @@ type chatDecoder struct {
 	// suppressUsage: the GATEWAY injected `include_usage`, so the terminal
 	// usage-only frame is one the client never asked for and must not receive.
 	suppressUsage bool
+
+	// ended records a `finish_reason` or `[DONE]` — see protocol.EndWatcher.
+	ended bool
 }
+
+// SawEnd — see protocol.EndWatcher.
+func (d *chatDecoder) SawEnd() bool { return d.ended }
 
 // SawCalls — see protocol.CallWatcher. A chunk carrying a tool-call delta has
 // already allocated the accumulator, so a non-empty map IS "bytes went out".
@@ -514,6 +520,7 @@ func (d *chatDecoder) Line(line string, isLast bool) string {
 	}
 	if data == "[DONE]" {
 		d.frames++
+		d.ended = true
 		return d.Flush() + line
 	}
 	parsed := gjson.Parse(data)
@@ -546,6 +553,7 @@ func (d *chatDecoder) Line(line string, isLast bool) string {
 	finished := parsed.Get("choices.0.finish_reason")
 	if finished.Exists() && finished.Type == gjson.String {
 		prefix = d.Flush()
+		d.ended = true
 	}
 
 	modified := data

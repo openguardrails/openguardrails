@@ -33,6 +33,39 @@ import (
 //  3. `allow` → release everything held. `block` → drop it and cut the stream, so
 //     the answer never completes as sent.
 //
+// ⚠️⚠️ **SINCE 3.15.0 THE DEFAULT RELEASES THE PROSE AND HOLDS THE ACTIONS**
+// (`stream_release: prose`). The head budget below made every enforced stream go
+// quiet ~10 characters in and stay quiet for the WHOLE generation, so the caller's
+// wait became the model's generation time plus the judgement: measured at mcd on
+// 2026-09-23, a simple question sat ~2 minutes behind its first fragment, and no
+// customer accepts that. Prose (text and reasoning) is now forwarded frame by frame
+// as the model produces it; what is held is everything from the FIRST TOOL-CALL
+// BYTE and the reply's ENDING (`protocol.Segment.Hold`) — the two things a client
+// ACTS on. What that costs, said out loud:
+//
+//   - the answer TEXT's content judgement becomes detect-and-retract: a refused
+//     answer has been read by the time the verdict exists, and the stream ends on
+//     the protocol's retraction frame. That is the exposure 3.10.0 closed, reopened
+//     on purpose (Tom, 2026-09-23).
+//   - reasoning is released freely and costs nothing: it is not a judged text
+//     (the runtime's extract.ts, 2026-08-17).
+//   - tool calls are untouched: no call byte leaves before the verdict, so
+//     `drop_calls` still keeps a loop running and `mayEndSoftly` still holds.
+//   - the stream is never COMPLETED before the verdict: `finish_reason`, `[DONE]`,
+//     `message_stop`, `response.completed` are held, so nothing downstream reads the
+//     turn as over and acts on it.
+//
+// `stream_release: head` restores the 3.10.0 posture exactly — the section below.
+//
+// ⚠️⚠️ **AND WHAT IS HELD IS BOUNDED (`stream_hold_max_bytes`, default 8 MiB).** The
+// hold kept every withheld frame in the Wasm heap with no ceiling — a long answer
+// is megabytes of SSE framing (one JSON frame per token), times every concurrent
+// stream, in a heap Go never returns to the host. Past the bound the stream stops
+// being held: under `fail_mode: open` everything held is released and the rest
+// passes through, judged for the RECORD only; under `closed` it is refused. Either
+// way it is counted (`hold_overflow`), because a stream that silently stopped being
+// enforced is the failure this filter must never have.
+//
 // ⚠️⚠️ **THE BOUND IS MEASURED FROM THE HEAD, AND THAT INVERSION IS THE WHOLE POINT
 // (3.10.0).** Until now the knob was `stream_tail_chars` — withhold the LAST 200
 // bytes — whose guarantee is "at least 200 bytes withheld" and which therefore says
@@ -104,8 +137,11 @@ type tailHold struct {
 	// head is the most client-visible content, in UTF-8 bytes, that may reach the
 	// caller before the end-of-stream verdict; < 0 means release nothing at all (the
 	// non-SSE degenerate case). 0 is a real setting with the same effect, chosen
-	// rather than fallen into.
+	// rather than fallen into. Ignored under `prose` except for its sign.
 	head int
+	// prose selects the 3.15.0 release rule: forward every segment until the first
+	// one tagged Hold (a tool-call byte or the ending), whatever its content size.
+	prose bool
 	// sse records whether the response is a real event stream — it decides which
 	// shape a refusal takes when nothing has been released yet.
 	sse bool
@@ -117,6 +153,19 @@ type tailHold struct {
 	releasedCalls bool
 	// sawCalls is set by the chunk lane before each push — see streamProcessor.SawCalls.
 	sawCalls bool
+
+	// heldBytes is the size of segs, and max its ceiling (<= 0: none) — see
+	// `stream_hold_max_bytes`.
+	heldBytes int
+	max       int
+	// settled means the caller's stream has already been decided without the
+	// verdict — released whole (bypass) or refused (cut) on overflow — so the
+	// end-of-stream evaluate is a RECORD and must not write to the stream again.
+	settled bool
+	// bypass: every later segment is released as it comes (overflow under open).
+	bypass bool
+	// cut: the stream was ended by a refusal; every later chunk is dropped.
+	cut bool
 }
 
 // heldSeg is one processed chunk awaiting release, tagged with the cumulative
@@ -126,6 +175,8 @@ type tailHold struct {
 type heldSeg struct {
 	bytes      []byte
 	cumContent int
+	// hold is protocol.Segment.Hold: from here on the prose release stops.
+	hold bool
 	// afterCalls records that tool-call bytes were already in the decoder when this
 	// segment was produced. Carried per segment rather than as one flag because what
 	// matters is whether a segment CARRYING call bytes was RELEASED, not whether the
@@ -140,14 +191,41 @@ func newTailHold(head int, sse bool) *tailHold {
 	return &tailHold{head: head, sse: sse}
 }
 
-// push queues one processed chunk and returns the prefix now safe to release — every
-// queued segment whose completed content still fits inside the head budget.
+// newProseHold is the 3.15.0 default — see the file header.
+func newProseHold(sse bool, max int) *tailHold {
+	h := newTailHold(0, sse)
+	h.prose = true
+	h.max = max
+	return h
+}
+
+// releasable is the release rule for the segment at the front of the queue.
+func (h *tailHold) releasable(s heldSeg) bool {
+	if h.bypass {
+		return true
+	}
+	if h.head < 0 {
+		return false
+	}
+	if h.prose {
+		return !s.hold
+	}
+	return s.cumContent <= h.head
+}
+
+// push queues one processed chunk and returns the prefix now safe to release.
 //
-// ⚠️ A CEILING, not a floor. `cumContent` is the exposure that releasing this segment
-// would produce, so `<= head` never overshoots: a frame that would carry the caller
-// past the bound is held WHOLE rather than trimmed, because an SSE frame cut in half
-// is not a frame. Once the front segment fails the test every later one fails it too
-// (cumContent is non-decreasing), so the budget, once spent, stays spent.
+// Under `head`: every queued segment whose completed content still fits inside the
+// head budget. ⚠️ A CEILING, not a floor. `cumContent` is the exposure that
+// releasing this segment would produce, so `<= head` never overshoots: a frame that
+// would carry the caller past the bound is held WHOLE rather than trimmed, because
+// an SSE frame cut in half is not a frame. Once the front segment fails the test
+// every later one fails it too (cumContent is non-decreasing), so the budget, once
+// spent, stays spent.
+//
+// Under `prose`: every queued segment up to the first tagged `hold`. The tag is a
+// snapshot of two monotonic decoder flags, so once one segment is held every later
+// one is too — the same "once stopped, stays stopped" shape.
 //
 // ⚠️ Contentless frames (the opening role delta, a keepalive comment, usage-only
 // framing) carry the PRECEDING cumContent and so ride out for free while the budget
@@ -155,19 +233,18 @@ func newTailHold(head int, sse bool) *tailHold {
 //
 // The final chunk's frames must not come through here (see judgeFinal): they are
 // queued by the caller and released only by the verdict.
-func (h *tailHold) push(out []byte, cumContent int) [][]byte {
-	h.add(out, cumContent)
-	if h.head < 0 {
-		return nil
-	}
+func (h *tailHold) push(out []byte, cumContent int, hold bool) [][]byte {
+	h.add(out, cumContent, hold)
 	var release [][]byte
-	for len(h.segs) > 0 && h.segs[0].cumContent <= h.head {
+	for len(h.segs) > 0 && h.releasable(h.segs[0]) {
 		release = append(release, h.segs[0].bytes)
 		// ⚠️ Once a segment carrying tool-call bytes has gone out, the client may hold
 		// a partial call and the stream can no longer be ended on a normal stop.
 		if h.segs[0].afterCalls {
 			h.releasedCalls = true
 		}
+		h.heldBytes -= len(h.segs[0].bytes)
+		h.segs[0] = heldSeg{} // drop the reference, or the backing array pins it
 		h.segs = h.segs[1:]
 		h.released = true
 	}
@@ -175,16 +252,21 @@ func (h *tailHold) push(out []byte, cumContent int) [][]byte {
 }
 
 // add queues a chunk without releasing anything — the isLast entry point.
-func (h *tailHold) add(out []byte, cumContent int) {
+func (h *tailHold) add(out []byte, cumContent int, hold bool) {
 	if len(out) == 0 {
 		return
 	}
-	h.segs = append(h.segs, heldSeg{bytes: out, cumContent: cumContent, afterCalls: h.sawCalls})
+	h.segs = append(h.segs, heldSeg{bytes: out, cumContent: cumContent, hold: hold, afterCalls: h.sawCalls})
+	h.heldBytes += len(out)
 }
 
-// held concatenates everything still withheld, for release on allow.
+// overflowed reports that what is withheld has passed `stream_hold_max_bytes`.
+func (h *tailHold) overflowed() bool { return h.max > 0 && h.heldBytes > h.max && !h.settled }
+
+// held concatenates everything still withheld, for release on allow — sized once,
+// because this is the one moment the whole tail exists twice.
 func (h *tailHold) held() []byte {
-	var out []byte
+	out := make([]byte, 0, h.heldBytes)
 	for _, s := range h.segs {
 		out = append(out, s.bytes...)
 	}
@@ -192,7 +274,7 @@ func (h *tailHold) held() []byte {
 }
 
 // drop discards the withheld tail — the block path.
-func (h *tailHold) drop() { h.segs = nil }
+func (h *tailHold) drop() { h.segs = nil; h.heldBytes = 0 }
 
 // sawRelease reports whether any byte has already reached the caller, which is
 // what decides between a true refusal and a retraction.
@@ -230,9 +312,30 @@ func armTailHold(ctx wrapper.HttpContext, cfg Config, rs *reqState) {
 func holdChunk(ctx wrapper.HttpContext, cfg Config, rs *reqState, sp *streamProcessor,
 	segs []protocol.Segment, isLast bool) []byte {
 	if rs.hold == nil {
-		rs.hold = newTailHold(cfg.streamHeadReleaseBytes, ctx.GetBoolContext(ctxStreaming, true))
+		sse := ctx.GetBoolContext(ctxStreaming, true)
+		if cfg.streamRelease == releaseHead {
+			rs.hold = newTailHold(cfg.streamHeadReleaseBytes, sse)
+			rs.hold.max = cfg.streamHoldMaxBytes
+		} else {
+			rs.hold = newProseHold(sse, cfg.streamHoldMaxBytes)
+		}
 	}
 	rs.sp = sp
+	if rs.hold.cut {
+		/*
+		 * Refused on overflow and already ended with endStream. The upstream keeps
+		 * generating and the chain keeps delivering it here; it goes nowhere. The
+		 * reassembly still runs (the caller did that) so the RECORD can be made at the
+		 * end — what was refused should still say what it was.
+		 */
+		if isLast {
+			rs.ended = true
+			if !(rs.spec && rs.input == inputPending) {
+				judgeFinal(ctx, cfg, rs, sp)
+			}
+		}
+		return nil
+	}
 	// Stamped BEFORE the push so each segment records the state at the moment it was
 	// produced — see heldSeg.afterCalls.
 	rs.hold.sawCalls = sp.SawCalls()
@@ -256,10 +359,16 @@ func holdChunk(ctx wrapper.HttpContext, cfg Config, rs *reqState, sp *streamProc
 				 * block is safe at any time, loosening on an allow is what this release
 				 * removed.
 				 */
-				rs.hold.add(seg.Bytes, seg.Content)
+				rs.hold.add(seg.Bytes, seg.Content, seg.Hold)
 				continue
 			}
-			emit(rs, rs.hold.push(seg.Bytes, seg.Content))
+			emit(rs, rs.hold.push(seg.Bytes, seg.Content, seg.Hold))
+		}
+		if rs.hold.overflowed() {
+			holdOverflow(cfg, rs)
+			if rs.hold.cut {
+				return nil
+			}
 		}
 		/*
 		 * ⚠️ EVERY chunk, not just the clamped ones. With the bound at the head a
@@ -274,9 +383,18 @@ func holdChunk(ctx wrapper.HttpContext, cfg Config, rs *reqState, sp *streamProc
 	// The stream's last chunk is queued and NEVER released by arithmetic: whatever
 	// the configured tail, the frames that complete the answer wait for the verdict.
 	for _, seg := range segs {
-		rs.hold.add(seg.Bytes, seg.Content)
+		rs.hold.add(seg.Bytes, seg.Content, true)
 	}
 	rs.ended = true
+	if rs.hold.bypass {
+		/*
+		 * No longer held (overflow under `open`): the caller gets the end of its
+		 * stream NOW, and the end-of-stream evaluate below is a record only. Waiting
+		 * for the verdict here would put the whole judgement back on a stream this
+		 * filter already said it would not enforce.
+		 */
+		rs.finishAllow()
+	}
 	/*
 	 * ⚠️ **THE FINAL JUDGEMENT WAITS FOR THE REQUEST HALF**, and the case that makes
 	 * this necessary is the common one rather than a corner: an unsafe question whose
@@ -325,6 +443,32 @@ func keepalive(rs *reqState) {
 	if err := proxywasm.InjectEncodedDataToFilterChain([]byte(": ogr\n\n"), false); err != nil {
 		proxywasm.LogErrorf("[OGR-TAIL] keepalive inject failed: %v", err)
 	}
+}
+
+/*
+ * holdOverflow is what happens when the withheld tail passes `stream_hold_max_bytes`.
+ *
+ * ⚠️ The fail mode decides, exactly as it does for an evaluate that could not be
+ * made: this is the same situation — the filter cannot enforce on this stream — at a
+ * different size. `open` releases what it holds and stops holding; `closed` refuses.
+ * ⚠️ Counted either way. An unbounded hold was a crash risk; a bounded one that
+ * gives up SILENTLY would be a bypass anyone can trigger with a long enough answer.
+ */
+func holdOverflow(cfg Config, rs *reqState) {
+	bump(cntHoldOverflow, 1)
+	logConditionf("tail.overflow", "[OGR-TAIL] held %d bytes > stream_hold_max_bytes %d — %s",
+		rs.hold.heldBytes, rs.hold.max, map[bool]string{true: "refusing", false: "releasing and passing the rest through unenforced"}[cfg.failClosed || (rs.spec && rs.input == inputClamped)])
+	rs.hold.settled = true
+	// ⚠️ A clamped stream is one whose REQUEST was refused: nothing more of it may be
+	// delivered whatever the fail mode says, so releasing on overflow is not an option.
+	if cfg.failClosed || (rs.spec && rs.input == inputClamped) {
+		bump(cntRefused, 1)
+		rs.finishBlocked(overflowMessage)
+		rs.hold.cut = true
+		return
+	}
+	rs.hold.bypass = true
+	emit(rs, rs.hold.push(nil, 0, false))
 }
 
 // emit writes released segments to the caller and stamps the keepalive clock.
@@ -380,6 +524,19 @@ func settleInput(ctx wrapper.HttpContext, cfg Config, rs *reqState, state inputS
 // judgeFinal puts the COMPLETE answer to the PDP — the step's one and only
 // response-side evaluate — and finishes the stream with what the verdict says.
 func judgeFinal(ctx wrapper.HttpContext, cfg Config, rs *reqState, sp *streamProcessor) {
+	if rs.hold != nil && rs.hold.settled {
+		/*
+		 * The caller's stream was decided on overflow and has already ended. What is
+		 * left is the RECORD: the step keeps its response half, fire-and-forget,
+		 * exactly as observe mode would have sent it.
+		 */
+		if sp != nil {
+			if out := sp.Result(); !out.Empty() {
+				report(cfg, responseEventCanonical(rs.derive, canonicalOf(rs, out, sp.Timing())))
+			}
+		}
+		return
+	}
 	if sp == nil {
 		rs.finishAllow()
 		return

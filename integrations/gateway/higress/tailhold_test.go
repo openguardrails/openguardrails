@@ -18,7 +18,7 @@ func (f *tailFixture) push(t *testing.T, frame string, contentLen int) []byte {
 	t.Helper()
 	f.cum += contentLen
 	var out []byte
-	for _, seg := range f.h.push([]byte(frame), f.cum) {
+	for _, seg := range f.h.push([]byte(frame), f.cum, false) {
 		out = append(out, seg...)
 	}
 	return out
@@ -54,10 +54,10 @@ func TestOnlyTheHeadReachesTheCallerBeforeTheVerdict(t *testing.T) {
 // add(), which never releases.
 func TestTheFinalChunkIsNeverReleasedByArithmetic(t *testing.T) {
 	h := newTailHold(100, true)
-	if got := h.push([]byte("body"), 4); len(got) != 1 || string(got[0]) != "body" {
+	if got := h.push([]byte("body"), 4, false); len(got) != 1 || string(got[0]) != "body" {
 		t.Fatalf("a chunk inside the budget should release immediately, got %q", got)
 	}
-	h.add([]byte("data: [DONE]\n\n"), 4)
+	h.add([]byte("data: [DONE]\n\n"), 4, false)
 	if got := h.held(); string(got) != "data: [DONE]\n\n" {
 		t.Fatalf("the terminal frame escaped the hold: held = %q", got)
 	}
@@ -81,7 +81,7 @@ func TestAZeroBudgetReleasesNothing(t *testing.T) {
 // limit case. A block then still owns every byte: a true refusal, not a retraction.
 func TestANonSSEResponseIsHeldWhole(t *testing.T) {
 	h := newTailHold(10, false)
-	if got := h.push([]byte(`{"choices":[...`), 1000); got != nil {
+	if got := h.push([]byte(`{"choices":[...`), 1000, false); got != nil {
 		t.Fatalf("a non-SSE body leaked ahead of the verdict: %q", got)
 	}
 	if h.sawRelease() {
@@ -109,7 +109,7 @@ func TestContentlessFramesRideOutFreeWhileTheBudgetIsUnspent(t *testing.T) {
 
 func TestDropDiscardsTheTail(t *testing.T) {
 	h := newTailHold(100, true)
-	h.add([]byte("secret tail"), 11)
+	h.add([]byte("secret tail"), 11, false)
 	h.drop()
 	if got := h.held(); len(got) != 0 {
 		t.Fatalf("dropped tail still held: %q", got)
@@ -238,9 +238,9 @@ func TestAStreamMayEndSoftlyOnlyWhileNoCallBytesAreOut(t *testing.T) {
 	// whole continuation exists for.
 	h = newTailHold(4, true)
 	h.sawCalls = false
-	h.push([]byte("aaaa"), 4)
-	h.push([]byte("bbbb"), 8)
-	h.push([]byte("cccc"), 12)
+	h.push([]byte("aaaa"), 4, false)
+	h.push([]byte("bbbb"), 8, false)
+	h.push([]byte("cccc"), 12, false)
 	if !h.sawRelease() {
 		t.Fatal("expected the arithmetic to release something")
 	}
@@ -251,9 +251,9 @@ func TestAStreamMayEndSoftlyOnlyWhileNoCallBytesAreOut(t *testing.T) {
 	// A segment produced once tool-call bytes existed is then RELEASED.
 	h = newTailHold(4, true)
 	h.sawCalls = true
-	h.push([]byte("aaaa"), 4)
-	h.push([]byte("bbbb"), 8)
-	h.push([]byte("cccc"), 12)
+	h.push([]byte("aaaa"), 4, false)
+	h.push([]byte("bbbb"), 8, false)
+	h.push([]byte("cccc"), 12, false)
 	if h.mayEndSoftly() {
 		t.Error("released tool-call bytes must force the hard retraction")
 	}
@@ -268,11 +268,11 @@ func TestAStreamMayEndSoftlyOnlyWhileNoCallBytesAreOut(t *testing.T) {
 func TestCallBytesStillHeldDoNotForbidASoftEnding(t *testing.T) {
 	h := newTailHold(4, true)
 	h.sawCalls = false
-	h.push([]byte("aaaa"), 4) // prose
-	h.push([]byte("bbbb"), 8) // prose — releases the first
-	h.sawCalls = true         // the decoder now has a tool call
-	h.push([]byte("cccc"), 12)
-	h.add([]byte("dddd"), 16)
+	h.push([]byte("aaaa"), 4, false) // prose
+	h.push([]byte("bbbb"), 8, false) // prose — releases the first
+	h.sawCalls = true                // the decoder now has a tool call
+	h.push([]byte("cccc"), 12, false)
+	h.add([]byte("dddd"), 16, false)
 	if !h.sawRelease() {
 		t.Fatal("expected a release")
 	}

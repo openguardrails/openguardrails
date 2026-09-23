@@ -526,7 +526,13 @@ type anthropicDecoder struct {
 	// frames counts data payloads whose `type` this decoder handles — see
 	// protocol.FrameCounter.
 	frames int
+	// ended records `message_delta` (which carries stop_reason) or `message_stop` —
+	// see protocol.EndWatcher.
+	ended bool
 }
+
+// SawEnd — see protocol.EndWatcher.
+func (d *anthropicDecoder) SawEnd() bool { return d.ended }
 
 // SawCalls — see protocol.CallWatcher.
 func (d *anthropicDecoder) SawCalls() bool {
@@ -616,6 +622,7 @@ func (d *anthropicDecoder) Line(line string, isLast bool) string {
 
 	case "message_delta", "message_stop":
 		d.frames++
+		d.ended = true
 		// The final output_tokens count rides message_delta's own `usage`.
 		d.usage = mergeAnthropicUsage(d.usage, parsed.Get("usage"))
 		// ⚠️ The answer is ending, so whatever the restorer holds is text and has to

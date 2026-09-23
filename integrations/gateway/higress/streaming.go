@@ -179,7 +179,9 @@ func (s *streamProcessor) ProcessChunkSegments(chunk []byte, isLast bool) []prot
 		if len(chunk) == 0 {
 			return nil
 		}
-		return []protocol.Segment{{Bytes: chunk, Content: s.ContentBytes()}}
+		// Hold: a partial JSON body is useless to a client and nothing in it can be
+		// released early — whatever the hold was told about the stream.
+		return []protocol.Segment{{Bytes: chunk, Content: s.ContentBytes(), Hold: true}}
 	}
 	return s.scan.ChunkSegments(chunk, isLast)
 }

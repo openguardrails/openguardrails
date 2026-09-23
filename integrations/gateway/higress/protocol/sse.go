@@ -61,6 +61,34 @@ type CallWatcher interface {
 	SawCalls() bool
 }
 
+/*
+ * EndWatcher is implemented by a Decoder that can say whether it has seen the frame
+ * that ENDS the reply — chat's `finish_reason` / `[DONE]`, anthropic's
+ * `message_delta` / `message_stop`, responses' `response.completed` /
+ * `.incomplete` / `.failed`. Optional, type-asserted like CallWatcher.
+ *
+ * ⚠️⚠️ It exists because the prose release (3.15.0) forwards frames the moment they
+ * are produced, and a client ACTS on the ending: a harness runs `tool_calls` once the
+ * finish frame says the turn is over, and an SDK builds its final object from
+ * `response.completed`. The ending must therefore wait for the verdict whatever else
+ * went out. The old head budget never needed this, because 32 bytes never reached
+ * the end of anything; a release rule without a budget does.
+ *
+ * ⚠️ A decoder that does not implement it is treated as HAVING ENDED — the side that
+ * holds everything, which is the conservative reading.
+ */
+type EndWatcher interface {
+	SawEnd() bool
+}
+
+// SawEnd delegates to the decoder — see EndWatcher. TRUE when it cannot answer.
+func (s *Scanner) SawEnd() bool {
+	if w, ok := s.dec.(EndWatcher); ok {
+		return w.SawEnd()
+	}
+	return true
+}
+
 // FrameCounter is implemented by a Decoder that counts the data frames it
 // RECOGNISED as its own protocol's — a chat chunk with a `choices` array, an
 // anthropic event of a known type, a `response.*` event. It exists to split an
@@ -163,6 +191,12 @@ type Segment struct {
 	// Content is the scanner's running ContentBytes() AFTER this segment, i.e.
 	// exactly the exposure a caller holds once it has been released.
 	Content int
+	// Hold records that, once this segment was produced, the decoder had seen a
+	// tool-call byte or the reply's ending — the two things a client ACTS on. The
+	// prose release forwards every segment up to the first one carrying it and
+	// nothing after, so it is a snapshot of two monotonic flags and therefore itself
+	// monotonic along the stream.
+	Hold bool
 }
 
 // Chunk processes one raw chunk and returns the bytes to forward.
@@ -204,7 +238,7 @@ func (s *Scanner) ChunkSegments(chunk []byte, isLast bool) []Segment {
 		 * is still a terminator, and the bytes forwarded are untouched either way.
 		 */
 		if strings.TrimRight(line, "\r") == "" {
-			segs = append(segs, Segment{Bytes: cur, Content: s.ContentBytes()})
+			segs = append(segs, s.segment(cur))
 			cur = make([]byte, 0, 64)
 		}
 	}
@@ -226,9 +260,14 @@ func (s *Scanner) ChunkSegments(chunk []byte, isLast bool) []Segment {
 	// never terminates its last frame — closes the chunk as its own segment rather
 	// than being dropped or merged into the NEXT chunk's first frame.
 	if len(cur) > 0 {
-		segs = append(segs, Segment{Bytes: cur, Content: s.ContentBytes()})
+		segs = append(segs, s.segment(cur))
 	}
 	return segs
+}
+
+// segment closes one release unit, snapshotting the decoder state that tags it.
+func (s *Scanner) segment(b []byte) Segment {
+	return Segment{Bytes: b, Content: s.ContentBytes(), Hold: s.SawCalls() || s.SawEnd()}
 }
 
 // Output is the reply reassembled so far.

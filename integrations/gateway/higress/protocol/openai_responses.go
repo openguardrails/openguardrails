@@ -519,7 +519,14 @@ type responsesDecoder struct {
 	// frames counts data payloads in this protocol's own event namespace
 	// (`response.*`) — see protocol.FrameCounter.
 	frames int
+	// ended records the terminal event — see protocol.EndWatcher. The per-item
+	// `.done` events are NOT endings: they close one output item, and the stream
+	// may go on to a function call.
+	ended bool
 }
+
+// SawEnd — see protocol.EndWatcher.
+func (d *responsesDecoder) SawEnd() bool { return d.ended }
 
 // SawCalls — see protocol.CallWatcher.
 func (d *responsesDecoder) SawCalls() bool {
@@ -599,6 +606,10 @@ func (d *responsesDecoder) Line(line string, isLast bool) string {
 		"response.function_call_arguments.done", "response.content_part.done",
 		"response.output_item.done", "response.completed", "response.incomplete",
 		"response.failed":
+		switch parsed.Get("type").String() {
+		case "response.completed", "response.incomplete", "response.failed":
+			d.ended = true
+		}
 		// The terminal events repeat the whole reply object, usage included.
 		if u := responsesUsage(parsed.Get("response.usage")); u != nil {
 			d.usage = u
