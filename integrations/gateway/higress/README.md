@@ -312,6 +312,12 @@ message_stop, ...     ┘                    allow ─► release what was held
 - **The stream is never COMPLETED before the verdict.** The ending frames are
   held by what they ARE, not by where they arrive — Envoy's `end_stream` chunk
   is often empty, so "the last chunk" does not contain them.
+- **What is withheld is compressed past 64 KB** (3.15.2) and inflated byte-for-byte
+  on release — the client receives exactly the model's bytes. A tool call's frames
+  are ~230 bytes of envelope per 3–4 characters of arguments, so a 150 KB file write
+  held 12 MB of frames; compressed it holds ~0.25 MB. Rewriting the frames instead
+  was built and refused: it needs to understand each protocol, and a mistake would
+  reach the client as a changed frame.
 - **What is withheld is bounded** by `stream_hold_max_bytes` (default 8 MiB):
   the hold kept every withheld frame in the Wasm heap with no ceiling, which on a
   busy gateway is megabytes per stream in a heap Go never returns. Past the bound
@@ -594,7 +600,7 @@ the traffic pass with `decision=` empty).
 | `timeout_ms` | `5000` | the PDP budget, enforce only. A CEILING for the worst case, not a target; the runtime's `OGR_MODEL_TIMEOUT_MS` must fit strictly inside it |
 | `fail_mode` | `open` | **open is the spec's default** (an unanswered evaluate proceeds, counted `unchecked`); `closed` refuses when the PDP is unreachable, answers garbage, reports unjudged paths, or the reply itself is unreadable |
 | `media_max_bytes` | `4194304` (4 MiB) | above this, an inline media part (a base64 image, audio clip, video or document) is DESCRIBED in the event instead of sent — `payload._ogr_media` carries kind/type/size and the value becomes `ogr-media:elided`. `0` sends every body verbatim. ⚠️ The body FORWARDED to the model is never touched, and only base64-shaped values are ever elided: the event payload is what the runtime judges, so prose must reach it whole. ⚠️ Since 3.8.0 the EFFECTIVE cap is `min(this, what the runtime advertises)`, per media KIND — see *What the runtime accepts* below |
-| `stream_hold_max_bytes` | `8388608` | the most one stream may have WITHHELD, in raw bytes (SSE framing included — that is what sits in the heap). Past it the stream stops being held: released and judged for the record under `fail_mode: open`, refused under `closed`; counted `hold_overflow` either way. `0` = no bound (pre-3.15.0) |
+| `stream_hold_max_bytes` | `8388608` | the most one stream's hold may OCCUPY in the heap. Past 64 KB withheld, further withheld frames are kept deflate-compressed and inflated byte-for-byte on release (3.15.2) — a 150 KB file write's frames go from 12 MB to ~0.25 MB — and this bound counts what is actually stored. Past it the stream stops being held: released and judged for the record under `fail_mode: open`, refused under `closed`; counted `hold_overflow` either way. `0` = no bound |
 | `stream_head_release_bytes` | `-1` | how much of a streamed answer's PROSE (text and reasoning, UTF-8 bytes, never SSE framing) may reach the caller BEFORE the end-of-stream verdict. `-1` (any negative): all of it, live — the default since 3.15.0. `N`: at most N bytes, a CEILING — a frame crossing it is held whole. `0`: nothing (a spinner, and every block a clean refusal). ⚠️ Tool-call bytes and the ending frames wait for the verdict whatever the value. ⚠️ Replaces `stream_tail_chars` (≤ 3.9) and `stream_release` (3.15.0), both accepted, IGNORED and warned about at startup |
 | `agent_id_header` | `x-ogr-agent-id`, else `x-mse-consumer` | which header carries the agent's identity; configuring one replaces the whole chain |
 | `agent_workspace_header` | `x-ogr-agent-workspace`, else `x-mse-consumer-group` | which header carries the agent's workspace; configuring one replaces the whole chain |

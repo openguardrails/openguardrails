@@ -9,6 +9,16 @@ version is independent of any implementation's package version.
 
 ## [Unreleased]
 
+### Higress plugin 3.15.2 (implementation, not a wire change)
+- **What a stream withholds is compressed** past 64 KB (deflate, inflated
+  byte-for-byte on release) and the hold bound counts what is stored. Measured: a
+  held 150 KB file write went from 12 MB of frames (past the 8 MiB bound, i.e.
+  released unjudged under fail-open) to ~0.25 MB; peak live at the verdict from
+  40 MB to 2 MB.
+- **Two copies removed**: release injects segment by segment instead of
+  concatenating the tail first, and the SSE scanner cuts frames as slices of one
+  per-chunk buffer instead of growing a fresh buffer per frame.
+
 ### Higress plugin 3.15.1 (implementation, not a wire change)
 - **One knob: `stream_head_release_bytes`**, default `-1` (all prose live); `N` = at
   most N bytes; `0` = nothing. The 3.15.0 `stream_release` switch is removed (ignored

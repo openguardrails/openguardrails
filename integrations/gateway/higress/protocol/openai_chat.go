@@ -135,6 +135,10 @@ func chatText(c gjson.Result) string {
 // is read once rather than twice.
 var chatReasoningFields = [2]string{"reasoning_content", "reasoning"}
 
+// chatReasoningPaths is `choices.0.delta.<field>` for each spelling, built once:
+// it is asked on every frame of every stream.
+var chatReasoningPaths = [2]string{"choices.0.delta." + chatReasoningFields[0], "choices.0.delta." + chatReasoningFields[1]}
+
 // chatReasoning reads whichever spelling a message used.
 func chatReasoning(msg gjson.Result) string {
 	for _, f := range chatReasoningFields {
@@ -624,8 +628,8 @@ func (d *chatDecoder) Line(line string, isLast bool) string {
 // chatReasoningFields of the first spelling PRESENT, and its text. A frame with
 // neither answers false.
 func chatDeltaReasoning(parsed gjson.Result) (int, string, bool) {
-	for i, f := range chatReasoningFields {
-		if c := parsed.Get("choices.0.delta." + f); c.Type == gjson.String {
+	for i, path := range chatReasoningPaths {
+		if c := parsed.Get(path); c.Type == gjson.String {
 			return i, c.String(), true
 		}
 	}

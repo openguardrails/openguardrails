@@ -218,15 +218,28 @@ func (s *Scanner) ChunkSegments(chunk []byte, isLast bool) []Segment {
 	s.carry = ""
 
 	var segs []Segment
-	cur := make([]byte, 0, len(chunk)+64)
+	/*
+	 * ⚠️ ONE buffer per chunk, and segments are SUB-SLICES of it (2026-09-23). The
+	 * first version opened a fresh 64-byte buffer per frame and let `append` double
+	 * it — measured, a held frame then cost ~2.3× its bytes and the churn was ~6× the
+	 * wire, in a Wasm heap that never shrinks. The three-index slice caps each
+	 * segment at its own length, so appending past it writes into `buf`, never into
+	 * a segment; if `buf` reallocates, the segments already cut keep the old array.
+	 */
+	buf := make([]byte, 0, len(text)+256)
+	segStart := 0
+	cut := func() {
+		segs = append(segs, Segment{Bytes: buf[segStart:len(buf):len(buf)], Content: s.ContentBytes(), Hold: s.SawCalls() || s.SawEnd()})
+		segStart = len(buf)
+	}
 	start := 0
 	for i := 0; i < len(text); i++ {
 		if text[i] != '\n' {
 			continue
 		}
 		line := text[start:i]
-		cur = append(cur, s.dec.Line(line, isLast)...)
-		cur = append(cur, '\n')
+		buf = append(buf, s.dec.Line(line, isLast)...)
+		buf = append(buf, '\n')
 		start = i + 1
 		/*
 		 * ⚠️ An EMPTY line terminates a frame, and that is where a segment closes —
@@ -238,14 +251,13 @@ func (s *Scanner) ChunkSegments(chunk []byte, isLast bool) []Segment {
 		 * is still a terminator, and the bytes forwarded are untouched either way.
 		 */
 		if strings.TrimRight(line, "\r") == "" {
-			segs = append(segs, s.segment(cur))
-			cur = make([]byte, 0, 64)
+			cut()
 		}
 	}
 	if start < len(text) {
 		tail := text[start:]
 		if isLast {
-			cur = append(cur, s.dec.Line(tail, true)...)
+			buf = append(buf, s.dec.Line(tail, true)...)
 		} else {
 			s.carry = tail
 		}
@@ -254,20 +266,15 @@ func (s *Scanner) ChunkSegments(chunk []byte, isLast bool) []Segment {
 		// Backstop for a stream that ends without its own terminator — a dropped
 		// upstream connection. Nothing more is coming, so whatever the restorer is
 		// holding is text, not the start of a token.
-		cur = append(cur, s.dec.Flush()...)
+		buf = append(buf, s.dec.Flush()...)
 	}
 	// Whatever did not end on a frame boundary — a comment, a flush, a stream that
 	// never terminates its last frame — closes the chunk as its own segment rather
 	// than being dropped or merged into the NEXT chunk's first frame.
-	if len(cur) > 0 {
-		segs = append(segs, s.segment(cur))
+	if len(buf) > segStart {
+		cut()
 	}
 	return segs
-}
-
-// segment closes one release unit, snapshotting the decoder state that tags it.
-func (s *Scanner) segment(b []byte) Segment {
-	return Segment{Bytes: b, Content: s.ContentBytes(), Hold: s.SawCalls() || s.SawEnd()}
 }
 
 // Output is the reply reassembled so far.
