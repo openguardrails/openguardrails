@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"compress/flate"
 	"encoding/json"
+	"io"
 	"time"
 
 	"github.com/higress-group/proxy-wasm-go-sdk/proxywasm"
@@ -155,10 +158,16 @@ type tailHold struct {
 	// sawCalls is set by the chunk lane before each push — see streamProcessor.SawCalls.
 	sawCalls bool
 
-	// heldBytes is the size of segs, and max its ceiling (<= 0: none) — see
-	// `stream_hold_max_bytes`.
+	// heldBytes is the size of segs (uncompressed), and max the ceiling on what the
+	// hold OCCUPIES — segs plus the compressed tail (<= 0: none), see
+	// `stream_hold_max_bytes` and `memBytes`.
 	heldBytes int
 	max       int
+	// z is the COMPRESSED tail (2026-09-23): once more than `compressAfter` is
+	// withheld, every further withheld segment is deflated here instead of queued, and
+	// inflated byte-for-byte on release. nil until then — a text reply, which only
+	// ever holds its ending, never pays for it.
+	z *heldZ
 	// settled means the caller's stream has already been decided without the
 	// verdict — released whole (bypass) or refused (cut) on overflow — so the
 	// end-of-stream evaluate is a RECORD and must not write to the stream again.
@@ -245,30 +254,152 @@ func (h *tailHold) push(out []byte, cumContent int, hold bool) [][]byte {
 	return release
 }
 
+/*
+ * compressAfter is how much may be withheld UNCOMPRESSED before the hold starts
+ * deflating (2026-09-23).
+ *
+ * ⚠️⚠️ WHY COMPRESS, AND WHY NOT ANYTHING CLEVERER. Measured: an OpenAI-style frame is
+ * ~230 bytes of envelope around 3–4 characters of tool arguments, so a held 150 KB
+ * file write was 12 MB of frames — past the 8 MiB bound, i.e. released UNJUDGED
+ * under fail-open, in a Wasm heap that never shrinks. The envelope repeats frame
+ * after frame, so deflate takes it to ~1/60. Rewriting the frames instead (one merged
+ * delta per call) was built, measured and REFUSED (Tom: 「如果协议搞错了会影响用户使用，
+ * 都很难找出问题」): it needs to understand each protocol, and a misunderstanding reaches
+ * the client as a changed frame nobody can trace. Compression understands nothing —
+ * the client receives exactly the bytes the model sent.
+ *
+ * ⚠️ Below the threshold nothing is compressed: a text reply holds only its ending,
+ * a small call holds a few KB, and neither should pay for a compressor's state.
+ */
+const compressAfter = 64 << 10
+
+type heldZ struct {
+	buf bytes.Buffer
+	w   *flate.Writer
+	// raw is the uncompressed size — what the client will receive.
+	raw int
+	// afterCalls: some segment in here carried tool-call bytes (see heldSeg).
+	afterCalls bool
+}
+
 // add queues a chunk without releasing anything — the isLast entry point.
+//
+// ⚠️ Only a segment that CANNOT be released now goes into the compressed tail. The
+// release rule is monotonic (once the front is held everything after it is), so a
+// compressed segment is never ahead of one that could still go out.
 func (h *tailHold) add(out []byte, cumContent int, hold bool) {
 	if len(out) == 0 {
 		return
 	}
-	h.segs = append(h.segs, heldSeg{bytes: out, cumContent: cumContent, hold: hold, afterCalls: h.sawCalls})
+	seg := heldSeg{bytes: out, cumContent: cumContent, hold: hold, afterCalls: h.sawCalls}
+	if h.z == nil && h.heldBytes+len(out) > compressAfter && !h.releasable(seg) {
+		if w, err := flate.NewWriter(nil, flate.BestSpeed); err == nil {
+			h.z = &heldZ{w: w}
+			w.Reset(&h.z.buf)
+		}
+	}
+	if h.z != nil && !h.releasable(seg) {
+		if _, err := h.z.w.Write(out); err == nil {
+			h.z.raw += len(out)
+			h.z.afterCalls = h.z.afterCalls || seg.afterCalls
+			return
+		}
+		// A deflate write cannot fail into a bytes.Buffer; if it ever did, the
+		// segment is still held — uncompressed — rather than lost.
+	}
+	h.segs = append(h.segs, seg)
 	h.heldBytes += len(out)
 }
 
-// overflowed reports that what is withheld has passed `stream_hold_max_bytes`.
-func (h *tailHold) overflowed() bool { return h.max > 0 && h.heldBytes > h.max && !h.settled }
+// memBytes is what the hold OCCUPIES — the bound `stream_hold_max_bytes` is about.
+func (h *tailHold) memBytes() int {
+	n := h.heldBytes
+	if h.z != nil {
+		n += h.z.buf.Len()
+	}
+	return n
+}
 
-// held concatenates everything still withheld, for release on allow — sized once,
-// because this is the one moment the whole tail exists twice.
+// overflowed reports that what is withheld has passed `stream_hold_max_bytes`.
+func (h *tailHold) overflowed() bool { return h.max > 0 && h.memBytes() > h.max && !h.settled }
+
+// held concatenates everything still withheld. Tests only: the release path injects
+// piece by piece (`releaseAll`) so the tail never exists twice.
 func (h *tailHold) held() []byte {
-	out := make([]byte, 0, h.heldBytes)
+	var out []byte
 	for _, s := range h.segs {
 		out = append(out, s.bytes...)
+	}
+	if h.z != nil {
+		_ = h.z.w.Close()
+		b, _ := io.ReadAll(flate.NewReader(bytes.NewReader(h.z.buf.Bytes())))
+		out = append(out, b...)
+		h.z = nil
 	}
 	return out
 }
 
+// releaseAll hands every withheld segment to emit in order, dropping each reference
+// as it goes, and reports whether there was anything.
+//
+// ⚠️ ONE SEGMENT AT A TIME, never concatenated first (2026-09-23): the concatenation
+// was the moment the whole tail existed twice, measured at +1× the held bytes on top
+// of a peak the Wasm heap keeps.
+func (h *tailHold) releaseAll(emit func(b []byte, last bool)) bool {
+	z := h.z
+	h.z = nil
+	n := len(h.segs)
+	for i := range h.segs {
+		b := h.segs[i].bytes
+		if h.segs[i].afterCalls {
+			h.releasedCalls = true
+		}
+		h.segs[i] = heldSeg{}
+		emit(b, i == n-1 && z == nil)
+	}
+	h.segs = nil
+	h.heldBytes = 0
+	if n > 0 {
+		h.released = true
+	}
+	if z == nil {
+		return n > 0
+	}
+	/*
+	 * ⚠️ INFLATED A PIECE AT A TIME into the chain, one piece read ahead so the last
+	 * one can carry endStream — never back into one buffer, which would put the whole
+	 * uncompressed tail in the heap at the moment it was compressed to avoid.
+	 */
+	_ = z.w.Close()
+	r := flate.NewReader(&z.buf)
+	piece := make([]byte, 32<<10)
+	var pending []byte
+	for {
+		k, err := io.ReadFull(r, piece)
+		if k > 0 {
+			if pending != nil {
+				emit(pending, false)
+			}
+			pending = append([]byte(nil), piece[:k]...)
+		}
+		if err != nil {
+			break
+		}
+	}
+	if pending != nil {
+		emit(pending, true)
+	} else if n == 0 {
+		return false
+	}
+	h.released = true
+	if z.afterCalls {
+		h.releasedCalls = true
+	}
+	return true
+}
+
 // drop discards the withheld tail — the block path.
-func (h *tailHold) drop() { h.segs = nil; h.heldBytes = 0 }
+func (h *tailHold) drop() { h.segs = nil; h.heldBytes = 0; h.z = nil }
 
 // sawRelease reports whether any byte has already reached the caller, which is
 // what decides between a true refusal and a retraction.
@@ -446,7 +577,7 @@ func keepalive(rs *reqState) {
 func holdOverflow(cfg Config, rs *reqState) {
 	bump(cntHoldOverflow, 1)
 	logConditionf("tail.overflow", "[OGR-TAIL] held %d bytes > stream_hold_max_bytes %d — %s",
-		rs.hold.heldBytes, rs.hold.max, map[bool]string{true: "refusing", false: "releasing and passing the rest through unenforced"}[cfg.failClosed || (rs.spec && rs.input == inputClamped)])
+		rs.hold.memBytes(), rs.hold.max, map[bool]string{true: "refusing", false: "releasing and passing the rest through unenforced"}[cfg.failClosed || (rs.spec && rs.input == inputClamped)])
 	rs.hold.settled = true
 	// ⚠️ A clamped stream is one whose REQUEST was refused: nothing more of it may be
 	// delivered whatever the fail mode says, so releasing on overflow is not an option.
@@ -457,7 +588,7 @@ func holdOverflow(cfg Config, rs *reqState) {
 		return
 	}
 	rs.hold.bypass = true
-	emit(rs, rs.hold.push(nil, 0, false))
+	rs.hold.releaseAll(func(b []byte, _ bool) { emit(rs, [][]byte{b}) })
 }
 
 // emit writes released segments to the caller and stamps the keepalive clock.
@@ -766,12 +897,13 @@ func (rs *reqState) survivorFrames(c *continuation) (string, bool) {
 
 // finishAllow releases the held tail and ends the stream.
 func (rs *reqState) finishAllow() {
-	var body []byte
-	if rs.hold != nil {
-		body = rs.hold.held()
+	inject := func(b []byte, end bool) {
+		if err := proxywasm.InjectEncodedDataToFilterChain(b, end); err != nil {
+			proxywasm.LogErrorf("[OGR-TAIL] final inject failed: %v", err)
+		}
 	}
-	if err := proxywasm.InjectEncodedDataToFilterChain(body, true); err != nil {
-		proxywasm.LogErrorf("[OGR-TAIL] final inject failed: %v", err)
+	if rs.hold == nil || !rs.hold.releaseAll(inject) {
+		inject(nil, true)
 	}
 }
 
