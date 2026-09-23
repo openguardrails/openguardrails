@@ -270,7 +270,7 @@ func TestCallBytesStillHeldDoNotForbidASoftEnding(t *testing.T) {
 	h.sawCalls = false
 	h.push([]byte("aaaa"), 4, false) // prose
 	h.push([]byte("bbbb"), 8, false) // prose — releases the first
-	h.sawCalls = true         // the decoder now has a tool call
+	h.sawCalls = true                // the decoder now has a tool call
 	h.push([]byte("cccc"), 12, false)
 	h.add([]byte("dddd"), 16, false)
 	if !h.sawRelease() {
