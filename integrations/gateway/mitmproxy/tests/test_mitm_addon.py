@@ -98,11 +98,16 @@ class FakeRequest:
         self.path, self.method = path, method
         self._text = body if isinstance(body, str) else json.dumps(body)
 
+    @property
+    def content(self):
+        return self._text.encode("utf-8")
+
+    @content.setter
+    def content(self, data):
+        self._text = data.decode("utf-8")
+
     def get_text(self):
         return self._text
-
-    def set_text(self, text):
-        self._text = text
 
 
 class FakeResponse:
@@ -111,11 +116,16 @@ class FakeResponse:
         self.headers = {"content-type": content_type}
         self._text = body if isinstance(body, str) else json.dumps(body)
 
+    @property
+    def content(self):
+        return self._text.encode("utf-8")
+
+    @content.setter
+    def content(self, data):
+        self._text = data.decode("utf-8")
+
     def get_text(self):
         return self._text
-
-    def set_text(self, text):
-        self._text = text
 
 
 class FakeFlow:
@@ -405,6 +415,89 @@ def test_responses_stream_uses_the_completed_raw_body(gateway, runtime):
     assert event["payload"]["timing"]["started_at"]
 
 
+def test_a_stream_with_no_content_type_is_still_a_stream(gateway, runtime):
+    # The ChatGPT backend behind Codex streams /backend-api/codex/responses
+    # with NO content-type header. Keyed on the header alone, the SSE text was
+    # parsed as JSON, failed, and every Codex response half went unjudged.
+    sse = ('event: response.created\n'
+           'data: {"type": "response.created", "response": {"id": "resp_1"}}\n\n'
+           'event: response.completed\n'
+           'data: {"type": "response.completed", "response": {"id": "resp_1",'
+           ' "output": [], "usage": {"input_tokens": 2, "output_tokens": 1}}}\n\n')
+    flow = FakeFlow("/backend-api/codex/responses",
+                    {"model": "gpt-5", "stream": True, "input": []})
+    roundtrip(gateway, flow, sse, content_type="")
+    assert gateway.counters["unreadable"] == 0
+    event = runtime.events[1]
+    assert event["llm_protocol"] == "openai.responses"
+    assert event["payload"]["id"] == "resp_1"
+
+
+def test_responses_items_fill_an_empty_completed_output(gateway, runtime):
+    # The ChatGPT backend (store=false) ends with "output": [] and delivers
+    # the items only as output_item.done frames. Taken at its word, the
+    # runtime judged an empty answer — the tool call included.
+    call = {"type": "custom_tool_call", "call_id": "c1", "name": "exec",
+            "input": "rm -rf /"}
+    msg = {"type": "message", "role": "assistant",
+           "content": [{"type": "output_text", "text": "Running it."}]}
+    sse = ('data: {"type": "response.output_item.done", "output_index": 1, "item": %s}\n\n'
+           'data: {"type": "response.output_item.done", "output_index": 0, "item": %s}\n\n'
+           'data: {"type": "response.completed", "response": {"id": "resp_1",'
+           ' "output": []}}\n\n') % (json.dumps(call), json.dumps(msg))
+    flow = FakeFlow("/backend-api/codex/responses", {"model": "gpt-5", "stream": True, "input": []})
+    roundtrip(gateway, flow, sse, content_type="text/event-stream")
+    payload = runtime.events[1]["payload"]
+    assert runtime.events[1]["llm_protocol"] == "openai.responses"
+    assert payload["output"] == [msg, call]   # in output_index order
+
+
+def test_an_incomplete_responses_stream_keeps_its_raw_body(gateway, runtime):
+    sse = ('data: {"type": "response.incomplete", "response": {"id": "resp_2",'
+           ' "status": "incomplete", "output": [{"type": "message", "content":'
+           ' [{"type": "output_text", "text": "cut o"}]}]}}\n\n')
+    flow = FakeFlow("/v1/responses", {"model": "gpt-5", "stream": True, "input": []})
+    roundtrip(gateway, flow, sse, content_type="text/event-stream")
+    event = runtime.events[1]
+    assert event["llm_protocol"] == "openai.responses"
+    assert event["payload"]["status"] == "incomplete"
+
+
+def test_anthropic_server_tool_calls_are_calls(gateway, runtime):
+    # Claude Code's WebSearch is a server_tool_use block; its query streams as
+    # input_json_delta like any tool_use, and used to be dropped.
+    sse = ('data: {"type": "content_block_start", "index": 0, "content_block":'
+           ' {"type": "server_tool_use", "id": "st1", "name": "web_search", "input": {}}}\n\n'
+           'data: {"type": "content_block_delta", "index": 0, "delta":'
+           ' {"type": "input_json_delta", "partial_json": "{\\"query\\": \\"x\\"}"}}\n\n'
+           'data: {"type": "message_delta", "usage": {"output_tokens": 0}}\n\n')
+    flow = FakeFlow("/v1/messages", {"model": "claude-x", "stream": True, "messages": []})
+    roundtrip(gateway, flow, sse, content_type="text/event-stream")
+    payload = runtime.events[1]["payload"]
+    assert payload["tool_calls"] == [{"id": "st1", "name": "web_search",
+                                      "arguments": {"query": "x"}}]
+    assert payload["usage"] == {"output_tokens": 0}   # a zero is reported, not absent
+
+
+def test_a_200_without_a_decision_is_not_a_verdict(runtime):
+    gw = OGRGateway(ogr_url=runtime.url, ogr_api_key="ogr_test",
+                    ogr_fail_mode="closed", **FOUR_TUPLE)
+    runtime.verdicts.append({"ok": True})
+    flow = FakeFlow("/v1/chat/completions", CHAT_BODY)
+    run(gw.request(flow))
+    assert flow.response.status_code == 503
+    assert gw.counters["evaluated"] == 0
+
+
+def test_an_upstream_x_ogr_decision_header_does_not_skip_judgement(gateway, runtime):
+    flow = FakeFlow("/v1/chat/completions", CHAT_BODY)
+    run(gateway.request(flow))
+    flow.response = FakeResponse({"choices": []})
+    flow.response.headers["x-ogr-decision"] = "allow"
+    run(gateway.response(flow))
+    assert [e["kind"] for e in runtime.events] == ["step/request", "step/response"]
+
+
 def test_blocked_stream_never_reaches_the_client(gateway, runtime):
     runtime.verdicts.append({"event_id": "e1", "provider": "mock", "decision": "allow"})
     runtime.verdicts.append({"event_id": "e2", "provider": "mock", "decision": "block"})
@@ -465,3 +558,25 @@ def test_with_real_mitmproxy_flow(runtime):
         content=json.dumps(CHAT_BODY).encode()))
     run(gw.request(flow))
     assert flow.response.status_code == 403
+
+
+def test_real_flow_without_content_type_is_read_as_utf8(runtime):
+    """mitmproxy's get_text() guesses latin-1 for a body with no content-type
+    (the ChatGPT backend's Codex stream); every non-ASCII character reached
+    the runtime as mojibake. The addon decodes the bytes as UTF-8."""
+    pytest.importorskip("mitmproxy")
+    from mitmproxy.test import tflow, tutils
+
+    gw = OGRGateway(ogr_url=runtime.url, ogr_api_key="ogr_test", **FOUR_TUPLE)
+    flow = tflow.tflow(req=tutils.treq(
+        method=b"POST", path=b"/backend-api/codex/responses",
+        content=json.dumps({"model": "gpt-5", "stream": True, "input": []}).encode()))
+    run(gw.request(flow))
+    sse = ('data: {"type": "response.completed", "response": {"id": "r",'
+           ' "output": [{"type": "message", "content": [{"type": "output_text",'
+           ' "text": "I\u2019ll \u5217\u51fa"}]}]}}\n\n')
+    flow.response = tutils.tresp(content=sse.encode("utf-8"))
+    assert "content-type" not in flow.response.headers
+    run(gw.response(flow))
+    text = runtime.events[1]["payload"]["output"][0]["content"][0]["text"]
+    assert text == "I\u2019ll \u5217\u51fa"

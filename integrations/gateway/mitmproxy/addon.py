@@ -56,7 +56,7 @@ logger = logging.getLogger("ogr.mitmproxy")
 
 # The integration build id. It left the GuardEvent in v0.8 — it rides ONLY on
 # the heartbeat, where fleet coverage and bad-rollout triage read it.
-INTEGRATION = "ogr-mitmproxy/1.0.0"
+INTEGRATION = "ogr-mitmproxy/1.1.0"
 
 HEARTBEAT_INTERVAL_S = 30
 
@@ -75,6 +75,29 @@ def match_protocol(path: str) -> str | None:
     if p.endswith("/messages"):
         return "anthropic.messages"
     return None
+
+
+def body_text(message) -> str | None:
+    """A request's or response's body as text, or None when it cannot be read.
+
+    Decoded as UTF-8 from the bytes, never through `get_text()`: mitmproxy
+    guesses the charset from the content-type, and for a body WITHOUT one
+    (the ChatGPT backend's Codex stream) it guesses latin-1 — every non-ASCII
+    character then reached the runtime as mojibake (`’` as `\\u00e2\\u0080\\u0099`,
+    all CJK text unreadable). JSON (RFC 8259) and SSE are UTF-8 by definition.
+    `.content` has already undone any content-encoding; a body whose encoding
+    does not decode raises ValueError there, and reads as unreadable."""
+    try:
+        content = message.content
+    except ValueError:
+        return None
+    return None if content is None else content.decode("utf-8", errors="replace")
+
+
+def set_body_text(message, text: str) -> None:
+    # The inverse of body_text: UTF-8 bytes; mitmproxy re-applies the
+    # content-encoding the message arrived with.
+    message.content = text.encode("utf-8")
 
 
 def now_iso() -> str:
@@ -233,6 +256,20 @@ def _index(node, key):
 
 # ── stream reassembly (judge once, whole) ───────────────────────────────────
 
+def is_event_stream(content_type: str, raw: str) -> bool:
+    """Whether a response body is an SSE stream. The header is the normal
+    signal, but it is not a reliable one: the ChatGPT backend Codex talks to
+    streams `/backend-api/codex/responses` with NO content-type at all, and
+    read as JSON that stream is "unreadable" — the response half of every
+    Codex step silently unjudged. So a body whose first line is an SSE field
+    (`event:`, `data:`, or a `:` comment) is a stream too; no JSON document
+    can begin that way."""
+    if "text/event-stream" in (content_type or "").lower():
+        return True
+    head = raw.lstrip()[:16]
+    return head.startswith(("event:", "data:", ":"))
+
+
 def sse_data_frames(raw: str) -> list[dict]:
     """The parsed `data:` payloads of an SSE stream, in order. Multi-line data
     per the SSE spec (joined with \\n); `[DONE]` and unparseable frames are
@@ -260,9 +297,11 @@ def sse_data_frames(raw: str) -> list[dict]:
 
 def _merge_usage(into: dict, new: dict | None) -> None:
     # Anthropic splits usage across message_start/message_delta; merge halves,
-    # either half never zeroing the other.
+    # a half that does not mention a counter never erasing the other's. A
+    # reported 0 IS a value (a cache miss, an empty answer) and is kept:
+    # absence means "not reported", which a zero is not.
     for k, v in (new or {}).items():
-        if v:
+        if v is not None:
             into[k] = v
 
 
@@ -312,9 +351,9 @@ def reassemble_stream(llm_protocol: str, raw: str) -> tuple[dict | None, str]:
     if not frames:
         return None, llm_protocol
     if llm_protocol == "openai.responses":
-        for frame in reversed(frames):
-            if frame.get("type") == "response.completed" and isinstance(frame.get("response"), dict):
-                return frame["response"], "openai.responses"
+        body = _responses_terminal_body(frames)
+        if body is not None:
+            return body, "openai.responses"
         return _reassemble_responses(frames), "canonical"
     if llm_protocol == "anthropic.messages":
         return _reassemble_anthropic(frames), "canonical"
@@ -348,6 +387,9 @@ def _reassemble_openai_chat(frames: list[dict]) -> dict:
                                model, usage, "openai.chat")
 
 
+_ANTHROPIC_CALL_BLOCKS = ("tool_use", "server_tool_use", "mcp_tool_use")
+
+
 def _reassemble_anthropic(frames: list[dict]) -> dict:
     text: list[str] = []
     reasoning: list[str] = []
@@ -361,7 +403,12 @@ def _reassemble_anthropic(frames: list[dict]) -> dict:
             _merge_usage(usage, message.get("usage"))
         elif ftype == "content_block_start":
             block = frame.get("content_block") or {}
-            if block.get("type") == "tool_use":
+            # A server-executed call (Claude Code's WebSearch is a
+            # `server_tool_use`; MCP connector calls are `mcp_tool_use`) is
+            # still a call the model made, with its arguments streamed as
+            # input_json_delta like any other — dropped, a web search went
+            # unjudged with its query.
+            if block.get("type") in _ANTHROPIC_CALL_BLOCKS:
                 tools[frame.get("index", 0)] = {"id": block.get("id", ""),
                                                 "name": block.get("name", ""),
                                                 "arguments": ""}
@@ -381,6 +428,36 @@ def _reassemble_anthropic(frames: list[dict]) -> dict:
                                model, usage, "anthropic.messages")
 
 
+_RESPONSES_TERMINAL = ("response.completed", "response.incomplete", "response.failed")
+
+
+def _responses_terminal_body(frames: list[dict]) -> dict | None:
+    """The raw response object a Responses stream ends with, or None.
+
+    Any terminal frame counts — an `incomplete` (max tokens) or `failed`
+    answer still carries prose and tool calls worth judging. Its `output` is
+    NOT reliable: the ChatGPT backend behind Codex (store=false) sends
+    `"output": []` in `response.completed` and delivers the items only as
+    `response.output_item.done` frames — taken at its word, every Codex answer
+    reached the runtime empty, tool calls included. The items those frames
+    carried are the output when the terminal frame names none."""
+    body = None
+    for frame in reversed(frames):
+        if frame.get("type") in _RESPONSES_TERMINAL and isinstance(frame.get("response"), dict):
+            body = frame["response"]
+            break
+    if body is None:
+        return None
+    if not body.get("output"):
+        items = sorted(
+            (f for f in frames
+             if f.get("type") == "response.output_item.done" and isinstance(f.get("item"), dict)),
+            key=lambda f: f.get("output_index", 0))
+        if items:
+            body = {**body, "output": [f["item"] for f in items]}
+    return body
+
+
 def _reassemble_responses(frames: list[dict]) -> dict:
     # Fallback for a Responses stream whose completed frame was withheld.
     text: list[str] = []
@@ -395,6 +472,12 @@ def _reassemble_responses(frames: list[dict]) -> dict:
                 calls.append({"id": item.get("call_id", ""),
                               "name": item.get("name", ""),
                               "arguments": item.get("arguments", "")})
+            elif item.get("type") == "custom_tool_call":
+                # Freeform tools (Codex's apply_patch / exec): `input` is raw
+                # text, not JSON — it stays a string in `arguments`.
+                calls.append({"id": item.get("call_id", ""),
+                              "name": item.get("name", ""),
+                              "arguments": item.get("input", "")})
     return _canonical_response(text, [], calls, model, usage, "openai.chat")
 
 
@@ -455,6 +538,9 @@ class OGRGateway:
         self.counters = {"evaluated": 0, "refused": 0, "unchecked": 0,
                          "unreadable": 0, "unresolved_spans": 0}
         self._heartbeat_task = None
+        # Per process, not across restarts: two proxies with one API key are
+        # two heartbeating instances, never one set of counters overwritten.
+        self.instance_id = uuid.uuid4().hex
         if not self.ogr_api_key:
             logger.warning("OGR_API_KEY is not set — every evaluate will fail "
                            "into fail_%s", self.ogr_fail_mode)
@@ -502,6 +588,12 @@ class OGRGateway:
         except Exception as exc:  # noqa: BLE001 - every failure maps to the fail mode
             logger.warning("[OGR] evaluate failed: %s", exc)
             verdict = None
+        if verdict is not None and verdict.get("decision") not in ("allow", "block"):
+            # A 200 carrying some other object — a misrouted URL answering
+            # `{"ok": true}`, a proxy's JSON error — is not a verdict. Counted
+            # as one it would be an allow, and pass fail-closed.
+            logger.warning("[OGR] evaluate answered without a decision — not a verdict")
+            verdict = None
         if verdict is not None:
             self.counters["evaluated"] += 1
         return verdict
@@ -510,6 +602,8 @@ class OGRGateway:
         while True:
             await asyncio.sleep(HEARTBEAT_INTERVAL_S)
             body = json.dumps({"integration": INTEGRATION,
+                               "instance_id": self.instance_id,
+                               "agent_id": self.ogr_agent_id,
                                "interval_s": HEARTBEAT_INTERVAL_S,
                                "counters": self.counters}).encode("utf-8")
             try:
@@ -526,6 +620,7 @@ class OGRGateway:
         if event_id:
             headers["x-ogr-event-id"] = event_id
         flow.response = make_response(status, refusal_body(llm_protocol, message), headers)
+        flow.metadata["ogr_refused"] = True
         self.counters["refused"] += 1
 
     def _gate(self, flow, llm_protocol: str, verdict: dict | None) -> bool:
@@ -575,7 +670,7 @@ class OGRGateway:
         llm_protocol = match_protocol(flow.request.path)
         if llm_protocol is None:
             return  # not an LLM call — pass through untouched
-        text = flow.request.get_text() or ""
+        text = body_text(flow.request) or ""
         try:
             body = json.loads(text)
         except ValueError:
@@ -597,7 +692,7 @@ class OGRGateway:
             return  # blocked/refused: flow.response is set, the model is never called
         if self._apply_spans(verdict, body):
             # Spans applied BEFORE sending — the redacted body is what leaves.
-            flow.request.set_text(json.dumps(body, ensure_ascii=False))
+            set_body_text(flow.request, json.dumps(body, ensure_ascii=False))
         # started_at is stamped at the request's RELEASE upstream (after the
         # verdict), so TTFT measures the provider, not our evaluate wait.
         meta["started_at"] = now_iso()
@@ -607,8 +702,12 @@ class OGRGateway:
         meta = flow.metadata.get("ogr")
         if not meta or flow.response is None:
             return  # unrecognized path, or a request we could not judge
-        if flow.response.headers.get("x-ogr-decision"):
-            return  # our own refusal echoing through the hook — never re-judge it
+        if flow.metadata.get("ogr_refused"):
+            # Our own refusal echoing through the hook — never re-judge it.
+            # Marked in private flow metadata, not recognized by the
+            # x-ogr-decision header: that header is on the wire, and an
+            # upstream that sent it would switch the response half off.
+            return
         if flow.response.status_code != 200:
             return  # an upstream error carries no model answer to judge
         llm_protocol = meta["llm_protocol"]
@@ -617,8 +716,8 @@ class OGRGateway:
         # mitmproxy buffered the reply whole; no first-token moment was
         # observed, and a buffered reply omits first_token_at rather than
         # inventing one.
-        raw = flow.response.get_text() or ""
-        streaming = "text/event-stream" in (flow.response.headers.get("content-type") or "")
+        raw = body_text(flow.response) or ""
+        streaming = is_event_stream(flow.response.headers.get("content-type") or "", raw)
 
         if streaming:
             payload, event_protocol = reassemble_stream(llm_protocol, raw)
@@ -650,7 +749,7 @@ class OGRGateway:
             # withheld; the agent gets the refusal instead and no tool runs.
             return
         if not streaming and self._apply_spans(verdict, body):
-            flow.response.set_text(json.dumps(body, ensure_ascii=False))
+            set_body_text(flow.response, json.dumps(body, ensure_ascii=False))
         elif streaming:
             # Spans against a reassembled stream name the canonical payload,
             # not the SSE frames we would forward; splicing them is not
