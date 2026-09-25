@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "openguardrails-gateway-mitmproxy"
-version = "1.0.0"
+version = "1.1.0"
 description = "OpenGuardrails v0.8 gateway integration: a mitmproxy addon that speaks the Runtime API directly (two POSTs per proxied model call)."
 readme = "README.md"
 requires-python = ">=3.10"

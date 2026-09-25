@@ -42,6 +42,11 @@ A refusal is rendered in the **caller's** protocol — an Anthropic caller gets
 an Anthropic-shaped error, an OpenAI caller an OpenAI-shaped one. Everything
 else on the proxy passes through untouched.
 
+A stream is recognized by `content-type: text/event-stream` **or** by a body
+that opens with an SSE field — the ChatGPT backend behind Codex streams with no
+content-type at all. Bodies are decoded as UTF-8 from the bytes (JSON and SSE
+are UTF-8 by definition), never through a charset guess.
+
 ## Streaming: buffered whole (tail = ∞)
 
 mitmproxy buffers a response in full before the `response` hook fires, and
@@ -55,7 +60,10 @@ of streaming UX behind the proxy.
 
 Reassembly per protocol: an `openai.responses` stream ends with a
 `response.completed` frame carrying the complete raw response object, which
-travels as-is under `openai.responses`; chat and messages streams have no
+travels as-is under `openai.responses` (so does a `response.incomplete` or
+`response.failed` one; when that object's `output` is empty — the ChatGPT
+backend sends `"output": []` with `store: false` — it is filled from the
+stream's `response.output_item.done` items); chat and messages streams have no
 such body and reassemble into the **canonical** shape
 (`{text, reasoning?, tool_calls?, model?, usage?, timing}`) with the
 provider's usage counters transcribed — and omitted, never zeroed, when the
@@ -141,7 +149,15 @@ spans dropped and counted (`unresolved_spans`), never applied somewhere else.
 - **WebSocket transports are not covered.** v0.6's Codex-over-WebSocket
   support was removed with the v0.8 rewrite; the v0.8 wire is defined over
   request/response bodies. Codex traffic over plain HTTP+SSE to a
-  `…/responses` path is still judged like any Responses call.
+  `…/responses` path is still judged like any Responses call — and the Codex
+  CLI signed in with ChatGPT uses a WebSocket by default, which this addon
+  never sees. Point it at the same backend through a provider that turns the
+  WebSocket off:
+
+  ```bash
+  codex -c 'model_providers.openai-http={name="OpenAI", base_url="https://chatgpt.com/backend-api/codex", wire_api="responses", requires_openai_auth=true, supports_websockets=false}' \
+        -c model_provider=openai-http
+  ```
 - A forward proxy is evadable from outside the process (an agent pointed at a
   different endpoint is simply never seen); it is an enforcement point for
   traffic you route through it, not a containment boundary.

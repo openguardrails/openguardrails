@@ -9,6 +9,21 @@ version is independent of any implementation's package version.
 
 ## [Unreleased]
 
+### mitmproxy addon 1.1.0 (implementation, not a wire change)
+- **Codex responses are judged.** The ChatGPT backend streams
+  `/backend-api/codex/responses` with no content-type; a body opening with an SSE
+  field is now a stream. Its `response.completed` carries `"output": []` — the
+  output is rebuilt from the `response.output_item.done` items. Before, every Codex
+  response half was either unreadable or empty.
+- **Bodies are decoded as UTF-8 from the bytes**, not via mitmproxy's charset
+  guess (latin-1 for a body with no content-type — all non-ASCII text arrived as
+  mojibake).
+- A 200 without an `allow|block` decision is not a verdict; the own-refusal marker
+  is private flow metadata, not the on-wire `x-ogr-decision` header; Anthropic
+  `server_tool_use`/`mcp_tool_use` blocks are calls; `response.incomplete|failed`
+  keep their raw body; a reported zero usage counter is kept; the heartbeat carries
+  `instance_id` and `agent_id`.
+
 ### Higress plugin 3.15.2 (implementation, not a wire change)
 - **What a stream withholds is compressed** past 64 KB (deflate, inflated
   byte-for-byte on release) and the hold bound counts what is stored. Measured: a
