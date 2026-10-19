@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"compress/flate"
 	"encoding/json"
+	"fmt"
+	"github.com/tidwall/gjson"
 	"io"
 	"time"
 
@@ -438,6 +440,9 @@ func holdChunk(ctx wrapper.HttpContext, cfg Config, rs *reqState, sp *streamProc
 	segs []protocol.Segment, isLast bool) []byte {
 	if rs.hold == nil {
 		rs.hold = newTailHold(cfg.streamHeadReleaseBytes, ctx.GetBoolContext(ctxStreaming, true))
+		if rs.piiHold {
+			rs.hold.holdAll = true
+		}
 		rs.hold.max = cfg.streamHoldMaxBytes
 	}
 	rs.sp = sp
@@ -484,7 +489,7 @@ func holdChunk(ctx wrapper.HttpContext, cfg Config, rs *reqState, sp *streamProc
 			}
 			emit(rs, rs.hold.push(seg.Bytes, seg.Content, seg.Hold))
 		}
-		if rs.hold.overflowed() {
+		if rs.hold.overflowed() || (rs.piiHold && !rs.hold.settled && rs.hold.max > 0 && sp.Bytes() > rs.hold.max) {
 			holdOverflow(cfg, rs)
 			if rs.hold.cut {
 				return nil
@@ -506,6 +511,12 @@ func holdChunk(ctx wrapper.HttpContext, cfg Config, rs *reqState, sp *streamProc
 		rs.hold.add(seg.Bytes, seg.Content, true)
 	}
 	rs.ended = true
+	if rs.hold.overflowed() || (rs.piiHold && !rs.hold.settled && rs.hold.max > 0 && sp.Bytes() > rs.hold.max) {
+		holdOverflow(cfg, rs)
+		if rs.hold.cut {
+			return nil
+		}
+	}
 	if rs.hold.bypass {
 		/*
 		 * No longer held (overflow under `open`): the caller gets the end of its
@@ -594,6 +605,7 @@ func holdOverflow(cfg Config, rs *reqState) {
 // emit writes released segments to the caller and stamps the keepalive clock.
 func emit(rs *reqState, segs [][]byte) {
 	for _, seg := range segs {
+		seg = rs.restoreFallback(seg, false)
 		if err := proxywasm.InjectEncodedDataToFilterChain(seg, false); err != nil {
 			proxywasm.LogErrorf("[OGR-TAIL] inject failed: %v", err)
 		}
@@ -662,7 +674,7 @@ func judgeFinal(ctx wrapper.HttpContext, cfg Config, rs *reqState, sp *streamPro
 		return
 	}
 	out := sp.Result()
-	if out.Empty() {
+	if out.Empty() && !rs.piiHold {
 		// ⚠️ Nothing said, or nothing READABLE — and since 3.6.1 the frame count is
 		// what separates them, not SawBytes alone. A WELL-FORMED stream that carried
 		// no content is the model genuinely saying nothing: a judgeable (vacuous)
@@ -743,15 +755,30 @@ func judgeFinal(ctx wrapper.HttpContext, cfg Config, rs *reqState, sp *streamPro
 				// `refused`. Fixed in 3.0.1 together with the buffered twin at
 				// main.go's onResponseBody.
 				bump(cntRefused, 1)
-				if c := v.Continuation(); c != nil {
+				if c := v.Continuation(); c != nil && !rs.piiHold {
 					rs.finishBlockedSoft(c)
 					return
 				}
 				rs.finishBlocked(v.Reason())
 				return
 			}
+			if sp.sse && !sp.scan.SawEnd() {
+				rs.finishProcessingFailure(cfg)
+				return
+			}
 			if partiallyJudged("TAIL", v, cfg.failClosed) {
 				rs.finishBlocked(partialMessage)
+				return
+			}
+			if rs.piiHold {
+				if v.root.Get("response_policy.pii").String() != "redact" {
+					rs.finishProcessingFailure(cfg)
+					return
+				}
+				if err := rs.finishPrivateStream(e.Payload, v.Spans()); err != nil {
+					logConditionf("tail.privacy", "[OGR-TAIL] privacy rewrite failed: %s", err.Error())
+					rs.finishProcessingFailure(cfg)
+				}
 				return
 			}
 			// ⚠️ Spans against a CANONICAL payload cannot be spliced into SSE frames —
@@ -761,6 +788,8 @@ func judgeFinal(ctx wrapper.HttpContext, cfg Config, rs *reqState, sp *streamPro
 			// masking that a stream cannot deliver.
 			if spans := v.Spans(); len(spans) > 0 {
 				logUnresolvedSpans(len(spans))
+				rs.finishProcessingFailure(cfg)
+				return
 			}
 			rs.finishAllow()
 		})
@@ -898,6 +927,7 @@ func (rs *reqState) survivorFrames(c *continuation) (string, bool) {
 // finishAllow releases the held tail and ends the stream.
 func (rs *reqState) finishAllow() {
 	inject := func(b []byte, end bool) {
+		b = rs.restoreFallback(b, end)
 		if err := proxywasm.InjectEncodedDataToFilterChain(b, end); err != nil {
 			proxywasm.LogErrorf("[OGR-TAIL] final inject failed: %v", err)
 		}
@@ -905,6 +935,70 @@ func (rs *reqState) finishAllow() {
 	if rs.hold == nil || !rs.hold.releaseAll(inject) {
 		inject(nil, true)
 	}
+}
+
+// finishPrivateStream rewrites a complete unpublished stream. Offsets index the
+// canonical source; rewriting by the recovered values also covers repeated final
+// snapshots. A missing span or unsupported dialect is a processing failure; the
+// caller applies fail_mode, retaining the original for an open fallback.
+func (rs *reqState) finishPrivateStream(canonical []byte, spans []Span) error {
+	replacements := make(map[string]string)
+	for token, value := range rs.session.Mapping {
+		if protocol.IsSecretPlaceholder(token) {
+			replacements[token] = value
+		}
+	}
+	for _, span := range spans {
+		path := stripPayloadPrefix(span.Path)
+		value := gjson.GetBytes(canonical, path)
+		chars := []rune(value.String())
+		if path == "" || value.Type != gjson.String || span.Start < 0 || span.End <= span.Start || span.End > len(chars) {
+			return fmt.Errorf("unresolved privacy span")
+		}
+		replacements[string(chars[span.Start:span.End])] = span.Replacement
+	}
+	var raw bytes.Buffer
+	if rs.hold == nil {
+		return fmt.Errorf("missing privacy buffer")
+	}
+	rs.hold.releaseAll(func(b []byte, _ bool) { raw.Write(b) })
+	// Keep the original available until rewriting succeeds: fail_mode=open may
+	// need to release it with secret restoration after a processing failure.
+	rs.hold.add(raw.Bytes(), 0, true)
+	rs.hold.released = false
+	rs.hold.releasedCalls = false
+	if rs.sp == nil || !rs.sp.sse {
+		return fmt.Errorf("privacy stream is not SSE")
+	}
+	rewritten, err := protocol.RewriteHeldSSE(raw.String(), replacements)
+	if err != nil {
+		return err
+	}
+	rs.hold.drop()
+	return proxywasm.InjectEncodedDataToFilterChain([]byte(rewritten), true)
+}
+
+// Processing failures share the same fail_mode for every guardrail. An explicit
+// policy block is handled separately and is never turned into a fail-open.
+func (rs *reqState) finishProcessingFailure(cfg Config) {
+	evaluateFailed("TAIL", 0, cfg.failClosed)
+	if cfg.failClosed {
+		rs.finishBlocked(failMessage)
+	} else {
+		rs.finishAllow()
+	}
+}
+
+// Private holds contain the original placeholders. If processing fails open,
+// still restore known secrets, using one decoder across overflow passthrough.
+func (rs *reqState) restoreFallback(b []byte, end bool) []byte {
+	if !rs.piiHold {
+		return b
+	}
+	if rs.privacyFallback == nil {
+		rs.privacyFallback = newStreamProcessor(rs.proto, rs.session.Mapping, rs.hold == nil || rs.hold.sse, time.Time{}, false)
+	}
+	return rs.privacyFallback.ProcessChunk(b, end)
 }
 
 // finishBlocked ends a stream the verdict (or fail-closed) refused: the held tail

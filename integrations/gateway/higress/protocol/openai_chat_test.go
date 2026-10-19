@@ -14,14 +14,14 @@ func TestMaskRewritesBothContentShapes(t *testing.T) {
 	body := `{"messages":[
 	  {"role":"user","content":"mail ada@example.com"},
 	  {"role":"user","content":[{"type":"text","text":"again ada@example.com"}]}]}`
-	out, n := openAIChat{}.Mask(body, []Redaction{{Token: "${OGR_EMAIL_1}", Value: "ada@example.com"}})
+	out, n := openAIChat{}.Mask(body, []Redaction{{Token: "${OGR_SECRET_1}", Value: "ada@example.com"}})
 	if n != 2 {
 		t.Fatalf("changed %d strings, want 2", n)
 	}
 	if strings.Contains(out, "ada@example.com") {
 		t.Fatalf("plaintext survived: %s", out)
 	}
-	if got := gjson.Get(out, "messages.1.content.0.text").String(); got != "again ${OGR_EMAIL_1}" {
+	if got := gjson.Get(out, "messages.1.content.0.text").String(); got != "again ${OGR_SECRET_1}" {
 		t.Fatalf("array part = %q", got)
 	}
 }
@@ -30,11 +30,11 @@ func TestMaskKeepsTheDocumentValidWhenValuesCarryQuotes(t *testing.T) {
 	// A blind string replace over raw JSON corrupts the document the moment a value
 	// contains a quote or a backslash; the walk sets each field through sjson instead.
 	body := `{"messages":[{"role":"user","content":"say \"ada@example.com\" twice"}]}`
-	out, _ := openAIChat{}.Mask(body, []Redaction{{Token: "${OGR_EMAIL_1}", Value: "ada@example.com"}})
+	out, _ := openAIChat{}.Mask(body, []Redaction{{Token: "${OGR_SECRET_1}", Value: "ada@example.com"}})
 	if !gjson.Valid(out) {
 		t.Fatalf("masking produced invalid JSON: %s", out)
 	}
-	if got := gjson.Get(out, "messages.0.content").String(); got != `say "${OGR_EMAIL_1}" twice` {
+	if got := gjson.Get(out, "messages.0.content").String(); got != `say "${OGR_SECRET_1}" twice` {
 		t.Fatalf("content = %q", got)
 	}
 }
@@ -44,7 +44,7 @@ func TestTheSystemPromptIsMaskedLikeAnyOtherMessage(t *testing.T) {
 	// other two keep it in a field of its own and mask it separately.
 	body := `{"messages":[{"role":"system","content":"contact ada@example.com"},
 	  {"role":"user","content":"hi"}]}`
-	out, n := openAIChat{}.Mask(body, []Redaction{{Token: "${OGR_EMAIL_1}", Value: "ada@example.com"}})
+	out, n := openAIChat{}.Mask(body, []Redaction{{Token: "${OGR_SECRET_1}", Value: "ada@example.com"}})
 	if n != 1 || strings.Contains(out, "ada@example.com") {
 		t.Fatalf("system prompt not masked (%d): %s", n, out)
 	}
@@ -99,9 +99,9 @@ func TestBareReasoningIsReadAsReasoning(t *testing.T) {
 func TestBufferedRestoreCoversBothReasoningSpellings(t *testing.T) {
 	// An unrestored placeholder in the thinking pane is the cosmetic half of the
 	// same defect — and it was ONLY ever fixed for one spelling, in the stream.
-	mapping := map[string]string{"${OGR_PHONE_1}": "13800000000"}
+	mapping := map[string]string{"${OGR_SECRET_1}": "13800000000"}
 	for _, field := range []string{"reasoning_content", "reasoning"} {
-		body := `{"choices":[{"message":{"content":"done","` + field + `":"call ${OGR_PHONE_1} first"}}]}`
+		body := `{"choices":[{"message":{"content":"done","` + field + `":"call ${OGR_SECRET_1} first"}}]}`
 		out, changed := openAIChat{}.Restore(body, mapping)
 		if !changed {
 			t.Fatalf("%s: nothing restored", field)
@@ -116,17 +116,17 @@ func TestAStreamedBareReasoningIsAccumulatedAndRestored(t *testing.T) {
 	// Both halves of the bug in one stream: the text has to reach Output (or the
 	// response half is lost as `unreadable`), and the placeholder has to come back
 	// out restored under the SPELLING THE CLIENT IS READING.
-	mapping := map[string]string{"${OGR_PHONE_1}": "13800000000"}
+	mapping := map[string]string{"${OGR_SECRET_1}": "13800000000"}
 	dec := openAIChat{}.NewDecoder(NewRestorer(mapping))
 	scan := NewScanner(dec)
 	var out strings.Builder
-	for _, frag := range []string{"call ${OGR", "_PHONE", "_1} now"} {
+	for _, frag := range []string{"call ${OGR", "_SECRET", "_1} now"} {
 		out.Write(scan.Chunk([]byte(`data: {"choices":[{"delta":{"reasoning":"`+frag+`"}}]}`+"\n\n"), false))
 	}
 	out.Write(scan.Chunk([]byte("data: [DONE]\n\n"), true))
 
 	got := dec.Output()
-	if got.Reasoning != "call ${OGR_PHONE_1} now" {
+	if got.Reasoning != "call ${OGR_SECRET_1} now" {
 		t.Errorf("accumulated reasoning = %q", got.Reasoning)
 	}
 	if got.Empty() {
@@ -135,7 +135,7 @@ func TestAStreamedBareReasoningIsAccumulatedAndRestored(t *testing.T) {
 	if !strings.Contains(out.String(), "13800000000") {
 		t.Errorf("placeholder not restored to the client:\n%s", out.String())
 	}
-	if strings.Contains(out.String(), "${OGR_PHONE_1}") {
+	if strings.Contains(out.String(), "${OGR_SECRET_1}") {
 		t.Errorf("placeholder still on the wire:\n%s", out.String())
 	}
 	// ⚠️ The held tail is flushed under the stream's OWN spelling: a client reading
@@ -148,15 +148,15 @@ func TestAStreamedBareReasoningIsAccumulatedAndRestored(t *testing.T) {
 func TestAMirroredReasoningPairStaysConsistent(t *testing.T) {
 	// A vendor that sends both must not be accumulated twice (one pending tail is
 	// shared) and must not be delivered half-restored.
-	mapping := map[string]string{"${OGR_PHONE_1}": "13800000000"}
+	mapping := map[string]string{"${OGR_SECRET_1}": "13800000000"}
 	dec := openAIChat{}.NewDecoder(NewRestorer(mapping))
 	scan := NewScanner(dec)
 	var out strings.Builder
-	line := `data: {"choices":[{"delta":{"reasoning_content":"call ${OGR_PHONE_1}","reasoning":"call ${OGR_PHONE_1}"}}]}` + "\n\n"
+	line := `data: {"choices":[{"delta":{"reasoning_content":"call ${OGR_SECRET_1}","reasoning":"call ${OGR_SECRET_1}"}}]}` + "\n\n"
 	out.Write(scan.Chunk([]byte(line), false))
 	out.Write(scan.Chunk([]byte("data: [DONE]\n\n"), true))
 
-	if got := dec.Output().Reasoning; got != "call ${OGR_PHONE_1}" {
+	if got := dec.Output().Reasoning; got != "call ${OGR_SECRET_1}" {
 		t.Errorf("mirrored reasoning counted %d times: %q", strings.Count(got, "call"), got)
 	}
 	frame := out.String()
@@ -168,12 +168,12 @@ func TestAMirroredReasoningPairStaysConsistent(t *testing.T) {
 func TestAHalfTokenSplitAcrossArgumentDeltasStillRestores(t *testing.T) {
 	// ⚠️ The normal case, not the exception: deltas are token-sized and the placeholder
 	// is fourteen characters. Restoring only when a whole token fits inside one delta is
-	// what handed the client `{"to": "${OGR_EMAIL_1}"}` and made it act on a value that
+	// what handed the client `{"to": "${OGR_SECRET_1}"}` and made it act on a value that
 	// names nothing. What matters is that the SEQUENCE comes out restored.
-	mapping := map[string]string{"${OGR_EMAIL_1}": "ada@example.com"}
+	mapping := map[string]string{"${OGR_SECRET_1}": "ada@example.com"}
 	scan := NewScanner(openAIChat{}.NewDecoder(NewRestorer(mapping)))
 	var out strings.Builder
-	for _, frag := range []string{`{\"to\":\"${OGR`, `_EMAIL`, `_1}\"}`} {
+	for _, frag := range []string{`{\"to\":\"${OGR`, `_SECRET`, `_1}\"}`} {
 		line := `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"` + frag + `"}}]}}]}` + "\n\n"
 		out.Write(scan.Chunk([]byte(line), false))
 	}
@@ -198,7 +198,7 @@ func TestAnAnswerEndingMidTokenIsNotTruncated(t *testing.T) {
 	// closes the answer nothing more can complete it, so it has to be flushed — without
 	// this, an answer ending in `$` silently loses its last characters and only the
 	// client could ever notice.
-	scan := NewScanner(openAIChat{}.NewDecoder(NewRestorer(map[string]string{"${OGR_EMAIL_1}": "x@y.z"})))
+	scan := NewScanner(openAIChat{}.NewDecoder(NewRestorer(map[string]string{"${OGR_SECRET_1}": "x@y.z"})))
 	var out strings.Builder
 	out.Write(scan.Chunk([]byte(`data: {"choices":[{"delta":{"content":"cost: $"}}]}`+"\n\n"), false))
 	out.Write(scan.Chunk([]byte(`data: {"choices":[{"delta":{},"finish_reason":"stop"}]}`+"\n\n"), false))

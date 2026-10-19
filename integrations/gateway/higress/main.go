@@ -474,8 +474,11 @@ const (
 )
 
 type reqState struct {
-	session *sessionState
-	derive  *deriveCtx
+	// Selected by the request verdict, before a response byte can be released.
+	piiHold         bool
+	privacyFallback *streamProcessor
+	session         *sessionState
+	derive          *deriveCtx
 
 	// The CLIENT's protocol adapter. Everything that has to know a wire shape goes
 	// through it: reassembling the SSE stream, restoring the placeholders, and
@@ -876,6 +879,7 @@ func onRequestBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Actio
 		stepID = mintStepID()
 	}
 	rs := &reqState{
+		piiHold: true, // hold until the output policy is known; failures use fail_mode
 		session: newSessionState(),
 		derive: &deriveCtx{
 			subj:       subj,
@@ -999,6 +1003,7 @@ func onFastVerdict(ctx wrapper.HttpContext, cfg Config, rs *reqState,
 		bump(cntUnchecked, 1)
 	} else {
 		bump(cntEvaluated, 1)
+		rs.piiHold = v.root.Get("response_policy.pii").String() != "off"
 		/*
 		 * ⚠️ A fast-lane BLOCK still blocks, and this is the one place speculation
 		 * does not defer. The deterministic detectors answer about VALUES — a secret,
@@ -1017,6 +1022,11 @@ func onFastVerdict(ctx wrapper.HttpContext, cfg Config, rs *reqState,
 		if spans := v.Spans(); len(spans) > 0 {
 			masked, applied, unresolved, learned := applySpans(outBody, spans)
 			logUnresolvedSpans(unresolved)
+			if unresolved > 0 && cfg.failClosed {
+				evaluateFailed("FAST", 0, true)
+				answer(ctx, rs, failMessage)
+				return
+			}
 			if applied > 0 {
 				outBody = masked
 				rs.session.adopt(learned)
@@ -1150,6 +1160,7 @@ func onInputVerdict(ctx wrapper.HttpContext, cfg Config, rs *reqState,
 	}
 	bump(cntEvaluated, 1)
 	logInfof("[OGR-REQ] decision=%s", v.Decision())
+	rs.piiHold = v.root.Get("response_policy.pii").String() != "off"
 
 	if v.Stops() {
 		bump(cntRefused, 1)
@@ -1166,10 +1177,6 @@ func onInputVerdict(ctx wrapper.HttpContext, cfg Config, rs *reqState,
 		return
 	}
 
-	// Take ownership of a streaming response before the request goes anywhere:
-	// arming the pause has to happen before the response phase begins (tailhold.go).
-	armTailHold(ctx, cfg, rs)
-
 	// ⚠️ The verdict's spans name paths INSIDE THE BODY WE SENT (`payload.messages.3.
 	// content`, …) and their offsets index those strings as transported. The runtime
 	// holds the session, so the spans cover everything in this body that must not
@@ -1179,12 +1186,21 @@ func onInputVerdict(ctx wrapper.HttpContext, cfg Config, rs *reqState,
 	if spans := v.Spans(); len(spans) > 0 {
 		masked, applied, unresolved, learned := applySpans(outBody, spans)
 		logUnresolvedSpans(unresolved)
+		if unresolved > 0 && cfg.failClosed {
+			evaluateFailed("REQ", 0, true)
+			answer(ctx, rs, failMessage)
+			return
+		}
 		if applied > 0 {
 			outBody = masked
 			rs.session.adopt(learned)
 			logInfof("[OGR-REQ] applied %d modification spans, %d tokens live", applied, len(rs.session.Mapping))
 		}
 	}
+
+	// Arm only after all local input failures can still answer normally. Arming
+	// before refusing invalid spans would pause our own refusal indefinitely.
+	armTailHold(ctx, cfg, rs)
 
 	// Ask the provider to report token usage on a stream that would otherwise
 	// omit it (openai.chat's `include_usage`). ENFORCE ONLY — enforce already
@@ -1324,6 +1340,11 @@ func onResponseBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Acti
 				if spans := v.Spans(); len(spans) > 0 {
 					masked, applied, unresolved, learned := applySpans(next, spans)
 					logUnresolvedSpans(unresolved)
+					if unresolved > 0 && cfg.failClosed {
+						_ = proxywasm.ReplaceHttpResponseBody([]byte(rs.proto.Refuse(rs.model, failMessage)))
+						proxywasm.ResumeHttpResponse()
+						return
+					}
 					if applied > 0 {
 						next = masked
 						rs.session.adopt(learned)
@@ -1356,6 +1377,11 @@ func onResponseBody(ctx wrapper.HttpContext, cfg Config, body []byte) types.Acti
 			proxywasm.ResumeHttpResponse()
 		})
 	if err != nil {
+		evaluateFailed("RESP", 0, cfg.failClosed)
+		if cfg.failClosed {
+			_ = proxywasm.ReplaceHttpResponseBody([]byte(rs.proto.Refuse(rs.model, failMessage)))
+			return types.ActionContinue
+		}
 		return restoreResponse(rs, body)
 	}
 	return types.ActionPause
@@ -1403,7 +1429,11 @@ func onStreamingResponseBody(ctx wrapper.HttpContext, cfg Config, chunk []byte, 
 	}
 	sp, _ := ctx.GetContext(ctxStream).(*streamProcessor)
 	if sp == nil {
-		sp = newStreamProcessor(rs.proto, rs.session.Mapping, ctx.GetBoolContext(ctxStreaming, true),
+		mapping := rs.session.Mapping
+		if rs.piiHold {
+			mapping = nil
+		} // apply PII and authorized restore together after judgement
+		sp = newStreamProcessor(rs.proto, mapping, ctx.GetBoolContext(ctxStreaming, true),
 			rs.sentAt, rs.injectedUsage)
 		ctx.SetContext(ctxStream, sp)
 	}

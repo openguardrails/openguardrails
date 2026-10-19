@@ -293,3 +293,21 @@ where the answer is itself a stream.
 ```
 
 The normative JSON Schema is [`schema/verdict.schema.json`](../schema/verdict.schema.json).
+## Response privacy processing
+
+An optional request-verdict field `response_policy: {"pii":"redact"|"off"}`
+selects output processing before forwarding the model request and confirms the
+policy on the response verdict. `redact` requires
+holding the entire reply, including reasoning and tool arguments, until the full
+output has been judged and PII permanently masked. PII masks MUST NOT be restored.
+Only secret placeholders may be restored using the caller's secret mapping.
+
+An absent field means unknown, not `off`; retain the full hold until the response
+policy is known. Missing policy confirmation, incomplete judgement, timeouts,
+unsupported streams, buffer overflows and unresolved spans are processing failures.
+The enforcement point MUST apply the same `fail_mode` to all guardrails: `open`
+(default) releases held output without guaranteed redaction, restoring known secrets
+where supported; `closed` refuses delivery. An explicit policy block is enforced
+in either mode. PII and content safety have no failure-handling priority over each
+other. With PII off, prose may stream live while tool calls and completion events
+wait for the complete-output content-safety verdict.

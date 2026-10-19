@@ -287,13 +287,13 @@ func TestV08DecisionsAreAllowAndBlock(t *testing.T) {
 
 func TestSpansAreReadFromModifications(t *testing.T) {
 	v := parseVerdict([]byte(`{"decision":"allow","modifications":{"spans":[
-	  {"path":"payload.messages.1.content","start":5,"end":20,"replacement":"${OGR_EMAIL_1}"}]}}`))
+	  {"path":"payload.messages.1.content","start":5,"end":20,"replacement":"${OGR_SECRET_1}"}]}}`))
 	spans := v.Spans()
 	if len(spans) != 1 {
 		t.Fatalf("spans = %+v", spans)
 	}
 	s := spans[0]
-	if s.Path != "payload.messages.1.content" || s.Start != 5 || s.End != 20 || s.Replacement != "${OGR_EMAIL_1}" {
+	if s.Path != "payload.messages.1.content" || s.Start != 5 || s.End != 20 || s.Replacement != "${OGR_SECRET_1}" {
 		t.Fatalf("span = %+v", s)
 	}
 }

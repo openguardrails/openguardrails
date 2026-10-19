@@ -1,6 +1,8 @@
 package protocol
 
 import (
+	"encoding/json"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -104,6 +106,9 @@ func restoreAt(body, path string, mapping map[string]string) (string, bool) {
 		return body, false
 	}
 	restored := RestoreString(f.String(), mapping)
+	if strings.HasSuffix(path, ".arguments") {
+		restored = RestoreArguments(f.String(), mapping)
+	}
 	if restored == f.String() {
 		return body, false
 	}
@@ -124,7 +129,15 @@ func restoreRawAt(body, path string, mapping map[string]string) (string, bool) {
 	if raw == "" {
 		return body, false
 	}
-	restored := RestoreString(raw, mapping)
+	var value any
+	if json.Unmarshal([]byte(raw), &value) != nil {
+		return body, false
+	}
+	b, err := json.Marshal(rewriteLeaves(value, NewRestorer(mapping)))
+	if err != nil {
+		return body, false
+	}
+	restored := string(b)
 	if restored == raw {
 		return body, false
 	}
@@ -148,13 +161,28 @@ func restoreRawAt(body, path string, mapping map[string]string) (string, bool) {
 // make the model emit near-miss tokens reads back values it was never shown. The
 // defined unescape is the only latitude taken.
 type Restorer struct {
-	mapping map[string]string
-	keys    []string // longest first, so a key is never shadowed by a prefix
-	maxRaw  int      // longest key's worst case: every byte preceded by an escape
-	starts  [256]bool
+	jsonValues *Restorer
+	mapping    map[string]string
+	keys       []string // longest first, so a key is never shadowed by a prefix
+	maxRaw     int      // longest key's worst case: every byte preceded by an escape
+	starts     [256]bool
 }
 
 func NewRestorer(mapping map[string]string) *Restorer {
+	secrets := make(map[string]string)
+	for k, v := range mapping {
+		if IsSecretPlaceholder(k) {
+			secrets[k] = v
+		}
+	}
+	return newRewriter(secrets)
+}
+
+var secretPlaceholder = regexp.MustCompile(`^(?:OGRK[0-9A-Z][0-9X]{7,}|\$\{OGR_SECRET_(?:[0-9]+|X)\})$`)
+
+func IsSecretPlaceholder(token string) bool { return secretPlaceholder.MatchString(token) }
+
+func newRewriter(mapping map[string]string) *Restorer {
 	r := &Restorer{mapping: mapping}
 	longest := 0
 	for k := range mapping {
@@ -217,6 +245,64 @@ func (r *Restorer) Feed(buf *string, text string, isLast bool) string {
 	output, pending := r.Extract(*buf, isLast)
 	*buf = pending
 	return output
+}
+
+// FeedJSON restores tokens inside a streamed JSON arguments document. JSON
+// escaping is separate from the surrounding SSE envelope's own JSON encoding.
+func (r *Restorer) FeedJSON(buf *string, text string, isLast bool) string {
+	if r.jsonValues == nil {
+		mapping := make(map[string]string)
+		for k, v := range r.mapping {
+			b, _ := json.Marshal(v)
+			mapping[k] = string(b[1 : len(b)-1])
+		}
+		r.jsonValues = newRewriter(mapping)
+	}
+	return r.jsonValues.Feed(buf, text, isLast)
+}
+
+func RestoreArguments(raw string, mapping map[string]string) string {
+	var value any
+	if json.Unmarshal([]byte(raw), &value) != nil {
+		return raw
+	}
+	b, err := json.Marshal(rewriteLeaves(value, NewRestorer(mapping)))
+	if err != nil {
+		return raw
+	}
+	return string(b)
+}
+
+func restoreSnapshotJSON(raw string, mapping map[string]string) string {
+	var value any
+	if json.Unmarshal([]byte(raw), &value) != nil {
+		return raw
+	}
+	var visit func(any) any
+	visit = func(v any) any {
+		switch x := v.(type) {
+		case string:
+			return RestoreString(x, mapping)
+		case []any:
+			for i, a := range x {
+				x[i] = visit(a)
+			}
+		case map[string]any:
+			for k, a := range x {
+				if text, ok := a.(string); ok && k == "arguments" {
+					x[k] = RestoreArguments(text, mapping)
+				} else {
+					x[k] = visit(a)
+				}
+			}
+		}
+		return v
+	}
+	b, err := json.Marshal(visit(value))
+	if err != nil {
+		return raw
+	}
+	return string(b)
 }
 
 // matchAt tries every key at i, longest first, returning the key that matched and

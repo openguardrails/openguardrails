@@ -67,7 +67,7 @@ jobs:
         run: |
           test -z "$(gofmt -l .)" || { echo "::error::gofmt"; gofmt -l .; exit 1; }
           go vet ./...
-          go test ./...
+          make test
 
       - name: Build plugin.wasm
         working-directory: ${{ env.PLUGIN_DIR }}

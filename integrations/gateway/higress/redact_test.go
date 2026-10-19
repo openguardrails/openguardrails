@@ -21,18 +21,18 @@ const spanBody = `{"model":"m","messages":[` +
 func TestASpanIsSplicedInPlaceAndTheValueLearned(t *testing.T) {
 	spans := []Span{{
 		Path: "payload.messages.1.content", Start: 5, End: 20,
-		Replacement: "${OGR_EMAIL_1}",
+		Replacement: "${OGR_SECRET_1}",
 	}}
 	body, applied, unresolved, learned := applySpans(spanBody, spans)
 	if applied != 1 || unresolved != 0 {
 		t.Fatalf("applied=%d unresolved=%d", applied, unresolved)
 	}
-	if got := gjson.Get(body, "messages.1.content").String(); got != "mail ${OGR_EMAIL_1} now" {
+	if got := gjson.Get(body, "messages.1.content").String(); got != "mail ${OGR_SECRET_1} now" {
 		t.Fatalf("content = %q", got)
 	}
 	// What the splice displaced is the restore map: the model may echo the token and
 	// the caller must receive its own data back.
-	if learned["${OGR_EMAIL_1}"] != "ada@example.com" {
+	if learned["${OGR_SECRET_1}"] != "ada@example.com" {
 		t.Fatalf("learned = %v", learned)
 	}
 	// The rest of the body is untouched.
@@ -51,7 +51,7 @@ func TestOffsetsAreCharactersNotBytes(t *testing.T) {
 	body := `{"messages":[{"role":"user","content":"请原样复述这个邮箱：kate@example.com"}]}`
 	spans := []Span{{
 		Path: "payload.messages.0.content", Start: 10, End: 26,
-		Replacement: "${OGR_EMAIL_1}",
+		Replacement: "${OGR_SECRET_1}",
 	}}
 	next, applied, _, learned := applySpans(body, spans)
 	if applied != 1 {
@@ -64,7 +64,7 @@ func TestOffsetsAreCharactersNotBytes(t *testing.T) {
 	if !strings.Contains(got, "请原样复述这个邮箱：") {
 		t.Fatalf("masking mangled the surrounding text: %q", got)
 	}
-	if learned["${OGR_EMAIL_1}"] != "kate@example.com" {
+	if learned["${OGR_SECRET_1}"] != "kate@example.com" {
 		t.Fatalf("learned = %v", learned)
 	}
 }
@@ -74,14 +74,14 @@ func TestSpansOnOnePathApplyHighestOffsetFirst(t *testing.T) {
 	// the later offsets were computed against.
 	body := `{"messages":[{"role":"user","content":"a@b.io and c@d.io wrote"}]}`
 	spans := []Span{
-		{Path: "payload.messages.0.content", Start: 0, End: 6, Replacement: "${OGR_EMAIL_1}"},
-		{Path: "payload.messages.0.content", Start: 11, End: 17, Replacement: "${OGR_EMAIL_2}"},
+		{Path: "payload.messages.0.content", Start: 0, End: 6, Replacement: "${OGR_SECRET_1}"},
+		{Path: "payload.messages.0.content", Start: 11, End: 17, Replacement: "${OGR_SECRET_2}"},
 	}
 	next, applied, unresolved, _ := applySpans(body, spans)
 	if applied != 2 || unresolved != 0 {
 		t.Fatalf("applied=%d unresolved=%d", applied, unresolved)
 	}
-	if got := gjson.Get(next, "messages.0.content").String(); got != "${OGR_EMAIL_1} and ${OGR_EMAIL_2} wrote" {
+	if got := gjson.Get(next, "messages.0.content").String(); got != "${OGR_SECRET_1} and ${OGR_SECRET_2} wrote" {
 		t.Fatalf("content = %q", got)
 	}
 }
@@ -111,13 +111,13 @@ func TestAnUnresolvableSpanIsDroppedAndCountedNeverAppliedElsewhere(t *testing.T
 func TestBracketPathsFoldToTheDottedForm(t *testing.T) {
 	spans := []Span{{
 		Path: "payload.messages[1].content", Start: 5, End: 20,
-		Replacement: "${OGR_EMAIL_1}",
+		Replacement: "${OGR_SECRET_1}",
 	}}
 	next, applied, _, _ := applySpans(spanBody, spans)
 	if applied != 1 {
 		t.Fatalf("bracket path did not resolve")
 	}
-	if got := gjson.Get(next, "messages.1.content").String(); got != "mail ${OGR_EMAIL_1} now" {
+	if got := gjson.Get(next, "messages.1.content").String(); got != "mail ${OGR_SECRET_1} now" {
 		t.Fatalf("content = %q", got)
 	}
 }
@@ -131,11 +131,11 @@ func TestBracketPathsFoldToTheDottedForm(t *testing.T) {
 func TestMaskThenRestoreRoundTrip(t *testing.T) {
 	spans := []Span{{
 		Path: "payload.messages.1.content", Start: 5, End: 20,
-		Replacement: "${OGR_EMAIL_1}",
+		Replacement: "${OGR_SECRET_1}",
 	}}
 	_, _, _, learned := applySpans(spanBody, spans)
 
-	reply := "your address is ${OGR_EMAIL_1}"
+	reply := "your address is ${OGR_SECRET_1}"
 	if got := protocol.RestoreString(reply, learned); got != "your address is ada@example.com" {
 		t.Fatalf("restored = %q", got)
 	}
@@ -144,8 +144,8 @@ func TestMaskThenRestoreRoundTrip(t *testing.T) {
 func TestRestoreIsWholeTokenOnly(t *testing.T) {
 	// A restorer that guesses is an exfiltration oracle: near misses must not
 	// resolve to a value the attacker was never shown.
-	mapping := map[string]string{"${OGR_EMAIL_1}": "ada@example.com"}
-	for _, near := range []string{"${OGR_EMAIL_2}", "${OGR_EMAIL_1", "$OGR_EMAIL_1", "${OGR_EMAIL_11}"} {
+	mapping := map[string]string{"${OGR_SECRET_1}": "ada@example.com"}
+	for _, near := range []string{"${OGR_SECRET_2}", "${OGR_SECRET_1", "$OGR_SECRET_1", "${OGR_SECRET_11}"} {
 		if got := protocol.RestoreString(near, mapping); got != near {
 			t.Errorf("RestoreString(%q) = %q, want it left alone", near, got)
 		}
@@ -153,11 +153,11 @@ func TestRestoreIsWholeTokenOnly(t *testing.T) {
 }
 
 func TestRestoreAbsorbsMarkdownEscaping(t *testing.T) {
-	mapping := map[string]string{"${OGR_EMAIL_1}": "ada@example.com"}
+	mapping := map[string]string{"${OGR_SECRET_1}": "ada@example.com"}
 	cases := map[string]string{
-		`mail ${OGR\_EMAIL\_1} now`: "mail ada@example.com now",
-		`\$\{OGR\_EMAIL\_1\}`:       "ada@example.com",
-		`C:\notes stay literal`:     `C:\notes stay literal`,
+		`mail ${OGR\_SECRET\_1} now`: "mail ada@example.com now",
+		`\$\{OGR\_SECRET\_1\}`:       "ada@example.com",
+		`C:\notes stay literal`:      `C:\notes stay literal`,
 	}
 	for in, want := range cases {
 		if got := protocol.RestoreString(in, mapping); got != want {

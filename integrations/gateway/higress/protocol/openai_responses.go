@@ -594,7 +594,11 @@ func (d *responsesDecoder) Line(line string, isLast bool) string {
 		it := d.item(idx)
 		original := parsed.Get("delta").String()
 		it.args.WriteString(original)
-		return d.rewrite(line, data, "delta", &it.argsBuf, original, isLast)
+		restored := d.r.FeedJSON(&it.argsBuf, original, isLast)
+		if next, err := sjson.Set(data, "delta", restored); err == nil {
+			return "data: " + next
+		}
+		return line
 
 	// ⚠️ The `.done` and terminal events REPEAT the whole value, and an SDK builds its
 	// result from them rather than from the deltas it already dispatched. Restoring
@@ -639,7 +643,7 @@ func (d *responsesDecoder) restoreWhole(line, data string) string {
 	if !d.r.Active() {
 		return line
 	}
-	restored := RestoreString(data, d.r.mapping)
+	restored := restoreSnapshotJSON(data, d.r.mapping)
 	if restored == data {
 		return line
 	}

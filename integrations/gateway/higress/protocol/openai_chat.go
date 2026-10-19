@@ -617,9 +617,10 @@ func (d *chatDecoder) Line(line string, isLast bool) string {
 		// `{"to": "${OGR_EMAIL_1}"}` and made it act on a value that names nothing. The
 		// client's JSON parse sees the concatenation, so what matters is that the
 		// SEQUENCE comes out restored, not that any one delta does.
-		modified = d.rewrite(modified,
-			"choices.0.delta.tool_calls."+strconv.Itoa(n)+".function.arguments",
-			&acc.pending, args.String(), isLast)
+		restored := d.r.FeedJSON(&acc.pending, args.String(), isLast)
+		if next, err := sjson.Set(modified, "choices.0.delta.tool_calls."+strconv.Itoa(n)+".function.arguments", restored); err == nil {
+			modified = next
+		}
 	}
 	return prefix + "data: " + modified
 }
