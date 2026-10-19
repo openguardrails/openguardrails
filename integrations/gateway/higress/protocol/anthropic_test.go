@@ -99,7 +99,7 @@ func TestMaskingReachesANestedToolResult(t *testing.T) {
 	  {"role":"user","content":[
 	    {"type":"tool_result","tool_use_id":"c1","content":[{"type":"text","text":"found ada@example.com"}]},
 	    {"type":"text","text":"and ada@example.com again"}]}]}`
-	out, n := anthropicMessages{}.Mask(body, []Redaction{{Token: "${OGR_EMAIL_1}", Value: "ada@example.com"}})
+	out, n := anthropicMessages{}.Mask(body, []Redaction{{Token: "${OGR_SECRET_1}", Value: "ada@example.com"}})
 	if n != 3 {
 		t.Errorf("masked %d strings, want 3 (system, tool_result body, user text)", n)
 	}
@@ -112,18 +112,18 @@ func TestMaskingReachesANestedToolResult(t *testing.T) {
 }
 
 func TestAnthropicStreamRestoresInsideThinkingAndArguments(t *testing.T) {
-	mapping := map[string]string{"${OGR_EMAIL_1}": "ada@example.com"}
+	mapping := map[string]string{"${OGR_SECRET_1}": "ada@example.com"}
 	stream := `event: content_block_start
 data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}
 
 event: content_block_delta
-data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"mail ${OGR_EMAIL_1}"}}
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"mail ${OGR_SECRET_1}"}}
 
 event: content_block_start
 data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"c1","name":"send","input":{}}}
 
 event: content_block_delta
-data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"to\":\"${OGR_EMAIL_1}\"}"}}
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"to\":\"${OGR_SECRET_1}\"}"}}
 
 event: message_stop
 data: {"type":"message_stop"}
@@ -131,7 +131,7 @@ data: {"type":"message_stop"}
 `
 	scan := NewScanner(anthropicMessages{}.NewDecoder(NewRestorer(mapping)))
 	out := string(scan.Chunk([]byte(stream), true))
-	if strings.Contains(out, "${OGR_EMAIL_1}") {
+	if strings.Contains(out, "${OGR_SECRET_1}") {
 		t.Errorf("a placeholder reached the caller:\n%s", out)
 	}
 	if strings.Count(out, "ada@example.com") != 2 {
@@ -139,10 +139,10 @@ data: {"type":"message_stop"}
 	}
 	// What we REPORT keeps the placeholder.
 	res := scan.Output()
-	if res.Reasoning != "mail ${OGR_EMAIL_1}" {
+	if res.Reasoning != "mail ${OGR_SECRET_1}" {
 		t.Errorf("reported reasoning = %q", res.Reasoning)
 	}
-	if len(res.Actions) != 1 || res.Actions[0].Arguments != `{"to":"${OGR_EMAIL_1}"}` {
+	if len(res.Actions) != 1 || res.Actions[0].Arguments != `{"to":"${OGR_SECRET_1}"}` {
 		t.Errorf("reported actions = %+v", res.Actions)
 	}
 }

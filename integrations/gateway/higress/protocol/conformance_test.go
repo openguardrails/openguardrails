@@ -348,7 +348,7 @@ func TestAStreamedReplyReassemblesInEveryProtocol(t *testing.T) {
 }
 
 func TestMaskingReachesEveryTextSurfaceInEveryProtocol(t *testing.T) {
-	red := []Redaction{{Token: "${OGR_EMAIL_1}", Value: "ada@example.com"}}
+	red := []Redaction{{Token: "${OGR_SECRET_1}", Value: "ada@example.com"}}
 	for _, c := range conformance {
 		t.Run(c.name, func(t *testing.T) {
 			out, n := protoFor(t, c.name).Mask(c.request, red)
@@ -367,7 +367,7 @@ func TestMaskingReachesEveryTextSurfaceInEveryProtocol(t *testing.T) {
 			}
 			// The tool RESULT is where retrieved data arrives — the surface indirect
 			// injection travels on, and the one each protocol nests differently.
-			if strings.Count(out, "${OGR_EMAIL_1}") < 2 {
+			if strings.Count(out, "${OGR_SECRET_1}") < 2 {
 				t.Errorf("the value was masked in the question but not in the tool result:\n%s", out)
 			}
 		})
@@ -375,14 +375,14 @@ func TestMaskingReachesEveryTextSurfaceInEveryProtocol(t *testing.T) {
 }
 
 func TestRestorationRoundTripsInEveryProtocol(t *testing.T) {
-	mapping := map[string]string{"${OGR_EMAIL_1}": "ada@example.com"}
+	mapping := map[string]string{"${OGR_SECRET_1}": "ada@example.com"}
 	for _, c := range conformance {
 		t.Run(c.name, func(t *testing.T) {
 			p := protoFor(t, c.name)
 			// A reply that carries the placeholder in BOTH places it can appear.
-			masked := strings.ReplaceAll(c.response, "closing it", "closing it for ${OGR_EMAIL_1}")
-			masked = strings.ReplaceAll(masked, `"id":1`, `"id":"${OGR_EMAIL_1}"`)
-			masked = strings.ReplaceAll(masked, `{\"id\":1}`, `{\"id\":\"${OGR_EMAIL_1}\"}`)
+			masked := strings.ReplaceAll(c.response, "closing it", "closing it for ${OGR_SECRET_1}")
+			masked = strings.ReplaceAll(masked, `"id":1`, `"id":"${OGR_SECRET_1}"`)
+			masked = strings.ReplaceAll(masked, `{\"id\":1}`, `{\"id\":\"${OGR_SECRET_1}\"}`)
 
 			out, changed := p.Restore(masked, mapping)
 			if !changed {
@@ -391,7 +391,7 @@ func TestRestorationRoundTripsInEveryProtocol(t *testing.T) {
 			if !gjson.Valid(out) {
 				t.Fatalf("restoration produced invalid JSON:\n%s", out)
 			}
-			if strings.Contains(out, "${OGR_EMAIL_1}") {
+			if strings.Contains(out, "${OGR_SECRET_1}") {
 				t.Errorf("a placeholder escaped to the caller:\n%s", out)
 			}
 			// The arguments half is the one that MATTERS: an unrestored line of prose is

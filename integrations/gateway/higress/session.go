@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"github.com/openguardrails/higress/protocol"
 	"strings"
 )
 
@@ -41,7 +42,7 @@ func (s *sessionState) adopt(learned map[string]string) {
 		if len(s.Mapping) >= maxTokens {
 			return
 		}
-		if token != "" && value != "" {
+		if protocol.IsSecretPlaceholder(token) && value != "" {
 			s.Mapping[token] = value
 		}
 	}

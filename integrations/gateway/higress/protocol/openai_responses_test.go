@@ -65,7 +65,7 @@ func TestMaskingReachesAFunctionCallOutput(t *testing.T) {
 	body := `{"instructions":"prompt ada@example.com","input":[
 	  {"type":"message","role":"user","content":[{"type":"input_text","text":"ask ada@example.com"}]},
 	  {"type":"function_call_output","call_id":"c1","output":"the doc names ada@example.com"}]}`
-	out, n := openAIResponses{}.Mask(body, []Redaction{{Token: "${OGR_EMAIL_1}", Value: "ada@example.com"}})
+	out, n := openAIResponses{}.Mask(body, []Redaction{{Token: "${OGR_SECRET_1}", Value: "ada@example.com"}})
 	if n != 3 {
 		t.Errorf("masked %d strings, want 3 (instructions, question, tool output)", n)
 	}
@@ -79,26 +79,26 @@ func TestMaskingReachesAFunctionCallOutput(t *testing.T) {
 // whole reply. Restoring only the deltas leaves every visible token correct and the
 // caller's result object full of placeholders.
 func TestTheTerminalEventIsRestoredToo(t *testing.T) {
-	mapping := map[string]string{"${OGR_EMAIL_1}": "ada@example.com"}
+	mapping := map[string]string{"${OGR_SECRET_1}": "ada@example.com"}
 	stream := `event: response.output_text.delta
-data: {"type":"response.output_text.delta","output_index":0,"delta":"mail ${OGR_EMAIL_1}"}
+data: {"type":"response.output_text.delta","output_index":0,"delta":"mail ${OGR_SECRET_1}"}
 
 event: response.output_text.done
-data: {"type":"response.output_text.done","output_index":0,"text":"mail ${OGR_EMAIL_1}"}
+data: {"type":"response.output_text.done","output_index":0,"text":"mail ${OGR_SECRET_1}"}
 
 event: response.completed
-data: {"type":"response.completed","response":{"id":"r1","status":"completed","output_text":"mail ${OGR_EMAIL_1}"}}
+data: {"type":"response.completed","response":{"id":"r1","status":"completed","output_text":"mail ${OGR_SECRET_1}"}}
 
 `
 	scan := NewScanner(openAIResponses{}.NewDecoder(NewRestorer(mapping)))
 	out := string(scan.Chunk([]byte(stream), true))
-	if strings.Contains(out, "${OGR_EMAIL_1}") {
+	if strings.Contains(out, "${OGR_SECRET_1}") {
 		t.Fatalf("a placeholder survived into the caller's stream:\n%s", out)
 	}
 	if strings.Count(out, "ada@example.com") != 3 {
 		t.Errorf("restored %d of 3 occurrences:\n%s", strings.Count(out, "ada@example.com"), out)
 	}
-	if scan.Output().Text != "mail ${OGR_EMAIL_1}" {
+	if scan.Output().Text != "mail ${OGR_SECRET_1}" {
 		t.Errorf("what we report must keep the placeholder, got %q", scan.Output().Text)
 	}
 }

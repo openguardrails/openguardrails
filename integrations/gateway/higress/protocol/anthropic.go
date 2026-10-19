@@ -610,7 +610,12 @@ func (d *anthropicDecoder) Line(line string, isLast bool) string {
 			return line // signature_delta and anything newer: not text, pass through
 		}
 		b.buf.WriteString(original)
-		restored := d.r.Feed(&b.pending, original, isLast)
+		var restored string
+		if path == "delta.partial_json" {
+			restored = d.r.FeedJSON(&b.pending, original, isLast)
+		} else {
+			restored = d.r.Feed(&b.pending, original, isLast)
+		}
 		if restored == original {
 			return line
 		}

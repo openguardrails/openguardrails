@@ -238,7 +238,10 @@ func (s *Scanner) ChunkSegments(chunk []byte, isLast bool) []Segment {
 			continue
 		}
 		line := text[start:i]
-		buf = append(buf, s.dec.Line(line, isLast)...)
+		// A final NETWORK chunk can contain many deltas. Only terminal protocol
+		// events (or Flush below) end a channel; marking every line final loses
+		// placeholders split between two frames in that same final chunk.
+		buf = append(buf, s.dec.Line(line, false)...)
 		buf = append(buf, '\n')
 		start = i + 1
 		/*

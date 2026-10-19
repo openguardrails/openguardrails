@@ -11,6 +11,13 @@
   ],
   "additionalProperties": false,
   "properties": {
+    "response_policy": {
+      "type": "object",
+      "description": "Select response privacy processing before the first response byte on a request verdict; confirm the policy on the response verdict. pii=redact requires holding every output channel, including reasoning and tool arguments, until the complete response is judged and permanently masked. pii=off permits the ordinary live-prose/completion-barrier mode. Missing is unknown, not off. Missing confirmation or failed processing uses the same fail_mode as every guardrail: open by default, closed only when configured. An explicit policy block is enforced in either mode.",
+      "properties": { "pii": { "enum": ["redact", "off"] } },
+      "required": ["pii"],
+      "additionalProperties": false
+    },
     "event_id": {
       "type": "string",
       "minLength": 1,

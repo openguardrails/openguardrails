@@ -588,6 +588,33 @@ Also treated as failures, never as allows: a non-200, a timeout, a 429, and **a
 live by pointing the plugin at a cluster with nothing behind it and watching
 the traffic pass with `decision=` empty).
 
+## SDK callback stability
+
+The plugin pins a local SDK patch through go.mod; its base revision and the exact
+change are documented in `third_party/proxy-wasm-go-sdk/PATCHES.md`. Duplicate
+HTTP callout responses after timeouts must not crash the worker VM and silently
+bypass later evaluations. `make test` includes the SDK regression tests, and both
+CI and release checks run it. This does not change `fail_mode` semantics.
+
+## Output privacy and streaming
+
+PII inspects model output only, including reasoning and tool arguments. It uses
+permanent redaction masks and never restores PII, including historical PII tokens.
+Secrets mask the model input and restore only recognized secret placeholders on
+output, using the current agent's mapping.
+
+The request verdict's `response_policy.pii: "redact"` selects a full response hold:
+no output content is delivered until generation and final judgement complete.
+The plugin then masks PII and restores secrets together. With PII off, prose and
+reasoning stream live while tool calls and completion events wait for judgement.
+
+All processing failures use **the same `fail_mode`, default `open`**. This includes
+timeouts, partial or invalid verdicts, unsupported stream events, unresolved spans,
+and buffer overflow. `open` releases output without guaranteed PII redaction and
+still attempts known-secret restoration; `closed` refuses the held output. Neither
+PII nor content safety has priority over the other. An explicit policy block is
+enforced in both modes. Already delivered prose cannot be recalled.
+
 ## Configuration
 
 | Key | Default | Notes |
@@ -598,10 +625,10 @@ the traffic pass with `decision=` empty).
 | `api_key` | — | the runtime API key; authenticates the SENDER, resolves the org |
 | `mode` | `observe` | `enforce` to act on verdicts |
 | `timeout_ms` | `5000` | the PDP budget, enforce only. A CEILING for the worst case, not a target; the runtime's `OGR_MODEL_TIMEOUT_MS` must fit strictly inside it |
-| `fail_mode` | `open` | **open is the spec's default** (an unanswered evaluate proceeds, counted `unchecked`); `closed` refuses when the PDP is unreachable, answers garbage, reports unjudged paths, or the reply itself is unreadable |
+| `fail_mode` | `open` | **open is the spec's default** (an unanswered evaluate proceeds, counted `unchecked`); `closed` refuses when the PDP is unreachable, answers garbage, reports unjudged paths, or the reply itself is unreadable. Applies equally to PII, secrets and content safety; PII never overrides this setting |
 | `media_max_bytes` | `4194304` (4 MiB) | above this, an inline media part (a base64 image, audio clip, video or document) is DESCRIBED in the event instead of sent — `payload._ogr_media` carries kind/type/size and the value becomes `ogr-media:elided`. `0` sends every body verbatim. ⚠️ The body FORWARDED to the model is never touched, and only base64-shaped values are ever elided: the event payload is what the runtime judges, so prose must reach it whole. ⚠️ Since 3.8.0 the EFFECTIVE cap is `min(this, what the runtime advertises)`, per media KIND — see *What the runtime accepts* below |
-| `stream_hold_max_bytes` | `8388608` | the most one stream's hold may OCCUPY in the heap. Past 64 KB withheld, further withheld frames are kept deflate-compressed and inflated byte-for-byte on release (3.15.2) — a 150 KB file write's frames go from 12 MB to ~0.25 MB — and this bound counts what is actually stored. Past it the stream stops being held: released and judged for the record under `fail_mode: open`, refused under `closed`; counted `hold_overflow` either way. `0` = no bound |
-| `stream_head_release_bytes` | `-1` | how much of a streamed answer's PROSE (text and reasoning, UTF-8 bytes, never SSE framing) may reach the caller BEFORE the end-of-stream verdict. `-1` (any negative): all of it, live — the default since 3.15.0. `N`: at most N bytes, a CEILING — a frame crossing it is held whole. `0`: nothing (a spinner, and every block a clean refusal). ⚠️ Tool-call bytes and the ending frames wait for the verdict whatever the value. ⚠️ Replaces `stream_tail_chars` (≤ 3.9) and `stream_release` (3.15.0), both accepted, IGNORED and warned about at startup |
+| `stream_hold_max_bytes` | `8388608` | the most one stream's hold may OCCUPY in the heap. Past 64 KB withheld, further withheld frames are kept deflate-compressed and inflated byte-for-byte on release (3.15.2) — a 150 KB file write's frames go from 12 MB to ~0.25 MB — and this bound counts what is actually stored. A full PII hold also bounds original wire bytes before rewriting. Past it the stream stops being held: released and judged for the record under `fail_mode: open`, refused under `closed`; counted `hold_overflow` either way. `0` = no bound |
+| `stream_head_release_bytes` | `-1` | how much of a streamed answer's PROSE (text and reasoning, UTF-8 bytes, never SSE framing) may reach the caller BEFORE the end-of-stream verdict. `-1` (any negative): all of it, live — the default since 3.15.0. `N`: at most N bytes, a CEILING — a frame crossing it is held whole. `0`: nothing (a spinner, and every block a clean refusal). ⚠️ Tool-call bytes and the ending frames wait for the verdict whatever the value. PII output redaction holds every channel regardless of this budget until judgement or a fail-mode decision. ⚠️ Replaces `stream_tail_chars` (≤ 3.9) and `stream_release` (3.15.0), both accepted, IGNORED and warned about at startup |
 | `agent_id_header` | `x-ogr-agent-id`, else `x-mse-consumer` | which header carries the agent's identity; configuring one replaces the whole chain |
 | `agent_workspace_header` | `x-ogr-agent-workspace`, else `x-mse-consumer-group` | which header carries the agent's workspace; configuring one replaces the whole chain |
 | `agent_type_header` | `x-ogr-agent-type` | which header carries the kind of agent |

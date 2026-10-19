@@ -15,3 +15,5 @@ require (
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
 )
+
+replace github.com/higress-group/proxy-wasm-go-sdk => ./third_party/proxy-wasm-go-sdk

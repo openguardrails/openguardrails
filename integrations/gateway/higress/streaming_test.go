@@ -28,10 +28,10 @@ func chunk(content string) string {
 }
 
 func TestStreamRestoresAndReassembles(t *testing.T) {
-	sp := newStreamProcessor(chatProto(t), map[string]string{"${OGR_EMAIL_1}": "ada@example.com"}, true, time.Time{}, false)
+	sp := newStreamProcessor(chatProto(t), map[string]string{"${OGR_SECRET_1}": "ada@example.com"}, true, time.Time{}, false)
 
 	var out strings.Builder
-	for _, c := range []string{chunk("mail "), chunk("${OGR_EMAIL_1}"), chunk(" now")} {
+	for _, c := range []string{chunk("mail "), chunk("${OGR_SECRET_1}"), chunk(" now")} {
 		out.Write(sp.ProcessChunk([]byte(c), false))
 	}
 	out.Write(sp.ProcessChunk([]byte("data: [DONE]\n\n"), true))
@@ -41,7 +41,7 @@ func TestStreamRestoresAndReassembles(t *testing.T) {
 	}
 	// ⚠️ What we REPORT keeps the placeholder: detecting on the restored text would
 	// find the very value we removed and block our own restoration.
-	if got := sp.Result().Text; got != "mail ${OGR_EMAIL_1} now" {
+	if got := sp.Result().Text; got != "mail ${OGR_SECRET_1} now" {
 		t.Fatalf("reassembled = %q", got)
 	}
 }
@@ -304,13 +304,13 @@ func TestAPlainReplyMislabelledAsSSEIsStillParsed(t *testing.T) {
 
 func TestAnHonestClaimIsNotSecondGuessed(t *testing.T) {
 	// A correct SSE claim keeps the scanner from frame one — restoration included.
-	sp := newStreamProcessor(chatProto(t), map[string]string{"${OGR_EMAIL_1}": "ada@example.com"}, true, time.Time{}, false)
-	out := string(sp.ProcessChunk([]byte(chunk("${OGR_EMAIL_1}")), false))
+	sp := newStreamProcessor(chatProto(t), map[string]string{"${OGR_SECRET_1}": "ada@example.com"}, true, time.Time{}, false)
+	out := string(sp.ProcessChunk([]byte(chunk("${OGR_SECRET_1}")), false))
 	out += string(sp.ProcessChunk([]byte("data: [DONE]\n\n"), true))
 	if !strings.Contains(out, "ada@example.com") {
 		t.Fatalf("restoration missed the FIRST frame — the sniff must not delay the scanner:\n%s", out)
 	}
-	if got := sp.Result().Text; got != "${OGR_EMAIL_1}" {
+	if got := sp.Result().Text; got != "${OGR_SECRET_1}" {
 		t.Fatalf("reassembled = %q", got)
 	}
 }
