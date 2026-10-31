@@ -91,9 +91,10 @@ type Config struct {
 	evaluatePath  string
 	heartbeatPath string
 
-	mode       string
-	timeoutMs  uint32
-	failClosed bool
+	stagedRollout map[string]bool
+	mode          string
+	timeoutMs     uint32
+	failClosed    bool
 
 	// How much client-visible content (UTF-8 bytes) the streaming lane withholds
 	// until the end-of-stream verdict — see tailhold.go.
@@ -148,6 +149,7 @@ func normalizeBasePath(s string) string {
 
 func parseConfig(j gjson.Result, c *Config) error {
 	c.cluster = j.Get("runtime_cluster").String()
+	c.stagedRollout = parseStagedRollout(j.Get("staged_rollout").String())
 	c.host = strings.TrimPrefix(strings.TrimPrefix(j.Get("runtime_base_url").String(), "https://"), "http://")
 	c.apiKey = j.Get("api_key").String()
 
@@ -425,12 +427,9 @@ func parseConfig(j gjson.Result, c *Config) error {
 	// silence at startup is indistinguishable from a plugin that never loaded at all,
 	// which is the failure this whole integration exists to make visible.
 	//
-	// ⚠️ `mode=` is what was CONFIGURED. While the temporary beta gate is in the
-	// build it is not what most requests run in, so the line says so itself —
-	// otherwise `mode=enforce` beside a gateway that enforces nothing reads as a
-	// broken plugin. Drop `beta=` with betaflags.go.
-	proxywasm.LogWarnf("[OGR-CONFIG] v%s mode=%s beta=%s cluster=%s host=%s base_path=%q timeout=%dms fail=%s head=%d hold_max=%d beat=%ds log=%s protocols=%s",
-		pluginVersion, c.mode, betaFlagOGR, c.cluster, c.host, c.basePath, c.timeoutMs, failLabel(c.failClosed), c.streamHeadReleaseBytes, c.streamHoldMaxBytes,
+	// Mode applies to enrolled exchanges; all others use fire-and-forget observe.
+	proxywasm.LogWarnf("[OGR-CONFIG] v%s mode=%s beta=%s staged_rollout=%q cluster=%s host=%s base_path=%q timeout=%dms fail=%s head=%d hold_max=%d beat=%ds log=%s protocols=%s",
+		pluginVersion, c.mode, betaFlagOGR, j.Get("staged_rollout").String(), c.cluster, c.host, c.basePath, c.timeoutMs, failLabel(c.failClosed), c.streamHeadReleaseBytes, c.streamHoldMaxBytes,
 		heartbeatPeriodMs/1000, logLevelName(logLevel), strings.Join(protocolNames(), ","))
 	return nil
 }
@@ -567,10 +566,9 @@ func onRequestHeaders(ctx wrapper.HttpContext, cfg Config) types.Action {
 	// shape check can refine it.
 	ctx.SetContext(ctxPath, path)
 
-	// ⚠️ TEMPORARY gray-release gate (betaflags.go): a request without the `og-airs`
-	// beta flag runs in OBSERVE whatever `mode:` says. Stamped here because the
-	// header is gone by the body phase. Delete this line with that file.
-	stampBetaOptIn(ctx)
+	// Store rollout membership from request headers. Both JSON and streaming
+	// replies use it: configured mode for members, observe for everyone else.
+	stampBetaOptIn(ctx, cfg)
 
 	/**
 	 * WHO IS THIS, and — the part that matters — WHO GOT TO SAY SO.

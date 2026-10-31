@@ -101,37 +101,37 @@ flipping it back, not redeploying.
 ⚠️ **Observe never buffers and never pauses.** Only enforce buffers, because
 only enforce can still change the reply.
 
-### ⚠️ TEMPORARY: the `og-airs` gray-release gate (3.12.0)
+### Staged rollout with legacy OGR v5
 
-**3.12.0** ships a rollout gate (`betaflags.go`) that sits in front of the
-switch above, so a deployment can enforce for a named slice of traffic and
-nothing else. **It is temporary and will be deleted when the MCD rollout is
-done.**
+When both plugins run on the same Higress, configure the same `staged_rollout`
+string in legacy OGR v5 and AIRS. Legacy OGR skips enrolled traffic; AIRS only
+uses the configured mode for enrolled traffic. Other traffic uses AIRS observe:
+both halves are reported fire-and-forget, without waiting for verdicts, rewriting
+bodies or buffering replies for enforcement. Legacy OGR continues to protect it.
 
+```yaml
+staged_rollout: "group-a, consumer-b, ungrouped"
+mode: enforce
 ```
-x-higress-ai-beta-flags: some-other-beta,og-airs
-```
 
-The header is a comma-separated token list written at the edge. Membership is
-exact per token after trimming, case-insensitively — `og-airs` enrolls,
-`og-airs-v2` and `xog-airs` do not.
+Membership is the union of:
 
-| `x-higress-ai-beta-flags` | `mode: enforce` | `mode: observe` |
-|---|---|---|
-| contains `og-airs` | **enforce** | observe |
-| anything else, or absent | **observe** | observe |
+- `x-higress-ai-beta-flags` containing the complete `og-airs` token (comma-separated,
+  trimmed, case-insensitive).
+- `x-mse-consumer` or `x-mse-consumer-group` matching a configured entry.
+- `ungrouped` when the consumer-group header is absent or blank.
+- `all_consumers` to enroll every consumer, including requests without identity.
 
-**The gate can only ever narrow.** It never turns an observe deployment into
-an enforcing one, so it is safe to ship ahead of the traffic it is meant to
-catch. A missing header, an empty one, or a request whose headers this filter
-never read all read as "not enrolled" and observe: during a rollout the
-affordable failure is a request that was only reported, not one refused for a
-caller who was never enrolled.
+Consumer/group names are case-sensitive exact matches, with surrounding spaces
+trimmed and empty configuration entries ignored. No prefixes are required;
+`ungrouped` and `all_consumers` are reserved. Omitted/empty configuration enrolls
+only beta-flag traffic. Use `staged_rollout: "all_consumers"` for full deployment.
 
-Everything else is unchanged — the same events are computed and reported for
-gated-out traffic, so the console still fills with findings while enforcement
-reaches only the gray set. At `log_level: info` each gated-out request says so
-on one line (`[OGR-BETA]`).
+The request-headers hook stores membership in the exchange context. Request body,
+JSON response and SSE response handlers use that same decision; LLM replies need
+not repeat any of these headers. Consumer identity must be available before both
+plugins execute. Enrolled traffic uses the configured `mode` unchanged; all other
+traffic uses `observe`, even when `mode: enforce` is configured.
 
 ## Mirror
 

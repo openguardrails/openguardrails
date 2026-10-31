@@ -2,11 +2,8 @@ package main
 
 import "testing"
 
-// ⚠️ TEMPORARY, and it goes when betaflags.go goes.
-//
-// The gray-release gate has exactly one property worth pinning: it can only ever
-// move a request TOWARD observe. Everything below is that sentence, split in two —
-// who is in the gray set (hasBetaFlag) and what membership buys (gatedMode).
+// Beta-token parsing and mode selection. rollout_test.go covers configuration
+// membership and persisted decisions for both halves of an exchange.
 
 func TestHasBetaFlag(t *testing.T) {
 	cases := []struct {
@@ -45,7 +42,7 @@ func TestGatedModeOnlyEverNarrows(t *testing.T) {
 		t.Errorf("og-airs + mode:observe = %q, want observe", got)
 	}
 
-	// Out of it: observe, whatever the config says. This is the whole point.
+	// Out of the rollout: observe, whatever the configured mode.
 	if got := gatedMode(false, modeEnforce); got != modeObserve {
 		t.Errorf("no flag + mode:enforce = %q, want observe — ungated traffic must never be enforced on", got)
 	}
