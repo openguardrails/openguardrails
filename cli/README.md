@@ -29,7 +29,8 @@ Configuration is `~/.openguardrails/config.json`, mode 0600. Every part is optio
 - `workspaces` are the absolute directories an agent works in. A relative path is taken as inside
   one. An absolute path outside them goes to the model. The Runtime API does not tell this service an
   agent's working directory, so nothing else can draw this line yet.
-- The local service listens on loopback and takes any API key.
+- The local service listens on loopback and takes any API key. Avoid port 4190: `fetch` refuses it, so every
+  agent built on Node would fail to connect while `curl` works.
 
 ## What the rules decide
 

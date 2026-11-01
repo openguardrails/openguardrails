@@ -164,7 +164,7 @@ export const HARD_CREDENTIAL =
 export const SENSITIVE_PATH =
   /\.(ssh|aws|gnupg|kube|azure|oci|docker\/config\.json|netrc|npmrc|pypirc|pgpass|git-credentials|boto|my\.cnf|vault-token|openguardrails)\b|\bconfig\/gcloud\b|\.(pem|key|p12|pfx|jks|keystore)(?=$|[\s"'])|\/etc\/(shadow|sudoers)|(^|[\s/"'])\.env(\.[\w.-]*)?(?=$|[\s"'/])|\b(secrets?|credentials?)\.(json|xml|ya?ml|toml|ini|env)\b|\bterraform\.tfstate\b|\bcookies(\.sqlite)?\b|Keychains\/|\.keychain/;
 
-const READERS = new Set(["cat", "head", "tail", "less", "more", "strings", "xxd", "od", "base64", "cp", "mv", "scp", "rsync", "tar", "zip", "nl", "tac", "awk", "sed", "grep"]);
+const READER_WORD = /(^|[\s;&|(`'"$/])(cat|head|tail|less|more|strings|xxd|od|base64|cp|mv|scp|rsync|tar|zip|nl|tac|awk|sed|grep)\s/;
 
 /** True when a word might name something outside the workspace. */
 function leavesWorkspace(word: string, workspaces: readonly string[]): boolean {
@@ -191,7 +191,9 @@ export function gateCommand(raw: string, options: GateOptions = {}): GateDecisio
     if (re.test(skeleton)) return { verdict: "deny", reason: why };
   }
   const parsed = analyzeCommand(raw);
-  if (parsed && HARD_CREDENTIAL.test(raw) && parsed.commands.some((c) => READERS.has(base(c.name)))) {
+  // On the raw text, not on a parse: a line break or `$(cat key)` makes the parser give up, and that must
+  // not turn a hard deny into a question. Real agents do join commands this way.
+  if (HARD_CREDENTIAL.test(raw) && READER_WORD.test(raw)) {
     return { verdict: "deny", reason: "reading a private key or cloud credential into the model's context" };
   }
   if (SENSITIVE_PATH.test(raw)) return { verdict: "judge", reason: "touches a path where secrets live" };
