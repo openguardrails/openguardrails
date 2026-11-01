@@ -3,11 +3,13 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homeDir } from "./config.js";
 import { latestRun, readRun, renderEvent } from "./record.js";
+import { connect } from "./connect.js";
 import { run } from "./run.js";
 import { serve, status, stop } from "./serve.js";
 
 const USAGE = `openguardrails: AI agent guardrails for every builder
 
+  openguardrails connect [--url <url>]   turn on the model: get a free key, and show where to claim more
   openguardrails decisions               print what the rules and the model decided, newest last
   openguardrails run [options] -- <command...>   run a command and everything it spawns inside the sandbox
   openguardrails log [run-id]                    print what a run did (default: the latest)
@@ -64,6 +66,10 @@ async function main(argv: string[]): Promise<number> {
   if (verb === "serve") return serve();
   if (verb === "status") return status();
   if (verb === "stop") return stop();
+  if (verb === "connect") {
+    const at = rest.indexOf("--url");
+    return connect(at >= 0 ? rest[at + 1] : undefined);
+  }
   if (verb === "decisions") {
     const path = join(homeDir(), "decisions.ndjson");
     if (existsSync(path)) process.stdout.write(readFileSync(path, "utf8"));

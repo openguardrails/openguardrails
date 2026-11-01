@@ -84,8 +84,9 @@ export class ModelChannelGuard {
     const calls = callsIn(protocol, parsed);
     const refused = await this.refusals(request, calls);
     let out = reply;
-    if (refused.size > 0) {
-      const notice = [...new Set(refused.values())].join(" ");
+    const told = this.runtime.takeQuotaNotice();
+    const notice = [...new Set(refused.values()), ...(told ? [told] : [])].join(" ");
+    if (notice) {
       if (protocol === "openai.chat") {
         const message = parsed.choices?.[0]?.message ?? {};
         message.tool_calls = (message.tool_calls ?? []).filter((_: unknown, i: number) => !refused.has(`payload.choices.0.message.tool_calls.${i}`));
@@ -112,6 +113,7 @@ export class ModelChannelGuard {
       protocol,
       map: request.map,
       write,
+      notice: () => this.runtime.takeQuotaNotice(),
       judge: (calls) =>
         this.refusals(request, calls).catch((error) => {
           // No answer is not an allow: every call is refused, and the agent is told it was a fault.

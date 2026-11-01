@@ -92,9 +92,9 @@ export function callsInFrames(protocol: LlmProtocol, frames: Frame[]): StreamCal
 }
 
 /** The held frames with refused calls gone and the agent told why. */
-export function renderHeld(protocol: LlmProtocol, frames: Frame[], refused: Refusals): string {
-  if (refused.size === 0) return frames.map((frame) => frame.raw).join("");
-  const notice = [...new Set(refused.values())].join(" ");
+export function renderHeld(protocol: LlmProtocol, frames: Frame[], refused: Refusals, extra?: string | null): string {
+  const notice = [...new Set(refused.values()), ...(extra ? [extra] : [])].join(" ");
+  if (!notice) return frames.map((frame) => frame.raw).join("");
   let out = "";
   if (protocol === "openai.chat") {
     const kept = [...new Set(frames.flatMap((f) => (f.data?.choices?.[0]?.delta?.tool_calls ?? []).map((d: any) => d.index ?? 0)))].filter((i) => !refused.has(`tool:${i}`));
@@ -158,6 +158,7 @@ export function renderHeld(protocol: LlmProtocol, frames: Frame[], refused: Refu
     }
     return noticed ? out : out + tell();
   }
+  if (refused.size === 0) return frames.map((frame) => frame.raw).join("");
   // A Responses stream states its whole output in several places, so a call cannot be cut out of it
   // cleanly. The whole step is retracted, and the agent is told why.
   return render({ type: "response.failed", response: { status: "failed", error: { code: "refused", message: notice } } }, "response.failed");
@@ -169,9 +170,11 @@ export interface StreamGuardOptions {
   write(text: string): void;
   /** Answers for every call. It must always resolve. */
   judge(calls: StreamCall[]): Promise<Refusals>;
+  /** Something for the person, added to the reply's text. */
+  notice?(): string | null;
 }
 
-export function createStreamGuard({ protocol, map, write, judge }: StreamGuardOptions) {
+export function createStreamGuard({ protocol, map, write, judge, notice }: StreamGuardOptions) {
   const restorer = createSseRestorer(protocol, map);
   const held: Frame[] = [];
   let carry = "";
@@ -201,7 +204,7 @@ export function createStreamGuard({ protocol, map, write, judge }: StreamGuardOp
       if (carry.trim()) take(`${carry}\n\n`);
       carry = "";
       const refused = await judge(callsInFrames(protocol, held));
-      const out = restorer.feed(renderHeld(protocol, held, refused)) + restorer.end();
+      const out = restorer.feed(renderHeld(protocol, held, refused, notice?.())) + restorer.end();
       if (out) write(out);
     },
   };

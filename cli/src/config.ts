@@ -27,7 +27,15 @@ export interface Config {
     firstByteTimeoutMs?: number;
   };
   /** The OpenGuardrails Model API. With no key anywhere, what the rules cannot decide goes unjudged. */
-  model?: { url?: string; apiKeyEnv?: string; apiKey?: string; model?: string; timeoutMs?: number };
+  model?: {
+    url?: string;
+    apiKeyEnv?: string;
+    apiKey?: string;
+    model?: string;
+    timeoutMs?: number;
+    /** When the model cannot answer. `closed`, the default, refuses the action and says it can be retried. */
+    failMode?: "open" | "closed";
+  };
   /** Absolute directories the agent works in. Relative paths are taken as inside. */
   workspaces?: string[];
   airs?: { url: string; apiKeyEnv?: string; apiKey?: string; agentId?: string; agentWorkspace?: string; failMode?: "open" | "closed"; requestTimeoutMs?: number };

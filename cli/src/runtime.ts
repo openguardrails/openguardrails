@@ -75,15 +75,26 @@ const MODEL_NOTICE = (reason: string) =>
 const DECISION_NOTICE = (reason: string) =>
   `This action was NOT executed because it needs the user's own decision: ${reason}. Ask the user directly, and try again only after they answer in this conversation.`;
 
+const UNAVAILABLE_NOTICE =
+  "This action was NOT executed because the safety check could not answer just now. This is not a finding that it is unsafe. Try the same action once more. If it keeps failing, tell the user.";
+const QUOTA_NOTICE_EVERY_MS = 24 * 60 * 60 * 1000;
+const QUOTA_NOTICE = (quota: { claim_url?: string; upgrade_url?: string }) =>
+  `OpenGuardrails: the free model quota for today is used up, so actions the local rules cannot decide are not being judged. Please tell the user: they can raise the quota at ${quota.claim_url ?? quota.upgrade_url ?? "https://openguardrails.com"}`;
+
 export class LocalRuntime {
   private readonly sessions = new Map<string, TranscriptEntry[]>();
+  /** When the person was last told the quota ran out. Telling them on every call would teach them to ignore it. */
+  private quotaToldAt = 0;
+  private quotaPending: string | null = null;
   private readonly recent = new Map<string, { at: number; judgement: Judgement }>();
   private readonly model: ModelTarget | null;
   private readonly workspaces: string[];
+  private readonly failOpen: boolean;
 
   constructor(config: Config, env = process.env) {
     this.model = modelTarget(config, env);
     this.workspaces = config.workspaces ?? [];
+    this.failOpen = config.model?.failMode === "open";
   }
 
   private remember(key: string, entries: TranscriptEntry[]): void {
@@ -101,6 +112,13 @@ export class LocalRuntime {
     const judgement = await judge(this.model!, request);
     this.recent.set(key, { at: now, judgement });
     return judgement;
+  }
+
+  /** A message for the person, handed out once. */
+  takeQuotaNotice(): string | null {
+    const notice = this.quotaPending;
+    this.quotaPending = null;
+    return notice;
   }
 
   /** One answer per call, in order. `history` grows as the calls are judged. */
@@ -134,8 +152,16 @@ export class LocalRuntime {
           judgement = await this.judgeOnce(key, request);
         } catch (error) {
           const quota = error instanceof ModelUnavailable ? error.quota : undefined;
-          record("model", "unjudged", String((error as Error).message), quota ? { claim_url: quota.claim_url } : {});
-          answer.unjudged = true;
+          record("model", quota || this.failOpen ? "unjudged" : "deny", String((error as Error).message), quota ? { claim_url: quota.claim_url } : {});
+          // Someone who turned the model on is relying on it, so a passing failure must not switch it off.
+          // A used-up quota is a known state with a person told about it, and it must not stop all work.
+          if (!quota && !this.failOpen) refuse("x.ogr.unjudged", "low", "model", UNAVAILABLE_NOTICE);
+          else answer.unjudged = true;
+          if (quota && Date.now() - this.quotaToldAt > QUOTA_NOTICE_EVERY_MS) {
+            this.quotaToldAt = Date.now();
+            this.quotaPending = QUOTA_NOTICE(quota);
+            process.stderr.write(`[openguardrails] ${this.quotaPending}\n`);
+          }
         }
         if (judgement?.decision === "allow") {
           record("model", "allow", local.reason);

@@ -8,7 +8,8 @@ import type { TranscriptEntry } from "./transcript.js";
 
 export const DEFAULT_MODEL_URL = "https://api.openguardrails.com";
 export const DEFAULT_MODEL = "openguardrails-guard-1";
-const DEFAULT_TIMEOUT_MS = 4000;
+/** Longer than the service's own budget. A plugin's budget is shorter by default, so set OGR_TIMEOUT above this. */
+const DEFAULT_TIMEOUT_MS = 8000;
 
 export interface JudgeRequest {
   model: string;
@@ -27,7 +28,7 @@ export interface Judgement {
 export class ModelUnavailable extends Error {
   constructor(
     message: string,
-    readonly quota?: { claim_url?: string },
+    readonly quota?: { claim_url?: string; upgrade_url?: string },
   ) {
     super(message);
   }
@@ -65,7 +66,7 @@ export async function judge(target: ModelTarget, request: Omit<JudgeRequest, "mo
   }
   const body = (await response.json().catch(() => ({}))) as Record<string, any>;
   if (response.status === 429 && body.error?.code === "quota_exhausted") {
-    throw new ModelUnavailable("the model API quota is used up", { claim_url: body.error.claim_url });
+    throw new ModelUnavailable("the model API quota is used up", { claim_url: body.error.claim_url, upgrade_url: body.error.upgrade_url });
   }
   if (!response.ok) throw new ModelUnavailable(`the model API answered HTTP ${response.status}`);
   // A 200 that names no known decision is not a judgement.
@@ -73,4 +74,12 @@ export async function judge(target: ModelTarget, request: Omit<JudgeRequest, "mo
     throw new ModelUnavailable("the model API answered without a decision");
   }
   return body as unknown as Judgement;
+}
+
+/** Asks for a free key. Only ever run because a person ran `openguardrails connect`. */
+export async function mintKey(url: string): Promise<{ api_key: string; claim_url: string; limit_per_day: number }> {
+  const response = await fetch(`${url.replace(/\/$/, "")}/v1/keys`, { method: "POST", signal: AbortSignal.timeout(15_000) });
+  const body = (await response.json().catch(() => ({}))) as Record<string, any>;
+  if (!response.ok || !body.api_key) throw new Error(body.error?.message ?? `the model API answered HTTP ${response.status}`);
+  return body as { api_key: string; claim_url: string; limit_per_day: number };
 }
