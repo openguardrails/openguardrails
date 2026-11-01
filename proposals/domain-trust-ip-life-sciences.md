@@ -9,7 +9,7 @@
 > and the [taxonomy](../specification/taxonomy.md#safetyhallucination-and-safetyunsafe_advice--grounding-subcategories)
 > as OGR 1.7 **draft**; if accepted they are ratified there and this file is retired.
 >
-> **Discussion:** [openguardrails/openguardrails#36](https://github.com/openguardrails/openguardrails/discussions/36) · merged as draft in [#35](https://github.com/openguardrails/openguardrails/pull/35)
+> **Discussion:** [openguardrails/openguardrails-spec#36](https://github.com/openguardrails/openguardrails-spec/discussions/36) · merged as draft in [#35](https://github.com/openguardrails/openguardrails-spec/pull/35)
 
 ## 1. The claim, and what is wrong with the obvious version of it
 
