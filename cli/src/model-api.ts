@@ -9,7 +9,7 @@ import type { TranscriptEntry } from "./transcript.js";
 export const DEFAULT_MODEL_URL = "https://api.openguardrails.com";
 export const DEFAULT_MODEL = "openguardrails-guard-1";
 /** Longer than the service's own budget. A plugin's budget is shorter by default, so set OGR_TIMEOUT above this. */
-const DEFAULT_TIMEOUT_MS = 8000;
+const DEFAULT_TIMEOUT_MS = 15_000;
 
 export interface JudgeRequest {
   model: string;
