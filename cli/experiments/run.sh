@@ -60,7 +60,11 @@ else
 fi
 if [ "$MODE" = judge ] || [ "$MODE" = gateway ]; then MODEL_CFG="\"model\": {\"url\": \"http://127.0.0.1:$PORT_JUDGE\", \"apiKey\": \"local\"},"; else MODEL_CFG=""; fi
 echo "{ $MODEL_CFG \"gateway\": {$GATEWAY_CFG} }" > "$RUN/ogr/config.json"; chmod 600 "$RUN/ogr/config.json"
-if [ "$MODE" = live ]; then OPENGUARDRAILS_HOME="$RUN/ogr" node "$CLI/dist/src/cli.js" connect --url "$MODEL_API_URL" | sed 's/^/connect: /' | head -3; fi
+if [ "$MODE" = live ]; then
+  # With no key this would run unjudged, and its results would look like a guard that failed.
+  OPENGUARDRAILS_HOME="$RUN/ogr" node "$CLI/dist/src/cli.js" connect --url "$MODEL_API_URL" >"$RUN/connect.out" 2>&1 || { echo "connect failed: $(cat "$RUN/connect.out")" >&2; exit 2; }
+  head -1 "$RUN/connect.out" | sed 's/^/connect: /'
+fi
 node "$CLI/experiments/mock-model.mjs" $PORT_MODEL "$RUN/model.log" "$RUN/script.json" 2>/dev/null & P1=$!
 node "$CLI/experiments/mock-judge.mjs" $PORT_JUDGE "$RUN/judge.log" & P2=$!
 OPENGUARDRAILS_HOME="$RUN/ogr" env -u OPENGUARDRAILS_API_KEY node "$CLI/dist/src/cli.js" serve 2>"$RUN/ogr/serve.log" & P3=$!
