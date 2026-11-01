@@ -76,7 +76,13 @@ export function entriesFromMessages(messages: unknown): TranscriptEntry[] {
   const entries: TranscriptEntry[] = [];
   for (const message of messages as any[]) {
     const role = message?.role;
-    if (role === "user") {
+    // A Responses `input` keeps calls and their outputs as items of their own.
+    if (/_call$/.test(String(message?.type))) {
+      const call = callFrom(message);
+      if (call) entries.push(projection(call));
+    } else if (/_call_output$|_output$/.test(String(message?.type))) {
+      entries.push({ outcome: "ok", id: message.call_id });
+    } else if (role === "user") {
       const results = Array.isArray(message.content) ? message.content.filter((part: any) => part?.type === "tool_result") : [];
       for (const result of results) entries.push({ outcome: result.is_error ? "error" : "ok", id: result.tool_use_id });
       const text = results.length ? textOf(message.content.filter((part: any) => part?.type !== "tool_result")) : textOf(message.content);

@@ -29,6 +29,9 @@ Unsafe and "your decision" are different things. A key on its way to an unknown 
 problem, and it is refused. Nobody is asked to rule on it. Buying this lipstick is safe, and it is
 still your call.
 
+- **Your keys stay home.** Secrets become placeholders before a request leaves your machine, side
+  requests included, so the model provider and any relay never see them. A tool still gets the real
+  value, and only after its call is allowed.
 - **Local rules.** A strict shell parser, a read-only allowlist, workspace boundaries and a small
   list of things no agent should ever do. A command the parser does not fully understand is never
   allowed by a rule. Read them: [`cli/src/gate/gate.ts`](cli/src/gate/gate.ts),
@@ -43,14 +46,14 @@ still your call.
 
 ## Status
 
-Early, and honest about it. Tested end to end against the real harnesses, with the scripted models
-in [`cli/experiments`](cli/experiments):
+Early, and honest about it. Tested end to end against the real harnesses through the local gateway,
+with no plugin, using the scripted models in [`cli/experiments`](cli/experiments):
 
-| Agent | Rules and model enforced | Agent told why | Secrets kept from the model provider |
-|---|---|---|---|
-| [Hermes](https://github.com/NousResearch/hermes-agent) 0.20 | yes | yes | **no**: the side request that names a session goes out unmasked |
-| [OpenClaw](https://github.com/openclaw/openclaw) 2026.6 | yes | yes | **no**: this version's model traffic misses the plugin's interceptor |
-| [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 0.2 | **no**: the plugin no longer loads on this version | no | no |
+| Agent | Rules and model enforced | Agent told why | Secrets kept from the model provider | Tool gets the real value |
+|---|---|---|---|---|
+| [Hermes](https://github.com/NousResearch/hermes-agent) 0.20 | yes | yes | yes | yes |
+| [OpenClaw](https://github.com/openclaw/openclaw) 2026.6 | yes | yes | yes | yes |
+| [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 0.2 | yes | yes | yes | yes |
 
 Not available yet:
 
@@ -60,6 +63,8 @@ Not available yet:
 - **The package is not on npm yet.** Install from a checkout, below.
 - Asking you on your phone. Until then, a decision that is yours comes back to you through the agent.
 
+Known limits are listed in [`cli/README.md`](cli/README.md#what-it-does-not-do-yet).
+
 ## Try it
 
 Needs Node 22.12 or newer.
@@ -67,32 +72,28 @@ Needs Node 22.12 or newer.
 ```sh
 git clone https://github.com/openguardrails/openguardrails
 cd openguardrails/cli && npm install && npm run build && npm link
+```
+
+Tell it about your model API in `~/.openguardrails/config.json`, mode 0600:
+
+```json
+{
+  "gateway": {
+    "upstreams": { "main": { "baseURL": "https://openrouter.ai/api/v1", "model": "qwen/qwen3.8-27b", "apiKeyEnv": "OPENROUTER_API_KEY" } },
+    "routes": { "auto": ["main"] }
+  }
+}
+```
+
+```sh
 openguardrails serve   # port 4180; set gateway.port in the config to change it
 ```
 
-Then point an agent's plugin at it.
+Then point your agent at `http://127.0.0.1:4180/v1`, with model `auto` and any string as its API key.
+That is the whole integration, and it works the same for every agent.
 
-**Hermes:**
-
-```sh
-mkdir -p ~/.hermes/plugins
-ln -sfn "$PWD/../integrations/agent/hermes/src/openguardrails_instrumentation_hermes" ~/.hermes/plugins/ogr-guard
-hermes plugins enable ogr-guard
-export OGR_RUNTIME_URL=http://127.0.0.1:4180 OGR_API_KEY=local
-```
-
-**OpenClaw:**
-
-```sh
-(cd ../integrations/agent/openclaw && npm install && npm run build)
-openclaw plugins install -l ../integrations/agent/openclaw
-export OGR_RUNTIME_URL=http://127.0.0.1:4180 OGR_API_KEY=local
-```
-
-The same setting pointed at an OpenGuardrails AIRS deployment makes it an enterprise agent, with no
-other change.
-
-`openguardrails run -- <command>` and the gateway are described in [`cli/README.md`](cli/README.md).
+`openguardrails decisions` shows what happened. For an enterprise deployment, plugins and the gateway
+connect to OpenGuardrails AIRS instead, with no other change.
 
 ## What is in this repository
 

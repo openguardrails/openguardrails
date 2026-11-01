@@ -17,24 +17,37 @@ let cursor = 0;
 
 const toolNames = (body) => (body.tools ?? []).map((t) => t.function?.name ?? t.name).filter(Boolean);
 
-function nextStep(body) {
+/** `{{TOKEN}}` in a scripted argument becomes the first placeholder the model was shown. */
+function withToken(args, raw) {
+  const token = /OGRK[0-9A-Z][0-9X]{7,}/.exec(raw)?.[0] ?? "NO-PLACEHOLDER-SEEN";
+  return JSON.parse(JSON.stringify(args).replaceAll("{{TOKEN}}", token));
+}
+
+function resolveCall(body, raw, step) {
+  const offered = new Set(toolNames(body));
+  const name = step.tool.find((candidate) => offered.has(candidate));
+  if (!name) return null;
+  // DeepSeek Harness's bash refuses a call with no description.
+  return { name, args: withToken(name === "bash" ? { description: "scripted step", ...step.args } : step.args, raw) };
+}
+
+function nextStep(body, raw) {
   // A request offering no tools is the harness's own side work, such as naming the session.
   if (toolNames(body).length === 0) return { text: "side reply" };
   const step = script[cursor];
   if (!step) return { text: "done" };
   cursor += 1;
+  // Several tools at once: one reply carrying parallel calls.
+  if (step.parallel) return { calls: step.parallel.map((one) => resolveCall(body, raw, one)).filter(Boolean) };
   if (!step.tool) return step;
-  const offered = new Set(toolNames(body));
-  const name = step.tool.find((candidate) => offered.has(candidate));
-  // DeepSeek Harness's bash refuses a call with no description.
-  if (name === "bash") return { name, args: { description: "scripted step", ...step.args } };
-  return name ? { name, args: step.args } : { text: `no tool among ${step.tool.join(",")}` };
+  const call = resolveCall(body, raw, step);
+  return call ? { calls: [call] } : { text: `no tool among ${step.tool.join(",")}` };
 }
 
 function chatReply(step, stream) {
   const id = `chatcmpl-${Date.now()}`;
   const base = { id, created: Math.floor(Date.now() / 1000), model: "mock" };
-  const call = step.name ? [{ index: 0, id: `call_${cursor}`, type: "function", function: { name: step.name, arguments: JSON.stringify(step.args) } }] : undefined;
+  const call = step.calls?.length ? step.calls.map((one, index) => ({ index, id: `call_${cursor}_${index}`, type: "function", function: { name: one.name, arguments: JSON.stringify(one.args) } })) : undefined;
   const usage = { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 };
   if (!stream) {
     return JSON.stringify({ ...base, object: "chat.completion", usage, choices: [{ index: 0, finish_reason: call ? "tool_calls" : "stop", message: { role: "assistant", content: step.text ?? null, ...(call ? { tool_calls: call } : {}) } }] });
@@ -66,8 +79,8 @@ http
         return;
       }
       const body = JSON.parse(raw || "{}");
-      const step = nextStep(body);
-      appendFileSync(logPath, `${JSON.stringify({ t: Date.now(), tools: toolNames(body), messages: body.messages?.length, roles: (body.messages ?? []).map((m) => m.role).join(","), lastTool: (body.messages ?? []).filter((m) => m.role === "tool").at(-1)?.content, step, stream: Boolean(body.stream), secretLeft: raw.includes("sk-proj-LABFAKE") })}\n`);
+      const step = nextStep(body, raw);
+      appendFileSync(logPath, `${JSON.stringify({ t: Date.now(), tools: toolNames(body), messages: body.messages?.length, roles: (body.messages ?? []).map((m) => m.role).join(","), lastTool: (body.messages ?? []).filter((m) => m.role === "tool").at(-1)?.content, step, stream: Boolean(body.stream), secretLeft: raw.includes("sk-proj-LABFAKE"), noticeSeen: raw.includes("NOT executed") })}\n`);
       res.writeHead(200, { "content-type": body.stream ? "text/event-stream" : "application/json" });
       res.end(chatReply(step, Boolean(body.stream)));
     });

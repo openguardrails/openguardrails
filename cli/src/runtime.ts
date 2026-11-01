@@ -34,6 +34,11 @@ interface Finding {
   subject: string;
 }
 
+export interface CallAnswer {
+  refused?: { category: string; severity: Finding["severity"]; detector: string; notice: string };
+  unjudged?: boolean;
+}
+
 export interface Verdict {
   event_id: string;
   provider: string;
@@ -98,6 +103,59 @@ export class LocalRuntime {
     return judgement;
   }
 
+  /** One answer per call, in order. `history` grows as the calls are judged. */
+  async judgeCalls(calls: NormalCall[], history: TranscriptEntry[], agentType: string, session: string): Promise<CallAnswer[]> {
+    const answers: CallAnswer[] = [];
+    for (const call of calls) {
+      const answer: CallAnswer = {};
+      const refuse = (category: string, severity: Finding["severity"], detector: string, notice: string) => {
+        answer.refused = { category, severity, detector, notice };
+      };
+      const local = decideTool(call, { workspaces: this.workspaces });
+      const record = (layer: string, decision: string, reason: string, extra: Record<string, unknown> = {}) =>
+        logDecision({ agent: agentType, tool: call.name, layer, decision, reason, ...extra });
+      if (local.verdict === "allow") {
+        record("rules", "allow", local.reason);
+      } else if (local.verdict === "deny") {
+        record("rules", "deny", local.reason);
+        refuse("security.malicious_command", "critical", "local-rules", RULE_NOTICE(local.reason));
+      } else if (!this.model) {
+        // No model means no auto mode: the action goes on to the harness's own permission check,
+        // and it is reported as not judged. Nothing here claims it was looked at.
+        record("none", "unjudged", local.reason);
+        answer.unjudged = true;
+      } else {
+        const transcript = buildTranscript(history, call);
+        const request = { transcript, environment: { agent_type: agentType, workspaces: this.workspaces } };
+        // Keyed on what would run, not on the tool's name: `terminal` and `bash` are one action.
+        const key = `${session}\n${JSON.stringify(shellLine(call.args) ?? [call.name, call.args])}`;
+        let judgement: Judgement | null = null;
+        try {
+          judgement = await this.judgeOnce(key, request);
+        } catch (error) {
+          const quota = error instanceof ModelUnavailable ? error.quota : undefined;
+          record("model", "unjudged", String((error as Error).message), quota ? { claim_url: quota.claim_url } : {});
+          answer.unjudged = true;
+        }
+        if (judgement?.decision === "allow") {
+          record("model", "allow", local.reason);
+        } else if (judgement?.decision === "block") {
+          const reason = judgement.reason ?? judgement.category ?? "the model judged this action unsafe";
+          record("model", "block", reason, { category: judgement.category });
+          refuse(judgement.category ?? "security.unsafe_action", judgement.severity ?? "high", "model", MODEL_NOTICE(reason));
+        } else if (judgement?.decision === "needs_decision") {
+          const reason = judgement.reason ?? "this is the user's decision";
+          record("model", "needs_decision", reason);
+          refuse("x.ogr.needs_decision", "low", "model", DECISION_NOTICE(reason));
+        }
+      }
+      answers.push(answer);
+      // Later calls in this step are judged knowing this one came first.
+      history.push({ [call.name]: "(earlier call in this step)" });
+    }
+    return answers;
+  }
+
   async evaluate(event: Record<string, any>): Promise<Verdict> {
     const started = Date.now();
     const base = { event_id: randomUUID(), provider: PROVIDER };
@@ -110,61 +168,23 @@ export class LocalRuntime {
     }
 
     const calls = callsIn(String(event.llm_protocol ?? "canonical"), event.payload);
+    const history = this.sessions.get(session) ?? [];
+    const answers = await this.judgeCalls(calls, history, String(event.agent_type ?? ""), session);
+    this.remember(session, history);
     const findings: Finding[] = [];
     const notices: string[] = [];
     const paths: string[] = [];
     const unjudged: string[] = [];
-    const history = this.sessions.get(session) ?? [];
-    const refuse = (call: NormalCall & { path: string }, category: string, severity: Finding["severity"], detector: string, notice: string) => {
-      findings.push({ category, severity, path: call.path, detector, subject: call.name });
-      paths.push(call.path);
-      notices.push(notice);
-    };
-    const agentType = String(event.agent_type ?? "");
-
-    for (const call of calls) {
-      const local = decideTool(call, { workspaces: this.workspaces });
-      const record = (layer: string, decision: string, reason: string, extra: Record<string, unknown> = {}) =>
-        logDecision({ agent: agentType, tool: call.name, layer, decision, reason, ...extra });
-      if (local.verdict === "allow") {
-        record("rules", "allow", local.reason);
-      } else if (local.verdict === "deny") {
-        record("rules", "deny", local.reason);
-        refuse(call, "security.malicious_command", "critical", "local-rules", RULE_NOTICE(local.reason));
-      } else if (!this.model) {
-        // No model means no auto mode: the action goes on to the harness's own permission check,
-        // and it is reported as not judged. Nothing here claims it was looked at.
-        record("none", "unjudged", local.reason);
-        unjudged.push(call.path);
-      } else {
-        const transcript = buildTranscript(history, call);
-        const request = { transcript, environment: { agent_type: agentType, workspaces: this.workspaces } };
-        // Keyed on what would run, not on the tool's name: `terminal` and `bash` are one action.
-        const key = `${session}\n${JSON.stringify(shellLine(call.args) ?? [call.name, call.args])}`;
-        let judgement: Judgement | null = null;
-        try {
-          judgement = await this.judgeOnce(key, request);
-        } catch (error) {
-          const quota = error instanceof ModelUnavailable ? error.quota : undefined;
-          record("model", "unjudged", String((error as Error).message), quota ? { claim_url: quota.claim_url } : {});
-          unjudged.push(call.path);
-        }
-        if (judgement?.decision === "allow") {
-          record("model", "allow", local.reason);
-        } else if (judgement?.decision === "block") {
-          const reason = judgement.reason ?? judgement.category ?? "the model judged this action unsafe";
-          record("model", "block", reason, { category: judgement.category });
-          refuse(call, judgement.category ?? "security.unsafe_action", judgement.severity ?? "high", "model", MODEL_NOTICE(reason));
-        } else if (judgement?.decision === "needs_decision") {
-          const reason = judgement.reason ?? "this is the user's decision";
-          record("model", "needs_decision", reason);
-          refuse(call, "x.ogr.needs_decision", "low", "model", DECISION_NOTICE(reason));
-        }
+    answers.forEach((answer, i) => {
+      const call = calls[i]!;
+      if (answer.unjudged) unjudged.push(call.path);
+      if (answer.refused) {
+        const { category, severity, detector, notice } = answer.refused;
+        findings.push({ category, severity, path: call.path, detector, subject: call.name });
+        paths.push(call.path);
+        notices.push(notice);
       }
-      // Later calls in this step are judged knowing this one came first.
-      history.push({ [call.name]: "(earlier call in this step)" });
-    }
-    this.remember(session, history);
+    });
 
     return {
       ...base,

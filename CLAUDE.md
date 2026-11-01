@@ -5,6 +5,10 @@ command (local rules, local OGR service, sandbox, firewall, gateway). The enterp
 closed source and lives elsewhere. Priority agents are Hermes, OpenClaw and DeepSeek Harness, tested
 with `cli/experiments/run.sh`, because a mock of a harness has repeatedly hidden what the real one does.
 
+⚠️ The local gateway is the default connection and is where masking and judging live for builders. A
+plugin sees only what its harness shows it: tested, Hermes's side requests and all of OpenClaw 2026.6's
+model traffic went around plugin masking. Every request passes through the gateway.
+
 ⚠️ A security risk is refused and alerted, never sent to a person to approve. Approval is for a choice
 that belongs to the person and is not a risk. `needs_decision` must never mean "could not tell".
 
