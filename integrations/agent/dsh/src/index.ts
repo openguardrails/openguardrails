@@ -584,7 +584,7 @@ export function apply(ctx: Context, config: Config): void {
           calls.forEach((call, index) => {
             const hit = targets.get(index)
             rememberCall(call.id, hit
-              ? { allow: false, reason: `${hit.category}${hit.severity ? ` (${hit.severity})` : ""}` }
+              ? { allow: false, reason: resVerdict.continuation?.notice ?? `${hit.category}${hit.severity ? ` (${hit.severity})` : ""}` }
               : { allow: true })
           })
           yield* gate.flush()

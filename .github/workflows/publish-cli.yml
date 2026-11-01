@@ -1,0 +1,32 @@
+name: Publish CLI
+
+# Tag `cli-v<version>` to publish `openguardrails` to npm. The tag must match cli/package.json.
+# Publishing uses npm trusted publishing (OIDC), so no registry token is stored here. On npm, the
+# package's trusted publisher must name this repository and this workflow file.
+
+on:
+  push:
+    tags:
+      - "cli-v*"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+      - name: The tag must match the package
+        run: test "cli-v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
+      - run: npm install -g npm@latest
+      - run: npm ci
+      - run: npm publish --provenance --access public

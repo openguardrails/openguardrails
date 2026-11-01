@@ -1,11 +1,11 @@
 # openguardrails-bench
 
-**The neutral leaderboard for AI agent safety & security detectors.**
+**A public, reproducible evaluation of AI agent safety and security detectors.**
 
-OpenGuardrails does not build detection capability — it **referees**. Any
-[OGR-conformant](https://github.com/openguardrails/openguardrails) detector
-(config-based or model-based) can be run against shared corpora here and ranked
-on a level field. We never fabricate a vendor's score; numbers come from the
+OpenGuardrails builds detectors and enters them here too, so check the numbers yourself: the corpora,
+scoring and harness are all in this directory. Any
+[OGR-conformant](../specification/README.md) detector
+(config-based or model-based) can be run against the same corpora and ranked. We never fabricate a vendor's score; numbers come from the
 harness or they don't appear.
 
 ```bash
