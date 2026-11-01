@@ -116,6 +116,8 @@ export interface WireFinding {
 
 /** The v0.8 Verdict: two decisions, findings, spans, and the coverage truth. */
 export interface WireVerdict {
+  /** OGR 1.3: how to say no to an agent. Absent means no rendering was offered. */
+  continuation?: { style?: string; paths?: string[]; notice?: string }
   event_id: string
   provider: string
   decision: "allow" | "block"

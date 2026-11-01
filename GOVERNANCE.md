@@ -1,21 +1,16 @@
 # Governance
 
-OpenGuardrails is a **neutral standard**. Its value depends on no single vendor
-controlling what counts as "safe" or who wins the benchmark. This document
-states how the specification evolves and how neutrality is protected.
+OGR is the wire protocol OpenGuardrails' plugins speak, published so that anyone can read it, implement it
+or connect their own detector. OpenGuardrails maintains it and also builds a guardrail product and
+models, so it is not a neutral standards body and does not claim to be.
 
 ## Principles
 
-1. **The protocol is open and vendor-neutral.** No detector vendor, model
-   provider, or sandbox operator has privileged control over the contract.
-2. **The benchmark is a referee, not a contestant.** The party that maintains
-   `openguardrails-bench` does not ship a competing detector ranked by it. The
-   leaderboard methodology, corpora provenance, and scoring are public.
-3. **Standardize the boundary, not the brains.** The spec defines the wire
-   (`GuardEvent`, `Verdict`, provenance, correlation, composition). Detection
-   quality stays competitive and out of scope.
-4. **Taxonomy is versioned and swappable.** The contract references category IDs;
-   it stays neutral on what each category deems unsafe.
+1. **The wire is open.** The specification and schemas are Apache-2.0, and anyone may implement them.
+2. **The evaluation is reproducible.** OpenGuardrails enters its own detectors in `benchmarks/`. The
+   corpora, scoring and harness are public, so anyone can check a result, and results are published
+   whether or not they favor us.
+3. **Changes are additive.** Within 1.x a new wire field is optional in both directions.
 
 ## Scope of this repo
 
@@ -26,8 +21,7 @@ This repository is normative for:
 - the taxonomy namespace (`safety.*`, `security.*`),
 - conformance criteria (`CONFORMANCE.md`).
 
-Implementations (SDKs, instrumentations, gateway, bench) live in their own repos
-and are **not** normative — when an implementation disagrees with this repo, this
+Implementations (`cli/`, `integrations/`, `benchmarks/`) are **not** normative — when an implementation disagrees with this repo, this
 repo wins.
 
 ## Changes
@@ -51,10 +45,3 @@ and adapters pin a protocol version. See `CHANGELOG.md` for the version history.
 
 - `v0` — draft. Breaking changes permitted between drafts; each is logged.
 - `v1+` — stable. Breaking changes require a new major version.
-
-## Toward foundation hosting
-
-OGR is intended to be hosted by a neutral foundation. Until then, maintainers
-commit to the principles above and to keeping the path to foundation governance
-open: a transparent change process, a public benchmark methodology, and an
-Apache-2.0 license with no vendor-specific carve-outs.

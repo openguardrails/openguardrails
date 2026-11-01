@@ -1,5 +1,16 @@
 # OpenGuardrails repository instructions
 
+**This repository is the product: AI agent guardrails for every builder.** `cli/` is the `openguardrails`
+command (local rules, local OGR service, sandbox, firewall, gateway). The enterprise product, AIRS, is
+closed source and lives elsewhere. Priority agents are Hermes, OpenClaw and DeepSeek Harness, tested
+with `cli/experiments/run.sh`, because a mock of a harness has repeatedly hidden what the real one does.
+
+⚠️ A security risk is refused and alerted, never sent to a person to approve. Approval is for a choice
+that belongs to the person and is not a risk. `needs_decision` must never mean "could not tell".
+
+⚠️ A rule may allow only what it fully understands and only what stays on the machine. Whatever it
+cannot parse, and every tool it does not know, goes to the model.
+
 This is a monorepo. Run commands from the repository root unless a component
 README explicitly says otherwise.
 

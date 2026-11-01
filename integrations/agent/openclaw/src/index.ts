@@ -159,6 +159,8 @@ export const RESTORE_PRIORITY = 10
 
 /** One-line human summary of a verdict for a denial reason. */
 function brief(v: WireVerdict): string {
+  // A notice is written for the agent: it says what was refused and what it may do instead.
+  if (v.continuation?.notice) return v.continuation.notice
   const f = (v.findings ?? [])
     .map((x) => `${x.category}${x.severity ? `(${x.severity})` : ""}`)
     .join(", ")

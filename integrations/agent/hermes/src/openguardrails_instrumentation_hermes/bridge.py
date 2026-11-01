@@ -169,6 +169,10 @@ def _brief(verdict: dict[str, Any] | None) -> str:
     end user — see _refusal_text): decision plus finding categories/scores."""
     if verdict is None:
         return "[OGR:unjudged] runtime unreachable"
+    # A notice is written for the agent: it says what was refused and what it may do instead.
+    notice = (verdict.get("continuation") or {}).get("notice")
+    if notice:
+        return f"[OGR:{verdict.get('decision', '?')}] {notice}"
     cats = ", ".join(
         f"{f.get('category', '?')}({f.get('score', 0):.2f})"
         for f in (verdict.get("findings") or [])

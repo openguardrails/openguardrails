@@ -53,6 +53,19 @@ jobs:
             (cd "integrations/agent/$d" && npm test)
           done
 
+  cli:
+    # The `openguardrails` command. Its tests start their own stand-ins for the model API and AIRS.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - run: npm ci
+        working-directory: cli
+      - run: npm test
+        working-directory: cli
+
   higress:
     # The Higress WASM plugin ("OpenGuardrails AIRS"). Everything worth
     # testing in it — span offsets, SSE chunk boundaries, tail-hold release
