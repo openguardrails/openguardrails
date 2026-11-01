@@ -9,10 +9,12 @@ import http, { type IncomingHttpHeaders, type IncomingMessage, type ServerRespon
 import https from "node:https";
 import { hostname, userInfo } from "node:os";
 import { join } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import zlib from "node:zlib";
 import { INTEGRATION } from "./airs.js";
 import { homeDir, resolveRoute, secretOf, type Config, type Upstream } from "./config.js";
 import { ExecTracker, type ExecReport, type Observation } from "./exec.js";
+import { ModelChannelGuard, type GuardedRequest } from "./guard.js";
 import { handleRuntime, LocalRuntime } from "./runtime.js";
 import { classifyModelRequest, harnessFrom, hostsIn, toolCallsIn, toolCallsInReply, toolResultIdsIn, type LlmProtocol } from "./model.js";
 
@@ -130,6 +132,9 @@ export function startGateway(config: Config): Promise<http.Server> {
   const airsKey = airs ? secretOf(airs) : undefined;
   const failClosed = airs?.failMode === "closed";
   const requestTimeoutMs = airs?.requestTimeoutMs ?? 6_000;
+  // With AIRS connected, AIRS judges and masks. Otherwise the local guard does.
+  const localRuntime = new LocalRuntime(config);
+  const guard = airsKey ? null : new ModelChannelGuard(localRuntime);
   let lastFailover: unknown = null;
   let served = 0;
   // What runs ask for, since agents reach the gateway directly and their calls never pass the proxy.
@@ -340,18 +345,18 @@ export function startGateway(config: Config): Promise<http.Server> {
   };
 
   /** One attempt. Resolves with why it failed, or null once the reply is the client's. */
-  const attempt = (name: string, upstream: Upstream, path: string, protocol: LlmProtocol, stepId: string, agentType: string, method: string, clientHeaders: IncomingHttpHeaders, body: Buffer, res: ServerResponse): Promise<string | null> =>
+  const attempt = (name: string, upstream: Upstream, path: string, protocol: LlmProtocol, stepId: string, agentType: string, method: string, clientHeaders: IncomingHttpHeaders, body: Buffer, res: ServerResponse, guarded: GuardedRequest | null): Promise<string | null> =>
     new Promise((resolve) => {
       const url = upstreamUrl(upstream.baseURL, path);
       const headers = upstreamHeaders(clientHeaders, protocol, secretOf(upstream));
       headers["content-length"] = String(body.length);
       // The reply is read here and sent on to AIRS, so it has to arrive readable.
-      if (airsKey) delete headers["accept-encoding"];
+      if (airsKey || guarded) delete headers["accept-encoding"];
       const endpoint = new URL(upstream.baseURL).host;
       let settled = false;
       let replied = false;
       let clientGone = false;
-      let sink: ReturnType<typeof judgedStream> | null = null;
+      let sink: { write(chunk: Buffer): void; end(): void; abort(): void } | null = null;
       const settle = (reason: string | null) => {
         if (settled) return;
         settled = true;
@@ -380,7 +385,20 @@ export function startGateway(config: Config): Promise<http.Server> {
           clearTimeout(firstByteTimer);
           settle(null);
           if (airsKey && streamed && status < 400 && !encoding) sink = judgedStream(stepId, protocol, agentType, endpoint, res, out, status);
-          else if (!airsKey || status >= 400) res.writeHead(status, out);
+          else if (guarded && guard && streamed && status < 400 && !encoding) {
+            const { "content-length": _length, ...headers } = out;
+            res.writeHead(status, headers);
+            const stream = guard.stream(guarded, protocol, (text) => void res.write(text));
+            const decoder = new StringDecoder("utf8");
+            sink = {
+              write: (chunk: Buffer) => stream.feed(decoder.write(chunk)),
+              end: () => {
+                stream.feed(decoder.end());
+                void stream.finish().then(() => res.end(), () => res.destroy());
+              },
+              abort: () => undefined,
+            };
+          } else if ((!airsKey && !guarded) || status >= 400) res.writeHead(status, out);
         };
         const decoded = (): Buffer | null => {
           if (size > MAX_JUDGED_REPLY_BYTES) return null;
@@ -415,6 +433,18 @@ export function startGateway(config: Config): Promise<http.Server> {
           if (!reply) {
             res.writeHead(status, out);
             return void res.end(Buffer.concat(parts));
+          }
+          if (guarded && guard) {
+            // Compressed despite being asked not to, it could not be read frame by frame.
+            const { "content-encoding": _e, "content-length": _l, ...plain } = out;
+            res.writeHead(status, plain);
+            if (streamed) {
+              const stream = guard.stream(guarded, protocol, (text) => void res.write(text));
+              stream.feed(reply.toString("utf8"));
+              await stream.finish();
+              return void res.end();
+            }
+            return void res.end(await guard.whole(guarded, protocol, reply.toString("utf8")));
           }
           const judged = await judgeWholeReply(stepId, protocol, reply, agentType, endpoint);
           const { "content-encoding": _encoding, "content-length": _length, ...headers } = out;
@@ -472,7 +502,7 @@ export function startGateway(config: Config): Promise<http.Server> {
     res.end(JSON.stringify(value));
   };
 
-  const runtime = new LocalRuntime(config);
+  const runtime = localRuntime;
   const server = http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? "/", "http://gateway");
@@ -527,13 +557,14 @@ export function startGateway(config: Config): Promise<http.Server> {
         res.writeHead(judged.status, { "content-type": judged.contentType, "x-openguardrails-verdict": judged.reason });
         return void res.end(judged.body);
       }
-      const payload = judged.body ?? parsed;
+      const guarded = guard ? guard.outbound(agentType, parsed) : null;
+      const payload = guarded?.body ?? judged.body ?? parsed;
 
       const failures: string[] = [];
       for (const name of order) {
         const upstream = gateway.upstreams[name]!;
         const body = Buffer.from(JSON.stringify(rewriteBody(payload, upstream)));
-        const reason = await attempt(name, upstream, url.pathname, protocol, stepId, agentType, req.method!, req.headers, body, res);
+        const reason = await attempt(name, upstream, url.pathname, protocol, stepId, agentType, req.method!, req.headers, body, res, guarded);
         if (reason === null) {
           if (failures.length > 0) {
             lastFailover = { to: name, failed: failures, t: new Date().toISOString() };
@@ -547,7 +578,7 @@ export function startGateway(config: Config): Promise<http.Server> {
         failures.push(`${name}: ${reason}`);
       }
       log("exhausted", { failed: failures });
-      return json(res, 502, { error: { message: `openguardrails gateway: every upstream failed. ${failures.join("; ")}`, type: "rontye_upstreams_failed" } });
+      return json(res, 502, { error: { message: `openguardrails gateway: every upstream failed. ${failures.join("; ")}`, type: "openguardrails_upstreams_failed" } });
     } catch (error) {
       if (!res.headersSent) return json(res, 400, { error: { message: `openguardrails gateway: ${String(error)}` } });
       res.destroy();

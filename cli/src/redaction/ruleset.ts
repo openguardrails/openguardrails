@@ -1,4 +1,25 @@
-/** Compiling and verifying the secret ruleset. Copied from integrations/agent/local-redaction, which has the full argument. */
+/**
+ * The secret ruleset: what `GET /v1/rules` serves, how it is cached on the
+ * host, and how it is compiled — and VERIFIED — in this engine.
+ *
+ * The plugin ships with no patterns (design D4): the ruleset is an org asset
+ * fetched from the runtime with the org key, cached at mode 0600, refreshed
+ * when the heartbeat says the id moved. Every rule carries `examples`, and a
+ * rule whose examples fail in THIS engine is disabled by name rather than run
+ * wrong (D9) — dialects drift silently, and a pattern that compiles to
+ * "matches nothing" looks exactly like a pattern that is doing its job.
+ *
+ * ⚠️⚠️ **A RULE IS ITS PATTERNS MINUS ITS `reject_value` FILTERS** (OGR 1.4, served
+ * since 2026-09-06 — `predicates.ts`). D9's corpus tests the WHOLE rule, so a reader
+ * holding only the patterns fails examples it was never able to satisfy and then
+ * disables itself: that is what happened to `password_assignment`, `url_credential`
+ * and `db_connection` for five days. Compile the filters, or disable the rule.
+ */
+import { createHash } from "node:crypto"
+import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
+import { homedir } from "node:os"
+import { dirname, join } from "node:path"
+
 import { type CompiledReject, type ValueRule, compileRejects, valueRejected } from "./predicates.js"
 
 export type RuleTier = "strong" | "heuristic"
@@ -184,3 +205,98 @@ function verifyExamples(rule: CompiledRule, examples: Rule["examples"] | undefin
 }
 
 // ---- the feed and its cache ---------------------------------------------------
+
+export interface LoadOptions {
+  /** Runtime base URL — a mounted prefix belongs in it, exactly as for `/v1/evaluate`. */
+  runtimeUrl: string
+  apiKey: string
+  /** Where the ruleset is cached; default {@link defaultCachePath}. */
+  cachePath?: string
+  /** Injected for tests; default `globalThis.fetch`. */
+  fetch?: typeof fetch
+  timeoutMs?: number
+}
+
+export interface LoadResult {
+  ruleset: Ruleset | null
+  /** `fetched` — a new body; `cached` — the cache (304, or the fetch failed); `none` — nothing anywhere. */
+  source: "fetched" | "cached" | "none"
+  /** Why the fetch did not produce a body, when it did not. */
+  error?: string
+}
+
+/** `~/.openguardrails/rules-<sha256(runtimeUrl)[:8]>.json` — one cache per runtime. */
+export function defaultCachePath(runtimeUrl: string): string {
+  const key = createHash("sha256").update(runtimeUrl).digest("hex").slice(0, 8)
+  return join(homedir(), ".openguardrails", `rules-${key}.json`)
+}
+
+/** Read a cached ruleset, tolerating absence and corruption (both ⇒ null). */
+export function readCachedRuleset(cachePath: string): Ruleset | null {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(cachePath, "utf8"))
+    return isRuleset(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Atomic, private write: the directory is created 0700, the file lands at
+ * 0600 through a rename from a sibling temp file. The customer's own machine
+ * already holds the obfuscated image; what the cache keeps the rules from is
+ * a world-readable home directory, not the customer.
+ */
+export function writeCachedRuleset(cachePath: string, ruleset: Ruleset): void {
+  mkdirSync(dirname(cachePath), { recursive: true, mode: 0o700 })
+  const tmp = `${cachePath}.${process.pid}.${Date.now()}.tmp`
+  writeFileSync(tmp, JSON.stringify(ruleset), { mode: 0o600 })
+  chmodSync(tmp, 0o600)
+  renameSync(tmp, cachePath)
+}
+
+function isRuleset(x: unknown): x is Ruleset {
+  if (typeof x !== "object" || x === null) return false
+  const r = x as Record<string, unknown>
+  return typeof r["id"] === "string" && r["id"].length > 0 && Array.isArray(r["rules"])
+}
+
+/**
+ * `GET /v1/rules` with the org key. Sends `If-None-Match` from the cached id
+ * and keeps the cache on 304; a 200 body replaces it (written atomically at
+ * 0600). Any failure — network, 4xx/5xx, a malformed body — answers with
+ * the cache when there is one and `none` when there is not; it never throws.
+ */
+export async function loadRuleset(opts: LoadOptions): Promise<LoadResult> {
+  const cachePath = opts.cachePath ?? defaultCachePath(opts.runtimeUrl)
+  const cached = readCachedRuleset(cachePath)
+  const fetchImpl = opts.fetch ?? globalThis.fetch
+  const base = opts.runtimeUrl.endsWith("/") ? opts.runtimeUrl.slice(0, -1) : opts.runtimeUrl
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 5000)
+  try {
+    const headers: Record<string, string> = { authorization: `Bearer ${opts.apiKey}`, accept: "application/json" }
+    if (cached) headers["if-none-match"] = `"${cached.id}"`
+    const res = await fetchImpl(`${base}/v1/rules`, { method: "GET", headers, signal: controller.signal })
+    if (res.status === 304 && cached) return { ruleset: cached, source: "cached" }
+    if (!res.ok) {
+      return { ruleset: cached, source: cached ? "cached" : "none", error: `rules answered ${res.status}` }
+    }
+    const body = (await res.json()) as { ruleset?: unknown }
+    const ruleset = body?.ruleset
+    if (!isRuleset(ruleset)) {
+      return { ruleset: cached, source: cached ? "cached" : "none", error: "rules answered a body without a ruleset" }
+    }
+    try {
+      writeCachedRuleset(cachePath, ruleset)
+    } catch (err) {
+      // A cache that cannot be written is a slower next start, not a failure to mask.
+      return { ruleset, source: "fetched", error: `cache not written: ${String(err)}` }
+    }
+    return { ruleset, source: "fetched" }
+  } catch (err) {
+    return { ruleset: cached, source: cached ? "cached" : "none", error: `rules fetch failed: ${String(err)}` }
+  } finally {
+    clearTimeout(timer)
+  }
+}

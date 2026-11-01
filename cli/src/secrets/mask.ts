@@ -1,6 +1,6 @@
 /** Masking what is sent to the model API. It never comes back, so a labelled stub is enough. */
 import { readFileSync } from "node:fs";
-import { compileRuleset, ruleSpans, type CompiledRuleset, type Ruleset } from "./ruleset.js";
+import { compileRuleset, ruleSpans, type CompiledRuleset, type Ruleset } from "../redaction/ruleset.js";
 
 // From dist/src/secrets/mask.js up to the package root.
 const RULES_URL = new URL("../../../rules/secrets.json", import.meta.url);

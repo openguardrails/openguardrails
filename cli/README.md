@@ -40,15 +40,35 @@ Configuration is `~/.openguardrails/config.json`, mode 0600. Every part is optio
 
 Nothing that leaves the machine is ever allowed by a rule.
 
+## Two ways to connect
+
+**The gateway, recommended.** Point the agent's base URL at `http://127.0.0.1:4180/v1`. Every request
+passes through it, whichever harness sent it. It holds your provider keys, masks secrets on the way
+out and judges tool calls on the way back. With AIRS configured, AIRS does the masking and judging.
+
+**A plugin**, from `integrations/agent/`, with `OGR_RUNTIME_URL=http://127.0.0.1:4180`. A refused call
+reaches the agent as a failed tool call, so it carries on by itself. But a plugin sees only what its
+harness shows it. Tested: on Hermes the request that names a session goes out unmasked, on OpenClaw
+2026.6 no model traffic reaches the plugin's interceptor, and the DeepSeek Harness plugin does not load
+on 0.2.0-rc.2. A plugin that fails to load can leave the agent running with no guard and one line of
+warning.
+
 ## What it does not do yet
 
+- **A refused step can end the agent's turn.** Through the gateway, a refused call is removed from the
+  reply and the reason added to its text. If no call survives, the turn ends with that reason, for
+  the person to read. It does not end the session. If another call survives, the task goes on.
 - A rule reads one action. The model sees the whole session, but only for the actions that reach it.
 - With no model key, what the rules cannot decide proceeds unjudged, subject to the agent's own
   permission check. It is logged as `unjudged`.
-- Secrets in what is sent to the model API are masked here. Secrets in what your agent sends to its own
-  model provider are masked only by each plugin, with the gaps listed in the [status table](../README.md#status).
-- If a plugin fails to load, the agent may run with no guard and little warning. DeepSeek Harness
-  prints one line and carries on. `openguardrails decisions` staying empty is the sign.
+- **Placeholders do not survive a restart of the service.** A model that reuses one from before gets
+  that call refused, with an explanation, and no tool sees the placeholder.
+- A secret the rules do not recognize is not masked. Prose in a reply keeps its placeholders, on
+  purpose: only a tool gets the real value.
+- The gateway sees what is sent to it. An agent or a tool that calls a provider directly goes around it.
+  `openguardrails run` forces the network through this machine's proxy and records that traffic.
+- Only OpenAI Chat is tested against real harnesses. Anthropic Messages streaming is tested against a
+  stand-in. On OpenAI Responses a refusal in a stream retracts the whole step.
 - `openguardrails run` hides this tool's own configuration from the sandbox, so a plugin inside it
   cannot read a key from there. Pass the local service's address to the plugin instead.
 
@@ -59,7 +79,7 @@ Seatbelt on macOS, bubblewrap and seccomp on Linux. It is a beta, so the version
 stated limits apply. macOS also needs `ripgrep`. Linux needs `bubblewrap`, `socat` and `ripgrep`.
 Windows is untested.
 
-The gateway is one local base URL in front of many model APIs, with failover, for OpenAI Chat, OpenAI
+The gateway also fails over between model APIs, for OpenAI Chat, OpenAI
 Responses and Anthropic Messages. It does not translate protocols, so the members of a route must
 speak the protocol their client speaks.
 
@@ -67,11 +87,11 @@ speak the protocol their client speaks.
 
 ```sh
 npm run build
-experiments/run.sh <hermes|openclaw|dsh> <empty-lab-dir> [judge|nomodel]
+experiments/run.sh <hermes|openclaw|dsh> <empty-lab-dir> [gateway|judge|nomodel]
 ```
 
-Runs the real harness with its plugin, in a throwaway home, against a scripted model and a scripted
-model API. Files in the work directory prove what really ran. The harness must already be installed.
+Runs the real harness in a throwaway home, against a scripted model and a scripted model API: through
+the gateway with `gateway`, or with its plugin otherwise. Files in the work directory prove what really ran. The harness must already be installed.
 
 The secret rules in `rules/secrets.json` are a snapshot of what OpenGuardrails AIRS serves. Every rule
 carries examples, and the tests fail if one stops passing them. Examples shaped like a real issuer's key
