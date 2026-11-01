@@ -57,9 +57,9 @@ with no plugin, using the scripted models in [`cli/experiments`](cli/experiments
 
 Not available yet:
 
-- **The model API is not live.** Without it, what the rules cannot decide is reported as not judged
-  and left to the agent's own permission check. The contract is in
-  [`specification/model-api.md`](specification/model-api.md).
+- **The model API is not public yet.** It has been tested with the real model through all three agents, but
+  is not deployed. Until then, what the rules cannot decide is reported as not judged and left to the
+  agent's own permission check. The contract is in [`specification/model-api.md`](specification/model-api.md).
 - **The package is not on npm yet.** Install from a checkout, below.
 - Asking you on your phone. Until then, a decision that is yours comes back to you through the agent.
 
@@ -92,6 +92,7 @@ openguardrails serve   # port 4180; set gateway.port in the config to change it
 Then point your agent at `http://127.0.0.1:4180/v1`, with model `auto` and any string as its API key.
 That is the whole integration, and it works the same for every agent.
 
+`openguardrails connect` turns on the model once it is public, and shows where to raise your quota.
 `openguardrails decisions` shows what happened. For an enterprise deployment, plugins and the gateway
 connect to OpenGuardrails AIRS instead, with no other change.
 

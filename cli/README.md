@@ -5,6 +5,7 @@ The command behind [OpenGuardrails](../README.md).
 ```text
 openguardrails serve                    the local service: OGR Runtime API, and the model gateway if configured
 openguardrails status                   check the service, every upstream, the model API and AIRS; exit 1 on a problem
+openguardrails connect                  turn on the model: get a free key, and show where to claim more
 openguardrails decisions                what the rules and the model decided, with no arguments or message text
 openguardrails run -- <command...>      run a command and everything it spawns inside the sandbox
 openguardrails log [run-id]             what a sandboxed run did
@@ -16,7 +17,7 @@ Configuration is `~/.openguardrails/config.json`, mode 0600. Every part is optio
 ```json
 {
   "workspaces": ["/Users/me/work"],
-  "model": { "apiKeyEnv": "OPENGUARDRAILS_API_KEY" },
+  "model": { "apiKeyEnv": "OPENGUARDRAILS_API_KEY", "failMode": "closed" },
   "gateway": {
     "upstreams": { "primary": { "baseURL": "http://10.0.0.5:8000/v1", "model": "dsv41-flash", "apiKey": "local-no-auth" } },
     "routes": { "auto": ["primary"] }
@@ -59,8 +60,11 @@ warning.
   reply and the reason added to its text. If no call survives, the turn ends with that reason, for
   the person to read. It does not end the session. If another call survives, the task goes on.
 - A rule reads one action. The model sees the whole session, but only for the actions that reach it.
-- With no model key, what the rules cannot decide proceeds unjudged, subject to the agent's own
-  permission check. It is logged as `unjudged`.
+- With no model connected, what the rules cannot decide proceeds unjudged, subject to the agent's own
+  permission check. It is logged as `unjudged`. The same goes for a used-up quota, and the person is told
+  once a day.
+- Once connected, a model that cannot answer means the action is refused, and the agent is told it may
+  retry. Set `"failMode": "open"` under `model` to let such actions through instead.
 - **Placeholders do not survive a restart of the service.** A model that reuses one from before gets
   that call refused, with an explanation, and no tool sees the placeholder.
 - A secret the rules do not recognize is not masked. Prose in a reply keeps its placeholders, on
@@ -87,11 +91,12 @@ speak the protocol their client speaks.
 
 ```sh
 npm run build
-experiments/run.sh <hermes|openclaw|dsh> <empty-lab-dir> [gateway|judge|nomodel]
+experiments/run.sh <hermes|openclaw|dsh> <empty-lab-dir> [gateway|live|judge|nomodel]
 ```
 
 Runs the real harness in a throwaway home, against a scripted model and a scripted model API: through
-the gateway with `gateway`, or with its plugin otherwise. Files in the work directory prove what really ran. The harness must already be installed.
+the gateway with `gateway`, through the gateway and a real Model API at `$MODEL_API_URL` with `live`, or
+with its plugin otherwise. Files in the work directory prove what really ran. The harness must already be installed.
 
 The secret rules in `rules/secrets.json` are a snapshot of what OpenGuardrails AIRS serves. Every rule
 carries examples, and the tests fail if one stops passing them. Examples shaped like a real issuer's key

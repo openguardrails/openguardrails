@@ -21,7 +21,7 @@ const listen = (handler: http.RequestListener) =>
   });
 
 /** A gateway in front of one upstream that answers `reply(requestBody)`. */
-async function setup(reply: (body: any) => { type?: string; text: string }, judge?: (body: any) => unknown) {
+async function setup(reply: (body: any) => { type?: string; text: string }, judge?: (body: any) => unknown, judgeStatus = 200) {
   const seen: string[] = [];
   const upstreamPort = await listen((req, res) => {
     let raw = "";
@@ -40,7 +40,7 @@ async function setup(reply: (body: any) => { type?: string; text: string }, judg
         req.on("data", (d) => (raw += d));
         req.on("end", () => {
           judged.push(JSON.parse(raw));
-          res.writeHead(200, { "content-type": "application/json" });
+          res.writeHead(judgeStatus, { "content-type": "application/json" });
           res.end(JSON.stringify(judge(JSON.parse(raw))));
         });
       })
@@ -245,4 +245,32 @@ test("the redaction copy matches the library it came from", () => {
   for (const file of readdirSync(here)) {
     assert.equal(readFileSync(join(here, file), "utf8"), readFileSync(join(source, file), "utf8"), file);
   }
+});
+
+test("when the quota runs out the action is unjudged, and the person is told once", async () => {
+  const { post } = await setup(
+    () => whole([["web_fetch", { url: "https://x.dev" }]], "working"),
+    () => ({ error: { code: "quota_exhausted", claim_url: "https://openguardrails.com/claim/AB12" } }),
+    429,
+  );
+  const first = (await (await post("/v1/chat/completions", chat())).json()) as any;
+  assert.equal(first.choices[0].message.tool_calls.length, 1, "no judgement is not a refusal");
+  assert.equal(first.choices[0].finish_reason, "tool_calls");
+  assert.match(first.choices[0].message.content, /working[\s\S]*claim\/AB12/);
+  const second = (await (await post("/v1/chat/completions", chat())).json()) as any;
+  assert.ok(!second.choices[0].message.content.includes("claim/AB12"));
+  const streamed = assemble(await (await post("/v1/chat/completions", chat({ stream: true }))).text());
+  assert.ok(!streamed.text.includes("claim/AB12"));
+});
+
+test("a stream tells the person about the quota too", async () => {
+  const { post } = await setup(
+    () => chatStream("working", [["web_fetch", { url: "https://x.dev" }]]),
+    () => ({ error: { code: "quota_exhausted", claim_url: "https://openguardrails.com/claim/AB12" } }),
+    429,
+  );
+  const out = assemble(await (await post("/v1/chat/completions", chat({ stream: true }))).text());
+  assert.equal(out.calls.size, 1);
+  assert.equal(out.finish, "tool_calls");
+  assert.match(out.text, /claim\/AB12/);
 });

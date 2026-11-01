@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
+import { connect } from "../src/connect.js";
 import { handleRuntime, LocalRuntime } from "../src/runtime.js";
 import { compiledRules, loadRuleset, maskText } from "../src/secrets/mask.js";
 
@@ -119,23 +120,62 @@ test("the rules endpoint answers in the wire's shape, or a plugin masks nothing"
   assert.equal((await fetch(url, { headers: { "if-none-match": `"${body.ruleset.id}"` } })).status, 304);
 });
 
-test("no answer from the model is neither an allow nor a block", async () => {
-  for (const answer of [{ status: 500, json: {} }, { json: { nonsense: true } }, { status: 429, json: { error: { code: "quota_exhausted", claim_url: "https://openguardrails.com/claim/AB12" } } }]) {
+test("a model that cannot answer refuses the action, says why, and says it may be retried", async () => {
+  for (const answer of [{ status: 500, json: {} }, { json: { nonsense: true } }]) {
     const verdict = await withModel((await fakeModel(() => answer)).url).evaluate(response(["web_fetch", { url: "https://x.dev" }]));
-    assert.equal(verdict.decision, "allow");
-    assert.deepEqual(verdict.unjudged, ["payload.tool_calls.0"]);
+    assert.equal(verdict.decision, "block");
+    assert.match(verdict.continuation!.notice, /not a finding that it is unsafe/);
+    assert.match(verdict.continuation!.notice, /Try the same action once more/);
+    assert.equal(verdict.findings?.[0]?.category, "x.ogr.unjudged");
   }
+});
+
+test("failMode open keeps the old behaviour, for someone who chooses it", async () => {
+  const model = await fakeModel(() => ({ status: 500, json: {} }));
+  const verdict = await new LocalRuntime({ model: { url: model.url, apiKey: "k", failMode: "open" } }, {}).evaluate(response(["web_fetch", { url: "https://x.dev" }]));
+  assert.equal(verdict.decision, "allow");
+  assert.deepEqual(verdict.unjudged, ["payload.tool_calls.0"]);
+});
+
+test("a used-up quota is reported unjudged, and the log holds no arguments", async () => {
+  const model = await fakeModel(() => ({ status: 429, json: { error: { code: "quota_exhausted", claim_url: "https://openguardrails.com/claim/AB12" } } }));
+  const verdict = await withModel(model.url).evaluate(response(["web_fetch", { url: "https://x.dev" }]));
+  assert.equal(verdict.decision, "allow");
+  assert.deepEqual(verdict.unjudged, ["payload.tool_calls.0"]);
   const log = readFileSync(join(home, "decisions.ndjson"), "utf8");
   assert.match(log, /claim_url/);
   assert.doesNotMatch(log, /x\.dev/, "the decision log holds no arguments");
 });
 
-// Assembled here because the public ruleset carries no example shaped like a real issuer's key.
 test("issuer-shaped keys are masked", () => {
   const body = "Zx8Qm2Lp7Vt4Rb9Ks3Nd6Fh1";
   for (const key of ["sk" + "_live_" + body, "gh" + "p_" + body + "abcdefghijkl", "AK" + "IA" + "ABCDEFGHIJKLMNOP"]) {
     assert.match(maskText(`key ${key} end`), /^key \[REDACTED:[a-z_]+\] end$/, key.slice(0, 6));
   }
+});
+
+test("connect is the only thing that gets a key, and keeps the rest of the config", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "openguardrails-connect-"));
+  process.env.OPENGUARDRAILS_HOME = dir;
+  writeFileSync(join(dir, "config.json"), JSON.stringify({ workspaces: ["/w"] }));
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ api_key: "ogk_x", claim_url: "https://c/AB", limit_per_day: 50 }));
+  });
+  servers.push(server);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const url = `http://127.0.0.1:${(server.address() as any).port}`;
+  const log = console.log;
+  console.log = () => {};
+  try {
+    assert.equal(await connect(url), 0);
+  } finally {
+    console.log = log;
+  }
+  const config = JSON.parse(readFileSync(join(dir, "config.json"), "utf8"));
+  assert.deepEqual(config, { workspaces: ["/w"], model: { url, apiKey: "ogk_x" } });
+  assert.equal(statSync(join(dir, "config.json")).mode & 0o077, 0);
+  process.env.OPENGUARDRAILS_HOME = home;
 });
 
 test("every rule in the shipped ruleset passes its own examples", () => {
