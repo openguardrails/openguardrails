@@ -1,0 +1,776 @@
+# OpenGuardrails AIRS — the Higress plugin
+
+A Higress WASM plugin that speaks **OGR v1.0 directly to an OpenGuardrails
+runtime**. It implements **the recipe of the v1.0 Runtime API**
+([`specification/runtime-api.md`](../../../specification/runtime-api.md)) —
+one recipe now, the same two POSTs per model call whether the integration is a
+gateway or a developer's own agent loop.
+
+It is called **OpenGuardrails AIRS** in the Higress console;
+`openguardrails-airs` is its plugin name (both renamed from "OpenGuardrails
+Runtime" / `openguardrails-runtime` at 3.6.0, with the product — an existing
+WasmPlugin CR under the old name keeps working and adopts the new name on its
+next upgrade).
+
+```
+   client ──▶ Higress ──▶ OpenGuardrails AIRS (WASM) ──▶ runtime
+                              │                    POST {base_path}/v1/evaluate  (+ heartbeat)
+                              ▼                    (base_path defaults to "", the canonical /v1/* root)
+                          LLM upstream
+```
+
+## The v1.0 shape: a raw forwarder + the build id
+
+One proxied model call is one **step**, reported as two `/v1/evaluate` events:
+
+| flow | event | payload |
+|---|---|---|
+| request | `step/request` | the provider request body, **verbatim** |
+| response | `step/response` | the provider response body verbatim (plus a byte-inserted top-level `timing`); for a streamed reply, the canonical `{text, reasoning?, tool_calls?, model?, usage?, timing?}` shape reassembled from the SSE frames |
+
+Both carry a plugin-minted `step_id` — a fresh opaque id per proxied call,
+never reused, and never taken from `x-request-id` (a client retry could repeat
+that). It is the one coordinate v0.8 kept, because concurrency makes it
+underivable; everything above it is derived server-side, always. The event is
+eight required fields — `kind`, `step_id`, the identity four-tuple (empty string
+= explicit "no assertion"), `llm_protocol`, `payload` — plus the optional
+`integration`, `connection`, (3.11.0) `initiator`, (3.13.0) `llm_endpoint` and
+(3.14.0) `transport`. No `ogr_version` (the runtime
+adapts), no `timestamp` (receive time), no declared coordinates and no coordinate echo
+on the verdict.
+
+`initiator` (**3.11.0**, OGR 1.5) says a run was **scheduled**, and it exists because
+the BODY cannot say so. Most harnesses announce a scheduled run in the first line of
+the prompt — hermes writes `[IMPORTANT: You are running as a scheduled cron job…]`,
+openclaw `[cron:<id> <name>]` — and the runtime reads those for itself, so this plugin
+has nothing to add for them. Claude Code's cron injects the user's own prompt VERBATIM
+and declares the fact only in a request header (`cc_workload=cron` in its billing
+attribution header, `workload/cron` in its User-Agent; its own source comments "Absent
+= interactive default"). A gateway can see that; nothing downstream can. Absent is the
+normal case and is NOT a claim that a person is present, and the plugin never emits
+`spawned` — it sees one request, not the session tree that would say who spawned whom.
+⚠️ SELF-DECLARED, like `integration`: the CLIENT writes those headers, so it is a
+record and never an input to a decision.
+
+`integration` is this plugin's own `name/version` (e.g. `ogr-higress/3.2.0`),
+stamped on every event since **3.2.0**. It was heartbeat-only in 3.0.0–3.1.0,
+which turned out to answer coverage but not triage: a runtime keys its liveness
+row on the integration NAME, so this gateway's replicas and any other
+`ogr-higress` under the same tenant collapse into ONE row whose version is
+whoever beat last — and a beat can go quiet on its own precisely when a bad
+rollout is what you are naming. Per-event, the build travels with the traffic it
+produced and nothing can overwrite it.
+
+**Nothing is decomposed client-side.** Earlier versions classified the
+conversation into turns, actions and outcomes, itemised history, fingerprinted
+the tool set, and carried a transcript envelope — roughly 900 lines of the
+plugin doing the runtime's job, twice. All of it moved runtime-side; what
+remains here is what only the thing in the byte path can do: hold the bytes,
+enforce the verdict, splice the redactions, reassemble and time the stream, and
+render a refusal in the caller's own protocol.
+
+**Unreadable traffic is counted, not fabricated.** A completion body whose
+protocol this plugin cannot name, or a stream no decoder reassembles, produces
+NO event — `llm_protocol` is a required closed enum and inventing a value (or a
+payload) would make the guardrails judge a fiction. The gap stays visible the
+way the spec keeps every lost observation visible: the heartbeat's `unreadable`
+counter plus a log line. (v0.7's `{"unparsed": true}` diagnostic event had no
+schema-legal home left.) In enforce mode with `fail_mode: closed`, an
+unreadable *reply* is refused outright — a reply we could not read is a reply
+we could not judge.
+
+## One switch
+
+```yaml
+mode: observe   # report only: never pauses a request, never touches a body
+mode: enforce   # evaluate each step half before it proceeds, honour the verdict
+```
+
+| mode | dispatch |
+|---|---|
+| `observe` | **fire-and-forget `/evaluate`** — the verdict is discarded unread; nothing waits, nothing is refusable, because the request is already gone. |
+| `enforce` | **awaited `/evaluate`** — one event, blocking, verdict honoured. |
+
+**Observe still detects.** Evaluate records and judges everything it receives
+(it is the observation channel — v0.8 removed `/ingest`), so the console fills
+with findings while the gateway stays a mirror. That is what makes the
+migration safe: watch for a week, then flip the switch. Rolling back is
+flipping it back, not redeploying.
+
+⚠️ **The two modes compute events identically; only the dispatch differs.**
+⚠️ **Observe never buffers and never pauses.** Only enforce buffers, because
+only enforce can still change the reply.
+
+### Staged rollout with legacy OGR v5
+
+When both plugins run on the same Higress, configure the same `staged_rollout`
+string in legacy OGR v5 and AIRS. Legacy OGR skips enrolled traffic; AIRS only
+uses the configured mode for enrolled traffic. Other traffic uses AIRS observe:
+both halves are reported fire-and-forget, without waiting for verdicts, rewriting
+bodies or buffering replies for enforcement. Legacy OGR continues to protect it.
+
+```yaml
+staged_rollout: "group-a, consumer-b, ungrouped"
+mode: enforce
+```
+
+Membership is the union of:
+
+- `x-higress-ai-beta-flags` containing the complete `og-airs` token (comma-separated,
+  trimmed, case-insensitive).
+- `x-mse-consumer` or `x-mse-consumer-group` matching a configured entry.
+- `ungrouped` when the consumer-group header is absent or blank.
+- `all_consumers` to enroll every consumer, including requests without identity.
+
+Consumer/group names are case-sensitive exact matches, with surrounding spaces
+trimmed and empty configuration entries ignored. No prefixes are required;
+`ungrouped` and `all_consumers` are reserved. Omitted/empty configuration enrolls
+only beta-flag traffic. Use `staged_rollout: "all_consumers"` for full deployment.
+
+The request-headers hook stores membership in the exchange context. Request body,
+JSON response and SSE response handlers use that same decision; LLM replies need
+not repeat any of these headers. Consumer identity must be available before both
+plugins execute. Enrolled traffic uses the configured `mode` unchanged; all other
+traffic uses `observe`, even when `mode: enforce` is configured.
+
+## Mirror
+
+A second runtime can receive a COPY of every event and decide nothing:
+
+```yaml
+mirror_cluster: "outbound|80||openguardrails-candidate.static"
+mirror_base_url: "http://openguardrails-candidate.static"
+mirror_api_key: "ogr_..."      # falls back to api_key
+mirror_base_path: ""           # falls back to base_path
+```
+
+⚠️ **Dispatched, never awaited, in every mode — including enforce.** A mirror is
+not in the decision, so a slow or dead candidate must cost the caller nothing.
+It rides `/evaluate` like everything else; its verdicts are never read.
+
+## Which protocols it reads
+
+Three, natively, each with its own adapter under
+[`protocol/`](protocol/README.md):
+
+| client speaks | path | `llm_protocol` |
+|---|---|---|
+| Chat Completions | `…/chat/completions` | `openai.chat` |
+| Responses | `…/responses` | `openai.responses` |
+| Anthropic Messages | `…/messages` | `anthropic.messages` |
+
+Detected per request from the path, falling back to the body shape, and
+reported on every event. Each adapter renders its own refusal, its own SSE
+reader and its own restore paths — a refused Anthropic caller gets an Anthropic
+reply.
+
+⚠️ It is the **client's** protocol, never the upstream provider's. The plugin
+runs at priority 200 and ai-proxy at 100, so on the request it sees the body
+before ai-proxy translates it and on the response after ai-proxy has translated
+back — both times, the shape the caller chose.
+
+## Identity
+
+The agent-id header becomes **`agent_id`** — the consumer the gateway
+authenticated IS the agent. The workspace header becomes **`agent_workspace`**
+— a group of agents plus one policy set. Both are header CHAINS, first
+non-empty wins: the OGR spelling first (`x-ogr-agent-id` /
+`x-ogr-agent-workspace`), then the MSE compatibility spelling
+(`x-mse-consumer` / `x-mse-consumer-group`). The two MSE headers arrive
+differently: `x-mse-consumer` is written by the AUTHENTICATOR (higress
+`key-auth`, on every authenticated request), while `x-mse-consumer-group` is
+an **admin-configured** header — no authenticator writes it; the operator
+decides it (on MSE, by assigning consumers to groups in the console; on a
+self-hosted gateway, by a header-injection rule on the route). Three more
+renameable headers carry `agent_type`, `agent_user`. The user is
+user are attributes; they never select policy.
+
+### The default headers
+
+Nothing has to be configured for identity to work. Each field is read from a
+header (a CHAIN for id and workspace — first non-empty wins), falling back to
+a static config value, and `agent_id` falls back once more to the credential
+fingerprint floor:
+
+| field | default header(s) | static fallback | rename with | asserted by |
+|---|---|---|---|---|
+| `agent_id` | `x-ogr-agent-id` → `x-mse-consumer` | `agent_id`, then `caller-<hash>` | `agent_id_header` | **the gateway** |
+| `agent_type` | `x-ogr-agent-type` | `agent_type` | `agent_type_header` | the client |
+| `agent_workspace` | `x-ogr-agent-workspace` → `x-mse-consumer-group` | `agent_workspace` | `agent_workspace_header` | **the gateway** |
+| `agent_user` | `x-ogr-agent-user` | *(none — per-session by nature)* | `agent_user_header` | the client |
+
+⚠️ **Configuring a `*_header` REPLACES the whole chain** with that one header;
+it does not extend it. A field that resolves to nothing is sent as the empty
+string — the spec's explicit "no assertion", never an error — and the runtime
+falls back to what the API key says. The spec's cross-gateway version of this
+table is [Runtime API § at a gateway](../../../specification/runtime-api.md#at-a-gateway-the-four-tuple-arrives-as-headers).
+
+### Who gets to say what (2.1.0)
+
+The five identity fields split in two, and the split is the security model:
+
+| field | asserted by | why |
+|---|---|---|
+| `agent_id` | **the gateway** | names the party; a client that could set it would pick its own audit trail |
+| `agent_workspace` | **the gateway** | selects the POLICY SET — the one field a caller must never choose |
+| `agent_type` | the client | which harness is running; only the client knows, and it selects nothing |
+| `agent_user` | the client | changes per request; only the client knows |
+
+⚠️ **There is deliberately no consumer map in this plugin** — no
+credential→name list, no consumer→workspace list. The gateway's authenticator
+is the one source of the consumer name: higress `key-auth` writes
+`X-Mse-Consumer` on every authenticated request and this filter reads it
+through the chain above, with no plugin configuration at all. A 2.1.0
+pre-release briefly carried a duplicate credential list here, justified by a
+measurement that key-auth's header "does not reach a later WasmPlugin" — the
+measurement was wrong (see the strip warning below for how), and the list was
+two places to revoke a key plus a second copy of every secret. For a gateway
+that cannot write a group header (open-source higress has no consumer groups),
+the runtime console owns agent→workspace placement.
+
+⚠️ **Strip the gateway-side headers at the edge** (`x-ogr-agent-id`,
+`x-ogr-agent-workspace`, `x-ogr-agent-owner`, `x-mse-consumer`,
+`x-mse-consumer-group`) — and strip them **before the authenticator runs**.
+This filter cannot tell a header the gateway wrote from one the client sent,
+and key-auth does NOT overwrite a client-supplied consumer header — a valid
+credential plus a forged `x-mse-consumer` is attributed to the forgery.
+Verified in the lab.
+
+⚠️ **"Before" is a PHASE question, not a priority one.** Istio orders wasm
+filters by phase first (`AUTHN` before `UNSPECIFIED_PHASE`), priority only
+within a phase — so a strip transformer at `phase: UNSPECIFIED_PHASE,
+priority: 400` runs AFTER key-auth at `phase: AUTHN, priority: 310` and
+deletes the authenticated header it exists to protect. That mis-phasing is
+exactly what produced the wrong measurement above: every caller degraded to
+`caller-<hash>` and it read as "the header never propagates". Put the
+stripper at `phase: AUTHN` with a priority above key-auth's: strip, then
+authenticate, then report.
+
+### When nothing names the agent (2.1.0)
+
+A route that sends no consumer header and configures no static `agent_id` still
+reports an agent — the plugin fingerprints the credential the CLIENT presented
+(`Authorization: Bearer …`, `x-api-key` or `api-key`, first non-empty wins) and
+sends `agent_id: "caller-<12 hex of sha256>"`.
+
+⚠️ **This exists because the alternative was one agent per GATEWAY.** With no
+`agent_id` on the event the runtime falls back to the credential it can see —
+the gateway's own OGR API key — and since one gateway has one key, every
+consumer behind it collapses into a single inventory row: one policy
+resolution, one blast radius for every "move this agent" click, one owner for
+traffic that had many. Different callers hold different keys, so fingerprinting
+theirs is the true statement where the gateway's key was a false one.
+
+⚠️ **The credential never leaves the gateway** — only its truncated hash does.
+48 bits, so a collision (which would silently merge two callers) is negligible
+at any real consumer count.
+
+⚠️ **It is a FLOOR, not a substitute for key-auth.** It says "these requests
+came from one credential", never whose. Two honest limits, both removed by
+authenticating properly: a credential shared by a team is one caller here, and
+rotating a credential mints a new agent row. The `caller-` prefix is there so
+nobody reads a fingerprint as an authenticated identity.
+
+Set `caller_fallback: false` to switch it off; the runtime's key-derived
+`key-<…>` agent is then the last resort again.
+
+The build id (`ogr-higress/<version>`) rides the **heartbeat**, not the event —
+v0.8 moved it there, and fleet coverage / bad-rollout triage read it from the
+heartbeat row.
+
+⚠️ **The identity headers are only as trustworthy as the edge that writes
+them.** The plugin reports whatever arrives. A forged `agent_id` misattributes
+the audit trail; a forged **workspace** changes WHICH POLICY SET applies. Strip
+the consumer headers from client requests at the edge, before AUTHN, or use
+headers no client can reach — and verify it on your own deployment; ours did
+not.
+
+## Judging a STREAMED answer: release the prose, hold the actions, judge once
+
+**3.15.0 changed the default**; 3.15.1 made it one knob —
+`stream_head_release_bytes: -1`, the default. Under the 3.10.0 head
+budget every enforced stream went quiet ~10 characters in and stayed quiet for
+the whole generation, so the caller waited for the model's generation time plus
+the judgement: a simple question at a customer sat ~2 minutes behind its first
+fragment. Now:
+
+```
+text / reasoning ──► released frame by frame, as the model produces them
+first tool-call byte ─┐
+finish_reason, [DONE],├─► WITHHELD ──► stream ends: ONE step/response evaluate
+message_stop, ...     ┘                    allow ─► release what was held
+                                           block ─► retract (or drop the calls
+                                                    and keep the loop running)
+```
+
+- ⚠️ **The cost, stated:** the answer TEXT's content judgement is
+  detect-and-retract — a refused answer has been read by the time the verdict
+  exists, and the stream ends on the protocol's retraction frame.
+- **Reasoning is released freely and costs nothing**: it is not a judged text.
+- **Tool calls are untouched**: no tool-call byte leaves before the verdict, so
+  a refused call can still be dropped while the agent loop keeps its turn.
+- **The stream is never COMPLETED before the verdict.** The ending frames are
+  held by what they ARE, not by where they arrive — Envoy's `end_stream` chunk
+  is often empty, so "the last chunk" does not contain them.
+- **What is withheld is compressed past 64 KB** (3.15.2) and inflated byte-for-byte
+  on release — the client receives exactly the model's bytes. A tool call's frames
+  are ~230 bytes of envelope per 3–4 characters of arguments, so a 150 KB file write
+  held 12 MB of frames; compressed it holds ~0.25 MB. Rewriting the frames instead
+  was built and refused: it needs to understand each protocol, and a mistake would
+  reach the client as a changed frame.
+- **What is withheld is bounded** by `stream_hold_max_bytes` (default 8 MiB):
+  the hold kept every withheld frame in the Wasm heap with no ceiling, which on a
+  busy gateway is megabytes per stream in a heap Go never returns. Past the bound
+  the stream stops being held — released under `fail_mode: open` and judged for
+  the record only, refused under `closed` — and counted as `hold_overflow`.
+
+One knob, three readings:
+
+| `stream_head_release_bytes` | before the verdict |
+|---|---|
+| `-1` (default; any negative) | all prose, live |
+| `N > 0` | at most N bytes of prose — the 3.10.0 bound below |
+| `0` | nothing — a spinner, and every block a clean refusal |
+
+⚠️ **Whatever the number, tool-call bytes and the ending frames wait for the
+verdict** — the number bounds prose only (3.15.1; under 3.10.0 a large N let call
+bytes out). `-1` rather than a word because ≤ 3.14 clamped a negative to 0: a
+config written for this build and applied to an older plugin holds everything —
+the strict side. The 3.15.0 `stream_release` key is ignored with a startup warning.
+
+### `stream_head_release_bytes: N` — release a bounded head, judge once
+
+**Not while it grows.** The pipeline measured mid-stream judgement directly: at
+25% of the reply visible, false positives on `mt_harm_correct` are 0.353
+against 0.000 on the whole reply — all of it the answer that agrees on the
+surface and corrects underneath ("Yes, a lot of people think that — but the
+thought is wrong").
+Early detection is a fit prefilter and an unfit blocking criterion. v0.8
+codified the alternative (and deleted the `ogr-partial` interim evaluates and
+the `output_mode` lane switch that preceded it); **3.10.0 moved the bound from
+the answer's tail to its head**:
+
+```
+first token ──► first stream_head_release_bytes RELEASED ──► everything after WITHHELD
+                                                        │
+                                    stream ends: reassemble the WHOLE answer,
+                                    ONE step/response evaluate (canonical shape,
+                                    transcribed usage + observed timing)
+                                                        │
+                                        allow ─► release everything held
+                                        block ─► drop it, CUT the stream
+```
+
+- ⚠️ **Why the head and not the tail.** `stream_tail_chars` (≤ 3.9.0, default
+  200) guaranteed "at least 200 bytes withheld", which says *nothing about
+  exposure*: what reached the caller was `total − 200`, unbounded in the length
+  of the answer. A ~900-byte answer to a prohibited question was therefore
+  delivered essentially whole and then retracted, because the verdict cannot
+  exist before the last token. Bounding the HEAD makes exposure a **constant**,
+  independent of the answer's length and of judge latency.
+- The released head is `stream_head_release_bytes` of client-visible content
+  (default **32**, counted in UTF-8 bytes of text/reasoning/tool-arguments —
+  never SSE framing, so contentless opening frames are free and the stream
+  looks alive immediately). It is a **ceiling**: a chunk that would carry the
+  caller past the bound is held whole, never trimmed.
+- **32 is a liveness token, not a delivery** — about ten characters, enough for
+  a client to render "the stream started" and measure an honest TTFT, and
+  enough to buy the judge the whole generation on the overwhelming majority of
+  requests that are never refused. `0` releases nothing: a spinner until the
+  judged answer arrives, and every block a clean refusal.
+- **Tool calls never execute before the verdict**, whatever the setting: a
+  provider stream only completes tool calls at its end, so argument
+  completions, `finish_reason` and `[DONE]` are always inside the held
+  remainder — and the final chunk is never released by arithmetic, only by the
+  verdict.
+- **A block cuts the stream so the answer never completes as sent.** If nothing
+  was released yet (a zero budget, a non-SSE reply, an answer whose first chunk
+  already exceeds the budget) the caller gets a true refusal in its own
+  protocol; otherwise the stream ends with the protocol's retraction frame
+  (`content_filter` / `refusal` stop) — the head has been read and cannot be
+  un-delivered, which is the accepted, spec-stated cost of streaming.
+- ⚠️ **What this gave up, stated rather than hidden.** Under the tail rule an
+  answer shorter than the tail released *nothing*, so a model refusing an
+  unsafe question in one sentence produced a CLEAN refusal by arithmetic. A
+  head budget spends itself on the first bytes instead, so that answer now
+  leaks its opening fragment. The trade was taken deliberately: the tail bought
+  that property by delivering the whole of every longer answer. Set the budget
+  to `0` to have it back.
+- ⚠️ **The request half no longer lifts the bound.** A request judged clean
+  releases nothing extra: the *response* is unjudged until end of stream
+  whatever the request half said. A request judged BLOCK does tighten — unspent
+  budget is forfeit and nothing further is delivered.
+- ⚠️ **The stream is kept alive with SSE comment frames** (`: ogr`) while it is
+  held. With the bound at the head an enforced stream is quiet for the whole
+  generation, and an already-open stream silent for 30s is cut by the client's
+  own idle timeout.
+- A response the client streams but the provider answers whole (non-SSE) is
+  held whole: partial JSON is useless to a client, so there is nothing to
+  release early.
+- **The final check always runs** — 11.5% of real violating replies have a
+  question the input side never flags — and it runs even when the *request*
+  evaluate failed open: the two step halves are judged independently.
+
+## Token usage and timing (2.2.0)
+
+Every `step/response` now carries the two per-step facts the trajectory view
+reads — **`timing`** and **`usage`** — from whichever side of the four-way
+split (buffered/streamed × observe/enforce) the reply took:
+
+- **`timing`** = `{started_at, first_token_at?, completed_at}`. `started_at`
+  is stamped when the request is RELEASED upstream (after the input verdict,
+  in enforce), so TTFT measures the provider, not this filter's wait. A
+  buffered reply omits `first_token_at` — buffering is exactly the mode that
+  hides it. On the canonical (stream-reassembled) payload it is the ordinary
+  field; on a buffered RAW body it is spliced in as a top-level `timing` key
+  **by byte insertion, never re-serialization** — span offsets index the
+  strings as transported, and Go's encoder would re-escape them.
+- **`usage`** is transcription, never estimation — the gateway holds no
+  tokenizer, and a provider that reported nothing yields NO field, not zeros.
+  A raw buffered body already carries the provider's own `usage` untouched.
+  A reassembled stream reports the canonical five counters (`input_tokens`,
+  `output_tokens`, `reasoning_tokens`, `cache_read_tokens`,
+  `cache_write_tokens`), captured per protocol: `anthropic.messages` splits
+  them across `message_start`/`message_delta` (merged, either half never
+  zeroing the other), `openai.responses` repeats them on the terminal event,
+  and `openai.chat` omits them from streams entirely unless the request opts
+  in — so:
+- ⚠️ **In ENFORCE mode the plugin opts `openai.chat` streams into
+  `stream_options.include_usage` itself** (after span application, so
+  offsets were resolved against the body the runtime counted) **and swallows
+  the resulting usage-only frame** — a client that never asked must not have
+  to parse it; a frame that also carries `choices` is part of the answer and
+  always passes, and a client that opted in itself keeps its frame. OBSERVE
+  mode injects nothing — observe never touches a body — so chat streams
+  under observe report usage only when the client opted in. That coverage
+  gap is the price of the observe contract, stated rather than papered over.
+
+## Refusing without ending the caller's run (3.9.0)
+
+A refusal used to come back as `finish_reason: "content_filter"` (openai.chat) or
+`stop_reason: "refusal"` (anthropic.messages). That is the right thing to tell a chatbot
+client and the wrong thing to tell an AGENT: those two strings are a TERMINAL condition
+in every harness we measured — hermes branches on `finish_reason == "content_filter"`
+alone, never retries, and abandons the run. One refused tool call in the middle of a
+task ended the task.
+
+So when the runtime sends a `continuation` on a `block`, this plugin renders the refusal
+in a shape the caller's loop survives:
+
+| `style` | what the caller gets |
+|---|---|
+| `drop_calls` | the reply with the refused tool calls REMOVED, the calls the policy allowed intact, the reason appended as text, and `finish_reason` matching what survived |
+| `withhold` | the request forwarded with the refused tool result replaced by the reason |
+| `answer` | the reason as an ordinary completed reply |
+
+⚠️ **Nothing about the refusal weakens.** The refused action is not forwarded, the
+withheld content does not reach the model, `refused` still counts it, and the decision
+the runtime recorded is still `block`. What moves is the token the turn ends on — and
+the WHY moves with it, into an `x_ogr` object on the body (`{"decision":"block",
+"continuation":"…"}`) that a client can log without any loop branching on it.
+
+⚠️ **No directive ⇒ nothing changes.** An older runtime sends none, and a runtime that
+could not name an honest shape sends none; both land on the hard refusal this plugin has
+always rendered. An unrecognised `style` does too — a directive from a newer runtime is
+not guessed at.
+
+⚠️ **All or nothing.** If any path in the directive fails to resolve against the body,
+the whole thing is abandoned and the turn is refused whole. A partial drop would forward
+some refused calls under a notice claiming they were refused, which reads as a working
+control and is not one.
+
+⚠️ **On a stream the ending is chosen by what the caller already holds.** While no
+tool-call bytes have been released the stream can end on a normal completion, with the
+surviving calls re-emitted as fresh frames. Once tool-call bytes are out, the client
+holds a partial call and harnesses act on tool calls being present rather than on the
+finish reason — so the stream is cut with the hard retraction instead, because a normal
+completion there would invite it to run a call with truncated arguments.
+
+## Redaction: applying the verdict's spans
+
+The runtime never returns plaintext: a verdict carries
+`modifications.spans[] = {path, start, end, replacement}` — offsets and a
+token, never the matched text. The party that already holds the plaintext does
+the splicing — this plugin, before the body is forwarded.
+
+The applier is **generic**. A span's `path` names a location in the body we
+sent (`payload.messages.3.content`, bracket form accepted), and the runtime —
+which holds the session — returns spans for everything in the body that must
+not reach the model: this turn's findings AND values bound on earlier turns
+that the client re-sent in the clear. There is no registration table, no
+protocol-specific mask paths and no gateway-side session store: the whole
+conversation is in the body, so the spans cover it.
+
+- Spans on one string apply **highest offset first**, so a splice cannot shift
+  the offsets a later span was computed against.
+- **Offsets are CHARACTERS, not bytes.** The detectors count code points and Go
+  indexes bytes; on Chinese text a byte splice masks a fragment that matches
+  nothing while the value travels on. Found live 2026-07-30.
+- What each splice displaced becomes the token→value map that **restores the
+  reply** (buffered and streamed — the SSE restorer handles tokens split
+  across deltas and markdown-escaped tokens, and flushes its pending tail
+  before the stream closes).
+- ⚠️ A span that does not resolve — an unknown path, a non-string, offsets out
+  of range — is **dropped and counted** (`unresolved_spans`), never applied
+  somewhere else. Silent, that disagreement looks exactly like a workspace
+  with no redaction policy; the counter is the only signal.
+- ⚠️ Spans against a streamed reply's canonical payload cannot be spliced into
+  SSE frames the caller already received; they are counted unresolved rather
+  than half-applied.
+
+## No state survives a request
+
+The plugin keeps nothing across requests — no Redis, no session store, no
+"already reported" marks. Each request re-derives everything from the bytes it
+carries; the runtime holds the session, numbers the placeholders, and answers
+each request with the spans that apply to it. An exact replay is judged again,
+which is the safe direction: the opposite (suppressing a turn we believe we
+have seen) is how a retried blocked prompt reaches the model unjudged.
+
+## Liveness
+
+Silencing a PEP is the cheapest bypass: uninstall the plugin and every request
+is unguarded, with nothing in the console to say so. So the plugin heartbeats
+every 30s as its **integration** (`{integration, interval_s, counters}`).
+Silence past `interval_s` is a coverage loss, not an absence of risk.
+
+| counter | meaning |
+|---|---|
+| `evaluated` | verdicts asked for and received |
+| `unchecked` | **traffic that passed with no verdict behind it** |
+| `reported` | events posted fire-and-forget (observe mode), verdict discarded |
+| `mirrored` | events copied to the candidate runtime |
+| `stream_stopped` | streamed answers refused or cut at end of stream — an overlay on `refused`, not an alternative to it |
+| `unresolved_spans` | **modification spans that named nothing this body holds** |
+| `unreadable` | bodies recognised but not parseable — NOT judged, and NOT reported as events (v0.8 leaves them no honest shape); this counter is the record. Since 3.6.1 a WELL-FORMED stream whose answer is empty is no longer counted here (see `empty_reply`), and a compressed body is named in the log |
+| `truncated` | tools or actions dropped by a cap — NOT judged |
+| `refused` | **everything this filter refused** — a blocked request, a blocked REPLY (buffered or streamed), fail-closed, partial-closed, an unreadable reply under `closed`. A streamed refusal bumps `stream_stopped` too |
+| `upstream_non200` | completion requests whose response came back non-200 — nothing to judge, the step's response half is not reported (3.5.0) |
+| `empty_reply` | well-formed streams whose reassembled answer was genuinely EMPTY — reported as an empty response event so the step keeps its response half; a rising rate is a model/harness symptom, not a filter error (3.6.1) |
+| `post_failed` | **fire-and-forget posts the runtime never took** — the dispatch failed, or it answered anything but 200. Until 3.11.1 these were counted as `reported` and nowhere else, so a gateway posting into a black hole beat identically to one whose events all landed (3.11.1) |
+| `mirror_failed` | the same, on the mirror channel — kept apart so a dead candidate runtime cannot read as lost primary traffic (3.11.1) |
+| `hold_overflow` | streamed answers whose withheld part passed `stream_hold_max_bytes` and stopped being held — released unenforced under `open`, refused under `closed` (3.15.0) |
+
+`unchecked` is the one to alert on: it is what a tight `timeout_ms` plus
+`fail_mode: open` produces, and it is invisible in any other signal.
+`post_failed` is the one to RECONCILE on, and it is why `reported` alone never
+answered "did the runtime get this": `reported` counts ATTEMPTS — it is bumped
+after a post that waits for nothing — so before 3.11.1 an observe-mode gateway
+whose runtime had been down for a day reported exactly the same numbers as one
+whose events all landed. ⚠️ It rides the channel it reports on, so during a total
+outage it does not arrive either; it lands on the first beat AFTER, which is when
+the question gets asked.
+`unresolved_spans` is the second, and it fails the other way — nothing masked,
+no error, indistinguishable from a deployment with no redaction policy.
+
+### Partial verdicts, and what `fail_mode: closed` really promises
+
+The promise to an operator who sets `closed` is: *if we could not judge it, it
+does not go through.* That must hold one level deeper than transport. The
+runtime fans out per text — a reply with five tool calls is five judge calls —
+and one failing under the runtime's OWN fail-open produces a verdict that
+looks complete: four actions judged, one never looked at, `decision: allow`,
+HTTP 200.
+
+**`unjudged` on the verdict** is what separates those: the payload paths that
+reached a detector and got no judgement. Absent or
+empty means everything routed was judged — the one assertion fail-closed hangs
+on. Coverage, not attendance: a path appears if ANY guardrail routed to it
+failed. The plugin does not interpret the entries — the security property is
+non-emptiness, and entries go to the log verbatim.
+
+Under `closed` a non-empty list refuses the event (with a message distinct
+from the transport-failure one — the service answered, it just did not answer
+about everything); under `open` it passes and bumps `unchecked`.
+
+Also treated as failures, never as allows: a non-200, a timeout, a 429, and **a
+200 whose body is not a verdict** (an empty body, an HTML error page — found
+live by pointing the plugin at a cluster with nothing behind it and watching
+the traffic pass with `decision=` empty).
+
+## SDK callback stability
+
+The plugin pins a local SDK patch through go.mod; its base revision and the exact
+change are documented in `third_party/proxy-wasm-go-sdk/PATCHES.md`. Duplicate
+HTTP callout responses after timeouts must not crash the worker VM and silently
+bypass later evaluations. `make test` includes the SDK regression tests, and both
+CI and release checks run it. This does not change `fail_mode` semantics.
+
+## Output privacy and streaming
+
+PII inspects model output only, including reasoning and tool arguments. It uses
+permanent redaction masks and never restores PII, including historical PII tokens.
+Secrets mask the model input and restore only recognized secret placeholders on
+output, using the current agent's mapping.
+
+The request verdict's `response_policy.pii: "redact"` selects a full response hold:
+no output content is delivered until generation and final judgement complete.
+The plugin then masks PII and restores secrets together. With PII off, prose and
+reasoning stream live while tool calls and completion events wait for judgement.
+
+All processing failures use **the same `fail_mode`, default `open`**. This includes
+timeouts, partial or invalid verdicts, unsupported stream events, unresolved spans,
+and buffer overflow. `open` releases output without guaranteed PII redaction and
+still attempts known-secret restoration; `closed` refuses the held output. Neither
+PII nor content safety has priority over the other. An explicit policy block is
+enforced in both modes. Already delivered prose cannot be recalled.
+
+## Configuration
+
+| Key | Default | Notes |
+|---|---|---|
+| `runtime_cluster` | — | Envoy cluster, e.g. `outbound\|80\|\|openguardrails-airs.static` |
+| `runtime_base_url` | — | used for the Host header |
+| `base_path` | `""` | the mount prefix the canonical `/v1/*` endpoint paths are joined onto |
+| `api_key` | — | the runtime API key; authenticates the SENDER, resolves the org |
+| `mode` | `observe` | `enforce` to act on verdicts |
+| `timeout_ms` | `5000` | the PDP budget, enforce only. A CEILING for the worst case, not a target; the runtime's `OGR_MODEL_TIMEOUT_MS` must fit strictly inside it |
+| `fail_mode` | `open` | **open is the spec's default** (an unanswered evaluate proceeds, counted `unchecked`); `closed` refuses when the PDP is unreachable, answers garbage, reports unjudged paths, or the reply itself is unreadable. Applies equally to PII, secrets and content safety; PII never overrides this setting |
+| `media_max_bytes` | `4194304` (4 MiB) | above this, an inline media part (a base64 image, audio clip, video or document) is DESCRIBED in the event instead of sent — `payload._ogr_media` carries kind/type/size and the value becomes `ogr-media:elided`. `0` sends every body verbatim. ⚠️ The body FORWARDED to the model is never touched, and only base64-shaped values are ever elided: the event payload is what the runtime judges, so prose must reach it whole. ⚠️ Since 3.8.0 the EFFECTIVE cap is `min(this, what the runtime advertises)`, per media KIND — see *What the runtime accepts* below |
+| `stream_hold_max_bytes` | `8388608` | the most one stream's hold may OCCUPY in the heap. Past 64 KB withheld, further withheld frames are kept deflate-compressed and inflated byte-for-byte on release (3.15.2) — a 150 KB file write's frames go from 12 MB to ~0.25 MB — and this bound counts what is actually stored. A full PII hold also bounds original wire bytes before rewriting. Past it the stream stops being held: released and judged for the record under `fail_mode: open`, refused under `closed`; counted `hold_overflow` either way. `0` = no bound |
+| `stream_head_release_bytes` | `-1` | how much of a streamed answer's PROSE (text and reasoning, UTF-8 bytes, never SSE framing) may reach the caller BEFORE the end-of-stream verdict. `-1` (any negative): all of it, live — the default since 3.15.0. `N`: at most N bytes, a CEILING — a frame crossing it is held whole. `0`: nothing (a spinner, and every block a clean refusal). ⚠️ Tool-call bytes and the ending frames wait for the verdict whatever the value. PII output redaction holds every channel regardless of this budget until judgement or a fail-mode decision. ⚠️ Replaces `stream_tail_chars` (≤ 3.9) and `stream_release` (3.15.0), both accepted, IGNORED and warned about at startup |
+| `agent_id_header` | `x-ogr-agent-id`, else `x-mse-consumer` | which header carries the agent's identity; configuring one replaces the whole chain |
+| `agent_workspace_header` | `x-ogr-agent-workspace`, else `x-mse-consumer-group` | which header carries the agent's workspace; configuring one replaces the whole chain |
+| `agent_type_header` | `x-ogr-agent-type` | which header carries the kind of agent |
+| `agent_user_header` | `x-ogr-agent-user` | which header carries who is using the agent this session |
+| `agent_id` / `agent_type` / `agent_workspace` | *(unset)* | static fallbacks for a route fronting exactly one agent. No static `agent_user` — a constant user is already the runtime's default |
+| `caller_fallback` | `true` | when nothing above names the agent, fingerprint the client's own credential into `caller-<hash>` rather than letting every consumer behind this gateway become one agent (see Identity) |
+| `caller_key_headers` | `authorization`, `x-api-key`, `api-key` | which headers may carry that credential, first non-empty wins |
+| `mirror_cluster` / `mirror_base_url` | *(unset)* | a candidate runtime that gets copies and gates nothing |
+| `mirror_api_key` | `api_key` | the mirror's own credential, when it differs |
+| `mirror_base_path` | `base_path` | the mirror's own mount, when it differs |
+| `log_level` | `quiet` | `quiet` \| `info` \| `debug`. Quiet prints only what says the deployment is broken. Anything unrecognised is quiet — the failure mode of this setting is disk. |
+
+### What ends up in the gateway's log
+
+`log_level` governs everything this plugin prints, and at the default `quiet`
+that is one line per plugin LOAD plus whatever says the deployment is broken.
+
+**No request or response body is ever printed at any level, including `debug`.**
+Up to and including 3.8.0 that was not true, and not because of anything in this
+plugin: events were posted through `wrapper.HttpClient` from higress-group/wasm-go,
+which logs `http call start … body: … timeout: …` and `http call end … body: …` at
+**info**, from inside the SDK. Envoy's default log level *is* info, so a gateway
+running 3.8.0 printed every GuardEvent — the user's prompt, the tool schema, the
+model's reply, all raw — and the runtime's whole answer back. At least twice per
+model call, since a step has a request half and a response half, and twice that many
+lines because the SDK logs a start AND an end; a speculative fast lane or a mirror
+adds more. All of it to stdout, and from there into the container log.
+`log_level: quiet` could not suppress it; only Envoy's own `wasm` logger could,
+which silences this plugin's real errors too.
+
+Since **3.8.1** the plugin dispatches its own calls (`dispatch.go`) and the wrapper
+is gone from the event path, so the default install prints nothing about the traffic
+it judges. If you are on 3.8.0 or earlier and cannot upgrade yet, the stopgap is to
+turn the gateway's wasm logger down — on the gateway pod,
+`curl -XPOST 'localhost:15000/logging?wasm=warn'` (immediate, lost on restart), or
+`--component-log-level wasm:warn` on the proxy for something that survives one.
+
+### Which paths it calls
+
+The canonical endpoint paths are rooted at **`/v1/`**: the plugin joins
+`base_path` with `/v1/evaluate` and `/v1/heartbeat` (the whole v1.0 surface —
+`/v1/ingest` no longer exists), and hard-codes no other prefix. The mount is **configuration, not discovery** — a
+WASM filter cannot cheaply probe-and-fall-back, and a wrong `base_path` is
+loud (every `/evaluate` comes back non-200, which is `fail_mode` territory,
+not silence). What loaded is printed once, at startup, in the `[OGR-CONFIG]`
+line.
+
+### The budget, and why it is ordered
+
+⚠️ **5s is a CEILING, not a target** — what a person tolerates once, on a bad
+request. A 1s budget was tried and measured wrong: latency scales with
+concurrency (12 concurrent: 619→1647ms), so a budget inside the working
+distribution makes enforcement evaporate exactly when the gateway is busy.
+
+⚠️ **The budgets must be ordered, outermost longest**: `timeout_ms` > the
+runtime's `OGR_MODEL_TIMEOUT_MS` > the model gateway's own. Equal budgets are
+a race, and when this filter wins it nothing can name what was slow. Order the
+chain by lowering the INNER budgets, never by raising this one — that spends
+the user's patience, which is the one resource in this chain that is not ours.
+
+⚠️ **It is a fan-out budget too.** A response carrying N tool calls costs the
+runtime N judge calls; fail-open then makes that failure *faster and quieter
+than success*. `unchecked` is the number that tells you.
+
+## Build and test
+
+```bash
+make test    # ordinary Go tests — the span applier, the SSE restorer, wire shapes
+make build   # GOOS=wasip1 GOARCH=wasm -> plugin.wasm
+```
+
+Nothing in this plugin may depend on being inside a Wasm VM: `go test` builds
+the package for the host, which is what keeps the parts that are easy to get
+wrong (offsets, chunk boundaries, verdict reading) testable in a second.
+
+### The local lab
+
+Sideload rather than an OCI pull (the docker bridge on the dev box has no
+egress):
+
+```bash
+cp plugin.wasm references/higress_root/openguardrails-airs.wasm
+# WasmPlugin CR with url: file:///data/openguardrails-airs.wasm, priority 200
+```
+
+⚠️ Priority must stay BELOW `key-auth` (310): the consumer headers this plugin
+reads are written by key-auth, and a plugin that runs first sees no caller at
+all.
+⚠️ Bumping the version in the CR name is what forces a reload; editing config
+in place does not always take.
+
+## Releasing
+
+Bump `VERSION`, then push the matching tag:
+
+```bash
+git tag higress-v3.0.0 && git push origin higress-v3.0.0
+```
+
+`.github/workflows/publish-higress.yml` refuses a tag whose version does not
+match `VERSION`, runs the tests, builds `plugin.wasm`, and `oras push`es the
+gzipped layer under both the version and `latest`:
+
+```yaml
+url: oci://docker.io/openguardrails/higress:3.0.0
+```
+
+Publishing needs `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (a Docker Hub
+**access token** scoped to that one repository). Missing secrets fail the
+publish job rather than skipping it — a tag with no artifact behind it is
+worse than a red run. (GHCR was tried first and lost: a GHCR package created
+by Actions stays private until someone flips it by hand, and a reference a
+gateway cannot pull anonymously is not a release.)
+
+## Support
+
+thomas@openguardrails.com
+
+## What the runtime accepts (3.8.0)
+
+The runtime bounds what one organization may send — a whole-body cap it answers
+`413` to, and a per-KIND cap deciding whether an inline attachment's bytes are kept
+at all. It advertises those numbers in the **heartbeat response** (and at
+`GET /v1/limits`), so this plugin learns them on the channel it already runs and
+elides locally instead of collecting refusals.
+
+What changes: an organization whose runtime accepts no images stops having base64
+screenshots shipped across the wire — in enforce mode, in front of a waiting caller —
+only to be recorded as declined at the far end.
+
+- **`min(configured, advertised)`, never `max`.** An operator who lowered
+  `media_max_bytes` made a bandwidth decision about their own link; learning a larger
+  cap does not overrule it.
+- **Advisory, never authority.** The runtime enforces its limits regardless. With no
+  successful beat — or against a runtime too old to advertise — this plugin behaves
+  exactly as 3.7.0 did.
+- ⚠️⚠️ **`0` MEANS THE OPPOSITE THING ON EACH SIDE.** In THIS config,
+  `media_max_bytes: 0` means *send everything verbatim*; in the advertised limits, `0`
+  means *this kind is refused*. The plugin keeps the advertised value in its own
+  tri-state (never advertised / refused / a number) and never assigns it into the
+  configured field. If you are reading `limits.go`, that is what the whole file is
+  about.
+- ⚠️ **Absent is not zero.** A runtime that sends no `limits` leaves every kind
+  UNKNOWN, which resolves to the configured behaviour. Reading silence as "refuse
+  everything" would stop a working deployment reporting attachments at all.

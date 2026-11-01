@@ -1,0 +1,454 @@
+# OpenGuardrails Runtime API — OpenAPI 3.1 description of the normative HTTP
+# binding in ../specification/runtime-api.md. The Markdown specification is
+# authoritative; this document is its machine-readable projection, kept in
+# lockstep with the JSON Schemas in this directory
+# (guard-event.schema.json, verdict.schema.json, ruleset.schema.json).
+openapi: 3.1.0
+
+info:
+  title: OpenGuardrails Runtime API
+  version: "1.0"
+  summary: The HTTP wire contract between an OGR runtime (PDP) and its integration points (PEPs).
+  description: |
+    The OpenGuardrails (OGR) Runtime API is the normative HTTP binding of the
+    OGR contract: the API a runtime (Policy Decision Point) exposes and an
+    integration point (Policy Enforcement Point, PEP) calls. There is no SDK
+    layer — this API is the integration surface: one decision endpoint and
+    one recipe, the same for a developer instrumenting their own agent loop
+    and for a gateway proxying model traffic.
+
+    The observed plane is LLM messages. One step is one model call, reported
+    as two events — `step/request` (what is about to be sent) and
+    `step/response` (what came back, whole, before the agent acts on it) —
+    bound to each other by a producer-minted `step_id`. Everything above the
+    step (session, turn, numbering) is derived server-side; nothing else is
+    declared on the wire.
+
+    `POST /v1/evaluate` is the one event path: one event in, one verdict
+    out, called while the PEP is holding an action; every accepted evaluate
+    also records the event. A streamed response is judged exactly once,
+    whole, behind a held-back tail. The remaining endpoints are PEP liveness
+    and runtime health.
+
+    All requests and responses are JSON, UTF-8,
+    `Content-Type: application/json` — except the optional streamed
+    transport of a `step/response` (OGR 1.9), where the request body is the
+    provider's SSE frames and, with `?payload=true`, so is the answer. Field names on the wire are
+    `snake_case`, exactly as in the JSON Schemas. There is no protocol
+    version on the wire; the runtime adapts to the events it receives.
+
+    Hosted reference documentation: https://openguardrails.com/api/docs/
+    Normative specification:
+    https://github.com/openguardrails/openguardrails/blob/main/specification/runtime-api.md
+  license:
+    name: Apache-2.0
+    identifier: Apache-2.0
+  contact:
+    name: OpenGuardrails
+    url: https://openguardrails.com
+
+externalDocs:
+  description: "Runtime API (HTTP binding) — the normative specification this document projects."
+  url: https://github.com/openguardrails/openguardrails/blob/main/specification/runtime-api.md
+
+servers:
+  - url: "https://{host}"
+    description: |
+      Any OGR runtime deployment. Canonical endpoint paths are rooted at
+      `/v1/` and MUST be joined to a single configured base URL; the base URL
+      MAY include a deployment-specific prefix (the reference runtime also
+      mounts the same handlers under `/api/public/ogr`, so
+      `https://host/api/public/ogr/v1/evaluate` is equally valid). Clients
+      MUST NOT hard-code any prefix other than the configured base URL plus
+      the canonical `/v1/...` path.
+    variables:
+      host:
+        default: ogr.example.com
+
+security:
+  - orgApiKey: []
+
+tags:
+  - name: decisions
+    description: The decision path — since v0.8 also the only event path.
+  - name: liveness
+    description: Integration liveness and runtime health.
+
+paths:
+  /v1/evaluate:
+    post:
+      tags: [decisions]
+      operationId: evaluate
+      summary: Judge one event and return one verdict.
+      description: |
+        One `GuardEvent` in, one `Verdict` out. A PEP calls this while
+        holding an action: the step's request before the model call, or the
+        step's complete response before executing what the model asked for.
+        Every accepted evaluate also RECORDS the event — evaluate is the
+        observation channel; there is no separate ingest path.
+
+        A streamed response is judged exactly once, whole, after stream
+        reassembly, while the integration holds back the stream's tail
+        (see the specification's streaming section).
+
+        On failure (timeout, 429, 5xx, network) the PEP applies its
+        configured fail mode. The default is open: proceed and record the
+        step as unjudged; deployments gating dangerous categories configure
+        closed.
+      parameters:
+        - name: payload
+          in: query
+          required: false
+          schema: { type: boolean, default: false }
+          description: |
+            OGR 1.9, optional for a runtime to support and off by default:
+            the verdict also carries `payload`, the body the caller should
+            now use, rendered by the runtime from the verdict it just
+            composed. A PEP in the byte path does not ask for it (returning
+            a rewritten body doubles every request's bytes); it is for a
+            caller that already holds the whole body and would otherwise
+            have to apply spans, restore placeholders and render refusals
+            itself. See the Verdict schema's `payload`.
+        - name: ogr-kind
+          in: header
+          required: false
+          schema: { type: string, enum: ["step/response"] }
+          description: |
+            Streamed transport only (see the `text/event-stream` request
+            body): the event's `kind`, which can only be `step/response`.
+            The other required fields ride headers of the same shape —
+            `ogr-step-id`, `ogr-llm-protocol`, `ogr-agent-id`,
+            `ogr-agent-type`, `ogr-agent-workspace`, `ogr-agent-user` —
+            beside the optional `ogr-session-hint`, `ogr-connection`,
+            `ogr-llm-endpoint`, `ogr-initiator`, `ogr-integration`,
+            `ogr-head-release-bytes` and `ogr-fail-mode`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GuardEvent"
+          text/event-stream:
+            schema:
+              type: string
+              description: |
+                OGR 1.9 STREAMED TRANSPORT, optional for a runtime to
+                support: the provider's SSE frames of one `step/response`,
+                written as they arrive, with the event's other fields as
+                `ogr-*` headers. This is a transport of ONE event, not a
+                sequence of events — the runtime reassembles the frames and
+                judges once, whole, at end of stream. A `step/request` MUST
+                NOT be streamed: a request is one body.
+      responses:
+        "200":
+          description: |
+            The verdict — or, for a streamed request with `?payload=true`,
+            the guarded stream to forward to the client.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Verdict"
+            text/event-stream:
+              schema:
+                type: string
+                description: |
+                  The frames to forward: the bounded head released live
+                  (`ogr-head-release-bytes`, reference default 32), the
+                  remainder held until the verdict, placeholders restored
+                  per frame, and at end of stream either the remainder
+                  released or a refusal in the caller's own protocol. The
+                  verdict rides a trailing SSE comment line,
+                  `: ogr {"decision":…,"event_id":…}`, which SSE parsers
+                  ignore by definition.
+        "400": { $ref: "#/components/responses/InvalidEvent" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/heartbeat:
+    post:
+      tags: [liveness]
+      operationId: heartbeat
+      summary: Integration liveness over the authenticated channel.
+      description: |
+        Lets the runtime distinguish "agent idle" from "integration went
+        dark". Transport-level: a heartbeat is not a GuardEvent and carries
+        no guarded action. This is also where the integration build id
+        lives (it left the event in v0.8) — fleet coverage and bad-rollout
+        triage read it from here. A heartbeat MUST register a live-but-idle
+        agent so fleet coverage reflects integrations that have not yet
+        emitted an event.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              minProperties: 1
+              properties:
+                integration:
+                  type: string
+                  description: The reporting integration and build, e.g. "ogr-higress/3.0.0".
+                instance_id:
+                  type: string
+                  maxLength: 128
+                  description: |
+                    Opaque id the reporter mints for itself, stable for the life
+                    of the reporting process and not across restarts. Version
+                    and counters are recorded per (integration, instance_id).
+                agent_id:
+                  type: string
+                interval_s:
+                  type: integer
+                  minimum: 1
+                ruleset:
+                  type: string
+                  maxLength: 64
+                  description: |
+                    Optional (1.4). The id of the local-redaction ruleset this
+                    instance is masking with, exactly as GET /v1/rules served
+                    it — so the per-instance record can say which ruleset each
+                    reporting process is on. Omitted by an integration not
+                    doing local redaction.
+                counters:
+                  type: object
+                  additionalProperties:
+                    type: number
+      responses:
+        "200":
+          description: Acknowledged.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok:
+                    type: boolean
+                  limits:
+                    allOf: [{ $ref: "#/components/schemas/Limits" }]
+                    description: |
+                      Optional. The same object GET /v1/limits returns, so a
+                      reporter that already beats learns its caps without a
+                      second call. Absent means UNKNOWN, never "zero".
+                  rules:
+                    type: object
+                    required: [id]
+                    properties:
+                      id:
+                        type: string
+                        pattern: "^rs_[0-9a-f]{32}$"
+                    description: |
+                      Optional (1.4). The id of the ruleset GET /v1/rules
+                      currently serves, so a reporter that already beats learns
+                      of a change within one interval without polling the
+                      feed. Absent means the runtime serves no feed or did not
+                      say — never that the ruleset is empty; a reporter holding
+                      a cached ruleset keeps masking with it.
+        "400": { $ref: "#/components/responses/InvalidBody" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/limits:
+    get:
+      tags: [liveness]
+      operationId: limits
+      summary: What this caller may send.
+      description: |
+        A runtime MAY bound request size and attachment size per organization.
+        This is how a producer learns those numbers at configuration time
+        rather than discovering them as 413s in production.
+
+        The numbers are ADVISORY to a producer and AUTHORITATIVE at the
+        runtime: a producer MUST remain correct having never fetched them, and
+        one that also holds a local cap MUST use min(local, advertised).
+      responses:
+        "200":
+          description: The caller's resolved limits.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [limits]
+                properties:
+                  limits: { $ref: "#/components/schemas/Limits" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/rules:
+    get:
+      tags: [liveness]
+      operationId: rules
+      summary: The local-redaction rule feed (1.4).
+      description: |
+        The secret patterns this caller's organization masks with on the
+        host, before a request leaves for the model provider — served by the
+        runtime so that an open-source integration ships none of its own
+        (specification/local-redaction.md). Dialect `ogr-re-1`; every rule
+        carries examples an integration MUST run at load, disabling by id any
+        rule that fails in its own engine.
+
+        ADVISORY to the integration and AUTHORITATIVE at the runtime, which
+        runs the identical ruleset on every event it receives. A fetch that
+        failed means UNKNOWN, never "no rules": the integration falls back to
+        its cached ruleset, and with none to its configured fail mode.
+      parameters:
+        - in: header
+          name: If-None-Match
+          required: false
+          schema:
+            type: string
+          description: The id of the ruleset the integration holds, quoted; a match answers 304.
+      responses:
+        "200":
+          description: The organization's current ruleset.
+          headers:
+            ETag:
+              schema:
+                type: string
+              description: The ruleset id, quoted — what the next request sends as If-None-Match.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ruleset]
+                properties:
+                  ruleset: { $ref: "#/components/schemas/SecretRuleset" }
+        "304":
+          description: The ruleset the integration holds is current.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404":
+          description: This runtime serves no rule feed. An integration treats it as UNKNOWN, exactly like a failed fetch.
+
+  /v1/health:
+    get:
+      tags: [liveness]
+      operationId: health
+      security: []
+      summary: Unauthenticated runtime liveness.
+      responses:
+        "200":
+          description: The runtime can serve decisions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    const: ok
+                  version:
+                    type: string
+        "503":
+          description: The runtime cannot serve decisions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    const: error
+
+components:
+  securitySchemes:
+    orgApiKey:
+      type: http
+      scheme: bearer
+      description: |
+        Organization API key (`Authorization: Bearer ogr_<key>`). The key
+        proves the ORGANIZATION — the tenant boundary every asserted name is
+        resolved inside — and is the identity floor: a caller whose identity
+        four-tuple is all empty strings is still fully attributable (agent
+        derived from the key, sessions derived, the key's workspace).
+
+  responses:
+    InvalidEvent:
+      description: Body failed schema validation.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error]
+            properties:
+              error:
+                type: string
+                const: invalid_event
+              details:
+                type: array
+                description: |
+                  Per-field validation issues. Each entry names the offending
+                  field and why it failed — an unknown key, a missing
+                  required field, a value outside an enum.
+                items:
+                  type: object
+    InvalidBody:
+      description: Malformed request.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error]
+            properties:
+              error:
+                type: string
+    Unauthorized:
+      description: Missing or invalid API key.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error]
+            properties:
+              error:
+                type: string
+                const: unauthorized
+    RateLimited:
+      description: Rate limit exhausted. Clients back off and treat a 429 on /v1/evaluate like an unreachable runtime (apply the configured fail mode; the default is open, and deployments gating dangerous categories configure closed).
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error, limit]
+            properties:
+              error:
+                type: string
+                const: rate_limited
+              limit:
+                type: integer
+
+  schemas:
+    Limits:
+      type: object
+      required: [max_request_bytes, media, media_parts_max]
+      properties:
+        max_request_bytes:
+          type: integer
+          minimum: 0
+          description: |
+            The whole /v1/evaluate body. A larger request MUST be refused with
+            413, and the runtime SHOULD refuse it before reading the body.
+        media:
+          type: object
+          description: |
+            Largest single inline attachment of each kind whose BYTES the
+            runtime will retain. 0 means the kind is NOT ACCEPTED — an
+            unaccepted attachment is recorded and reported in the verdict's
+            `unjudged` list, never answered with a 4xx.
+          properties:
+            image: { type: integer, minimum: 0 }
+            audio: { type: integer, minimum: 0 }
+            video: { type: integer, minimum: 0 }
+            document: { type: integer, minimum: 0 }
+            file: { type: integer, minimum: 0 }
+        media_parts_max:
+          type: integer
+          minimum: 0
+          description: Inline attachments per event.
+    GuardEvent:
+      $ref: "./guard-event.schema.json"
+    Verdict:
+      $ref: "./verdict.schema.json"
+    SecretRuleset:
+      $ref: "./ruleset.schema.json"

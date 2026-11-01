@@ -1,0 +1,22 @@
+{
+  "mandate": "acme-webapp-engagement",
+  "version": "bench-seed",
+  "workspace": "secops-agents",
+  "on_violation": "block",
+  "bindings": [
+    { "tool": "run_scan", "capability": "net.scan",
+      "fields": { "target": "target", "technique": "technique", "session": "window" },
+      "capability_map": { "technique": { "denial_of_service": "denial_of_service", "phish": "phishing" } } },
+    { "tool": "http_probe", "capability": "web.probe", "fields": { "target": "host" } },
+    { "tool": "write_report", "capability": "evidence.write" }
+  ],
+  "scope": { "allow": ["10.20.0.0/16", "app.acme.example"], "deny": ["10.20.0.1"] },
+  "capabilities": {
+    "allow": ["net.scan", "web.probe", "evidence.write"],
+    "deny": ["denial_of_service", "phishing", "exploit.third_party"] },
+  "limits": [],
+  "windows": [
+    { "id": "maintenance", "sessions": ["maintenance"] } ],
+  "irreversible": [
+    { "id": "destructive", "capability": "net.scan", "when": { "technique": ["drop", "encrypt", "wipe"] } } ]
+}

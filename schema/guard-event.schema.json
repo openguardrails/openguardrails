@@ -1,0 +1,265 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "https://openguardrails.com/schema/1.0/guard-event.schema.json",
+ "title": "GuardEvent",
+ "description": "A unit observed at an OGR integration point, on the one observed plane: LLM messages. Two kinds: the two halves of a step (one model call). Every field is required except (1.2) 'obligation_results', 'integration', 'connection', 'session_hint', (1.4) 'redaction', (1.5) 'initiator', (1.6) 'llm_endpoint' (1.8) 'transport' and (1.10) 'sources'; the empty string on an identity field is the explicit 'no assertion'. All fields are flat, top-level snake_case; objects are reserved for inherently structured data (payload).",
+ "type": "object",
+ "required": [
+  "kind",
+  "step_id",
+  "agent_id",
+  "agent_type",
+  "agent_workspace",
+  "agent_user",
+  "llm_protocol",
+  "payload"
+ ],
+ "additionalProperties": false,
+ "properties": {
+  "kind": {
+   "enum": [
+    "step/request",
+    "step/response"
+   ]
+  },
+  "step_id": {
+   "type": "string",
+   "minLength": 1,
+   "maxLength": 128,
+   "description": "Producer-minted opaque id binding the step/request and step/response of ONE model call. A fresh random id per call; never reused. The one coordinate on the wire — everything above it (session, turn, step numbering) is derived server-side. Opaque: no character set or pattern is imposed. At most 128 characters — a runtime refuses a longer value rather than storing a shortened one (specification/guard-event.md § Field bounds)."
+  },
+  "agent_id": {
+   "type": "string",
+   "maxLength": 255,
+   "description": "WHICH agent this is, unique within the organization; policy resolution and the inventory key on it. Empty = derived from the API key (identity floor). Opaque: no character set or pattern is imposed. At most 255 characters — a runtime refuses a longer value rather than storing a shortened one (specification/guard-event.md § Field bounds)."
+  },
+  "agent_type": {
+   "type": "string",
+   "maxLength": 64,
+   "description": "What KIND of agent — the harness or product name. A label, never an identity. Empty = unlabeled. Opaque: no character set or pattern is imposed. At most 64 characters — a runtime refuses a longer value rather than storing a shortened one (specification/guard-event.md § Field bounds)."
+  },
+  "agent_workspace": {
+   "type": "string",
+   "maxLength": 255,
+   "description": "The named GROUP of agents this one belongs to — one workspace, one policy set. Empty = the API key's workspace. Opaque: no character set or pattern is imposed. At most 255 characters — a runtime refuses a longer value rather than storing a shortened one (specification/guard-event.md § Field bounds)."
+  },
+  "agent_user": {
+   "type": "string",
+   "maxLength": 255,
+   "description": "Who is USING the agent this session/request. An attribute, never a policy boundary. Empty = every session is one user. Opaque: no character set or pattern is imposed. At most 255 characters — a runtime refuses a longer value rather than storing a shortened one (specification/guard-event.md § Field bounds)."
+  },
+  "llm_protocol": {
+   "enum": [
+    "openai.chat",
+    "openai.responses",
+    "anthropic.messages",
+    "canonical"
+   ],
+   "description": "Which shape the payload speaks: a raw provider body's protocol, or 'canonical' for the OGR canonical shape (an integration with no provider body in hand, e.g. after stream reassembly). The producer states it; a runtime may verify against the body shape."
+  },
+  "payload": {
+   "type": "object",
+   "description": "step/request: the untouched provider request body (or canonical {messages, tools?}), optionally with an integration-inserted top-level 'timing' key carrying 'received_at' — when the integration saw the request. step/response: the untouched, complete provider response body — stream-reassembled if streamed — optionally with an integration-inserted top-level 'timing' key (or canonical {text?, reasoning?, tool_calls?, model?, usage?, timing?}). A payload MAY carry media parts (images, audio, video, documents) in the protocol's own shapes; a runtime MUST treat them as UNJUDGED content. A producer that elides an oversized inline part replaces that value IN PLACE with 'ogr-media:elided' and describes it in a top-level '_ogr_media' array — see specification/guard-event.md § Media parts."
+  },
+  "integration": {
+   "type": "string",
+   "maxLength": 128,
+   "description": "OPTIONAL. WHO REPORTED IT — 'name/version', e.g. 'ogr-higress/3.0.2'. The name is the identity (a rollout must not read as a second integration); the version rides along so a bad build can be triaged from the traffic itself. Integrations SHOULD send it. A self-declared label, not proof: exactly as trustworthy as the credential that carried it, and a runtime MUST NOT derive trust from it."
+  },
+  "connection": {
+   "type": "string",
+   "maxLength": 128,
+   "description": "OPTIONAL. WHICH DOWNSTREAM CONNECTION carried this request — the integration's own opaque flow id (e.g. '<instance>#<connection ordinal>'), stable for the life of one client connection and never reused across processes. The one session signal a client cannot strip: consecutive requests of one client process ride one keep-alive connection even when the body carries no session field at all. Attribution only — a connection names a PROCESS, which may hold several concurrent conversations, so a runtime MAY use it only as a corroborated last-resort grouping signal and MUST NOT derive trust or policy from it."
+  },
+  "session_hint": {
+   "type": "string",
+   "maxLength": 128,
+   "description": "OPTIONAL. The producer's own name for the CONVERSATION this step belongs to — opaque, stable for the life of one conversation, distinct across concurrent conversations. Integrations that hold a natural session id SHOULD send it on every event of the session, side calls and subagents included. A GROUPING HINT, not v0.7's declared coordinates: the runtime still derives turns/steps and may decline the grouping where its own evidence contradicts it. A runtime MUST NOT derive authorization, policy selection, ordering, or trust from it."
+  },
+  "initiator": {
+   "type": "string",
+   "maxLength": 32,
+   "enum": [
+    "scheduled",
+    "spawned"
+   ],
+   "description": "OPTIONAL (OGR 1.5). WHO STARTED the work this step belongs to, when the producer knows and nothing in the body says so: 'scheduled' — a scheduler did, and no person is present; 'spawned' — another agent session did. ABSENT is the normal case and is NOT a claim that a human is present: a producer that cannot tell omits it, and so does one whose banner already says it in the body. There is deliberately no 'human' value — nothing can prove one, so a runtime would have to ignore it. A CLAIM per the `integration` rule: self-declared, a RECORD only, and a runtime MUST NOT derive authorization, policy selection, enforcement or rate limiting from it. A runtime MUST accept an unknown value by ignoring it rather than rejecting the event.",
+   "$comment": "The motivating case is a harness whose scheduled runs carry no in-band marker at all — Claude Code's cron injects the user's prompt verbatim and declares the fact only in a request header. A gateway can see that header; the body cannot."
+  },
+  "llm_endpoint": {
+   "type": "string",
+   "maxLength": 253,
+   "description": "OPTIONAL (OGR 1.6). The HOST the agent pointed the model request at — 'host[:port]', no scheme, path, userinfo or query. Answers WHERE THE AGENT DIALLED, not who finally served it: a gateway reports the ':authority' it received, an agent-side plugin the host of the URL it intercepted, an integration with no HTTP view sends nothing. A CLAIM per the `integration` rule: self-declared, a RECORD only, and a runtime MUST NOT derive authorization, policy selection, enforcement or trust from it. A runtime MUST accept a malformed value by ignoring it rather than rejecting the event; the length bound is the only refusal.",
+   "$comment": "What it is for: a credential sitting in the context goes wherever the request goes, and a request pointed at a host that is no known model vendor and not the tenant's own is the one signal that names a RELAY on the model channel — which nothing in the body can reveal."
+  },
+  "redaction": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "ruleset",
+    "masked"
+   ],
+   "description": "OPTIONAL (OGR 1.4). What an integration doing LOCAL REDACTION masked on the host before this step left it — see specification/local-redaction.md. Tokens, never values. Absent means the integration does not do local redaction or has it off; a runtime MUST accept the event and draw no diagnosis. A CLAIM per the `integration` rule: self-declared, never an input to a decision; a runtime SHOULD verify each reported token occurs in the body before counting it, and MUST count it nowhere else.",
+   "properties": {
+    "ruleset": {
+     "type": "string",
+     "maxLength": 64,
+     "description": "The id of the ruleset the integration ran, exactly as GET /v1/rules served it ('rs_' + 32 hex). The empty string means local redaction is ON but no ruleset was ever obtained (fail-open) — 'protected by nothing', which is different from absent."
+    },
+    "masked": {
+     "type": "array",
+     "maxItems": 256,
+     "description": "The placeholders MINTED in this step — new values only; tokens already in the history are just text now.",
+     "items": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+       "token",
+       "rule"
+      ],
+      "properties": {
+       "token": {
+        "type": "string",
+        "maxLength": 64,
+        "pattern": "^(?:OGRK[0-9A-Z][0-9X]{7,}|\\$\\{OGR_[A-Z_]+_[0-9]+\\})$",
+        "description": "The placeholder, in either OGR shape: `OGRKP0000003` (secrets — the fifth character names the MINTER, so a producer's numbering can never collide with a runtime's) or `${OGR_SECRET_3}` (the shape minted before it, still recognised). Never the value."
+       },
+       "rule": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "description": "Which rule minted it: the check_id, or check_id/pattern_id where the rule names its patterns (`entity_api_key/gitlab`) — the coverage statistic per issuer."
+       }
+      }
+     }
+    }
+   }
+  },
+  "obligation_results": {
+   "type": "array",
+   "description": "OPTIONAL (OGR 1.2). What the PEP did about the obligations a previous verdict gave it. Rides the NEXT step/request, beside the tool_results for the same calls. SELF-DECLARED: a PEP that called no scanner and reports `clean` is indistinguishable from one that called and was told `clean`, so a runtime MUST NOT treat this as verified, and MUST NOT make it an input to authorization. Absent is the ordinary case and means nothing was reported.",
+   "maxItems": 64,
+   "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+     "id",
+     "state"
+    ],
+    "properties": {
+     "id": {
+      "type": "string",
+      "maxLength": 256,
+      "description": "The obligation's id, echoed verbatim."
+     },
+     "state": {
+      "enum": [
+       "fulfilled",
+       "failed",
+       "skipped"
+      ]
+     },
+     "verdict": {
+      "enum": [
+       "clean",
+       "suspicious",
+       "malicious"
+      ],
+      "description": "Present on `fulfilled`. The scanner is a DETECTOR: how a `suspicious` answer is treated is the runtime policy's decision, not the scanner's."
+     },
+     "provider": {
+      "type": "string",
+      "maxLength": 64,
+      "description": "Which scanner answered. Self-declared, like `integration`."
+     },
+     "analysis_id": {
+      "type": "string",
+      "maxLength": 128,
+      "description": "The scanner's own id for the analysis — what an attestation is matched against."
+     },
+     "detected_type": {
+      "type": "string",
+      "maxLength": 128,
+      "description": "What the BYTES were, against the name's claim. The cheapest durable signal in this axis: it needs the first few KiB and survives a refused upload, an exhausted quota and an unreachable provider."
+     },
+     "reason": {
+      "type": "string",
+      "maxLength": 512,
+      "description": "Why, on `failed`/`skipped`."
+     }
+    }
+   }
+  },
+  "transport": {
+   "type": "object",
+   "description": "OPTIONAL (OGR 1.8). Where the time went on the way to this verdict, so a first-token regression is attributable to a LAYER rather than argued about. ⚠️⚠️ EVERY VALUE IS A DURATION MEASURED INSIDE ONE CLOCK, and an integration MUST NOT produce one any other way: stamping timestamps across two parties and subtracting the neighbours yields a number spanning two clocks, and on a measured deployment that error was a steady 2.1 seconds on 2,997 of 3,000 events. 'net_ms' is the integration's OWN round trip minus the 'responded_at - received_at' the runtime reported in the verdict's 'timing' — the NTP delay formula, no synchronised clocks required; it does NOT decompose into outbound and inbound and an integration MUST NOT report half of it as either. 'net_ms' and 'skew_ms' describe a call that already completed, so they ride the 'step/response' and describe that step's REQUEST half; a one-sided step carries neither and they MUST NOT be carried across steps. ⚠️ An unmeasured hop is an ABSENT key, never 0 — a runtime MUST NOT read one as the other. ⚠️ A CLAIM per the 'integration' rule: self-declared, a RECORD ONLY, never an input to authorization, policy selection, enforcement or trust — and a runtime MUST NOT correct any stored time by 'skew_ms'.",
+   "properties": {
+    "gw_ms": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 3600000,
+     "description": "The host had the request before the guard code did — filter chain, body buffering."
+    },
+    "plugin_ms": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 3600000,
+     "description": "The guard code's own work, up to the moment it built this event."
+    },
+    "net_ms": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 3600000,
+     "description": "The wire, BOTH directions, for the evaluate call this step's request half made."
+    },
+    "skew_ms": {
+     "type": "integer",
+     "minimum": -3600000,
+     "maximum": 3600000,
+     "description": "The integration's clock MINUS the runtime's, signed. A DIAGNOSTIC — never a correction."
+    }
+   },
+   "additionalProperties": false,
+   "$comment": "The envelope is 'additionalProperties: false' because an unknown TOP-LEVEL key is a producer talking about something else; this sub-object is deliberately tolerant in the other direction — a validator SHOULD strip unknown keys inside it rather than reject the event, so an integration one version ahead reporting a hop this build has no field for keeps validating and loses only the field it added. A diagnostic sub-object must not be the thing that 400s an upgrade."
+  },
+  "sources": {
+   "type": "array",
+   "maxItems": 64,
+   "description": "OPTIONAL (OGR 1.10 DRAFT). WHAT the untrusted content in this payload ACTUALLY IS \u2014 see specification/provenance.md. A runtime already derives trusted/user/untrusted from message roles; what it cannot derive is that the opaque string a tool returned is an email whose DMARC failed. That fact is producer-known, so it rides here. A CLAIM per the `integration` rule: a runtime MUST NOT RAISE trust on its strength, MAY use it only to lower trust, select detectors and enrich audit, and with the field present MUST NOT reach a LESS strict decision than it would without it (a forged 'dmarc: pass' must be unable to buy anything). Absent is not a claim of trustworthiness \u2014 unlabelled content keeps the trust its role implies.",
+   "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+     "path",
+     "channel"
+    ],
+    "properties": {
+     "path": {
+      "type": "string",
+      "maxLength": 256,
+      "description": "The registered payload path this entry describes, resolved through the same table as findings[].path. A path that names nothing in the payload is dropped, never an error."
+     },
+     "channel": {
+      "type": "string",
+      "maxLength": 64,
+      "description": "HOW the content entered: 'email.inbound', 'web.fetch', 'doc.upload', 'mcp.tool', 'rag.retrieve', \u2026 Open vocabulary; an unknown channel is untrusted like any other, never a reason to reject the event."
+     },
+     "origin": {
+      "type": "string",
+      "maxLength": 255,
+      "description": "The remote identity as the channel names it (a sender address, a URL, a document id). Attribution and audit only."
+     },
+     "auth": {
+      "type": "object",
+      "description": "The channel's OWN authentication result, verbatim and channel-specific (e.g. {spf, dkim, dmarc} for email). Deliberately untyped: a runtime reads what it recognises and ignores the rest. Never a proof \u2014 see the array's description."
+     },
+     "fetched_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 instant the content was obtained, where it differs materially from when this step was built."
+     }
+    }
+   }
+  }
+ }
+}

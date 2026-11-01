@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "openguardrails-instrumentation-langgraph"
+version = "1.0.0"
+description = "Guard a LangGraph agent with OpenGuardrails (OGR) v0.8 — a chat-model wrapper that judges every step before the model sees it and before the agent acts on it. No SDK, no dependencies: two hand-rolled POSTs to /v1/evaluate."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+# Deliberately empty: there is no SDK layer in v0.8, the wire is stdlib
+# urllib, and the langchain-core message surface is duck-typed — langgraph
+# is the HOST application's dependency, never this package's.
+dependencies = []
+
+[project.urls]
+Homepage = "https://openguardrails.com"
+Specification = "https://github.com/openguardrails/openguardrails"
+Source = "https://github.com/openguardrails/openguardrails/tree/main/integrations/agent/langgraph"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/openguardrails_instrumentation_langgraph"]

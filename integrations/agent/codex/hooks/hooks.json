@@ -1,0 +1,43 @@
+{
+  "description": "OpenGuardrails auto mode, guardrail and local secrets redaction for Codex.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/hooks/ogr-codex-session-start.mjs\"",
+            "timeout": 20,
+            "statusMessage": "OpenGuardrails local redaction"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "Bash|apply_patch|Read|Edit|Write|WebFetch|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "OGR_STATE_DIR=\"${PLUGIN_DATA}\" node \"${PLUGIN_ROOT}/hooks/ogr-codex-automode-hook.mjs\"",
+            "timeout": 15,
+            "statusMessage": "OpenGuardrails auto mode"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|apply_patch|Read|Edit|Write|WebFetch|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/hooks/ogr-codex-hook.mjs\"",
+            "timeout": 15,
+            "statusMessage": "OpenGuardrails guardrail"
+          }
+        ]
+      }
+    ]
+  }
+}

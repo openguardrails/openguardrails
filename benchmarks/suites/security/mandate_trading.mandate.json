@@ -1,0 +1,26 @@
+{
+  "mandate": "desk-a-equities",
+  "version": "bench-seed",
+  "workspace": "quant-agents",
+  "on_violation": "block",
+  "bindings": [
+    { "tool": "place_order", "capability": "order.place",
+      "fields": { "asset_class": "asset_class", "instrument": "symbol",
+                  "quantity": "quantity", "side": "side", "session": "session" },
+      "capability_map": { "side": { "sell_short": "order.short", "buy_to_cover": "order.short" } } },
+    { "tool": "get_quote", "capability": "data.read" },
+    { "tool": "http_request", "capability": "data.read" }
+  ],
+  "scope": { "allow": ["equity:us:*"], "deny": ["equity:us:GME", "crypto:*"] },
+  "capabilities": {
+    "allow": ["order.place", "order.cancel", "data.read"],
+    "deny": ["order.short", "funds.withdraw"] },
+  "limits": [
+    { "id": "per-order-qty", "metric": "quantity", "window": "per_call", "max": 500, "unit": "shares" },
+    { "id": "daily-orders", "metric": "count", "window": "per_day", "max": 200 } ],
+  "windows": [
+    { "id": "rth", "sessions": ["regular"],
+      "applies_to": { "capabilities": ["order.place", "order.cancel"] } } ],
+  "irreversible": [
+    { "id": "unwind", "capability": "order.place", "when": { "side": "sell_all" } } ]
+}

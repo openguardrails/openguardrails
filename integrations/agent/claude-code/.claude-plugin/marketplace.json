@@ -1,0 +1,11 @@
+{
+  "name": "openguardrails",
+  "owner": { "name": "OpenGuardrails", "url": "https://openguardrails.com" },
+  "plugins": [
+    {
+      "name": "openguardrails",
+      "source": "./",
+      "description": "OGR v0.8 enforcement for Claude Code — a PreToolUse hook that evaluates each held tool call against your OGR runtime and denies dangerous calls before they run, even in bypass mode."
+    }
+  ]
+}

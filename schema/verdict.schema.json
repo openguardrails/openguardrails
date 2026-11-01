@@ -1,0 +1,290 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openguardrails.com/schema/1.0/verdict.schema.json",
+  "title": "Verdict",
+  "description": "The runtime's decision about a GuardEvent. Two decisions: allow | block. Redaction is not a decision — a non-empty modifications.spans on an allow says it. \"Flag\" is not a decision — allow with findings says it.",
+  "type": "object",
+  "required": [
+    "event_id",
+    "provider",
+    "decision"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "response_policy": {
+      "type": "object",
+      "description": "Select response privacy processing before the first response byte on a request verdict; confirm the policy on the response verdict. pii=redact requires holding every output channel, including reasoning and tool arguments, until the complete response is judged and permanently masked. pii=off permits the ordinary live-prose/completion-barrier mode. Missing is unknown, not off. Missing confirmation or failed processing uses the same fail_mode as every guardrail: open by default, closed only when configured. An explicit policy block is enforced in either mode.",
+      "properties": { "pii": { "enum": ["redact", "off"] } },
+      "required": ["pii"],
+      "additionalProperties": false
+    },
+    "event_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Runtime-assigned identity of the judged event, returned to the caller here."
+    },
+    "provider": {
+      "type": "string",
+      "minLength": 1
+    },
+    "decision": {
+      "enum": [
+        "allow",
+        "block"
+      ]
+    },
+    "latency_ms": {
+      "type": "number",
+      "minimum": 0
+    },
+    "timing": {
+      "type": "object",
+      "description": "OPTIONAL (OGR 1.8). The runtime's OWN two instants: when it received the request and when it serialized this verdict, both RFC 3339 with sub-second precision. `responded_at - received_at` is the WHOLE handler where `latency_ms` is the evaluation alone, and the gap between them is where an integration finds a runtime that is slow for a reason the evaluation cannot see. A runtime SHOULD send them; an integration MAY ignore them. ⚠️ They are NOT for an integration to subtract from its own clock: with the two instants the integration already holds they complete the four points of an NTP exchange, so `delay = (received_back - dispatched) - (responded_at - received_at)` and `skew = ((dispatched - received_at) + (received_back - responded_at)) / 2`. An integration MUST NOT report `received_at - dispatched` as a network duration — it is a clock offset plus a network duration with nothing in it to say which part is which — and MUST NOT report half of `delay` as either direction.",
+      "properties": {
+        "received_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "responded_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "received_at",
+        "responded_at"
+      ],
+      "additionalProperties": false
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "category"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "type": "string",
+            "pattern": "^(safety|security|privacy|x)\\.[a-z0-9_.]+$"
+          },
+          "severity": {
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ]
+          },
+          "path": {
+            "type": "string",
+            "description": "Payload path of the judged text, e.g. payload.tool_calls.1.arguments.command. Registration contract: paths name locations the producer registered when building the event."
+          },
+          "start": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "end": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "detector": {
+            "type": "string"
+          },
+          "fp": {
+            "type": "string",
+            "description": "Whitelist fingerprint: a hash of the finding's subject, minted by the engine. Never the value itself."
+          },
+          "whitelisted": {
+            "type": "boolean",
+            "description": "True when an operator whitelisted this exact subject: the finding is recorded but contributes nothing to the decision."
+          },
+          "subject": {
+            "type": "string",
+            "description": "The detected value this finding is about, as the producer sent it — at most one per finding, and what an operator's false-positive exception keys on. NOT a per-span echo of matched text, which findings MUST NOT carry."
+          }
+        }
+      }
+    },
+    "modifications": {
+      "type": "object",
+      "required": [
+        "spans"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "spans": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "path",
+              "start",
+              "end",
+              "replacement"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "start": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "end": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "replacement": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "unjudged": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Payload paths this verdict could NOT judge. Absent or empty asserts every routed text was judged; a fail-closed enforcement point MUST treat a non-empty value as \"could not look\", which is not \"found nothing\"."
+    },
+    "obligations": {
+      "type": "array",
+      "description": "OPTIONAL (OGR 1.2). What the PEP MUST do before the action proceeds, alongside a decision that is still `allow`. An obligation is not a decision and does not take part in composition. A PEP that does not understand this key ignores it and behaves as before; a runtime therefore MUST NOT rest a control on one being fulfilled. See specification/obligations.md.",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "type",
+          "call_id",
+          "artifact",
+          "on_unfulfilled"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 256,
+            "description": "Stable and deterministic for a given event, so a re-delivery re-mints it and a duplicate fulfilment is idempotent."
+          },
+          "type": {
+            "enum": [
+              "scan_artifact"
+            ]
+          },
+          "call_id": {
+            "type": "string",
+            "maxLength": 256,
+            "description": "The provider tool-call id this is about."
+          },
+          "artifact": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "locator"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "file",
+                  "package",
+                  "url",
+                  "text"
+                ]
+              },
+              "locator": {
+                "type": "string",
+                "maxLength": 512,
+                "description": "The AGENT's own string — a path as written, `npm:left-pad@9.9.9`, or a URL. A runtime MUST NOT resolve or normalise it: only the PEP knows the working directory it means."
+              },
+              "declared_type": {
+                "type": "string",
+                "maxLength": 128,
+                "description": "What the NAME claims, from its extension. A CLAIM: the disagreement between this and the bytes' own signature is itself a finding."
+              }
+            }
+          },
+          "provider_hint": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "A non-secret provider NAME. Advisory. MUST NOT be an address and MUST NOT carry a credential — the decision channel is not a credential-distribution channel; whoever makes the scan call holds the scan credential."
+          },
+          "on_unfulfilled": {
+            "enum": [
+              "flag",
+              "block"
+            ],
+            "description": "What the runtime does if no result is reported for this obligation."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this stops being answerable. Deep analysis is asynchronous, so an obligation outlives the step that issued it."
+          }
+        }
+      }
+    },
+    "continuation": {
+      "type": "object",
+      "description": "HOW to express this refusal to a caller that is an agent loop. Present only on `block`, and OPTIONAL: a runtime MAY omit it and a PEP MAY ignore it, in which case the refusal is rendered as it always was. It NEVER weakens the decision — the action still does not proceed; it selects the shape the refusal takes so that one refused step does not end the caller's session. `drop_calls`: remove the named `payload.tool_calls.N` elements from the reply, keep the rest, append `notice`. `withhold`: replace the text at each path with `notice` and forward the request. `answer`: render `notice` as the whole reply. Paths follow the same grammar as `findings[].path`, against the body as transported.",
+      "properties": {
+        "style": {
+          "type": "string",
+          "enum": [
+            "drop_calls",
+            "withhold",
+            "answer"
+          ]
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Payload paths to act on. Empty for `answer`."
+        },
+        "notice": {
+          "type": "string",
+          "maxLength": 2000,
+          "description": "Prose the MODEL reads: why, and what it may do instead."
+        }
+      },
+      "required": [
+        "style",
+        "notice"
+      ],
+      "additionalProperties": false
+    },
+    "payload": {
+      "description": "OGR 1.9, present only when the request asked for it (`POST /v1/evaluate?payload=true`): the body the caller should now use, rendered by the runtime from this verdict. The literal string `\"unchanged\"` means nothing about the body changed — use your own copy, and nothing is echoed back. An object is the body to use INSTEAD of the caller's copy: on an `allow`, with the spans applied (request half) or the placeholders restored and output-side spans applied (response half); on a `block` WITH a `continuation`, the continued body to forward (`withhold`) or deliver (`drop_calls`). On a `block` without one — or with `answer` — it is the refusal document in the caller's own `llm_protocol`, which is a STRING of SSE text when `payload_stream` is true. It is a rendering of this verdict and never a different decision: `decision` and `modifications` are unchanged beside it, and a continuation still changes no enforcement. Absent for a `canonical` refusal (there is no client protocol to render into), and absent whenever the parameter was not sent.",
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object"
+        }
+      ]
+    },
+    "payload_stream": {
+      "type": "boolean",
+      "description": "OGR 1.9: `payload` is SSE text to write with `Content-Type: text/event-stream`, not a JSON document — the shape a refusal takes for a request that said `stream: true`. Absent means `payload` is a document."
+    },
+    "unresolved_spans": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "OGR 1.9: how many of `modifications.spans` could not be located in the body the runtime rendered `payload` from. A non-zero count means the payload the caller sent is not the one the offsets were computed against; the spans in question were DISCARDED, never applied to a neighbouring string."
+    }
+  }
+}

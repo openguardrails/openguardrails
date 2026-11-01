@@ -1,0 +1,42 @@
+# The @openguardrails/dsh bundle layer — applied automatically when
+# a profile lists this bundle:
+#
+#     dsh plugin --profile <name> add @openguardrails/dsh
+#
+# Two rows:
+#
+#  1. Insert the plugin. Auto mode is on by default; the v0.8 guard
+#     (step/request before the model, step/response behind the held stream
+#     tail — all decisions from the runtime) runs for every session once an
+#     API key is configured. Tune it by overriding the `openguardrails` row
+#     in a later layer (your profile's cordis.patch.yml) — see
+#     cordis.example.yml for every knob.
+#
+#  2. Put "Auto Mode by OGR" in the Permissions selector by overriding
+#     the base `permission` row. A patch replaces the targeted row's WHOLE
+#     `config`, so the base presets are restated verbatim around the new
+#     entry. A deployment with its own preset table should instead merge the
+#     `auto-mode` entry into that table in its own later layer, which wins over
+#     this one.
+
+- insert:
+    - id: openguardrails
+      name: '@openguardrails/dsh'
+
+- id: permission
+  config:
+    presets:
+      read-only:
+        sandbox: read-only
+        approval: ask
+      workspace-write:
+        sandbox: workspace-write
+        approval: ask
+      auto-mode:
+        sandbox: workspace-write
+        approval: ask
+        name: Auto Mode by OGR
+        description: OpenGuardrails answers approval prompts; only asks it cannot decide reach you.
+      danger-full-access:
+        sandbox: danger-full-access
+        approval: never

@@ -1,0 +1,267 @@
+{
+  "latency_probe": {
+    "evaluate_delay_seconds": 1.2,
+    "observe_seconds": 0.0429817770000227,
+    "enforce_seconds": 2.445344143998227,
+    "passed": true
+  },
+  "passed": 26,
+  "cases": [
+    {
+      "case": "normal",
+      "stream": false,
+      "paths": [
+        "/v1/evaluate",
+        "/v1/gateway/process-input",
+        "/v1/chat/completions",
+        "/v1/gateway/process-output",
+        "/v1/evaluate"
+      ],
+      "passed": true
+    },
+    {
+      "case": "normal",
+      "stream": true,
+      "paths": [
+        "/v1/evaluate",
+        "/v1/gateway/process-input",
+        "/v1/chat/completions",
+        "/v1/evaluate"
+      ],
+      "passed": true
+    },
+    {
+      "case": "group",
+      "stream": false,
+      "paths": [
+        "/v1/evaluate",
+        "/v1/chat/completions",
+        "/v1/evaluate"
+      ],
+      "passed": true
+    },
+    {
+      "case": "group",
+      "stream": true,
+      "paths": [
+        "/v1/evaluate",
+        "/v1/chat/completions",
+        "/v1/evaluate"
+      ],
+      "passed": true
+    },
+    {
+      "case": "consumer",
+      "stream": false,
+      "paths": [
+        "/v1/evaluate",
+        "/v1/chat/completions",
+        "/v1/evaluate"
+      ],
+      "passed": true
+    },
+    {
+      "case": "consumer",
+      "stream": true,
+      "paths": [
+        "/v1/evaluate",
+        "/v1/chat/completions",
+        "/v1/evaluate"
+      ],
+      "passed": true
+    },
+    {
+      "case": "ungrouped",
+      "stream": false,
+      "paths": [
+        "/v1/evaluate",
+        "/v1/chat/completions",
+        "/v1/evaluate"
+      ],
+      "passed": true
+    },
+    {
+      "case": "ungrouped",
+      "stream": true,
+      "paths": [
+        "/v1/evaluate",
+        "/v1/chat/completions",
+        "/v1/evaluate"
+      ],
+      "passed": true
+    },
+    {
+      "case": "blank-group",
+      "stream": false,
+      "paths": [
+        "/v1/evaluate",
+        "/v1/chat/completions",
+        "/v1/evaluate"
+      ],
+      "passed": true
+    },
+    {
+      "case": "blank-group",
+      "stream": true,
+      "paths": [
+        "/v1/evaluate",
+        "/v1/chat/completions",
+        "/v1/evaluate"
+      ],
+      "passed": true
+    },
+    {
+      "case": "beta",
+      "stream": false,
+      "paths": [
+        "/v1/evaluate",
+        "/v1/chat/completions",
+        "/v1/evaluate"
+      ],
+      "passed": true
+    },
+    {
+      "case": "beta",
+      "stream": true,
+      "paths": [
+        "/v1/evaluate",
+        "/v1/chat/completions",
+        "/v1/evaluate"
+      ],
+      "passed": true
+    },
+    {
+      "case": "both",
+      "stream": false,
+      "paths": [
+        "/v1/evaluate",
+        "/v1/chat/completions",
+        "/v1/evaluate"
+      ],
+      "passed": true
+    },
+    {
+      "case": "both",
+      "stream": true,
+      "paths": [
+        "/v1/evaluate",
+        "/v1/chat/completions",
+        "/v1/evaluate"
+      ],
+      "passed": true
+    },
+    {
+      "case": "substring",
+      "stream": false,
+      "paths": [
+        "/v1/evaluate",
+        "/v1/gateway/process-input",
+        "/v1/chat/completions",
+        "/v1/gateway/process-output",
+        "/v1/evaluate"
+      ],
+      "passed": true
+    },
+    {
+      "case": "substring",
+      "stream": true,
+      "paths": [
+        "/v1/gateway/process-input",
+        "/v1/evaluate",
+        "/v1/chat/completions",
+        "/v1/evaluate"
+      ],
+      "passed": true
+    },
+    {
+      "case": "empty",
+      "stream": false,
+      "paths": [
+        "/v1/gateway/process-input",
+        "/v1/evaluate",
+        "/v1/chat/completions",
+        "/v1/gateway/process-output",
+        "/v1/evaluate"
+      ],
+      "passed": true
+    },
+    {
+      "case": "empty",
+      "stream": true,
+      "paths": [
+        "/v1/evaluate",
+        "/v1/gateway/process-input",
+        "/v1/chat/completions",
+        "/v1/evaluate"
+      ],
+      "passed": true
+    },
+    {
+      "case": "empty-beta",
+      "stream": false,
+      "paths": [
+        "/v1/evaluate",
+        "/v1/chat/completions",
+        "/v1/evaluate"
+      ],
+      "passed": true
+    },
+    {
+      "case": "empty-beta",
+      "stream": true,
+      "paths": [
+        "/v1/evaluate",
+        "/v1/chat/completions",
+        "/v1/evaluate"
+      ],
+      "passed": true
+    },
+    {
+      "case": "all",
+      "stream": false,
+      "paths": [
+        "/v1/evaluate",
+        "/v1/chat/completions",
+        "/v1/evaluate"
+      ],
+      "passed": true
+    },
+    {
+      "case": "all",
+      "stream": true,
+      "paths": [
+        "/v1/evaluate",
+        "/v1/chat/completions",
+        "/v1/evaluate"
+      ],
+      "passed": true
+    },
+    {
+      "case": "all-anonymous",
+      "stream": false,
+      "paths": [
+        "/v1/evaluate",
+        "/v1/chat/completions",
+        "/v1/evaluate"
+      ],
+      "passed": true
+    },
+    {
+      "case": "all-anonymous",
+      "stream": true,
+      "paths": [
+        "/v1/evaluate",
+        "/v1/chat/completions",
+        "/v1/evaluate"
+      ],
+      "passed": true
+    }
+  ],
+  "concurrency": {
+    "requests": 20,
+    "input_calls": 10,
+    "output_calls": 10,
+    "airs_evaluate_calls": 40,
+    "passed": true
+  }
+}

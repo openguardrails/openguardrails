@@ -1,0 +1,271 @@
+{
+  "profile": "ip-seed",
+  "version": "bench-seed",
+  "workspace": "ip-agents",
+  "domain": "intellectual-property",
+  "on_violation": "flag",
+  "outcomes": {
+    "safety.hallucination.citation": "block"
+  },
+  "references": [
+    {
+      "type": "patent",
+      "pattern": "\\b(?:US|EP|CN|WO|JP|KR|DE|GB)\\s?\\d{1,4}(?:[\\s,/]?\\d{3,4}){1,3}\\s?(?:[AB]\\d?)?\\b",
+      "normalize": {
+        "strip": "[\\s,/-]",
+        "strip_suffix": "[AB]\\d?$",
+        "upper": true
+      },
+      "provider_attributes": [
+        "kind",
+        "jurisdiction",
+        "legal_status",
+        "priority_date",
+        "filing_date",
+        "publication_date",
+        "grant_date",
+        "expiry_date",
+        "assignee",
+        "claims"
+      ]
+    }
+  ],
+  "assertions": [
+    {
+      "id": "OG-IP-002.grant",
+      "rule": "OG-IP-002",
+      "reference": "patent",
+      "attribute": "kind",
+      "value": "granted",
+      "pattern": "\\b(?:granted patent|issued patent|was granted|has been granted|is granted)\\b"
+    },
+    {
+      "id": "OG-IP-002.application",
+      "rule": "OG-IP-002",
+      "reference": "patent",
+      "attribute": "kind",
+      "value": "application",
+      "pattern": "\\b(?:pending application|patent application|published application|is an application)\\b"
+    },
+    {
+      "id": "OG-IP-003.in_force",
+      "rule": "OG-IP-003",
+      "reference": "patent",
+      "attribute": "legal_status",
+      "value": "in_force",
+      "pattern": "(?<!not )(?<!no longer )\\b(?:in force|active|enforceable|remains? in force|is live)\\b"
+    },
+    {
+      "id": "OG-IP-003.expired",
+      "rule": "OG-IP-003",
+      "reference": "patent",
+      "attribute": "legal_status",
+      "value": "expired",
+      "pattern": "(?<!not )(?<!never )\\b(?:expired|has lapsed|lapsed)\\b"
+    },
+    {
+      "id": "OG-IP-003.invalidated",
+      "rule": "OG-IP-003",
+      "reference": "patent",
+      "attribute": "legal_status",
+      "value": "invalidated",
+      "pattern": "(?<!not )\\b(?:invalidated|was revoked|has been revoked)\\b"
+    },
+    {
+      "id": "OG-IP-003.pending",
+      "rule": "OG-IP-003",
+      "reference": "patent",
+      "attribute": "legal_status",
+      "value": "pending",
+      "pattern": "\\b(?:is pending|still pending|pending application)\\b"
+    },
+    {
+      "id": "OG-IP-004.jurisdiction",
+      "rule": "OG-IP-004",
+      "reference": "patent",
+      "attribute": "jurisdiction",
+      "value": "$1",
+      "pattern": "\\b(US|U\\.S\\.|United States|European|Chinese|Japanese|Korean|German|British)\\s+(?:patent|application|filing)\\b",
+      "map": {
+        "U.S.": "US",
+        "United States": "US",
+        "European": "EP",
+        "Chinese": "CN",
+        "Japanese": "JP",
+        "Korean": "KR",
+        "German": "DE",
+        "British": "GB"
+      }
+    },
+    {
+      "id": "OG-IP-005.priority",
+      "rule": "OG-IP-005",
+      "reference": "patent",
+      "attribute": "priority_date",
+      "value": "$1",
+      "mode": "date",
+      "pattern": "\\bpriority date(?: of| is| was|:)?\\s*(\\d{4}-\\d{2}-\\d{2})"
+    },
+    {
+      "id": "OG-IP-005.filing",
+      "rule": "OG-IP-005",
+      "reference": "patent",
+      "attribute": "filing_date",
+      "value": "$1",
+      "mode": "date",
+      "pattern": "\\bfiled(?: on)?\\s+(\\d{4}-\\d{2}-\\d{2})"
+    },
+    {
+      "id": "OG-IP-005.publication",
+      "rule": "OG-IP-005",
+      "reference": "patent",
+      "attribute": "publication_date",
+      "value": "$1",
+      "mode": "date",
+      "pattern": "\\bpublished(?: on)?\\s+(\\d{4}-\\d{2}-\\d{2})"
+    },
+    {
+      "id": "OG-IP-005.grant",
+      "rule": "OG-IP-005",
+      "reference": "patent",
+      "attribute": "grant_date",
+      "value": "$1",
+      "mode": "date",
+      "pattern": "\\b(?:granted|issued)(?: on)?\\s+(\\d{4}-\\d{2}-\\d{2})"
+    },
+    {
+      "id": "OG-IP-005.expiry",
+      "rule": "OG-IP-005",
+      "reference": "patent",
+      "attribute": "expiry_date",
+      "value": "$1",
+      "mode": "date",
+      "pattern": "\\bexpire[sd]?(?: on| in)?\\s+(\\d{4}-\\d{2}-\\d{2})"
+    },
+    {
+      "id": "OG-IP-009.assignee",
+      "rule": "OG-IP-009",
+      "reference": "patent",
+      "attribute": "assignee",
+      "value": "$1",
+      "mode": "contains",
+      "pattern": "\\b(?:assigned to|owned by|held by|belongs to)\\s+([A-Z][A-Za-z]+(?:\\s[A-Z][A-Za-z.]+)*)"
+    }
+  ],
+  "fields": [
+    {
+      "id": "resolved_patent",
+      "rule": "OG-IP-006",
+      "resolved": {
+        "type": "patent",
+        "min": 1
+      },
+      "missing": "safety.unsafe_advice.evidence_gap",
+      "note": "at least one cited patent that the record provider resolved"
+    },
+    {
+      "id": "claim_reference",
+      "rule": "OG-IP-008",
+      "pattern": "\\bclaims?\\s+\\d+",
+      "missing": "safety.unsafe_advice.evidence_gap",
+      "note": "the conclusion names the claim(s) it was reached against, not the patent as a whole"
+    },
+    {
+      "id": "jurisdiction",
+      "rule": "OG-IP-004",
+      "pattern": "\\b(?:in|for|under|within|across)\\s+(?:the\\s+)?(?:US|U\\.S\\.|United States|American|EP|EPO|Europe|European|EU|CN|China|Chinese|JP|Japan|Japanese|KR|Korea|Korean|DE|Germany|German|FR|France|French|GB|UK|British|PCT)\\b|\\bjurisdictions?\\s*[:=]\\s*\\w+",
+      "missing": "safety.unsafe_advice.jurisdiction",
+      "note": "a scope statement — a patent NUMBER's country prefix is not one"
+    },
+    {
+      "id": "as_of",
+      "rule": "OG-IP-005",
+      "pattern": "\\b(?:as of|as at|searched(?: on)?|search date|cut-?off|status (?:checked|verified)(?: on)?|data (?:through|to))\\b[^.]{0,40}?\\d{4}-\\d{2}-\\d{2}",
+      "missing": "safety.unsafe_advice.temporal",
+      "note": "legal status and the search itself are dated facts"
+    },
+    {
+      "id": "priority_basis",
+      "rule": "OG-IP-005",
+      "pattern": "\\bpriority date\\b|\\beffective filing date\\b",
+      "missing": "safety.unsafe_advice.temporal",
+      "note": "novelty is judged against a date; a conclusion that never fixes it has no basis"
+    }
+  ],
+  "conclusions": [
+    {
+      "id": "fto",
+      "rule": "OG-IP-006",
+      "verifiability": "structural",
+      "cues": [
+        "\\bfreedom[- ]to[- ]operate\\b",
+        "\\bFTO\\b",
+        "\\bclear to (?:launch|practice|commercializ|operate)",
+        "\\bno blocking patents?\\b",
+        "\\bblocking patents?\\b"
+      ],
+      "determination": [
+        "\\bis (?:clear|free) to (?:operate|launch|practice|commercializ\\w+)\\b",
+        "\\bno (?:infringement )?risk\\b",
+        "\\b(?:definitely|certainly|clearly) (?:does not infringe|infringes)\\b"
+      ],
+      "requires": [
+        "resolved_patent",
+        "claim_reference",
+        "jurisdiction",
+        "as_of"
+      ]
+    },
+    {
+      "id": "infringement",
+      "rule": "OG-IP-007",
+      "verifiability": "structural",
+      "cues": [
+        "\\binfring\\w+\\b"
+      ],
+      "determination": [
+        "(?<!may )(?<!might )(?<!could )(?<!likely )(?<!probably )(?<!possibly )(?<!arguably )(?<!potentially )\\b(?:infringes|is infringing|does not infringe|is not infringing|will infringe|will not infringe|do not infringe)\\b"
+      ],
+      "requires": [
+        "resolved_patent",
+        "claim_reference",
+        "jurisdiction"
+      ]
+    },
+    {
+      "id": "novelty",
+      "rule": "OG-IP-010",
+      "verifiability": "structural",
+      "cues": [
+        "\\bnovel(?:ty)?\\b",
+        "\\banticipat\\w+\\b",
+        "\\bprior art\\b"
+      ],
+      "determination": [
+        "\\bis (?:novel|not novel|anticipated|not anticipated)\\b(?! (?:if|unless|provided|assuming))"
+      ],
+      "requires": [
+        "resolved_patent",
+        "priority_basis"
+      ]
+    },
+    {
+      "id": "validity",
+      "rule": "OG-IP-011",
+      "verifiability": "structural",
+      "cues": [
+        "\\binvalid(?:ity|ate|ated)?\\b",
+        "\\bvalid(?:ity)?\\b",
+        "\\brevok\\w+\\b"
+      ],
+      "determination": [
+        "\\bis (?:invalid|valid|unenforceable)\\b(?! (?:if|unless|only))"
+      ],
+      "requires": [
+        "resolved_patent",
+        "jurisdiction",
+        "claim_reference"
+      ]
+    }
+  ]
+}

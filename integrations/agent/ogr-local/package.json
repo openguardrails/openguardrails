@@ -1,0 +1,56 @@
+{
+  "name": "@openguardrails/ogr-local",
+  "version": "0.2.0",
+  "description": "The local masking proxy for agent harnesses with no in-process plugin seam — Claude Code and Codex. Source only: it is BUNDLED into each of those plugins (hooks/ogr-local.mjs) rather than published, because those plugins install as a directory with no npm install and no build step.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "author": "OpenGuardrails",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc && node scripts/bundle.mjs",
+    "pretest": "tsc",
+    "test": "node --test tests/*.spec.mjs",
+    "clean": "rm -rf dist",
+    "bundle": "node scripts/bundle.mjs"
+  },
+  "keywords": [
+    "proxy",
+    "redaction",
+    "secrets",
+    "claude-code",
+    "codex",
+    "ai",
+    "agent",
+    "security",
+    "guardrails",
+    "ogr",
+    "openguardrails"
+  ],
+  "dependencies": {
+    "@openguardrails/local-redaction": "^0.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^5.7.0",
+    "esbuild": "^0.24.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/openguardrails/openguardrails.git",
+    "directory": "integrations/agent/ogr-local"
+  },
+  "homepage": "https://openguardrails.com",
+  "private": true
+}
