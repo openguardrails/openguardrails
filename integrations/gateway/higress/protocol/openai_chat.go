@@ -1,0 +1,711 @@
+package protocol
+
+import (
+	"encoding/json"
+	"sort"
+	"strconv"
+	"strings"
+
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
+)
+
+// `openai.chat` — the Chat Completions API.
+//
+// The oldest of the three and still the most widely spoken, because every
+// OpenAI-compatible vendor implements it. It is also the one OpenAI is moving off:
+// the Responses API is where new capability lands. It is treated here as one
+// protocol among three, with no special standing.
+//
+// Its agent loop is FLAT: an assistant message carries `tool_calls`, and each result
+// comes back as its own `role: "tool"` message paired by `tool_call_id`.
+
+// ⚠️ RegisterFallback, not Register: this adapter's body test is "has a `messages`
+// array", which every anthropic.messages body also passes. It may only match a body
+// once every more specific protocol has declined.
+func init() { RegisterFallback(openAIChat{}) }
+
+type openAIChat struct{}
+
+func (openAIChat) Name() string { return "openai.chat" }
+
+func (openAIChat) Claim(path string) Claim {
+	if HasSuffixPath(path, "/chat/completions") {
+		return ClaimServe
+	}
+	return ClaimIgnore
+}
+
+// MatchBody is the CATCH-ALL, which is why this adapter registers last: a bare
+// `messages` array with nothing protocol-specific in it is chat by elimination.
+func (openAIChat) MatchBody(body gjson.Result) bool { return body.Get("messages").IsArray() }
+
+// --- request -----------------------------------------------------------------
+
+func (openAIChat) ParseRequest(body gjson.Result) (*Conversation, bool) {
+	msgs := body.Get("messages")
+	if !msgs.IsArray() {
+		return nil, false
+	}
+	conv := &Conversation{
+		Model:  body.Get("model").String(),
+		Stream: body.Get("stream").Bool(),
+	}
+	for _, m := range msgs.Array() {
+		switch m.Get("role").String() {
+		case "system", "developer":
+			// First one wins: a prompt split across several system messages is rare,
+			// and joining them would change the text agent recognition matches on.
+			if conv.System == "" {
+				conv.System = chatText(m.Get("content"))
+			}
+		case "user":
+			if t := chatText(m.Get("content")); t != "" {
+				conv.Turns = append(conv.Turns, Turn{Role: RoleUser, Text: t})
+			}
+		case "assistant":
+			turn := Turn{
+				Role:      RoleAssistant,
+				Text:      chatText(m.Get("content")),
+				Reasoning: chatReasoning(m),
+				Actions:   chatActions(m),
+			}
+			if turn.Text != "" || turn.Reasoning != "" || len(turn.Actions) > 0 {
+				conv.Turns = append(conv.Turns, turn)
+			}
+		case "tool":
+			conv.Turns = append(conv.Turns, Turn{Role: RoleTool, Outcome: &Outcome{
+				CallID: m.Get("tool_call_id").String(),
+				Name:   m.Get("name").String(),
+				Text:   chatText(m.Get("content")),
+			}})
+		}
+	}
+	for _, t := range body.Get("tools").Array() {
+		if n := t.Get("function.name").String(); n != "" {
+			conv.Tools = append(conv.Tools, ToolDef{
+				Name:        n,
+				Description: t.Get("function.description").String(),
+				Schema:      t.Get("function.parameters").Raw,
+			})
+		}
+	}
+	return conv, len(conv.Turns) > 0
+}
+
+// chatText flattens content, which is a bare string or a list of parts.
+func chatText(c gjson.Result) string {
+	if c.Type == gjson.String {
+		return c.String()
+	}
+	if !c.IsArray() {
+		return ""
+	}
+	var b strings.Builder
+	for _, part := range c.Array() {
+		if t := part.Get("text"); t.Exists() && t.Type == gjson.String {
+			if b.Len() > 0 {
+				b.WriteString(" ")
+			}
+			b.WriteString(t.String())
+		}
+	}
+	return b.String()
+}
+
+// chatReasoningFields are the two spellings a Chat Completions body carries the
+// model's thinking under. `reasoning_content` is the one DeepSeek introduced and
+// vLLM emits; `reasoning` is what OpenRouter normalises to and what the qwen3.6
+// family sends. A vendor sends ONE of them — the assumption that `reasoning` only
+// ever appears BESIDE `reasoning_content` ("some vendors mirror the field") is
+// what this list exists to stop anyone making again.
+//
+// ⚠️ ONE LIST, EVERY READER — the parse, the stream accumulator, the buffered
+// restore and the streamed restore all walk it, because a reader that knows only
+// one spelling fails SILENTLY in whichever direction it sits:
+//
+//   - A PARSE that misses it reports the reply EMPTY. `Output.Empty()` counts a
+//     pure-reasoning reply's whole response half `unreadable`, and a fail-closed
+//     gateway REFUSES it — the 2026-08-23 deepseek loss (9.5% of steps), which was
+//     fixed for `reasoning_content` alone and reappears verbatim one spelling over.
+//   - A RESTORE that misses it hands the client `${OGR_PHONE_1}` in the thinking
+//     pane of an answer whose prose came back correct.
+//
+// Order is the probe order: first spelling PRESENT wins, so a body carrying both
+// is read once rather than twice.
+var chatReasoningFields = [2]string{"reasoning_content", "reasoning"}
+
+// chatReasoningPaths is `choices.0.delta.<field>` for each spelling, built once:
+// it is asked on every frame of every stream.
+var chatReasoningPaths = [2]string{"choices.0.delta." + chatReasoningFields[0], "choices.0.delta." + chatReasoningFields[1]}
+
+// chatReasoning reads whichever spelling a message used.
+func chatReasoning(msg gjson.Result) string {
+	for _, f := range chatReasoningFields {
+		if r := msg.Get(f); r.Type == gjson.String && r.String() != "" {
+			return r.String()
+		}
+	}
+	return ""
+}
+
+func chatActions(msg gjson.Result) []Action {
+	var out []Action
+	for _, tc := range msg.Get("tool_calls").Array() {
+		out = append(out, Action{
+			ID:   tc.Get("id").String(),
+			Name: tc.Get("function.name").String(),
+			// `arguments` is a JSON STRING here. Its CONTENTS are the argument object,
+			// which is what Action.Arguments holds in every protocol.
+			Arguments: tc.Get("function.arguments").String(),
+		})
+	}
+	return out
+}
+
+// --- response ----------------------------------------------------------------
+
+func (openAIChat) ParseResponse(body gjson.Result) Output {
+	msg := body.Get("choices.0.message")
+	return Output{
+		Text:      msg.Get("content").String(),
+		Reasoning: chatReasoning(msg),
+		Actions:   chatActions(msg),
+		Usage:     chatUsage(body.Get("usage")),
+	}
+}
+
+// chatUsage transcribes the Chat Completions usage object. `usage: null` — what
+// every streamed chunk before the final one carries under include_usage — is not
+// an object and reads as "nothing reported".
+func chatUsage(u gjson.Result) *Usage {
+	if !u.IsObject() {
+		return nil
+	}
+	return &Usage{
+		InputTokens:     u.Get("prompt_tokens").Int(),
+		OutputTokens:    u.Get("completion_tokens").Int(),
+		ReasoningTokens: u.Get("completion_tokens_details.reasoning_tokens").Int(),
+		CacheReadTokens: u.Get("prompt_tokens_details.cached_tokens").Int(),
+	}
+}
+
+// EnsureStreamUsage opts a streaming request into usage reporting
+// (`stream_options.include_usage`), which this protocol otherwise OMITS from
+// streams — the one protocol of the three where a stream's token counts exist
+// only if the request asked. Returns the body unchanged when the request is not
+// a stream or the client already opted in; true means the GATEWAY injected it,
+// and the extra usage-only frame is then the gateway's to swallow, not the
+// client's to parse.
+func (openAIChat) EnsureStreamUsage(body string) (string, bool) {
+	parsed := gjson.Parse(body)
+	if !parsed.Get("stream").Bool() {
+		return body, false
+	}
+	if parsed.Get("stream_options.include_usage").Bool() {
+		return body, false
+	}
+	next, err := sjson.Set(body, "stream_options.include_usage", true)
+	if err != nil {
+		return body, false
+	}
+	return next, true
+}
+
+// --- masking and restoration -------------------------------------------------
+
+// Mask walks `messages[].content`, which covers the user's words, the assistant's
+// prose, the system prompt (a message in this protocol) and every tool result.
+func (openAIChat) Mask(body string, redactions []Redaction) (string, int) {
+	if len(redactions) == 0 {
+		return body, 0
+	}
+	out, changed := body, 0
+	for i := range gjson.Get(out, "messages").Array() {
+		next, n := maskTextOrBlocks(out, "messages."+strconv.Itoa(i)+".content", redactions)
+		out, changed = next, changed+n
+	}
+	return out, changed
+}
+
+func (openAIChat) Restore(body string, mapping map[string]string) (string, bool) {
+	if len(mapping) == 0 {
+		return body, false
+	}
+	out, changed := restoreAt(body, "choices.0.message.content", mapping)
+	// The model's thinking, under whichever spelling this vendor used — both are
+	// restored when both are present, because a client reads one of them and
+	// nothing here says which. See chatReasoningFields.
+	for _, f := range chatReasoningFields {
+		next, ok := restoreAt(out, "choices.0.message."+f, mapping)
+		out, changed = next, changed || ok
+	}
+	// ⚠️ The arguments are not an afterthought, they are the half that MATTERS. An
+	// unrestored line of prose is a cosmetic defect the reader can see; an unrestored
+	// `{"to": "${OGR_EMAIL_1}"}` is an agent acting on a value that names nothing —
+	// mailing a placeholder, looking up a customer who does not exist — and nothing
+	// in the reply says so.
+	for i := range gjson.Get(out, "choices.0.message.tool_calls").Array() {
+		path := "choices.0.message.tool_calls." + strconv.Itoa(i) + ".function.arguments"
+		next, ok := restoreAt(out, path, mapping)
+		out, changed = next, changed || ok
+	}
+	return out, changed
+}
+
+// --- refusals ----------------------------------------------------------------
+
+// Refuse renders the refusal AS THE ASSISTANT MESSAGE, with HTTP 200.
+//
+// ⚠️ 200, not 4xx, on purpose: every OpenAI-compatible client renders an assistant
+// message, while a 4xx surfaces as a generic transport failure that explains nothing
+// to the person who typed the prompt — and many agent harnesses retry it, turning
+// one refusal into a retry storm.
+func (openAIChat) Refuse(model, reason string) string {
+	out, err := json.Marshal(map[string]any{
+		"id": "chatcmpl-ogr-refusal", "object": "chat.completion", "model": model,
+		"choices": []map[string]any{{
+			"index":         0,
+			"message":       map[string]any{"role": "assistant", "content": reason},
+			"finish_reason": "content_filter",
+		}},
+	})
+	if err != nil {
+		return `{"error":{"message":"refused"}}`
+	}
+	return string(out)
+}
+
+func (openAIChat) RefuseStream(model, reason string) string {
+	first, _ := json.Marshal(chatChunk(model, map[string]any{"role": "assistant", "content": reason}, ""))
+	return SSEFrame(string(first)) + openAIChat{}.Retract(model)
+}
+
+// Retract ends a stream the final judgement refused.
+//
+// ⚠️ `content_filter`, not `stop`. The finish reason states WHY the turn ended, and a
+// client that logs or retries on it must be able to tell a refusal from a completed
+// reply.
+func (openAIChat) Retract(model string) string {
+	last, _ := json.Marshal(chatChunk(model, map[string]any{}, "content_filter"))
+	return SSEFrame(string(last)) + "data: [DONE]\n\n"
+}
+
+// --- continuations -----------------------------------------------------------
+
+// SoftRefuse: the notice as an ordinary assistant message, `finish_reason: "stop"`.
+func (openAIChat) SoftRefuse(model, notice string) string {
+	out, err := json.Marshal(map[string]any{
+		"id": "chatcmpl-ogr-refusal", "object": "chat.completion", "model": model,
+		"choices": []map[string]any{{
+			"index":         0,
+			"message":       map[string]any{"role": "assistant", "content": notice},
+			"finish_reason": "stop",
+		}},
+		"x_ogr": xOGR("answer"),
+	})
+	if err != nil {
+		return `{"error":{"message":"refused"}}`
+	}
+	return string(out)
+}
+
+// ⚠️ Deliberately does NOT set `message.refusal`. Some harnesses promote a populated
+// `refusal` to a terminal content_filter, which is the exact branch this rendering
+// exists to avoid — and the ones that do not would render the notice twice.
+func (c openAIChat) SoftRefuseStream(model, notice string) string {
+	head := chatChunk(model, map[string]any{"role": "assistant", "content": notice}, "")
+	// The marker rides the FIRST frame: a client that logs refusals must be able to
+	// see one on a stream too, now that the finish reason no longer says it.
+	head["x_ogr"] = xOGR("answer")
+	first, _ := json.Marshal(head)
+	last, _ := json.Marshal(chatChunk(model, map[string]any{}, "stop"))
+	return SSEFrame(string(first)) + SSEFrame(string(last)) + "data: [DONE]\n\n"
+}
+
+/*
+ * DropCallsStream re-emits the calls that survived as ordinary tool-call deltas.
+ *
+ * ⚠️ Each survivor is sent COMPLETE in one delta — id, name and the whole argument
+ * string — rather than split the way a provider streams it. A client concatenates
+ * argument deltas by index, so one complete delta assembles to the same call, and
+ * splitting it would only add ways to be cut short.
+ *
+ * ⚠️ Indexes are RENUMBERED from zero over the survivors. They must be: index is the
+ * client's accumulator key, so keeping the original index of call 2 after call 0 was
+ * refused leaves a hole that some clients render as an empty call.
+ */
+func (openAIChat) DropCallsStream(model string, survivors []Action, notice string) (string, bool) {
+	var b strings.Builder
+	for i, a := range survivors {
+		args := a.Arguments
+		if args == "" {
+			args = "{}"
+		}
+		chunk := chatChunk(model, map[string]any{"tool_calls": []map[string]any{{
+			"index": i, "id": a.ID, "type": "function",
+			"function": map[string]any{"name": a.Name, "arguments": args},
+		}}}, "")
+		raw, err := json.Marshal(chunk)
+		if err != nil {
+			return "", false
+		}
+		b.WriteString(SSEFrame(string(raw)))
+	}
+	notes, err := json.Marshal(chatChunk(model, map[string]any{"content": "\n\n" + notice}, ""))
+	if err != nil {
+		return "", false
+	}
+	b.WriteString(SSEFrame(string(notes)))
+	finish := "tool_calls"
+	if len(survivors) == 0 {
+		finish = "stop"
+	}
+	last, err := json.Marshal(chatChunk(model, map[string]any{}, finish))
+	if err != nil {
+		return "", false
+	}
+	b.WriteString(SSEFrame(string(last)))
+	b.WriteString("data: [DONE]\n\n")
+	return b.String(), true
+}
+
+// RetractSoft: one more content delta carrying the notice, then a normal stop.
+// Mid-stream this is exactly what a client expects — chunks are additive.
+func (openAIChat) RetractSoft(model, notice string) string {
+	first, _ := json.Marshal(chatChunk(model, map[string]any{"content": "\n\n" + notice}, ""))
+	last, _ := json.Marshal(chatChunk(model, map[string]any{}, "stop"))
+	return SSEFrame(string(first)) + SSEFrame(string(last)) + "data: [DONE]\n\n"
+}
+
+func (openAIChat) DropCalls(body string, paths []string, notice string) (string, bool) {
+	ordered := dropGroups(paths)
+	if ordered == nil || !allResolve(body, ordered) {
+		return body, false
+	}
+	out := body
+	for _, p := range ordered {
+		next, err := sjson.Delete(out, p)
+		if err != nil {
+			return body, false
+		}
+		out = next
+	}
+	const msg = "choices.0.message"
+	/*
+	 * ⚠️ What SURVIVED decides the finish reason, and getting it wrong breaks the loop
+	 * in whichever direction it is wrong: `tool_calls` with an empty array leaves a
+	 * harness waiting for calls that will never arrive, and `stop` while calls remain
+	 * makes it discard work the policy allowed.
+	 */
+	remaining := len(gjson.Get(out, msg+".tool_calls").Array())
+	finish := "tool_calls"
+	if remaining == 0 {
+		finish = "stop"
+		// An empty array is not the same as no array to every client; the model asked
+		// for nothing that survived, so say exactly that.
+		if next, err := sjson.Delete(out, msg+".tool_calls"); err == nil {
+			out = next
+		}
+	}
+	next, err := sjson.Set(out, msg+".content",
+		withNotice(gjson.Get(out, msg+".content").String(), notice))
+	if err != nil {
+		return body, false
+	}
+	out = next
+	if next, err := sjson.Set(out, "choices.0.finish_reason", finish); err == nil {
+		out = next
+	}
+	if next, err := sjson.SetRaw(out, "x_ogr", `{"decision":"block","continuation":"drop_calls"}`); err == nil {
+		out = next
+	}
+	return out, true
+}
+
+func chatChunk(model string, delta map[string]any, finish string) map[string]any {
+	choice := map[string]any{"index": 0, "delta": delta}
+	if finish != "" {
+		choice["finish_reason"] = finish
+	}
+	return map[string]any{
+		"id": "chatcmpl-ogr", "object": "chat.completion.chunk", "model": model,
+		"choices": []map[string]any{choice},
+	}
+}
+
+// --- streaming ---------------------------------------------------------------
+
+func (openAIChat) NewDecoder(r *Restorer) Decoder {
+	return &chatDecoder{r: r, calls: map[int]*streamCall{}}
+}
+
+// streamCall accumulates one tool call's deltas, which concatenate by index.
+type streamCall struct {
+	ID   string
+	Name string
+	Args strings.Builder
+	// pending is the restorer's held-back tail for THIS call's arguments.
+	pending string
+}
+
+type chatDecoder struct {
+	r *Restorer
+
+	text      strings.Builder
+	reasoning strings.Builder
+	calls     map[int]*streamCall
+	usage     *Usage
+
+	textBuf      string
+	reasoningBuf string
+
+	// reasoningSeen[i] records that this stream carried chatReasoningFields[i], so
+	// a flushed tail is emitted under every spelling the client has been reading —
+	// emitting only the first would leave a mirroring vendor's client short its
+	// last few characters, which is the defect Flush exists to prevent.
+	reasoningSeen [len(chatReasoningFields)]bool
+
+	// frames counts data payloads recognised as THIS protocol's — a chunk
+	// carrying a `choices` array or a `usage` object, or the `[DONE]`
+	// terminator, which no other protocol of the three emits. See
+	// protocol.FrameCounter for what the count separates.
+	frames int
+
+	// suppressUsage: the GATEWAY injected `include_usage`, so the terminal
+	// usage-only frame is one the client never asked for and must not receive.
+	suppressUsage bool
+
+	// ended records a `finish_reason` or `[DONE]` — see protocol.EndWatcher.
+	ended bool
+}
+
+// SawEnd — see protocol.EndWatcher.
+func (d *chatDecoder) SawEnd() bool { return d.ended }
+
+// SawCalls — see protocol.CallWatcher. A chunk carrying a tool-call delta has
+// already allocated the accumulator, so a non-empty map IS "bytes went out".
+func (d *chatDecoder) SawCalls() bool { return len(d.calls) > 0 }
+
+// RecognizedFrames — see protocol.FrameCounter.
+func (d *chatDecoder) RecognizedFrames() int { return d.frames }
+
+// SuppressUsageFrame arms the swallow — see UsageFrameSuppressor.
+func (d *chatDecoder) SuppressUsageFrame() { d.suppressUsage = true }
+
+// ContentBytes — see protocol.ContentMeter. Builder lengths, so it is O(#calls)
+// per ask, never a rebuild of the reply.
+func (d *chatDecoder) ContentBytes() int {
+	n := d.text.Len() + d.reasoning.Len()
+	for _, c := range d.calls {
+		n += c.Args.Len()
+	}
+	return n
+}
+
+func (d *chatDecoder) Output() Output {
+	out := Output{Text: d.text.String(), Reasoning: d.reasoning.String(), Usage: d.usage}
+	idx := make([]int, 0, len(d.calls))
+	for i := range d.calls {
+		idx = append(idx, i)
+	}
+	sort.Ints(idx)
+	for _, i := range idx {
+		c := d.calls[i]
+		out.Actions = append(out.Actions, Action{ID: c.ID, Name: c.Name, Arguments: c.Args.String()})
+	}
+	return out
+}
+
+func (d *chatDecoder) Line(line string, isLast bool) string {
+	data, ok := SSEData(line)
+	if !ok {
+		return line
+	}
+	if data == "[DONE]" {
+		d.frames++
+		d.ended = true
+		return d.Flush() + line
+	}
+	parsed := gjson.Parse(data)
+	if !parsed.IsObject() {
+		return line
+	}
+	if parsed.Get("choices").IsArray() || parsed.Get("usage").IsObject() {
+		d.frames++
+	}
+
+	// Token usage, when a chunk carries it (the terminal frame under
+	// include_usage; some vendors put it on the last content chunk instead).
+	// Last non-null wins.
+	if u := chatUsage(parsed.Get("usage")); u != nil {
+		d.usage = u
+		// The usage-only frame the gateway's OWN opt-in produced: captured above,
+		// withheld from a client that never asked for it. A frame that also
+		// carries choices is part of the answer and always passes.
+		if d.suppressUsage && len(parsed.Get("choices").Array()) == 0 {
+			return ""
+		}
+	}
+
+	// ⚠️ The stream is ENDING, so nothing more can complete a half-matched token:
+	// whatever the restorer is holding is text, and it has to be written out BEFORE
+	// the frame that closes the answer. Without this it was silently dropped — an
+	// answer ending in `$`, or in the first characters of a placeholder, simply lost
+	// its last few characters, and only the client could ever have noticed.
+	prefix := ""
+	finished := parsed.Get("choices.0.finish_reason")
+	if finished.Exists() && finished.Type == gjson.String {
+		prefix = d.Flush()
+		d.ended = true
+	}
+
+	modified := data
+	if c := parsed.Get("choices.0.delta.content"); c.Type == gjson.String {
+		d.text.WriteString(c.String())
+		modified = d.rewrite(modified, "choices.0.delta.content", &d.textBuf, c.String(), isLast)
+	}
+	// ⚠️ ACCUMULATED ONCE, RESTORED ONCE, THEN COPIED — see chatReasoningFields.
+	// The pending tail is ONE buffer, so feeding a mirrored pair through the
+	// restorer twice would consume it twice and the second field would come out
+	// mangled. The other spelling gets a COPY of the restored value, and only when
+	// it arrived EQUAL to the field we restored: two fields carrying different text
+	// are two different things, and overwriting one with the other would invent
+	// content the model never produced.
+	if i, original, ok := chatDeltaReasoning(parsed); ok {
+		field := chatReasoningFields[i]
+		d.reasoningSeen[i] = true
+		d.reasoning.WriteString(original)
+		modified = d.rewrite(modified, "choices.0.delta."+field, &d.reasoningBuf, original, isLast)
+		restored := gjson.Get(modified, "choices.0.delta."+field).String()
+		for j, other := range chatReasoningFields {
+			if j == i {
+				continue
+			}
+			o := parsed.Get("choices.0.delta." + other)
+			if o.Type != gjson.String || o.String() != original {
+				continue
+			}
+			d.reasoningSeen[j] = true
+			if next, err := sjson.Set(modified, "choices.0.delta."+other, restored); err == nil {
+				modified = next
+			}
+		}
+	}
+	for n, tc := range parsed.Get("choices.0.delta.tool_calls").Array() {
+		idx := int(tc.Get("index").Int())
+		acc := d.calls[idx]
+		if acc == nil {
+			acc = &streamCall{}
+			d.calls[idx] = acc
+		}
+		if id := tc.Get("id").String(); id != "" {
+			acc.ID = id
+		}
+		if name := tc.Get("function.name").String(); name != "" {
+			acc.Name = name
+		}
+		args := tc.Get("function.arguments")
+		if args.Type != gjson.String {
+			continue
+		}
+		acc.Args.WriteString(args.String())
+		// ⚠️ Restored the SAME way as prose — through a pending tail — because a token
+		// split across two argument deltas is the normal case, not the exception: the
+		// deltas are token-sized and the placeholder is fourteen characters. Restoring
+		// only when a whole token fits inside one delta is what handed the client
+		// `{"to": "${OGR_EMAIL_1}"}` and made it act on a value that names nothing. The
+		// client's JSON parse sees the concatenation, so what matters is that the
+		// SEQUENCE comes out restored, not that any one delta does.
+		restored := d.r.FeedJSON(&acc.pending, args.String(), isLast)
+		if next, err := sjson.Set(modified, "choices.0.delta.tool_calls."+strconv.Itoa(n)+".function.arguments", restored); err == nil {
+			modified = next
+		}
+	}
+	return prefix + "data: " + modified
+}
+
+// chatDeltaReasoning picks the reasoning field this delta carries: the index into
+// chatReasoningFields of the first spelling PRESENT, and its text. A frame with
+// neither answers false.
+func chatDeltaReasoning(parsed gjson.Result) (int, string, bool) {
+	for i, path := range chatReasoningPaths {
+		if c := parsed.Get(path); c.Type == gjson.String {
+			return i, c.String(), true
+		}
+	}
+	return 0, "", false
+}
+
+func (d *chatDecoder) rewrite(frame, path string, buf *string, original string, isLast bool) string {
+	restored := d.r.Feed(buf, original, isLast)
+	if restored == original {
+		return frame
+	}
+	if next, err := sjson.Set(frame, path, restored); err == nil {
+		return next
+	}
+	return frame
+}
+
+func (d *chatDecoder) Flush() string {
+	type fn struct {
+		Arguments string `json:"arguments"`
+	}
+	type call struct {
+		Index    int `json:"index"`
+		Function fn  `json:"function"`
+	}
+	// ⚠️ A MAP, not a tagged struct, because the reasoning field's NAME is the
+	// stream's, not ours: a reply that arrived as `reasoning` must not have its
+	// tail flushed under `reasoning_content`, which the client is not reading.
+	delta := map[string]any{}
+	if d.textBuf != "" {
+		delta["content"] = d.textBuf
+	}
+	if d.reasoningBuf != "" {
+		sighted := false
+		for i, seen := range d.reasoningSeen {
+			if seen {
+				delta[chatReasoningFields[i]] = d.reasoningBuf
+				sighted = true
+			}
+		}
+		// A held tail with no sighting is unreachable — the buffer only fills from a
+		// delta — but a tail dropped on the floor is exactly the loss Flush exists to
+		// prevent, so it goes out under the commoner spelling rather than nowhere.
+		if !sighted {
+			delta[chatReasoningFields[0]] = d.reasoningBuf
+		}
+	}
+	d.textBuf, d.reasoningBuf = "", ""
+
+	var calls []call
+	idx := make([]int, 0, len(d.calls))
+	for i := range d.calls {
+		idx = append(idx, i)
+	}
+	sort.Ints(idx)
+	for _, i := range idx {
+		c := d.calls[i]
+		if c.pending == "" {
+			continue
+		}
+		calls = append(calls, call{Index: i, Function: fn{Arguments: c.pending}})
+		c.pending = ""
+	}
+	if len(calls) > 0 {
+		delta["tool_calls"] = calls
+	}
+	if len(delta) == 0 {
+		return ""
+	}
+	out, err := json.Marshal(map[string]any{
+		"id": "chatcmpl-ogr-flush", "object": "chat.completion.chunk",
+		"choices": []map[string]any{{"index": 0, "delta": delta}},
+	})
+	if err != nil {
+		return ""
+	}
+	return SSEFrame(string(out))
+}

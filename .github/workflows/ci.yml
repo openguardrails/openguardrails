@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    # Root pytest covers the benchmark suite plus every Python integration
+    # (hermes, langgraph, litellm, mitmproxy, openai-anthropic) — the
+    # testpaths list lives in pyproject.toml. All suites are offline: each
+    # spins its own strict mock runtime that 400s any event deviating from
+    # the v0.8 GuardEvent schema, so a passing run is also a wire-conformance
+    # check.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest
+      - name: Test
+        run: python -m pytest
+
+  javascript:
+    # The dsh plugin (@openguardrails/dsh) — the v0.8 reference agent-direct
+    # integration — builds and tests through the npm workspace. The hook
+    # plugins (claude-code, codex, openclaw, opencode) are deliberately NOT
+    # workspace members: each is standalone-testable, and their suites run
+    # here directly against their own strict mock runtimes.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+      - name: Hook plugins (standalone)
+        run: |
+          for d in claude-code codex openclaw opencode; do
+            echo "== $d"
+            (cd "integrations/agent/$d" && npm test)
+          done
+
+  higress:
+    # The Higress WASM plugin ("OpenGuardrails AIRS"). Everything worth
+    # testing in it — span offsets, SSE chunk boundaries, tail-hold release
+    # order, the nine-field wire — is ordinary Go and runs on the host; the
+    # wasm build is the compile check for the parts that only exist inside a
+    # gateway.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: integrations/gateway/higress/go.sum
+      - name: Test
+        working-directory: integrations/gateway/higress
+        run: |
+          test -z "$(gofmt -l .)" || { echo "::error::gofmt"; gofmt -l .; exit 1; }
+          go vet ./...
+          make test
+      - name: Build plugin.wasm
+        working-directory: integrations/gateway/higress
+        run: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o plugin.wasm .
+
+  java-bridge:
+    # The Java bridge: a library a Java service embeds, plus a runnable reference
+    # proxy. The suite is offline by construction — a mock runtime and a mock
+    # provider, both stdlib, with the REAL proxy between them, so the streamed byte
+    # path is exercised as a client actually sees it.
+    #
+    # Java 11 is the floor the modules compile against (`maven.compiler.release`);
+    # the toolchain here is newer on purpose, so a construct that only compiles on a
+    # recent JDK still fails the release check rather than passing unnoticed.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+      - name: Test
+        working-directory: integrations/bridge/java
+        run: mvn -B --no-transfer-progress verify

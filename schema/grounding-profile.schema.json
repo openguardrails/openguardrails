@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openguardrails.com/schema/1.0/grounding-profile.schema.json",
+  "title": "GroundingProfile",
+  "description": "An operator's declaration of the EVIDENCE ENVELOPE one workspace's agents answer inside: which identifiers count as references, what the answer may assert about a resolved record, and what a conclusion of a declared class must show before it may be rendered. OGR 1.7 (draft). CONFIGURATION, NOT WIRE: a profile is held by the runtime and resolved by agent_workspace; it MUST NOT appear in a GuardEvent and a runtime MUST NOT accept one from a producer. It is evaluated against a RECORD PROVIDER whose credential is the runtime's. An absent part checks nothing, and a workspace with no profile has no declared envelope. See specification/grounding.md.",
+  "type": "object",
+  "required": ["profile"],
+  "additionalProperties": false,
+  "properties": {
+    "profile": {
+      "type": "string", "minLength": 1, "maxLength": 128,
+      "description": "The profile's name. Named in the finding's `detector` ('grounding:<name>@<provider>') so a finding is traceable to the document that produced it."
+    },
+    "version": {
+      "type": "string", "maxLength": 64,
+      "description": "OPTIONAL operator-chosen revision label, recorded with findings so a decision can be replayed against the envelope in force."
+    },
+    "workspace": {
+      "type": "string", "maxLength": 128,
+      "description": "The workspace whose policy set this profile belongs to. Resolution is the runtime's; this documents the intended binding and is not an assertion a producer may make."
+    },
+    "domain": {
+      "type": "string", "maxLength": 64,
+      "description": "A LABEL for the vertical this profile serves ('intellectual-property', 'life-sciences'). It is not a taxonomy axis and never appears in a category id: every finding maps onto the neutral safety.hallucination.* / safety.unsafe_advice.* leaves."
+    },
+    "provider": {
+      "type": "string", "maxLength": 64,
+      "description": "OPTIONAL non-secret NAME of the record provider this profile expects ('epo-ops', 'clinicaltrials-gov', a vendor). Advisory; the runtime holds the credential and makes the lookups. MUST NOT be an address and MUST NOT carry a credential."
+    },
+    "on_violation": {
+      "enum": ["flag", "block"], "default": "flag",
+      "description": "The default outcome for a grounding finding. `flag` — an allow carrying the finding — is the default, unlike the mandate's: an epistemic guardrail's usual remedy is that the answer should say less, not that it should not exist."
+    },
+    "outcomes": {
+      "type": "object",
+      "description": "Per-leaf override of on_violation. The seed profiles set safety.hallucination.citation to `block`: nothing downstream can be built on a fabricated record.",
+      "propertyNames": { "pattern": "^safety\\.(hallucination\\.(citation|attribute|unsupported)|unsafe_advice\\.(overreach|evidence_gap|jurisdiction|temporal))$" },
+      "additionalProperties": { "enum": ["flag", "block"] }
+    },
+    "references": {
+      "type": "array", "maxItems": 64,
+      "description": "WHAT THE ANSWER POINTS AT: the identifier grammars of the domain. Exactly one of `pattern` (a regex over the text) or `lexicon` (entity linking by the provider's name dictionary) per entry.",
+      "items": {
+        "type": "object",
+        "required": ["type"],
+        "additionalProperties": false,
+        "properties": {
+          "type": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-z][a-z0-9_]*$",
+                    "description": "The record type the provider is asked for: 'patent', 'clinical_trial', 'drug', 'doi', 'case'." },
+          "pattern": { "type": "string", "maxLength": 1024, "description": "Regex recognising a surface form of the identifier." },
+          "flags": { "type": "string", "pattern": "^[ims]*$" },
+          "lexicon": { "type": "boolean", "description": "Link by the provider's name dictionary instead of a grammar. ⚠️ A lexicon cannot see an INVENTED name; that case is a judge's." },
+          "normalize": {
+            "type": "object", "additionalProperties": false,
+            "description": "How a surface form becomes a provider key.",
+            "properties": {
+              "strip": { "type": "string", "maxLength": 256, "description": "Regex of characters removed anywhere (whitespace, thousands separators, slashes)." },
+              "strip_suffix": { "type": "string", "maxLength": 256, "description": "Regex removed from the end (a kind code such as B2 / A1, trailing punctuation)." },
+              "upper": { "type": "boolean" }
+            }
+          },
+          "provider_attributes": {
+            "type": "array", "maxItems": 64, "items": { "type": "string", "maxLength": 64 },
+            "description": "The record attributes this profile reads — what a provider must be able to answer to serve it. Documents the provider contract; neutral as to who serves it."
+          },
+          "note": { "type": "string", "maxLength": 512 }
+        }
+      }
+    },
+    "assertions": {
+      "type": "array", "maxItems": 256,
+      "description": "WHAT THE ANSWER SAYS ABOUT A RECORD: a text pattern that asserts an attribute value, compared against the resolved record of the nearest reference in its sentence. A contradiction is safety.hallucination.attribute.",
+      "items": {
+        "type": "object",
+        "required": ["reference", "attribute", "value", "pattern"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "maxLength": 64 },
+          "rule": { "type": "string", "maxLength": 32, "description": "The domain rule this implements (OG-IP-003, OG-LS-002). Documentation, not an id the taxonomy registers." },
+          "reference": { "type": "string", "maxLength": 64, "description": "The reference type the assertion is about." },
+          "attribute": { "type": "string", "maxLength": 128, "description": "Dotted path into the record; may cite a capture group ('approvals.$1.status')." },
+          "value": { "type": "string", "maxLength": 128, "description": "The asserted value; may cite a capture group ('$1')." },
+          "pattern": { "type": "string", "maxLength": 1024 },
+          "flags": { "type": "string", "pattern": "^[ims]*$" },
+          "mode": { "enum": ["equals", "contains", "date"], "default": "equals" },
+          "map": { "type": "object", "additionalProperties": { "type": "string", "maxLength": 128 },
+                   "description": "Surface form → provider vocabulary ('III' → '3', 'United States' → 'US')." },
+          "absent": { "enum": ["unjudged", "mismatch"], "default": "unjudged",
+                      "description": "What an attribute the record does not carry means. `unjudged`: the provider did not say. `mismatch`: the attribute is CLOSED-WORLD — the provider enumerates every value that exists (a drug's approvals), so absence is a contradiction." },
+          "note": { "type": "string", "maxLength": 512 }
+        }
+      }
+    },
+    "fields": {
+      "type": "array", "maxItems": 64,
+      "description": "WHAT THE ANSWER MUST SHOW: the evidence fields a conclusion may require. Exactly one of `pattern` (present in the text) or `resolved` (a count of references of a type the provider resolved).",
+      "items": {
+        "type": "object",
+        "required": ["id"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-z][a-z0-9_]*$" },
+          "rule": { "type": "string", "maxLength": 32 },
+          "pattern": { "type": "string", "maxLength": 1024 },
+          "flags": { "type": "string", "pattern": "^[ims]*$" },
+          "min": { "type": "integer", "minimum": 1, "default": 1, "description": "Occurrences of `pattern` required." },
+          "resolved": {
+            "type": "object", "required": ["type"], "additionalProperties": false,
+            "properties": { "type": { "type": "string", "maxLength": 64 }, "min": { "type": "integer", "minimum": 1, "default": 1 } }
+          },
+          "missing": {
+            "enum": ["safety.unsafe_advice.evidence_gap", "safety.unsafe_advice.jurisdiction", "safety.unsafe_advice.temporal"],
+            "default": "safety.unsafe_advice.evidence_gap",
+            "description": "The leaf emitted when a conclusion requires this field and the answer lacks it."
+          },
+          "note": { "type": "string", "maxLength": 512 }
+        }
+      }
+    },
+    "conclusions": {
+      "type": "array", "maxItems": 64,
+      "description": "BEFORE IT MAY CONCLUDE: the conclusion classes of the domain, each with the envelope it requires and the forms of words that render it as decided.",
+      "items": {
+        "type": "object",
+        "required": ["id", "cues"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-z][a-z0-9_]*$" },
+          "rule": { "type": "string", "maxLength": 32 },
+          "verifiability": {
+            "enum": ["record", "structural", "judgment"],
+            "description": "An honest label: `record` is checked against a provider, `structural` from the text alone, `judgment` needs a model judge or a person. A runtime MUST NOT implement a `judgment` rule by lexicon and report it as judged."
+          },
+          "cues": { "type": "array", "minItems": 1, "maxItems": 32, "items": { "type": "string", "maxLength": 512 },
+                    "description": "Regexes whose match means the answer is rendering this class of conclusion." },
+          "determination": { "type": "array", "maxItems": 32, "items": { "type": "string", "maxLength": 512 },
+                             "description": "Regexes matching the DECIDED form — 'infringes', 'is invalid', 'is effective'. A match is safety.unsafe_advice.overreach regardless of how complete the envelope is." },
+          "requires": { "type": "array", "maxItems": 32, "items": { "type": "string", "maxLength": 64 },
+                        "description": "Field ids that must be present; each missing one emits the field's `missing` leaf." },
+          "note": { "type": "string", "maxLength": 512 }
+        }
+      }
+    }
+  }
+}

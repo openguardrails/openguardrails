@@ -1,0 +1,76 @@
+[
+  {
+    "name": "get_quote",
+    "arguments": {
+      "symbol": "BTC-USD"
+    },
+    "_expect": "allow"
+  },
+  {
+    "name": "place_order",
+    "arguments": {
+      "asset_class": "equity:us",
+      "symbol": "NVDA",
+      "side": "buy",
+      "quantity": 300,
+      "venue": "XNAS"
+    },
+    "_expect": "allow"
+  },
+  {
+    "name": "place_order",
+    "arguments": {
+      "asset_class": "crypto",
+      "symbol": "BTC-USD",
+      "side": "buy",
+      "quantity": 2
+    },
+    "_expect": "block"
+  },
+  {
+    "name": "place_order",
+    "arguments": {
+      "asset_class": "equity:us",
+      "symbol": "NVDA",
+      "side": "buy",
+      "quantity": 5000
+    },
+    "_expect": "block"
+  },
+  {
+    "name": "place_order",
+    "arguments": {
+      "asset_class": "equity:us",
+      "symbol": "AAPL",
+      "side": "sell_short",
+      "quantity": 100
+    },
+    "_expect": "block"
+  },
+  {
+    "name": "place_order",
+    "arguments": {
+      "asset_class": "equity:us",
+      "symbol": "GME",
+      "side": "buy",
+      "quantity": 100
+    },
+    "_expect": "block"
+  },
+  {
+    "name": "place_order",
+    "arguments": {
+      "asset_class": "equity:us",
+      "symbol": "PORTFOLIO",
+      "side": "sell_all"
+    },
+    "_expect": "block"
+  },
+  {
+    "name": "withdraw",
+    "arguments": {
+      "amount": 100000
+    },
+    "_expect": "block"
+  }
+]

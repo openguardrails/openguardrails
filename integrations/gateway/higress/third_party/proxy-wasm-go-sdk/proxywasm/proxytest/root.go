@@ -1,0 +1,657 @@
+// Copyright 2020-2024 Tetrate
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package proxytest
+
+import (
+	"fmt"
+	"log"
+	"strings"
+	"unsafe"
+
+	"github.com/higress-group/proxy-wasm-go-sdk/proxywasm/internal"
+	"github.com/higress-group/proxy-wasm-go-sdk/proxywasm/types"
+)
+
+type (
+	rootHostEmulator struct {
+		activeCalloutID  uint32
+		logs             [internal.LogLevelMax][]string
+		tickPeriod       uint32
+		foreignFunctions map[string]func([]byte) []byte
+
+		queues        map[uint32][][]byte
+		queueNameID   map[string]uint32
+		sharedDataKVS map[string]*sharedData
+
+		httpContextIDToCalloutInfos map[uint32][]HttpCalloutAttribute // key: contextID
+		httpCalloutIDToContextID    map[uint32]uint32                 // key: calloutID
+		httpCalloutResponse         map[uint32]struct {               // key: calloutID
+			headers  [][2]string
+			trailers [][2]string
+			body     []byte
+		}
+
+		redisContextIDToCalloutInfos map[uint32][]RedisCalloutAttribute // key: contextID
+		redisCalloutIDToContextID    map[uint32]uint32                  // key: calloutID
+		redisCalloutResponse         map[uint32]struct {                // key: calloutID
+			status   int32
+			response []byte
+		}
+
+		metricIDToType  map[uint32]internal.MetricType
+		metricNameToID  map[string]uint32
+		metricIDToValue map[uint32]uint64
+
+		pluginConfiguration, vmConfiguration []byte
+
+		// Add unique ID counters
+		nextHttpCalloutID  uint32
+		nextRedisCalloutID uint32
+	}
+
+	HttpCalloutAttribute struct {
+		CalloutID uint32
+		Upstream  string
+		Headers   [][2]string
+		Trailers  [][2]string
+		Body      []byte
+	}
+
+	RedisCalloutAttribute struct {
+		CalloutID uint32
+		Upstream  string
+		Query     []byte
+	}
+
+	sharedData struct {
+		data []byte
+		cas  uint32
+	}
+)
+
+func newRootHostEmulator(pluginConfiguration, vmConfiguration []byte) *rootHostEmulator {
+	host := &rootHostEmulator{
+		foreignFunctions:            map[string]func([]byte) []byte{},
+		queues:                      map[uint32][][]byte{},
+		queueNameID:                 map[string]uint32{},
+		sharedDataKVS:               map[string]*sharedData{},
+		metricIDToValue:             map[uint32]uint64{},
+		metricIDToType:              map[uint32]internal.MetricType{},
+		metricNameToID:              map[string]uint32{},
+		httpContextIDToCalloutInfos: map[uint32][]HttpCalloutAttribute{},
+		httpCalloutIDToContextID:    map[uint32]uint32{},
+		httpCalloutResponse: map[uint32]struct {
+			headers  [][2]string
+			trailers [][2]string
+			body     []byte
+		}{},
+
+		redisContextIDToCalloutInfos: map[uint32][]RedisCalloutAttribute{},
+		redisCalloutIDToContextID:    map[uint32]uint32{},
+		redisCalloutResponse: map[uint32]struct {
+			status   int32
+			response []byte
+		}{},
+
+		pluginConfiguration: pluginConfiguration,
+		vmConfiguration:     vmConfiguration,
+	}
+	return host
+}
+
+// impl internal.ProxyWasmHost
+func (r *rootHostEmulator) ProxyLog(logLevel internal.LogLevel, messageData *byte, messageSize int32) internal.Status {
+	str := unsafe.String(messageData, messageSize)
+
+	log.Printf("proxy_%s_log: %s", logLevel, str)
+	r.logs[logLevel] = append(r.logs[logLevel], str)
+	return internal.StatusOK
+}
+
+// impl internal.ProxyWasmHost
+func (r *rootHostEmulator) ProxySetTickPeriodMilliseconds(period uint32) internal.Status {
+	r.tickPeriod = period
+	return internal.StatusOK
+}
+
+// impl internal.ProxyWasmHost
+func (r *rootHostEmulator) ProxyRegisterSharedQueue(nameData *byte, nameSize int32, returnID *uint32) internal.Status {
+	name := unsafe.String(nameData, nameSize)
+	if id, ok := r.queueNameID[name]; ok {
+		*returnID = id
+		return internal.StatusOK
+	}
+
+	id := uint32(len(r.queues))
+	r.queues[id] = [][]byte{}
+	r.queueNameID[name] = id
+	*returnID = id
+	return internal.StatusOK
+}
+
+// impl internal.ProxyWasmHost
+func (r *rootHostEmulator) ProxyDequeueSharedQueue(queueID uint32, returnValueData unsafe.Pointer, returnValueSize *int32) internal.Status {
+	queue, ok := r.queues[queueID]
+	if !ok {
+		log.Printf("queue %d is not found", queueID)
+		return internal.StatusNotFound
+	} else if len(queue) == 0 {
+		log.Printf("queue %d is empty", queueID)
+		return internal.StatusEmpty
+	}
+
+	data := queue[0]
+	*(**byte)(returnValueData) = &data[0]
+	*returnValueSize = int32(len(data))
+	r.queues[queueID] = queue[1:]
+	return internal.StatusOK
+}
+
+// impl internal.ProxyWasmHost
+func (r *rootHostEmulator) ProxyEnqueueSharedQueue(queueID uint32, valueData *byte, valueSize int32) internal.Status {
+	queue, ok := r.queues[queueID]
+	if !ok {
+		log.Printf("queue %d is not found", queueID)
+		return internal.StatusNotFound
+	}
+
+	r.queues[queueID] = append(queue, unsafe.Slice(valueData, valueSize))
+	internal.ProxyOnQueueReady(PluginContextID, queueID)
+	return internal.StatusOK
+}
+
+// impl internal.ProxyWasmHost
+func (r *rootHostEmulator) ProxyGetSharedData(keyData *byte, keySize int32,
+	returnValueData unsafe.Pointer, returnValueSize *int32, returnCas *uint32) internal.Status {
+	key := unsafe.String(keyData, keySize)
+
+	value, ok := r.sharedDataKVS[key]
+	if !ok {
+		return internal.StatusNotFound
+	}
+
+	*returnValueSize = int32(len(value.data))
+	if len(value.data) > 0 {
+		*(**byte)(returnValueData) = &value.data[0]
+	}
+	*returnCas = value.cas
+	return internal.StatusOK
+}
+
+// impl internal.ProxyWasmHost
+func (r *rootHostEmulator) ProxySetSharedData(keyData *byte, keySize int32,
+	valueData *byte, valueSize int32, cas uint32) internal.Status {
+	// Copy data provided by plugin to keep ownership within host. Otherwise, when
+	// plugin deallocates the memory could be modified.
+	key := strings.Clone(unsafe.String(keyData, keySize))
+	v := unsafe.Slice(valueData, valueSize)
+	value := make([]byte, len(v))
+	copy(value, v)
+
+	prev, ok := r.sharedDataKVS[key]
+	if !ok {
+		r.sharedDataKVS[key] = &sharedData{
+			data: value,
+			cas:  cas + 1,
+		}
+		return internal.StatusOK
+	}
+
+	if prev.cas != cas {
+		return internal.StatusCasMismatch
+	}
+
+	r.sharedDataKVS[key].cas = cas + 1
+	r.sharedDataKVS[key].data = value
+	return internal.StatusOK
+}
+
+// impl internal.ProxyWasmHost
+func (r *rootHostEmulator) ProxyDefineMetric(metricType internal.MetricType,
+	metricNameData *byte, metricNameSize int32, returnMetricIDPtr *uint32) internal.Status {
+	name := unsafe.String(metricNameData, metricNameSize)
+	id, ok := r.metricNameToID[name]
+	if !ok {
+		id = uint32(len(r.metricNameToID))
+		r.metricNameToID[name] = id
+		r.metricIDToValue[id] = 0
+		r.metricIDToType[id] = metricType
+	}
+	*returnMetricIDPtr = id
+	return internal.StatusOK
+}
+
+// impl internal.ProxyWasmHost
+func (r *rootHostEmulator) ProxyIncrementMetric(metricID uint32, offset int64) internal.Status {
+	val, ok := r.metricIDToValue[metricID]
+	if !ok {
+		return internal.StatusBadArgument
+	}
+
+	r.metricIDToValue[metricID] = val + uint64(offset)
+	return internal.StatusOK
+}
+
+// impl internal.ProxyWasmHost
+func (r *rootHostEmulator) ProxyRecordMetric(metricID uint32, value uint64) internal.Status {
+	_, ok := r.metricIDToValue[metricID]
+	if !ok {
+		return internal.StatusBadArgument
+	}
+	r.metricIDToValue[metricID] = value
+	return internal.StatusOK
+}
+
+// impl internal.ProxyWasmHost
+func (r *rootHostEmulator) ProxyGetMetric(metricID uint32, returnMetricValue *uint64) internal.Status {
+	value, ok := r.metricIDToValue[metricID]
+	if !ok {
+		return internal.StatusBadArgument
+	}
+	*returnMetricValue = value
+	return internal.StatusOK
+}
+
+// impl internal.ProxyWasmHost
+func (r *rootHostEmulator) ProxyHttpCall(upstreamData *byte, upstreamSize int32, headerData *byte, headerSize int32, bodyData *byte,
+	bodySize int32, trailersData *byte, trailersSize int32, timeout uint32, calloutIDPtr *uint32) internal.Status {
+	upstream := unsafe.String(upstreamData, upstreamSize)
+	body := unsafe.String(bodyData, bodySize)
+	headers := deserializeRawBytePtrToMap(headerData, headerSize)
+	trailers := deserializeRawBytePtrToMap(trailersData, trailersSize)
+
+	log.Printf("[http callout to %s] timeout: %d", upstream, timeout)
+	log.Printf("[http callout to %s] headers: %v", upstream, headers)
+	log.Printf("[http callout to %s] body: %s", upstream, body)
+	log.Printf("[http callout to %s] trailers: %v", upstream, trailers)
+
+	calloutID := r.nextHttpCalloutID
+	r.nextHttpCalloutID++
+	contextID := internal.VMStateGetActiveContextID()
+	r.httpCalloutIDToContextID[calloutID] = contextID
+	r.httpContextIDToCalloutInfos[contextID] = append(r.httpContextIDToCalloutInfos[contextID], HttpCalloutAttribute{
+		CalloutID: calloutID,
+		Upstream:  upstream,
+		Headers:   headers,
+		Trailers:  trailers,
+		Body:      []byte(body),
+	})
+
+	*calloutIDPtr = calloutID
+	return internal.StatusOK
+}
+
+// impl internal.ProxyWasmHost
+func (r *rootHostEmulator) ProxyRedisCall(upstreamData *byte, upstreamSize int32, queryData *byte, querySize int32, calloutIDPtr *uint32) internal.Status {
+	upstream := unsafe.String(upstreamData, upstreamSize)
+	query := unsafe.Slice(queryData, querySize)
+
+	log.Printf("[redis callout to %s] query: %v", upstream, query)
+
+	calloutID := r.nextRedisCalloutID
+	r.nextRedisCalloutID++
+	contextID := internal.VMStateGetActiveContextID()
+	r.redisCalloutIDToContextID[calloutID] = contextID
+	r.redisContextIDToCalloutInfos[contextID] = append(r.redisContextIDToCalloutInfos[contextID], RedisCalloutAttribute{
+		CalloutID: calloutID,
+		Upstream:  upstream,
+		Query:     query,
+	})
+
+	*calloutIDPtr = calloutID
+	return internal.StatusOK
+}
+
+// impl internal.ProxyWasmHost
+func (r *rootHostEmulator) ProxyRedisInit(upstreamData *byte, upstreamSize int32, usernameData *byte, usernameSize int32, passwordData *byte, passwordSize int32, timeout uint32) internal.Status {
+	upstream := unsafe.String(upstreamData, upstreamSize)
+	username := unsafe.String(usernameData, usernameSize)
+	password := unsafe.String(passwordData, passwordSize)
+
+	log.Printf("[redis init] upstream: %s, username: %s, timeout: %d", upstream, username, timeout)
+	log.Printf("[redis init] password: %s", password)
+
+	return internal.StatusOK
+}
+
+// impl internal.ProxyWasmHost
+func (r *rootHostEmulator) RegisterForeignFunction(name string, f func([]byte) []byte) {
+	r.foreignFunctions[name] = f
+}
+
+// impl internal.ProxyWasmHost
+func (r *rootHostEmulator) ProxyCallForeignFunction(funcNamePtr *byte, funcNameSize int32, paramPtr *byte, paramSize int32, returnData unsafe.Pointer, returnSize *int32) internal.Status {
+	funcName := unsafe.String(funcNamePtr, funcNameSize)
+	param := unsafe.Slice(paramPtr, paramSize)
+
+	log.Printf("[foreign call] funcname: %s", funcName)
+	log.Printf("[foreign call] param: %s", param)
+
+	f, ok := r.foreignFunctions[funcName]
+	if !ok {
+		log.Fatalf("%s not registered as a foreign function", funcName)
+	}
+	ret := f(param)
+	*(**byte)(returnData) = &ret[0]
+	*returnSize = int32(len(ret))
+
+	return internal.StatusOK
+}
+
+// // impl internal.ProxyWasmHost: delegated from hostEmulator
+func (r *rootHostEmulator) rootHostEmulatorProxyGetHeaderMapPairs(mapType internal.MapType, returnValueData unsafe.Pointer, returnValueSize *int32) internal.Status {
+	res, ok := r.httpCalloutResponse[r.activeCalloutID]
+	if !ok {
+		log.Fatalf("callout response unregistered for %d", r.activeCalloutID)
+	}
+
+	var raw []byte
+	switch mapType {
+	case internal.MapTypeHttpCallResponseHeaders:
+		raw = internal.SerializeMap(res.headers)
+	case internal.MapTypeHttpCallResponseTrailers:
+		raw = internal.SerializeMap(res.trailers)
+	default:
+		panic("unreachable: maybe a bug in this host emulation or SDK")
+	}
+
+	*(**byte)(returnValueData) = &raw[0]
+	*returnValueSize = int32(len(raw))
+	return internal.StatusOK
+}
+
+// // impl internal.ProxyWasmHost: delegated from hostEmulator
+func (r *rootHostEmulator) rootHostEmulatorProxyGetMapValue(mapType internal.MapType, keyData *byte,
+	keySize int32, returnValueData unsafe.Pointer, returnValueSize *int32) internal.Status {
+	res, ok := r.httpCalloutResponse[r.activeCalloutID]
+	if !ok {
+		log.Fatalf("callout response unregistered for %d", r.activeCalloutID)
+	}
+
+	var hs [][2]string
+	switch mapType {
+	case internal.MapTypeHttpCallResponseHeaders:
+		hs = res.headers
+	case internal.MapTypeHttpCallResponseTrailers:
+		hs = res.trailers
+	default:
+		panic("unimplemented")
+	}
+
+	key := strings.ToLower(unsafe.String(keyData, keySize))
+
+	for _, h := range hs {
+		if h[0] == key {
+			v := []byte(h[1])
+			*(**byte)(returnValueData) = &v[0]
+			*returnValueSize = int32(len(v))
+			return internal.StatusOK
+		}
+	}
+
+	return internal.StatusNotFound
+}
+
+// // impl internal.ProxyWasmHost: delegated from hostEmulator
+func (r *rootHostEmulator) rootHostEmulatorProxyGetBufferBytes(bt internal.BufferType, start int32, maxSize int32,
+	returnBufferData unsafe.Pointer, returnBufferSize *int32) internal.Status {
+	var buf []byte
+	switch bt {
+	case internal.BufferTypePluginConfiguration:
+		buf = r.pluginConfiguration
+	case internal.BufferTypeVMConfiguration:
+		buf = r.vmConfiguration
+	case internal.BufferTypeHttpCallResponseBody:
+		activeID := internal.VMStateGetActiveContextID()
+		res, ok := r.httpCalloutResponse[r.activeCalloutID]
+		if !ok {
+			log.Fatalf("callout response unregistered for %d", activeID)
+		}
+		buf = res.body
+	case internal.BufferTypeRedisCallResponse:
+		res, ok := r.redisCalloutResponse[r.activeCalloutID]
+		if !ok {
+			log.Fatalf("redis callout response unregistered for %d", r.activeCalloutID)
+		}
+		buf = res.response
+	default:
+		panic("unreachable: maybe a bug in this host emulation or SDK")
+	}
+
+	bl := int32(len(buf))
+	if bl == 0 {
+		return internal.StatusNotFound
+	} else if start >= bl {
+		log.Printf("start index out of range: %d (start) >= %d ", start, len(buf))
+		return internal.StatusBadArgument
+	}
+
+	*(**byte)(returnBufferData) = &buf[start]
+	if maxSize > bl-start {
+		*returnBufferSize = bl - start
+	} else {
+		*returnBufferSize = maxSize
+	}
+	return internal.StatusOK
+}
+
+// impl HostEmulator
+func (r *rootHostEmulator) GetTraceLogs() []string {
+	return r.getLogs(internal.LogLevelTrace)
+}
+
+// impl HostEmulator
+func (r *rootHostEmulator) GetDebugLogs() []string {
+	return r.getLogs(internal.LogLevelDebug)
+}
+
+// impl HostEmulator
+func (r *rootHostEmulator) GetInfoLogs() []string {
+	return r.getLogs(internal.LogLevelInfo)
+}
+
+// impl HostEmulator
+func (r *rootHostEmulator) GetWarnLogs() []string {
+	return r.getLogs(internal.LogLevelWarn)
+}
+
+// impl HostEmulator
+func (r *rootHostEmulator) GetErrorLogs() []string {
+	return r.getLogs(internal.LogLevelError)
+}
+
+// impl HostEmulator
+func (r *rootHostEmulator) GetCriticalLogs() []string {
+	return r.getLogs(internal.LogLevelCritical)
+}
+
+func (r *rootHostEmulator) getLogs(level internal.LogLevel) []string {
+	return r.logs[level]
+}
+
+// impl HostEmulator
+func (r *rootHostEmulator) GetTickPeriod() uint32 {
+	return r.tickPeriod
+}
+
+// impl HostEmulator
+func (r *rootHostEmulator) Tick() {
+	internal.ProxyOnTick(PluginContextID)
+}
+
+// impl HostEmulator
+func (r *rootHostEmulator) GetQueueSize(queueID uint32) int {
+	return len(r.queues[queueID])
+}
+
+// impl HostEmulator
+func (r *rootHostEmulator) GetCalloutAttributesFromContext(contextID uint32) []HttpCalloutAttribute {
+	infos := r.httpContextIDToCalloutInfos[contextID]
+	return infos
+}
+
+// impl HostEmulator
+func (r *rootHostEmulator) GetRedisCalloutAttributesFromContext(contextID uint32) []RedisCalloutAttribute {
+	infos := r.redisContextIDToCalloutInfos[contextID]
+	return infos
+}
+
+// impl HostEmulator
+func (r *rootHostEmulator) StartVM() types.OnVMStartStatus {
+	return internal.ProxyOnVMStart(PluginContextID, int32(len(r.vmConfiguration)))
+}
+
+// impl HostEmulator
+func (r *rootHostEmulator) StartPlugin() types.OnPluginStartStatus {
+	return internal.ProxyOnConfigure(PluginContextID, int32(len(r.pluginConfiguration)))
+}
+
+// impl HostEmulator
+func (r *rootHostEmulator) CallOnHttpCallResponse(calloutID uint32, headers, trailers [][2]string, body []byte) {
+	r.httpCalloutResponse[calloutID] = struct {
+		headers, trailers [][2]string
+		body              []byte
+	}{headers: cloneWithLowerCaseMapKeys(headers), trailers: cloneWithLowerCaseMapKeys(trailers), body: body}
+
+	// PluginContextID, calloutID uint32, numHeaders, bodySize, numTrailers in
+	r.activeCalloutID = calloutID
+	defer func() {
+		r.activeCalloutID = 0
+		delete(r.httpCalloutResponse, calloutID)
+
+		// Clean up contextID to callout mapping
+		if contextID, exists := r.httpCalloutIDToContextID[calloutID]; exists {
+			delete(r.httpCalloutIDToContextID, calloutID)
+
+			// Remove the corresponding entry from contextID's callout list
+			if callouts, exists := r.httpContextIDToCalloutInfos[contextID]; exists {
+				for i, callout := range callouts {
+					if callout.CalloutID == calloutID {
+						// Remove the i-th element
+						r.httpContextIDToCalloutInfos[contextID] = append(callouts[:i], callouts[i+1:]...)
+						break
+					}
+				}
+			}
+		}
+	}()
+	internal.ProxyOnHttpCallResponse(PluginContextID, calloutID, int32(len(headers)), int32(len(body)), int32(len(trailers)))
+}
+
+// impl HostEmulator
+func (r *rootHostEmulator) CallOnRedisCallResponse(calloutID uint32, status int32, response []byte) {
+	r.redisCalloutResponse[calloutID] = struct {
+		status   int32
+		response []byte
+	}{status: status, response: response}
+
+	// PluginContextID, calloutID uint32, status, responseSize in
+	r.activeCalloutID = calloutID
+	defer func() {
+		r.activeCalloutID = 0
+		delete(r.redisCalloutResponse, calloutID)
+
+		// Clean up contextID to callout mapping
+		if contextID, exists := r.redisCalloutIDToContextID[calloutID]; exists {
+			delete(r.redisCalloutIDToContextID, calloutID)
+
+			// Remove the corresponding entry from contextID's callout list
+			if callouts, exists := r.redisContextIDToCalloutInfos[contextID]; exists {
+				for i, callout := range callouts {
+					if callout.CalloutID == calloutID {
+						// Remove the i-th element
+						r.redisContextIDToCalloutInfos[contextID] = append(callouts[:i], callouts[i+1:]...)
+						break
+					}
+				}
+			}
+		}
+	}()
+	internal.ProxyOnRedisCallResponse(PluginContextID, calloutID, status, int32(len(response)))
+}
+
+// impl HostEmulator
+func (r *rootHostEmulator) FinishVM() bool {
+	return internal.ProxyOnDone(PluginContextID)
+}
+
+func (r *rootHostEmulator) GetCounterMetric(name string) (uint64, error) {
+	id, ok := r.metricNameToID[name]
+	if !ok {
+		return 0, fmt.Errorf("%s not found", name)
+	}
+
+	t, ok := r.metricIDToType[id]
+	if !ok {
+		return 0, fmt.Errorf("%s not found", name)
+	}
+
+	if t != internal.MetricTypeCounter {
+		return 0, fmt.Errorf(
+			"%s is not %v metric type but %v", name, internal.MetricTypeCounter, t)
+	}
+
+	v, ok := r.metricIDToValue[id]
+	if !ok {
+		return 0, fmt.Errorf("%s not found", name)
+	}
+	return v, nil
+}
+
+func (r *rootHostEmulator) GetGaugeMetric(name string) (uint64, error) {
+	id, ok := r.metricNameToID[name]
+	if !ok {
+		return 0, fmt.Errorf("%s not found", name)
+	}
+
+	t, ok := r.metricIDToType[id]
+	if !ok {
+		return 0, fmt.Errorf("%s not found", name)
+	}
+
+	if t != internal.MetricTypeGauge {
+		return 0, fmt.Errorf(
+			"%s is not %v metric type but %v", name, internal.MetricTypeGauge, t)
+	}
+
+	v, ok := r.metricIDToValue[id]
+	if !ok {
+		return 0, fmt.Errorf("%s not found", name)
+	}
+	return v, nil
+}
+
+func (r *rootHostEmulator) GetHistogramMetric(name string) (uint64, error) {
+	id, ok := r.metricNameToID[name]
+	if !ok {
+		return 0, fmt.Errorf("%s not found", name)
+	}
+
+	t, ok := r.metricIDToType[id]
+	if !ok {
+		return 0, fmt.Errorf("%s not found", name)
+	}
+
+	if t != internal.MetricTypeHistogram {
+		return 0, fmt.Errorf(
+			"%s is not %v metric type but %v", name, internal.MetricTypeHistogram, t)
+	}
+
+	v, ok := r.metricIDToValue[id]
+	if !ok {
+		return 0, fmt.Errorf("%s not found", name)
+	}
+	return v, nil
+}

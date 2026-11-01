@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "openguardrails-artifact-scan"
+version = "1.0.0"
+description = "Fulfil OGR scan_artifact obligations: sniff, hash, negotiate ranges, and ask a scanner — malware0, ICAP, ClamAV or your own."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+# Deliberately empty. The wire is stdlib urllib and stdlib socket; a scanning
+# client that drags a dependency tree into an agent's process is a client nobody
+# is allowed to install.
+dependencies = []
+
+[project.urls]
+Homepage = "https://openguardrails.com"
+Specification = "https://github.com/openguardrails/openguardrails/blob/main/specification/artifact-scan.md"
+Source = "https://github.com/openguardrails/openguardrails/tree/main/packages/artifact-scan"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ogr_artifact_scan"]

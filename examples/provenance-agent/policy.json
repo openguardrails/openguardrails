@@ -1,0 +1,40 @@
+{
+  "workspace": "finance-agents",
+  "about": "Runtime-side configuration, never on the wire -- the same rule mandate.md states for the authorization envelope. `bindings` is the operator saying which tool means which capability; a runtime MUST NOT guess one from a tool's name, and an unbound tool is reported unjudged rather than assumed harmless.",
+
+  "bindings": [
+    { "tool": "gmail_fetch",   "capability": "mail.read" },
+    { "tool": "memory_write",  "capability": "memory.write", "key_field": "key" },
+    { "tool": "memory_read",   "capability": "memory.read",  "key_field": "key" },
+    { "tool": "reply_to_user", "capability": "message.reply" },
+    { "tool": "payment_send",  "capability": "payment.send" }
+  ],
+
+  "provenance": {
+    "on_violation": "block",
+
+    "lower_trust": [
+      {
+        "id": "unauthenticated-email",
+        "about": "`sources` may only ever LOWER trust. A failed DMARC does not prove the content is an attack -- it proves nobody vouched for the sender, which is exactly the case where an action derived from it should not proceed unseen.",
+        "when": { "channel": "email.inbound", "auth": { "dmarc": ["fail", "none", "temperror", "permerror"] } },
+        "to": "hostile"
+      }
+    ],
+
+    "rules": [
+      {
+        "id": "hostile-external-effect",
+        "when": { "trust": ["hostile"], "capability": ["payment.*", "message.send", "credential.*"] },
+        "then": "block"
+      },
+      {
+        "id": "untrusted-irreversible",
+        "when": { "trust": ["untrusted"], "capability": ["payment.*", "data.delete"] },
+        "then": "flag"
+      }
+    ]
+  },
+
+  "note": "No rule names memory.write, memory.read, mail.read or message.reply. Read-only and internal capabilities carry no provenance rule at all -- that is what makes the deliberately conservative propagation in provenance.md affordable: almost every action an agent takes never reaches a rule."
+}

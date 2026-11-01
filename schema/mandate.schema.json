@@ -1,0 +1,331 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openguardrails.com/schema/1.0/mandate.schema.json",
+  "title": "Mandate",
+  "description": "An operator's declaration of the authorization envelope one workspace's agents run inside. OGR 1.3. CONFIGURATION, NOT WIRE: a mandate is held by the runtime and resolved by agent_workspace; it MUST NOT appear in a GuardEvent and a runtime MUST NOT accept one from a producer. An absent part constrains nothing, and a workspace with no mandate has no declared envelope \u2014 never an empty one. See specification/mandate.md.",
+  "type": "object",
+  "required": [
+    "mandate"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "mandate": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "The mandate's name. Named in the finding's `detector` ('mandate:<name>') so a violation is traceable to the document that produced it."
+    },
+    "version": {
+      "type": "string",
+      "maxLength": 64,
+      "description": "OPTIONAL operator-chosen revision label, recorded with findings so a decision can be replayed against the envelope that was in force."
+    },
+    "workspace": {
+      "type": "string",
+      "maxLength": 128,
+      "description": "The workspace whose policy set this mandate belongs to. Resolution is the runtime's; this field documents the intended binding and is not an assertion a producer may make."
+    },
+    "on_violation": {
+      "enum": [
+        "block",
+        "flag"
+      ],
+      "default": "block",
+      "description": "The default outcome for a violation of this mandate: `block` contributes a block to composition like any other blocking detector; `flag` yields an allow carrying the finding. Overridable per rule. There is deliberately no 'ask a human' value \u2014 see specification/mandate.md."
+    },
+    "bindings": {
+      "type": "array",
+      "maxItems": 256,
+      "description": "How to read the AGENT'S OWN tool calls. A runtime holds a raw provider body and MUST NOT guess which argument is the instrument or the target. A tool with no binding is UNBOUND: it is evaluated against `capabilities` only and every dimension that could not be read MUST be reported in the verdict's `unjudged`.",
+      "items": {
+        "type": "object",
+        "required": [
+          "tool"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "tool": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "The tool name as it appears in the provider body's tool call."
+          },
+          "capability": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "The capability id this tool exercises, e.g. 'order.place', 'net.scan'. Dotted, operator-defined; the taxonomy does not register capability names."
+          },
+          "fields": {
+            "type": "object",
+            "description": "Mandate dimension -> the argument key that carries it, e.g. {\"instrument\": \"symbol\", \"quantity\": \"qty\"}. A field named here but absent from a call is UNJUDGED, never zero and never compliant.",
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "propertyNames": {
+              "maxLength": 64
+            }
+          },
+          "capability_map": {
+            "type": "object",
+            "description": "OPTIONAL argument-conditional capability. A tool's capability sometimes depends on an argument value \u2014 a short sale is `place_order` with side=sell_short, a withdrawal is `transfer` to an external account. Maps an argument key -> {value: capability}; a matching value overrides `capability` for that call. This is what lets `capabilities.deny: [order.short]` bite without a separate tool.",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "maxLength": 128
+              },
+              "propertyNames": {
+                "maxLength": 256
+              }
+            },
+            "propertyNames": {
+              "maxLength": 64
+            }
+          }
+        }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "WHAT the agent may act on, matched against binding-extracted values. Entries are opaque operator-chosen selectors with '*' as the only wildcard ('equity:us:*', '10.20.0.0/16', 'repo:acme/*'). A runtime MUST NOT resolve or normalise them beyond glob matching \u2014 it does not know what namespace the operator means. `deny` wins over `allow`; a non-empty `allow` makes everything unlisted a violation.",
+      "properties": {
+        "allow": {
+          "type": "array",
+          "maxItems": 1024,
+          "items": {
+            "type": "string",
+            "maxLength": 256
+          }
+        },
+        "deny": {
+          "type": "array",
+          "maxItems": 1024,
+          "items": {
+            "type": "string",
+            "maxLength": 256
+          }
+        }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "WHAT the agent may do, in capability ids from `bindings`. `deny` wins; a non-empty `allow` makes every unlisted capability a violation \u2014 including the capability of an unbound tool, which is the one check that still applies when nothing else can be read.",
+      "properties": {
+        "allow": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "type": "string",
+            "maxLength": 128
+          }
+        },
+        "deny": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "type": "string",
+            "maxLength": 128
+          }
+        }
+      }
+    },
+    "limits": {
+      "type": "array",
+      "maxItems": 128,
+      "description": "HOW MUCH. `per_call` reads the one call in front of the runtime; every other window is counted across the traffic the runtime has already seen for this agent, using the sessions and turns it derives server-side. The count is a FLOOR \u2014 it covers reported traffic only.",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "metric",
+          "window",
+          "max"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Stable id, echoed in the finding's subject."
+          },
+          "metric": {
+            "enum": [
+              "quantity",
+              "count",
+              "notional",
+              "concurrency"
+            ],
+            "description": "What is measured. `count` counts calls; the others are read from bound fields. \u26a0\ufe0f `notional` is computable only when the call itself carries it \u2014 a runtime MUST NOT derive it from a price it does not hold, and MUST report the dimension unjudged instead."
+          },
+          "window": {
+            "enum": [
+              "per_call",
+              "per_turn",
+              "per_session",
+              "per_minute",
+              "per_hour",
+              "per_day"
+            ]
+          },
+          "max": {
+            "type": "number",
+            "minimum": 0
+          },
+          "unit": {
+            "type": "string",
+            "maxLength": 32,
+            "description": "OPTIONAL operator label ('USD', 'shares', 'hosts'). Documentation only: a runtime MUST NOT convert between units."
+          },
+          "applies_to": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "OPTIONAL narrowing. Absent means the limit applies to every bound call.",
+            "properties": {
+              "capabilities": {
+                "type": "array",
+                "maxItems": 64,
+                "items": {
+                  "type": "string",
+                  "maxLength": 128
+                }
+              },
+              "scope": {
+                "type": "array",
+                "maxItems": 256,
+                "items": {
+                  "type": "string",
+                  "maxLength": 256
+                }
+              }
+            }
+          },
+          "on_violation": {
+            "enum": [
+              "block",
+              "flag"
+            ]
+          }
+        }
+      }
+    },
+    "windows": {
+      "type": "array",
+      "maxItems": 64,
+      "description": "WHEN the agent may act. A call outside every declared window is `security.mandate_violation.window`. Evaluated against the RUNTIME's clock \u2014 the wire carries no trustworthy event timestamp (see specification/guard-event.md).",
+      "items": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "timezone": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "IANA zone name, e.g. 'America/New_York'. Required for the clock form (from/to); a window that uses only `sessions` omits it."
+          },
+          "days": {
+            "type": "array",
+            "maxItems": 7,
+            "items": {
+              "enum": [
+                "mon",
+                "tue",
+                "wed",
+                "thu",
+                "fri",
+                "sat",
+                "sun"
+              ]
+            },
+            "description": "Absent means every day."
+          },
+          "from": {
+            "type": "string",
+            "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+          },
+          "to": {
+            "type": "string",
+            "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+          },
+          "applies_to": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "capabilities": {
+                "type": "array",
+                "maxItems": 64,
+                "items": {
+                  "type": "string",
+                  "maxLength": 128
+                }
+              }
+            }
+          },
+          "sessions": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "description": "Allowed session labels, compared against the value a binding maps to the `session` dimension (e.g. 'regular'/'post_market', 'maintenance'/'adhoc'). A call whose session label is not listed is outside this window."
+          }
+        },
+        "description": "A window may be expressed as a CLOCK range (timezone + from + to, evaluated against the runtime's clock) or as a set of allowed SESSION labels the call itself carries (sessions), or both. A call outside every window is security.mandate_violation.window. \u26a0\ufe0f The session form is often the more honest one: the wire carries no trustworthy event timestamp, and 'which session' is a venue/scheduler label attached to the action rather than something to infer from wall-clock. A window with NEITHER form is invalid."
+      }
+    },
+    "irreversible": {
+      "type": "array",
+      "maxItems": 64,
+      "description": "Actions the mandate reserves to a human. The dimension is not 'how much' but 'who may decide'. These rules BLOCK: there is no approval outcome on this wire, so a person re-runs the action through the operator's own approval path.",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "capability"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "capability": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "when": {
+            "type": "object",
+            "description": "OPTIONAL argument match, dimension -> value or list of values, read through the tool's binding. Absent means every call of this capability is reserved.",
+            "additionalProperties": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "maxLength": 256
+                },
+                {
+                  "type": "array",
+                  "maxItems": 64,
+                  "items": {
+                    "type": "string",
+                    "maxLength": 256
+                  }
+                }
+              ]
+            },
+            "propertyNames": {
+              "maxLength": 64
+            }
+          }
+        }
+      }
+    }
+  }
+}

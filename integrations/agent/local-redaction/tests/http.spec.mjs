@@ -1,0 +1,402 @@
+/**
+ * The HTTP interceptor, end to end against a local stand-in provider: the
+ * outbound body is masked whole (system prompt included) with the harness's
+ * own headers untouched; the reply is restored inside tool-call arguments
+ * only, streamed or not; anything that is not a model call passes through
+ * byte-identical; and a tool call before any traffic yields no `redaction`
+ * report.
+ */
+import assert from "node:assert/strict"
+import { mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { createServer } from "node:http"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { test } from "node:test"
+
+import {
+  sessionOfStamp,
+  stampedSession,
+  installHttpInterceptor,
+  interceptorStatus,
+  LocalRedactor,
+  uninstallHttpInterceptor,
+  writeCachedRuleset,
+} from "../dist/index.js"
+
+const corpus = JSON.parse(readFileSync(new URL("../conformance/local-redaction.json", import.meta.url), "utf8"))
+const AWS = "AKIAIOSFODNN7EXAMPLE"
+const OPENAI = "sk-proj-abcdefghijklmnopqrstuvwxyz0123456789"
+
+/** A redactor holding the conformance ruleset from its cache — no network. */
+async function redactorWith(over = {}) {
+  const cachePath = join(mkdtempSync(join(tmpdir(), "ogr-http-")), "rules.json")
+  writeCachedRuleset(cachePath, corpus.ruleset)
+  const logs = []
+  const red = new LocalRedactor({ source: () => null, cachePath, log: { info: (m) => logs.push(m), warn: (m) => logs.push(m) }, ...over })
+  await red.start()
+  red.logs = logs
+  return red
+}
+
+/**
+ * The stand-in provider. `reply(path, body, req)` returns `{ status, headers,
+ * body }` or `{ sse: [frames...] }`; the received requests are recorded.
+ */
+async function provider(reply) {
+  const received = []
+  const server = createServer((req, res) => {
+    let raw = ""
+    req.on("data", (c) => (raw += c))
+    req.on("end", () => {
+      received.push({ url: req.url, method: req.method, headers: req.headers, raw })
+      const r = reply(req.url, raw, req)
+      if (r.sse) {
+        res.writeHead(200, { "content-type": "text/event-stream", ...(r.headers ?? {}) })
+        let i = 0
+        const tick = () => {
+          if (i >= r.sse.length) return res.end()
+          res.write(r.sse[i++])
+          setTimeout(tick, 2)
+        }
+        tick()
+        return
+      }
+      res.writeHead(r.status ?? 200, { "content-type": "application/json", ...(r.headers ?? {}) })
+      res.end(r.body ?? "{}")
+    })
+  })
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
+  return { url: `http://127.0.0.1:${server.address().port}`, received, close: () => new Promise((r) => server.close(r)) }
+}
+
+const echo = (url, raw) => ({ body: JSON.stringify({ echo: raw }) })
+
+const install = (redactor, over = {}) => installHttpInterceptor({ redactor, installFetch: false, undici: false, ...over })
+
+test("openai.chat: the body is masked whole, the system prompt included, and the two headers ride the request", async () => {
+  const red = await redactorWith()
+  const p = await provider(echo)
+  const h = install(red)
+  try {
+    const body = {
+      model: "gpt-4.1",
+      messages: [
+        { role: "system", content: `You hold ${AWS}.` },
+        { role: "user", content: [{ type: "text", text: `use ${OPENAI}` }] },
+        { role: "tool", tool_call_id: "c1", content: `${AWS}\n` },
+      ],
+      tools: [{ type: "function", function: { name: "bash", description: `never print ${AWS}`, parameters: {} } }],
+    }
+    const res = await h.fetch(`${p.url}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer sk-provider-key-stays" },
+      body: JSON.stringify(body),
+    })
+    assert.equal(res.status, 200)
+    const [req] = p.received
+    const sent = JSON.parse(req.raw)
+    assert.equal(sent.messages[0].content, "You hold OGRKP0000001.")
+    assert.equal(sent.messages[1].content[0].text, "use OGRKP0000002")
+    assert.equal(sent.messages[2].content, "OGRKP0000001\n")
+    assert.equal(sent.tools[0].function.description, "never print OGRKP0000001")
+    assert.equal(sent.model, "gpt-4.1")
+    assert.ok(!req.raw.includes(AWS) && !req.raw.includes(OPENAI))
+    assert.equal(req.headers.authorization, "Bearer sk-provider-key-stays")
+    assert.ok(!Object.keys(req.headers).some((k) => k.startsWith("x-ogr-"))) // nothing rides the request
+    assert.equal(req.headers["content-length"], String(Buffer.byteLength(req.raw)))
+    assert.ok(h.sawTraffic)
+    assert.equal(h.status().requests, 1)
+    assert.deepEqual(h.sessions(), ["process"])
+    // The minted report is drained by the next event of any host session.
+    assert.deepEqual(red.report("host-session").masked.map((m) => m.token), ["OGRKP0000001", "OGRKP0000002"])
+  } finally {
+    h.uninstall()
+    await p.close()
+  }
+})
+
+test("anthropic.messages: the top-level system prompt and tool_result blocks are masked; the stamped metadata.user_id keys the session", async () => {
+  const red = await redactorWith()
+  const p = await provider(echo)
+  const h = install(red)
+  try {
+    await h.fetch(`${p.url}/v1/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": "provider" },
+      body: JSON.stringify({
+        model: "claude",
+        system: [{ type: "text", text: `key ${AWS}` }],
+        metadata: { user_id: "u-42" },
+        messages: [{ role: "user", content: [{ type: "tool_result", tool_use_id: "t", content: [{ type: "text", text: `.env: ${OPENAI}` }] }] }],
+      }),
+    })
+    const sent = JSON.parse(p.received[0].raw)
+    assert.equal(sent.system[0].text, "key OGRKP0000001")
+    assert.equal(sent.messages[0].content[0].content[0].text, ".env: OGRKP0000002")
+    assert.equal(sent.metadata.user_id, "u-42")
+    assert.deepEqual(h.sessions(), ["u-42"])
+    assert.equal(red.session("u-42").valueOf("OGRKP0000001"), AWS)
+  } finally {
+    h.uninstall()
+    await p.close()
+  }
+})
+
+test("non-streaming reply: restored inside tool-call arguments, never in prose; content-length follows the new body; a value with a quote stays valid JSON", async () => {
+  const red = await redactorWith()
+  const p = await provider((url) => {
+    if (url.endsWith("/chat/completions")) {
+      return {
+        body: JSON.stringify({
+          id: "c",
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "I used OGRKP0000001 and OGRKP0000002",
+              tool_calls: [{ id: "call_1", type: "function", function: { name: "bash", arguments: '{"cmd":"aws --key OGRKP0000001 --pw OGRKP0000002 --missing OGRKP0000009"}' } }],
+            },
+            finish_reason: "tool_calls",
+          }],
+        }),
+      }
+    }
+    return { body: JSON.stringify({ content: [{ type: "text", text: "OGRKP0000001" }, { type: "tool_use", id: "t", name: "bash", input: { cmd: "echo OGRKP0000001", nested: ["OGRKP0000002"] } }] }) }
+  })
+  const h = install(red)
+  try {
+    red.session("process").tokenFor('pa"ss')
+    await h.fetch(`${p.url}/v1/chat/completions`, { method: "POST", body: JSON.stringify({ model: "m", messages: [{ role: "user", content: `k ${AWS}` }] }) })
+    // OGRKP0000001 = pa"ss (seeded), OGRKP0000002 = AWS (masked out of the request)
+    const res = await h.fetch(`${p.url}/v1/chat/completions`, { method: "POST", body: JSON.stringify({ model: "m", messages: [{ role: "user", content: "again" }] }) })
+    const text = await res.text()
+    assert.equal(res.headers.get("content-length"), String(Buffer.byteLength(text)))
+    const reply = JSON.parse(text)
+    assert.equal(reply.choices[0].message.content, "I used OGRKP0000001 and OGRKP0000002")
+    assert.deepEqual(JSON.parse(reply.choices[0].message.tool_calls[0].function.arguments), { cmd: `aws --key pa"ss --pw ${AWS} --missing \OGRKP0000009` })
+    assert.deepEqual(h.status().unrestorable, ["OGRKP0000009"])
+    assert.equal(h.status().restored, 2) // both replies carried a restorable argument
+
+    const a = await h.fetch(`${p.url}/v1/messages`, { method: "POST", body: JSON.stringify({ model: "m", system: "x", messages: [{ role: "user", content: "hi" }] }) })
+    const reply2 = await a.json()
+    assert.equal(reply2.content[0].text, "OGRKP0000001")
+    assert.deepEqual(reply2.content[1].input, { cmd: 'echo pa"ss', nested: [AWS] })
+  } finally {
+    h.uninstall()
+    await p.close()
+  }
+})
+
+const chatChunk = (delta, finish = null) =>
+  `data: ${JSON.stringify({ id: "c", object: "chat.completion.chunk", choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`
+const ev = (name, payload) => `event: ${name}\ndata: ${JSON.stringify(payload)}\n\n`
+
+test("streamed reply (openai.chat): an argument split across three deltas is restored through the wrapped body; prose deltas are not", async () => {
+  const red = await redactorWith()
+  const p = await provider(() => ({
+    sse: [
+      chatChunk({ role: "assistant", content: "key: OGRKP0000001" }),
+      chatChunk({ tool_calls: [{ index: 0, id: "call_1", type: "function", function: { name: "bash", arguments: "" } }] }),
+      chatChunk({ tool_calls: [{ index: 0, function: { arguments: '{"cmd":"aws --key OGRKP00' } }] }),
+      chatChunk({ tool_calls: [{ index: 0, function: { arguments: "0000" } }] }),
+      chatChunk({ tool_calls: [{ index: 0, function: { arguments: '1 ls"}' } }] }),
+      chatChunk({}, "tool_calls"),
+      "data: [DONE]\n\n",
+    ],
+  }))
+  const h = install(red)
+  try {
+    const res = await h.fetch(`${p.url}/v1/chat/completions`, { method: "POST", body: JSON.stringify({ model: "m", stream: true, messages: [{ role: "user", content: `k ${AWS}` }] }) })
+    assert.equal(res.headers.get("content-type"), "text/event-stream")
+    const text = await res.text()
+    const data = text.split("\n\n").filter((f) => f.startsWith("data:")).map((f) => f.slice(6))
+    assert.equal(data.at(-1), "[DONE]")
+    const parsed = data.slice(0, -1).map((d) => JSON.parse(d))
+    assert.equal(parsed[0].choices[0].delta.content, "key: OGRKP0000001")
+    const args = parsed.flatMap((c) => c.choices[0].delta.tool_calls ?? []).map((tc) => tc.function?.arguments ?? "").join("")
+    assert.deepEqual(JSON.parse(args), { cmd: `aws --key ${AWS} ls` })
+    assert.equal(h.status().streams, 1)
+    assert.equal(h.status().restored, 1)
+  } finally {
+    h.uninstall()
+    await p.close()
+  }
+})
+
+test("streamed reply (anthropic.messages): input_json_delta across three deltas restores; text_delta keeps its placeholder", async () => {
+  const red = await redactorWith()
+  const p = await provider(() => ({
+    sse: [
+      ev("message_start", { type: "message_start", message: { id: "m", role: "assistant", content: [] } }),
+      ev("content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }),
+      ev("content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "using OGRKP0000001" } }),
+      ev("content_block_stop", { type: "content_block_stop", index: 0 }),
+      ev("content_block_start", { type: "content_block_start", index: 1, content_block: { type: "tool_use", id: "t", name: "bash", input: {} } }),
+      ev("content_block_delta", { type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: '{"cmd": "echo OGRKP' } }),
+      ev("content_block_delta", { type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: "0000" } }),
+      ev("content_block_delta", { type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: '001"}' } }),
+      ev("content_block_stop", { type: "content_block_stop", index: 1 }),
+      ev("message_delta", { type: "message_delta", delta: { stop_reason: "tool_use" } }),
+      ev("message_stop", { type: "message_stop" }),
+    ],
+  }))
+  const h = install(red)
+  try {
+    const res = await h.fetch(`${p.url}/v1/messages`, { method: "POST", body: JSON.stringify({ model: "m", stream: true, system: "s", messages: [{ role: "user", content: `k ${AWS}` }] }) })
+    const text = await res.text()
+    const data = text.split("\n\n").filter(Boolean).map((f) => JSON.parse(f.split("\n").find((l) => l.startsWith("data:")).slice(6)))
+    const json = data.filter((d) => d.type === "content_block_delta" && d.delta.type === "input_json_delta").map((d) => d.delta.partial_json).join("")
+    assert.deepEqual(JSON.parse(json), { cmd: `echo ${AWS}` })
+    assert.equal(data.find((d) => d.delta?.type === "text_delta").delta.text, "using OGRKP0000001")
+  } finally {
+    h.uninstall()
+    await p.close()
+  }
+})
+
+test("what is not a model call passes through byte-identical, headers untouched: a GET, a non-JSON POST, a JSON POST without a model shape", async () => {
+  const red = await redactorWith()
+  const p = await provider(echo)
+  const h = install(red)
+  try {
+    const evaluate = JSON.stringify({ kind: "step/response", payload: { tool_calls: [{ name: "bash", arguments: { command: `echo ${AWS}` } }] }, messages_note: "not an array" })
+    await h.fetch(`${p.url}/v1/evaluate`, { method: "POST", headers: { "content-type": "application/json", authorization: "Bearer ogr_key" }, body: evaluate })
+    await h.fetch(`${p.url}/upload`, { method: "POST", headers: { "content-type": "text/plain" }, body: `plain ${AWS}` })
+    await h.fetch(`${p.url}/v1/models?q=${encodeURIComponent(AWS)}`)
+    assert.equal(p.received[0].raw, evaluate)
+    assert.equal(p.received[1].raw, `plain ${AWS}`)
+    assert.equal(p.received[2].method, "GET")
+    for (const r of p.received) assert.ok(!Object.keys(r.headers).some((k) => k.startsWith("x-ogr-")))
+    assert.equal(h.sawTraffic, false)
+    assert.equal(h.status().requests, 0)
+  } finally {
+    h.uninstall()
+    await p.close()
+  }
+})
+
+test("a Request object and a streamed request body are both read, masked and forwarded", async () => {
+  const red = await redactorWith()
+  const p = await provider(echo)
+  const h = install(red)
+  try {
+    const req = new Request(`${p.url}/v1/chat/completions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model: "m", messages: [{ role: "user", content: AWS }] }) })
+    await h.fetch(req)
+    const stream = new Blob([JSON.stringify({ model: "m", messages: [{ role: "user", content: OPENAI }] })]).stream()
+    await h.fetch(`${p.url}/v1/chat/completions`, { method: "POST", headers: { "content-type": "application/json" }, body: stream, duplex: "half" })
+    assert.equal(JSON.parse(p.received[0].raw).messages[0].content, "OGRKP0000001")
+    assert.equal(JSON.parse(p.received[1].raw).messages[0].content, "OGRKP0000002")
+  } finally {
+    h.uninstall()
+    await p.close()
+  }
+})
+
+test("the self-check: a tool call before any traffic warns once and yields no redaction report; after traffic, the report is back", async () => {
+  const red = await redactorWith()
+  const p = await provider(echo)
+  const misses = []
+  const h = install(red, { onMiss: () => misses.push(1) })
+  try {
+    assert.equal(h.noteToolCall(), false)
+    assert.equal(h.noteToolCall(), false)
+    assert.equal(misses.length, 1)
+    assert.equal(red.masking, false)
+    assert.equal(red.report("sess"), undefined)
+    // The hook fallback, when a plugin engages it, is the other proof.
+    red.fallbackActive = true
+    assert.deepEqual(red.report("sess"), { ruleset: corpus.ruleset.id, masked: [] })
+    red.fallbackActive = false
+    await h.fetch(`${p.url}/v1/chat/completions`, { method: "POST", body: JSON.stringify({ model: "m", messages: [{ role: "user", content: AWS }] }) })
+    assert.equal(h.noteToolCall(), true)
+    assert.deepEqual(red.report("sess"), { ruleset: corpus.ruleset.id, masked: [{ token: "OGRKP0000001", rule: "entity_aws_key_id/aws_access_key_id" }] })
+    // …and restoreArgs on the host's session reaches the interceptor's map.
+    assert.deepEqual(red.restoreArgs("sess", { k: "OGRKP0000001" }), { args: { k: AWS }, unresolved: [], changed: true })
+  } finally {
+    h.uninstall()
+    await p.close()
+  }
+})
+
+test("no ruleset in hand: `proceed` masks known values and warns, `refuse` throws", async () => {
+  const cachePath = join(mkdtempSync(join(tmpdir(), "ogr-http-")), "none.json")
+  const logs = []
+  const red = new LocalRedactor({ source: () => null, cachePath, log: { info: () => {}, warn: (m) => logs.push(m) } })
+  await red.start()
+  const p = await provider(echo)
+  const h = install(red)
+  try {
+    await h.fetch(`${p.url}/v1/chat/completions`, { method: "POST", body: JSON.stringify({ model: "m", messages: [{ role: "user", content: AWS }] }) })
+    assert.equal(JSON.parse(p.received[0].raw).messages[0].content, AWS)
+    assert.ok(logs.some((m) => /no ruleset obtained yet/.test(m)))
+    h.uninstall()
+    const strict = install(red, { unprotected: "refuse" })
+    await assert.rejects(
+      strict.fetch(`${p.url}/v1/chat/completions`, { method: "POST", body: JSON.stringify({ model: "m", messages: [{ role: "user", content: "x" }] }) }),
+      /fail-closed/,
+    )
+    strict.uninstall()
+  } finally {
+    await p.close()
+  }
+})
+
+test("installing on globalThis wraps fetch, a second install replaces the first, uninstall restores the original", async () => {
+  const original = globalThis.fetch
+  const red = await redactorWith()
+  const a = installHttpInterceptor({ redactor: red, undici: false })
+  assert.equal(globalThis.fetch, a.fetch)
+  assert.equal(interceptorStatus().fetch, "wrapped")
+  assert.equal(red.http, a)
+  const b = installHttpInterceptor({ redactor: red, undici: false })
+  assert.equal(a.status().installed, false)
+  assert.equal(globalThis.fetch, b.fetch)
+  uninstallHttpInterceptor()
+  assert.equal(globalThis.fetch, original)
+  assert.equal(interceptorStatus().installed, false)
+  assert.equal(red.http, null)
+})
+
+test("stampedSession: the map key is the bare session id the harness's hooks are handed", () => {
+  // Claude Code 2.x — a JSON stamp; the hook gets `session_id` alone.
+  const cc = JSON.stringify({ device_id: "0e2d", account_uuid: "dc62", session_id: "484d2bc1-b7e9-4f28-9d97-d08777526aa6" })
+  assert.equal(stampedSession({ metadata: { user_id: cc } }), "484d2bc1-b7e9-4f28-9d97-d08777526aa6")
+  // The older Claude Code spelling.
+  assert.equal(sessionOfStamp("user_ab12_account_cd34_session_11111111-2222-3333-4444-555555555555"), "11111111-2222-3333-4444-555555555555")
+  // An opaque stamp is the key as before.
+  assert.equal(stampedSession({ user: "u-42" }), "u-42")
+  // Codex: no user field, prompt_cache_key is the session.
+  assert.equal(stampedSession({ model: "gpt-6", input: [], prompt_cache_key: "01a0-codex" }), "01a0-codex")
+  assert.equal(stampedSession({ model: "gpt-6", input: [] }), null)
+  // A JSON stamp WITHOUT session_id is left whole — never the device or account id.
+  const noSid = JSON.stringify({ device_id: "0e2d", account_uuid: "dc62" })
+  assert.equal(sessionOfStamp(noSid), noSid)
+})
+
+test("reportFor: a hook's claim names the tokens present in ITS event, with their rules, and drains nothing", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ogr-lr-"))
+  const cache = join(dir, "rules.json")
+  writeCachedRuleset(cache, {
+    id: "rs_reportfor", generated_at: "2026-09-11T00:00:00Z", family: "secrets", dialect: "ogr-re-1",
+    rules: [
+      { id: "entity_api_key", category: "secrets", severity: "critical", tier: "strong", flags: "", patterns: [{ id: "openai_project", source: "sk-proj-[A-Za-z0-9_-]{20,}" }], examples: { match: ["sk-proj-abcdefghijklmnopqrstuvwx"], nomatch: ["sk-proj-short"] } },
+      { id: "entity_aws_key_id", category: "secrets", severity: "critical", tier: "strong", flags: "", patterns: [{ id: "aws_access_key_id", source: "AKIA[A-Z0-9]{16}" }], examples: { match: ["AKIAIOSFODNN7EXAMPLE"], nomatch: ["AKIA1234"] } },
+    ],
+  })
+  const r = new LocalRedactor({ source: () => null, cachePath: cache, log: { info() {}, warn() {} } })
+  await r.start()
+  r.fallbackActive = true
+  // The model request masked two values (the user's prompt) …
+  const req = r.maskValue("s1", { messages: [{ role: "user", content: "use sk-proj-abcdefghijklmnopqrstuvwx and AKIAIOSFODNN7EXAMPLE" }] })
+  assert.equal(req.minted.length, 2)
+  // … the tool call the model wrote back carries ONE of them.
+  const event = { tool_calls: [{ name: "Bash", arguments: { command: "aws configure set aws_access_key_id OGRKP0000002" } }] }
+  const claim = r.reportFor("s1", event)
+  assert.deepEqual(claim.masked, [{ token: "OGRKP0000002", rule: "entity_aws_key_id/aws_access_key_id" }])
+  // Nothing drained: the per-step report still holds both, and a second reportFor answers the same.
+  assert.deepEqual(r.reportFor("s1", event).masked.map((m) => m.token), ["OGRKP0000002"])
+  assert.equal(r.report("s1").masked.length, 2)
+  // A token this session never issued is not claimed.
+  assert.deepEqual(r.reportFor("s1", { text: "OGRKP0000099" }).masked, [])
+  rmSync(dir, { recursive: true, force: true })
+})

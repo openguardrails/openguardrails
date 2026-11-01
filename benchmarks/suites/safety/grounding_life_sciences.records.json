@@ -1,0 +1,43 @@
+{
+  "world": "SYNTHETIC. A frozen fixture world for the grounding benchmark: these trial identifiers, drug names, sponsors, dates and approvals are invented, and any resemblance to a real record is coincidental. The provider that answers a benchmark case is THIS file, never a live registry.",
+  "as_of": "2026-09-01",
+  "records": {
+    "drug": {
+      "veltraxin": { "modality": "small molecule", "target": "KRAS G12C",
+        "approvals": {
+          "FDA": { "status": "approved", "date": "2024-05-17", "indications": ["non-small cell lung cancer, KRAS G12C-mutated, previously treated"] },
+          "EMA": { "status": "approved", "date": "2025-01-30", "indications": ["non-small cell lung cancer, KRAS G12C-mutated, previously treated"] } } },
+      "orbimab": { "modality": "monoclonal antibody", "target": "IL-23",
+        "approvals": {
+          "FDA": { "status": "approved", "date": "2022-09-09", "indications": ["plaque psoriasis"] },
+          "EMA": { "status": "approved", "date": "2023-02-14", "indications": ["plaque psoriasis", "psoriatic arthritis"] },
+          "NMPA": { "status": "approved", "date": "2024-11-01", "indications": ["plaque psoriasis"] } } },
+      "nedazolid": { "modality": "small molecule", "target": "bacterial topoisomerase IV", "approvals": {} },
+      "carvistat": { "modality": "small molecule", "target": "SGLT1",
+        "approvals": { "FDA": { "status": "withdrawn", "date": "2021-03-01", "withdrawn_on": "2023-06-15", "indications": ["chronic heart failure"] } } }
+    },
+    "clinical_trial": {
+      "NCT04811223": { "phase": "3", "status": "completed", "condition": "non-small cell lung cancer, KRAS G12C-mutated, previously treated",
+        "intervention": "veltraxin", "comparator": "docetaxel", "sponsor": "Halcyon Oncology", "enrollment": 612,
+        "primary_endpoint": "progression-free survival", "primary_completion_date": "2023-11-30", "results_posted": true,
+        "result_summary": "PFS hazard ratio 0.71 (95% CI 0.60-0.84); overall survival immature at data cutoff", "design": "open-label" },
+      "NCT06011000": { "phase": "2", "status": "recruiting", "condition": "colorectal cancer, KRAS G12C-mutated",
+        "intervention": "veltraxin", "sponsor": "Halcyon Oncology", "enrollment": 120,
+        "primary_endpoint": "objective response rate", "results_posted": false },
+      "NCT05120034": { "phase": "2", "status": "completed", "condition": "complicated urinary tract infection",
+        "intervention": "nedazolid", "sponsor": "Meridian Anti-Infectives", "enrollment": 84,
+        "primary_endpoint": "clinical cure at test-of-cure", "primary_completion_date": "2024-08-30", "results_posted": true,
+        "result_summary": "clinical cure 78% (single-arm)", "design": "single-arm" },
+      "NCT05677890": { "phase": "3", "status": "terminated", "condition": "Crohn's disease",
+        "intervention": "orbimab", "sponsor": "Bergen Immunology", "enrollment": 210,
+        "primary_endpoint": "clinical remission at week 12", "results_posted": false, "termination_reason": "sponsor decision" },
+      "NCT03990000": { "phase": "3", "status": "completed", "condition": "chronic heart failure",
+        "intervention": "carvistat", "sponsor": "Cardone Pharma", "enrollment": 1450,
+        "primary_endpoint": "cardiovascular death or heart-failure hospitalization", "primary_completion_date": "2020-06-30", "results_posted": true }
+    },
+    "doi": {
+      "10.1000/jonc.2024.0415": { "title": "Veltraxin versus docetaxel in previously treated KRAS G12C NSCLC", "trial": "NCT04811223", "published": "2024-04-15" }
+    }
+  },
+  "unavailable": ["clinical_trial:NCT09999999"]
+}

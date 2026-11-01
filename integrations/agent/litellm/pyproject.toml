@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openguardrails-litellm"
+version = "0.1.0"
+description = "OpenGuardrails for litellm — the v0.8 agent-direct integration (proxy hooks enforce, SDK callbacks observe). Stdlib-only wire: two POSTs to /v1/evaluate."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.9"
+# The core is deliberately dependency-free: the v0.8 wire is hand-rolled on
+# urllib.request (there is no SDK layer). litellm itself is the host, not a
+# dependency — install it via the extra if you want pip to manage it.
+dependencies = []
+
+[project.optional-dependencies]
+litellm = ["litellm>=1.40"]
+
+[tool.setuptools.packages.find]
+include = ["openguardrails_litellm*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

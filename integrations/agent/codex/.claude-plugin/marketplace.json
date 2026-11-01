@@ -1,0 +1,12 @@
+{
+  "name": "openguardrails",
+  "interface": {
+    "displayName": "OpenGuardrails"
+  },
+  "plugins": [
+    {
+      "name": "openguardrails-codex",
+      "source": "."
+    }
+  ]
+}

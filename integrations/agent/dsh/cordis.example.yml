@@ -1,0 +1,115 @@
+# OpenGuardrails on DeepSeek Harness — the fully-commented config reference,
+# usable directly as a patch overlay:
+#
+#     dsh web --patch integrations/agent/dsh/cordis.example.yml
+#
+# The NORMAL install path needs none of this: `dsh plugin --profile <name>
+# add @openguardrails/dsh` activates the bundle's own minimal cordis.patch.yml
+# (plugin row + the Auto preset) with every default below. Use this file to
+# see and tune the knobs, or as the manual-composition template for a
+# deployment that owns its whole plugin tree (drop the `insert:` wrapper and
+# paste the entry into `cordis.yml` directly).
+#
+# v0.8 (the minimum API): every model call is judged at the loop's own
+# seams — `step/request` before the model, `step/response` once, whole, at
+# stream end while the tail is still held back. One endpoint, no declared
+# coordinates (the runtime derives session/turn/step; `step_id` pairs the
+# halves), the identity four-tuple on every event. All decisions come from
+# the runtime; the v0.6 local policy engine is long gone with the SDK layer
+# it rode on.
+
+- insert:
+    - id: openguardrails
+      name: '@openguardrails/dsh'
+      config:
+        # ── The OpenGuardrails runtime connection. Only the API key is
+        # required (register at https://openguardrails.com) — most users
+        # paste it into the dsh Settings card "openguardrails" instead of
+        # configuring anything here. Resolution: Settings > this block >
+        # OGR_* environment variables > defaults. No API key = the
+        # integration is off (and says so, once, in the harness log).
+        #
+        # runtime:
+        #   apiKey: !!js process.env.OGR_API_KEY
+        #   url: https://openguardrails.com
+        #   workspace: ''  # agent_workspace claim: the platform policy group (NOT a directory); empty = the key's workspace
+        #   user: ''       # agent_user claim; empty = the OS account
+
+        # ── Degraded mode (specification/degraded-mode.md): what happens when
+        # the runtime CANNOT ANSWER — unreachable, timeout, a 429, a verdict
+        # whose `unjudged` names the content being enforced, or a tool call
+        # that reached execution with no step verdict at all.
+        #
+        #   open   (the spec's default and this plugin's) — proceed, loudly;
+        #          the heartbeat's evaluate_errors counter shows the gap
+        #   closed — treat "could not look" as block
+        failMode: open
+
+        # Per-call evaluate budget, milliseconds.
+        timeoutMs: 5000
+
+        # Streaming enforcement: the answer streams through live, but its
+        # final N characters are withheld until the step/response verdict —
+        # allow releases them, block cuts the stream. 200 is the spec's
+        # reference default; a deployment that cannot accept content ahead
+        # of the tail being seen sets this huge (degenerates to buffering).
+        streamTailChars: 200
+
+        # Heartbeat cadence, seconds — the build id and the degraded-mode
+        # counters ride /v1/heartbeat so the runtime can tell "agent idle"
+        # from "integration went dark".
+        heartbeatS: 60
+
+        # ── Auto mode: answer approval asks from the STEP VERDICT for
+        # sessions whose Permissions preset is `auto-mode` (on by default;
+        # these are the defaults, shown for visibility).
+        #
+        # step-cleared call → granted once · step-refused call → rejected ·
+        # anything the verdict never covered follows `unresolved`: `human`
+        # falls back to the chat UI's gate, `reject` refuses (headless
+        # stance). Sessions on any other preset are never claimed.
+        auto:
+          enabled: true
+          preset: auto-mode
+          unresolved: human
+
+    # Local secrets redaction (OGR 1.4). On by default; every field here is
+    # already the default, shown so the shape is discoverable.
+    #
+    # Credentials in the outbound model request become ${OGR_SECRET_n} on
+    # THIS machine — the runtime and the model provider are both given the
+    # placeholder, and the value goes back into the reply's tool-call
+    # arguments locally, after judgement. The patterns are your
+    # organization's, served by the runtime; this plugin ships none.
+    localRedaction:
+      enabled: true
+      # `strong` is carriers and issuer-prefixed keys; `heuristic` adds the
+      # gated assignment shapes (password=…, api_key: …). Drop `heuristic`
+      # if a config-heavy agent finds it masks values the model needs.
+      tiers:
+        - strong
+        - heuristic
+      # Empty = ~/.openguardrails/rules-<hash>.json, one cache per runtime.
+      cachePath: ""
+
+# Put "Auto Mode by OGR" in the Permissions selector. A patch replaces
+# the targeted row's WHOLE `config`, so the base presets are restated
+# verbatim around the new entry — merge `auto-mode` into your own table
+# instead if you have customized it.
+- id: permission
+  config:
+    presets:
+      read-only:
+        sandbox: read-only
+        approval: ask
+      workspace-write:
+        sandbox: workspace-write
+        approval: ask
+      auto-mode:
+        sandbox: workspace-write
+        approval: ask
+        name: Auto Mode by OGR
+        description: OpenGuardrails answers approval prompts; only asks it cannot decide reach you.
+      danger-full-access:
+        sandbox: danger-full-access
+        approval: never
