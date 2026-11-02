@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"compress/flate"
 	"encoding/json"
@@ -374,15 +375,37 @@ func (h *tailHold) releaseAll(emit func(b []byte, last bool)) bool {
 	 */
 	_ = z.w.Close()
 	r := flate.NewReader(&z.buf)
+	defer r.Close()
+	reader := bufio.NewReaderSize(r, 32<<10)
 	piece := make([]byte, 32<<10)
 	var pending []byte
 	for {
-		k, err := io.ReadFull(r, piece)
-		if k > 0 {
+		var next []byte
+		var err error
+		if h.sse {
+			// Injection resumes the remaining response filters. Keep the same
+			// complete-frame contract as the uncompressed segments: a downstream
+			// SSE filter may otherwise terminate a partial data line at each 32 KiB
+			// boundary. The target is a batch size, never a frame-size limit.
+			for {
+				var line []byte
+				line, err = reader.ReadBytes('\n')
+				next = append(next, line...)
+				blank := bytes.Equal(line, []byte("\n")) || bytes.Equal(line, []byte("\r\n"))
+				if err != nil || (len(next) >= len(piece) && blank) {
+					break
+				}
+			}
+		} else {
+			var k int
+			k, err = io.ReadFull(reader, piece)
+			next = append([]byte(nil), piece[:k]...)
+		}
+		if len(next) > 0 {
 			if pending != nil {
 				emit(pending, false)
 			}
-			pending = append([]byte(nil), piece[:k]...)
+			pending = next
 		}
 		if err != nil {
 			break
