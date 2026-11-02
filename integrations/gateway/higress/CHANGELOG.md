@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.17.1
+
+- Preserve complete SSE frames when releasing compressed tool-call output. The 32 KiB replay target is now extended through the frame terminator, so downstream filters cannot turn replay boundaries into newlines inside JSON data lines.
+- Cover LF and CRLF streams, frames larger than the replay target, byte preservation and exactly one final end-of-stream signal. Non-SSE responses retain bounded binary replay.
+
 ## 3.17.0
 
 - Add `staged_rollout` consumer/group enrollment using `x-mse-consumer` and `x-mse-consumer-group`, including `ungrouped` and `all_consumers`. Membership is the union of the configured list and the existing `og-airs` beta flag.

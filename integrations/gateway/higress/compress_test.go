@@ -2,12 +2,89 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/openguardrails/higress/protocol"
 )
+
+// Filters after this plugin can parse each injected buffer as SSE. Compression
+// must preserve the frame boundaries used by the uncompressed release path.
+func TestCompressedReplayInjectsCompleteSSEFrames(t *testing.T) {
+	for _, ending := range []string{"\n", "\r\n"} {
+		for _, size := range []int{73, 32768, 100000} {
+			t.Run(fmt.Sprintf("ending=%q/argument=%d", ending, size), func(t *testing.T) {
+				h := newTailHold(-1, true)
+				var want []byte
+				for i := 0; i < 1200; i++ {
+					b, err := json.Marshal(map[string]any{
+						"choices": []any{map[string]any{
+							"delta": map[string]any{"tool_calls": []any{map[string]any{
+								"index": 0, "function": map[string]any{"arguments": strings.Repeat("x", size)},
+							}}},
+						}},
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					frame := append([]byte("data: "), b...)
+					frame = append(frame, ending+ending...)
+					want = append(want, frame...)
+					h.add(frame, 0, true)
+					if len(want) > 300000 {
+						break
+					}
+				}
+				if h.z == nil {
+					t.Fatal("fixture did not enter compressed replay")
+				}
+				var got []byte
+				ends := 0
+				h.releaseAll(func(b []byte, last bool) {
+					if !bytes.HasSuffix(b, []byte(ending+ending)) {
+						t.Errorf("injected %d bytes ending inside an SSE frame", len(b))
+					}
+					got = append(got, b...)
+					if last {
+						ends++
+					}
+				})
+				if !bytes.Equal(got, want) || ends != 1 {
+					t.Fatalf("replay changed bytes or endStream: %d", ends)
+				}
+			})
+		}
+	}
+}
+
+func TestCompressedReplayPreservesBinaryBodiesAndUnterminatedTails(t *testing.T) {
+	for _, sse := range []bool{false, true} {
+		t.Run(fmt.Sprintf("sse=%t", sse), func(t *testing.T) {
+			h := newTailHold(-1, sse)
+			// No final newline: even a malformed upstream tail must be preserved,
+			// never repaired by adding a byte or silently lost at EOF.
+			want := bytes.Repeat([]byte("raw\x00tail"), 16000)
+			h.add(want, 0, true)
+			var got []byte
+			ends := 0
+			h.releaseAll(func(b []byte, last bool) {
+				if !sse && len(b) > 32<<10 {
+					t.Errorf("binary replay grew past its chunk bound: %d", len(b))
+				}
+				got = append(got, b...)
+				if last {
+					ends++
+				}
+			})
+			if !bytes.Equal(got, want) || ends != 1 {
+				t.Fatalf("replay changed bytes or endStream: %d", ends)
+			}
+		})
+	}
+}
 
 // THE COMPRESSED TAIL (2026-09-23). What is pinned: the client receives EXACTLY the
 // bytes the model sent — the hold understands nothing about them — and a held file
