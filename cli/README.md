@@ -126,12 +126,13 @@ speak the protocol their client speaks.
 
 ```sh
 npm run build
-experiments/run.sh <hermes|openclaw|dsh> <empty-lab-dir> [gateway|live]
+experiments/run.sh <hermes|openclaw|dsh> <empty-lab-dir> [gateway|attach|live]
 ```
 
 Runs the real harness in a throwaway home, against a scripted model and a scripted model API: through
-the gateway with `gateway`, and through the gateway and a real Model API at `$MODEL_API_URL` with
-`live`. Files in the work directory prove what really ran. The harness must already be installed.
+the gateway with `gateway`; configured to call the model directly and then put behind the gateway by
+`openguardrails attach` with `attach`; and through the gateway and a real Model API at `$MODEL_API_URL`
+with `live`. Files in the work directory prove what really ran. The harness must already be installed.
 
 The secret rules in `rules/secrets.json` are a snapshot of what OpenGuardrails AIRS serves. Every rule
 carries examples, and the tests fail if one stops passing them. Examples shaped like a real issuer's key
