@@ -7,6 +7,7 @@ openguardrails serve                    the local service: OGR Runtime API, and 
 openguardrails status                   check the service, every upstream, the model API and AIRS; exit 1 on a problem
 openguardrails connect                  turn on the model: get a free key, and show where to claim more
 openguardrails decisions                what the rules and the model decided, with no arguments or message text
+openguardrails scan [--json]            the agents on this machine, what they load, and what to fix
 openguardrails run -- <command...>      run a command and everything it spawns inside the sandbox
 openguardrails log [run-id]             what a sandboxed run did
 openguardrails stop                     stop the local service
@@ -76,6 +77,27 @@ warning.
   stand-in. On OpenAI Responses a refusal in a stream retracts the whole step.
 - `openguardrails run` hides this tool's own configuration from the sandbox, so a plugin inside it
   cannot read a key from there. Pass the local service's address to the plugin instead.
+
+## Scan
+
+`openguardrails scan` lists every agent it finds on the machine. It changes nothing and sends nothing.
+
+| Agents | |
+|---|---|
+| OpenClaw and Hermes (personal), OpenCode, Codex and DeepSeek Harness (open source coding) | OpenGuardrails protects these |
+| Claude Code, Gemini CLI, Cursor, Claude Desktop, VS Code, Windsurf | Listed only. Claude Code's own permissions are strong; the others are apps whose model settings are not a file to rewrite |
+
+For each agent it lists:
+
+- where its model calls go, and whether they pass through the local gateway;
+- the MCP servers it starts or connects to, with the package each one runs and whether that package
+  is pinned to an exact version;
+- its skills and plugins, each with a sha256 of what is on disk.
+
+It reports three findings: a protected agent that calls its model directly, a secret written in plain
+text in any agent's config (where it is, never its value), and an MCP server that fetches an unpinned
+package.
+`--json` prints the whole inventory.
 
 ## Sandbox and gateway
 
