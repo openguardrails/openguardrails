@@ -16,7 +16,7 @@ function home(files: Record<string, string>): ScanContext {
     mkdirSync(dirname(join(root, path)), { recursive: true });
     writeFileSync(join(root, path), body);
   }
-  return { home: root, env: { PATH: "" }, gatewayPort: 4180 };
+  return { home: root, platform: "linux", env: { PATH: "" }, gatewayPort: 4180 };
 }
 
 const byAgent = (ctx: ScanContext) => {
@@ -27,7 +27,7 @@ const byAgent = (ctx: ScanContext) => {
 test("nothing installed, nothing reported", () => {
   const { inventory } = byAgent(home({}));
   assert.deepEqual(inventory.agents, []);
-  assert.match(render(inventory), /No supported agent found/);
+  assert.match(render(inventory), /No agent found/);
 });
 
 test("Hermes: model, custom providers, MCP servers, grouped skills, and a plaintext key", () => {
@@ -205,4 +205,42 @@ test("packageOf reads the launchers that fetch code, and nothing else", () => {
   assert.equal(packageOf("docker", ["run", "-i", "img@sha256:abc"])?.pinned, true);
   assert.equal(packageOf("node", ["server.js"]), undefined);
   assert.equal(packageOf("C:\\Program Files\\nodejs\\npx.cmd", ["-y", "pkg@1.0.0"])?.pinned, true);
+});
+
+test("Claude Code is listed, with its MCP servers, but not something to attach", () => {
+  const ctx = home({
+    ".claude.json": JSON.stringify({
+      mcpServers: { linear: { type: "http", url: "https://mcp.linear.app/mcp", headers: { Authorization: `Bearer ${SECRET}` } } },
+      projects: { "/work/app": { mcpServers: { db: { command: "npx", args: ["-y", "pg-mcp"] } } } },
+      oauthAccount: { emailAddress: "someone@example.com" },
+    }),
+    ".claude/settings.json": JSON.stringify({ env: { ANTHROPIC_BASE_URL: "https://api.anthropic.com" }, enabledPlugins: { "review@official": true } }),
+    ".claude/skills/release/SKILL.md": "# release",
+  });
+  const { agent, findings } = byAgent(ctx);
+  const cc = agent("claude-code")!;
+  assert.equal(cc.protectable, false);
+  assert.equal(cc.open_source, false);
+  assert.deepEqual(cc.components.map((c) => `${c.kind} ${c.name}`).sort(), ["mcp_server /work/app: db", "mcp_server linear", "plugin review@official", "skill release"]);
+  // Listed only: no gateway finding, but its own secrets and unpinned servers still count.
+  assert.deepEqual(findings("claude-code").map((f) => f.id).sort(), ["config.plaintext_secret", "mcp.unpinned_package"]);
+  assert.match(render(scan(ctx), ctx.home), /Claude Code .*listed only/);
+});
+
+test("Gemini CLI extensions and the MCP-only apps are listed", () => {
+  const ctx = home({
+    ".gemini/settings.json": JSON.stringify({ mcpServers: { fs: { command: "npx", args: ["-y", "@x/fs@1.0.0"] } } }),
+    ".gemini/extensions/search/gemini-extension.json": JSON.stringify({ name: "search", mcpServers: { web: { httpUrl: "https://search.example/mcp" } } }),
+    ".cursor/mcp.json": JSON.stringify({ mcpServers: { notes: { url: "https://notes.example/mcp" } } }),
+    ".config/Claude/claude_desktop_config.json": JSON.stringify({ mcpServers: { files: { command: "uvx", args: ["mcp-files"] } } }),
+    ".config/Code/User/mcp.json": JSON.stringify({ servers: { gh: { type: "http", url: "https://api.githubcopilot.com/mcp/" } } }),
+  });
+  const { agent } = byAgent(ctx);
+  const gem = agent("gemini-cli")!;
+  assert.deepEqual(gem.components.map((c) => `${c.kind} ${c.name}`).sort(), ["mcp_server fs", "mcp_server search: web", "plugin search"]);
+  assert.equal(agent("cursor")!.components[0]!.url, "https://notes.example/mcp");
+  assert.equal(agent("claude-desktop")!.components[0]!.package?.name, "mcp-files");
+  assert.equal(agent("vscode")!.components[0]!.transport, "http");
+  assert.equal(agent("windsurf"), undefined);
+  assert.ok(["gemini-cli", "cursor", "claude-desktop", "vscode"].every((id) => agent(id)!.protectable === false));
 });

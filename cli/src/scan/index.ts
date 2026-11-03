@@ -11,12 +11,12 @@ export function defaultContext(): ScanContext {
   } catch {
     // An unreadable config still leaves the default port to compare against.
   }
-  return { home: homedir(), env: process.env, gatewayPort: port };
+  return { home: homedir(), platform: process.platform, env: process.env, gatewayPort: port };
 }
 
 function derivedFindings(agent: Agent): Finding[] {
   const findings: Finding[] = [];
-  if (agent.models.length > 0 && !agent.models.some((model) => model.through_gateway)) {
+  if (agent.protectable && agent.models.length > 0 && !agent.models.some((model) => model.through_gateway)) {
     findings.push({
       id: "gateway.not_attached",
       severity: "medium",
@@ -59,12 +59,12 @@ const tilde = (path: string, home: string) => (path.startsWith(home) ? `~${path.
 export function render(inventory: Inventory, home = homedir()): string {
   const lines: string[] = [];
   if (inventory.agents.length === 0) {
-    lines.push("No supported agent found. Looked for OpenClaw, Hermes, OpenCode, Codex and DeepSeek Harness.");
+    lines.push("No agent found. Looked for OpenClaw, Hermes, OpenCode, Codex, DeepSeek Harness, Claude Code, Gemini CLI, Cursor, Claude Desktop, VS Code and Windsurf.");
     return `${lines.join("\n")}\n`;
   }
   for (const agent of inventory.agents) {
     const count = (kind: string) => agent.components.filter((component) => component.kind === kind).length;
-    lines.push(`${agent.name}  (${agent.kind} agent, ${agent.open_source ? "open source" : "closed source"})`);
+    lines.push(`${agent.name}  (${agent.kind} agent, ${agent.open_source ? "open source" : "closed source"})${agent.protectable ? "" : "  listed only: OpenGuardrails does not protect it"}`);
     for (const model of agent.models) {
       lines.push(`  model     ${model.provider}  ${model.base_url ?? "(built-in default)"}  ${model.through_gateway ? "through the gateway" : "direct"}`);
     }

@@ -80,16 +80,23 @@ warning.
 
 ## Scan
 
-`openguardrails scan` reads the configs of OpenClaw, Hermes, OpenCode, Codex and DeepSeek Harness. It
-changes nothing and sends nothing. For each agent it lists:
+`openguardrails scan` lists every agent it finds on the machine. It changes nothing and sends nothing.
+
+| Agents | |
+|---|---|
+| OpenClaw and Hermes (personal), OpenCode, Codex and DeepSeek Harness (open source coding) | OpenGuardrails protects these |
+| Claude Code, Gemini CLI, Cursor, Claude Desktop, VS Code, Windsurf | Listed only. Claude Code's own permissions are strong; the others are apps whose model settings are not a file to rewrite |
+
+For each agent it lists:
 
 - where its model calls go, and whether they pass through the local gateway;
 - the MCP servers it starts or connects to, with the package each one runs and whether that package
   is pinned to an exact version;
 - its skills and plugins, each with a sha256 of what is on disk.
 
-It reports three findings: an agent that calls its model directly, a secret written in plain text in
-an agent's config (where it is, never its value), and an MCP server that fetches an unpinned package.
+It reports three findings: a protected agent that calls its model directly, a secret written in plain
+text in any agent's config (where it is, never its value), and an MCP server that fetches an unpinned
+package.
 `--json` prints the whole inventory.
 
 ## Sandbox and gateway

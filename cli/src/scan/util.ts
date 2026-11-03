@@ -63,6 +63,13 @@ export function readConfig(path: string): unknown {
   }
 }
 
+/** Where desktop apps keep per-user settings: Application Support, %APPDATA%, or ~/.config. */
+export function appData(ctx: ScanContext): string {
+  if (ctx.platform === "darwin") return join(ctx.home, "Library", "Application Support");
+  if (ctx.platform === "win32") return ctx.env.APPDATA ?? join(ctx.home, "AppData", "Roaming");
+  return ctx.env.XDG_CONFIG_HOME ?? join(ctx.home, ".config");
+}
+
 export function onPath(name: string, ctx: ScanContext): string | undefined {
   for (const dir of (ctx.env.PATH ?? "").split(delimiter)) {
     if (!dir) continue;

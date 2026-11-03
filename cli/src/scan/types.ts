@@ -40,6 +40,11 @@ export interface Agent {
   name: string;
   kind: AgentKind;
   open_source: boolean;
+  /**
+   * Whether OpenGuardrails can put this agent behind its gateway. The others are listed so a person
+   * sees every agent on the machine, and their findings still count.
+   */
+  protectable: boolean;
   /** The executable on PATH, when there is one. */
   binary?: string;
   config_files: string[];
@@ -68,6 +73,7 @@ export interface Inventory {
 /** Where an adapter looks. Tests point every path at a fixture. */
 export interface ScanContext {
   home: string;
+  platform: NodeJS.Platform;
   env: NodeJS.ProcessEnv;
   gatewayPort: number;
 }

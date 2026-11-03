@@ -5,7 +5,7 @@
  */
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { endpoint, expandHome, isObj, mcpServer, onPath, pluginDirs, readConfig, secretFindings, skillsIn, str, strings, type Obj } from "./util.js";
+import { appData, endpoint, expandHome, isObj, mcpServer, onPath, pluginDirs, readConfig, secretFindings, skillsIn, str, strings, type Obj } from "./util.js";
 import type { Agent, Component, Finding, ScanContext } from "./types.js";
 
 export interface AgentScan {
@@ -32,7 +32,7 @@ const hermes: Reader = (ctx) => {
   if (!present(binary, [file])) return null;
   const config = readConfig(file);
   const cfg = isObj(config) ? config : {};
-  const agent: Agent = { id: "hermes", name: "Hermes", kind: "personal", open_source: true, ...(binary ? { binary } : {}), config_files: existsSync(file) ? [file] : [], models: [], components: [] };
+  const agent: Agent = { id: "hermes", name: "Hermes", kind: "personal", open_source: true, protectable: true, ...(binary ? { binary } : {}), config_files: existsSync(file) ? [file] : [], models: [], components: [] };
   const model = cfg.model;
   if (isObj(model)) agent.models.push(endpoint(str(model.provider) ?? "default", str(model.base_url), file, ctx));
   else if (typeof model === "string") agent.models.push(endpoint("default", undefined, file, ctx));
@@ -57,7 +57,7 @@ const openclaw: Reader = (ctx) => {
   if (!present(binary, [file])) return null;
   const config = readConfig(file);
   const cfg = isObj(config) ? config : {};
-  const agent: Agent = { id: "openclaw", name: "OpenClaw", kind: "personal", open_source: true, ...(binary ? { binary } : {}), config_files: existsSync(file) ? [file] : [], models: [], components: [] };
+  const agent: Agent = { id: "openclaw", name: "OpenClaw", kind: "personal", open_source: true, protectable: true, ...(binary ? { binary } : {}), config_files: existsSync(file) ? [file] : [], models: [], components: [] };
   const models = isObj(cfg.models) ? cfg.models : {};
   if (isObj(models.providers)) {
     for (const [name, provider] of Object.entries(models.providers)) {
@@ -89,7 +89,7 @@ const opencode: Reader = (ctx) => {
   const files = ["opencode.json", "opencode.jsonc"].map((name) => join(root, name));
   const binary = onPath("opencode", ctx);
   if (!present(binary, files)) return null;
-  const agent: Agent = { id: "opencode", name: "OpenCode", kind: "coding", open_source: true, ...(binary ? { binary } : {}), config_files: files.filter((file) => existsSync(file)), models: [], components: [] };
+  const agent: Agent = { id: "opencode", name: "OpenCode", kind: "coding", open_source: true, protectable: true, ...(binary ? { binary } : {}), config_files: files.filter((file) => existsSync(file)), models: [], components: [] };
   const findings: Finding[] = [];
   for (const file of agent.config_files) {
     const config = readConfig(file);
@@ -122,7 +122,7 @@ const codex: Reader = (ctx) => {
   if (!present(binary, [file])) return null;
   const config = readConfig(file);
   const cfg = isObj(config) ? config : {};
-  const agent: Agent = { id: "codex", name: "Codex", kind: "coding", open_source: true, ...(binary ? { binary } : {}), config_files: existsSync(file) ? [file] : [], models: [], components: [] };
+  const agent: Agent = { id: "codex", name: "Codex", kind: "coding", open_source: true, protectable: true, ...(binary ? { binary } : {}), config_files: existsSync(file) ? [file] : [], models: [], components: [] };
   const providers = isObj(cfg.model_providers) ? cfg.model_providers : {};
   const active = str(cfg.model_provider);
   for (const [name, provider] of Object.entries(providers)) {
@@ -150,7 +150,7 @@ const dsh: Reader = (ctx) => {
   const profiles = join(root, "profiles");
   const binary = onPath("dsh", ctx);
   if (!present(binary, [profiles])) return null;
-  const agent: Agent = { id: "deepseek-harness", name: "DeepSeek Harness", kind: "coding", open_source: true, ...(binary ? { binary } : {}), config_files: [], models: [], components: [] };
+  const agent: Agent = { id: "deepseek-harness", name: "DeepSeek Harness", kind: "coding", open_source: true, protectable: true, ...(binary ? { binary } : {}), config_files: [], models: [], components: [] };
   const findings: Finding[] = [];
   let names: string[] = [];
   try {
@@ -191,4 +191,92 @@ const dsh: Reader = (ctx) => {
   return { agent, findings };
 };
 
-export const READERS: Reader[] = [openclaw, hermes, opencode, codex, dsh];
+// Listed only. A person should see every agent on the machine, but OpenGuardrails does not put these
+// behind its gateway: Claude Code's own permissions are strong, and the others are closed apps or
+// editors whose model settings are not a file we can safely rewrite.
+
+/** Claude Code: MCP servers in `~/.claude.json` (global and per project), settings in `~/.claude/settings.json`. */
+const claudeCode: Reader = (ctx) => {
+  const state = join(ctx.home, ".claude.json");
+  const root = ctx.env.CLAUDE_CONFIG_DIR ?? join(ctx.home, ".claude");
+  const settingsFile = join(root, "settings.json");
+  const binary = onPath("claude", ctx);
+  if (!present(binary, [state, settingsFile])) return null;
+  const agent: Agent = { id: "claude-code", name: "Claude Code", kind: "coding", open_source: false, protectable: false, ...(binary ? { binary } : {}), config_files: [state, settingsFile].filter((file) => existsSync(file)), models: [], components: [] };
+  const findings: Finding[] = [];
+  const settings = readConfig(settingsFile);
+  const settingsObj = isObj(settings) ? settings : {};
+  const env = isObj(settingsObj.env) ? settingsObj.env : {};
+  const base = str(env.ANTHROPIC_BASE_URL) ?? ctx.env.ANTHROPIC_BASE_URL;
+  agent.models.push(endpoint("anthropic", base, str(env.ANTHROPIC_BASE_URL) ? settingsFile : base ? "ANTHROPIC_BASE_URL" : settingsFile, ctx));
+  if (settings !== undefined) findings.push(...secretFindings({ env: settingsObj.env }, agent.id, settingsFile));
+  const stateObj = readConfig(state);
+  if (isObj(stateObj)) {
+    agent.components.push(...mcpTable(stateObj.mcpServers, state, ctx));
+    findings.push(...secretFindings({ mcpServers: stateObj.mcpServers }, agent.id, state));
+    if (isObj(stateObj.projects)) {
+      for (const [project, entry] of Object.entries(stateObj.projects)) {
+        if (!isObj(entry) || !isObj(entry.mcpServers)) continue;
+        for (const server of mcpTable(entry.mcpServers, state, ctx)) agent.components.push({ ...server, name: `${project}: ${server.name}` });
+        findings.push(...secretFindings({ projects: { [project]: { mcpServers: entry.mcpServers } } }, agent.id, state));
+      }
+    }
+  }
+  agent.components.push(...skillsIn(join(root, "skills"), join(root, "skills")));
+  if (isObj(settingsObj.enabledPlugins)) {
+    for (const [name, on] of Object.entries(settingsObj.enabledPlugins)) agent.components.push({ kind: "plugin", name, ...(on === false ? { enabled: false } : {}), declared_in: settingsFile });
+  }
+  const installed = readConfig(join(root, "plugins", "installed_plugins.json"));
+  if (isObj(installed) && isObj(installed.plugins)) {
+    for (const name of Object.keys(installed.plugins)) {
+      if (!agent.components.some((c) => c.kind === "plugin" && c.name === name)) agent.components.push({ kind: "plugin", name, declared_in: join(root, "plugins", "installed_plugins.json") });
+    }
+  }
+  return { agent, findings };
+};
+
+/** Gemini CLI: `~/.gemini/settings.json`, and extensions that can bring MCP servers of their own. */
+const gemini: Reader = (ctx) => {
+  const root = join(ctx.home, ".gemini");
+  const file = join(root, "settings.json");
+  const binary = onPath("gemini", ctx);
+  if (!present(binary, [file])) return null;
+  const agent: Agent = { id: "gemini-cli", name: "Gemini CLI", kind: "coding", open_source: true, protectable: false, ...(binary ? { binary } : {}), config_files: existsSync(file) ? [file] : [], models: [], components: [] };
+  const config = readConfig(file);
+  const cfg = isObj(config) ? config : {};
+  agent.models.push(endpoint("google", ctx.env.GOOGLE_GEMINI_BASE_URL, ctx.env.GOOGLE_GEMINI_BASE_URL ? "GOOGLE_GEMINI_BASE_URL" : file, ctx));
+  agent.components.push(...mcpTable(cfg.mcpServers, file, ctx));
+  const findings = config === undefined ? [] : secretFindings({ mcpServers: cfg.mcpServers }, agent.id, file);
+  for (const extension of pluginDirs(join(root, "extensions"), join(root, "extensions"))) {
+    agent.components.push(extension);
+    const manifest = join(extension.path!, "gemini-extension.json");
+    const ext = readConfig(manifest);
+    if (!isObj(ext)) continue;
+    for (const server of mcpTable(ext.mcpServers, manifest, ctx)) agent.components.push({ ...server, name: `${extension.name}: ${server.name}` });
+    findings.push(...secretFindings({ mcpServers: ext.mcpServers }, agent.id, manifest));
+  }
+  return { agent, findings };
+};
+
+/** An app whose only readable footprint is an MCP file: Cursor, Claude Desktop, VS Code, Windsurf. */
+function mcpOnly(spec: { id: string; name: string; kind: "personal" | "coding"; openSource: boolean; binary?: string; file: (ctx: ScanContext) => string; table: string; apps?: string[] }): Reader {
+  return (ctx) => {
+    const file = spec.file(ctx);
+    const binary = spec.binary ? onPath(spec.binary, ctx) : undefined;
+    const app = ctx.platform === "darwin" ? (spec.apps ?? []).find((path) => existsSync(path)) : undefined;
+    if (!present(binary ?? app, [file])) return null;
+    const agent: Agent = { id: spec.id, name: spec.name, kind: spec.kind, open_source: spec.openSource, protectable: false, ...(binary ? { binary } : {}), config_files: existsSync(file) ? [file] : [], models: [], components: [] };
+    const config = readConfig(file);
+    const cfg = isObj(config) ? config : {};
+    agent.components.push(...mcpTable(cfg[spec.table], file, ctx));
+    return { agent, findings: config === undefined ? [] : secretFindings({ [spec.table]: cfg[spec.table] }, agent.id, file) };
+  };
+}
+
+const cursor = mcpOnly({ id: "cursor", name: "Cursor", kind: "coding", openSource: false, binary: "cursor-agent", file: (ctx) => join(ctx.home, ".cursor", "mcp.json"), table: "mcpServers", apps: ["/Applications/Cursor.app"] });
+const claudeDesktop = mcpOnly({ id: "claude-desktop", name: "Claude Desktop", kind: "personal", openSource: false, file: (ctx) => join(appData(ctx), "Claude", "claude_desktop_config.json"), table: "mcpServers", apps: ["/Applications/Claude.app"] });
+const vscode = mcpOnly({ id: "vscode", name: "VS Code (Copilot and other extensions)", kind: "coding", openSource: false, binary: "code", file: (ctx) => join(appData(ctx), "Code", "User", "mcp.json"), table: "servers", apps: ["/Applications/Visual Studio Code.app"] });
+const windsurf = mcpOnly({ id: "windsurf", name: "Windsurf", kind: "coding", openSource: false, file: (ctx) => join(ctx.home, ".codeium", "windsurf", "mcp_config.json"), table: "mcpServers", apps: ["/Applications/Windsurf.app"] });
+
+/** The agents OpenGuardrails protects come first, then the ones it only lists. */
+export const READERS: Reader[] = [openclaw, hermes, opencode, codex, dsh, claudeCode, gemini, cursor, claudeDesktop, vscode, windsurf];
