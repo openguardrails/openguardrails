@@ -1,8 +1,8 @@
 # OpenGuardrails AIRS — the Higress plugin
 
 A Higress WASM plugin that speaks **OGR v1.0 directly to an OpenGuardrails
-runtime**. It implements **the recipe of the v1.0 Runtime API**
-([`specification/runtime-api.md`](../../../specification/runtime-api.md)) —
+runtime**. It implements **the recipe of the v1.0 Runtime API** (`/v1/evaluate`, which AIRS
+serves and keeps frozen; the protocol is no longer published as a specification) —
 one recipe now, the same two POSTs per model call whether the integration is a
 gateway or a developer's own agent loop.
 
@@ -202,8 +202,7 @@ fingerprint floor:
 ⚠️ **Configuring a `*_header` REPLACES the whole chain** with that one header;
 it does not extend it. A field that resolves to nothing is sent as the empty
 string — the spec's explicit "no assertion", never an error — and the runtime
-falls back to what the API key says. The spec's cross-gateway version of this
-table is [Runtime API § at a gateway](../../../specification/runtime-api.md#at-a-gateway-the-four-tuple-arrives-as-headers).
+falls back to what the API key says.
 
 ### Who gets to say what (2.1.0)
 

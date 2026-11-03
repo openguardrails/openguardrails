@@ -1,46 +1,24 @@
 # Contributing
 
-This monorepo contains the OpenGuardrails specification, core runtimes,
-integrations, benchmark, examples, skill, and website. Cross-component changes can
-be made in one pull request; independently published packages keep their own
-versions and changelogs.
-
-## What belongs here
-
-- Changes to `specification/*.md`
-- Changes to `schema/*.json`
-- Taxonomy additions/changes (`specification/taxonomy.md`)
-- Conformance criteria (`CONFORMANCE.md`)
-- Core runtime changes under `packages/`
-- Gateway plugins, standalone bridges and agent plugins under `integrations/`
-- Benchmark, example, skill, and website changes in their respective directories
-
-Keep a change scoped to the smallest relevant directories. When a protocol
-change affects an implementation, update both in the same pull request.
+This repository holds the `openguardrails` command in [`cli/`](cli/), the public benchmark in
+[`benchmarks/`](benchmarks/), and the Higress plugin in
+[`integrations/gateway/higress/`](integrations/gateway/higress/).
 
 ## How to propose a change
 
-1. Open an issue describing the problem before a large change, so the wire isn't
-   churned twice.
-2. Submit a PR. Classify it in the description:
-   - **Editorial** — wording, examples, clarification with no change to the wire.
-   - **Normative** — any change to a schema, required field, verdict semantics,
-     composition rule, or taxonomy ID.
-3. For normative PRs, include:
-   - a rationale,
-   - a `CHANGELOG.md` entry,
-   - a version bump (see [GOVERNANCE.md](GOVERNANCE.md#versioning)),
-   - a migration note if breaking.
-4. Keep schema and prose in sync — a field added to a schema must be documented in
-   the matching `specification/` file, and vice versa.
-5. Run the relevant checks from the repository root: `npm run build && npm test`
-   for JavaScript work and `python -m pytest` for Python work.
+1. Open an issue before a large change.
+2. Submit a pull request scoped to the smallest relevant directory, with a `CHANGELOG.md` entry when
+   behavior changes.
+3. Run the checks for what you touched:
+   - the command: `cd cli && npm install && npm test`
+   - the benchmark: `python -m pip install pytest && python -m pytest`
+   - the Higress plugin: `cd integrations/gateway/higress && gofmt -l . && go vet ./... && go test ./...`
 
-## Reviewing
+## Benchmark submissions
 
-Normative changes are reviewed against the [principles](GOVERNANCE.md#principles):
-neutral, boundary-not-brains, provenance-first, defense-in-depth. A change that
-advantages one detector vendor over others is out of scope by construction.
+A detector that wants to appear on the leaderboard runs through the harness in
+[`benchmarks/`](benchmarks/). We never fabricate a vendor's score: numbers come from the harness or they
+do not appear. A change that advantages one detector over others is out of scope.
 
 ## Licensing
 

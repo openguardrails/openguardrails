@@ -1,13 +1,27 @@
 # Changelog
 
-All notable changes to the OpenGuardrails **protocol** are recorded here. This
-tracks the wire (schemas, verdict semantics, provenance, composition, taxonomy),
-not implementations. Downstream SDKs and adapters pin a protocol version.
+Until 2026-11-03 this file recorded the OpenGuardrails **protocol** (the wire:
+schemas, verdict semantics, provenance, composition, taxonomy), last at v1.10. The
+protocol is no longer published. Entries below that date describe it as it was.
 
-The format follows [Keep a Changelog](https://keepachangelog.com/). The protocol
-version is independent of any implementation's package version.
+The format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
+
+### The protocol is no longer published (2026-11-03)
+- **Removed:** `specification/`, `schema/`, `CONFORMANCE.md`, `GOVERNANCE.md`,
+  `proposals/`, `examples/`, `skills/`, `packages/`, every agent plugin under
+  `integrations/agent/`, the Java bridge, the mitmproxy and OpenAI/Anthropic
+  reference gateways, the OpenAFW pointer and the root npm workspace. Their code
+  remains in the git history.
+- **What is published now:** the `openguardrails` command and the benchmark. Detection
+  moves to `/v1/openguardrails`, one API that builders and AIRS share; its reference
+  will be published with the service.
+- **What keeps working:** `/v1/evaluate`. AIRS keeps serving it, translated to
+  `/v1/openguardrails`, for every existing deployment. The Higress plugin, which
+  speaks it, stays here.
+- **Experiments:** `cli/experiments/run.sh` runs `gateway` and `live` only; the plugin
+  modes `judge` and `nomodel` went with the plugins.
 
 ### mitmproxy addon 1.1.0 (implementation, not a wire change)
 - **Codex responses are judged.** The ChatGPT backend streams

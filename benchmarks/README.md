@@ -3,8 +3,7 @@
 **A public, reproducible evaluation of AI agent safety and security detectors.**
 
 OpenGuardrails builds detectors and enters them here too, so check the numbers yourself: the corpora,
-scoring and harness are all in this directory. Any
-[OGR-conformant](../specification/README.md) detector
+scoring and harness are all in this directory. Any detector
 (config-based or model-based) can be run against the same corpora and ranked. We never fabricate a vendor's score; numbers come from the
 harness or they don't appear.
 
@@ -93,7 +92,7 @@ governance will be foundation-neutral.
 ## Mandate scoring (the authorization envelope)
 
 `run.py` also scores a **mandate** — the operator's declared authorization
-envelope ([`specification/mandate.md`](../specification/mandate.md)) — over the two
+envelope — over the two
 `mandate_violation_*` corpora. This is deliberately kept OUT of the vendor
 leaderboard: a mandate is runtime *configuration*, not a submitted detector, so it
 does not compete with the guard models. It is scored on its own:
@@ -116,8 +115,7 @@ are scored the same way.
 ## Grounding scoring (the evidence envelope)
 
 `run.py` also scores a **grounding profile** — the operator's declaration of what an
-agent must SHOW before it may CONCLUDE
-([`specification/grounding.md`](../specification/grounding.md)) — over the two
+agent must SHOW before it may CONCLUDE — over the two
 `grounding_*` corpora. Like the mandate it is kept OUT of the vendor leaderboard: a
 profile is runtime configuration plus a **record provider**, and here the provider
 is a frozen synthetic world (`*.records.json`) so the ground truth cannot move under
@@ -138,8 +136,7 @@ the corpus. It is scored on its own:
   structural reference does not score them; a submitted judge would.
 
 Each corpus carries an `owner` per case (`grounding`, `judge`, or the other detector's
-name) and a `rule` (`OG-IP-003`, `OG-LS-005`) from the catalogues in
-[`proposals/domain-trust-ip-life-sciences.md`](../proposals/domain-trust-ip-life-sciences.md).
+name) and a `rule` (`OG-IP-003`, `OG-LS-005`) from the IP and life-sciences rule catalogues.
 The reference profiles score 1.000 on their seed; `benchmarks/tests/test_grounding_scoring.py`
 proves the metric is not vacuous (an empty profile scores recall 0) and that darkening
 the provider yields `unjudged`, never a finding.
@@ -151,6 +148,5 @@ the provider yields `unjudged`, never a finding.
 - `tool_poisoning` suite (malicious MCP/tool **definitions**).
 - A mandate evaluator scoring the `mandate_violation_*` corpora against a
   declared envelope (they carry `expected_categories` today; a mandate is
-  runtime configuration, not a submitted detector — see
-  [`specification/mandate.md`](../specification/mandate.md)).
+  runtime configuration, not a submitted detector).
 - Adapters for real guard models so vendors appear with real numbers.

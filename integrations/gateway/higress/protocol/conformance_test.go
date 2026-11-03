@@ -507,7 +507,7 @@ func TestTheCatchAllRegistersLast(t *testing.T) {
 }
 
 func TestEveryProtocolNamesAValueTheSchemaAllows(t *testing.T) {
-	// schema/guard-event.schema.json, `llm_protocol`. A name that is not in the enum is
+	// AIRS's GuardEvent schema, `llm_protocol`. A name that is not in the enum is
 	// rejected by the runtime for every event this protocol ever produces.
 	allowed := map[string]bool{
 		"openai.chat": true, "openai.responses": true, "anthropic.messages": true,
@@ -515,7 +515,7 @@ func TestEveryProtocolNamesAValueTheSchemaAllows(t *testing.T) {
 	for _, p := range All() {
 		if !allowed[p.Name()] {
 			t.Errorf("%q is not an llm_protocol the OGR schema accepts — add it to "+
-				"schema/guard-event.schema.json in the same change", p.Name())
+				"AIRS's GuardEvent schema first", p.Name())
 		}
 	}
 }

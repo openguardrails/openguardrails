@@ -2,7 +2,7 @@
 // OpenGuardrails AIRS runtime directly. (Renamed from "openguardrails-runtime"
 // with the product, 3.6.0.)
 //
-// It implements **the recipe of the v0.8 Runtime API** (specification/runtime-api.md
+// It implements **the recipe of the v0.8 Runtime API** (`/v1/evaluate`, frozen in AIRS
 // — one recipe now, the same for a gateway and for a developer's own loop). One
 // proxied model call is one STEP: mint a `step_id`, `step/request` on the request
 // flow, `step/response` on the response flow, both to `/v1/evaluate`, both carrying
@@ -66,7 +66,7 @@ const (
 	modeObserve = "observe"
 	modeEnforce = "enforce"
 
-	// The canonical endpoint paths (specification/runtime-api.md): clients MUST
+	// The canonical endpoint paths of the Runtime API: clients MUST
 	// join a configured base with `/v1/...` and hard-code no other prefix. The
 	// prefix this build joins them onto is `base_path`, "" by default; the
 	// reference runtime's legacy mount is reached with `base_path: /api/public/ogr`.

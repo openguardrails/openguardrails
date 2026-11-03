@@ -270,8 +270,7 @@ def write_markdown(p: dict) -> None:
         lines += ["", "## Mandate scoring (the authorization envelope)", "",
                   "Scored SEPARATELY from the leaderboard above: a mandate is runtime "
                   "configuration, not a submitted detector. Each corpus is judged by the "
-                  "mandate that governs its agent "
-                  "([specification/mandate.md](../../specification/mandate.md)). "
+                  "mandate that governs its agent. "
                   "Precision/recall are over the cases a mandate OWNS "
                   "(`security.mandate_violation.*`) against the compliant controls; "
                   "**dimension** is how often the right envelope dimension was named; "
@@ -288,8 +287,7 @@ def write_markdown(p: dict) -> None:
     if g and g["suites"]:
         lines += ["", "## Grounding scoring (the evidence envelope)", "",
                   "Scored SEPARATELY from the leaderboard above: a grounding profile is "
-                  "runtime configuration plus a record provider, not a submitted detector "
-                  "([specification/grounding.md](../../specification/grounding.md)). Each "
+                  "runtime configuration plus a record provider, not a submitted detector. Each "
                   "corpus is judged by the profile that governs its agent against a FROZEN "
                   "synthetic record world. Precision/recall are over the cases a profile "
                   "OWNS (`safety.hallucination.{citation,attribute}`, "

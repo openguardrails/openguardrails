@@ -1,8 +1,8 @@
 """A mandate evaluator for the benchmark harness — the runtime-side authorization
-check of specification/mandate.md, adapted to the harness `Event`.
+check of a mandate, adapted to the harness `Event`.
 
 A mandate is CONFIGURATION, not a submitted detector: it is loaded from a JSON
-file (schema/mandate.schema.json) and resolved per workspace. So this is not one
+file and resolved per workspace. So this is not one
 of the competing `detectors.py` entries — it is scored on its own, over the
 `mandate_violation_*` corpora, by run.py.
 

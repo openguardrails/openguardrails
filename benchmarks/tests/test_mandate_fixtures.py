@@ -1,9 +1,8 @@
 """Structural validation of the mandate-violation category-expectation corpora.
 
 These two suites (trading, security-operations) are the executable form of the
-agentic-trading and security-operations mapping tables in
-specification/taxonomy.md, and of the envelope dimensions in
-specification/mandate.md. Like the healthcare fixtures they carry
+agentic-trading and security-operations mapping tables of the
+safety/security/privacy taxonomy, and of a mandate's envelope dimensions. Like the healthcare fixtures they carry
 `expected_categories` rather than being scored by the binary seed-v0 leaderboard:
 the reference detectors do not evaluate a mandate (a mandate is runtime
 configuration, not a detector), so this test checks that the labels are
@@ -28,7 +27,7 @@ FIXTURES = {
 }
 
 # Every id these corpora reference must live in the security.* namespace of
-# specification/taxonomy.md. The mandate/market/restricted/persistence ids are
+# the taxonomy. The mandate/market/restricted/persistence ids are
 # the ones OGR 1.3 adds; the rest are pre-existing.
 ALLOWED = {
     "security.mandate_violation.scope",

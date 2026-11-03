@@ -1,6 +1,5 @@
 /**
- * `reject_value` — what a rule refuses to call a credential (OGR 1.4,
- * specification/local-redaction.md §4.6).
+ * `reject_value` — what a rule refuses to call a credential.
  *
  * ⚠️⚠️ **A RULE IS ITS PATTERNS MINUS WHAT ITS FILTERS THROW AWAY.** A reader that
  * applies only the patterns is running a DIFFERENT rule from the one the runtime runs,
