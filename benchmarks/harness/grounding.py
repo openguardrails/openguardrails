@@ -1,8 +1,8 @@
 """A grounding evaluator for the benchmark harness — the runtime-side evidence
-check of specification/grounding.md, adapted to the harness `Event`.
+check of a grounding profile, adapted to the harness `Event`.
 
 A grounding profile is CONFIGURATION, not a submitted detector: it is loaded from
-a JSON file (schema/grounding-profile.schema.json) and resolved per workspace,
+a JSON file and resolved per workspace,
 and it needs a RECORD PROVIDER — here a frozen fixture world, in a deployment a
 patent office feed, ClinicalTrials.gov, a vendor database. So this is not one of
 the competing `detectors.py` entries — it is scored on its own, over the

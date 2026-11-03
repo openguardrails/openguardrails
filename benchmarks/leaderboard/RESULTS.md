@@ -15,7 +15,7 @@ Suite sizes (unsafe / shared safe): prompt injection 11/14, malicious command 12
 
 ## Mandate scoring (the authorization envelope)
 
-Scored SEPARATELY from the leaderboard above: a mandate is runtime configuration, not a submitted detector. Each corpus is judged by the mandate that governs its agent ([specification/mandate.md](../../specification/mandate.md)). Precision/recall are over the cases a mandate OWNS (`security.mandate_violation.*`) against the compliant controls; **dimension** is how often the right envelope dimension was named; **lane** is how often the mandate correctly abstained on cases another detector owns (injection, secret leak, manipulation, MNPI, raw exec).
+Scored SEPARATELY from the leaderboard above: a mandate is runtime configuration, not a submitted detector. Each corpus is judged by the mandate that governs its agent. Precision/recall are over the cases a mandate OWNS (`security.mandate_violation.*`) against the compliant controls; **dimension** is how often the right envelope dimension was named; **lane** is how often the mandate correctly abstained on cases another detector owns (injection, secret leak, manipulation, MNPI, raw exec).
 
 | Mandate | P | R | F1 | Dimension | Lane (n) |
 |---|---|---|---|---|---|
@@ -26,7 +26,7 @@ Macro-F1 across mandates: **1.000**.
 
 ## Grounding scoring (the evidence envelope)
 
-Scored SEPARATELY from the leaderboard above: a grounding profile is runtime configuration plus a record provider, not a submitted detector ([specification/grounding.md](../../specification/grounding.md)). Each corpus is judged by the profile that governs its agent against a FROZEN synthetic record world. Precision/recall are over the cases a profile OWNS (`safety.hallucination.{citation,attribute}`, `safety.unsafe_advice.{overreach,evidence_gap,jurisdiction,temporal}`) against the compliant controls; **leaf** is how often exactly the right leaves were named; **lane** is how often it abstained on cases another detector owns; **unjudged** is how often a provider outage was confessed as `unjudged` rather than fired on or passed silently; **judge** counts the fixtures reserved for a model judge (`safety.hallucination.unsupported` and the like), which the structural reference does not score.
+Scored SEPARATELY from the leaderboard above: a grounding profile is runtime configuration plus a record provider, not a submitted detector. Each corpus is judged by the profile that governs its agent against a FROZEN synthetic record world. Precision/recall are over the cases a profile OWNS (`safety.hallucination.{citation,attribute}`, `safety.unsafe_advice.{overreach,evidence_gap,jurisdiction,temporal}`) against the compliant controls; **leaf** is how often exactly the right leaves were named; **lane** is how often it abstained on cases another detector owns; **unjudged** is how often a provider outage was confessed as `unjudged` rather than fired on or passed silently; **judge** counts the fixtures reserved for a model judge (`safety.hallucination.unsupported` and the like), which the structural reference does not score.
 
 | Profile | P | R | F1 | Leaf | Lane (n) | Unjudged (n) | Judge (n) |
 |---|---|---|---|---|---|---|---|

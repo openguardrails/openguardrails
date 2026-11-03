@@ -1,6 +1,6 @@
 /**
- * The OpenGuardrails Model API: consulted only for what the local rules hand over. See
- * specification/model-api.md. `allow` and `block` answer whether the action is safe and authorized.
+ * The OpenGuardrails Model API: consulted only for what the local rules hand over. It is to be
+ * replaced by `/v1/openguardrails`, the detection API that AIRS and builders share. `allow` and `block` answer whether the action is safe and authorized.
  * `needs_decision` means it is safe and yet the choice is the person's own, such as a purchase.
  */
 import { secretOf, type Config } from "./config.js";

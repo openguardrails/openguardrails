@@ -32,7 +32,7 @@ export interface RestoreResult {
   unresolved: string[]
 }
 
-/** The notice a blocked call carries, verbatim from the specification. */
+/** The notice a blocked call carries. */
 export function UNRESTORABLE_NOTICE(token: string): string {
   return (
     `${token} could not be restored: it is not a placeholder this session issued. ` +

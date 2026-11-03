@@ -1,10 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import http from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { fileURLToPath } from "node:url";
 import { startGateway } from "../src/gateway.js";
 
 process.env.OPENGUARDRAILS_HOME = mkdtempSync(join(tmpdir(), "openguardrails-guard-"));
@@ -237,14 +236,6 @@ test("a placeholder nothing here can answer never reaches a tool", async () => {
   const { post } = await setup(() => whole([["read_file", { path: "OGRKP9999999.txt" }]]));
   const reply = (await (await post("/v1/chat/completions", chat())).json()) as any;
   assert.equal(reply.choices[0].message.tool_calls, undefined);
-});
-
-test("the redaction copy matches the library it came from", () => {
-  const here = fileURLToPath(new URL("../../src/redaction/", import.meta.url));
-  const source = fileURLToPath(new URL("../../../integrations/agent/local-redaction/src/", import.meta.url));
-  for (const file of readdirSync(here)) {
-    assert.equal(readFileSync(join(here, file), "utf8"), readFileSync(join(source, file), "utf8"), file);
-  }
 });
 
 test("when the quota runs out the action is unjudged, and the person is told once", async () => {

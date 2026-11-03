@@ -3,11 +3,8 @@
 OpenGuardrails publishes from GitHub Actions. No long-lived registry token is
 stored in GitHub except the one Docker Hub exception below.
 
-The v0.6 npm/PyPI SDK packages and the plugins built on them were retired in
-v0.7 (the API is the integration surface — see the
-[Runtime API binding](specification/runtime-api.md)). Their publish workflows
-are gone; release tags return per integration as each is rewritten against
-the v0.7 contract.
+The SDK packages, the plugins and the published protocol are retired. The
+only artifacts are the ones in the table below.
 
 ## Release tags
 

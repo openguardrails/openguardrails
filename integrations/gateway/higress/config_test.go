@@ -2,7 +2,7 @@ package main
 
 import "testing"
 
-// The canonical binding (specification/runtime-api.md) is a joining contract:
+// The canonical binding (the Runtime API, `/v1/evaluate`) is a joining contract:
 // a configured base plus `/v1/...`, and no other prefix hard-coded. These
 // tests pin the two halves — the constants ARE the canonical paths, and the
 // normalizer can never produce a join with a double or missing slash.

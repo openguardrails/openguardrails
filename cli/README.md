@@ -43,18 +43,16 @@ Configuration is `~/.openguardrails/config.json`, mode 0600. Every part is optio
 
 Nothing that leaves the machine is ever allowed by a rule.
 
-## Two ways to connect
+## Connecting
 
-**The gateway, recommended.** Point the agent's base URL at `http://127.0.0.1:4180/v1`. Every request
+Point the agent's base URL at `http://127.0.0.1:4180/v1`. Every request
 passes through it, whichever harness sent it. It holds your provider keys, masks secrets on the way
 out and judges tool calls on the way back. With AIRS configured, AIRS does the masking and judging.
 
-**A plugin**, from `integrations/agent/`, with `OGR_RUNTIME_URL=http://127.0.0.1:4180`. A refused call
-reaches the agent as a failed tool call, so it carries on by itself. But a plugin sees only what its
-harness shows it. Tested: on Hermes the request that names a session goes out unmasked, on OpenClaw
-2026.6 no model traffic reaches the plugin's interceptor, and the DeepSeek Harness plugin does not load
-on 0.2.0-rc.2. A plugin that fails to load can leave the agent running with no guard and one line of
-warning.
+There are no agent plugins any more. A plugin sees only what its harness shows it. Tested: on Hermes
+the request that names a session went out unmasked, on OpenClaw 2026.6 no model traffic reached the
+plugin's interceptor, and the DeepSeek Harness plugin did not load on 0.2.0-rc.2. A plugin that fails
+to load can leave the agent running with no guard and one line of warning.
 
 ## What it does not do yet
 
@@ -75,8 +73,8 @@ warning.
   `openguardrails run` forces the network through this machine's proxy and records that traffic.
 - Only OpenAI Chat is tested against real harnesses. Anthropic Messages streaming is tested against a
   stand-in. On OpenAI Responses a refusal in a stream retracts the whole step.
-- `openguardrails run` hides this tool's own configuration from the sandbox, so a plugin inside it
-  cannot read a key from there. Pass the local service's address to the plugin instead.
+- `openguardrails run` hides this tool's own configuration from the sandbox, so nothing inside it can
+  read a key from there.
 
 ## Scan
 
@@ -114,12 +112,12 @@ speak the protocol their client speaks.
 
 ```sh
 npm run build
-experiments/run.sh <hermes|openclaw|dsh> <empty-lab-dir> [gateway|live|judge|nomodel]
+experiments/run.sh <hermes|openclaw|dsh> <empty-lab-dir> [gateway|live]
 ```
 
 Runs the real harness in a throwaway home, against a scripted model and a scripted model API: through
-the gateway with `gateway`, through the gateway and a real Model API at `$MODEL_API_URL` with `live`, or
-with its plugin otherwise. Files in the work directory prove what really ran. The harness must already be installed.
+the gateway with `gateway`, and through the gateway and a real Model API at `$MODEL_API_URL` with
+`live`. Files in the work directory prove what really ran. The harness must already be installed.
 
 The secret rules in `rules/secrets.json` are a snapshot of what OpenGuardrails AIRS serves. Every rule
 carries examples, and the tests fail if one stops passing them. Examples shaped like a real issuer's key

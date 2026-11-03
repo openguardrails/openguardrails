@@ -59,7 +59,7 @@ Not available yet:
 
 - **The model API is not public yet.** It has been tested with the real model through all three agents, but
   is not deployed. Until then, what the rules cannot decide is reported as not judged and left to the
-  agent's own permission check. The contract is in [`specification/model-api.md`](specification/model-api.md).
+  agent's own permission check. Its API reference will be published with the service.
 - **The package is not on npm yet.** Install from a checkout, below.
 - Asking you on your phone. Until then, a decision that is yours comes back to you through the agent.
 
@@ -93,22 +93,21 @@ Then point your agent at `http://127.0.0.1:4180/v1`, with model `auto` and any s
 That is the whole integration, and it works the same for every agent.
 
 `openguardrails connect` turns on the model once it is public, and shows where to raise your quota.
-`openguardrails decisions` shows what happened. For an enterprise deployment, plugins and the gateway
-connect to OpenGuardrails AIRS instead, with no other change.
+`openguardrails decisions` shows what happened. For an enterprise deployment, the gateway connects to
+OpenGuardrails AIRS instead, with no other change.
 
 ## What is in this repository
 
 | Path | What it is |
 |---|---|
 | [`cli/`](cli/) | The `openguardrails` command: rules, local service, sandbox, firewall, gateway |
-| [`integrations/`](integrations/) | Plugins for agents and gateways |
+| [`integrations/`](integrations/) | The Higress plugin, which connects a Higress gateway to OpenGuardrails AIRS |
 | [`benchmarks/`](benchmarks/) | The public evaluation. We enter too, and publish the results either way |
-| [`specification/`](specification/README.md) | The OGR wire protocol that the plugins speak |
 
 ## For companies
 
 OpenGuardrails AIRS is the enterprise product: organization-wide policy, audit, SSO, analytics and
-private deployment. It uses the same plugins and the same models. See
+private deployment. It uses the same models. See
 [openguardrails.com](https://openguardrails.com).
 
 ## License

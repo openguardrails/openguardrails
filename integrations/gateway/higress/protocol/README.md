@@ -93,7 +93,7 @@ One file, one `init()`, one test-table row.
 
    | method | what it must do |
    |---|---|
-   | `Name` | the `llm_protocol` value — add it to `schema/guard-event.schema.json` in the same change |
+   | `Name` | the `llm_protocol` value — add it to AIRS's GuardEvent schema (`llm_protocol`) first |
    | `Claim` | `ClaimServe` for your completion path; `ClaimReject` for a path you own that is *not* a completion (see Anthropic's `count_tokens`) |
    | `MatchBody` | recognise the body when the path is unfamiliar |
    | `ParseRequest` | body → `*Conversation`; `ok=false` means "no conversation here" |

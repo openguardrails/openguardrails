@@ -35,7 +35,7 @@ export interface MaskResult {
 
 /**
  * Any placeholder, WHICHEVER ALLOCATOR MINTED IT — the fifth character is the
- * minter's letter, so this recognises `OGRKP…` (ours), `OGRKF…` (openafw) and
+ * minter's letter, so this recognises `OGRKP…` (ours), `OGRKF…` (the retired OpenAFW) and
  * `OGRKR…` (the runtime) alike, plus the `${OGR_<TYPE>_n}` shape
  * (pii on the gateway path, and every secrets token minted before the switch).
  * A rule never matches inside one.

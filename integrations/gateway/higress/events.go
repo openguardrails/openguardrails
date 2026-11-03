@@ -14,8 +14,8 @@ import (
 // turns, actions and outcomes, decided what was NEW, itemised history, carried a
 // transcript envelope for the judge, and registered every judged text under a
 // payload path so verdict spans could be resolved. All of that was the plugin doing
-// the RUNTIME's job, and the spec makes the split explicit (the recipe in
-// specification/runtime-api.md): the gateway is a RAW FORWARDER. One proxied model
+// the RUNTIME's job, and the spec makes the split explicit (the recipe of
+// the Runtime API, `/v1/evaluate`): the gateway is a RAW FORWARDER. One proxied model
 // call is one STEP, reported as two events —
 //
 //	step/request    the provider request body, untouched, before the model sees it

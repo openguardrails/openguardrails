@@ -250,7 +250,7 @@ const (
 
 // Protocol is one LLM wire format. Every method is a pure function of its inputs.
 type Protocol interface {
-	// Name is the OGR `llm_protocol` enum value (schema/guard-event.schema.json).
+	// Name is the OGR `llm_protocol` enum value (AIRS's GuardEvent schema).
 	Name() string
 
 	// Claim answers whether a request path belongs to this protocol.

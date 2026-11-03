@@ -15,7 +15,7 @@
 /**
  * The placeholder shape this library mints: `OGRK` + a MINTER LETTER + seven
  * zero-padded digits — `OGRKP0000001`. A VALUE shape, not a variable shape (2026-09-14, measured across
- * five model setups, `proposals/secrets-placeholder-shape.md`): `${OGR_SECRET_n}`
+ * five model setups): `${OGR_SECRET_n}`
  * reached a tool call verbatim 43% of the time — a model reads `${…}` as a shell
  * variable and "helpfully" rewrites it to `$OGR_SECRET_1`, which restores to
  * nothing — and the word SECRET beside a visible sequence reads as a canary the
@@ -30,7 +30,8 @@ export const SECRET_TOKEN_PREFIX = "OGRK"
 /**
  * WHO MINTED IT — the fifth character. One letter per allocator that can write into
  * one model context: `P` is this library (the in-process interceptor and the loopback
- * proxy), `F` is openafw, `R` is the AIRS runtime.
+ * proxy), `R` is the AIRS runtime. `F` belonged to OpenAFW, which is retired, and stays
+ * reserved so an old placeholder is never read as someone else's.
  *
  * ⚠️⚠️ **THIS IS WHAT KEEPS TWO ALLOCATORS FROM COLLIDING, AND A FLOOR WAS NOT
  * ENOUGH.** Both ends used to number into ONE namespace; the runtime defended it by
