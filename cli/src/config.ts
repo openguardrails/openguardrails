@@ -12,6 +12,15 @@ export interface Upstream {
   apiKey?: string;
   /** Renames chat_template_kwargs, for models whose templates spell a switch differently. */
   renameTemplateKwargs?: Record<string, string>;
+  /** The client's path is appended unchanged, for an attached agent. Never set in the config file. */
+  verbatimPath?: boolean;
+}
+
+export interface AttachedOrigin {
+  /** Scheme, host and port the agent used to call. */
+  origin: string;
+  /** The agents that call it through this name. */
+  agents: string[];
 }
 
 export interface Config {
@@ -25,6 +34,11 @@ export interface Config {
     connectTimeoutMs?: number;
     /** A shared vLLM can queue a request for minutes before the first byte. */
     firstByteTimeoutMs?: number;
+    /**
+     * Written by `openguardrails attach`. An agent's base URL becomes /u/<name>/<its old path> on this
+     * gateway, and the request goes on to `origin` with the same path, body, model and key.
+     */
+    attached?: Record<string, AttachedOrigin>;
   };
   /** The OpenGuardrails Model API. With no key anywhere, what the rules cannot decide goes unjudged. */
   model?: {
@@ -60,6 +74,10 @@ export function validate(config: Config): Config {
   for (const [name, upstream] of Object.entries(gateway.upstreams ?? {})) {
     if (!upstream.baseURL || !upstream.model) throw new Error(`config: upstream "${name}" needs baseURL and model`);
     new URL(upstream.baseURL);
+  }
+  for (const [name, attached] of Object.entries(gateway.attached ?? {})) {
+    if (!/^[A-Za-z0-9._-]+$/.test(name)) throw new Error(`config: attached name "${name}" may use letters, digits, dot, dash and underscore only`);
+    if (new URL(attached.origin).origin !== attached.origin) throw new Error(`config: attached "${name}" origin must be scheme, host and port only`);
   }
   for (const [name, members] of Object.entries(gateway.routes ?? {})) {
     if (members.length === 0) throw new Error(`config: route "${name}" is empty`);
