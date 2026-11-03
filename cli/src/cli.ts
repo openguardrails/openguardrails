@@ -4,15 +4,19 @@ import { join } from "node:path";
 import { homeDir } from "./config.js";
 import { latestRun, readRun, renderEvent } from "./record.js";
 import { connect } from "./connect.js";
+import { attachCommand, detach } from "./attach.js";
+import { loadConfig } from "./config.js";
 import { run } from "./run.js";
 import { render, scan } from "./scan/index.js";
-import { serve, status, stop } from "./serve.js";
+import { ensureGateway, serve, status, stop } from "./serve.js";
 
 const USAGE = `openguardrails: AI agent guardrails for every builder
 
   openguardrails connect [--url <url>]   turn on the model: get a free key, and show where to claim more
   openguardrails decisions               print what the rules and the model decided, newest last
   openguardrails scan [--json]           list the agents on this machine, what they load, and what to fix
+  openguardrails attach <agent...|--all> [--dry-run]   send an agent's model calls through the gateway
+  openguardrails detach <agent...|--all>        put an agent's old base URLs back
   openguardrails run [options] -- <command...>   run a command and everything it spawns inside the sandbox
   openguardrails log [run-id]                    print what a run did (default: the latest)
   openguardrails status                          check the gateway, every upstream and AIRS; exit 1 on a problem
@@ -67,6 +71,30 @@ async function main(argv: string[]): Promise<number> {
   if (verb === "run") return run(parseRun(rest));
   if (verb === "serve") return serve();
   if (verb === "status") return status();
+  if (verb === "attach") {
+    if (!rest.includes("--all") && rest.every((arg) => arg.startsWith("--"))) throw new Error("name the agents to attach, or --all. `openguardrails scan` lists them");
+    const dryRun = rest.includes("--dry-run");
+    const { plan, unknown } = attachCommand(rest);
+    for (const id of unknown) console.log(`${id}: not found on this machine`);
+    for (const change of plan.changes) console.log(`${dryRun ? "would attach" : "attached"}  ${change.agent}  ${change.from}  ->  ${change.to}\n            in ${change.file}`);
+    for (const skip of plan.skipped) console.log(`skipped   ${skip.agent} ${skip.provider}: ${skip.reason}`);
+    if (plan.changes.length === 0) {
+      console.log("Nothing to attach.");
+      return unknown.length > 0 ? 1 : 0;
+    }
+    if (dryRun) return 0;
+    await ensureGateway(loadConfig());
+    console.log("\nThe gateway is running. Restart each attached agent so it reads its new base URL. `openguardrails detach` undoes this.");
+    return 0;
+  }
+  if (verb === "detach") {
+    if (!rest.includes("--all") && rest.length === 0) throw new Error("name the agents to detach, or --all");
+    const undone = detach(rest.includes("--all") ? "all" : rest, loadConfig());
+    for (const entry of undone) console.log(`detached  ${entry.agent}  ${entry.to}  ->  ${entry.from}\n          in ${entry.file}`);
+    if (undone.length === 0) console.log("Nothing was attached.");
+    else console.log("\nRestart each agent so it reads its old base URL.");
+    return 0;
+  }
   if (verb === "scan") {
     const inventory = scan();
     process.stdout.write(rest.includes("--json") ? `${JSON.stringify(inventory, null, 2)}\n` : render(inventory));

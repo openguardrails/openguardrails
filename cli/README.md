@@ -8,6 +8,8 @@ openguardrails status                   check the service, every upstream, the m
 openguardrails connect                  turn on the model: get a free key, and show where to claim more
 openguardrails decisions                what the rules and the model decided, with no arguments or message text
 openguardrails scan [--json]            the agents on this machine, what they load, and what to fix
+openguardrails attach <agent...|--all>  send an agent's model calls through the gateway (--dry-run to preview)
+openguardrails detach <agent...|--all>  put an agent's old base URLs back
 openguardrails run -- <command...>      run a command and everything it spawns inside the sandbox
 openguardrails log [run-id]             what a sandboxed run did
 openguardrails stop                     stop the local service
@@ -96,6 +98,18 @@ It reports three findings: a protected agent that calls its model directly, a se
 text in any agent's config (where it is, never its value), and an MCP server that fetches an unpinned
 package.
 `--json` prints the whole inventory.
+
+## Attach
+
+`openguardrails attach hermes` (or `--all`) points an agent's model calls at the local gateway. Only
+the base URL changes: `https://api.example.com/v1` becomes `http://127.0.0.1:4180/u/api.example.com/v1`,
+and the gateway sends each call on to `https://api.example.com/v1` with the agent's own path, model and
+key. The key stays where the agent keeps it. The config file is edited value by value, so comments and
+formatting survive, and a copy is kept in `~/.openguardrails/backups` first. Restart the agent afterwards.
+`openguardrails detach` puts the old URLs back.
+
+It attaches OpenClaw, Hermes, OpenCode, Codex and DeepSeek Harness. It skips a provider the agent
+builds in, with no base URL in its config, and says so.
 
 ## Sandbox and gateway
 

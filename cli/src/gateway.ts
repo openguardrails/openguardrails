@@ -4,7 +4,7 @@
  * the members of a route must speak the protocol their client speaks.
  */
 import { randomBytes } from "node:crypto";
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import http, { type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } from "node:http";
 import https from "node:https";
 import { hostname, userInfo } from "node:os";
@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import zlib from "node:zlib";
 import { INTEGRATION } from "./airs.js";
-import { homeDir, resolveRoute, secretOf, type Config, type Upstream } from "./config.js";
+import { configPath, homeDir, resolveRoute, secretOf, validate, type Config, type Upstream } from "./config.js";
 import { ExecTracker, type ExecReport, type Observation } from "./exec.js";
 import { ModelChannelGuard, type GuardedRequest } from "./guard.js";
 import { handleRuntime, LocalRuntime } from "./runtime.js";
@@ -33,6 +33,9 @@ export function rewriteBody(body: Record<string, any>, upstream: Upstream): Reco
   }
   return out;
 }
+
+/** `/u/<name>/<path>`: a request from an agent that `openguardrails attach` pointed here. */
+export const ATTACHED_PATH = /^\/u\/([A-Za-z0-9._-]+)(\/.*)?$/;
 
 /** The URL for a client path: /v1/chat/completions on a base of http://h/v1 is http://h/v1/chat/completions. */
 export function upstreamUrl(baseURL: string, clientPath: string): URL {
@@ -347,7 +350,8 @@ export function startGateway(config: Config): Promise<http.Server> {
   /** One attempt. Resolves with why it failed, or null once the reply is the client's. */
   const attempt = (name: string, upstream: Upstream, path: string, protocol: LlmProtocol, stepId: string, agentType: string, method: string, clientHeaders: IncomingHttpHeaders, body: Buffer, res: ServerResponse, guarded: GuardedRequest | null): Promise<string | null> =>
     new Promise((resolve) => {
-      const url = upstreamUrl(upstream.baseURL, path);
+      // An attached origin gets the agent's own path, verbatim.
+      const url = upstream.verbatimPath ? new URL(upstream.baseURL + path) : upstreamUrl(upstream.baseURL, path);
       const headers = upstreamHeaders(clientHeaders, protocol, secretOf(upstream));
       headers["content-length"] = String(body.length);
       // The reply is read here and sent on to AIRS, so it has to arrive readable.
@@ -502,6 +506,42 @@ export function startGateway(config: Config): Promise<http.Server> {
     res.end(JSON.stringify(value));
   };
 
+  // `attach` edits the config while this process runs, so the attached names are re-read when the
+  // file changes. A config that no longer validates keeps the last good list.
+  let attached: Record<string, string> = Object.fromEntries(Object.entries(gateway.attached ?? {}).map(([name, entry]) => [name, entry.origin]));
+  let attachedMtime = 0;
+  const attachedOrigins = (): Record<string, string> => {
+    try {
+      const mtime = statSync(configPath()).mtimeMs;
+      if (mtime !== attachedMtime) {
+        attachedMtime = mtime;
+        const fresh = validate(JSON.parse(readFileSync(configPath(), "utf8")) as Config);
+        attached = Object.fromEntries(Object.entries(fresh.gateway?.attached ?? {}).map(([name, entry]) => [name, entry.origin]));
+      }
+    } catch {
+      // keep the last good list
+    }
+    return attached;
+  };
+
+  /** Anything an attached agent sends that is not a model call, such as listing models, goes through untouched. */
+  const passThrough = (origin: string, path: string, req: IncomingMessage, res: ServerResponse): Promise<void> =>
+    new Promise((resolve) => {
+      const target = new URL(origin + path);
+      const headers = upstreamHeaders(req.headers, null, undefined);
+      const client = (target.protocol === "https:" ? https : http).request(target, { method: req.method, headers }, (upstreamRes) => {
+        res.writeHead(upstreamRes.statusCode ?? 502, upstreamRes.headers);
+        upstreamRes.pipe(res);
+        upstreamRes.on("end", resolve);
+      });
+      client.on("error", (error) => {
+        if (!res.headersSent) json(res, 502, { error: { message: `openguardrails gateway: ${origin} did not answer: ${error.message}` } });
+        else res.destroy();
+        resolve();
+      });
+      req.pipe(client);
+    });
+
   const runtime = localRuntime;
   const server = http.createServer(async (req, res) => {
     try {
@@ -525,15 +565,30 @@ export function startGateway(config: Config): Promise<http.Server> {
         }
         return json(res, 200, { ok: true });
       }
+      // An attached agent: its path after /u/<name> goes to the origin it used to call, unchanged.
+      const attachedMatch = ATTACHED_PATH.exec(url.pathname);
+      const attachedName = attachedMatch?.[1];
+      const attachedOrigin = attachedName ? attachedOrigins()[attachedName] : undefined;
+      if (attachedName && !attachedOrigin) {
+        return json(res, 404, { error: { message: `openguardrails gateway: nothing is attached as "${attachedName}". Run openguardrails attach again.` } });
+      }
+      const path = attachedMatch ? (attachedMatch[2] ?? "/") : url.pathname;
+      if (attachedOrigin && req.method !== "POST") return passThrough(attachedOrigin, path + url.search, req, res);
       if (req.method === "GET" && /\/models$/.test(url.pathname)) {
         const names = [...Object.keys(gateway.routes ?? {}), ...Object.keys(gateway.upstreams)];
         return json(res, 200, { object: "list", data: names.map((id) => ({ id, object: "model", owned_by: "openguardrails" })) });
       }
-      const protocol = classifyModelRequest(req.method ?? "", url.pathname);
-      if (!protocol) return json(res, 404, { error: { message: `openguardrails gateway does not serve ${req.method} ${url.pathname}` } });
+      const protocol = classifyModelRequest(req.method ?? "", path);
+      if (!protocol) {
+        if (attachedOrigin) return passThrough(attachedOrigin, path + url.search, req, res);
+        return json(res, 404, { error: { message: `openguardrails gateway does not serve ${req.method} ${url.pathname}` } });
+      }
 
       const parsed = JSON.parse(decode(await readAll(req), req.headers["content-encoding"] as string | undefined).toString("utf8"));
-      const members = resolveRoute(gateway, parsed?.model);
+      // The attached upstream keeps the agent's model and key: no rewrite, no key of ours.
+      const attachedUpstream: Upstream | null = attachedOrigin ? { baseURL: attachedOrigin, model: parsed?.model, verbatimPath: true } : null;
+      const upstreamFor = (name: string): Upstream => (attachedUpstream && name === `u/${attachedName}` ? attachedUpstream : gateway.upstreams[name]!);
+      const members = attachedUpstream ? [`u/${attachedName}`] : resolveRoute(gateway, parsed?.model);
       if (!members) {
         const known = [...Object.keys(gateway.routes ?? {}), ...Object.keys(gateway.upstreams)].join(", ");
         return json(res, 404, { error: { message: `openguardrails gateway has no model "${parsed?.model}". Known: ${known}` } });
@@ -550,7 +605,7 @@ export function startGateway(config: Config): Promise<http.Server> {
       exec.close(resultIds, now);
 
       const order = health.order(members);
-      const first = gateway.upstreams[order[0]!]!;
+      const first = upstreamFor(order[0]!);
       const judged = await judgeRequest(stepId, protocol, { ...parsed, model: first.model }, agentType, new URL(first.baseURL).host, exec.drain());
       if (judged.kind === "answer") {
         log("refused", { step: stepId, reason: judged.reason, agent_type: agentType });
@@ -562,9 +617,9 @@ export function startGateway(config: Config): Promise<http.Server> {
 
       const failures: string[] = [];
       for (const name of order) {
-        const upstream = gateway.upstreams[name]!;
+        const upstream = upstreamFor(name);
         const body = Buffer.from(JSON.stringify(rewriteBody(payload, upstream)));
-        const reason = await attempt(name, upstream, url.pathname, protocol, stepId, agentType, req.method!, req.headers, body, res, guarded);
+        const reason = await attempt(name, upstream, attachedUpstream ? path + url.search : url.pathname, protocol, stepId, agentType, req.method!, req.headers, body, res, guarded);
         if (reason === null) {
           if (failures.length > 0) {
             lastFailover = { to: name, failed: failures, t: new Date().toISOString() };
