@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Drives a real agent harness through the local gateway, against two scripted models. Each harness
 # runs in a throwaway home; files in the work directory prove what really ran.
-#   experiments/run.sh <hermes|openclaw|dsh> <lab-dir> [gateway|attach|live]
+#   experiments/run.sh <hermes|openclaw|dsh|opencode> <lab-dir> [gateway|attach|live]
 # gateway: the harness only has its base URL pointed at the local gateway, judged by a scripted model API.
 # attach: the harness is configured to call the scripted model directly, then `openguardrails attach`
 #   rewrites its config. What ran proves the rewrite put it behind the gateway.
@@ -119,6 +119,21 @@ YAML
   else
     limit 180 dsh --profile headless --patch "$RUN/patch.yml" "$PROMPT" </dev/null >"$RUN/agent.out" 2>&1
   fi
+  ;;
+opencode)
+  # Its own config, data, state and cache, so nothing of the person's OpenCode is read or written.
+  export XDG_CONFIG_HOME="$RUN/xdg/config" XDG_DATA_HOME="$RUN/xdg/data" XDG_STATE_HOME="$RUN/xdg/state" XDG_CACHE_HOME="$RUN/xdg/cache"
+  mkdir -p "$XDG_CONFIG_HOME/opencode"
+  cat > "$XDG_CONFIG_HOME/opencode/opencode.json" <<JSON
+{
+  "\$schema": "https://opencode.ai/config.json",
+  "provider": { "mock": { "npm": "@ai-sdk/openai-compatible", "name": "mock", "options": { "baseURL": "$BASE", "apiKey": "local" }, "models": { "mock": { "name": "mock" } } } },
+  "model": "mock/mock",
+  "permission": { "bash": "allow", "edit": "allow", "external_directory": "allow" }
+}
+JSON
+  attach_agent opencode
+  limit 180 opencode run "$PROMPT" </dev/null >"$RUN/agent.out" 2>&1
   ;;
 esac
 echo "rc=$?"

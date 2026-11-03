@@ -126,7 +126,7 @@ speak the protocol their client speaks.
 
 ```sh
 npm run build
-experiments/run.sh <hermes|openclaw|dsh> <empty-lab-dir> [gateway|attach|live]
+experiments/run.sh <hermes|openclaw|dsh|opencode> <empty-lab-dir> [gateway|attach|live]
 ```
 
 Runs the real harness in a throwaway home, against a scripted model and a scripted model API: through

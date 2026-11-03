@@ -2,8 +2,10 @@
 
 **This repository is the product: AI agent guardrails for every builder.** `cli/` is the `openguardrails`
 command (local rules, local OGR service, sandbox, firewall, gateway). The enterprise product, AIRS, is
-closed source and lives elsewhere. Priority agents are Hermes, OpenClaw and DeepSeek Harness, tested
-with `cli/experiments/run.sh`, because a mock of a harness has repeatedly hidden what the real one does.
+closed source and lives elsewhere. Protected agents are the builder's open source personal agents (OpenClaw,
+Hermes) and coding agents (OpenCode, Codex, DeepSeek Harness). All but Codex are tested with
+`cli/experiments/run.sh`, because a mock of a harness has repeatedly hidden what the real one does; Codex
+speaks only the Responses API, which the scripted model does not serve yet.
 
 ⚠️ The local gateway is the only connection and is where masking and judging live for builders. There
 are no agent plugins: a plugin sees only what its harness shows it, and tested, Hermes's side requests
