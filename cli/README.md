@@ -131,6 +131,20 @@ Docker socket, the systemd user bus, ssh-agents, the X server, browsers' singlet
 rest found under `/tmp`, `/run` and your home at the start of the run. A socket created later
 outside those directories is not covered.
 
+A service made of many processes that check on each other (with `ps`, or the pid in a lock file)
+cannot have a sandbox per process: each sandbox has processes of its own. On Linux, one named sandbox
+can be shared instead:
+
+```sh
+openguardrails sandbox start voicego --gpu --upstream-proxy http://127.0.0.1:20171 --allow-write /data/voicego
+openguardrails run --in voicego -- python3 webapp/runner.py     # in each service's unit, say
+openguardrails sandbox stop voicego
+```
+
+Every command started with `--in` joins the same processes, files, network and devices, under the
+one policy, record and set of rules of the `sandbox start` run, and drops every privilege joining
+gave it (`native/join.c`). Stopping the sandbox ends everything in it.
+
 On Linux the sandbox reports what it refuses, not what it allows. So `run` also preloads a small
 library (`native/observe.c`, built with the package) that writes down what each process opens for
 reading or writing and which programs it runs, and ties them to the tool call that was open, as on

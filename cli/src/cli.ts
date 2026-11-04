@@ -10,6 +10,7 @@ import { run } from "./run.js";
 import { render, scan } from "./scan/index.js";
 import { ensureGateway, hydrateEnv, serve, status, stop } from "./serve.js";
 import { notify } from "./notify.js";
+import { listSandboxes, runIn, startSandbox, stopSandbox } from "./sandbox.js";
 import { hostname } from "node:os";
 
 const USAGE = `openguardrails: AI agent guardrails for every builder
@@ -23,6 +24,9 @@ const USAGE = `openguardrails: AI agent guardrails for every builder
   openguardrails log [run-id]                    print what a run did (default: the latest)
   openguardrails status                          check the gateway, every upstream and AIRS; exit 1 on a problem
   openguardrails notify test [channel]           send a test message to the channels in notify
+  openguardrails sandbox start <name> [options]  keep a sandbox running that several commands share (Linux)
+  openguardrails run --in <name> -- <command...> start a command inside that sandbox
+  openguardrails sandbox stop <name> | list
   openguardrails serve                           run the local service in the foreground (\`run\` starts it for you)
   openguardrails stop                            stop the local service, for instance after editing the config
 
@@ -99,7 +103,28 @@ function parseRun(args: string[]) {
 
 async function main(argv: string[]): Promise<number> {
   const [verb, ...rest] = argv;
-  if (verb === "run") return run(parseRun(rest));
+  if (verb === "run") {
+    const at = rest.indexOf("--in");
+    if (at !== -1 && (rest.indexOf("--") === -1 || at < rest.indexOf("--"))) {
+      const name = rest[at + 1];
+      const command = rest.slice(rest.indexOf("--") + 1);
+      if (!name || rest.indexOf("--") === -1 || command.length === 0) throw new Error("usage: openguardrails run --in <sandbox> -- <command...>");
+      if (rest.slice(0, rest.indexOf("--")).length > 2) throw new Error("--in takes no other run options: the sandbox's own apply");
+      return runIn(name, command);
+    }
+    return run(parseRun(rest));
+  }
+  if (verb === "sandbox") {
+    const [action, name, ...more] = rest;
+    if (action === "list") {
+      process.stdout.write(listSandboxes().join("\n") + (listSandboxes().length ? "\n" : ""));
+      return 0;
+    }
+    if (!name || !["start", "stop"].includes(action ?? "")) throw new Error("usage: openguardrails sandbox <start|stop> <name> [run options] | sandbox list");
+    if (action === "stop") return stopSandbox(name);
+    const { command: _none, ...options } = parseRun([...more, "--", "true"]);
+    return startSandbox(name, options);
+  }
   if (verb === "serve") return serve();
   if (verb === "notify") {
     if (rest[0] !== "test") throw new Error("usage: openguardrails notify test [channel]");

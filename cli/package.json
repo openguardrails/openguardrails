@@ -27,8 +27,10 @@
   "files": [
     "dist/src",
     "native/observe.c",
+    "native/join.c",
     "native/build.mjs",
     "native/*.so",
+    "native/ogr-join-linux-*",
     "rules",
     "LICENSE",
     "README.md"
