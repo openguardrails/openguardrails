@@ -16,6 +16,7 @@ import { aliasProxyPort, bridgeGatewayPort, buildPolicy, exposePort, gpuDevices,
 import { Recorder, safePath } from "./record.js";
 import { ensureGateway, gatewayPort, gatewayToken, hydrateEnv } from "./serve.js";
 import { notify } from "./notify.js";
+import { BROKER_PORT, startBroker, unitMatcher, writeShims } from "./broker.js";
 import { Deduper, isRoutineRead, ObserveLog, preloadLibrary } from "./observe.js";
 import { describeActivity, isBusy, newestChange, processTreeCpu, StallWatch, type Activity } from "./watch.js";
 import { isUpstreamAddress, NO_PROXY, parseUpstreamProxy, startProxyAuthBridge, startUpstreamRelay, upstreamFromEnv, type Relay } from "./upstream.js";
@@ -24,7 +25,12 @@ export interface RunOptions extends Omit<PolicyOptions, "cwd"> {
   enforce: boolean;
   allowLocalBinding?: boolean;
   /** Ports a server inside the sandbox listens on, to reach from this machine's 127.0.0.1. */
-  expose?: number[];
+  /** Servers the command starts, reachable on this machine at host:port (127.0.0.1 unless given). */
+  expose?: Array<{ host: string; port: number }>;
+  /** This machine's loopback ports the command may connect to directly, without the proxy. */
+  bridge?: number[];
+  /** systemd user units the command may manage with systemctl and journalctl, by pattern. */
+  units?: string[];
   upstreamProxy?: string | undefined;
   /** How the run is named in its record and matched by rules; the command line by default. */
   label?: string;
@@ -223,7 +229,9 @@ export async function run(options: RunOptions): Promise<number> {
     process.stderr.write(`[openguardrails] out through the upstream proxy ${upstream.host}:${upstream.port}\n`);
   }
 
-  const expose = options.expose ?? [];
+  const expose = [...(options.expose ?? []), ...(settings.sandbox?.expose ?? []).map(parseExpose)];
+  const bridgePorts = [...new Set([...(options.bridge ?? []), ...(settings.sandbox?.bridge ?? [])])].filter((port) => port !== ownPort);
+  const units = [...(options.units ?? []), ...(settings.sandbox?.units ?? [])];
   // Where the Linux relays' sockets live. The sandbox creates the exposed ones, so it may write here.
   // On Linux the sandbox has its own 127.0.0.1, so the proxy port an agent names can be this tool's.
   // On macOS it is this machine's, where the real proxy listens, and the sandbox refuses it.
@@ -231,7 +239,9 @@ export async function run(options: RunOptions): Promise<number> {
   // What the sandbox allows it does not report on Linux; a preloaded library writes it down instead.
   const preload = preloadLibrary();
   if (process.platform === "linux" && !preload) process.stderr.write("[openguardrails] this install has no file and exec telemetry for Linux; allowed reads, writes and commands are not recorded\n");
-  const bridgeDir = process.platform === "linux" && (ownPort !== null || expose.length > 0 || aliasPort !== null || preload !== null) ? mkdtempSync(join(tmpdir(), "openguardrails-")) : null;
+  const bridgeDir = process.platform === "linux" && (ownPort !== null || expose.length > 0 || aliasPort !== null || preload !== null || bridgePorts.length > 0 || units.length > 0) ? mkdtempSync(join(tmpdir(), "openguardrails-")) : null;
+  if (process.platform !== "linux" && (bridgePorts.length > 0 || units.length > 0)) process.stderr.write("[openguardrails] --bridge and --units are for Linux; on macOS the command shares this machine's ports and systemd is not there\n");
+  const shims = bridgeDir && units.length > 0 ? writeShims(bridgeDir, BROKER_PORT) : null;
   observeLog = preload && bridgeDir ? new ObserveLog(join(bridgeDir, "observe.log")) : null;
   const config: SandboxRuntimeConfig = {
     ...buildPolicy({
@@ -316,7 +326,8 @@ export async function run(options: RunOptions): Promise<number> {
       server.listen(listen, () => resolve(server));
     });
   const telemetry = observeLog ? `LD_PRELOAD=${quote([preload!, process.env.LD_PRELOAD].filter(Boolean).join(":"))} OGR_OBSERVE_LOG=${quote(observeLog.path)} ` : "";
-  let wrapped = await SandboxManager.wrapWithSandbox(`${telemetry}NO_PROXY= no_proxy= NODE_USE_ENV_PROXY=1 ${command}`, undefined, undefined, undefined, {
+  const brokered = shims ? `OGR_SANDBOX_BIN=${quote(shims)} PATH=${quote(shims)}:"$PATH" ` : "";
+  let wrapped = await SandboxManager.wrapWithSandbox(`${telemetry}${brokered}NO_PROXY= no_proxy= NODE_USE_ENV_PROXY=1 ${command}`, undefined, undefined, undefined, {
     commandId: runId,
     commandText: command,
   });
@@ -336,7 +347,25 @@ export async function run(options: RunOptions): Promise<number> {
     wrapped = bridgeGatewayPort(wrapped, ownPort, socket);
     relays.push(await pipe({ path: socket }, () => net.connect(ownPort, "127.0.0.1")));
   }
-  if (bridgeDir) for (const port of expose) wrapped = exposePort(wrapped, port, join(bridgeDir, `expose-${port}.sock`));
+  if (bridgeDir) for (const { port } of expose) wrapped = exposePort(wrapped, port, join(bridgeDir, `expose-${port}.sock`));
+  // Clients that connect to a local service directly, without the proxy, find it at the same port.
+  for (const port of bridgeDir ? bridgePorts : []) {
+    const socket = join(bridgeDir!, `bridge-${port}.sock`);
+    wrapped = bridgeGatewayPort(wrapped, port, socket);
+    relays.push(
+      await pipe({ path: socket }, () => {
+        networkEvents += 1;
+        recorder.write("connect", { host: "127.0.0.1", port, allowed: true, via: "bridge" });
+        return net.connect(port, "127.0.0.1");
+      }),
+    );
+  }
+  if (shims && bridgeDir) {
+    const socket = join(bridgeDir, "broker.sock");
+    wrapped = bridgeGatewayPort(wrapped, BROKER_PORT, socket);
+    const unitAllowed = unitMatcher(units);
+    relays.push(await startBroker(socket, unitAllowed, (tool, args, refused) => recorder.write("broker", { tool, args, refused })));
+  }
   const proxyPort = SandboxManager.getProxyPort();
   if (aliasPort !== null && bridgeDir && proxyPort) {
     const socket = join(bridgeDir, "proxy.sock");
@@ -353,13 +382,13 @@ export async function run(options: RunOptions): Promise<number> {
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.on(signal, () => child.kill(signal));
   // The inner relay creates each exposed socket once the sandbox is up; then this machine listens.
   if (bridgeDir) {
-    for (const port of expose) {
+    for (const { host, port } of expose) {
       const socket = join(bridgeDir, `expose-${port}.sock`);
       void (async () => {
         for (let i = 0; i < 200 && !existsSync(socket); i += 1) await new Promise((resolve) => setTimeout(resolve, 50));
         if (!existsSync(socket)) return void process.stderr.write(`[openguardrails] could not expose port ${port}: the sandbox did not start its relay\n`);
         try {
-          relays.push(await pipe({ port, host: "127.0.0.1" }, () => net.connect(socket)));
+          relays.push(await pipe({ port, host }, () => net.connect(socket)));
         } catch (error) {
           process.stderr.write(`[openguardrails] could not expose port ${port} on this machine: ${String(error)}\n`);
         }
@@ -465,4 +494,14 @@ function watchForStalls(settings: ReturnType<typeof loadConfig>, command: string
     }
   }, pollMs);
   return () => clearInterval(timer);
+}
+
+/** `8765`, `0.0.0.0:8765` or `192.168.0.10:8766`: where on this machine a server in the sandbox is reached. */
+export function parseExpose(spec: string | number): { host: string; port: number } {
+  const text = String(spec);
+  const at = text.lastIndexOf(":");
+  const host = at === -1 ? "127.0.0.1" : text.slice(0, at).replace(/^\[|\]$/g, "");
+  const port = Number(at === -1 ? text : text.slice(at + 1));
+  if (!Number.isInteger(port) || port < 1 || port > 65535 || !host) throw new Error(`--expose needs [address:]port, not ${text}`);
+  return { host, port };
 }

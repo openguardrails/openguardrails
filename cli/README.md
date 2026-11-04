@@ -141,6 +141,15 @@ openguardrails run --in voicego -- python3 webapp/runner.py     # in each servic
 openguardrails sandbox stop voicego
 ```
 
+A service sandbox usually also needs:
+
+- `--expose [address:]port`, so a server in the sandbox is reached from this machine or the LAN
+  (`--expose 0.0.0.0:8765`);
+- `--bridge <port>`, for a client that connects to a local service directly, without the proxy;
+- `--units <pattern>`, so the service can still manage itself: inside the sandbox `systemctl` and
+  `journalctl` ask `run`, which runs them only for `systemctl --user` on the matching units, which
+  run in the sandbox themselves. Other units, `daemon-reload` and `systemd-run` are refused.
+
 Every command started with `--in` joins the same processes, files, network and devices, under the
 one policy, record and set of rules of the `sandbox start` run, and drops every privilege joining
 gave it (`native/join.c`). Stopping the sandbox ends everything in it.
