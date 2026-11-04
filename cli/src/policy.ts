@@ -82,6 +82,22 @@ export function exposePort(wrapped: string, port: number, socket: string): strin
   return insertRelay(wrapped, `socat UNIX-LISTEN:${socket},fork,reuseaddr TCP4:127.0.0.1:${port}`, socket);
 }
 
+/**
+ * An agent that names its own proxy (yt-dlp --proxy http://127.0.0.1:20171) must still go out only
+ * through this tool. Inside the sandbox that port is relayed to a socket on which `run` adds
+ * sandbox-runtime's per-run credentials and hands the request to its proxy, so the agent's requests
+ * are filtered and written down like any other, then leave through the real proxy as the upstream.
+ */
+export function aliasProxyPort(wrapped: string, port: number, socket: string): string {
+  return insertRelay(wrapped, `socat TCP4-LISTEN:${port},bind=127.0.0.1,fork,reuseaddr,backlog=4096 UNIX-CONNECT:${socket}`, socket);
+}
+
+/** The proxy credentials sandbox-runtime gave the command, which name it in what the proxy records. */
+export function proxyCredentials(wrapped: string): { user: string; token: string } | null {
+  const match = /HTTP_PROXY=http:\/\/([^:@\s'"]+):([^@\s'"]+)@localhost:\d+/.exec(wrapped);
+  return match ? { user: decodeURIComponent(match[1]!), token: decodeURIComponent(match[2]!) } : null;
+}
+
 function insertRelay(wrapped: string, relay: string, socket: string): string {
   const anchor = "_srt_socks=$!\n";
   if (wrapped.split(anchor).length !== 2 || /['"$\\\s]/.test(socket)) {

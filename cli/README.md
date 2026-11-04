@@ -123,6 +123,20 @@ sandbox has its own network, so its server is otherwise out of this machine's si
 reachable at `127.0.0.1:<port>` here, and nowhere else. The sandbox ends with the run, even when the
 run is killed.
 
+On a machine that reaches the internet through a proxy of its own (a corporate proxy, or v2rayA),
+give it as `--upstream-proxy http://127.0.0.1:20171`, or `sandbox.upstreamProxy` in the config. It
+defaults to `HTTPS_PROXY`. The command then reaches the internet only through this tool, and this
+tool through that proxy:
+
+- Every destination is written down per connection, with the bytes each way, and allowed or refused
+  as usual. HTTPS on this route is not decrypted, because sandbox-runtime does not send a decrypted
+  connection on to a parent proxy.
+- On Linux, a command that names the proxy itself (`yt-dlp --proxy http://127.0.0.1:20171`) reaches
+  this tool on that port inside the sandbox, so it needs no change. On macOS the real proxy is
+  refused, and the command must use the proxy it is given in `HTTPS_PROXY`.
+- Any other proxy on the machine is out of reach, and `--allow-host` for the upstream proxy itself
+  is refused, because a tunnel through it would be one host to this tool.
+
 The gateway also fails over between model APIs, for OpenAI Chat, OpenAI
 Responses and Anthropic Messages. It does not translate protocols, so the members of a route must
 speak the protocol their client speaks.
