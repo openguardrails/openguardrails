@@ -6,7 +6,7 @@ import { latestRun, readRun, renderEvent } from "./record.js";
 import { connect } from "./connect.js";
 import { attachCommand, detach } from "./attach.js";
 import { loadConfig } from "./config.js";
-import { run } from "./run.js";
+import { parseExpose, run } from "./run.js";
 import { render, scan } from "./scan/index.js";
 import { ensureGateway, hydrateEnv, serve, status, stop } from "./serve.js";
 import { notify } from "./notify.js";
@@ -37,7 +37,10 @@ run options:
   --allow-read <path>    re-open a credential path that is denied by default
   --allow-write <path>   allow writes outside the project, temp and agent state directories
   --allow-local-bind     let the command listen on a local port, for agents with a web UI
-  --expose <port>        reach a server the command starts on that port, at 127.0.0.1:<port> on this machine
+  --expose [addr:]port   reach a server the command starts on that port, at addr:port on this machine
+                         (127.0.0.1 unless given)
+  --bridge <port>        let the command connect straight to this machine's 127.0.0.1:<port> (Linux)
+  --units <pattern>      let the command manage these systemd user units with systemctl (Linux)
   --gpu                  let the command use this machine's NVIDIA GPUs (Linux)
   --device <path>        let the command use a device, such as /dev/video0 (Linux)
   --upstream-proxy <url> leave through this machine's own proxy (default: HTTPS_PROXY); the command
@@ -47,7 +50,7 @@ Configuration is ~/.openguardrails/config.json. See the README.
 `;
 
 function parseRun(args: string[]) {
-  const options = { enforce: false, allowLocalBinding: false, allowHosts: [] as string[], denyHosts: [] as string[], allowRead: [] as string[], allowWrite: [] as string[], expose: [] as number[], upstreamProxy: undefined as string | undefined, devices: [] as string[], command: [] as string[] };
+  const options = { enforce: false, allowLocalBinding: false, allowHosts: [] as string[], denyHosts: [] as string[], allowRead: [] as string[], allowWrite: [] as string[], expose: [] as Array<{ host: string; port: number }>, bridge: [] as number[], units: [] as string[], upstreamProxy: undefined as string | undefined, devices: [] as string[], command: [] as string[] };
   const lists: Record<string, string[]> = {
     "--allow-host": options.allowHosts,
     "--deny-host": options.denyHosts,
@@ -81,9 +84,20 @@ function parseRun(args: string[]) {
       continue;
     }
     if (arg === "--expose") {
+      options.expose.push(parseExpose(args[i + 1] ?? ""));
+      i += 1;
+      continue;
+    }
+    if (arg === "--bridge") {
       const port = Number(args[i + 1]);
-      if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`--expose needs a port number, not ${args[i + 1] ?? "nothing"}`);
-      options.expose.push(port);
+      if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`--bridge needs a port number, not ${args[i + 1] ?? "nothing"}`);
+      options.bridge.push(port);
+      i += 1;
+      continue;
+    }
+    if (arg === "--units") {
+      if (!args[i + 1]) throw new Error("--units needs a pattern, such as voicego-*");
+      options.units.push(args[i + 1]!);
       i += 1;
       continue;
     }

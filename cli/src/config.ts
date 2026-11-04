@@ -82,6 +82,12 @@ export interface Config {
     allowRead?: string[];
     allowWrite?: string[];
     allowLocalBinding?: boolean;
+    /** Servers in the sandbox to reach from this machine, as [address:]port. */
+    expose?: string[];
+    /** Loopback ports of this machine the command may connect to directly (Linux). */
+    bridge?: number[];
+    /** systemd user units the command may manage, by pattern such as voicego-* (Linux). */
+    units?: string[];
     /** Devices the command may use on Linux, such as /dev/nvidia0. "gpu" stands for every NVIDIA device. */
     devices?: string[];
     /** The proxy this machine reaches the internet through, such as http://127.0.0.1:20171. Defaults to HTTPS_PROXY. */

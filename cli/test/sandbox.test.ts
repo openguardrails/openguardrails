@@ -8,7 +8,7 @@ import { findDescendant, joinBinary, parseEnv, sandboxCpu, sandboxEnv } from "..
 test("the holder's environment is read, and only what the sandbox set is carried to joined commands", () => {
   const holder = parseEnv("HTTP_PROXY=http://u:t@localhost:3128\0PATH=/usr/bin\0LD_PRELOAD=/x.so\0PWD=/tmp\0SHLVL=2\0NO_PROXY=\0EQ=a=b\0");
   assert.equal(holder.EQ, "a=b");
-  assert.deepEqual(sandboxEnv(holder, { PATH: "/usr/bin", NO_PROXY: "localhost" }), { HTTP_PROXY: "http://u:t@localhost:3128", LD_PRELOAD: "/x.so", NO_PROXY: "", EQ: "a=b" });
+  assert.deepEqual(sandboxEnv({ ...holder, PATH: "/shims:/usr/bin" }, { PATH: "/usr/bin", NO_PROXY: "localhost" }), { HTTP_PROXY: "http://u:t@localhost:3128", LD_PRELOAD: "/x.so", NO_PROXY: "", EQ: "a=b" });
 });
 
 function fakeProc(entries: Array<{ pid: number; ppid: number; argv0: string; ns?: string; ticks?: number[] }>): string {
@@ -47,4 +47,34 @@ test("the sandbox's CPU is that of every process in its PID namespace, with thei
 
 test("joining is offered only on Linux", () => {
   assert.equal(joinBinary("darwin", "arm64"), null);
+});
+
+test("the broker runs systemctl and journalctl only for the sandbox's own units", async () => {
+  const { allowed, unitMatcher } = await import("../src/broker.js");
+  const ours = unitMatcher(["voicego-*"]);
+  const ok = (tool: string, args: string[]) => allowed(tool, args, ours);
+  assert.equal(ok("systemctl", ["--user", "restart", "--no-block", "voicego-runner.service"]), null);
+  assert.equal(ok("systemctl", ["--user", "is-active", "voicego-web"]), null);
+  assert.equal(ok("systemctl", ["--user", "show", "voicego-zhubo-manager.service", "-p", "ActiveState", "--value"]), null);
+  assert.equal(ok("systemctl", ["--user", "is-enabled", "--quiet", "voicego-publish-browser.service"]), null);
+  assert.equal(ok("journalctl", ["--user", "-u", "voicego-runner.service", "-n", "50", "-o", "json", "--no-pager"]), null);
+  assert.match(ok("systemctl", ["--user", "start", "evil.service"])!, /not one of this sandbox's units/);
+  assert.match(ok("systemctl", ["--user", "restart", "voicego-runner", "sshd"])!, /sshd is not one/);
+  assert.match(ok("systemctl", ["restart", "voicego-runner"])!, /only systemctl --user/);
+  assert.match(ok("systemctl", ["--user", "daemon-reload"])!, /not available/);
+  assert.match(ok("systemctl", ["--user", "edit", "voicego-runner"])!, /not available/);
+  assert.match(ok("systemctl", ["--user", "--runtime", "start", "voicego-runner"])!, /not allowed/);
+  assert.match(ok("systemctl", ["--user", "-H", "root@host", "start", "voicego-runner"])!, /not allowed/);
+  assert.match(ok("journalctl", ["--user", "-u", "sshd"])!, /not one of/);
+  assert.match(ok("journalctl", ["--user"])!, /needs -u/);
+  assert.match(ok("journalctl", ["--user", "-u", "voicego-web", "_PID=1"])!, /matches are not available/);
+  assert.match(ok("systemd-run", ["--user", "sh"])!, /not brokered/);
+});
+
+test("an exposed server is reached on 127.0.0.1 unless an address is given", async () => {
+  const { parseExpose } = await import("../src/run.js");
+  assert.deepEqual(parseExpose("8765"), { host: "127.0.0.1", port: 8765 });
+  assert.deepEqual(parseExpose("0.0.0.0:8765"), { host: "0.0.0.0", port: 8765 });
+  assert.deepEqual(parseExpose("[::]:8766"), { host: "::", port: 8766 });
+  assert.throws(() => parseExpose("x"), /address:\]port/);
 });

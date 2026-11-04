@@ -42,7 +42,8 @@ export function joinBinary(platform = process.platform, arch = process.arch): st
 
 /** What a command run in the sandbox needs from the holder's environment: what the sandbox set. */
 export function sandboxEnv(holder: Record<string, string>, outside: NodeJS.ProcessEnv): Record<string, string> {
-  const own = new Set(["PWD", "OLDPWD", "SHLVL", "_"]);
+  // PATH stays the joining command's own; the sandbox's shims are put in front of it (runIn).
+  const own = new Set(["PWD", "OLDPWD", "SHLVL", "_", "PATH"]);
   return Object.fromEntries(Object.entries(holder).filter(([key, value]) => !own.has(key) && outside[key] !== value));
 }
 
@@ -134,6 +135,7 @@ export async function runIn(name: string, command: string[], cwd = process.cwd()
   const join = joinBinary();
   if (!join) throw new Error("this install has no ogr-join for this machine; build it with npm run build");
   const env: NodeJS.ProcessEnv = { ...process.env, ...state.env };
+  if (state.env.OGR_SANDBOX_BIN) env.PATH = `${state.env.OGR_SANDBOX_BIN}:${process.env.PATH ?? "/usr/bin:/bin"}`;
   // The keys this tool holds never reach a sandboxed command, joined or not.
   for (const key of keyEnvNames(loadConfig())) delete env[key];
   const child = spawn(join, [String(state.holder), cwd, ...command], { stdio: "inherit", env });
