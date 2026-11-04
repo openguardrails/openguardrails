@@ -67,3 +67,15 @@ test("on Linux, the library reports opens and execs of the processes it is loade
   // A PATH search tries directories where the program is not; only the one that ran is reported.
   assert.equal(events.filter((e) => e?.action === "exec" && e.path.endsWith("/true")).length, 1);
 });
+
+test("a Seatbelt report of an allowed operation is read as an exec, a read or a write", async () => {
+  const { parseSeatbeltReport } = await import("../src/observe.js");
+  const tag = "\nCMD64_dHJ1ZQ==_END__x_SBX";
+  assert.deepEqual(parseSeatbeltReport(`Sandbox: cat(40462) allow file-read-data /work/in.txt${tag}`, 5), { t: 5, action: "read", pid: 40462, process: "cat", path: "/work/in.txt" });
+  assert.equal(parseSeatbeltReport(`Sandbox: bash(1) allow process-exec* /bin/cat${tag}`, 1)?.action, "exec");
+  assert.equal(parseSeatbeltReport(`Sandbox: bash(1) allow file-write-create /work/out file.txt${tag}`, 1)?.path, "/work/out file.txt");
+  assert.equal(parseSeatbeltReport(`Sandbox: head(2) deny(1) file-read-data /Users/me/.ssh/config${tag}`, 1), null);
+  assert.equal(parseSeatbeltReport("5 duplicate reports for Sandbox: mds(373) deny(1) system-info", 1), null);
+  assert.equal(isRoutineRead("/System/Library/Frameworks/Foundation.framework/Foundation"), true);
+  assert.equal(isRoutineRead("/usr/lib/libSystem.B.dylib"), true);
+});

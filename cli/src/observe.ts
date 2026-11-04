@@ -35,9 +35,19 @@ export function parseLine(line: string): FileEvent | null {
  */
 export function isRoutineRead(path: string): boolean {
   if (/^\/(usr|lib|lib32|lib64|bin|sbin|snap|opt)\//.test(path)) return true;
+  // macOS: the system, its frameworks and caches, and each app's own bundle.
+  if (/^\/(System|Library|dev)\/|^\/private\/var\/db\/|^\/private\/etc\/|\/Contents\/(Frameworks|Resources|MacOS|Info\.plist)|\.(dylib|framework)(\/|$)/.test(path)) return true;
   if (/\/(site-packages|dist-packages|node_modules|__pycache__|\.git)\//.test(path)) return true;
   if (/\.(pyc|so(\.\d+)*|pth)$/.test(path)) return true;
   return /^\/etc\/(ssl|ca-certificates|localtime|nsswitch\.conf|host\.conf|resolv\.conf|hosts|gai\.conf|mime\.types|passwd|group)$|^\/etc\/(ssl|ca-certificates|fonts|alternatives)\//.test(path);
+}
+
+/** One line Seatbelt logs for an allowed operation, as "Sandbox: cat(12) allow file-read-data /a". */
+export function parseSeatbeltReport(message: string, t: number): FileEvent | null {
+  const match = /^Sandbox: (.+?)\((\d+)\) allow (process-exec\*?|file-read-data|file-write-\S+) (\/[^\n]*)/.exec(message);
+  if (!match) return null;
+  const action = match[3]!.startsWith("process-exec") ? "exec" : match[3] === "file-read-data" ? "read" : "write";
+  return { t, action, pid: Number(match[2]), process: match[1]!, path: match[4]! };
 }
 
 /** Reads new lines from the log as they are written. */

@@ -67,3 +67,38 @@ test("with a GPU, every socket on the machine is hidden, and a per-program socke
   }
   assert.ok(!hidden.includes("/tmp"));
 });
+
+test("macOS reporting only marks existing allow rules, and adds none that could outrank a denial", async () => {
+  const { reportAllowed } = await import("../src/policy.js");
+  const tag = "CMD64_dHJ1ZQ==_END__x1_SBX";
+  const profile = `(version 1)\n(deny default (with message "${tag}"))\n(allow process-exec)\n(allow file-read*)\n(deny file-read*\n  (with message "${tag}")\n  (subpath "/Users/me/.ssh"))\n(allow file-write*\n  (subpath "/tmp/claude")\n  (subpath "/work")\n  (with message "${tag}"))\n(allow file-write*\n  (with message "${tag}")\n  (subpath "/work"))\n`;
+  const { wrapped, tag: found } = reportAllowed(`sandbox-exec -p '${profile}' sh`);
+  assert.equal(found, tag);
+  assert.match(wrapped, /\(allow process-exec \(with report\) \(with message "CMD64/);
+  assert.match(wrapped, /\(allow file-read\* \(with report\) \(with message "CMD64[^\n]*\n\(deny file-read\*/);
+  assert.match(wrapped, /\(allow file-write\* \(with report\)\n  \(with message/);
+  assert.match(wrapped, /\(allow file-write\* \(with report\)\n  \(subpath "\/tmp\/claude"\)/);
+  // One message per rule: a second is a syntax error ("kleene star") and the sandbox does not start.
+  assert.equal(wrapped.match(/with message/g)?.length, profile.match(/with message/g)!.length + 2);
+  assert.doesNotMatch(wrapped, /\(allow file-read-data/);
+  assert.equal(wrapped.split("(allow").length, profile.split("(allow").length);
+  assert.throws(() => reportAllowed("sandbox-exec -p '(version 1)' sh"), /unexpected profile/);
+});
+
+test("on macOS, with reporting on, a credential path stays unreadable", { skip: process.platform !== "darwin" }, async (t) => {
+  const { execFileSync } = await import("node:child_process");
+  const { existsSync, mkdtempSync } = await import("node:fs");
+  const { homedir, tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  if (!existsSync(join(homedir(), ".ssh", "config"))) return t.skip("no ~/.ssh/config on this machine");
+  const cli = new URL("../src/cli.js", import.meta.url).pathname;
+  const out = execFileSync("node", [cli, "run", "--", "sh", "-c", "cat ~/.ssh/config >/dev/null 2>&1 && echo SSH-READ || echo SSH-REFUSED; cat /etc/hosts >/dev/null && echo OTHER-READ"], {
+    cwd: mkdtempSync(join(tmpdir(), "ogr-mac-work-")),
+    env: { ...process.env, OPENGUARDRAILS_HOME: mkdtempSync(join(tmpdir(), "ogr-mac-")) },
+    encoding: "utf8",
+    timeout: 60_000,
+  });
+  assert.match(out, /SSH-REFUSED/);
+  assert.doesNotMatch(out, /SSH-READ/);
+  assert.match(out, /OTHER-READ/);
+});
