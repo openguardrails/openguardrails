@@ -27,7 +27,11 @@ jobs:
 
   cli:
     # The `openguardrails` command. Its tests start their own stand-ins for the model API and AIRS.
-    runs-on: ubuntu-latest
+    # arm64 too: the package ships its Linux native helpers for both architectures.
+    strategy:
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
