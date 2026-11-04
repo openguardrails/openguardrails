@@ -28,7 +28,7 @@ export interface RunOptions extends Omit<PolicyOptions, "cwd"> {
   /** Servers the command starts, reachable on this machine at host:port (127.0.0.1 unless given). */
   expose?: Array<{ host: string; port: number }>;
   /** This machine's loopback ports the command may connect to directly, without the proxy. */
-  bridge?: number[];
+  bridge?: Array<{ inside: number; host: number }>;
   /** systemd user units the command may manage with systemctl and journalctl, by pattern. */
   units?: string[];
   upstreamProxy?: string | undefined;
@@ -238,8 +238,11 @@ export async function run(options: RunOptions): Promise<number> {
   }
 
   const expose = [...(options.expose ?? []), ...(settings.sandbox?.expose ?? []).map(parseExpose)];
-  const bridgePorts = [...new Set([...(options.bridge ?? []), ...(settings.sandbox?.bridge ?? [])])].filter((port) => port !== ownPort);
-  if (upstream && ["127.0.0.1", "localhost", "::1"].includes(upstream.host) && bridgePorts.includes(upstream.port)) {
+  const bridges = [...(options.bridge ?? []), ...(settings.sandbox?.bridge ?? []).map(parseBridge)].filter(
+    (bridge, i, all) => bridge.inside !== ownPort && all.findIndex((other) => other.inside === bridge.inside) === i,
+  );
+  const bridgePorts = bridges.map((bridge) => bridge.inside);
+  if (upstream && ["127.0.0.1", "localhost", "::1"].includes(upstream.host) && bridges.some((bridge) => bridge.host === upstream.port || bridge.inside === upstream.port)) {
     process.stderr.write(`[openguardrails] cannot start: port ${upstream.port} is the upstream proxy. Commands reach it through openguardrails, so it must not be bridged\n`);
     relay?.close();
     return 2;
@@ -265,7 +268,9 @@ export async function run(options: RunOptions): Promise<number> {
     ...buildPolicy({
       cwd: process.cwd(),
       // A bridged service is meant to be reached; clients that send it through the proxy reach it too.
-      allowHosts: [...allowHosts, ...(ownPort !== null ? [`127.0.0.1:${ownPort}`] : []), ...bridgePorts.map((port) => `127.0.0.1:${port}`)],
+      // A bridged service is meant to be reached; a client that sends it through the proxy anyway
+      // reaches it there too. Not a remapped one: through the proxy that port is the machine's own.
+      allowHosts: [...allowHosts, ...(ownPort !== null ? [`127.0.0.1:${ownPort}`] : []), ...bridges.filter((bridge) => bridge.inside === bridge.host).map((bridge) => `127.0.0.1:${bridge.host}`)],
       denyHosts: [...options.denyHosts, ...(settings.sandbox?.denyHosts ?? [])],
       allowRead: [...options.allowRead, ...(settings.sandbox?.allowRead ?? [])],
       allowWrite: [...options.allowWrite, ...(settings.sandbox?.allowWrite ?? []), ...(bridgeDir && (expose.length > 0 || observeLog) ? [bridgeDir] : [])],
@@ -347,7 +352,11 @@ export async function run(options: RunOptions): Promise<number> {
   const telemetry = observeLog ? `LD_PRELOAD=${quote([preload!, process.env.LD_PRELOAD].filter(Boolean).join(":"))} OGR_OBSERVE_LOG=${quote(observeLog.path)} ` : "";
   const proxyEnv = aliasPort !== null ? ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"].map((name) => `${name}=http://127.0.0.1:${aliasPort} `).join("") : "";
   const brokered = shims ? `OGR_SANDBOX_BIN=${quote(shims)} PATH=${quote(shims)}:"$PATH" ` : "";
-  let wrapped = await SandboxManager.wrapWithSandbox(`${telemetry}${brokered}${proxyEnv}NO_PROXY= no_proxy= NODE_USE_ENV_PROXY=1 ${command}`, undefined, undefined, undefined, {
+  // macOS: nothing is exempt, so a local model server is seen through the proxy. Linux: the sandbox's
+  // own 127.0.0.1 holds only bridges and relays, which a client must reach directly; through the
+  // proxy, 127.0.0.1 would be this machine's and could go around a remapped bridge.
+  const noProxy = process.platform === "linux" ? "localhost,127.0.0.1,::1" : "";
+  let wrapped = await SandboxManager.wrapWithSandbox(`${telemetry}${brokered}${proxyEnv}NO_PROXY=${noProxy} no_proxy=${noProxy} NODE_USE_ENV_PROXY=1 ${command}`, undefined, undefined, undefined, {
     commandId: runId,
     commandText: command,
   });
@@ -382,14 +391,14 @@ export async function run(options: RunOptions): Promise<number> {
   }
   if (bridgeDir) for (const { port } of expose) wrapped = exposePort(wrapped, port, join(bridgeDir, `expose-${port}.sock`));
   // Clients that connect to a local service directly, without the proxy, find it at the same port.
-  for (const port of bridgeDir ? bridgePorts : []) {
-    const socket = join(bridgeDir!, `bridge-${port}.sock`);
-    wrapped = bridgeGatewayPort(wrapped, port, socket);
+  for (const { inside, host } of bridgeDir ? bridges : []) {
+    const socket = join(bridgeDir!, `bridge-${inside}.sock`);
+    wrapped = bridgeGatewayPort(wrapped, inside, socket);
     relays.push(
       await pipe({ path: socket }, () => {
         networkEvents += 1;
-        recorder.write("connect", { host: "127.0.0.1", port, allowed: true, via: "bridge" });
-        return net.connect(port, "127.0.0.1");
+        recorder.write("connect", { host: "127.0.0.1", port: host, ...(host !== inside ? { inside } : {}), allowed: true, via: "bridge" });
+        return net.connect(host, "127.0.0.1");
       }),
     );
   }
@@ -563,4 +572,12 @@ function streamSeatbeltReports(tag: string, onEvents: (events: FileEvent[]) => v
   });
   log.on("error", () => undefined);
   return () => void log.kill();
+}
+
+/** `18080`, or `18080=4180`: a port in the sandbox, and the port of this machine it reaches. */
+export function parseBridge(spec: string | number): { inside: number; host: number } {
+  const [inside, host = inside] = String(spec).split("=").map(Number);
+  const valid = (port: number | undefined) => Number.isInteger(port) && port! >= 1 && port! <= 65535;
+  if (!valid(inside) || !valid(host)) throw new Error(`--bridge needs <port> or <port>=<host-port>, not ${spec}`);
+  return { inside: inside!, host: host! };
 }

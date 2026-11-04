@@ -85,7 +85,7 @@ export interface Config {
     /** Servers in the sandbox to reach from this machine, as [address:]port. */
     expose?: string[];
     /** Loopback ports of this machine the command may connect to directly (Linux). */
-    bridge?: number[];
+    bridge?: Array<number | string>;
     /** systemd user units the command may manage, by pattern such as voicego-* (Linux). */
     units?: string[];
     /** Devices the command may use on Linux, such as /dev/nvidia0. "gpu" stands for every NVIDIA device. */

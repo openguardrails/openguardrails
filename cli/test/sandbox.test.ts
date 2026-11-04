@@ -85,3 +85,12 @@ test("the units a systemctl command would change are found past its options", as
   assert.deepEqual(unitsChanged(["--user", "is-active", "voicego-runner"]), []);
   assert.deepEqual(unitsChanged(["--user", "-p", "x", "start", "voicego-a"]), ["voicego-a"]);
 });
+
+test("a bridge maps a port in the sandbox to the same or another port of this machine", async () => {
+  const { parseBridge } = await import("../src/run.js");
+  assert.deepEqual(parseBridge("18080"), { inside: 18080, host: 18080 });
+  assert.deepEqual(parseBridge("18080=4180"), { inside: 18080, host: 4180 });
+  assert.deepEqual(parseBridge(8888), { inside: 8888, host: 8888 });
+  assert.throws(() => parseBridge("18080=x"), /--bridge needs/);
+  assert.throws(() => parseBridge("0"), /--bridge needs/);
+});
