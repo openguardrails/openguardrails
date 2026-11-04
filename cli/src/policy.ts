@@ -70,11 +70,24 @@ export function openLoopbackPort(wrapped: string, port: number): string {
  * creating a Unix socket afterwards. So it goes right after their SOCKS relay in the wrapped script.
  */
 export function bridgeGatewayPort(wrapped: string, port: number, socket: string): string {
+  return insertRelay(wrapped, `socat TCP4-LISTEN:${port},bind=127.0.0.1,fork,reuseaddr,backlog=4096 UNIX-CONNECT:${socket}`, socket);
+}
+
+/**
+ * The other direction, for an agent with a web UI: a server it starts inside the sandbox listens
+ * in the sandbox's own namespace, out of the machine's sight. The relay inside turns that port into
+ * a Unix socket, and `run` listens on 127.0.0.1:<port> on this machine and dials it.
+ */
+export function exposePort(wrapped: string, port: number, socket: string): string {
+  return insertRelay(wrapped, `socat UNIX-LISTEN:${socket},fork,reuseaddr TCP4:127.0.0.1:${port}`, socket);
+}
+
+function insertRelay(wrapped: string, relay: string, socket: string): string {
   const anchor = "_srt_socks=$!\n";
   if (wrapped.split(anchor).length !== 2 || /['"$\\\s]/.test(socket)) {
-    throw new Error("this sandbox-runtime version has an unexpected script; openguardrails cannot bridge the gateway port");
+    throw new Error("this sandbox-runtime version has an unexpected script; openguardrails cannot bridge a port");
   }
-  return wrapped.replace(anchor, `${anchor}{ socat TCP4-LISTEN:${port},bind=127.0.0.1,fork,reuseaddr,backlog=4096 UNIX-CONNECT:${socket}; } >/dev/null 2>&1 &\n`);
+  return wrapped.replace(anchor, `${anchor}{ ${relay}; } >/dev/null 2>&1 &\n`);
 }
 
 export function buildPolicy(options: PolicyOptions): SandboxRuntimeConfig {
