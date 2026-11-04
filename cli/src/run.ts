@@ -34,6 +34,8 @@ export interface RunOptions extends Omit<PolicyOptions, "cwd"> {
   upstreamProxy?: string | undefined;
   /** How the run is named in its record and matched by rules; the command line by default. */
   label?: string;
+  /** The named sandbox this run holds; its units may be managed from inside it. */
+  sandboxName?: string;
   /** Called once the sandbox is started; may return how to measure the CPU of everything in it. */
   onStarted?: (childPid: number) => Promise<(() => number) | undefined>;
   devices?: string[];
@@ -364,7 +366,7 @@ export async function run(options: RunOptions): Promise<number> {
     const socket = join(bridgeDir, "broker.sock");
     wrapped = bridgeGatewayPort(wrapped, BROKER_PORT, socket);
     const unitAllowed = unitMatcher(units);
-    relays.push(await startBroker(socket, unitAllowed, (tool, args, refused) => recorder.write("broker", { tool, args, refused })));
+    relays.push(await startBroker(socket, options.sandboxName ?? null, unitAllowed, (tool, args, refused) => recorder.write("broker", { tool, args, refused })));
   }
   const proxyPort = SandboxManager.getProxyPort();
   if (aliasPort !== null && bridgeDir && proxyPort) {

@@ -106,6 +106,7 @@ export async function startSandbox(name: string, options: Omit<RunOptions, "comm
     ...options,
     allowWrite: [...options.allowWrite, dir],
     label: `sandbox ${name}`,
+    sandboxName: name,
     command: ["bash", "-c", `env -0 > ${dir}/holder.env && exec -a ${holderName(name)} sleep infinity`],
     onStarted: async (child) => {
       for (let i = 0; i < 300 && !state; i += 1) {

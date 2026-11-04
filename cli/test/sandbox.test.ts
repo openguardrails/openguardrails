@@ -78,3 +78,10 @@ test("an exposed server is reached on 127.0.0.1 unless an address is given", asy
   assert.deepEqual(parseExpose("[::]:8766"), { host: "::", port: 8766 });
   assert.throws(() => parseExpose("x"), /address:\]port/);
 });
+
+test("the units a systemctl command would change are found past its options", async () => {
+  const { unitsChanged } = await import("../src/broker.js");
+  assert.deepEqual(unitsChanged(["--user", "restart", "--no-block", "voicego-runner.service", "voicego-web"]), ["voicego-runner.service", "voicego-web"]);
+  assert.deepEqual(unitsChanged(["--user", "is-active", "voicego-runner"]), []);
+  assert.deepEqual(unitsChanged(["--user", "-p", "x", "start", "voicego-a"]), ["voicego-a"]);
+});
