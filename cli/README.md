@@ -141,6 +141,34 @@ The gateway also fails over between model APIs, for OpenAI Chat, OpenAI
 Responses and Anthropic Messages. It does not translate protocols, so the members of a route must
 speak the protocol their client speaks.
 
+## Rules about your own work
+
+A rule can tell you when your agent gets stuck. Stuck means busy without progress: the command keeps
+using CPU, the network or the model, or keeps waiting on a model request or a connection, yet nothing
+new appears where its output goes. A command that finished and sits idle is not stuck.
+
+```json
+{
+  "watches": [{
+    "name": "translating or publishing gets stuck",
+    "command": "voicego",
+    "progress": ["/data/voicego/episodes", "/data/voicego/inbox"],
+    "idleMinutes": 30,
+    "notify": ["email"]
+  }],
+  "notify": {
+    "email": {
+      "to": "you@example.com",
+      "smtp": { "host": "smtp.example.com", "port": 465, "user": "you@example.com", "passwordEnv": "SMTP_PASSWORD" }
+    }
+  }
+}
+```
+
+`openguardrails run` checks each rule whose `command` is in its command line. It sends one message
+when the command gets stuck and one when new output appears. `openguardrails notify test` sends a
+test message. The password is kept from the sandbox like every other key.
+
 ## Experiments
 
 ```sh

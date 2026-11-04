@@ -31,7 +31,7 @@ export async function gatewayHealth(port: number): Promise<Record<string, any> |
  * shell finds it without copying a secret into another file.
  */
 export function hydrateEnv(config: Config): void {
-  const names = [config.airs?.apiKeyEnv, config.model?.apiKeyEnv, "OPENGUARDRAILS_API_KEY", ...Object.values(config.gateway?.upstreams ?? {}).map((upstream) => upstream.apiKeyEnv)];
+  const names = [config.airs?.apiKeyEnv, config.model?.apiKeyEnv, config.notify?.email?.smtp.passwordEnv, "OPENGUARDRAILS_API_KEY", ...Object.values(config.gateway?.upstreams ?? {}).map((upstream) => upstream.apiKeyEnv)];
   for (const name of new Set(names.filter((value): value is string => Boolean(value)))) {
     if (process.env[name] || !/^\w+$/.test(name)) continue;
     try {

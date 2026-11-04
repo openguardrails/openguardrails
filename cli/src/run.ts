@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import net from "node:net";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import zlib from "node:zlib";
 import { SandboxManager, type FilterRequestCallback, type SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
@@ -15,6 +15,8 @@ import { classifyModelRequest, harnessFrom, hostsIn, toolCallsIn, toolResultIdsI
 import { aliasProxyPort, bridgeGatewayPort, buildPolicy, exposePort, isLocalTarget, openLoopbackPort, proxyCredentials, type PolicyOptions } from "./policy.js";
 import { Recorder, safePath } from "./record.js";
 import { ensureGateway, gatewayPort, gatewayToken, hydrateEnv } from "./serve.js";
+import { notify } from "./notify.js";
+import { describeActivity, isBusy, newestChange, processTreeCpu, StallWatch, type Activity } from "./watch.js";
 import { isUpstreamAddress, NO_PROXY, parseUpstreamProxy, startProxyAuthBridge, startUpstreamRelay, upstreamFromEnv, type Relay } from "./upstream.js";
 
 export interface RunOptions extends Omit<PolicyOptions, "cwd"> {
@@ -74,12 +76,19 @@ export async function run(options: RunOptions): Promise<number> {
   const startedAt = Date.now();
   let lastActivity = startedAt;
   let servedAtStart: number | null = null;
+  // What a stall rule counts as being busy. The gateway's numbers cover every agent that uses it.
+  let networkEvents = 0;
+  let openConnections = 0;
+  let modelServed = 0;
+  let modelWaiting = 0;
   const syncGateway = async () => {
     if (ownPort === null) return;
     try {
       const response = await fetch(`http://127.0.0.1:${ownPort}/__ogr/activity?since=${lastActivity}`, { headers: { "x-openguardrails-token": gatewayToken() }, signal: AbortSignal.timeout(2000) });
-      const seen = (await response.json()) as { served: number; blind_to: string[]; calls: Array<{ t: number; agent: string; name: string; hosts: string[] }> };
+      const seen = (await response.json()) as { served: number; inflight?: number; blind_to: string[]; calls: Array<{ t: number; agent: string; name: string; hosts: string[] }> };
       servedAtStart ??= seen.served;
+      modelServed = seen.served;
+      modelWaiting = seen.inflight ?? 0;
       if (seen.served > servedAtStart) correlator.noteModelHost("127.0.0.1");
       for (const name of seen.blind_to) blindTo.add(name);
       for (const call of seen.calls) {
@@ -141,6 +150,7 @@ export async function run(options: RunOptions): Promise<number> {
     const bytes = Number(request.headers.get("content-length") ?? 0);
     const protocol = classifyModelRequest(request.method, url.pathname);
     const ownTraffic = ownPort !== null && host === "127.0.0.1" && info?.target?.port === ownPort;
+    if (!ownTraffic) networkEvents += 1;
     if (!protocol && !ownTraffic) outbox.push({ t: Date.now(), kind: "network", target: `${host}:${info?.target?.port ?? (url.protocol === "https:" ? 443 : 80)}`, action: request.method, ...(bytes ? { bytes } : {}) });
     if (protocol) {
       correlator.noteModelHost(host);
@@ -172,6 +182,8 @@ export async function run(options: RunOptions): Promise<number> {
       upstream,
       ({ method, host, port }) => {
         const now = Date.now();
+        networkEvents += 1;
+        openConnections += 1;
         // A tunnel is not decrypted on this route, so its connection is all there is to record.
         if (method === "CONNECT") {
           outbox.push({ t: now, kind: "network", target: `${host}:${port}`, action: method });
@@ -179,6 +191,7 @@ export async function run(options: RunOptions): Promise<number> {
         }
       },
       ({ method, host, port }, bytesUp, bytesDown) => {
+        openConnections -= 1;
         if (method === "CONNECT") recorder.write("request", { method, host, port, bytes: bytesUp, bytes_down: bytesDown, via: "upstream" });
       },
     );
@@ -218,6 +231,7 @@ export async function run(options: RunOptions): Promise<number> {
 
   const ask = async ({ host, port }: { host: string; port?: number | undefined }) => {
     const local = isLocalTarget(host);
+    networkEvents += 1;
     recorder.write("connect", { host, port, allowed: !options.enforce && !local });
     if (local || options.enforce) outbox.push({ t: Date.now(), kind: "network", target: `${host}:${port}`, denied: true });
     if (local) return { allow: false as const, reason: `openguardrails: ${host} is this machine or a metadata endpoint. Allow it with --allow-host ${host}:${port}` };
@@ -305,6 +319,7 @@ export async function run(options: RunOptions): Promise<number> {
   }
   await syncGateway();
   const syncTimer = setInterval(() => void syncGateway().then(() => flush()), 15_000);
+  const stopWatching = watchForStalls(settings, command, runId, child.pid, recorder, () => ({ networkEvents, openConnections, modelServed, modelWaiting }));
   const code = await new Promise<number>((resolve) => {
     child.on("error", () => resolve(127));
     child.on("exit", (exitCode, signal) => resolve(exitCode ?? (signal ? 128 : 1)));
@@ -314,6 +329,7 @@ export async function run(options: RunOptions): Promise<number> {
   await new Promise((resolve) => setTimeout(resolve, 1500));
   clearInterval(syncTimer);
   clearInterval(observeTimer);
+  stopWatching();
   await sendObservations();
   await syncGateway();
   flush(true);
@@ -325,4 +341,76 @@ export async function run(options: RunOptions): Promise<number> {
   await SandboxManager.reset();
   process.stderr.write(`[openguardrails] run ${runId} recorded. See: openguardrails log ${runId}\n`);
   return code;
+}
+
+interface Counters {
+  networkEvents: number;
+  openConnections: number;
+  modelServed: number;
+  modelWaiting: number;
+}
+
+/**
+ * The person's stall rules that apply to this command. Each is checked every quarter of its quiet
+ * window, at most once a minute, and sends one message when the command gets stuck and one when it
+ * moves again.
+ */
+function watchForStalls(settings: ReturnType<typeof loadConfig>, command: string, runId: string, pid: number | undefined, recorder: Recorder, counters: () => Counters): () => void {
+  const rules = (settings.watches ?? []).filter((rule) => !rule.command || command.includes(rule.command));
+  if (rules.length === 0 || pid === undefined) return () => undefined;
+  const startedAt = Date.now();
+  const watches = rules.map((rule) => new StallWatch(rule, startedAt));
+  const pollMs = Math.max(5_000, Math.min(60_000, (Math.min(...rules.map((rule) => rule.idleMinutes)) * 60_000) / 4));
+  let last = { t: startedAt, cpu: processTreeCpu(pid), ...counters() };
+  const send = (channels: string[], subject: string, lines: string[]) =>
+    void notify(settings, channels, { subject, text: lines.join("\n") }).then((failures) => {
+      recorder.write("notify", { subject, channels, failures });
+      for (const failure of failures) process.stderr.write(`[openguardrails] could not send "${subject}": ${failure}\n`);
+    });
+  const timer = setInterval(() => {
+    const now = Date.now();
+    const cpu = processTreeCpu(pid);
+    const current = counters();
+    const activity: Activity = {
+      // Processes that ended since the last look take their CPU time with them, so this never goes negative.
+      cpuPercent: Math.max(0, ((cpu - last.cpu) * 100_000) / Math.max(1, now - last.t)),
+      networkEvents: current.networkEvents - last.networkEvents,
+      openConnections: current.openConnections,
+      modelCalls: current.modelServed - last.modelServed,
+      modelWaiting: current.modelWaiting,
+    };
+    last = { t: now, cpu, ...current };
+    const busy = isBusy(activity);
+    for (const watch of watches) {
+      const progress = newestChange(watch.rule.progress);
+      const change = watch.step({ t: now, busy, activity }, progress.t);
+      if (!change) continue;
+      const minutes = (ms: number) => Math.round(ms / 60_000);
+      if (change.kind === "stalled") {
+        recorder.write("stalled", { rule: watch.rule.name, idle_ms: change.idleMs, activity: change.busyWith, last_output: progress.path });
+        send(watch.rule.notify, `[OpenGuardrails] stuck: ${watch.rule.name}`, [
+          watch.rule.name,
+          "",
+          `Busy for ${minutes(change.idleMs)} minutes without new output.`,
+          "",
+          `Command: ${command}`,
+          `Run: ${runId} on ${hostname()}`,
+          `Last output: ${progress.path ?? "none"}${progress.t ? ` at ${new Date(progress.t).toISOString()}` : ""}`,
+          `Busy with: ${describeActivity(change.busyWith)}`,
+          "",
+          `What it did: openguardrails log ${runId}`,
+        ]);
+      } else {
+        recorder.write("recovered", { rule: watch.rule.name, stalled_ms: change.stalledMs, output: progress.path });
+        send(watch.rule.notify, `[OpenGuardrails] moving again: ${watch.rule.name}`, [
+          watch.rule.name,
+          "",
+          `New output after ${minutes(change.stalledMs)} minutes stuck: ${progress.path}`,
+          "",
+          `Run: ${runId} on ${hostname()}`,
+        ]);
+      }
+    }
+  }, pollMs);
+  return () => clearInterval(timer);
 }

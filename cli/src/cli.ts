@@ -8,7 +8,9 @@ import { attachCommand, detach } from "./attach.js";
 import { loadConfig } from "./config.js";
 import { run } from "./run.js";
 import { render, scan } from "./scan/index.js";
-import { ensureGateway, serve, status, stop } from "./serve.js";
+import { ensureGateway, hydrateEnv, serve, status, stop } from "./serve.js";
+import { notify } from "./notify.js";
+import { hostname } from "node:os";
 
 const USAGE = `openguardrails: AI agent guardrails for every builder
 
@@ -20,6 +22,7 @@ const USAGE = `openguardrails: AI agent guardrails for every builder
   openguardrails run [options] -- <command...>   run a command and everything it spawns inside the sandbox
   openguardrails log [run-id]                    print what a run did (default: the latest)
   openguardrails status                          check the gateway, every upstream and AIRS; exit 1 on a problem
+  openguardrails notify test [channel]           send a test message to the channels in notify
   openguardrails serve                           run the local service in the foreground (\`run\` starts it for you)
   openguardrails stop                            stop the local service, for instance after editing the config
 
@@ -86,6 +89,20 @@ async function main(argv: string[]): Promise<number> {
   const [verb, ...rest] = argv;
   if (verb === "run") return run(parseRun(rest));
   if (verb === "serve") return serve();
+  if (verb === "notify") {
+    if (rest[0] !== "test") throw new Error("usage: openguardrails notify test [channel]");
+    const settings = loadConfig();
+    hydrateEnv(settings);
+    const channels = rest[1] ? [rest[1]] : Object.keys(settings.notify ?? {});
+    if (channels.length === 0) throw new Error("no channels: add notify.email to the config");
+    const failures = await notify(settings, channels, {
+      subject: "[OpenGuardrails] test message",
+      text: `This is a test from openguardrails on ${hostname()}. Your rules can send messages here.`,
+    });
+    for (const failure of failures) process.stderr.write(`could not send: ${failure}\n`);
+    if (failures.length === 0) process.stdout.write(`sent to ${channels.join(", ")}\n`);
+    return failures.length === 0 ? 0 : 1;
+  }
   if (verb === "status") return status();
   if (verb === "attach") {
     if (!rest.includes("--all") && rest.every((arg) => arg.startsWith("--"))) throw new Error("name the agents to attach, or --all. `openguardrails scan` lists them");
