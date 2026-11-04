@@ -3,6 +3,7 @@
  * It rewrites the model name and the key and nothing else: it does not translate protocols, so
  * the members of a route must speak the protocol their client speaks.
  */
+import { sseKeepAlive } from "./keepalive.js";
 import { randomBytes } from "node:crypto";
 import { appendFileSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import http, { type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } from "node:http";
@@ -178,6 +179,7 @@ export function startGateway(config: Config): Promise<http.Server> {
   const slots = new Slots();
   const connectTimeoutMs = gateway.connectTimeoutMs ?? 5_000;
   const firstByteTimeoutMs = gateway.firstByteTimeoutMs ?? 600_000;
+  const keepAliveMs = gateway.keepAliveMs ?? 15_000;
   const airs = config.airs;
   const airsKey = airs ? secretOf(airs) : undefined;
   const failClosed = airs?.failMode === "closed";
@@ -593,8 +595,13 @@ export function startGateway(config: Config): Promise<http.Server> {
 
   const runtime = localRuntime;
   const server = http.createServer(async (req, res) => {
+    sseKeepAlive(res, keepAliveMs);
     try {
       const url = new URL(req.url ?? "/", "http://gateway");
+      // A model server's conventional health check, for tools that watch the server they call.
+      if (url.pathname === "/healthz" && req.method === "GET") {
+        return json(res, 200, { ok: true, served, cooling: health.cooling(), slots: slots.busy(), last_failover: lastFailover });
+      }
       if (await handleRuntime(runtime, req, res, url.pathname)) return;
       if (url.pathname === "/__ogr/health") {
         return json(res, 200, { ok: true, pid: process.pid, served, cooling: health.cooling(), slots: slots.busy(), last_failover: lastFailover, airs: Boolean(airsKey), exec_refused: execRefused });

@@ -44,6 +44,8 @@ export interface Config {
     routes?: Record<string, string[]>;
     /** How long a failed upstream is skipped. */
     cooldownMs?: number;
+    /** A streamed reply that has sent nothing for this long gets an SSE comment, so the client keeps waiting. */
+    keepAliveMs?: number;
     connectTimeoutMs?: number;
     /** A shared vLLM can queue a request for minutes before the first byte. */
     firstByteTimeoutMs?: number;
