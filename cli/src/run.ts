@@ -12,7 +12,7 @@ import { keyEnvNames, loadConfig, looseConfigWarning } from "./config.js";
 import { Correlator } from "./correlate.js";
 import { fileObservation, type Observation } from "./exec.js";
 import { classifyModelRequest, harnessFrom, hostsIn, toolCallsIn, toolResultIdsIn, type LlmProtocol } from "./model.js";
-import { aliasProxyPort, bridgeGatewayPort, buildPolicy, exposePort, isLocalTarget, openLoopbackPort, proxyCredentials, type PolicyOptions } from "./policy.js";
+import { aliasProxyPort, bridgeGatewayPort, buildPolicy, exposePort, gpuDevices, passDevices, socketsToHide, isLocalTarget, openLoopbackPort, proxyCredentials, type PolicyOptions } from "./policy.js";
 import { Recorder, safePath } from "./record.js";
 import { ensureGateway, gatewayPort, gatewayToken, hydrateEnv } from "./serve.js";
 import { notify } from "./notify.js";
@@ -26,6 +26,7 @@ export interface RunOptions extends Omit<PolicyOptions, "cwd"> {
   /** Ports a server inside the sandbox listens on, to reach from this machine's 127.0.0.1. */
   expose?: number[];
   upstreamProxy?: string | undefined;
+  devices?: string[];
   command: string[];
 }
 
@@ -240,7 +241,16 @@ export async function run(options: RunOptions): Promise<number> {
   };
   // sandbox-runtime does not send a connection it decrypts to a parent proxy. Behind an upstream,
   // HTTPS therefore stays opaque, and the relay records where each tunnel went.
+  // The GPU needs Unix sockets; the socket files on this machine are hidden instead (see socketsToHide).
+  const wantsGpu = process.platform === "linux" && [...(options.devices ?? []), ...(settings.sandbox?.devices ?? [])].some((device) => device === "gpu" || /^\/dev\/nvidia/.test(device));
+  if (wantsGpu) {
+    const hidden = socketsToHide().filter((path) => !bridgeDir || !path.startsWith(bridgeDir));
+    config.filesystem = { ...config.filesystem, denyRead: [...(config.filesystem?.denyRead ?? []), ...hidden] } as typeof config.filesystem;
+    recorder.write("gpu", { unix_sockets: "allowed", hidden });
+    process.stderr.write(`[openguardrails] --gpu: the command may create Unix sockets, which CUDA needs; ${hidden.length} socket paths on this machine are hidden from it\n`);
+  }
   config.network = {
+    ...(wantsGpu ? { allowAllUnixSockets: true } : {}),
     ...config.network,
     ...(relay ? { parentProxy: { http: `http://127.0.0.1:${relay.port}`, https: `http://127.0.0.1:${relay.port}`, noProxy: NO_PROXY } } : { tlsTerminate: {} }),
     filterRequest,
@@ -307,6 +317,16 @@ export async function run(options: RunOptions): Promise<number> {
     commandText: command,
   });
   if (ownPort !== null && process.platform === "darwin") wrapped = openLoopbackPort(wrapped, ownPort);
+  const wanted = [...(options.devices ?? []), ...(settings.sandbox?.devices ?? [])];
+  const devices = wanted.flatMap((device) => (device === "gpu" ? gpuDevices() : [device]));
+  if (process.platform === "linux" && wanted.includes("gpu") && !devices.some((device) => /nvidia\d/.test(device))) process.stderr.write("[openguardrails] --gpu: this machine has no NVIDIA device in /dev\n");
+  if (devices.length > 0) {
+    if (process.platform !== "linux") process.stderr.write("[openguardrails] devices are passed to the sandbox on Linux only; on macOS the command already sees them\n");
+    else {
+      wrapped = passDevices(wrapped, [...new Set(devices)]);
+      recorder.write("devices", { devices: [...new Set(devices)] });
+    }
+  }
   if (ownPort !== null && bridgeDir) {
     const socket = join(bridgeDir, "gateway.sock");
     wrapped = bridgeGatewayPort(wrapped, ownPort, socket);
