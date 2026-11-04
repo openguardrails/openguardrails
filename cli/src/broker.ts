@@ -5,9 +5,13 @@
  * asks whether one is active, a page reads its journal. The sandbox cannot reach systemd (its bus is
  * hidden, because starting a unit would start a program outside the sandbox), so the commands are
  * replaced inside it by small shims that ask this broker, which runs the real command here for the
- * units the sandbox is given (`--units voicego-*`) and nothing else. Those units run inside the
- * sandbox themselves, so starting one is not a way out. Reloading systemd, editing units and
- * systemd-run are refused.
+ * units the sandbox is given (`--units voicego-*`) and nothing else. Reloading systemd, editing
+ * units and systemd-run are refused.
+ *
+ * ⚠️ Only a unit that itself runs in the sandbox may be started, stopped or restarted from inside
+ * it. A unit that runs outside it often runs a script the sandbox can write, so starting it would
+ * run the sandbox's code outside. Such a unit can be asked about, and `start` succeeds only when it
+ * is already running, which does nothing.
  */
 import { execFile } from "node:child_process";
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
@@ -16,6 +20,9 @@ import { join } from "node:path";
 
 /** Where the shims find the broker inside the sandbox, which has a network of its own. */
 export const BROKER_PORT = 4189;
+
+/** Verbs that change something. The rest only read. */
+const MUTATING = new Set(["start", "stop", "restart", "try-restart", "reload-or-restart"]);
 
 const SYSTEMCTL_VERBS = new Set(["start", "stop", "restart", "try-restart", "reload-or-restart", "is-active", "is-enabled", "is-failed", "status", "show", "cat", "list-units", "list-timers"]);
 /** Options that take no value, and options that take one (as `--x=v`, `--x v` or `-x v`). */
@@ -111,7 +118,34 @@ exit "\${code:-1}"
 const MAX_ARGS = 64;
 
 /** Reads `<tool>\0<n>\0<arg>\0...`, runs it if allowed, answers `<code> <stdout length>\n<stdout><stderr>`. */
-export function startBroker(socketPath: string, unitAllowed: (unit: string) => boolean, onRequest: (tool: string, args: string[], refused: string | null) => void): Promise<net.Server> {
+/** The units a systemctl command names, and whether it changes them. */
+export function unitsChanged(args: string[]): string[] {
+  const words = args.filter((arg, i) => !arg.startsWith("-") && !SYSTEMCTL_VALUED.has(args[i - 1] ?? ""));
+  return MUTATING.has(words[0] ?? "") ? words.slice(1) : [];
+}
+
+const run = (tool: string, args: string[]) =>
+  new Promise<{ code: number; stdout: string; stderr: string }>((resolve) =>
+    execFile(tool, args, { timeout: 60_000, maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) =>
+      resolve({ code: error ? (typeof (error as { code?: unknown }).code === "number" ? (error as { code: number }).code : 1) : 0, stdout, stderr }),
+    ),
+  );
+
+/**
+ * Whether a unit runs in this sandbox: its command starts with `run --in <name>`. Asked of systemd
+ * each time, so a unit moved out of the sandbox is treated as outside at once.
+ */
+export async function runsInside(unit: string, sandbox: string): Promise<boolean> {
+  const shown = await run("systemctl", ["--user", "show", "-p", "ExecStart", "--value", unit]);
+  return new RegExp(`\\brun --in ${sandbox.replace(/[^\w-]/g, "")} --`).test(shown.stdout);
+}
+
+export function startBroker(
+  socketPath: string,
+  sandbox: string | null,
+  unitAllowed: (unit: string) => boolean,
+  onRequest: (tool: string, args: string[], refused: string | null) => void,
+): Promise<net.Server> {
   const server = net.createServer((socket) => {
     let buffer = Buffer.alloc(0);
     socket.on("error", () => socket.destroy());
@@ -126,17 +160,38 @@ export function startBroker(socketPath: string, unitAllowed: (unit: string) => b
       if (parts.length < n + 3) return;
       socket.removeAllListeners("data");
       const args = parts.slice(2, 2 + n);
-      const refused = allowed(tool, args, unitAllowed);
-      onRequest(tool, args, refused);
       const answer = (code: number, stdout: string, stderr: string) => {
         const out = Buffer.from(stdout);
         socket.end(Buffer.concat([Buffer.from(`${code} ${out.length}\n`), out, Buffer.from(stderr)]));
       };
-      if (refused) return answer(1, "", `openguardrails: ${refused}\n`);
-      execFile(tool, args, { timeout: 60_000, maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
-        const code = error ? (typeof (error as NodeJS.ErrnoException & { code?: unknown }).code === "number" ? ((error as unknown as { code: number }).code) : 1) : 0;
-        answer(code, stdout, stderr);
-      });
+      void (async () => {
+        let refused = allowed(tool, args, unitAllowed);
+        let command = args;
+        if (!refused && tool === "systemctl" && unitsChanged(args).length > 0) {
+          const verb = args.find((arg) => !arg.startsWith("-"));
+          const outside: string[] = [];
+          for (const unit of unitsChanged(args)) {
+            if (sandbox && (await runsInside(unit, sandbox))) continue;
+            // Starting what already runs does nothing, so it is answered without running anything.
+            if (verb === "start" && (await run("systemctl", ["--user", "is-active", "--quiet", unit])).code === 0) {
+              outside.push(unit);
+              continue;
+            }
+            refused = `${unit} runs outside the sandbox, so it cannot be ${verb === "start" ? "started" : verb === "stop" ? "stopped" : "restarted"} from inside it`;
+            break;
+          }
+          // Only the units inside reach systemd; an outside one is never named to it.
+          command = args.filter((arg) => !outside.includes(arg));
+          if (!refused && unitsChanged(command).length === 0) {
+            onRequest(tool, args, null);
+            return answer(0, "", "");
+          }
+        }
+        onRequest(tool, args, refused);
+        if (refused) return answer(1, "", `openguardrails: ${refused}\n`);
+        const result = await run(tool, command);
+        answer(result.code, result.stdout, result.stderr);
+      })();
     });
   });
   return new Promise((resolve, reject) => {
