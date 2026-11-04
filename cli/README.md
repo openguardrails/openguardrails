@@ -118,6 +118,11 @@ Seatbelt on macOS, bubblewrap and seccomp on Linux. It is a beta, so the version
 stated limits apply. macOS also needs `ripgrep`. Linux needs `bubblewrap`, `socat` and `ripgrep`.
 Windows is untested.
 
+A command that serves a web UI, such as `dsh --profile web`, needs `--expose <port>` on Linux: the
+sandbox has its own network, so its server is otherwise out of this machine's sight. The port is then
+reachable at `127.0.0.1:<port>` here, and nowhere else. The sandbox ends with the run, even when the
+run is killed.
+
 The gateway also fails over between model APIs, for OpenAI Chat, OpenAI
 Responses and Anthropic Messages. It does not translate protocols, so the members of a route must
 speak the protocol their client speaks.

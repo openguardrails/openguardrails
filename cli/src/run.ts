@@ -1,5 +1,6 @@
 /** `openguardrails run`: start a command in the sandbox and record what its whole process tree does. */
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn } from "node:child_process";
+import net from "node:net";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -11,13 +12,15 @@ import { keyEnvNames, loadConfig, looseConfigWarning } from "./config.js";
 import { Correlator } from "./correlate.js";
 import { fileObservation, type Observation } from "./exec.js";
 import { classifyModelRequest, harnessFrom, hostsIn, toolCallsIn, toolResultIdsIn, type LlmProtocol } from "./model.js";
-import { bridgeGatewayPort, buildPolicy, isLocalTarget, openLoopbackPort, type PolicyOptions } from "./policy.js";
+import { bridgeGatewayPort, buildPolicy, exposePort, isLocalTarget, openLoopbackPort, type PolicyOptions } from "./policy.js";
 import { Recorder, safePath } from "./record.js";
 import { ensureGateway, gatewayPort, gatewayToken, hydrateEnv } from "./serve.js";
 
 export interface RunOptions extends Omit<PolicyOptions, "cwd"> {
   enforce: boolean;
   allowLocalBinding?: boolean;
+  /** Ports a server inside the sandbox listens on, to reach from this machine's 127.0.0.1. */
+  expose?: number[];
   command: string[];
 }
 
@@ -147,6 +150,9 @@ export async function run(options: RunOptions): Promise<number> {
     return { action: "allow" };
   };
 
+  const expose = options.expose ?? [];
+  // Where the Linux relays' sockets live. The sandbox creates the exposed ones, so it may write here.
+  const bridgeDir = process.platform === "linux" && (ownPort !== null || expose.length > 0) ? mkdtempSync(join(tmpdir(), "openguardrails-")) : null;
   const config: SandboxRuntimeConfig = {
     ...buildPolicy({
       cwd: process.cwd(),
@@ -157,8 +163,8 @@ export async function run(options: RunOptions): Promise<number> {
       ],
       denyHosts: [...options.denyHosts, ...(settings.sandbox?.denyHosts ?? [])],
       allowRead: [...options.allowRead, ...(settings.sandbox?.allowRead ?? [])],
-      allowWrite: [...options.allowWrite, ...(settings.sandbox?.allowWrite ?? [])],
-      allowLocalBinding: options.allowLocalBinding || settings.sandbox?.allowLocalBinding === true,
+      allowWrite: [...options.allowWrite, ...(settings.sandbox?.allowWrite ?? []), ...(bridgeDir && expose.length > 0 ? [bridgeDir] : [])],
+      allowLocalBinding: options.allowLocalBinding || expose.length > 0 || settings.sandbox?.allowLocalBinding === true,
     }),
   };
   config.network = { ...config.network, tlsTerminate: {}, filterRequest } as typeof config.network;
@@ -198,24 +204,57 @@ export async function run(options: RunOptions): Promise<number> {
   // sandbox-runtime exempts loopback and private ranges from the proxy, and those clients then fail
   // inside the sandbox. A local vLLM is what this tool exists to see, so everything goes through it.
   // NODE_USE_ENV_PROXY makes Node's own fetch honour the proxy; the pinned release does not set it.
-  let bridge: ChildProcess | null = null;
-  let bridgeDir: string | null = null;
+  // This machine's side of each Linux relay runs in this process, so it ends with the run however
+  // the run ends. The sandbox's side ends with the sandbox's namespace.
+  const relays: net.Server[] = [];
+  const pipe = (listen: net.ListenOptions, dial: () => net.Socket): Promise<net.Server> =>
+    new Promise((resolve, reject) => {
+      const server = net.createServer((inbound) => {
+        const outbound = dial();
+        inbound.pipe(outbound).pipe(inbound);
+        const close = () => {
+          inbound.destroy();
+          outbound.destroy();
+        };
+        inbound.on("error", close);
+        outbound.on("error", close);
+      });
+      server.once("error", reject);
+      server.listen(listen, () => resolve(server));
+    });
   let wrapped = await SandboxManager.wrapWithSandbox(`NO_PROXY= no_proxy= NODE_USE_ENV_PROXY=1 ${command}`, undefined, undefined, undefined, {
     commandId: runId,
     commandText: command,
   });
   if (ownPort !== null && process.platform === "darwin") wrapped = openLoopbackPort(wrapped, ownPort);
-  if (ownPort !== null && process.platform === "linux") {
-    bridgeDir = mkdtempSync(join(tmpdir(), "openguardrails-"));
+  if (ownPort !== null && bridgeDir) {
     const socket = join(bridgeDir, "gateway.sock");
     wrapped = bridgeGatewayPort(wrapped, ownPort, socket);
-    bridge = spawn("socat", [`UNIX-LISTEN:${socket},fork,reuseaddr`, `TCP:127.0.0.1:${ownPort}`], { stdio: "ignore" });
-    for (let i = 0; i < 50 && !existsSync(socket); i += 1) await new Promise((resolve) => setTimeout(resolve, 20));
+    relays.push(await pipe({ path: socket }, () => net.connect(ownPort, "127.0.0.1")));
   }
+  if (bridgeDir) for (const port of expose) wrapped = exposePort(wrapped, port, join(bridgeDir, `expose-${port}.sock`));
   const childEnv = { ...process.env };
   for (const name of keyEnvNames(settings)) delete childEnv[name];
-  const child = spawn(wrapped, { shell: true, stdio: "inherit", env: childEnv });
-  for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, () => child.kill(signal));
+  // `exec`, so the sandbox (bwrap or sandbox-exec) is this process's own child rather than a shell's.
+  // bwrap's --die-with-parent then ends the whole sandbox when this run ends, even by SIGKILL; behind
+  // a shell it would outlive a run killed without a chance to clean up.
+  const child = spawn(`exec ${wrapped}`, { shell: true, stdio: "inherit", env: childEnv });
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.on(signal, () => child.kill(signal));
+  // The inner relay creates each exposed socket once the sandbox is up; then this machine listens.
+  if (bridgeDir) {
+    for (const port of expose) {
+      const socket = join(bridgeDir, `expose-${port}.sock`);
+      void (async () => {
+        for (let i = 0; i < 200 && !existsSync(socket); i += 1) await new Promise((resolve) => setTimeout(resolve, 50));
+        if (!existsSync(socket)) return void process.stderr.write(`[openguardrails] could not expose port ${port}: the sandbox did not start its relay\n`);
+        try {
+          relays.push(await pipe({ port, host: "127.0.0.1" }, () => net.connect(socket)));
+        } catch (error) {
+          process.stderr.write(`[openguardrails] could not expose port ${port} on this machine: ${String(error)}\n`);
+        }
+      })();
+    }
+  }
   await syncGateway();
   const syncTimer = setInterval(() => void syncGateway().then(() => flush()), 15_000);
   const code = await new Promise<number>((resolve) => {
@@ -232,7 +271,7 @@ export async function run(options: RunOptions): Promise<number> {
   flush(true);
   recorder.write("exit", { code });
   unsubscribe();
-  bridge?.kill();
+  for (const relay of relays) relay.close();
   if (bridgeDir) rmSync(bridgeDir, { recursive: true, force: true });
   await SandboxManager.reset();
   process.stderr.write(`[openguardrails] run ${runId} recorded. See: openguardrails log ${runId}\n`);

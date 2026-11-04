@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { bridgeGatewayPort, isLocalTarget, openLoopbackPort } from "../src/policy.js";
+import { bridgeGatewayPort, exposePort, isLocalTarget, openLoopbackPort } from "../src/policy.js";
 
 test("this machine and metadata endpoints are local", () => {
   for (const host of ["localhost", "a.localhost", "127.0.0.1", "127.9.9.9", "::1", "[::1]", "::ffff:127.0.0.1", "169.254.169.254", "0.0.0.0", "100.100.100.200", "metadata.google.internal"]) {
@@ -31,4 +31,11 @@ test("on Linux the gateway relay starts beside sandbox-runtime's own, before sec
   assert.ok(lines.indexOf(lines[2]!) < lines.findIndex((line) => line.startsWith("apply-seccomp")));
   assert.throws(() => bridgeGatewayPort("no anchor", 18190, "/tmp/x.sock"), /unexpected script/);
   assert.throws(() => bridgeGatewayPort(script, 18190, "/tmp/it's.sock"), /unexpected script/);
+});
+
+test("an exposed port's relay inside the sandbox turns it into a Unix socket, before seccomp", () => {
+  const script = "x &\n_srt_socks=$!\ntrap 'rc=$?' EXIT\napply-seccomp bash -c 'dsh web'";
+  const out = exposePort(script, 18799, "/tmp/openguardrails-abc/expose-18799.sock");
+  assert.equal(out.split("\n")[2], "{ socat UNIX-LISTEN:/tmp/openguardrails-abc/expose-18799.sock,fork,reuseaddr TCP4:127.0.0.1:18799; } >/dev/null 2>&1 &");
+  assert.throws(() => exposePort("no anchor", 18799, "/tmp/x.sock"), /unexpected script/);
 });
