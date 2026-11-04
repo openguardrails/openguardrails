@@ -31,7 +31,53 @@ export function rewriteBody(body: Record<string, any>, upstream: Upstream): Reco
       Object.entries(kwargs).map(([key, value]) => [upstream.renameTemplateKwargs![key] ?? key, value]),
     );
   }
+  const thinking = upstream.thinkingParams;
+  if (thinking) {
+    const kwarg = thinking.kwarg ?? "enable_thinking";
+    const current = (out.chat_template_kwargs && typeof out.chat_template_kwargs === "object" ? out.chat_template_kwargs : {}) as Record<string, unknown>;
+    const on = typeof current[kwarg] === "boolean" ? (current[kwarg] as boolean) : (thinking.default ?? true);
+    out.chat_template_kwargs = { ...current, [kwarg]: on };
+    Object.assign(out, on ? thinking.on : thinking.off);
+  }
   return out;
+}
+
+/** Per-upstream concurrency: a slot is held from the attempt until the client's response closes. */
+export class Slots {
+  private readonly state = new Map<string, { active: number; waiting: Array<() => void> }>();
+  /** A release function, or null when no slot came free within `waitMs`. Unlimited when `max` is unset. */
+  acquire(name: string, max: number | undefined, waitMs = 0): Promise<(() => void) | null> {
+    if (!max) return Promise.resolve(() => undefined);
+    const entry = this.state.get(name) ?? { active: 0, waiting: [] };
+    this.state.set(name, entry);
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      entry.active -= 1;
+      entry.waiting.shift()?.();
+    };
+    if (entry.active < max) {
+      entry.active += 1;
+      return Promise.resolve(release);
+    }
+    if (waitMs <= 0) return Promise.resolve(null);
+    return new Promise((resolve) => {
+      const wake = () => {
+        clearTimeout(timer);
+        entry.active += 1;
+        resolve(release);
+      };
+      const timer = setTimeout(() => {
+        entry.waiting = entry.waiting.filter((waiter) => waiter !== wake);
+        resolve(null);
+      }, waitMs);
+      entry.waiting.push(wake);
+    });
+  }
+  busy(): Record<string, { active: number; waiting: number }> {
+    return Object.fromEntries([...this.state].map(([name, entry]) => [name, { active: entry.active, waiting: entry.waiting.length }]));
+  }
 }
 
 /** `/u/<name>/<path>`: a request from an agent that `openguardrails attach` pointed here. */
@@ -129,6 +175,7 @@ const refusal = (message: string): Extract<Judged, { kind: "answer" }> => ({
 export function startGateway(config: Config): Promise<http.Server> {
   const gateway: Gateway = config.gateway ?? { upstreams: {} };
   const health = new Health(gateway.cooldownMs ?? 30_000);
+  const slots = new Slots();
   const connectTimeoutMs = gateway.connectTimeoutMs ?? 5_000;
   const firstByteTimeoutMs = gateway.firstByteTimeoutMs ?? 600_000;
   const airs = config.airs;
@@ -548,7 +595,7 @@ export function startGateway(config: Config): Promise<http.Server> {
       const url = new URL(req.url ?? "/", "http://gateway");
       if (await handleRuntime(runtime, req, res, url.pathname)) return;
       if (url.pathname === "/__ogr/health") {
-        return json(res, 200, { ok: true, pid: process.pid, served, cooling: health.cooling(), last_failover: lastFailover, airs: Boolean(airsKey), exec_refused: execRefused });
+        return json(res, 200, { ok: true, pid: process.pid, served, cooling: health.cooling(), slots: slots.busy(), last_failover: lastFailover, airs: Boolean(airsKey), exec_refused: execRefused });
       }
       if (url.pathname.startsWith("/__ogr/") && req.headers["x-openguardrails-token"] !== internalToken) {
         return json(res, 403, { error: { message: "openguardrails: this path is for openguardrails run" } });
@@ -618,8 +665,17 @@ export function startGateway(config: Config): Promise<http.Server> {
       const failures: string[] = [];
       for (const name of order) {
         const upstream = upstreamFor(name);
+        const release = await slots.acquire(name, upstream.maxConcurrent, upstream.slotWaitMs);
+        if (!release) {
+          failures.push(`${name}: all ${upstream.maxConcurrent} slots busy`);
+          continue;
+        }
+        if (res.destroyed) return void release();
         const body = Buffer.from(JSON.stringify(rewriteBody(payload, upstream)));
         const reason = await attempt(name, upstream, attachedUpstream ? path + url.search : url.pathname, protocol, stepId, agentType, req.method!, req.headers, body, res, guarded);
+        if (reason !== null) release();
+        else if (res.destroyed || (res as { closed?: boolean }).closed) release();
+        else res.once("close", release);
         if (reason === null) {
           if (failures.length > 0) {
             lastFailover = { to: name, failed: failures, t: new Date().toISOString() };
