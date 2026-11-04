@@ -16,6 +16,7 @@ import { aliasProxyPort, bridgeGatewayPort, buildPolicy, exposePort, isLocalTarg
 import { Recorder, safePath } from "./record.js";
 import { ensureGateway, gatewayPort, gatewayToken, hydrateEnv } from "./serve.js";
 import { notify } from "./notify.js";
+import { Deduper, isRoutineRead, ObserveLog, preloadLibrary } from "./observe.js";
 import { describeActivity, isBusy, newestChange, processTreeCpu, StallWatch, type Activity } from "./watch.js";
 import { isUpstreamAddress, NO_PROXY, parseUpstreamProxy, startProxyAuthBridge, startUpstreamRelay, upstreamFromEnv, type Relay } from "./upstream.js";
 
@@ -101,6 +102,22 @@ export async function run(options: RunOptions): Promise<number> {
     }
   };
 
+  // Each path once per run in the log; each action on it once per ten seconds to the gateway.
+  const recordedPaths = new Set<string>();
+  const deduper = new Deduper();
+  let observeLog: ObserveLog | null = null;
+  const readObserveLog = () => {
+    for (const event of observeLog?.read() ?? []) {
+      if (event.action === "read" && isRoutineRead(event.path)) continue;
+      if (!deduper.fresh(event)) continue;
+      outbox.push({ t: event.t, kind: "file", target: event.path, action: event.action, process: event.process });
+      const key = `${event.action}\t${event.path}`;
+      if (!recordedPaths.has(key)) {
+        recordedPaths.add(key);
+        recorder.write("file", { action: event.action, path: event.path, process: event.process });
+      }
+    }
+  };
   // The sandbox's half of the story, sent to the gateway, which knows which tool call was open.
   let outbox: Observation[] = [];
   const sendObservations = async () => {
@@ -114,7 +131,10 @@ export async function run(options: RunOptions): Promise<number> {
       signal: AbortSignal.timeout(2000),
     }).catch(() => undefined);
   };
-  const observeTimer = setInterval(() => void sendObservations(), 250);
+  const observeTimer = setInterval(() => {
+    readObserveLog();
+    void sendObservations();
+  }, 250);
 
   const readModelRequest = async (request: Request, host: string, protocol: LlmProtocol, viaGateway: boolean) => {
     const harness = harnessFrom(request.headers.get("user-agent") ?? "");
@@ -203,14 +223,18 @@ export async function run(options: RunOptions): Promise<number> {
   // On Linux the sandbox has its own 127.0.0.1, so the proxy port an agent names can be this tool's.
   // On macOS it is this machine's, where the real proxy listens, and the sandbox refuses it.
   const aliasPort = upstream && process.platform === "linux" && ["127.0.0.1", "localhost", "::1"].includes(upstream.host) ? upstream.port : null;
-  const bridgeDir = process.platform === "linux" && (ownPort !== null || expose.length > 0 || aliasPort !== null) ? mkdtempSync(join(tmpdir(), "openguardrails-")) : null;
+  // What the sandbox allows it does not report on Linux; a preloaded library writes it down instead.
+  const preload = preloadLibrary();
+  if (process.platform === "linux" && !preload) process.stderr.write("[openguardrails] this install has no file and exec telemetry for Linux; allowed reads, writes and commands are not recorded\n");
+  const bridgeDir = process.platform === "linux" && (ownPort !== null || expose.length > 0 || aliasPort !== null || preload !== null) ? mkdtempSync(join(tmpdir(), "openguardrails-")) : null;
+  observeLog = preload && bridgeDir ? new ObserveLog(join(bridgeDir, "observe.log")) : null;
   const config: SandboxRuntimeConfig = {
     ...buildPolicy({
       cwd: process.cwd(),
       allowHosts: [...allowHosts, ...(ownPort !== null ? [`127.0.0.1:${ownPort}`] : [])],
       denyHosts: [...options.denyHosts, ...(settings.sandbox?.denyHosts ?? [])],
       allowRead: [...options.allowRead, ...(settings.sandbox?.allowRead ?? [])],
-      allowWrite: [...options.allowWrite, ...(settings.sandbox?.allowWrite ?? []), ...(bridgeDir && expose.length > 0 ? [bridgeDir] : [])],
+      allowWrite: [...options.allowWrite, ...(settings.sandbox?.allowWrite ?? []), ...(bridgeDir && (expose.length > 0 || observeLog) ? [bridgeDir] : [])],
       allowLocalBinding: options.allowLocalBinding || expose.length > 0 || settings.sandbox?.allowLocalBinding === true,
     }),
   };
@@ -277,7 +301,8 @@ export async function run(options: RunOptions): Promise<number> {
       server.once("error", reject);
       server.listen(listen, () => resolve(server));
     });
-  let wrapped = await SandboxManager.wrapWithSandbox(`NO_PROXY= no_proxy= NODE_USE_ENV_PROXY=1 ${command}`, undefined, undefined, undefined, {
+  const telemetry = observeLog ? `LD_PRELOAD=${quote([preload!, process.env.LD_PRELOAD].filter(Boolean).join(":"))} OGR_OBSERVE_LOG=${quote(observeLog.path)} ` : "";
+  let wrapped = await SandboxManager.wrapWithSandbox(`${telemetry}NO_PROXY= no_proxy= NODE_USE_ENV_PROXY=1 ${command}`, undefined, undefined, undefined, {
     commandId: runId,
     commandText: command,
   });
@@ -329,6 +354,7 @@ export async function run(options: RunOptions): Promise<number> {
   await new Promise((resolve) => setTimeout(resolve, 1500));
   clearInterval(syncTimer);
   clearInterval(observeTimer);
+  readObserveLog();
   stopWatching();
   await sendObservations();
   await syncGateway();

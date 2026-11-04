@@ -50,6 +50,7 @@ export function renderEvent(event: RunEvent): string {
     case "undeclared": return `${time} FINDING  undeclared destination ${f.host}: ${f.methods.join("/")} x${f.requests}, ${f.bytes_up}B up, no tool call named it`;
     case "unverified": return `${time} UNVERIFIED destination ${f.host}: ${f.methods.join("/")} x${f.requests}, ${f.bytes_up}B up, not named by a visible call, but the calls of ${f.blind_to.join(", ")} are not visible`;
     case "violation": return `${time} denied   ${f.line}`;
+    case "file": return `${time} ${f.action.padEnd(8)} ${f.path}  (${f.process})`;
     case "verdict": return `${time} airs     ${f.decision} (${f.findings} findings)${f.error ? ` error: ${f.error}` : ""}`;
     case "exit": return `${time} exit     ${f.code}`;
     default: return `${time} ${event.type}`;

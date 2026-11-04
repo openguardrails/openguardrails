@@ -26,6 +26,9 @@
   },
   "files": [
     "dist/src",
+    "native/observe.c",
+    "native/build.mjs",
+    "native/*.so",
     "rules",
     "LICENSE",
     "README.md"
@@ -34,7 +37,7 @@
     "node": ">=22.12.0"
   },
   "scripts": {
-    "build": "tsc && chmod +x dist/src/cli.js",
+    "build": "tsc && chmod +x dist/src/cli.js && node native/build.mjs",
     "test": "npm run build && node --test \"dist/test/*.test.js\"",
     "prepublishOnly": "npm test"
   },
