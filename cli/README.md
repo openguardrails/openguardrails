@@ -154,6 +154,13 @@ Every command started with `--in` joins the same processes, files, network and d
 one policy, record and set of rules of the `sandbox start` run, and drops every privilege joining
 gave it (`native/join.c`). Stopping the sandbox ends everything in it.
 
+On macOS, Seatbelt is told to report what it allows as well as what it refuses (`(with report)` on
+its allow rules, tagged with the run), and `run` reads the reports from the unified log: each
+program run, each file read and each file written, with the files every program reads to start left
+out. Only existing allow rules are marked; no rule is added, because Seatbelt prefers a rule for a
+narrower operation over a denial for a wider one, whatever the order. In a test, 2000 files
+written in a burst were all recorded.
+
 On Linux the sandbox reports what it refuses, not what it allows. So `run` also preloads a small
 library (`native/observe.c`, built with the package) that writes down what each process opens for
 reading or writing and which programs it runs, and ties them to the tool call that was open, as on

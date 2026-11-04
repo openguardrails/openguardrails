@@ -12,12 +12,12 @@ import { keyEnvNames, loadConfig, looseConfigWarning } from "./config.js";
 import { Correlator } from "./correlate.js";
 import { fileObservation, type Observation } from "./exec.js";
 import { classifyModelRequest, harnessFrom, hostsIn, toolCallsIn, toolResultIdsIn, type LlmProtocol } from "./model.js";
-import { aliasProxyPort, bridgeGatewayPort, buildPolicy, exposePort, gpuDevices, passDevices, socketsToHide, isLocalTarget, openLoopbackPort, proxyCredentials, type PolicyOptions } from "./policy.js";
+import { aliasProxyPort, bridgeGatewayPort, buildPolicy, exposePort, reportAllowed, gpuDevices, passDevices, socketsToHide, isLocalTarget, openLoopbackPort, proxyCredentials, type PolicyOptions } from "./policy.js";
 import { Recorder, safePath } from "./record.js";
 import { ensureGateway, gatewayPort, gatewayToken, hydrateEnv } from "./serve.js";
 import { notify } from "./notify.js";
 import { BROKER_PORT, startBroker, unitMatcher, writeShims } from "./broker.js";
-import { Deduper, isRoutineRead, ObserveLog, preloadLibrary } from "./observe.js";
+import { Deduper, isRoutineRead, ObserveLog, parseSeatbeltReport, preloadLibrary, type FileEvent } from "./observe.js";
 import { describeActivity, isBusy, newestChange, processTreeCpu, StallWatch, type Activity } from "./watch.js";
 import { isUpstreamAddress, NO_PROXY, parseUpstreamProxy, startProxyAuthBridge, startUpstreamRelay, upstreamFromEnv, type Relay } from "./upstream.js";
 
@@ -122,9 +122,11 @@ export async function run(options: RunOptions): Promise<number> {
   const recordedPaths = new Set<string>();
   const deduper = new Deduper();
   let observeLog: ObserveLog | null = null;
-  const readObserveLog = () => {
-    for (const event of observeLog?.read() ?? []) {
+  const handleFileEvents = (events: FileEvent[]) => {
+    for (const event of events) {
       if (event.action === "read" && isRoutineRead(event.path)) continue;
+      // A terminal, /dev/null and the like are where every program writes; they say nothing.
+      if (event.path.startsWith("/dev/")) continue;
       if (!deduper.fresh(event)) continue;
       outbox.push({ t: event.t, kind: "file", target: event.path, action: event.action, process: event.process });
       const key = `${event.action}\t${event.path}`;
@@ -134,6 +136,7 @@ export async function run(options: RunOptions): Promise<number> {
       }
     }
   };
+  const readObserveLog = () => handleFileEvents(observeLog?.read() ?? []);
   // The sandbox's half of the story, sent to the gateway, which knows which tool call was open.
   let outbox: Observation[] = [];
   const sendObservations = async () => {
@@ -343,6 +346,19 @@ export async function run(options: RunOptions): Promise<number> {
     commandText: command,
   });
   if (ownPort !== null && process.platform === "darwin") wrapped = openLoopbackPort(wrapped, ownPort);
+  // macOS: what Seatbelt allows is reported to the unified log under this run's tag, and read here.
+  let stopReports = () => undefined as void;
+  if (process.platform === "darwin") {
+    try {
+      const reported = reportAllowed(wrapped);
+      wrapped = reported.wrapped;
+      stopReports = streamSeatbeltReports(reported.tag, handleFileEvents);
+      // The stream takes a moment to attach; what the command does first would otherwise be missed.
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    } catch (error) {
+      process.stderr.write(`[openguardrails] ${(error as Error).message}\n`);
+    }
+  }
   const wanted = [...(options.devices ?? []), ...(settings.sandbox?.devices ?? [])];
   const devices = wanted.flatMap((device) => (device === "gpu" ? gpuDevices() : [device]));
   if (process.platform === "linux" && wanted.includes("gpu") && !devices.some((device) => /nvidia\d/.test(device))) process.stderr.write("[openguardrails] --gpu: this machine has no NVIDIA device in /dev\n");
@@ -420,6 +436,7 @@ export async function run(options: RunOptions): Promise<number> {
   clearInterval(syncTimer);
   clearInterval(observeTimer);
   readObserveLog();
+  stopReports();
   stopWatching();
   await sendObservations();
   await syncGateway();
@@ -515,4 +532,29 @@ export function parseExpose(spec: string | number): { host: string; port: number
   const port = Number(at === -1 ? text : text.slice(at + 1));
   if (!Number.isInteger(port) || port < 1 || port > 65535 || !host) throw new Error(`--expose needs [address:]port, not ${text}`);
   return { host, port };
+}
+
+/** Follows the unified log for Seatbelt's reports under `tag` and hands each allowed operation on. */
+function streamSeatbeltReports(tag: string, onEvents: (events: FileEvent[]) => void): () => void {
+  const log = spawn("/usr/bin/log", ["stream", "--style", "ndjson", "--predicate", `eventMessage ENDSWITH "${tag}" AND eventMessage CONTAINS " allow "`], { stdio: ["ignore", "pipe", "ignore"] });
+  let rest = "";
+  log.stdout.on("data", (chunk: Buffer) => {
+    const lines = (rest + chunk.toString("utf8")).split("\n");
+    rest = lines.pop() ?? "";
+    const events: FileEvent[] = [];
+    for (const line of lines) {
+      try {
+        const entry = JSON.parse(line) as { eventMessage?: string; timestamp?: string };
+        // "2026-11-04 04:17:07.993-0800": ISO wants a T and a colon in the offset.
+        const t = entry.timestamp ? Date.parse(entry.timestamp.replace(" ", "T").replace(/([+-]\d\d)(\d\d)$/, "$1:$2")) : NaN;
+        const event = entry.eventMessage ? parseSeatbeltReport(entry.eventMessage, Number.isFinite(t) ? t : Date.now()) : null;
+        if (event) events.push(event);
+      } catch {
+        // The header line, or a partial one.
+      }
+    }
+    if (events.length > 0) onEvents(events);
+  });
+  log.on("error", () => undefined);
+  return () => void log.kill();
 }

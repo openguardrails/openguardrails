@@ -168,6 +168,35 @@ export function passDevices(wrapped: string, devices: string[]): string {
   return wrapped.replace(anchor, `${anchor}${devices.map((device) => `--dev-bind ${device} ${device}`).join(" ")} `);
 }
 
+/**
+ * macOS: makes Seatbelt report what it allows, not only what it refuses. Each allowed exec, read of
+ * a file's contents and write is then logged by the kernel as "Sandbox: <process>(<pid>) allow
+ * <operation> <path>", tagged with the run's own message, and `run` reads it from the unified log.
+ * Metadata reads (stat) are not reported: sandbox-runtime allows them by a rule of their own.
+ *
+ * ⚠️ Only existing allow rules get `(with report)`; no rule is added. Seatbelt prefers the rule
+ * for the narrower operation whatever the order, so a separate `(allow file-read-data (with
+ * report))` would beat every `(deny file-read* …)` after it and open the credential paths. Tried,
+ * and caught: ~/.ssh/config became readable.
+ */
+export function reportAllowed(wrapped: string): { wrapped: string; tag: string } {
+  const tag = /\(with message "(CMD64_[A-Za-z0-9+/=_-]+_SBX)"\)/.exec(wrapped)?.[1];
+  const exec = "(allow process-exec)";
+  const read = "(allow file-read*)\n";
+  if (!tag || wrapped.split(exec).length !== 2 || wrapped.split(read).length !== 2) {
+    throw new Error("this sandbox-runtime version has an unexpected profile; openguardrails cannot record allowed operations");
+  }
+  const report = `(with report) (with message "${tag}")`;
+  return {
+    tag,
+    wrapped: wrapped
+      .replace(exec, `(allow process-exec ${report})`)
+      .replace(read, `(allow file-read* ${report})\n`)
+      // Write rules carry the tag already, at the start or after their paths; a second one is an error.
+      .replace(/\(allow (file-write\*|file-write-unlink file-write-create)\n/g, "(allow $1 (with report)\n"),
+  };
+}
+
 function insertRelay(wrapped: string, relay: string, socket: string): string {
   const anchor = "_srt_socks=$!\n";
   if (wrapped.split(anchor).length !== 2 || /['"$\\\s]/.test(socket)) {
