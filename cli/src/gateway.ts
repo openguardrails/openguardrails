@@ -410,6 +410,8 @@ export function startGateway(config: Config): Promise<http.Server> {
       const endpoint = new URL(upstream.baseURL).host;
       let settled = false;
       let replied = false;
+      const startedAt = Date.now();
+      let firstByteAt: number | null = null;
       let clientGone = false;
       let sink: { write(chunk: Buffer): void; end(): void; abort(): void } | null = null;
       const settle = (reason: string | null) => {
@@ -437,6 +439,7 @@ export function startGateway(config: Config): Promise<http.Server> {
         // The head waits for the first byte: until a byte has gone out, a failure can still fail over.
         const start = () => {
           started = true;
+          firstByteAt = Date.now();
           clearTimeout(firstByteTimer);
           settle(null);
           if (airsKey && streamed && status < 400 && !encoding) sink = judgedStream(stepId, protocol, agentType, endpoint, res, out, status);
@@ -467,8 +470,15 @@ export function startGateway(config: Config): Promise<http.Server> {
           if (replied) return;
           replied = true;
           const reply = status < 400 ? decoded() : null;
-          log("step", { step: stepId, upstream: name, model: upstream.model, protocol, agent_type: agentType, reply_bytes: reply?.length ?? null });
-          if (reply) noteCalls(agentType, toolCallsInReply(protocol, reply.toString("utf8"), streamed), Date.now());
+          const text = reply?.toString("utf8");
+          const calls = text ? toolCallsInReply(protocol, text, streamed) : [];
+          log("step", {
+            step: stepId, upstream: name, model: upstream.model, protocol, agent_type: agentType, reply_bytes: reply?.length ?? null,
+            status, ms: Date.now() - startedAt, first_byte_ms: firstByteAt === null ? null : firstByteAt - startedAt,
+            streamed, tools: calls.map((call) => call.name), ...(text ? usageIn(text, streamed) : {}),
+            ua: String(clientHeaders["user-agent"] ?? "").slice(0, 80),
+          });
+          if (calls.length > 0) noteCalls(agentType, calls, Date.now());
         };
         upstreamRes.on("data", (chunk: Buffer) => {
           if (!started) start();
@@ -716,4 +726,32 @@ export function startGateway(config: Config): Promise<http.Server> {
     // Loopback only: this process holds the keys.
     server.listen(port, "127.0.0.1", () => resolve(server));
   });
+}
+
+/** Token counts a reply reports, from its JSON or the last streamed chunk that carries them. */
+export function usageIn(reply: string, streamed: boolean): { tokens_in?: number; tokens_out?: number } {
+  const read = (value: unknown) => {
+    const usage = (value as { usage?: Record<string, number> } | null)?.usage;
+    if (!usage) return null;
+    const tokensIn = usage.prompt_tokens ?? usage.input_tokens;
+    const tokensOut = usage.completion_tokens ?? usage.output_tokens;
+    return { ...(typeof tokensIn === "number" ? { tokens_in: tokensIn } : {}), ...(typeof tokensOut === "number" ? { tokens_out: tokensOut } : {}) };
+  };
+  if (!streamed) {
+    try {
+      return read(JSON.parse(reply)) ?? {};
+    } catch {
+      return {};
+    }
+  }
+  const lines = reply.split("\n").filter((line) => line.startsWith("data:") && !line.includes("[DONE]"));
+  for (let i = lines.length - 1; i >= 0 && i >= lines.length - 5; i -= 1) {
+    try {
+      const found = read(JSON.parse(lines[i]!.slice(5)));
+      if (found && Object.keys(found).length > 0) return found;
+    } catch {
+      // A partial line.
+    }
+  }
+  return {};
 }
