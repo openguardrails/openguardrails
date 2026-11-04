@@ -186,6 +186,19 @@ The gateway also fails over between model APIs, for OpenAI Chat, OpenAI
 Responses and Anthropic Messages. It does not translate protocols, so the members of a route must
 speak the protocol their client speaks.
 
+## Seeing what your agents do
+
+`openguardrails ui` serves a page, at `http://127.0.0.1:4190/?token=…` (it prints the address),
+that shows what the protected agents are doing, from the records this tool keeps:
+- the model calls, with the model, which upstream served them, how long they took, the tools each
+  asked for and the tokens;
+- where each run connected and what was refused;
+- secrets and credentials read, the programs run, and where it writes (counted by directory);
+- what the stall rules saw.
+
+`--host <address>` serves it on another address, such as the machine's LAN address. Without the
+token it answers nothing.
+
 ## Rules about your own work
 
 A rule can tell you when your agent gets stuck. Stuck means busy without progress: the command keeps

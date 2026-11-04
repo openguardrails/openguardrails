@@ -10,6 +10,7 @@ import { parseBridge, parseExpose, run } from "./run.js";
 import { render, scan } from "./scan/index.js";
 import { ensureGateway, hydrateEnv, serve, status, stop } from "./serve.js";
 import { notify } from "./notify.js";
+import { ui } from "./ui.js";
 import { listSandboxes, runIn, startSandbox, stopSandbox } from "./sandbox.js";
 import { hostname } from "node:os";
 
@@ -27,6 +28,7 @@ const USAGE = `openguardrails: AI agent guardrails for every builder
   openguardrails sandbox start <name> [options]  keep a sandbox running that several commands share (Linux)
   openguardrails run --in <name> -- <command...> start a command inside that sandbox
   openguardrails sandbox stop <name> | list
+  openguardrails ui [--host <addr>] [--port <p>]  a page that shows what your agents are doing (127.0.0.1:4190)
   openguardrails serve                           run the local service in the foreground (\`run\` starts it for you)
   openguardrails stop                            stop the local service, for instance after editing the config
 
@@ -141,6 +143,17 @@ async function main(argv: string[]): Promise<number> {
     return startSandbox(name, options);
   }
   if (verb === "serve") return serve();
+  if (verb === "ui") {
+    let host = "127.0.0.1";
+    let port = 4190;
+    for (let i = 0; i < rest.length; i += 1) {
+      if (rest[i] === "--host" && rest[i + 1]) host = rest[++i]!;
+      else if (rest[i] === "--port" && rest[i + 1]) port = Number(rest[++i]);
+      else throw new Error("usage: openguardrails ui [--host <address>] [--port <port>]");
+    }
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`--port needs a port number, not ${port}`);
+    return ui({ host, port });
+  }
   if (verb === "notify") {
     if (rest[0] !== "test") throw new Error("usage: openguardrails notify test [channel]");
     const settings = loadConfig();

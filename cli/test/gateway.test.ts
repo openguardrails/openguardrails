@@ -228,3 +228,10 @@ test("pure helpers", () => {
   assert.equal(resolveRoute({ upstreams: {} }, "x"), null);
   assert.throws(() => validate({ gateway: { upstreams: {}, routes: { r: ["missing"] } } }), /unknown upstream/);
 });
+
+test("token counts are read from a reply, whole or streamed", async () => {
+  const { usageIn } = await import("../src/gateway.js");
+  assert.deepEqual(usageIn('{"usage":{"prompt_tokens":12,"completion_tokens":3}}', false), { tokens_in: 12, tokens_out: 3 });
+  assert.deepEqual(usageIn('data: {"choices":[]}\n\ndata: {"usage":{"input_tokens":5,"output_tokens":9}}\n\ndata: [DONE]\n\n', true), { tokens_in: 5, tokens_out: 9 });
+  assert.deepEqual(usageIn("not json", false), {});
+});
