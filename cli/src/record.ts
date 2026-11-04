@@ -41,7 +41,10 @@ export function renderEvent(event: RunEvent): string {
   switch (event.type) {
     case "start": return `${time} run      ${f.mode}: ${f.command}`;
     case "connect": return `${time} connect  ${f.host}:${f.port}${f.allowed ? "" : "  DENIED"}`;
-    case "request": return `${time} http     ${f.method} ${f.host}${f.path}${f.bytes ? `  ${f.bytes}B up` : ""}`;
+    case "request": return `${time} http     ${f.method} ${f.host}${f.path ?? `:${f.port}`}${f.bytes ? `  ${f.bytes}B up` : ""}${f.bytes_down ? `  ${f.bytes_down}B down` : ""}`;
+    case "stalled": return `${time} STUCK    ${f.rule}: busy ${Math.round(f.idle_ms / 60_000)} min without new output`;
+    case "recovered": return `${time} moving   ${f.rule}: new output ${f.output}`;
+    case "notify": return `${time} notify   ${f.subject} -> ${f.channels.join(", ")}${f.failures.length ? `  FAILED: ${f.failures.join("; ")}` : ""}`;
     case "model": return `${time} model    ${f.harness} -> ${f.host} ${f.model ?? "?"} (${f.protocol})`;
     case "tool_call": return `${time} tool     ${f.name}${f.hosts.length ? `  names ${f.hosts.join(", ")}` : ""}`;
     case "undeclared": return `${time} FINDING  undeclared destination ${f.host}: ${f.methods.join("/")} x${f.requests}, ${f.bytes_up}B up, no tool call named it`;

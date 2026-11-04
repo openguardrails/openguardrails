@@ -2,6 +2,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { WatchRule } from "./watch.js";
 
 export interface Upstream {
   baseURL: string;
@@ -65,6 +66,16 @@ export interface Config {
   /** Absolute directories the agent works in. Relative paths are taken as inside. */
   workspaces?: string[];
   airs?: { url: string; apiKeyEnv?: string; apiKey?: string; agentId?: string; agentWorkspace?: string; failMode?: "open" | "closed"; requestTimeoutMs?: number };
+  /** Where a rule's message goes. */
+  notify?: {
+    email?: {
+      to: string;
+      from?: string;
+      smtp: { host: string; port?: number; secure?: boolean; user: string; password?: string; passwordEnv?: string };
+    };
+  };
+  /** The person's own rules about their work, such as being told when it gets stuck. See watch.ts. */
+  watches?: WatchRule[];
   sandbox?: {
     allowHosts?: string[];
     denyHosts?: string[];
@@ -118,14 +129,14 @@ export function secretOf(holder: { apiKeyEnv?: string; apiKey?: string }, env = 
 
 /** A readable config file with a key in it is the leak this tool exists to prevent. */
 export function looseConfigWarning(config: Config): string | null {
-  const inline = config.airs?.apiKey || config.model?.apiKey || Object.values(config.gateway?.upstreams ?? {}).some((upstream) => upstream.apiKey);
+  const inline = config.airs?.apiKey || config.model?.apiKey || config.notify?.email?.smtp.password || Object.values(config.gateway?.upstreams ?? {}).some((upstream) => upstream.apiKey);
   if (!inline || process.platform === "win32") return null;
   return (statSync(configPath()).mode & 0o077) === 0 ? null : `${configPath()} holds keys and is readable by others. Run: chmod 600 ${configPath()}`;
 }
 
 /** The environment variables that hold this config's keys, which no sandboxed process may inherit. */
 export const keyEnvNames = (config: Config): string[] =>
-  [config.airs?.apiKeyEnv, config.model?.apiKeyEnv, "OPENGUARDRAILS_API_KEY", ...Object.values(config.gateway?.upstreams ?? {}).map((upstream) => upstream.apiKeyEnv)].filter((name): name is string => Boolean(name));
+  [config.airs?.apiKeyEnv, config.model?.apiKeyEnv, config.notify?.email?.smtp.passwordEnv, "OPENGUARDRAILS_API_KEY", ...Object.values(config.gateway?.upstreams ?? {}).map((upstream) => upstream.apiKeyEnv)].filter((name): name is string => Boolean(name));
 
 /** The upstreams to try for a requested model: a route, one upstream by name, or null. */
 export function resolveRoute(gateway: NonNullable<Config["gateway"]>, model: unknown): string[] | null {

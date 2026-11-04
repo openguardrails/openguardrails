@@ -187,6 +187,8 @@ export function startGateway(config: Config): Promise<http.Server> {
   const guard = airsKey ? null : new ModelChannelGuard(localRuntime);
   let lastFailover: unknown = null;
   let served = 0;
+  // Model requests not yet answered: a run waiting on one is busy, even when nothing else moves.
+  let inflight = 0;
   // What runs ask for, since agents reach the gateway directly and their calls never pass the proxy.
   const seenCalls = new Set<string>();
   const activity: Array<{ t: number; agent: string; name: string; hosts: string[] }> = [];
@@ -602,7 +604,7 @@ export function startGateway(config: Config): Promise<http.Server> {
       }
       if (url.pathname === "/__ogr/activity") {
         const since = Number(url.searchParams.get("since") ?? 0);
-        return json(res, 200, { served, blind_to: [...blindTo], calls: activity.filter((call) => call.t > since) });
+        return json(res, 200, { served, inflight, blind_to: [...blindTo], calls: activity.filter((call) => call.t > since) });
       }
       if (url.pathname === "/__ogr/observe" && req.method === "POST") {
         const observations = JSON.parse((await readAll(req)).toString("utf8")) as Observation[];
@@ -642,6 +644,8 @@ export function startGateway(config: Config): Promise<http.Server> {
       }
 
       served += 1;
+      inflight += 1;
+      res.once("close", () => void (inflight -= 1));
       const stepId = randomBytes(16).toString("hex");
       const agentType = harnessFrom(req.headers["user-agent"] ?? "");
       const now = Date.now();
