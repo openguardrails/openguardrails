@@ -14,7 +14,29 @@ permissions:
   id-token: write
 
 jobs:
+  # The package carries the Linux telemetry library and ogr-join for both architectures. This job
+  # builds the arm64 pair; the publish job builds x64 itself (npm test runs the build).
+  native-arm64:
+    runs-on: ubuntu-24.04-arm
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node native/build.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-arm64
+          path: |
+            cli/native/libogr-observe-linux-arm64.so
+            cli/native/ogr-join-linux-arm64
+          if-no-files-found: error
+
   publish:
+    needs: native-arm64
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -28,5 +50,13 @@ jobs:
       - name: The tag must match the package
         run: test "cli-v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
       - run: npm install -g npm@latest
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-arm64
+          path: cli/native
+      - run: chmod +x native/ogr-join-linux-arm64
       - run: npm ci
+      - run: npm run build
+      - name: Both architectures are in the package
+        run: test "$(npm pack --dry-run 2>&1 | grep -cE "native/(libogr-observe|ogr-join)-linux-(x64|arm64)")" = 4
       - run: npm publish --provenance --access public
