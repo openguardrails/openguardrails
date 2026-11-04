@@ -239,6 +239,11 @@ export async function run(options: RunOptions): Promise<number> {
 
   const expose = [...(options.expose ?? []), ...(settings.sandbox?.expose ?? []).map(parseExpose)];
   const bridgePorts = [...new Set([...(options.bridge ?? []), ...(settings.sandbox?.bridge ?? [])])].filter((port) => port !== ownPort);
+  if (upstream && ["127.0.0.1", "localhost", "::1"].includes(upstream.host) && bridgePorts.includes(upstream.port)) {
+    process.stderr.write(`[openguardrails] cannot start: port ${upstream.port} is the upstream proxy. Commands reach it through openguardrails, so it must not be bridged\n`);
+    relay?.close();
+    return 2;
+  }
   const units = [...(options.units ?? []), ...(settings.sandbox?.units ?? [])];
   // Where the Linux relays' sockets live. The sandbox creates the exposed ones, so it may write here.
   // On Linux the sandbox has its own 127.0.0.1, so the proxy port an agent names can be this tool's.
@@ -259,7 +264,8 @@ export async function run(options: RunOptions): Promise<number> {
   const config: SandboxRuntimeConfig = {
     ...buildPolicy({
       cwd: process.cwd(),
-      allowHosts: [...allowHosts, ...(ownPort !== null ? [`127.0.0.1:${ownPort}`] : [])],
+      // A bridged service is meant to be reached; clients that send it through the proxy reach it too.
+      allowHosts: [...allowHosts, ...(ownPort !== null ? [`127.0.0.1:${ownPort}`] : []), ...bridgePorts.map((port) => `127.0.0.1:${port}`)],
       denyHosts: [...options.denyHosts, ...(settings.sandbox?.denyHosts ?? [])],
       allowRead: [...options.allowRead, ...(settings.sandbox?.allowRead ?? [])],
       allowWrite: [...options.allowWrite, ...(settings.sandbox?.allowWrite ?? []), ...(bridgeDir && (expose.length > 0 || observeLog) ? [bridgeDir] : [])],
