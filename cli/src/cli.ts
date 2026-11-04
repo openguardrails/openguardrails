@@ -31,12 +31,14 @@ run options:
   --allow-write <path>   allow writes outside the project, temp and agent state directories
   --allow-local-bind     let the command listen on a local port, for agents with a web UI
   --expose <port>        reach a server the command starts on that port, at 127.0.0.1:<port> on this machine
+  --upstream-proxy <url> leave through this machine's own proxy (default: HTTPS_PROXY); the command
+                         reaches the internet only through openguardrails, then that proxy
 
 Configuration is ~/.openguardrails/config.json. See the README.
 `;
 
 function parseRun(args: string[]) {
-  const options = { enforce: false, allowLocalBinding: false, allowHosts: [] as string[], denyHosts: [] as string[], allowRead: [] as string[], allowWrite: [] as string[], expose: [] as number[], command: [] as string[] };
+  const options = { enforce: false, allowLocalBinding: false, allowHosts: [] as string[], denyHosts: [] as string[], allowRead: [] as string[], allowWrite: [] as string[], expose: [] as number[], upstreamProxy: undefined as string | undefined, command: [] as string[] };
   const lists: Record<string, string[]> = {
     "--allow-host": options.allowHosts,
     "--deny-host": options.denyHosts,
@@ -51,6 +53,12 @@ function parseRun(args: string[]) {
     }
     if (arg === "--enforce") {
       options.enforce = true;
+      continue;
+    }
+    if (arg === "--upstream-proxy") {
+      if (!args[i + 1]) throw new Error("--upstream-proxy needs a URL, such as http://127.0.0.1:20171");
+      options.upstreamProxy = args[i + 1];
+      i += 1;
       continue;
     }
     if (arg === "--expose") {

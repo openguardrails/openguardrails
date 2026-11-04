@@ -12,15 +12,17 @@ import { keyEnvNames, loadConfig, looseConfigWarning } from "./config.js";
 import { Correlator } from "./correlate.js";
 import { fileObservation, type Observation } from "./exec.js";
 import { classifyModelRequest, harnessFrom, hostsIn, toolCallsIn, toolResultIdsIn, type LlmProtocol } from "./model.js";
-import { bridgeGatewayPort, buildPolicy, exposePort, isLocalTarget, openLoopbackPort, type PolicyOptions } from "./policy.js";
+import { aliasProxyPort, bridgeGatewayPort, buildPolicy, exposePort, isLocalTarget, openLoopbackPort, proxyCredentials, type PolicyOptions } from "./policy.js";
 import { Recorder, safePath } from "./record.js";
 import { ensureGateway, gatewayPort, gatewayToken, hydrateEnv } from "./serve.js";
+import { isUpstreamAddress, NO_PROXY, parseUpstreamProxy, startProxyAuthBridge, startUpstreamRelay, upstreamFromEnv, type Relay } from "./upstream.js";
 
 export interface RunOptions extends Omit<PolicyOptions, "cwd"> {
   enforce: boolean;
   allowLocalBinding?: boolean;
   /** Ports a server inside the sandbox listens on, to reach from this machine's 127.0.0.1. */
   expose?: number[];
+  upstreamProxy?: string | undefined;
   command: string[];
 }
 
@@ -150,28 +152,67 @@ export async function run(options: RunOptions): Promise<number> {
     return { action: "allow" };
   };
 
+  const allowHosts = [...options.allowHosts, ...(settings.sandbox?.allowHosts ?? [])];
+  let upstream;
+  try {
+    upstream = parseUpstreamProxy(options.upstreamProxy ?? settings.sandbox?.upstreamProxy ?? upstreamFromEnv(process.env));
+  } catch (error) {
+    process.stderr.write(`[openguardrails] cannot start: ${(error as Error).message}\n`);
+    return 2;
+  }
+  // Reaching the upstream proxy directly is a way out that this tool would see as one host.
+  const around = upstream ? allowHosts.find((pattern) => isUpstreamAddress(upstream!, pattern)) : undefined;
+  if (around) {
+    process.stderr.write(`[openguardrails] cannot start: ${around} is the upstream proxy. Commands reach it through openguardrails, so it must not be allowed directly\n`);
+    return 2;
+  }
+  let relay: Relay | null = null;
+  if (upstream) {
+    relay = await startUpstreamRelay(
+      upstream,
+      ({ method, host, port }) => {
+        const now = Date.now();
+        // A tunnel is not decrypted on this route, so its connection is all there is to record.
+        if (method === "CONNECT") {
+          outbox.push({ t: now, kind: "network", target: `${host}:${port}`, action: method });
+          correlator.noteConnection(host, method, 0, now);
+        }
+      },
+      ({ method, host, port }, bytesUp, bytesDown) => {
+        if (method === "CONNECT") recorder.write("request", { method, host, port, bytes: bytesUp, bytes_down: bytesDown, via: "upstream" });
+      },
+    );
+    process.stderr.write(`[openguardrails] out through the upstream proxy ${upstream.host}:${upstream.port}\n`);
+  }
+
   const expose = options.expose ?? [];
   // Where the Linux relays' sockets live. The sandbox creates the exposed ones, so it may write here.
-  const bridgeDir = process.platform === "linux" && (ownPort !== null || expose.length > 0) ? mkdtempSync(join(tmpdir(), "openguardrails-")) : null;
+  // On Linux the sandbox has its own 127.0.0.1, so the proxy port an agent names can be this tool's.
+  // On macOS it is this machine's, where the real proxy listens, and the sandbox refuses it.
+  const aliasPort = upstream && process.platform === "linux" && ["127.0.0.1", "localhost", "::1"].includes(upstream.host) ? upstream.port : null;
+  const bridgeDir = process.platform === "linux" && (ownPort !== null || expose.length > 0 || aliasPort !== null) ? mkdtempSync(join(tmpdir(), "openguardrails-")) : null;
   const config: SandboxRuntimeConfig = {
     ...buildPolicy({
       cwd: process.cwd(),
-      allowHosts: [
-        ...options.allowHosts,
-        ...(settings.sandbox?.allowHosts ?? []),
-        ...(ownPort !== null ? [`127.0.0.1:${ownPort}`] : []),
-      ],
+      allowHosts: [...allowHosts, ...(ownPort !== null ? [`127.0.0.1:${ownPort}`] : [])],
       denyHosts: [...options.denyHosts, ...(settings.sandbox?.denyHosts ?? [])],
       allowRead: [...options.allowRead, ...(settings.sandbox?.allowRead ?? [])],
       allowWrite: [...options.allowWrite, ...(settings.sandbox?.allowWrite ?? []), ...(bridgeDir && expose.length > 0 ? [bridgeDir] : [])],
       allowLocalBinding: options.allowLocalBinding || expose.length > 0 || settings.sandbox?.allowLocalBinding === true,
     }),
   };
-  config.network = { ...config.network, tlsTerminate: {}, filterRequest } as typeof config.network;
+  // sandbox-runtime does not send a connection it decrypts to a parent proxy. Behind an upstream,
+  // HTTPS therefore stays opaque, and the relay records where each tunnel went.
+  config.network = {
+    ...config.network,
+    ...(relay ? { parentProxy: { http: `http://127.0.0.1:${relay.port}`, https: `http://127.0.0.1:${relay.port}`, noProxy: NO_PROXY } } : { tlsTerminate: {} }),
+    filterRequest,
+  } as typeof config.network;
 
   const deps = SandboxManager.checkDependencies();
   if (deps.errors.length > 0) {
     process.stderr.write(`[openguardrails] cannot start: ${deps.errors.join("; ")}\n`);
+    relay?.close();
     return 127;
   }
 
@@ -233,6 +274,13 @@ export async function run(options: RunOptions): Promise<number> {
     relays.push(await pipe({ path: socket }, () => net.connect(ownPort, "127.0.0.1")));
   }
   if (bridgeDir) for (const port of expose) wrapped = exposePort(wrapped, port, join(bridgeDir, `expose-${port}.sock`));
+  const proxyPort = SandboxManager.getProxyPort();
+  if (aliasPort !== null && bridgeDir && proxyPort) {
+    const socket = join(bridgeDir, "proxy.sock");
+    const credentials = proxyCredentials(wrapped) ?? { user: "openguardrails", token: SandboxManager.getProxyAuthToken() ?? "" };
+    wrapped = aliasProxyPort(wrapped, aliasPort, socket);
+    relays.push(await startProxyAuthBridge(socket, proxyPort, credentials.user, credentials.token));
+  }
   const childEnv = { ...process.env };
   for (const name of keyEnvNames(settings)) delete childEnv[name];
   // `exec`, so the sandbox (bwrap or sandbox-exec) is this process's own child rather than a shell's.
@@ -273,6 +321,7 @@ export async function run(options: RunOptions): Promise<number> {
   unsubscribe();
   for (const relay of relays) relay.close();
   if (bridgeDir) rmSync(bridgeDir, { recursive: true, force: true });
+  relay?.close();
   await SandboxManager.reset();
   process.stderr.write(`[openguardrails] run ${runId} recorded. See: openguardrails log ${runId}\n`);
   return code;

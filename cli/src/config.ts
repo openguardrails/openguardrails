@@ -65,7 +65,15 @@ export interface Config {
   /** Absolute directories the agent works in. Relative paths are taken as inside. */
   workspaces?: string[];
   airs?: { url: string; apiKeyEnv?: string; apiKey?: string; agentId?: string; agentWorkspace?: string; failMode?: "open" | "closed"; requestTimeoutMs?: number };
-  sandbox?: { allowHosts?: string[]; denyHosts?: string[]; allowRead?: string[]; allowWrite?: string[]; allowLocalBinding?: boolean };
+  sandbox?: {
+    allowHosts?: string[];
+    denyHosts?: string[];
+    allowRead?: string[];
+    allowWrite?: string[];
+    allowLocalBinding?: boolean;
+    /** The proxy this machine reaches the internet through, such as http://127.0.0.1:20171. Defaults to HTTPS_PROXY. */
+    upstreamProxy?: string;
+  };
 }
 
 export const homeDir = () => process.env.OPENGUARDRAILS_HOME ?? join(homedir(), ".openguardrails");
