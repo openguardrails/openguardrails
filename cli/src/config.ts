@@ -14,6 +14,18 @@ export interface Upstream {
   renameTemplateKwargs?: Record<string, string>;
   /** The client's path is appended unchanged, for an attached agent. Never set in the config file. */
   verbatimPath?: boolean;
+  /** At most this many requests at once. A serving engine with a fixed batch slows everyone past it. */
+  maxConcurrent?: number;
+  /**
+   * How long a request waits for a free slot here before trying the next upstream. 0, the default,
+   * moves on at once; a long wait keeps a preferred upstream preferred while it is busy.
+   */
+  slotWaitMs?: number;
+  /**
+   * Sampling that depends on whether the model thinks, read from `chat_template_kwargs[kwarg]` after
+   * the rename (default `enable_thinking`, assumed on when absent). The flag is then always sent.
+   */
+  thinkingParams?: { kwarg?: string; default?: boolean; on?: Record<string, unknown>; off?: Record<string, unknown> };
 }
 
 export interface AttachedOrigin {
@@ -74,6 +86,10 @@ export function validate(config: Config): Config {
   for (const [name, upstream] of Object.entries(gateway.upstreams ?? {})) {
     if (!upstream.baseURL || !upstream.model) throw new Error(`config: upstream "${name}" needs baseURL and model`);
     new URL(upstream.baseURL);
+    for (const key of ["maxConcurrent", "slotWaitMs"] as const) {
+      const value = upstream[key];
+      if (value !== undefined && !(Number.isInteger(value) && value >= 0)) throw new Error(`config: upstream "${name}" ${key} must be a whole number`);
+    }
   }
   for (const [name, attached] of Object.entries(gateway.attached ?? {})) {
     if (!/^[A-Za-z0-9._-]+$/.test(name)) throw new Error(`config: attached name "${name}" may use letters, digits, dot, dash and underscore only`);
