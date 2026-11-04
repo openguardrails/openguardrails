@@ -60,6 +60,23 @@ export function openLoopbackPort(wrapped: string, port: number): string {
   return wrapped.replace(rule, (match) => `${match}\n(allow network-outbound (remote ip "localhost:${port}"))`);
 }
 
+/**
+ * The Linux counterpart of openLoopbackPort. bubblewrap gives the sandbox its own network namespace,
+ * so its 127.0.0.1 is not this machine's, and an agent that will not proxy loopback (dsh) cannot
+ * reach the gateway. One socat on this machine turns a Unix socket into the gateway port; one inside
+ * the sandbox listens on 127.0.0.1:<port> and dials that socket. Only the gateway port is bridged.
+ *
+ * The inner relay has to start where sandbox-runtime starts its own, before seccomp, which forbids
+ * creating a Unix socket afterwards. So it goes right after their SOCKS relay in the wrapped script.
+ */
+export function bridgeGatewayPort(wrapped: string, port: number, socket: string): string {
+  const anchor = "_srt_socks=$!\n";
+  if (wrapped.split(anchor).length !== 2 || /['"$\\\s]/.test(socket)) {
+    throw new Error("this sandbox-runtime version has an unexpected script; openguardrails cannot bridge the gateway port");
+  }
+  return wrapped.replace(anchor, `${anchor}{ socat TCP4-LISTEN:${port},bind=127.0.0.1,fork,reuseaddr,backlog=4096 UNIX-CONNECT:${socket}; } >/dev/null 2>&1 &\n`);
+}
+
 export function buildPolicy(options: PolicyOptions): SandboxRuntimeConfig {
   const home = homedir();
   const inHome = (path: string) => join(home, path);
