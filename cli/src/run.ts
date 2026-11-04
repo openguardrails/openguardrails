@@ -1,6 +1,9 @@
 /** `openguardrails run`: start a command in the sandbox and record what its whole process tree does. */
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import zlib from "node:zlib";
 import { SandboxManager, type FilterRequestCallback, type SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import { airsTarget, guardEvent, report } from "./airs.js";
@@ -8,7 +11,7 @@ import { keyEnvNames, loadConfig, looseConfigWarning } from "./config.js";
 import { Correlator } from "./correlate.js";
 import { fileObservation, type Observation } from "./exec.js";
 import { classifyModelRequest, harnessFrom, hostsIn, toolCallsIn, toolResultIdsIn, type LlmProtocol } from "./model.js";
-import { buildPolicy, isLocalTarget, openLoopbackPort, type PolicyOptions } from "./policy.js";
+import { bridgeGatewayPort, buildPolicy, isLocalTarget, openLoopbackPort, type PolicyOptions } from "./policy.js";
 import { Recorder, safePath } from "./record.js";
 import { ensureGateway, gatewayPort, gatewayToken, hydrateEnv } from "./serve.js";
 
@@ -195,11 +198,20 @@ export async function run(options: RunOptions): Promise<number> {
   // sandbox-runtime exempts loopback and private ranges from the proxy, and those clients then fail
   // inside the sandbox. A local vLLM is what this tool exists to see, so everything goes through it.
   // NODE_USE_ENV_PROXY makes Node's own fetch honour the proxy; the pinned release does not set it.
+  let bridge: ChildProcess | null = null;
+  let bridgeDir: string | null = null;
   let wrapped = await SandboxManager.wrapWithSandbox(`NO_PROXY= no_proxy= NODE_USE_ENV_PROXY=1 ${command}`, undefined, undefined, undefined, {
     commandId: runId,
     commandText: command,
   });
   if (ownPort !== null && process.platform === "darwin") wrapped = openLoopbackPort(wrapped, ownPort);
+  if (ownPort !== null && process.platform === "linux") {
+    bridgeDir = mkdtempSync(join(tmpdir(), "openguardrails-"));
+    const socket = join(bridgeDir, "gateway.sock");
+    wrapped = bridgeGatewayPort(wrapped, ownPort, socket);
+    bridge = spawn("socat", [`UNIX-LISTEN:${socket},fork,reuseaddr`, `TCP:127.0.0.1:${ownPort}`], { stdio: "ignore" });
+    for (let i = 0; i < 50 && !existsSync(socket); i += 1) await new Promise((resolve) => setTimeout(resolve, 20));
+  }
   const childEnv = { ...process.env };
   for (const name of keyEnvNames(settings)) delete childEnv[name];
   const child = spawn(wrapped, { shell: true, stdio: "inherit", env: childEnv });
@@ -220,6 +232,8 @@ export async function run(options: RunOptions): Promise<number> {
   flush(true);
   recorder.write("exit", { code });
   unsubscribe();
+  bridge?.kill();
+  if (bridgeDir) rmSync(bridgeDir, { recursive: true, force: true });
   await SandboxManager.reset();
   process.stderr.write(`[openguardrails] run ${runId} recorded. See: openguardrails log ${runId}\n`);
   return code;
