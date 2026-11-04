@@ -123,6 +123,13 @@ sandbox has its own network, so its server is otherwise out of this machine's si
 reachable at `127.0.0.1:<port>` here, and nowhere else. The sandbox ends with the run, even when the
 run is killed.
 
+On Linux the sandbox reports what it refuses, not what it allows. So `run` also preloads a small
+library (`native/observe.c`, built with the package) that writes down what each process opens for
+reading or writing and which programs it runs, and ties them to the tool call that was open, as on
+macOS. The files every program reads to start (its libraries, its own code) are left out. This is a
+record, not a boundary: a statically linked program (most Go binaries) or a raw system call is not
+seen, and what is allowed is still decided by the sandbox.
+
 On a machine that reaches the internet through a proxy of its own (a corporate proxy, or v2rayA),
 give it as `--upstream-proxy http://127.0.0.1:20171`, or `sandbox.upstreamProxy` in the config. It
 defaults to `HTTPS_PROXY`. The command then reaches the internet only through this tool, and this
