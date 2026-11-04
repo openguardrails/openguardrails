@@ -51,7 +51,9 @@ test("the newest change under the output directories is found, and where", () =>
   const found = newestChange([root]);
   assert.equal(found.path, join(root, "ep1", "dub", "translation.json"));
   assert.equal(newestChange([join(root, "missing")]).path, null);
-  const now = new Date();
+  // Ahead of every earlier file by whole seconds: the file system keeps nanoseconds, utimes takes
+  // milliseconds, and a file written a moment before could otherwise look newer.
+  const now = new Date(Date.now() + 5000);
   writeFileSync(join(root, "ep1", "dub", "windows.json"), "{}");
   utimesSync(join(root, "ep1", "dub"), now, now);
   utimesSync(join(root, "ep1", "dub", "windows.json"), now, now);
