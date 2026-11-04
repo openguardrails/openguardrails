@@ -7,7 +7,7 @@
  * runs), everything refused, and the stall rules. Routine file activity is counted, not listed.
  */
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { closeSync, existsSync, fstatSync, openSync, readdirSync, readSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, openSync, readdirSync, readFileSync, readSync, statSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import { dirname, join } from "node:path";
 import { homeDir } from "./config.js";
@@ -262,8 +262,13 @@ export interface UiOptions {
 }
 
 export async function ui(options: UiOptions): Promise<number> {
-  const token = randomBytes(18).toString("base64url");
-  writeFileSync(join(homeDir(), "ui.token"), token, { mode: 0o600 });
+  // The same token across restarts, so the address a person bookmarked keeps working.
+  const tokenPath = join(homeDir(), "ui.token");
+  let token = existsSync(tokenPath) ? readFileSync(tokenPath, "utf8").trim() : "";
+  if (!/^[A-Za-z0-9_-]{24,}$/.test(token)) {
+    token = randomBytes(18).toString("base64url");
+    writeFileSync(tokenPath, token, { mode: 0o600 });
+  }
   const activity = new Activity();
   activity.refresh();
   const timer = setInterval(() => activity.refresh(), 3000);
