@@ -82,6 +82,8 @@ export interface Config {
     allowRead?: string[];
     allowWrite?: string[];
     allowLocalBinding?: boolean;
+    /** Devices the command may use on Linux, such as /dev/nvidia0. "gpu" stands for every NVIDIA device. */
+    devices?: string[];
     /** The proxy this machine reaches the internet through, such as http://127.0.0.1:20171. Defaults to HTTPS_PROXY. */
     upstreamProxy?: string;
   };

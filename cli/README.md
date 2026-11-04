@@ -123,6 +123,14 @@ sandbox has its own network, so its server is otherwise out of this machine's si
 reachable at `127.0.0.1:<port>` here, and nowhere else. The sandbox ends with the run, even when the
 run is killed.
 
+On Linux the sandbox has a minimal `/dev` of its own. `--gpu` (or `sandbox.devices: ["gpu"]`) hands
+it this machine's NVIDIA devices, for ASR, TTS or a local model; `--device <path>` hands it another.
+CUDA cannot start without creating Unix sockets, which the sandbox otherwise forbids, so with a GPU
+that rule is lifted and every socket file on the machine is hidden from the command instead: the
+Docker socket, the systemd user bus, ssh-agents, the X server, browsers' singleton sockets and the
+rest found under `/tmp`, `/run` and your home at the start of the run. A socket created later
+outside those directories is not covered.
+
 On Linux the sandbox reports what it refuses, not what it allows. So `run` also preloads a small
 library (`native/observe.c`, built with the package) that writes down what each process opens for
 reading or writing and which programs it runs, and ties them to the tool call that was open, as on

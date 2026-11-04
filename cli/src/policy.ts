@@ -1,5 +1,5 @@
 /** What a run may touch, as sandbox-runtime configuration. */
-import { realpathSync } from "node:fs";
+import { lstatSync, readdirSync, realpathSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
@@ -96,6 +96,76 @@ export function aliasProxyPort(wrapped: string, port: number, socket: string): s
 export function proxyCredentials(wrapped: string): { user: string; token: string } | null {
   const match = /HTTP_PROXY=http:\/\/([^:@\s'"]+):([^@\s'"]+)@localhost:\d+/.exec(wrapped);
   return match ? { user: decodeURIComponent(match[1]!), token: decodeURIComponent(match[2]!) } : null;
+}
+
+/** The NVIDIA devices CUDA needs: one per GPU, plus the control, memory and capability nodes. */
+export function gpuDevices(list: (dir: string) => string[] = (dir) => readdirSync(dir)): string[] {
+  let names: string[] = [];
+  try {
+    names = list("/dev").filter((name) => /^nvidia(\d+|ctl|-uvm|-uvm-tools|-modeset)$/.test(name)).map((name) => `/dev/${name}`);
+    if (names.length > 0) names.push(...list("/dev/nvidia-caps").map((name) => `/dev/nvidia-caps/${name}`));
+  } catch {
+    // No GPU, or no capability nodes.
+  }
+  return names;
+}
+
+/**
+ * CUDA cannot start without creating Unix sockets (one in the abstract namespace for its memory
+ * manager), and the sandbox's seccomp filter forbids creating them. With a GPU that rule is lifted,
+ * so a socket file becomes a way out: the Docker socket is root on this machine, the systemd user bus
+ * starts any program outside the sandbox, an ssh-agent signs as you, an X server takes keystrokes and
+ * a browser's singleton socket drives a signed-in browser. These are hidden from the sandbox instead:
+ * every socket found under the places sockets live, the directory of each per-program socket in /tmp,
+ * and the runtime directories as a whole. Abstract sockets need nothing: the sandbox has its own
+ * network namespace, so it cannot reach this machine's.
+ */
+export function socketsToHide(uid = process.getuid?.() ?? 0, find: (root: string, depth: number) => string[] = findSockets): string[] {
+  const hidden = new Set<string>([
+    `/run/user/${uid}`, "/run/dbus", "/var/run/dbus", "/run/docker.sock", "/var/run/docker.sock", "/run/containerd",
+    "/run/podman", "/run/snapd.socket", "/tmp/.X11-unix", "/tmp/.ICE-unix",
+  ]);
+  for (const socket of [...find("/tmp", 3), ...find("/run", 4), ...find("/var/run", 4), ...find(homedir(), 4)]) {
+    // /tmp/ssh-XXXX/agent.1: hide its directory, where the next one will appear too.
+    const tmpDir = /^(\/tmp\/[^/]+)\//.exec(socket)?.[1];
+    hidden.add(tmpDir ?? socket);
+  }
+  return [...hidden];
+}
+
+function findSockets(root: string, depth: number): string[] {
+  const found: string[] = [];
+  const visit = (path: string, left: number) => {
+    let stat;
+    try {
+      stat = lstatSync(path);
+    } catch {
+      return;
+    }
+    if (stat.isSocket()) found.push(path);
+    if (!stat.isDirectory() || left === 0) return;
+    let names: string[] = [];
+    try {
+      names = readdirSync(path);
+    } catch {
+      return;
+    }
+    for (const name of names) if (name !== "node_modules" && name !== ".git") visit(join(path, name), left - 1);
+  };
+  visit(root, depth);
+  return found;
+}
+
+/**
+ * Hands devices to a Linux sandbox. sandbox-runtime gives it a minimal /dev of its own, without a
+ * GPU, so ASR, TTS or a local model cannot run. Each device named here is bound in after it.
+ */
+export function passDevices(wrapped: string, devices: string[]): string {
+  if (devices.length === 0) return wrapped;
+  const anchor = " --dev /dev ";
+  if (wrapped.split(anchor).length !== 2) throw new Error("this sandbox-runtime version has an unexpected command; openguardrails cannot pass devices to it");
+  for (const device of devices) if (!/^\/dev\/[\w./-]+$/.test(device) || device.includes("..")) throw new Error(`${device} is not a device path`);
+  return wrapped.replace(anchor, `${anchor}${devices.map((device) => `--dev-bind ${device} ${device}`).join(" ")} `);
 }
 
 function insertRelay(wrapped: string, relay: string, socket: string): string {

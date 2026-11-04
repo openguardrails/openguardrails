@@ -34,6 +34,8 @@ run options:
   --allow-write <path>   allow writes outside the project, temp and agent state directories
   --allow-local-bind     let the command listen on a local port, for agents with a web UI
   --expose <port>        reach a server the command starts on that port, at 127.0.0.1:<port> on this machine
+  --gpu                  let the command use this machine's NVIDIA GPUs (Linux)
+  --device <path>        let the command use a device, such as /dev/video0 (Linux)
   --upstream-proxy <url> leave through this machine's own proxy (default: HTTPS_PROXY); the command
                          reaches the internet only through openguardrails, then that proxy
 
@@ -41,7 +43,7 @@ Configuration is ~/.openguardrails/config.json. See the README.
 `;
 
 function parseRun(args: string[]) {
-  const options = { enforce: false, allowLocalBinding: false, allowHosts: [] as string[], denyHosts: [] as string[], allowRead: [] as string[], allowWrite: [] as string[], expose: [] as number[], upstreamProxy: undefined as string | undefined, command: [] as string[] };
+  const options = { enforce: false, allowLocalBinding: false, allowHosts: [] as string[], denyHosts: [] as string[], allowRead: [] as string[], allowWrite: [] as string[], expose: [] as number[], upstreamProxy: undefined as string | undefined, devices: [] as string[], command: [] as string[] };
   const lists: Record<string, string[]> = {
     "--allow-host": options.allowHosts,
     "--deny-host": options.denyHosts,
@@ -56,6 +58,16 @@ function parseRun(args: string[]) {
     }
     if (arg === "--enforce") {
       options.enforce = true;
+      continue;
+    }
+    if (arg === "--gpu") {
+      options.devices.push("gpu");
+      continue;
+    }
+    if (arg === "--device") {
+      if (!args[i + 1]) throw new Error("--device needs a path, such as /dev/video0");
+      options.devices.push(args[i + 1]!);
+      i += 1;
       continue;
     }
     if (arg === "--upstream-proxy") {
