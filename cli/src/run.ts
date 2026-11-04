@@ -26,6 +26,10 @@ export interface RunOptions extends Omit<PolicyOptions, "cwd"> {
   /** Ports a server inside the sandbox listens on, to reach from this machine's 127.0.0.1. */
   expose?: number[];
   upstreamProxy?: string | undefined;
+  /** How the run is named in its record and matched by rules; the command line by default. */
+  label?: string;
+  /** Called once the sandbox is started; may return how to measure the CPU of everything in it. */
+  onStarted?: (childPid: number) => Promise<(() => number) | undefined>;
   devices?: string[];
   command: string[];
 }
@@ -289,7 +293,7 @@ export async function run(options: RunOptions): Promise<number> {
     }
   });
 
-  recorder.write("start", { mode: options.enforce ? "enforce" : "observe", command: options.command[0], run: runId });
+  recorder.write("start", { mode: options.enforce ? "enforce" : "observe", command: options.label ?? options.command[0], run: runId });
   // sandbox-runtime exempts loopback and private ranges from the proxy, and those clients then fail
   // inside the sandbox. A local vLLM is what this tool exists to see, so everything goes through it.
   // NODE_USE_ENV_PROXY makes Node's own fetch honour the proxy; the pinned release does not set it.
@@ -364,7 +368,8 @@ export async function run(options: RunOptions): Promise<number> {
   }
   await syncGateway();
   const syncTimer = setInterval(() => void syncGateway().then(() => flush()), 15_000);
-  const stopWatching = watchForStalls(settings, command, runId, child.pid, recorder, () => ({ networkEvents, openConnections, modelServed, modelWaiting }));
+  const cpuOf = child.pid !== undefined && options.onStarted ? await options.onStarted(child.pid) : undefined;
+  const stopWatching = watchForStalls(settings, options.label ?? command, runId, child.pid, recorder, () => ({ networkEvents, openConnections, modelServed, modelWaiting }), cpuOf);
   const code = await new Promise<number>((resolve) => {
     child.on("error", () => resolve(127));
     child.on("exit", (exitCode, signal) => resolve(exitCode ?? (signal ? 128 : 1)));
@@ -401,13 +406,14 @@ interface Counters {
  * window, at most once a minute, and sends one message when the command gets stuck and one when it
  * moves again.
  */
-function watchForStalls(settings: ReturnType<typeof loadConfig>, command: string, runId: string, pid: number | undefined, recorder: Recorder, counters: () => Counters): () => void {
+function watchForStalls(settings: ReturnType<typeof loadConfig>, command: string, runId: string, pid: number | undefined, recorder: Recorder, counters: () => Counters, cpuOf?: () => number): () => void {
   const rules = (settings.watches ?? []).filter((rule) => !rule.command || command.includes(rule.command));
   if (rules.length === 0 || pid === undefined) return () => undefined;
   const startedAt = Date.now();
   const watches = rules.map((rule) => new StallWatch(rule, startedAt));
   const pollMs = Math.max(5_000, Math.min(60_000, (Math.min(...rules.map((rule) => rule.idleMinutes)) * 60_000) / 4));
-  let last = { t: startedAt, cpu: processTreeCpu(pid), ...counters() };
+  const cpuNow = cpuOf ?? (() => processTreeCpu(pid));
+  let last = { t: startedAt, cpu: cpuNow(), ...counters() };
   const send = (channels: string[], subject: string, lines: string[]) =>
     void notify(settings, channels, { subject, text: lines.join("\n") }).then((failures) => {
       recorder.write("notify", { subject, channels, failures });
@@ -415,7 +421,7 @@ function watchForStalls(settings: ReturnType<typeof loadConfig>, command: string
     });
   const timer = setInterval(() => {
     const now = Date.now();
-    const cpu = processTreeCpu(pid);
+    const cpu = cpuNow();
     const current = counters();
     const activity: Activity = {
       // Processes that ended since the last look take their CPU time with them, so this never goes negative.

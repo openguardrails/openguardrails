@@ -6,6 +6,12 @@ import { fileURLToPath } from "node:url";
 
 if (platform !== "linux") process.exit(0);
 const here = fileURLToPath(new URL(".", import.meta.url));
-const out = `${here}libogr-observe-linux-${arch}.so`;
-execFileSync(process.env.CC ?? "cc", ["-O2", "-Wall", "-Wextra", "-Werror", "-shared", "-fPIC", "-o", out, `${here}observe.c`, "-ldl"], { stdio: "inherit" });
-console.log(`built ${out}`);
+const flags = ["-O2", "-Wall", "-Wextra", "-Werror"];
+const cc = process.env.CC ?? "cc";
+for (const [source, out, extra] of [
+  ["observe.c", `libogr-observe-linux-${arch}.so`, ["-shared", "-fPIC", "-ldl"]],
+  ["join.c", `ogr-join-linux-${arch}`, []],
+]) {
+  execFileSync(cc, [...flags, "-o", `${here}${out}`, `${here}${source}`, ...extra], { stdio: "inherit" });
+  console.log(`built ${here}${out}`);
+}
