@@ -42,6 +42,9 @@ export interface RunOptions extends Omit<PolicyOptions, "cwd"> {
   command: string[];
 }
 
+/** Where a Linux sandbox finds the proxy when the machine has no local upstream proxy to stand in for. */
+const INNER_PROXY_PORT = 3129;
+
 /** A connection waits this long for the tool call that names it, which only arrives with the next model request. */
 const GRACE_MS = 120_000;
 
@@ -237,11 +240,16 @@ export async function run(options: RunOptions): Promise<number> {
   // Where the Linux relays' sockets live. The sandbox creates the exposed ones, so it may write here.
   // On Linux the sandbox has its own 127.0.0.1, so the proxy port an agent names can be this tool's.
   // On macOS it is this machine's, where the real proxy listens, and the sandbox refuses it.
-  const aliasPort = upstream && process.platform === "linux" && ["127.0.0.1", "localhost", "::1"].includes(upstream.host) ? upstream.port : null;
+  const named = upstream && process.platform === "linux" && ["127.0.0.1", "localhost", "::1"].includes(upstream.host) ? upstream.port : null;
+  // sandbox-runtime's proxy wants per-run credentials, which a client that speaks to a proxy by hand
+  // does not send (voicego's health probe did not, saw 407 and went around the proxy). On Linux the
+  // proxy the sandbox is told about is a port where this tool adds them: the upstream's port when
+  // that is local, so an agent naming it needs no change, or 3129.
+  const aliasPort = process.platform === "linux" ? (named ?? INNER_PROXY_PORT) : null;
   // What the sandbox allows it does not report on Linux; a preloaded library writes it down instead.
   const preload = preloadLibrary();
   if (process.platform === "linux" && !preload) process.stderr.write("[openguardrails] this install has no file and exec telemetry for Linux; allowed reads, writes and commands are not recorded\n");
-  const bridgeDir = process.platform === "linux" && (ownPort !== null || expose.length > 0 || aliasPort !== null || preload !== null || bridgePorts.length > 0 || units.length > 0) ? mkdtempSync(join(tmpdir(), "openguardrails-")) : null;
+  const bridgeDir = process.platform === "linux" ? mkdtempSync(join(tmpdir(), "openguardrails-")) : null;
   if (process.platform !== "linux" && (bridgePorts.length > 0 || units.length > 0)) process.stderr.write("[openguardrails] --bridge and --units are for Linux; on macOS the command shares this machine's ports and systemd is not there\n");
   const shims = bridgeDir && units.length > 0 ? writeShims(bridgeDir, BROKER_PORT) : null;
   observeLog = preload && bridgeDir ? new ObserveLog(join(bridgeDir, "observe.log")) : null;
@@ -328,8 +336,9 @@ export async function run(options: RunOptions): Promise<number> {
       server.listen(listen, () => resolve(server));
     });
   const telemetry = observeLog ? `LD_PRELOAD=${quote([preload!, process.env.LD_PRELOAD].filter(Boolean).join(":"))} OGR_OBSERVE_LOG=${quote(observeLog.path)} ` : "";
+  const proxyEnv = aliasPort !== null ? ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"].map((name) => `${name}=http://127.0.0.1:${aliasPort} `).join("") : "";
   const brokered = shims ? `OGR_SANDBOX_BIN=${quote(shims)} PATH=${quote(shims)}:"$PATH" ` : "";
-  let wrapped = await SandboxManager.wrapWithSandbox(`${telemetry}${brokered}NO_PROXY= no_proxy= NODE_USE_ENV_PROXY=1 ${command}`, undefined, undefined, undefined, {
+  let wrapped = await SandboxManager.wrapWithSandbox(`${telemetry}${brokered}${proxyEnv}NO_PROXY= no_proxy= NODE_USE_ENV_PROXY=1 ${command}`, undefined, undefined, undefined, {
     commandId: runId,
     commandText: command,
   });
